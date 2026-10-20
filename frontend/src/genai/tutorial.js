@@ -21,8 +21,8 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
       title: 'Choose a model',
       body:
         'The model at the top answers your messages. "Sees images" means it also understands pictures. ' +
-        'Loading a different model takes a few minutes; Settings, Get more models downloads new ones, and ' +
-        'Delete in Settings, Models on the board frees the space of one you no longer need.',
+        'Loading a different model takes a few minutes; Settings, Models downloads new ones from Hugging Face, ' +
+        'and its Delete frees the space of one you no longer need.',
       target: 'model',
       action: null
     },

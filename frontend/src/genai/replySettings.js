@@ -9,10 +9,24 @@ export const MAX_TOKENS_KEY = 'neat-insight:genai-max-tokens'
 // request.max_tokens). The benchmark has its own setting.
 export const MAX_TOKENS_LIMITS = { min: 32, max: 2048, step: 32, default: 512 }
 
-// The Studio's default system prompt (apps: src/common/config.yaml).
+// The tab's default system prompt. Settings, Replies shows it as the
+// field's text until the user writes their own.
 export const DEFAULT_SYSTEM_PROMPT =
-  'Answer clearly and concisely. Use Markdown formatting when it helps. ' +
+  'You are a helpful assistant. Answer clearly and concisely. Use Markdown formatting when it helps. ' +
   'Answer the question in the language it was asked in.'
+
+// Whether the field holds the default: its text, or nothing at all (an empty
+// field sends the default rather than no instructions).
+export function isDefaultSystemPrompt(text) {
+  const prompt = String(text || '').trim()
+  return !prompt || prompt === DEFAULT_SYSTEM_PROMPT
+}
+
+// The line under the field.
+export function systemPromptNote(text) {
+  if (!String(text || '').trim()) return 'An empty prompt sends the default.'
+  return isDefaultSystemPrompt(text) ? 'The default prompt: edit it to change how replies are written.' : 'Your prompt replaces the default.'
+}
 
 // The tab knows whether the message carries a picture, so it says so: a small
 // vision model left to judge that itself answered "no image was provided" to
@@ -27,7 +41,7 @@ const PICTURE_NOTES = {
 }
 
 // picture: 'current' (this message has one), 'earlier' (an earlier one is sent
-// again) or 'none'. custom: the user's prompt; empty uses the default.
+// again) or 'none'. custom: the field's text; empty uses the default.
 export function systemPromptFor({ custom = '', picture = 'none' } = {}) {
   const base = String(custom || '').trim() || DEFAULT_SYSTEM_PROMPT
   return `${base} ${PICTURE_NOTES[picture] || PICTURE_NOTES.none}`
@@ -41,12 +55,14 @@ export function clampMaxTokens(value) {
 }
 
 // What this browser remembers; storage that refuses (a private window) gives
-// the defaults.
+// the defaults. systemPrompt is the field's text: the default when nothing
+// of the user's own is saved.
 export function loadReplySettings(storage) {
-  let systemPrompt = ''
+  let systemPrompt = DEFAULT_SYSTEM_PROMPT
   let maxTokens = MAX_TOKENS_LIMITS.default
   try {
-    systemPrompt = storage.getItem(SYSTEM_PROMPT_KEY) || ''
+    const prompt = storage.getItem(SYSTEM_PROMPT_KEY)
+    if (prompt && prompt.trim()) systemPrompt = prompt
     const saved = storage.getItem(MAX_TOKENS_KEY)
     if (saved !== null) maxTokens = clampMaxTokens(saved)
   } catch {
@@ -55,13 +71,14 @@ export function loadReplySettings(storage) {
   return { systemPrompt, maxTokens }
 }
 
-// An empty prompt, or the default reply length, is forgotten rather than
-// stored, so a later change of the default reaches this browser too.
+// The default prompt (or an empty one), or the default reply length, is
+// forgotten rather than stored, so a later change of the default reaches this
+// browser too.
 export function saveReplySettings(storage, { systemPrompt, maxTokens }) {
   try {
     if (systemPrompt !== undefined) {
-      if (String(systemPrompt).trim()) storage.setItem(SYSTEM_PROMPT_KEY, String(systemPrompt))
-      else storage.removeItem(SYSTEM_PROMPT_KEY)
+      if (isDefaultSystemPrompt(systemPrompt)) storage.removeItem(SYSTEM_PROMPT_KEY)
+      else storage.setItem(SYSTEM_PROMPT_KEY, String(systemPrompt))
     }
     if (maxTokens !== undefined) {
       const n = clampMaxTokens(maxTokens)
@@ -71,4 +88,10 @@ export function saveReplySettings(storage, { systemPrompt, maxTokens }) {
   } catch {
     // The setting still applies until the page is reloaded.
   }
+}
+
+// The Replies card's one line.
+export function replySummary({ systemPrompt, maxTokens } = {}) {
+  const prompt = isDefaultSystemPrompt(systemPrompt) ? 'Default system prompt' : 'Custom system prompt'
+  return `${prompt} · longest reply ${clampMaxTokens(maxTokens)} tokens`
 }

@@ -210,6 +210,9 @@ export async function followLoadProgress({ signal, onProgress }) {
 
 // Downloads a Hugging Face repo onto the board; calls onProgress(item) for each
 // JSON progress line ({state: resolving|downloading|done|error, pct, …}).
+// Resolves with the "done" line ({name}: the model's name in the catalog). A
+// failure keeps the board's error line as `body`: for a repo Hugging Face
+// renamed, its `renamedTo` names the id to download instead.
 export async function downloadModel({ repoId, signal, onProgress }) {
   const response = await request('models/hub/download', { method: 'POST', json: { repoId }, signal })
   if (!response.ok) {
@@ -224,7 +227,7 @@ export async function downloadModel({ repoId, signal, onProgress }) {
       onProgress(item)
     }
   })
-  if (last && last.state === 'error') throw new GenaiError(last.message || 'Download failed')
+  if (last && last.state === 'error') throw new GenaiError(last.message || 'Download failed', { body: last })
   // A stream that ends without "done" (the Studio restarted, the connection
   // dropped) is not a finished download.
   if (!last || last.state !== 'done') throw new GenaiError('The download stopped before it finished.')

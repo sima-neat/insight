@@ -43,10 +43,25 @@ import {
   MAX_TOKENS_LIMITS,
   SYSTEM_PROMPT_KEY,
   clampMaxTokens,
+  isDefaultSystemPrompt,
   loadReplySettings,
+  replySummary,
   saveReplySettings,
-  systemPromptFor
+  systemPromptFor,
+  systemPromptNote
 } from './replySettings.js'
+import {
+  RECOMMENDED_MODEL,
+  cardPath,
+  catalogNameFor,
+  codeParts,
+  downloadAvailability,
+  downloadFailure,
+  firstModelNeeded,
+  hubReachOf,
+  recommendedOffer
+} from './firstModel.js'
+import { STATE_LABELS, boardSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './settingsCards.js'
 import { LOOP_PAUSE_MS, VISION_PRESETS, createVisionLoop, pause } from './visionLoop.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
 import { allowedActions } from './activity.js'
@@ -124,6 +139,13 @@ test('a download is finished only when the board says done', async () => {
     assert.equal((await downloadModel({ repoId: 'a/b', onProgress: () => {} })).state, 'done')
     respondWith(200, '{"state":"downloading","pct":40}\n', 'application/x-ndjson')
     await assert.rejects(downloadModel({ repoId: 'a/b', onProgress: () => {} }), /stopped before it finished/)
+    // A renamed repo: the board's error line travels with the error.
+    respondWith(200, '{"state":"resolving"}\n{"state":"error","repoId":"simaai/old","renamedTo":"simaai/new","message":"Hugging Face now publishes this model as simaai/new; download that id instead"}\n', 'application/x-ndjson')
+    await assert.rejects(downloadModel({ repoId: 'simaai/old', onProgress: () => {} }), (error) => {
+      assert.match(error.message, /publishes this model as simaai\/new/)
+      assert.equal(error.body.renamedTo, 'simaai/new')
+      return true
+    })
   } finally {
     globalThis.fetch = realFetch
   }
@@ -1006,12 +1028,18 @@ test('stopping the vision loop ends the question in flight and its pause', async
 })
 
 test('reply settings: the default prompt, a custom one with the picture note, and the reply length', () => {
-  // The tab's prompts before they could be changed, word for word.
-  const base = 'Answer clearly and concisely. Use Markdown formatting when it helps. Answer the question in the language it was asked in.'
+  // The tab's prompts before they could be changed, word for word, after the new first sentence.
+  const before = 'Answer clearly and concisely. Use Markdown formatting when it helps. Answer the question in the language it was asked in.'
+  const base = `You are a helpful assistant. ${before}`
   assert.equal(DEFAULT_SYSTEM_PROMPT, base)
   assert.equal(systemPromptFor({ picture: 'current' }), `${base} The user's current message includes an image. Answer using what you see in it.`)
   assert.equal(systemPromptFor({ picture: 'earlier' }), `${base} An earlier message in this conversation includes an image. Answer questions about it using what you see in it.`)
-  assert.match(systemPromptFor({ custom: '   ' }), /^Answer clearly.*No image is attached.*Never describe an image you were not given\.$/)
+  assert.match(systemPromptFor({ custom: '   ' }), /^You are a helpful assistant\. Answer clearly.*No image is attached.*Never describe an image you were not given\.$/)
+  // The field shows the default as its text: sending it is the same as sending nothing.
+  for (const picture of ['current', 'earlier', 'none']) {
+    assert.equal(systemPromptFor({ custom: DEFAULT_SYSTEM_PROMPT, picture }), systemPromptFor({ picture }))
+    assert.equal(systemPromptFor({ custom: '', picture }), systemPromptFor({ picture }), 'a cleared field never sends an empty prompt')
+  }
   const pirate = systemPromptFor({ custom: '  Answer like a pirate.  ', picture: 'current' })
   assert.equal(pirate, "Answer like a pirate. The user's current message includes an image. Answer using what you see in it.")
   assert.doesNotMatch(systemPromptFor({ custom: 'Be brief.' }), /Answer clearly/, 'the custom prompt replaces the default text')
@@ -1030,7 +1058,8 @@ test('reply settings are remembered per browser, and storage that refuses gives 
     setItem: (k, v) => store.set(k, String(v)),
     removeItem: (k) => store.delete(k)
   }
-  assert.deepEqual(loadReplySettings(storage), { systemPrompt: '', maxTokens: 512 })
+  // Nothing saved: the field shows the default, not an empty box.
+  assert.deepEqual(loadReplySettings(storage), { systemPrompt: DEFAULT_SYSTEM_PROMPT, maxTokens: 512 })
   saveReplySettings(storage, { systemPrompt: 'Answer like a pirate.' })
   saveReplySettings(storage, { maxTokens: 1024 })
   assert.deepEqual(loadReplySettings(storage), { systemPrompt: 'Answer like a pirate.', maxTokens: 1024 })
@@ -1038,13 +1067,20 @@ test('reply settings are remembered per browser, and storage that refuses gives 
   saveReplySettings(storage, { systemPrompt: '  ', maxTokens: 512 })
   assert.equal(store.has(SYSTEM_PROMPT_KEY), false)
   assert.equal(store.has(MAX_TOKENS_KEY), false)
+  // Reset to default (the default's text in the field) is not stored either.
+  saveReplySettings(storage, { systemPrompt: 'Answer like a pirate.' })
+  saveReplySettings(storage, { systemPrompt: DEFAULT_SYSTEM_PROMPT })
+  assert.equal(store.has(SYSTEM_PROMPT_KEY), false)
+  assert.equal(loadReplySettings(storage).systemPrompt, DEFAULT_SYSTEM_PROMPT)
+  store.set(SYSTEM_PROMPT_KEY, '   ')
+  assert.equal(loadReplySettings(storage).systemPrompt, DEFAULT_SYSTEM_PROMPT, 'a blank saved prompt shows the default')
   store.set(MAX_TOKENS_KEY, '100000')
   assert.equal(loadReplySettings(storage).maxTokens, 2048, 'a hand-edited value is clamped')
 
   const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') }, removeItem: () => { throw new Error('denied') } }
-  assert.deepEqual(loadReplySettings(broken), { systemPrompt: '', maxTokens: 512 })
+  assert.deepEqual(loadReplySettings(broken), { systemPrompt: DEFAULT_SYSTEM_PROMPT, maxTokens: 512 })
   assert.doesNotThrow(() => saveReplySettings(broken, { systemPrompt: 'x', maxTokens: 64 }))
-  assert.deepEqual(loadReplySettings(null), { systemPrompt: '', maxTokens: 512 }, 'window.localStorage itself refused')
+  assert.deepEqual(loadReplySettings(null), { systemPrompt: DEFAULT_SYSTEM_PROMPT, maxTokens: 512 }, 'window.localStorage itself refused')
   assert.doesNotThrow(() => saveReplySettings(null, { maxTokens: 64 }))
 })
 
@@ -1146,4 +1182,144 @@ test("each vision answer starts without the previous answer's speech figures", (
   const start = view.indexOf("setSpeechError((e) => (e && e.id === VISION_READING ? null : e))")
   assert.ok(start >= 0)
   assert.match(view.slice(start, start + 400), /const \{ \[VISION_READING\]: _previous, \.\.\.rest \} = prev/)
+})
+
+test('the system prompt field: the default, a custom prompt, and a cleared field', () => {
+  assert.equal(isDefaultSystemPrompt(DEFAULT_SYSTEM_PROMPT), true)
+  assert.equal(isDefaultSystemPrompt(`  ${DEFAULT_SYSTEM_PROMPT}\n`), true)
+  assert.equal(isDefaultSystemPrompt(''), true, 'empty sends the default')
+  assert.equal(isDefaultSystemPrompt(undefined), true)
+  assert.equal(isDefaultSystemPrompt('Answer like a pirate.'), false)
+  assert.equal(isDefaultSystemPrompt(`${DEFAULT_SYSTEM_PROMPT} Be brief.`), false, 'an edited default is the user\'s own')
+  assert.match(systemPromptNote(DEFAULT_SYSTEM_PROMPT), /^The default prompt/)
+  assert.equal(systemPromptNote('  '), 'An empty prompt sends the default.')
+  assert.equal(systemPromptNote('Be brief.'), 'Your prompt replaces the default.')
+  assert.equal(replySummary({ systemPrompt: DEFAULT_SYSTEM_PROMPT, maxTokens: 512 }), 'Default system prompt · longest reply 512 tokens')
+  assert.equal(replySummary({ systemPrompt: '', maxTokens: 512 }), 'Default system prompt · longest reply 512 tokens')
+  assert.equal(replySummary({ systemPrompt: 'Be brief.', maxTokens: 1024 }), 'Custom system prompt · longest reply 1024 tokens')
+
+  // The view: the field shows the text itself, Reset puts the default back,
+  // and a field left empty shows the default again when it loses focus.
+  const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
+  assert.match(view, /value=\{replySettings\.systemPrompt\}/)
+  assert.match(view, /onBlur=\{\(\) => \{ if \(!replySettings\.systemPrompt\.trim\(\)\) changeReplySettings\(\{ systemPrompt: DEFAULT_SYSTEM_PROMPT \}\) \}\}/)
+  assert.match(view, /onClick=\{\(\) => changeReplySettings\(\{ systemPrompt: DEFAULT_SYSTEM_PROMPT \}\)\}/)
+})
+
+const EMPTY_STATUS = { catalog: [], loaded: [], loading: null, hubEnabled: true, disk: { freeBytes: 120e9 } }
+
+test('a board with no model to chat with gets the offer; an unknown catalog does not', () => {
+  assert.equal(firstModelNeeded(null), null, 'the catalog is not known yet')
+  assert.equal(firstModelNeeded({}), null)
+  assert.deepEqual(firstModelNeeded(EMPTY_STATUS), { reason: 'none' })
+  // Speech and search models don't chat.
+  assert.deepEqual(firstModelNeeded({ ...EMPTY_STATUS, catalog: [STATUS.catalog[2], STATUS.catalog[3]] }), { reason: 'none' })
+  assert.deepEqual(firstModelNeeded({ ...EMPTY_STATUS, catalog: [{ name: 'Qwen3-VL-8B', type: 'vlm', supported: false }] }), { reason: 'unsupported' })
+  assert.equal(firstModelNeeded(STATUS), null)
+  assert.equal(firstModelNeeded({ ...EMPTY_STATUS, catalog: [STATUS.catalog[1]] }), null, 'a chat model that is not loaded is chosen at the top')
+})
+
+test('the recommended first model: a vision model, its catalog name, size and the free space', () => {
+  assert.equal(RECOMMENDED_MODEL.repoId, 'simaai/Qwen3-VL-4B-Instruct-Autoround-a16w4')
+  assert.equal(RECOMMENDED_MODEL.sees, true)
+  assert.equal(catalogNameFor('simaai/Qwen3-VL-4B-Instruct-Autoround-a16w4'), 'Qwen3-VL-4B-Instruct-Autoround-a16w4')
+  assert.equal(catalogNameFor('florianvoss/whisper-small-a16w8'), 'florianvoss@whisper-small-a16w8', "another account's models carry its name")
+  assert.equal(catalogNameFor('SimaAI/Model'), 'Model')
+  assert.equal(catalogNameFor('nonsense'), '')
+  assert.equal(cardPath(RECOMMENDED_MODEL.repoId), 'models/hub/card?repoId=simaai%2FQwen3-VL-4B-Instruct-Autoround-a16w4')
+
+  const plain = recommendedOffer({ status: EMPTY_STATUS })
+  assert.deepEqual([plain.label, plain.name, plain.sizeBytes, plain.tooBig], ['Qwen3 VL 4B', 'Qwen3-VL-4B-Instruct-Autoround-a16w4', null, false])
+  const card = { enabled: true, repoId: RECOMMENDED_MODEL.repoId, sizeBytes: 8369097563 }
+  assert.equal(recommendedOffer({ status: EMPTY_STATUS, card }).sizeBytes, 8369097563)
+  assert.equal(recommendedOffer({ status: { ...EMPTY_STATUS, disk: { freeBytes: 5768511488 } }, card }).tooBig, true)
+  assert.equal(recommendedOffer({ status: { ...EMPTY_STATUS, disk: null }, card }).tooBig, false, 'unknown free space is no warning')
+  assert.equal(recommendedOffer({ status: EMPTY_STATUS, card: { ...card, repoId: 'simaai/other' } }).sizeBytes, null, "another model's card")
+  assert.equal(recommendedOffer({ status: EMPTY_STATUS, card: { enabled: false, error: 'Hugging Face is offline or disabled' } }).sizeBytes, null)
+})
+
+test('downloads: turned off on the board, offline, or available, and what to do', () => {
+  assert.equal(downloadAvailability({}).state, 'unknown')
+  const off = downloadAvailability({ status: { ...EMPTY_STATUS, hubEnabled: false } })
+  assert.equal(off.state, 'disabled')
+  assert.match(off.message, /`server\.hub\.allow_download: true`/)
+  assert.match(off.message, /`config\.local\.yaml`.*restart GenAI Studio/)
+  assert.equal(downloadAvailability({ status: { catalog: [] } }).state, 'disabled', 'a board that does not say allows none')
+  assert.equal(downloadAvailability({ status: EMPTY_STATUS }).state, 'available')
+  assert.equal(downloadAvailability({ status: EMPTY_STATUS, hubReach: { enabled: true, error: '' } }).state, 'available')
+  const offline = downloadAvailability({ status: EMPTY_STATUS, hubReach: hubReachOf({ enabled: false, error: 'Hugging Face is offline or disabled' }) })
+  assert.equal(offline.state, 'offline')
+  assert.equal(offline.message, "The board can't reach Hugging Face. Check the board's internet connection, then try again.")
+  assert.equal(downloadAvailability({ status: EMPTY_STATUS, hubReach: hubReachOf({ enabled: false, error: 'huggingface_hub is not installed' }) }).message,
+    "The board can't download from Hugging Face: huggingface_hub is not installed.")
+  assert.equal(downloadAvailability({ status: EMPTY_STATUS, hubReach: hubReachOf({ enabled: false, results: [] }) }).state, 'offline', 'a search the board could not run')
+  assert.equal(hubReachOf({ results: [] }), null, 'an answer that does not say')
+  assert.deepEqual(hubReachOf({ enabled: true, error: 'Could not load model metadata' }), { enabled: true, error: '' })
+  assert.deepEqual(codeParts('set `a: true` in `b`.'), ['set ', { code: 'a: true' }, ' in ', { code: 'b' }, '.'])
+})
+
+test('a failed download says why, the id Hugging Face renamed it to, and whether the board is offline', () => {
+  const renamed = downloadFailure('simaai/old', { message: 'Hugging Face now publishes this model as simaai/new; download that id instead', body: { state: 'error', renamedTo: 'simaai/new' } })
+  assert.deepEqual([renamed.renamedTo, renamed.offline], ['simaai/new', false])
+  assert.equal(downloadFailure('a/b', { message: 'Model download failed', body: { renamedTo: '../etc' } }).renamedTo, null)
+  assert.equal(downloadFailure('a/b', { message: 'Hugging Face downloads are disabled or offline' }).offline, true)
+  assert.equal(downloadFailure('a/b', { message: 'Hugging Face is offline or disabled' }).offline, true)
+  assert.equal(downloadFailure('a/b', { message: "Could not reach Hugging Face: check the board's internet connection" }).offline, true)
+  assert.equal(downloadFailure('a/b', null).message, 'Download failed')
+})
+
+test('the first model rules: one download at a time, not under a model operation or the benchmark', () => {
+  const idle = { usable: true, hasChatModel: false, hubEnabled: true }
+  assert.equal(allowedActions(idle).downloadFirstModel, true)
+  assert.equal(allowedActions(idle).browseModels, true)
+  for (const busy of [{ downloading: true }, { modelOp: true }, { benchmarking: true }, { usable: false }, { hubEnabled: false }]) {
+    assert.equal(allowedActions({ ...idle, ...busy }).downloadFirstModel, false, Object.keys(busy)[0])
+  }
+  assert.equal(allowedActions({ ...idle, hubEnabled: false }).browseModels, false, 'no Hugging Face search to open')
+  assert.equal(allowedActions({ ...idle, downloading: true }).browseModels, true, 'the search shows the running download')
+  // The model downloaded from the offer is loaded under the usual rule.
+  assert.equal(allowedActions({ ...idle, cameraOpen: true }).changeChatModel, false)
+
+  const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
+  assert.match(view, /if \(allowed\.downloadFirstModel\) startDownload\(repoId, \{ thenLoad: true \}\)/)
+  const effect = view.slice(view.indexOf('if (!loadAfterDownload) return'))
+  assert.ok(effect.indexOf('if (!allowed.changeChatModel) return') < effect.indexOf('loadChatModel(model)'), 'it waits for what holds model changes')
+  const forget = view.slice(view.indexOf('function forgetBoard() {'), view.indexOf('async function applySettings('))
+  for (const step of ['setLoadAfterDownload(null)', 'setRecommendedCard(null)', 'setHubReach(null)', 'setFailedDownload(null)']) assert.ok(forget.includes(step), step)
+})
+
+test('Settings cards: one line each about how they are set now', () => {
+  assert.equal(STATE_LABELS.unavailable, 'Not running')
+  assert.equal(boardSummary({ settings: { url: 'https://192.168.2.3:5000', configuredUrl: 'https://192.168.2.3:5000' }, state: 'ready' }), '192.168.2.3:5000 · Ready')
+  assert.equal(boardSummary({ settings: { url: 'https://10.0.0.5:5000', configuredUrl: null }, state: 'unavailable' }), '10.0.0.5:5000 (default) · Not running')
+  assert.equal(boardSummary({ settings: { url: '', configuredUrl: 'https://[bad' }, state: 'unconfigured' }), 'The saved address is not valid')
+  assert.equal(boardSummary({ settings: null }), 'No board selected')
+
+  assert.equal(modelsSummary(null), 'Waiting for the board')
+  assert.equal(modelsSummary(STATUS), 'Qwen3 VL 4B loaded · 3 models on the board', 'chat, vision and speech models; not the search model')
+  assert.equal(modelsSummary({ ...STATUS, loaded: [] }), 'No chat model loaded · 3 models on the board')
+  assert.equal(modelsSummary({ ...STATUS, loading: { name: 'Qwen3-0.6B-Autoround-a16w4' } }), 'Loading Qwen3 0.6B · 3 models on the board')
+  assert.equal(modelsSummary(EMPTY_STATUS), 'No models on the board yet')
+  assert.equal(modelsSummary({ catalog: [STATUS.catalog[2]], loaded: [] }), 'No chat model loaded · 1 model on the board')
+
+  const engines = [{ key: 'piper-plus', label: 'Piper Plus', voices: [{ id: 'amy', label: 'Amy' }] }]
+  assert.equal(voiceSummary({}), 'Automatic voice · spoken language detected automatically')
+  assert.equal(voiceSummary({ engine: 'piper-plus', voice: 'amy', engines, languageLabel: 'English' }), 'Piper Plus (Amy) · you speak English')
+  assert.equal(voiceSummary({ engine: 'supertonic', engines: [] }), 'Supertonic · spoken language detected automatically', 'an engine the voice list does not describe')
+
+  assert.equal(documentsCardSummary({ docs: { available: false, reason: 'x' } }), 'Not available on this board')
+  assert.equal(documentsCardSummary({ docs: { available: true }, docStatus: null }), 'Checking the documents…')
+  assert.equal(documentsCardSummary({ docs: { available: true }, docStatus: { enabled: true, database: true, service: 'ok', meta: { chunks: 8, input: '/x/neat.md' } } }), '8 sections from neat.md')
+})
+
+test('a model row: its kind, size and whether it is in use', () => {
+  const [vlm, small, whisper] = STATUS.catalog
+  assert.deepEqual(modelRow(vlm, STATUS), { name: 'Qwen3 VL 4B', kind: { key: 'vision', label: 'Vision' }, size: '8.4 GB', state: { key: 'on', label: 'Loaded' }, on: true })
+  assert.deepEqual([modelRow(small, STATUS).kind.label, modelRow(small, STATUS).state.label, modelRow(small, STATUS).size], ['Chat', 'Not loaded', '1.4 GB'])
+  assert.deepEqual([modelRow(whisper, STATUS).kind.label, modelRow(whisper, STATUS).state.label, modelRow(whisper, STATUS).size], ['Speech', 'In use', ''])
+  assert.equal(modelRow({ ...whisper, activeAsr: false }, { ...STATUS, asrModel: 'other' }).state.label, 'Not in use')
+  assert.equal(modelRow(small, { ...STATUS, loading: { name: small.name } }).state.label, 'Loading…')
+  assert.equal(modelRow({ ...small, supported: false }, STATUS).state.key, 'unsupported')
+  // Hugging Face search results type their models llm, vlm or asr.
+  assert.deepEqual(['llm', 'vlm', 'asr', undefined].map((type) => modelKind({ type }).label), ['Chat', 'Vision', 'Speech', 'Chat'])
 })

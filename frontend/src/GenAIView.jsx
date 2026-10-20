@@ -56,9 +56,22 @@ import {
   MAX_TOKENS_LIMITS,
   clampMaxTokens,
   loadReplySettings,
+  replySummary,
   saveReplySettings,
-  systemPromptFor
+  systemPromptFor,
+  systemPromptNote
 } from './genai/replySettings.js'
+import {
+  catalogNameFor,
+  cardPath,
+  codeParts,
+  downloadAvailability,
+  downloadFailure,
+  firstModelNeeded,
+  hubReachOf,
+  recommendedOffer
+} from './genai/firstModel.js'
+import { STATE_LABELS, boardSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './genai/settingsCards.js'
 import { VISION_PRESETS, createVisionLoop } from './genai/visionLoop.js'
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
@@ -147,21 +160,53 @@ const ICONS = {
   gauge: 'M3.5 17a8.5 8.5 0 1 1 17 0M12 17l4.5-5M12 17h.01M6.5 12.5l1.2.7M12 8.5V10M17.5 12.5l-1.2.7',
   help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17v.01',
   fullscreen: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
-  settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4'
+  settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+  // Settings cards, and the chat's offer of a first model.
+  board: 'M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4',
+  models: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9',
+  replies: 'M4 5h16v11H10l-6 4zM8 9h8M8 12h5',
+  voice: 'M4 9h4l5-4v14l-5-4H4zM16.5 9.5a3.5 3.5 0 0 1 0 5M19 7a7 7 0 0 1 0 10',
+  documents: 'M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6',
+  troubleshoot: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5.6 5.6l3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6',
+  download: 'M12 4v11M7 10l5 5 5-5M5 20h14'
 }
 
 function StatusChip({ state }) {
-  const labels = {
-    ready: 'Ready',
-    busy: 'Busy',
-    starting: 'Starting',
-    failed: 'Error',
-    error: 'Error',
-    unavailable: 'Not running',
-    unconfigured: 'Not set up',
-    incompatible: 'Incompatible'
-  }
-  return <span className={`genai-pill genai-pill-${state}`}>{labels[state] || state}</span>
+  return <span className={`genai-pill genai-pill-${state}`}>{STATE_LABELS[state] || state}</span>
+}
+
+// Text with `code` parts (genai/firstModel.js codeParts).
+function WithCode({ text }) {
+  return codeParts(text).map((part, i) => (typeof part === 'string' ? part : <code key={i}>{part.code}</code>))
+}
+
+// A Settings card: an icon, the title, and one line about how it is set now.
+function SettingsCard({ id, icon, title, summary, wide, children }) {
+  return (
+    <section className={`genai-card${wide ? ' genai-card-wide' : ''}`} aria-labelledby={`genai-card-${id}`} aria-describedby={`genai-card-${id}-summary`}>
+      <div className="genai-card-head">
+        <span className="genai-card-icon"><Icon d={ICONS[icon]} /></span>
+        <div className="genai-card-titles">
+          <h3 id={`genai-card-${id}`}>{title}</h3>
+          <p id={`genai-card-${id}-summary`} className="genai-card-summary" title={summary}>{summary}</p>
+        </div>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+// A download onto the board: its state, percent and time left, with a bar.
+function DownloadProgress({ download }) {
+  if (!download) return null
+  const pct = typeof download.pct === 'number' ? ` · ${download.pct}%` : ''
+  const eta = download.etaS ? ` · about ${formatDuration(download.etaS)} left` : ''
+  return (
+    <div className="genai-download" aria-live="polite">
+      <p className="hint">{download.repoId}: {download.state}{pct}{eta}</p>
+      <ProgressBar pct={download.pct} label={`Downloading ${download.repoId}`} />
+    </div>
+  )
 }
 
 function Metrics({ items, label }) {
@@ -283,6 +328,18 @@ export default function GenAIView({ onError, onStatus }) {
   const [hubQuery, setHubQuery] = useState('')
   const [hubResults, setHubResults] = useState(null)
   const [download, setDownload] = useState(null)
+  // Hugging Face as the board last answered about it ({enabled, error}), the
+  // recommended model's card (its download size), why the last download
+  // failed, and a model to load once its download from the chat's offer is in
+  // the catalog.
+  const [hubReach, setHubReach] = useState(null)
+  const [recommendedCard, setRecommendedCard] = useState(null)
+  const recommendedCardLoading = useRef(false)
+  const [failedDownload, setFailedDownload] = useState(null)
+  const [loadAfterDownload, setLoadAfterDownload] = useState(null)
+  // Browse models: + 1 each time it asks Settings to show the Hugging Face search.
+  const [browseRequest, setBrowseRequest] = useState(0)
+  const hubSearchBox = useRef(null)
 
   const backend = deriveBackendState({ health, status, busyOp, lastError })
   const usable = canUseModels(backend.state)
@@ -308,6 +365,7 @@ export default function GenAIView({ onError, onStatus }) {
     transcribing,
     modelOp: Boolean(busyOp),
     downloading: Boolean(download),
+    hubEnabled: Boolean(status?.hubEnabled),
     benchmarking,
     documentTask: Boolean(docProgress),
     documentsAvailable: docs.available,
@@ -319,6 +377,10 @@ export default function GenAIView({ onError, onStatus }) {
     useDocuments: useDocs && docs.available
   })
   const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
+  // No model to chat with: the chat offers the recommended one instead.
+  const firstModel = usable ? firstModelNeeded(status) : null
+  const offer = recommendedOffer({ status, card: recommendedCard })
+  const downloads = downloadAvailability({ status, hubReach })
 
   const fail = useCallback((message) => {
     setLastError(message)
@@ -492,6 +554,11 @@ export default function GenAIView({ onError, onStatus }) {
     setEngine('default')      // the new board may not have the chosen engine or voice
     setVoice('')
     setHubResults(null)
+    setHubReach(null)
+    setRecommendedCard(null)
+    recommendedCardLoading.current = false
+    setFailedDownload(null)
+    setLoadAfterDownload(null)
     setDocStatus(null)
     setUseDocs(false)         // chosen for the previous board's documents
     setDocsMidChat(false)
@@ -589,34 +656,116 @@ export default function GenAIView({ onError, onStatus }) {
 
   // Only the latest search is shown.
   const hubSearchId = useRef(0)
-  async function searchHub(event) {
+  function searchHub(event) {
     event.preventDefault()
+    runHubSearch(hubQuery)
+  }
+
+  async function runHubSearch(text) {
     if (!allowed.searchModels) return
     const id = ++hubSearchId.current
     const board = ticket()
     try {
-      const query = hubQuery.trim() ? `?q=${encodeURIComponent(hubQuery.trim())}` : ''
+      const query = text.trim() ? `?q=${encodeURIComponent(text.trim())}` : ''
       const results = await getJson(`models/hub/search${query}`, { signal: board.signal })
-      if (id === hubSearchId.current && board.live()) setHubResults(results)
+      if (id === hubSearchId.current && board.live()) {
+        setHubResults(results)
+        setHubReach((prev) => hubReachOf(results) || prev)
+      }
     } catch (error) {
       if (id === hubSearchId.current && board.live() && !isAbort(error)) onError?.(`Search failed: ${error.message}`)
     }
   }
 
-  async function startDownload(repoId) {
+  // thenLoad: the chat's offer loads the model once it is in the catalog.
+  async function startDownload(repoId, { thenLoad = false } = {}) {
     if (!allowed.downloadModel) return
+    const board = ticket()
+    setFailedDownload(null)
     setDownload({ repoId, state: 'resolving', pct: null })
     try {
-      await downloadModel({ repoId, signal: ticket().signal, onProgress: (item) => setDownload({ repoId, ...item }) })
+      const done = await downloadModel({ repoId, signal: board.signal, onProgress: (item) => setDownload({ repoId, ...item }) })
+      if (!board.live()) return
+      setHubReach({ enabled: true, error: '' })
       onStatus?.(`Downloaded ${repoId}.`)
       setHubResults(null)
+      if (thenLoad) setLoadAfterDownload(done.name || catalogNameFor(repoId))
     } catch (error) {
-      if (!isAbort(error)) onError?.(`Download of ${repoId} failed: ${error.message}`)
+      if (!isAbort(error) && board.live()) {
+        const failure = downloadFailure(repoId, error)
+        setFailedDownload(failure)
+        if (failure.offline) setHubReach({ enabled: false, error: failure.message })
+        onError?.(`Download of ${repoId} failed: ${error.message}`)
+      }
     } finally {
       setDownload(null)
       refresh()
     }
   }
+
+  // The chat's offer: the recommended model (or the id Hugging Face renamed it
+  // to), downloaded and then loaded.
+  function getFirstModel(repoId = offer.repoId) {
+    if (allowed.downloadFirstModel) startDownload(repoId, { thenLoad: true })
+  }
+
+  // Browse models: Settings, Models at the Hugging Face search, listing the
+  // models the board can download.
+  function browseModels() {
+    if (!allowed.browseModels) return
+    setSettingsOpen(true)
+    setBrowseRequest((n) => n + 1)
+    if (!hubResults) runHubSearch(hubQuery)
+  }
+
+  useEffect(() => {
+    if (!browseRequest || !settingsOpen) return
+    const box = hubSearchBox.current
+    box?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    box?.focus({ preventScroll: true })
+  }, [browseRequest, settingsOpen])
+
+  // The offer says how big the download is, and finds out early whether the
+  // board can reach Hugging Face. Once per board; the size is only a nicety,
+  // so a failed lookup is not retried until Check again.
+  useEffect(() => {
+    if (!firstModel || !status?.hubEnabled || recommendedCard || recommendedCardLoading.current) return
+    recommendedCardLoading.current = true
+    const board = ticket()
+    getJson(cardPath(offer.repoId), { signal: board.signal })
+      .then((card) => {
+        if (!board.live()) return
+        setRecommendedCard(card)
+        setHubReach((prev) => hubReachOf(card) || prev)
+      })
+      .catch(() => {})
+  }, [Boolean(firstModel), status?.hubEnabled, recommendedCard, offer.repoId, ticket])
+
+  function checkHubAgain() {
+    setHubReach(null)
+    setRecommendedCard(null)
+    recommendedCardLoading.current = false
+  }
+
+  // A model downloaded from the chat's offer loads once the catalog lists it,
+  // when nothing holds model changes; a model loaded meanwhile wins.
+  useEffect(() => {
+    if (!loadAfterDownload) return
+    const model = chatModels(status).find((m) => m.name === loadAfterDownload)
+    if (chatModel) {
+      setLoadAfterDownload(null)
+      return
+    }
+    if (!model) return
+    if (model.supported === false) {
+      setLoadAfterDownload(null)
+      onError?.(model.unsupportedReason || `${friendlyModelName(model.name)} can't run on this board.`)
+      return
+    }
+    if (!allowed.changeChatModel) return
+    setLoadAfterDownload(null)
+    loadChatModel(model)
+  }, [loadAfterDownload, status, chatModel, allowed.changeChatModel])
 
   // --- speech output ----------------------------------------------------------
 
@@ -1415,8 +1564,7 @@ export default function GenAIView({ onError, onStatus }) {
 
       {(settingsOpen || backend.state === 'unconfigured') && (
         <section className="panel genai-settings-panel" aria-label="GenAI settings">
-          <div className="genai-settings-section">
-            <h3>Board</h3>
+          <SettingsCard id="board" icon="board" title="Board" summary={boardSummary({ settings, state: backend.state })}>
             <form className="genai-form" onSubmit={applySettings}>
               <label>
                 <span>Board address</span>
@@ -1435,26 +1583,28 @@ export default function GenAIView({ onError, onStatus }) {
             <p className="hint">
               Start GenAI Studio on the board with <code>{START_COMMAND}</code>. Leave the address empty to use {settings?.defaultUrl || 'the paired DevKit'}.
             </p>
-          </div>
+          </SettingsCard>
 
-          <div className="genai-settings-section">
-            <h3>Replies</h3>
+          <SettingsCard id="replies" icon="replies" title="Replies" summary={replySummary(replySettings)}>
             <label className="genai-field">
               <span>System prompt</span>
               <textarea
                 value={replySettings.systemPrompt}
                 onChange={(e) => changeReplySettings({ systemPrompt: e.target.value })}
+                // A field left empty shows the default again: that is what is sent.
+                onBlur={() => { if (!replySettings.systemPrompt.trim()) changeReplySettings({ systemPrompt: DEFAULT_SYSTEM_PROMPT }) }}
                 placeholder={DEFAULT_SYSTEM_PROMPT}
                 rows={3}
                 disabled={!allowed.changeReplySettings}
+                aria-describedby="genai-system-prompt-note"
               />
             </label>
             <div className="genai-actions">
-              <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeReplySettings || !replySettings.systemPrompt} onClick={() => changeReplySettings({ systemPrompt: '' })}>
+              <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeReplySettings || replySettings.systemPrompt === DEFAULT_SYSTEM_PROMPT} onClick={() => changeReplySettings({ systemPrompt: DEFAULT_SYSTEM_PROMPT })}>
                 Reset to default
               </button>
-              <span className="hint">
-                {replySettings.systemPrompt.trim() ? 'Your prompt replaces the default.' : 'Empty uses the default shown.'} The tab still tells the model whether a message has a picture.
+              <span id="genai-system-prompt-note" className="hint">
+                {systemPromptNote(replySettings.systemPrompt)} The tab still tells the model whether a message has a picture.
               </span>
             </div>
             <label className="genai-field">
@@ -1473,10 +1623,83 @@ export default function GenAIView({ onError, onStatus }) {
               A token is about three quarters of a word; a reply that reaches the limit stops there. Both settings apply to the chat
               and the vision view, not to the benchmark, and this browser remembers them.
             </p>
-          </div>
+          </SettingsCard>
 
-          <div className="genai-settings-section">
-            <h3>Voice</h3>
+          <SettingsCard id="models" icon="models" title="Models" summary={modelsSummary(status)} wide>
+            <p className="hint">{status?.disk ? `${formatBytes(status.disk.freeBytes)} free on the board. ` : ''}One chat model runs at a time; the speech model turns your voice into text.</p>
+            <ModelList
+              title="Chat and vision"
+              models={chatModels(status)}
+              status={status}
+              disabled={!allowed.changeChatModel}
+              onLoad={loadChatModel}
+              onUnload={unloadChatModel}
+              canDelete={(m) => deletableModel(m, status)}
+              deleteDisabled={!allowed.deleteModel}
+              onDelete={deleteModel}
+            />
+            <ModelList
+              title="Speech recognition"
+              models={speechModels(status)}
+              status={status}
+              disabled={!allowed.changeSpeechModel}
+              onUse={switchSpeechModel}
+              canDelete={(m) => deletableModel(m, status)}
+              deleteDisabled={!allowed.deleteModel}
+              onDelete={deleteModel}
+            />
+            {downloads.state !== 'unknown' && (
+              <div className="genai-model-group">
+                <h4 className="genai-model-group-title">Get more models</h4>
+                {downloads.state === 'disabled' ? (
+                  <p className="hint"><WithCode text={downloads.message} /></p>
+                ) : (
+                  <>
+                    <form className="genai-row" onSubmit={searchHub}>
+                      <input ref={hubSearchBox} type="search" className="search-input" value={hubQuery} onChange={(e) => setHubQuery(e.target.value)} placeholder="Qwen, Whisper, Llama" aria-label="Search Hugging Face models" />
+                      <button type="submit" className="btn-ghost" disabled={!allowed.searchModels}>Search Hugging Face</button>
+                    </form>
+                    {downloads.state === 'offline' && <p className="hint">{downloads.message}</p>}
+                    <DownloadProgress download={download} />
+                    <DownloadFailure failure={failedDownload} disabled={!allowed.downloadModel} onDownload={(repoId) => startDownload(repoId)} />
+                    {hubResults && hubResults.enabled !== false && (
+                      <ul className="genai-models" aria-label="Models on Hugging Face">
+                        {(hubResults.results || []).length === 0 && <li className="hint">No matching models.</li>}
+                        {(hubResults.results || []).map((r) => {
+                          const kind = modelKind(r)
+                          const name = friendlyModelName(r.repoId.split('/').pop())
+                          return (
+                            <li key={r.repoId} className="genai-model-row">
+                              <span className={`genai-kind genai-kind-${kind.key}`}>{kind.label}</span>
+                              <span className="genai-model-name" title={r.repoId}>{name}</span>
+                              <span className="genai-model-size">{r.sizeBytes ? formatBytes(r.sizeBytes) : ''}</span>
+                              {r.alreadyInCatalog ? <span className="genai-model-state genai-model-state-on">On the board</span>
+                                : r.unsupportedReason ? <span className="genai-model-state genai-model-state-unsupported" title={r.unsupportedReason}>Can't run here</span>
+                                  : <span className="genai-model-state genai-model-state-off">On Hugging Face</span>}
+                              <span className="genai-model-actions">
+                                {!r.alreadyInCatalog && (
+                                  <button type="button" className="btn-ghost genai-small" disabled={!allowed.downloadModel || Boolean(r.unsupportedReason)} title={r.unsupportedReason || r.repoId} aria-label={`Download ${name}`} onClick={() => startDownload(r.repoId)}>
+                                    Download
+                                  </button>
+                                )}
+                              </span>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </SettingsCard>
+
+          <SettingsCard
+            id="voice"
+            icon="voice"
+            title="Voice"
+            summary={voiceSummary({ engine, voice, engines, languageLabel: language === 'auto' ? null : LANGUAGES.find((l) => l.value === language)?.label })}
+          >
             <div className="genai-form">
               <label>
                 <span>Voice engine</span>
@@ -1501,77 +1724,17 @@ export default function GenAIView({ onError, onStatus }) {
                 </select>
               </label>
             </div>
-          </div>
+          </SettingsCard>
 
-          <div className="genai-settings-section">
-            <h3>Models on the board</h3>
-            <p className="hint">{status?.disk ? `${formatBytes(status.disk.freeBytes)} free.` : ''} The chat model runs one at a time; the speech model turns your voice into text.</p>
-            <ModelList
-              title="Chat"
-              models={chatModels(status)}
-              loadedNames={new Set(status?.loaded || [])}
-              disabled={!allowed.changeChatModel}
-              onLoad={loadChatModel}
-              onUnload={unloadChatModel}
-              canDelete={(m) => deletableModel(m, status)}
-              deleteDisabled={!allowed.deleteModel}
-              onDelete={deleteModel}
-            />
-            <ModelList
-              title="Speech recognition"
-              models={speechModels(status)}
-              activeName={status?.asrModel}
-              disabled={!allowed.changeSpeechModel}
-              onUse={switchSpeechModel}
-              canDelete={(m) => deletableModel(m, status)}
-              deleteDisabled={!allowed.deleteModel}
-              onDelete={deleteModel}
-            />
-          </div>
-
-          {status?.hubEnabled && (
-            <div className="genai-settings-section">
-              <h3>Get more models</h3>
-              <form className="genai-row" onSubmit={searchHub}>
-                <input className="search-input" value={hubQuery} onChange={(e) => setHubQuery(e.target.value)} placeholder="Qwen, Whisper, Llama" aria-label="Search Hugging Face models" />
-                <button type="submit" className="btn-ghost" disabled={!allowed.searchModels}>Search Hugging Face</button>
-              </form>
-              {download && (
-                <div>
-                  <p className="hint">{download.repoId}: {download.state}{typeof download.pct === 'number' ? ` · ${download.pct}%` : ''}{download.etaS ? ` · about ${formatDuration(download.etaS)} left` : ''}</p>
-                  <ProgressBar pct={download.pct} label={`Downloading ${download.repoId}`} />
-                </div>
-              )}
-              {hubResults && (
-                <ul className="genai-models">
-                  {(hubResults.results || []).length === 0 && <li className="hint">No matching models.</li>}
-                  {(hubResults.results || []).map((r) => (
-                    <li key={r.repoId}>
-                      <span className="genai-model-name" title={r.repoId}>{friendlyModelName(r.repoId.split('/').pop())}</span>
-                      <span className="genai-badge">{r.type}</span>
-                      {r.alreadyInCatalog ? (
-                        <span className="hint">on the board</span>
-                      ) : (
-                        <button type="button" className="btn-ghost genai-small" disabled={!allowed.downloadModel || Boolean(r.unsupportedReason)} title={r.unsupportedReason || r.repoId} onClick={() => startDownload(r.repoId)}>
-                          Download
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
-          <div className="genai-settings-section">
-            <h3>Documents</h3>
+          <SettingsCard id="documents" icon="documents" title="Documents" summary={documentsCardSummary({ docs, docStatus })}>
             {docs.available ? (
               <>
                 <p className="hint">
                   With <b>Use my documents</b> on, the board answers from these documents. Uploading a Markdown file
                   replaces them; Reset brings back the default SiMa document.
                 </p>
-                <p className="genai-doc-summary">{documentsSummary(docStatus)}</p>
+                {/* The summary line may be cut short: a search service that isn't running is said in full. */}
+                {docStatus?.database && docStatus.service && docStatus.service !== 'ok' && <p className="genai-error">{documentsSummary(docStatus)}</p>}
                 <input ref={docInput} type="file" accept=".md,text/markdown" hidden onChange={(e) => { runDocumentTask('Uploading', (o) => uploadDocument(e.target.files[0], o)); e.target.value = '' }} />
                 <div className="genai-actions">
                   <button type="button" className="btn-tonal" disabled={!allowed.documentTasks} onClick={() => docInput.current?.click()}>Upload a Markdown file</button>
@@ -1588,15 +1751,14 @@ export default function GenAIView({ onError, onStatus }) {
             ) : (
               <p className="hint">{docs.reason}</p>
             )}
-          </div>
+          </SettingsCard>
 
-          <div className="genai-settings-section">
-            <h3>Troubleshooting</h3>
+          <SettingsCard id="troubleshooting" icon="troubleshoot" title="Troubleshooting" summary="Restart GenAI Studio if a model load fails or replies stop" wide>
             <p className="hint">
-              If a model load fails or replies stop, restart GenAI Studio on the board: <code>./run.sh stop</code>, then <code>{START_COMMAND}</code>.
+              Restart GenAI Studio on the board: <code>./run.sh stop</code>, then <code>{START_COMMAND}</code>.
               That frees the accelerator; then load the model again.
             </p>
-          </div>
+          </SettingsCard>
         </section>
       )}
 
@@ -1609,7 +1771,21 @@ export default function GenAIView({ onError, onStatus }) {
           </div>
         )}
         <div className="genai-transcript" ref={transcriptBox} onScroll={onTranscriptScroll}>
-          {messages.length === 0 && (
+          {messages.length === 0 && firstModel && (
+            <FirstModelOffer
+              need={firstModel}
+              offer={offer}
+              downloads={downloads}
+              download={download}
+              failure={failedDownload}
+              loadingNext={loadAfterDownload}
+              allowed={allowed}
+              onDownload={getFirstModel}
+              onBrowse={browseModels}
+              onCheckAgain={checkHubAgain}
+            />
+          )}
+          {messages.length === 0 && !firstModel && (
             <div className="genai-welcome">
               <p className="genai-welcome-title">Chat with {chatModel ? friendlyModelName(chatModel.name) : 'a model'} on your board</p>
               <p className="section-note">
@@ -1633,7 +1809,9 @@ export default function GenAIView({ onError, onStatus }) {
                 </button>
               </div>
               {usable && !chatModel && chatModels(status).length > 0 && (
-                <p className="hint">Choose a model at the top to start; loading takes a few minutes.</p>
+                <p className="hint" aria-live="polite">
+                  {loadAfterDownload ? `Downloaded. Loading ${friendlyModelName(loadAfterDownload)} next…` : 'Choose a model at the top to start; loading takes a few minutes.'}
+                </p>
               )}
             </div>
           )}
@@ -1737,7 +1915,7 @@ export default function GenAIView({ onError, onStatus }) {
                 sendTyped()
               }
             }}
-            placeholder={allowed.typeMessage ? 'Ask anything, or press the microphone and speak' : (usable ? 'Choose a model at the top first' : backend.title)}
+            placeholder={allowed.typeMessage ? 'Ask anything, or press the microphone and speak' : firstModel ? 'Get a model first (above)' : (usable ? 'Choose a model at the top first' : backend.title)}
             aria-label="Message"
             rows={1}
             disabled={!allowed.typeMessage}
@@ -1940,40 +2118,112 @@ function SolutionsOverlay({ model, sees, onClose }) {
   )
 }
 
-function ModelList({ title, models, loadedNames, activeName, disabled, onLoad, onUnload, onUse, canDelete, deleteDisabled, onDelete }) {
+// A group of models on the board, one row each: its kind, name, size and
+// whether it is in use, then what can be done with it.
+function ModelList({ title, models, status, disabled, onLoad, onUnload, onUse, canDelete, deleteDisabled, onDelete }) {
   return (
     <div className="genai-model-group">
-      <p className="genai-model-group-title">{title}</p>
-      {models.length === 0 && <p className="hint">None on the board yet.</p>}
-      <ul className="genai-models">
-        {models.map((m) => {
-          const loaded = loadedNames ? loadedNames.has(m.name) : false
-          const active = activeName === m.name
-          return (
-            <li key={m.name}>
-              <span className="genai-model-name" title={m.name}>{friendlyModelName(m.name)}</span>
-              {m.supportsVision && <span className="genai-badge">sees images</span>}
-              {(loaded || active) && <span className="genai-badge genai-badge-on">{active ? 'in use' : 'loaded'}</span>}
-              {m.sizeBytes ? <span className="hint">{formatBytes(m.sizeBytes)}</span> : null}
-              {onLoad && !loaded && (
-                <button type="button" className="btn-ghost genai-small" disabled={disabled || m.supported === false} title={m.unsupportedReason || (m.estimatedLoadS ? `About ${formatDuration(m.estimatedLoadS)} to load` : '')} onClick={() => onLoad(m)}>
-                  Load
-                </button>
-              )}
-              {onUnload && loaded && (
-                <button type="button" className="btn-ghost genai-small" disabled={disabled} onClick={() => onUnload(m)}>Unload</button>
-              )}
-              {onUse && !active && (
-                <button type="button" className="btn-ghost genai-small" disabled={disabled || m.supported === false} title={m.unsupportedReason || ''} onClick={() => onUse(m)}>Use</button>
-              )}
-              {onDelete && canDelete(m) && (
-                <button type="button" className="btn-ghost genai-small danger" disabled={deleteDisabled} title="Delete it from the board to free its space" onClick={() => onDelete(m)}>Delete</button>
-              )}
-            </li>
-          )
-        })}
-      </ul>
+      <h4 className="genai-model-group-title">{title}</h4>
+      {models.length === 0 ? (
+        <p className="hint">None on the board yet.</p>
+      ) : (
+        <ul className="genai-models" aria-label={title}>
+          {models.map((m) => {
+            const row = modelRow(m, status)
+            return (
+              <li key={m.name} className={`genai-model-row${row.on ? ' genai-model-row-on' : ''}`}>
+                <span className={`genai-kind genai-kind-${row.kind.key}`}>{row.kind.label}</span>
+                <span className="genai-model-name" title={m.name}>{row.name}</span>
+                <span className="genai-model-size">{row.size}</span>
+                <span className={`genai-model-state genai-model-state-${row.state.key}`} title={row.state.key === 'unsupported' ? m.unsupportedReason || undefined : undefined}>
+                  {row.state.label}
+                </span>
+                <span className="genai-model-actions">
+                  {onLoad && !row.on && (
+                    <button type="button" className="btn-ghost genai-small" disabled={disabled || m.supported === false} title={m.unsupportedReason || (m.estimatedLoadS ? `About ${formatDuration(m.estimatedLoadS)} to load` : '')} aria-label={`Load ${row.name}`} onClick={() => onLoad(m)}>
+                      Load
+                    </button>
+                  )}
+                  {onUnload && row.on && (
+                    <button type="button" className="btn-ghost genai-small" disabled={disabled} aria-label={`Unload ${row.name}`} onClick={() => onUnload(m)}>Unload</button>
+                  )}
+                  {onUse && !row.on && (
+                    <button type="button" className="btn-ghost genai-small" disabled={disabled || m.supported === false} title={m.unsupportedReason || ''} aria-label={`Use ${row.name}`} onClick={() => onUse(m)}>Use</button>
+                  )}
+                  {onDelete && canDelete(m) && (
+                    <button type="button" className="btn-ghost genai-small danger" disabled={deleteDisabled} title="Delete it from the board to free its space" aria-label={`Delete ${row.name}`} onClick={() => onDelete(m)}>Delete</button>
+                  )}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
+  )
+}
+
+// Why the last download failed; for a repo Hugging Face renamed, a button
+// downloads the new id (the board refuses to follow the rename on its own).
+function DownloadFailure({ failure, disabled, onDownload }) {
+  if (!failure) return null
+  return (
+    <div className="genai-actions" role="alert">
+      <span className="genai-error">Download of {failure.repoId} failed: {failure.message}</span>
+      {failure.renamedTo && (
+        <button type="button" className="btn-tonal genai-small" disabled={disabled} onClick={() => onDownload(failure.renamedTo)}>
+          Download {failure.renamedTo}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// The chat's offer when the board has no model to chat with: the recommended
+// model downloaded and loaded in place, or Settings, Models to browse; on a
+// board that doesn't allow downloads, how to allow them.
+function FirstModelOffer({ need, offer, downloads, download, failure, loadingNext, allowed, onDownload, onBrowse, onCheckAgain }) {
+  return (
+    <section className="genai-welcome genai-first-model" aria-labelledby="genai-first-model-title">
+      <span className="genai-card-icon genai-first-model-icon"><Icon d={ICONS.models} /></span>
+      <h2 id="genai-first-model-title" className="genai-welcome-title">
+        {need.reason === 'unsupported' ? 'None of the models on the board can run on it' : 'Get a model to start chatting'}
+      </h2>
+      <p className="section-note">
+        {need.reason === 'unsupported' ? 'The board lists only models it can\'t run. ' : 'The board has no chat model yet. '}
+        <b>{offer.label}</b> is a good first one: it chats{offer.sees ? ', understands pictures and works in the vision view' : ''}.
+        Downloading it onto the board, then loading it, takes several minutes.
+      </p>
+      {downloads.state === 'disabled' ? (
+        <p className="genai-first-model-note"><WithCode text={downloads.message} /></p>
+      ) : downloads.state === 'offline' ? (
+        <>
+          <p className="genai-first-model-note">{downloads.message}</p>
+          <div className="genai-actions">
+            <button type="button" className="btn-ghost" onClick={onCheckAgain}>Check again</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="genai-actions genai-first-model-actions">
+            <button type="button" className="btn-tonal" disabled={!allowed.downloadFirstModel} onClick={() => onDownload(offer.repoId)}>
+              <Icon d={ICONS.download} />
+              Download {offer.label}{offer.sizeBytes ? ` (${formatBytes(offer.sizeBytes)})` : ''}
+            </button>
+            <button type="button" className="btn-ghost" disabled={!allowed.browseModels} onClick={onBrowse}>Browse models</button>
+          </div>
+          <p className="hint">From Hugging Face: {offer.repoId}</p>
+          {offer.tooBig && (
+            <p className="genai-first-model-note">
+              The board has {formatBytes(offer.freeBytes)} free, less than the {formatBytes(offer.sizeBytes)} download: delete a model in Settings, Models first.
+            </p>
+          )}
+        </>
+      )}
+      <DownloadProgress download={download} />
+      {loadingNext && <p className="hint" aria-live="polite">Downloaded. Loading {friendlyModelName(loadingNext)} next…</p>}
+      <DownloadFailure failure={failure} disabled={!allowed.downloadFirstModel} onDownload={onDownload} />
+    </section>
   )
 }
 

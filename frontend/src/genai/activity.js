@@ -27,6 +27,7 @@
 //   visionLoop    the vision view's loop is running
 //   useDocuments  questions are sent with the documents
 //   downloading   a model download runs
+//   hubEnabled    the board allows model downloads (its server.hub.allow_download)
 export function allowedActions(state) {
   const s = state || {}
   const listening = Boolean(s.recording || s.micOpening || s.transcribing)
@@ -83,6 +84,12 @@ export function allowedActions(state) {
     changeBoard: !s.replying && !listening && !s.modelOp && !s.downloading && !s.benchmarking && !s.documentTask && !visionBusy,
     searchModels: !s.downloading,
     downloadModel: !s.downloading,
+    // The chat's offer of a first model downloads it, then loads it: one
+    // download at a time, and not under a model operation or the benchmark.
+    downloadFirstModel: ready && Boolean(s.hubEnabled) && !s.downloading,
+    // Opens Settings, Models at the Hugging Face search, which exists only
+    // on a board that allows downloads.
+    browseModels: Boolean(s.hubEnabled),
     // The benchmark loads and unloads models: the same rule as changing them.
     openBenchmark: modelsQuiet && !s.documentTask && Boolean(s.benchmarkAvailable),
     // Fixed for the length of a reply: the reply was sent with or without them.

@@ -4354,30 +4354,77 @@ button:disabled {
   width: auto;
 }
 
+/* Settings: one card per area in two columns, one on a narrow screen;
+   Models and Troubleshooting take the whole row. */
 .genai-settings-panel {
   display: grid;
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.genai-settings-section {
+@media (max-width: 900px) {
+  .genai-settings-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.genai-card {
   display: grid;
-  gap: 8px;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px 14px 14px;
+  background: var(--surface-soft);
 }
 
-.genai-settings-section + .genai-settings-section {
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
+.genai-card-wide {
+  grid-column: 1 / -1;
 }
 
-.genai-settings-section h3 {
+.genai-card .hint {
+  margin: 0;
+}
+
+.genai-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.genai-card-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.genai-card-titles {
+  min-width: 0;
+}
+
+.genai-card-titles h3 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 14px;
   color: #274155;
 }
 
-.genai-settings-section .hint {
-  margin: 0;
+/* The card's state in one line; the whole text is its tooltip. */
+.genai-card-summary {
+  margin: 1px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
 }
 
 .genai-form {
@@ -4405,8 +4452,13 @@ button:disabled {
   flex: 1;
 }
 
+.genai-model-group {
+  display: grid;
+  gap: 6px;
+}
+
 .genai-model-group-title {
-  margin: 4px 0;
+  margin: 4px 0 0;
   font-size: 12px;
   font-weight: 700;
   color: #2d4f64;
@@ -4420,24 +4472,29 @@ button:disabled {
   gap: 6px;
 }
 
-.genai-models li {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  background: var(--surface-soft);
-  font-size: 13px;
-}
-
-.genai-models li .hint {
+.genai-models > li.hint {
   margin: 0;
 }
 
+/* A model: kind, name, size, state, then its actions, in aligned columns. */
+.genai-model-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 64px 104px minmax(130px, auto);
+  gap: 6px 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px 6px 10px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.genai-model-row-on {
+  border-color: rgba(25, 113, 62, 0.35);
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
 .genai-model-name {
-  flex: 1 1 160px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4445,18 +4502,178 @@ button:disabled {
   font-weight: 600;
 }
 
-.genai-badge {
+.genai-model-size {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.genai-model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.genai-kind {
+  justify-self: start;
   border-radius: 999px;
   padding: 1px 8px;
   font-size: 11px;
   font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.genai-kind-vision {
   background: var(--accent-alt-soft);
   color: var(--accent-alt);
 }
 
-.genai-badge-on {
-  background: var(--ok-soft);
+.genai-kind-speech {
+  background: #f3edfb;
+  color: #5b3f8c;
+}
+
+.genai-model-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* A dot before the state: filled green when loaded or in use. */
+.genai-model-state::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+}
+
+.genai-model-state-on {
   color: var(--ok);
+}
+
+.genai-model-state-on::before {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.genai-model-state-loading {
+  color: var(--accent-strong);
+}
+
+.genai-model-state-loading::before {
+  border-color: var(--accent);
+  border-right-color: transparent;
+}
+
+.genai-model-state-unsupported {
+  color: var(--danger);
+}
+
+.genai-model-state-unsupported::before {
+  border-color: var(--danger);
+}
+
+/* A phone: the kind, name and size, then the state and the actions. */
+@media (max-width: 640px) {
+  .genai-model-row {
+    grid-template-columns: 62px minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "kind name name size"
+      "state state actions actions";
+  }
+
+  .genai-kind { grid-area: kind; }
+  .genai-model-row .genai-model-name { grid-area: name; }
+  .genai-model-size { grid-area: size; }
+  .genai-model-state { grid-area: state; }
+  .genai-model-actions { grid-area: actions; }
+
+  /* No tooltips on a touch screen: the whole line shows. */
+  .genai-card-summary {
+    white-space: normal;
+  }
+
+  .genai-card .genai-row {
+    flex-wrap: wrap;
+  }
+
+  .genai-card .genai-row input {
+    flex-basis: 100%;
+  }
+}
+
+.genai-download {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+}
+
+.genai-download .hint {
+  margin: 0;
+}
+
+/* The chat's offer of a first model: the welcome's look, higher up so the
+   download's progress shows under it on a laptop screen. */
+.genai-welcome.genai-first-model {
+  max-width: 640px;
+  margin: 0 auto;
+  padding-top: 3vh;
+}
+
+/* A heading in a .panel, but the welcome's title, not a panel label. */
+.genai-first-model .genai-welcome-title {
+  font-size: 22px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.genai-first-model .section-note {
+  margin: 0;
+  max-width: 60ch;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.genai-first-model-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.genai-first-model-icon .genai-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.genai-first-model-actions {
+  justify-content: center;
+}
+
+.genai-first-model-actions .btn-tonal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.genai-first-model-note {
+  margin: 0;
+  max-width: 60ch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  background: var(--surface-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
 }
 
 .genai-header-spacer {
@@ -5208,12 +5425,6 @@ button:disabled {
   font-style: italic;
 }
 
-.genai-doc-summary {
-  margin: 0 0 8px;
-  font-weight: 600;
-  font-size: 13px;
-}
-
 .genai-docs-hint {
   display: flex;
   flex-wrap: wrap;
@@ -5267,14 +5478,22 @@ button:disabled {
   accent-color: var(--accent);
 }
 
-/* Vision: the camera full size, the latest answer and the question under it. */
+/* Vision: the camera as large as fits, the latest answer and the question
+   under it. The controls keep their size; the picture and the answer share
+   what is left, so both stay on screen on a laptop and in full screen. */
 .genai-vision {
   position: fixed;
   inset: 0;
   z-index: 1000;
   display: flex;
   flex-direction: column;
+  /* Only on a screen too short for even the smallest picture. */
+  overflow-y: auto;
   background: var(--bg);
+}
+
+.genai-vision > * {
+  flex: none;
 }
 
 .genai-vision-top {
@@ -5300,16 +5519,22 @@ button:disabled {
 
 .genai-vision-stage {
   position: relative;
-  flex: 1 1 0;
-  min-height: 180px;
+  /* Half the screen at most (on a phone, a 4:3 picture's height at full
+     width); less when the answer and the controls need the room. */
+  flex: 0 1 min(50vh, 75vw);
+  min-height: 140px;
   display: grid;
   place-items: center;
   overflow: hidden;
   background: #0b0f14;
 }
 
+/* Laid over the stage rather than in its flow: a camera's own size (720 or
+   1080 pixels high) can't push the answer and the controls off screen. */
 .genai-vision-stage video,
 .genai-vision-stage img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -5340,7 +5565,10 @@ button:disabled {
 }
 
 .genai-vision-answer {
-  max-height: 32vh;
+  /* Takes the rest of the screen and scrolls a long answer. */
+  flex: 1 1 96px;
+  min-height: 72px;
+  align-content: start;
   overflow-y: auto;
   display: grid;
   gap: 6px;
