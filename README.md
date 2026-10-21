@@ -4,7 +4,8 @@
 > used to rebuild the Insight frontend in Angular on a new UI kit. It started from upstream commit `829ec7c`
 > with fresh history (see [`UPSTREAM.md`](UPSTREAM.md)), and the React frontend and the org-level release
 > workflows were removed. The Python backend and the Go viewer are unchanged for now and track upstream by hand.
-> The rest of this README describes upstream Insight.
+> The rest of this README describes upstream Insight, and `docs/` still describes the upstream UI until the
+> Angular frontend reaches parity.
 
 **Documentation:** [English](docs/index.md) | [한국어](docs/i18n/ko/index.md) | [日本語](docs/i18n/ja/index.md) | [繁體中文](docs/i18n/zh-Hant/index.md) | [Українська](docs/i18n/uk/index.md)
 

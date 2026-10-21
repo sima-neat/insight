@@ -1,10 +1,10 @@
 name: Tests
 
-# The one test job: pull requests (forks included) run it here, and Vulcan CI calls it on
-# every push and gates its build and publication on it.
+# The one test job: it runs on every pull request and on every push to main.
 on:
   pull_request:
-  workflow_call:
+  push:
+    branches: [main]
 
 permissions:
   contents: read

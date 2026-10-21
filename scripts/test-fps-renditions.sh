@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the FPS-rendition test suite for issue #111: backend integration tests
-# against real ffmpeg/ffprobe and the frontend FPS-control unit tests.
+# against real ffmpeg/ffprobe.
 # Usage: scripts/test-fps-renditions.sh   (PYTHON=/path/to/python to override the interpreter)
 set -euo pipefail
 
@@ -21,6 +21,3 @@ export NEAT_METRICS_ZMQ_ENDPOINT="${NEAT_METRICS_ZMQ_ENDPOINT:-tcp://127.0.0.1:5
 
 echo "== Backend: tests.test_fps_renditions"
 "$PYTHON" -m unittest tests.test_fps_renditions -v
-
-echo "== Frontend: npm run test:unit"
-npm --prefix frontend run test:unit
