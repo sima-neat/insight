@@ -11,6 +11,7 @@ import {
   formatNumber
 } from './genai/benchmark.js'
 import { getJson, postJson } from './genai/client.js'
+import { afterLoad, unloadChoice } from './genai/models.js'
 
 const POLL_MS = 500
 const STATUS_FAILURES_MAX = 20     // about 10 s of failing status polls
@@ -27,7 +28,9 @@ function download(name, text, type) {
 
 // The standalone Studio's benchmark: time to first token and tokens per second
 // for one or more chat models on the board, run one model at a time. A model
-// that isn't loaded is loaded first, which unloads others the board can't keep.
+// that isn't loaded is loaded first. A board that keeps several loaded refuses
+// a load past its limit or its memory (409); the run then unloads the models
+// the board names, as a board that keeps one does on its own.
 // ticket: the tab's board session (genai/boardSession.js); leaving the tab or
 // changing boards ends the run. onRunningChange tells the tab's rule table.
 export default function GenAIBenchmark({ status, ticket, onClose, onModelsChanged, onRunningChange }) {
@@ -93,15 +96,26 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
   }
 
   // What is loaded during a run: the tab's status at the start, then what this
-  // run's own loads change (loading one model can unload the others).
+  // run's own loads change (each answer names the models it unloaded).
   const runLoaded = useRef(new Set())
+
+  async function loadForRun(model) {
+    const options = { signal: runTicket.current.signal }
+    try {
+      return await postJson('models/load', { name: model }, options)
+    } catch (error) {
+      const choice = unloadChoice(error)
+      if (!choice || !choice.candidates.length || over()) throw error
+      return await postJson('models/load', { name: model, unload: choice.candidates }, options)
+    }
+  }
 
   async function benchmarkOne(model) {
     if (!runLoaded.current.has(model)) {
       setPhase(`Loading ${friendlyModelName(model)}: this takes a few minutes…`)
       try {
-        await postJson('models/load', { name: model }, { signal: runTicket.current.signal })
-        runLoaded.current = new Set([model])   // the other chat models may have been unloaded
+        const answer = await loadForRun(model)
+        runLoaded.current = afterLoad(runLoaded.current, model, answer)
         onModelsChanged?.()
       } catch (error) {
         // A failed load may already have unloaded others: what is loaded is
