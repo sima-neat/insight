@@ -10,10 +10,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
+from neat_insight.mediamtx import API_PORT, PUBLISHER_TAG, api_auth_headers
+
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
 # Loopback-only control API (webrtc/mediamtx.yml apiAddress); never published.
-# Not MediaMTX's default 9997, which the Neat GenAI Studio model server uses.
-MEDIAMTX_API_PORT = 9901
+MEDIAMTX_API_PORT = API_PORT
 MEDIAMTX_API_BASE_URL = f"http://127.0.0.1:{MEDIAMTX_API_PORT}"
 WEBCAM_WHIP_PORT = 8889
 # Key that the SDK port map uses for the WHIP listener above. The SDK may
@@ -240,6 +241,20 @@ def http_snapshot_command(file_path: str, source_codec: Optional[str] = None) ->
     ]
 
 
+def preview_command(rtsp_url: str) -> list[str]:
+    # The SDP already carries the codec parameters, so stream probing only adds about a
+    # second before the first frame; skipping it leaves the frame rate unknown, hence
+    # passthrough timing (ffmpeg would otherwise guess H.264 at twice the rate and
+    # duplicate every frame). No rate filter, so the preview follows the source rate.
+    return [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp",
+        "-analyzeduration", "0", "-probesize", "32",
+        "-i", rtsp_url, "-fps_mode", "passthrough", "-an",
+        "-vf", "scale=min(640\\,iw):-2",
+        "-c:v", "mjpeg", "-q:v", "7", "-f", "mpjpeg", "-boundary_tag", "frame", "pipe:1",
+    ]
+
+
 @dataclass
 class MediaStream:
     index: int
@@ -249,6 +264,7 @@ class MediaStream:
     source_codec: Optional[str] = None
     rtsp_url: str = ""
     process: Optional[subprocess.Popen] = None
+    rendition: Optional[str] = None
 
     def start(self) -> Tuple[bool, Optional[str]]:
         if self.process and self.process.poll() is None:
@@ -313,6 +329,7 @@ def start_media_stream(
     transport: str = DEFAULT_TRANSPORT,
     codec: str = DEFAULT_CODEC,
     source_codec: Optional[str] = None,
+    rendition: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[int]]:
     """Returns (ok, error, identity).
 
@@ -325,7 +342,7 @@ def start_media_stream(
         return False, "No file assigned", None
 
     slot = index - 1
-    rtsp_url = f"{RTSP_PUBLISH_BASE_URL}/src{index}"
+    rtsp_url = f"{RTSP_PUBLISH_BASE_URL}/src{index}?{PUBLISHER_TAG}"
     transport = normalize_transport(transport)
     codec = normalize_codec(codec)
 
@@ -343,6 +360,7 @@ def start_media_stream(
             codec=codec,
             source_codec=source_codec,
             rtsp_url=rtsp_url,
+            rendition=rendition,
         )
         ok, err = stream.start()
         if not ok:
@@ -380,6 +398,18 @@ def media_stream_identity(index: int) -> Optional[int]:
     with registry_lock:
         stream = pipeline_registry.get(slot)
         return id(stream) if stream else None
+
+
+def media_stream_file(index: int) -> Optional[str]:
+    """Absolute path of the file the running stream reads (source or rendition), or None."""
+    slot = index - 1
+    with registry_lock:
+        stream = pipeline_registry.get(slot)
+        if not stream:
+            return None
+        if stream.transport != "http" and not (stream.process and stream.process.poll() is None):
+            return None
+        return stream.file_path
 
 
 def stop_media_stream_if(index: int, identity: Optional[int]) -> bool:
@@ -469,7 +499,7 @@ def _mediamtx_request(path: str, method: str = "GET"):
     Returns the decoded body, or _MEDIAMTX_NOT_FOUND when MediaMTX answered 404.
     Raises MediaServerUnreachable for anything else.
     """
-    request = urllib.request.Request(f"{MEDIAMTX_API_BASE_URL}{path}", method=method)
+    request = urllib.request.Request(f"{MEDIAMTX_API_BASE_URL}{path}", method=method, headers=api_auth_headers())
     try:
         with urllib.request.urlopen(request, timeout=1.0) as response:
             body = response.read()
