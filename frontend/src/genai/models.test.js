@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { activeChatModel, afterLoad, loadPlan, loadedChatModels, residentLimit, unloadChoice } from './models.js'
+import { activeChatModel, afterLoad, keptChoice, loadPlan, loadedChatModels, residentLimit, unloadChoice } from './models.js'
 
 const catalog = [
   { name: 'a-chat', type: 'chat' },
@@ -71,4 +71,16 @@ test('the Models card names the model in use and counts the loaded ones', async 
   assert.equal(modelRow(catalog[0], s).state.label, 'Loaded', 'a board that keeps one says Loaded, as before')
   assert.match(modelsSummary(s), /^2 chat models loaded/)
   assert.equal(modelsSummary({ catalog: [catalog[0]], loaded: ['a-chat'] }), 'A loaded · 1 model on the board', 'one loaded model is named')
+})
+
+test('a chosen model the board unloaded is forgotten', () => {
+  const both = status(['a-chat', 'b-vlm'], { resident: ['b-vlm', 'a-chat'], maxResident: 2 })
+  assert.equal(keptChoice(both, 'a-chat'), 'a-chat')
+  const gone = status(['b-vlm'], { resident: ['b-vlm'], maxResident: 2 })
+  assert.equal(keptChoice(gone, 'a-chat'), null, 'unloaded: forgotten')
+  assert.equal(keptChoice(null, 'a-chat'), 'a-chat', 'no status yet: kept')
+  assert.equal(keptChoice(both, null), null)
+  // Reloaded later: the most recently loaded model answers, not the old choice.
+  const back = status(['a-chat', 'b-vlm'], { resident: ['b-vlm', 'a-chat'], maxResident: 2 })
+  assert.equal(activeChatModel(back, keptChoice(gone, 'a-chat')).name, 'b-vlm')
 })

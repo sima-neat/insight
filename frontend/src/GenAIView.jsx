@@ -36,7 +36,7 @@ import {
 } from './genai/client.js'
 import { languageNames, readAloudSupport } from './genai/speech.js'
 import { allowedActions } from './genai/activity.js'
-import { activeChatModel, loadPlan, residentLimit, unloadChoice } from './genai/models.js'
+import { activeChatModel, keptChoice, loadPlan, residentLimit, unloadChoice } from './genai/models.js'
 import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
 import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from './genai/chatExport.js'
@@ -353,6 +353,11 @@ export default function GenAIView({ onError, onStatus }) {
   const bench = benchmarkSupport(health)
   const boardCam = boardCameraSupport(health)
   const chatModel = activeChatModel(status, chosenModel)
+  // A chosen model that the board unloaded is forgotten (genai/models.js).
+  useEffect(() => {
+    const kept = keptChoice(status, chosenModel)
+    if (kept !== chosenModel) setChosenModel(kept)
+  }, [status, chosenModel])
   const keepsSeveral = residentLimit(status) > 1
   const sees = Boolean(chatModel && chatModel.supportsVision)
   // What the user may do now: every control and action reads this one table.

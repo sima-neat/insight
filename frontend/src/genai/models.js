@@ -35,6 +35,16 @@ export function activeChatModel(status, chosenName = null) {
   return loaded.find((m) => m.name === chosenName) || loaded[0] || null
 }
 
+// The user's choice of answering model, kept only while a status from the
+// board still has it loaded: once it is unloaded, the choice is forgotten, so
+// loading it again later (by another client, or the benchmark) doesn't make
+// it answer again over the most recently loaded model. An unknown status
+// (null) keeps the choice.
+export function keptChoice(status, chosenName) {
+  if (!chosenName || !status) return chosenName || null
+  return loadedChatModels(status).some((m) => m.name === chosenName) ? chosenName : null
+}
+
 // What loading `name` takes:
 //   {kind: 'use'}                      it is loaded already: just answer with it
 //   {kind: 'replace', unloads}         a limit of one: the loaded model goes
