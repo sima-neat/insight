@@ -358,7 +358,7 @@ class SocketClientTests(unittest.TestCase):
         # MAX_OUTPUT_BYTES. A run at the limit, shaped like the DevKit's (59 metrics a sample), must still fit.
         from neat_insight.board import transport
         self.assertGreaterEqual(socket_client.MAX_BODY_BYTES, 12 * 1024 * 1024)
-        live = json.loads((Path(__file__).parents[1] / "frontend/src/stats/fixtures/metrics-live.json").read_text())
+        live = json.loads((Path(__file__).parent / "fixtures/sentinel/metrics-live.json").read_text())
         keys = [metric["key"] for group in live["groups"] for metric in group["metrics"]]
         one = json.dumps({"timestamp": "2026-09-23T15:27:13.270295197Z", "values": {k: 8.812681752827412 for k in keys}})
         count = socket_client.MAX_BODY_BYTES // (len(one) + 2)

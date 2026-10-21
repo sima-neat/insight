@@ -170,12 +170,6 @@ class PipelineTests(unittest.TestCase):
                 with self.subTest(name=name):
                     self.assertEqual(subprocess.run(["sh", "-c", command], capture_output=True, timeout=30).stdout, name.encode())
 
-    def test_the_frontend_offers_preview_for_the_usb_formats_the_backend_previews(self):
-        model = (Path(__file__).parent.parent / "frontend" / "src" / "peripherals" / "model.js").read_text()
-        listed = re.search(r"USB_PREVIEW_FORMATS = Object\.freeze\(\[([^\]]*)\]\)", model)
-        self.assertIsNotNone(listed)
-        self.assertEqual(re.findall(r"'([A-Z0-9]+)'", listed[1]), ["MJPG", *gst.RAW_FORMATS])
-
 
 class FrameParserTests(unittest.TestCase):
     def test_frames_are_read_whole_from_one_chunk_or_many(self):

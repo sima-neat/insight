@@ -21,6 +21,9 @@ mipi-sweep-*.log
 folder-navigation-insight.log
 mipi-util/vendor/
 
-# Superpowers brainstorming sessions
+# Angular build cache
+.angular/
+
+# Superpowers workspace and its docs (kept outside the repo)
 .superpowers/
 docs/superpowers/

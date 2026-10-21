@@ -1,8 +1,13 @@
-# neat-insight
+# neat-insight (insight-next prototype)
+
+> **Prototype.** `insight-next` is a private copy of [`sima-neat/insight`](https://github.com/sima-neat/insight)
+> used to rebuild the Insight frontend in Angular on a new UI kit. It started from upstream commit `829ec7c`
+> with fresh history (see [`UPSTREAM.md`](UPSTREAM.md)), and the React frontend and the org-level release
+> workflows were removed. The Python backend and the Go viewer are unchanged for now and track upstream by hand.
+> The rest of this README describes upstream Insight.
 
 **Documentation:** [English](docs/index.md) | [한국어](docs/i18n/ko/index.md) | [日本語](docs/i18n/ja/index.md) | [繁體中文](docs/i18n/zh-Hant/index.md) | [Українська](docs/i18n/uk/index.md)
 
-[![Vulcan CI](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml/badge.svg)](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 `neat-insight` is a web app for inspecting NEAT apps and helping to setup test for vision ML apps.

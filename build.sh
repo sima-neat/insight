@@ -134,7 +134,6 @@ build_frontend() {
         npm install
     fi
     npm run build
-    npm run build:viewer
     popd > /dev/null
 }
 
