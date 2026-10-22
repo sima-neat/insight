@@ -118,6 +118,37 @@ describe('LayoutPrefs', () => {
     expect(prefs.tileWidthFor(8)).toBeNull();
   });
 
+  it("two viewer tabs keep each other's choices: bars in one does not wipe widths from the other", () => {
+    const first = open();
+    const second = open();
+
+    first.rememberTileWidth(16, 240);
+    second.setBars(false);
+    second.rememberTileWidth(4, 500);
+
+    expect(fake.readStored('layout')).toStrictEqual({
+      aspect: '16:9',
+      bars: false,
+      hideEmpty: false,
+      inspector: false,
+      tileWidths: { 4: 500, 16: 240 },
+    });
+    expect(second.tileWidthFor(16)).toBe(240);
+  });
+
+  it('choosing what is already chosen writes nothing', () => {
+    const prefs = open();
+    prefs.setAspect('16:9');
+    prefs.setBars(true);
+    prefs.setHideEmpty(false);
+    prefs.setInspector(false);
+    expect(fake.writes).toStrictEqual([]);
+
+    prefs.rememberTileWidth(16, 240);
+    prefs.rememberTileWidth(16, 240);
+    expect(fake.writes).toHaveLength(1);
+  });
+
   it('runs on defaults and keeps changes for the session when storage throws or holds garbage', () => {
     fake.seed({ layout: '{"aspect":' });
     expect(open().aspect()).toBe('16:9');

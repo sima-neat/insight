@@ -74,6 +74,9 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
 
 export const TYPE_DEFAULTS: TypeSettings = NEAT_OVERLAY_DEFAULTS.types;
 
+// Only the BlazePose 3D renderer has settings in 2a. The original also kept enabled/panelMode for
+// any other renderer the auxiliary panel met; nothing in 2a writes those, and plan 2b's panel
+// extends this schema for them (R24).
 export const AUXILIARY_DEFAULTS: { readonly 'blazepose-3d': AuxiliarySettings } = {
   'blazepose-3d': {
     enabled: true,

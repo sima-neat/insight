@@ -180,8 +180,9 @@ const TRACKING_FLAT_KEYS: readonly (readonly [string, SettingId])[] = [
 ];
 
 /**
- * Where the unversioned flat shape kept each setting. Pose and classification take only their
- * known keys (deliberate change): the original copied the whole flat object into both types.
+ * Where the unversioned flat shape kept each setting. Pose and classification get nothing from it
+ * (R23): the original's resolution never read them from a flat scope (only its dialog's load
+ * copied the whole flat object into both types), so tiles keep drawing what they drew before.
  */
 const LEGACY_FLAT_KEYS: readonly (readonly [string, SettingId])[] = [
   ['showRoi', 'general.showRoi'],
@@ -189,10 +190,6 @@ const LEGACY_FLAT_KEYS: readonly (readonly [string, SettingId])[] = [
   ['confidenceThreshold', 'types.object-detection.confidenceThreshold'],
   ['trackingConfidenceThreshold', 'types.tracking.confidenceThreshold'],
   ...TRACKING_FLAT_KEYS,
-  ['visible', 'types.pose-estimation.visible'],
-  ['showKeypoints', 'types.pose-estimation.showKeypoints'],
-  ['showKeypointLabels', 'types.pose-estimation.showKeypointLabels'],
-  ['visible', 'types.classification.visible'],
 ];
 
 function withRawValue(own: Tree, id: SettingId, raw: unknown, sourceVersion: number): Tree {

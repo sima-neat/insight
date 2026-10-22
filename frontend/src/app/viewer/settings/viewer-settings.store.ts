@@ -30,18 +30,19 @@ export type SettingsScope = 'global' | number;
 const GLOBAL_SCOPE = 'settings:global';
 const CHANNEL_SCOPE = /^settings:channel:(\d+)$/;
 
-function channelScope(channel: number): string {
-  return `settings:channel:${channel}`;
+function scopeName(scope: SettingsScope): string {
+  return scope === 'global' ? GLOBAL_SCOPE : `settings:channel:${scope}`;
 }
 
 /**
  * The viewer's overlay settings: a global scope plus per-channel overrides, one setting at a time
  * (Inv §5c). A change applies at once and is stored at once; there is no Save step.
  *
- * Every stored scope is read and parsed once, when the store opens. From then on the scopes live
- * in signals, and each channel's resolved settings are a computed signal built on first use and
- * reused, so reading them is free (tiles read them every frame) and a change re-resolves only the
- * channels it reaches: a channel's change its own, a global change every channel.
+ * Every stored scope is read and parsed when the store opens, and a scope again just before this
+ * store writes it. From then on the scopes live in signals, and each channel's resolved settings
+ * are a computed signal built on first use and reused, so reading them is free (tiles read them
+ * every frame) and a change re-resolves only the channels it reaches: a channel's change its own,
+ * a global change every channel. Changes other tabs make show up here only through a write.
  *
  * Provided by the Viewer page, so it ends with the page and the next visit reads storage afresh.
  */
@@ -120,14 +121,13 @@ export class ViewerSettingsStore {
     const normalized = normalizeSettingValue(id, value);
     const own = scope === 'global' ? this.global : this.channelSignal(scope);
     if (ownValue(own(), id) === normalized) return;
-    this.write(scope, withOwnValue(own(), id, normalized));
+    this.write(scope, (latest) => withOwnValue(latest, id, normalized));
   }
 
   /** Gives back the channel's own value for `id`, so the channel follows global again. */
   resetOverride(channel: number, id: SettingId): void {
-    const own = this.channelSignal(channel)();
-    if (ownValue(own, id) === undefined) return;
-    this.write(channel, withoutOwnValue(own, id));
+    if (!this.isOverride(channel, id)) return;
+    this.write(channel, (latest) => withoutOwnValue(latest, id));
   }
 
   /** The channels that override `id`, in ascending order. */
@@ -146,8 +146,9 @@ export class ViewerSettingsStore {
     value: number,
   ): { raised: boolean } {
     const target = normalizeSettingValue(id, value);
-    const raised = followedValue(this.global(), id) < target;
-    if (raised) this.set('global', id, target);
+    // Judged on the stored global value, so a higher one another tab stored is never lowered.
+    const raised = followedValue(this.read(GLOBAL_SCOPE), id) < target;
+    if (raised) this.write('global', (latest) => withOwnValue(latest, id, target));
     this.resetOverride(channel, id);
     return { raised };
   }
@@ -172,7 +173,14 @@ export class ViewerSettingsStore {
     }
   }
 
-  private write(scope: SettingsScope, own: ScopeOverrides): void {
+  /**
+   * Applies `edit` to the scope as stored now rather than as this store read it: another Viewer
+   * tab may have written the scope since, and its keys must survive this change. The result
+   * becomes this store's view of the scope too.
+   */
+  private write(scope: SettingsScope, edit: (latest: ScopeOverrides) => ScopeOverrides): void {
+    const name = scopeName(scope);
+    const own = edit(this.read(name));
     if (scope === 'global') {
       this.global.set(own);
     } else {
@@ -181,7 +189,6 @@ export class ViewerSettingsStore {
         this.ownerChannels.update((owners) => [...owners, scope].sort((a, b) => a - b));
       }
     }
-    const name = scope === 'global' ? GLOBAL_SCOPE : channelScope(scope);
     // A scope left holding nothing is removed rather than stored as an empty stub.
     if (holdsSomething(own)) {
       this.storage.set(name, JSON.stringify({ version: SETTINGS_VERSION, ...own }));

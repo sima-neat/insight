@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { NEAT_OVERLAY_DEFAULTS } from '@sima/neat-ui';
+import { NEAT_OVERLAY_DEFAULTS, NEAT_OVERLAY_STYLE_FALLBACK_COLOR } from '@sima/neat-ui';
 import { FakeLocalStorage } from './fake-storage.testing';
 import type { ScopeOverrides } from './resolver';
 import { SCALAR_SETTINGS, TYPE_DEFAULTS, type SettingId } from './schema';
@@ -200,6 +200,9 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   });
 
   it('migrating from version 9 drops a stock green default entry', () => {
+    // The drop recognises the stock row by the kit's fallback colour; a kit change must fail here
+    // rather than silently stop the drop.
+    expect(NEAT_OVERLAY_STYLE_FALLBACK_COLOR).toBe('#00ff00');
     const store = load({
       'settings:global': JSON.stringify({
         version: 9,
@@ -822,7 +825,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
     expect(scope?.types.tracking?.history).toStrictEqual({ trailLength: 20, lostTrackTtlMs: 5000 });
   });
 
-  it('clearing a value the scope does not have writes nothing', () => {
+  it('clearing a value the scope does not have writes nothing, for a nested id', () => {
     const store = load();
 
     store.resetOverride(1, 'types.tracking.history.trailLength');
@@ -933,12 +936,14 @@ describe('ViewerSettingsStore', () => {
     const store = load({ 'settings:channel:1': { version: 10, general: { lineWidth: 5 } } });
     // Opening the store reads every scope once: the global one (absent) and channel 1's.
     expect(parse).toHaveBeenCalledOnce();
-    const readsAtOpen = fake.reads.length;
 
     const resolved = store.resolved(1);
     const before = resolved();
     expect(before.general.lineWidth).toBe(5);
     store.set(1, 'general.lineWidth', 6);
+    // The write re-reads its own scope first, in case another tab changed it: the one parse.
+    expect(parse).toHaveBeenCalledTimes(2);
+    const readsAfterSet = fake.reads.length;
     const after = resolved();
     expect(after).not.toBe(before);
     expect(after.general.lineWidth).toBe(6);
@@ -949,13 +954,63 @@ describe('ViewerSettingsStore', () => {
     }
     expect(sameObject).toBe(1000);
     expect(store.resolved(1)).toBe(resolved);
+    expect(parse).toHaveBeenCalledTimes(2);
+    expect(fake.reads.length).toBe(readsAfterSet);
 
     // Another channel's change leaves channel 1's settings as they were.
     store.set(2, 'general.lineWidth', 8);
     expect(store.resolved(1)()).toBe(after);
+  });
 
-    expect(parse).toHaveBeenCalledOnce();
-    expect(fake.reads.length).toBe(readsAtOpen);
+  it("two viewer tabs writing the same scopes keep each other's keys", () => {
+    const first = load({ 'settings:channel:1': { version: 10, general: { lineWidth: 5 } } });
+    const second = openStore();
+
+    first.set(1, 'general.showRoi', false);
+    second.set(1, 'types.tracking.visible', false);
+    first.set('global', 'general.lineWidth', 2);
+    second.set('global', 'types.segmentation.maskOpacity', 0.1);
+
+    expect(stored('settings:channel:1')).toStrictEqual({
+      version: 10,
+      general: { lineWidth: 5, showRoi: false },
+      types: { tracking: { visible: false } },
+      auxiliary: {},
+    });
+    expect(stored('settings:global')).toStrictEqual({
+      version: 10,
+      general: { lineWidth: 2 },
+      types: { segmentation: { maskOpacity: 0.1 } },
+      auxiliary: {},
+    });
+    // A tab takes up what it found when it wrote.
+    expect(second.resolved(1)().general.showRoi).toBe(false);
+    expect(second.value('global', 'general.lineWidth')).toBe(2);
+
+    // A reset in one tab keeps the key the other tab added since.
+    first.resetOverride(1, 'general.lineWidth');
+    expect(stored('settings:channel:1')).toStrictEqual({
+      version: 10,
+      general: { showRoi: false },
+      types: { tracking: { visible: false } },
+      auxiliary: {},
+    });
+  });
+
+  it('a raise whose channel write storage refuses still makes the channel follow it this session', () => {
+    const channel1 = { version: 10, general: { videoSyncBufferMs: 400 } };
+    const store = load(
+      { 'settings:channel:1': channel1 },
+      { failWritesFor: ['settings:channel:1'] },
+    );
+
+    expect(store.raiseGlobal(1, 'general.videoSyncBufferMs', 900)).toStrictEqual({ raised: true });
+
+    expect(store.value(1, 'general.videoSyncBufferMs')).toBe(900);
+    expect(store.general(1)().videoSyncBufferMs).toBe(900);
+    expect(openStore().value(1, 'general.videoSyncBufferMs')).toBe(900);
+    expect(stored('settings:global')?.general.videoSyncBufferMs).toBe(900);
+    expect(stored('settings:channel:1')).toStrictEqual(channel1);
   });
 
   it('a channel override is marked, survives reload and resetOverride removes only that key', () => {

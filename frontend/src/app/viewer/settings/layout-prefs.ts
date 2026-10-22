@@ -70,19 +70,19 @@ export class LayoutPrefs {
   readonly inspector = computed(() => this.layout().inspector);
 
   setAspect(aspect: NeatTileAspect): void {
-    this.update({ aspect });
+    this.choose('aspect', aspect);
   }
 
   setBars(bars: boolean): void {
-    this.update({ bars });
+    this.choose('bars', bars);
   }
 
   setHideEmpty(hideEmpty: boolean): void {
-    this.update({ hideEmpty });
+    this.choose('hideEmpty', hideEmpty);
   }
 
   setInspector(inspector: boolean): void {
-    this.update({ inspector });
+    this.choose('inspector', inspector);
   }
 
   /** The width remembered for `count` displayed channels, or null when the user never chose one. */
@@ -94,11 +94,27 @@ export class LayoutPrefs {
   rememberTileWidth(count: number, width: number): void {
     if (!isChannelCount(count) || !isTileWidth(width)) return;
     if (this.tileWidths().get(count) === width) return;
-    this.update({ tileWidths: new Map(this.tileWidths()).set(count, width) });
+    this.update((latest) => ({
+      ...latest,
+      tileWidths: new Map(latest.tileWidths).set(count, width),
+    }));
   }
 
-  private update(change: Partial<Layout>): void {
-    const next = { ...this.layout(), ...change };
+  /** Stores one choice; choosing what is already chosen writes nothing. */
+  private choose<K extends 'aspect' | 'bars' | 'hideEmpty' | 'inspector'>(
+    key: K,
+    value: Layout[K],
+  ): void {
+    if (this.layout()[key] === value) return;
+    this.update((latest) => ({ ...latest, [key]: value }));
+  }
+
+  /**
+   * Applies `edit` to the layout as stored now rather than as read at open: another Viewer tab may
+   * have stored other choices since, and toggling bars here must not wipe its tile widths.
+   */
+  private update(edit: (latest: Layout) => Layout): void {
+    const next = edit(parseLayout(this.storage.get(LAYOUT)));
     this.layout.set(next);
     this.storage.set(
       LAYOUT,

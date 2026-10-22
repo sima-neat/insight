@@ -99,6 +99,21 @@ describe('viewer settings resolver', () => {
     expect(own.types['pose-estimation']).toBeUndefined();
   });
 
+  it('the metadata type defaults are those of Inv §5b', () => {
+    // TYPE_DEFAULTS comes from the kit; this pins the values the viewer has always used.
+    expect(TYPE_DEFAULTS).toStrictEqual({
+      'object-detection': { visible: true, confidenceThreshold: 0, objects: [] },
+      segmentation: { visible: true, confidenceThreshold: 0, maskOpacity: 0.4, objects: [] },
+      tracking: {
+        visible: true,
+        confidenceThreshold: 0,
+        history: { enabled: true, trailLength: 10, lostTrackTtlMs: 2000 },
+      },
+      'pose-estimation': { visible: true, showKeypoints: true, showKeypointLabels: false },
+      classification: { visible: true },
+    });
+  });
+
   it('settings version is 10 and object lists default to empty', () => {
     expect(SETTINGS_VERSION).toBe(10);
     expect(TYPE_DEFAULTS['object-detection'].objects).toStrictEqual([]);
@@ -170,8 +185,9 @@ describe('viewer settings resolver', () => {
     );
   });
 
-  it('a legacy flat scope maps its keys and copies only known pose and classification keys', () => {
-    // Deliberate change: the old migration copied the whole flat object into both types.
+  it('a legacy flat scope maps its keys and gives pose and classification nothing (R23)', () => {
+    // As the original's resolution read it: only its dialog's load copied the flat object into
+    // pose and classification, so `visible` and the pose keys never reached a tile.
     const own = settingsOverrides({
       showRoi: false,
       confidenceThreshold: 0.4,
@@ -199,8 +215,6 @@ describe('viewer settings resolver', () => {
           confidenceThreshold: 0.2,
           history: { enabled: false, trailLength: 120, lostTrackTtlMs: 4000 },
         },
-        'pose-estimation': { visible: false, showKeypointLabels: true },
-        classification: { visible: false },
       },
       auxiliary: {},
     });
