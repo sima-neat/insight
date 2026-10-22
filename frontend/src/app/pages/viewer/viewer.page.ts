@@ -138,13 +138,21 @@ export class ViewerPage {
     return limit === null ? null : parseChannelIndices(this.params().src, limit);
   });
 
+  /** "Hide empty" is on and ingest stats have neither answered nor failed yet. */
+  private readonly liveAwaited = computed(
+    () => this.prefs.hideEmpty() && this.liveness.live() === null && !this.liveness.unavailable(),
+  );
+
   /**
    * What the grid shows: the configured channels, only the live ones while "Hide empty" is on.
-   * Until ingest stats have answered once (the first request pending, or every one failed) nothing
-   * is hidden: an empty grid would say no channel has video, which nobody knows. After that a
-   * failed poll keeps the last answer's channels on screen.
+   * While the first ingest stats answer is awaited no channel is shown, since which are live is not
+   * known: showing them all would open a connection per slot only to close most of them a moment
+   * later. If stats fail before any answer every channel is shown, with a notice: an empty grid
+   * would say no channel has video, which nobody knows. After an answer a failed poll keeps that
+   * answer's channels on screen.
    */
   private readonly channels = computed<readonly number[]>(() => {
+    if (this.liveAwaited()) return [];
     const configured = this.configured() ?? [];
     const live = this.prefs.hideEmpty() ? this.liveness.live() : null;
     return live === null ? configured : configured.filter((channel) => live.has(channel));
@@ -200,7 +208,7 @@ export class ViewerPage {
   /** Why the grid is empty, once that is known. */
   protected readonly emptyText = computed(() => {
     const configured = this.configured();
-    if (configured === null || this.channels().length > 0) return null;
+    if (configured === null || this.liveAwaited() || this.channels().length > 0) return null;
     // Channels are only ever hidden by a known live set, so none of them is receiving video.
     return configured.length === 0
       ? 'The link selects no channels.'

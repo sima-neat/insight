@@ -320,8 +320,9 @@ describe('ViewerPage', () => {
     await open('/viewer');
 
     await click(toggle('Hide empty'));
-    // Until the first answer nothing is known, so nothing is hidden.
-    expect(shown()).toEqual(range(6));
+    // Until the first answer it is unknown which channels are live, so none is shown.
+    expect(shown()).toEqual([]);
+    expect(fake.held()).toEqual([]);
     http.expectOne(STATS_URL).flush({
       channels: [
         { channel: 2, active: true },
@@ -340,6 +341,22 @@ describe('ViewerPage', () => {
     expect(shown()).toEqual(range(6));
     vi.advanceTimersByTime(10_000);
     http.expectNone(STATS_URL);
+  });
+
+  it('with hide empty on, shows no channel and holds no connection until ingest stats answer', async () => {
+    storage.seed({ layout: { tileWidths: { 16: 300 }, hideEmpty: true } });
+    await open('/viewer');
+
+    expect(shown()).toEqual([]);
+    expect(fake.held()).toEqual([]);
+    // Not "no channel is receiving video": that is not known yet either.
+    expect(root().querySelector('.empty')).toBeNull();
+    expect(notice()).toBe('');
+
+    http.expectOne(STATS_URL).flush({ channels: [{ channel: 3, active: true }] });
+    await settle();
+    expect(shown()).toEqual([3]);
+    expect(fake.held()).toEqual([3]);
   });
 
   it('with ingest stats unavailable, hide empty shows every channel and says why', async () => {
