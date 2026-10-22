@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Feeds a vf channel in the Neat SDK container with a test stream for the Viewer: an H.264 test
+# pattern (640x480 at 15 fps, RTP payload type 96) on UDP 9000+N and object-detection metadata
+# matched to its frames on UDP 9100+N. The work happens in the container, in
+# vf_test_metadata.py beside this script, which says how the metadata is matched.
+#
+# Usage, from the laptop:
+#   scripts/vf-test-feed.sh <channel> [--metadata-delay-ms <ms>]   runs until Ctrl-C
+#   scripts/vf-test-feed.sh stop [<channel>]                       stops that channel's feed, or all
+#
+# The container is the first running sima-neat-sdk* one, as for the sima-insight-dev-deploy skill;
+# INSIGHT_SDK_CONTAINER=<name> picks another. It needs ffmpeg and python3, which the SDK image has.
+set -euo pipefail
+
+SENDER=vf_test_metadata.py
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# The sender runs from a copy at a fixed path, so `stop` can tell it from any other process.
+REMOTE_DIR=/tmp/neat-insight-vf-test-feed
+REMOTE_SENDER=$REMOTE_DIR/$SENDER
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  scripts/vf-test-feed.sh <channel> [--metadata-delay-ms <ms>]   runs until Ctrl-C
+  scripts/vf-test-feed.sh stop [<channel>]                       stops that channel's feed, or all
+EOF
+  exit 2
+}
+
+die() {
+  echo "vf-test-feed: $*" >&2
+  exit 1
+}
+
+# The channel number in $1 without leading zeros, which `stop` matches literally.
+channel_number() {
+  if ! [[ "$1" =~ ^[0-9]+$ ]] || ((10#$1 >= 80)); then die "channel must be 0-79: $1"; fi
+  echo $((10#$1))
+}
+
+# The anchored command line of the feed on channel $1, or of every feed without one. Anchored,
+# because an unanchored pattern also matches the shell that runs pgrep or pkill.
+feed_pattern() {
+  local pattern="^python3 ${REMOTE_SENDER//./\\.}"
+  [[ -n "${1:-}" ]] && pattern+=" $1( |\$)"
+  echo "$pattern"
+}
+
+# Stops the feed on channel $1, or every feed, and returns once it is gone: a feed started next must
+# not overlap it, and a caller timing the stream's end needs it ended.
+stop_feeds() {
+  local pattern status=0
+  pattern=$(feed_pattern "${1:-}")
+  # SIGTERM lets the sender stop its ffmpeg. pkill exits 1 when nothing matched.
+  docker exec "$CONTAINER" pkill -TERM -f "$pattern" || status=$?
+  ((status <= 1)) || die "could not stop the feed (pkill exited $status)"
+  if ((status == 1)); then
+    echo "vf-test-feed: no feed was running${1:+ on channel $1}" >&2
+    return
+  fi
+  for _ in {1..50}; do
+    docker exec "$CONTAINER" pgrep -f "$pattern" >/dev/null || return 0
+    sleep 0.1
+  done
+  die "the feed did not stop within 5 s"
+}
+
+CONTAINER=${INSIGHT_SDK_CONTAINER:-$(docker ps --format '{{.Names}}' | grep -m1 'sima-neat-sdk' || true)}
+[[ -n "$CONTAINER" ]] || die "SDK container not running (set INSIGHT_SDK_CONTAINER to pick one)"
+
+case "${1:-}" in
+  stop)
+    [[ $# -le 2 ]] || usage
+    channel=
+    if [[ -n "${2:-}" ]]; then channel=$(channel_number "$2"); fi
+    stop_feeds "$channel"
+    ;;
+  '' | -h | --help)
+    usage
+    ;;
+  *)
+    channel=$(channel_number "$1")
+    shift
+    # Two senders on one port would interleave two streams into garbage.
+    if docker exec "$CONTAINER" pgrep -f "$(feed_pattern "$channel")" >/dev/null; then
+      die "a feed already runs on channel $channel (scripts/vf-test-feed.sh stop $channel)"
+    fi
+    docker exec "$CONTAINER" mkdir -p "$REMOTE_DIR"
+    docker cp --quiet "$SCRIPT_DIR/$SENDER" "$CONTAINER:$REMOTE_SENDER"
+    # docker exec passes no signal into the container, so Ctrl-C stops the sender the way `stop`
+    # does. The client runs in the background because bash runs a trap only once its foreground
+    # command has ended, and with the sender gone the client ends too.
+    trap 'stop_feeds "$channel"; wait' INT TERM HUP
+    docker exec "$CONTAINER" python3 "$REMOTE_SENDER" "$channel" "$@" &
+    wait $! || exit $?
+    ;;
+esac
