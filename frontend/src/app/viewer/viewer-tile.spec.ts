@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { bufferSettleMs, type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui';
+import { ChannelLateness } from './channel-lateness';
 import { FakeConnections } from './fake-connections.testing';
 import { FakeLocalStorage } from './settings/fake-storage.testing';
 import { ViewerSettingsStore } from './settings/viewer-settings.store';
@@ -77,6 +78,7 @@ describe('ViewerTile', () => {
       providers: [
         { provide: VfConnections, useValue: fake.asVfConnections() },
         ViewerSettingsStore,
+        ChannelLateness,
       ],
     });
     fixture = TestBed.createComponent(Host);
@@ -222,5 +224,39 @@ describe('ViewerTile', () => {
 
     expect(fixture.nativeElement.querySelector('.bar')).toBeNull();
     expect(chip()).toBeNull();
+  });
+
+  it('publishes its lateness each tick for the inspector, and withdraws it when removed', async () => {
+    const reading = TestBed.inject(ChannelLateness).of(2);
+    expect(reading()).toEqual({ active: false, snapshot: null });
+
+    vi.spyOn(kitTile(), 'snapshot').mockReturnValue({
+      ...kitTile().snapshot(),
+      recentLateShare: 0.9,
+      recentLatenessMedianMs: 80,
+      recentLatenessP90Ms: 120,
+    });
+    await tick();
+    // Late, but not playing: the warning is off, the measurement is there.
+    expect(reading()).toMatchObject({
+      active: false,
+      snapshot: { recentLateShare: 0.9, recentLatenessMedianMs: 80, recentLatenessP90Ms: 120 },
+    });
+
+    await play();
+    expect(reading()?.active).toBe(true);
+
+    // A buffer change turns the warning off at once, as it does the chip.
+    host().store.set(2, 'general.videoSyncBufferMs', 700);
+    await fixture.whenStable();
+    expect(reading()?.active).toBe(false);
+
+    kitTile().stateChange.emit('empty');
+    await fixture.whenStable();
+    expect(reading()).toEqual({ active: false, snapshot: null });
+
+    host().shown.set(false);
+    await fixture.whenStable();
+    expect(reading()).toBeNull();
   });
 });

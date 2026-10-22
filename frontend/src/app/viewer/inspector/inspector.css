@@ -1,0 +1,77 @@
+/*
+ * The page's aside gives the panel its width, inset and scrolling; the panel only stacks its
+ * parts. Nothing here scrolls on its own.
+ */
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-4);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--neat-space-2);
+}
+
+.title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+/* Focused after a late notice action, which removes the button that had focus. */
+.title:focus {
+  outline: none;
+}
+
+/* The kit tile fills the box it is given: a 16:9 one across the panel. */
+.preview {
+  flex: none;
+  aspect-ratio: 16 / 9;
+}
+
+.status {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--neat-space-2) var(--neat-space-3);
+  margin: 0;
+  font-size: var(--neat-text-sm);
+}
+
+.status dt {
+  color: var(--muted-foreground);
+}
+
+.status dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-4);
+  padding-block-start: var(--neat-space-2);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+.section-title {
+  margin: 0;
+  font-size: var(--neat-text-sm);
+  font-weight: 600;
+}
+
+.note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+}

@@ -121,8 +121,12 @@ export interface SettingValues {
 
 export type SettingId = keyof SettingValues;
 
-type NumericSettingId = {
+export type NumericSettingId = {
   [Id in SettingId]: SettingValues[Id] extends number ? Id : never;
+}[SettingId];
+
+export type BooleanSettingId = {
+  [Id in SettingId]: SettingValues[Id] extends boolean ? Id : never;
 }[SettingId];
 
 export interface NumberRange {

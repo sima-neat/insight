@@ -10,7 +10,13 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { type NeatFrameStats, type NeatTileState, NeatVideoTile } from '@sima/neat-ui';
+import {
+  type NeatFrameStats,
+  type NeatLatenessSnapshot,
+  type NeatTileState,
+  NeatVideoTile,
+} from '@sima/neat-ui';
+import { ChannelLateness } from './channel-lateness';
 import { LateChip } from './late-chip';
 import { ViewerSettingsStore } from './settings/viewer-settings.store';
 import { formatChannelStatus } from './vf/channel-status';
@@ -22,7 +28,8 @@ import { VfConnections } from './vf/vf-connections';
  * resolved settings. It holds the connection for as long as it exists, so a tile paged away
  * releases it, and it is where the connection meets the tile: the sync buffer and retention are
  * applied when they change, the tile's frame stats go back to the connection for vf's egress
- * report, and each stats tick decides the "Metadata late" chip.
+ * report, and each stats tick decides the "Metadata late" chip, which it also publishes for the
+ * inspector (`ChannelLateness`).
  *
  * The page owns selection; the tile only shows it.
  */
@@ -66,6 +73,7 @@ export class ViewerTile {
 
   private readonly connections = inject(VfConnections);
   private readonly store = inject(ViewerSettingsStore);
+  private readonly lateness = inject(ChannelLateness);
   private readonly tile = viewChild.required(NeatVideoTile);
 
   protected readonly connection = signal<VfConnection | null>(null);
@@ -84,6 +92,8 @@ export class ViewerTile {
   private readonly lateActive = signal(false);
   /** Late metadata matters only while there is video for it to be late for (Inv §4g). */
   protected readonly lateShown = computed(() => this.playing() && this.lateActive());
+  /** The lateness window at the last stats tick of the current stream. */
+  private readonly latenessSnapshot = signal<NeatLatenessSnapshot | null>(null);
 
   constructor() {
     effect((onCleanup) => {
@@ -114,6 +124,15 @@ export class ViewerTile {
       const retentionMs = this.retentionMs();
       untracked(() => connection?.setMetadataRetention(retentionMs));
     });
+
+    effect((onCleanup) => {
+      const channel = this.channel();
+      this.lateness.publish(channel, {
+        active: this.lateShown(),
+        snapshot: this.latenessSnapshot(),
+      });
+      onCleanup(() => this.lateness.clear(channel));
+    });
   }
 
   protected onStateChange(state: NeatTileState): void {
@@ -122,6 +141,7 @@ export class ViewerTile {
     if (state === 'empty') {
       this.lateChip.reset();
       this.lateActive.set(false);
+      this.latenessSnapshot.set(null);
     }
   }
 
@@ -129,5 +149,7 @@ export class ViewerTile {
   protected onFrameStats(stats: NeatFrameStats): void {
     this.connection()?.reportFrameStats(stats);
     this.lateActive.set(this.lateChip.tick(this.tile(), performance.now()));
+    // After the tick, which resets the window while a new buffer settles.
+    this.latenessSnapshot.set(this.tile().snapshot());
   }
 }

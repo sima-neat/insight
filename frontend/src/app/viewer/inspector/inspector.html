@@ -1,0 +1,70 @@
+<header class="header">
+  <h2 #titleHeading id="viewer-inspector-title" class="title" tabindex="-1">{{ title() }}</h2>
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    iconOnly
+    aria-label="Close inspector"
+    neatTooltip="Close inspector"
+    neatTooltipPosition="left"
+    (click)="dismiss.emit()"
+  >
+    <span aria-hidden="true">✕</span>
+  </button>
+</header>
+
+@if (preview(); as preview) {
+  <div class="preview">
+    <neat-video-tile
+      [source]="preview.connection"
+      [settings]="preview.settings"
+      [retentionMs]="preview.retentionMs"
+      [channel]="preview.channel"
+      [bars]="false"
+    />
+  </div>
+}
+@if (status(); as status) {
+  <dl class="status">
+    <dt>Stream</dt>
+    <dd>{{ status.stream }}</dd>
+    <dt>Sync buffer</dt>
+    <dd>{{ status.buffer }}</dd>
+    <dt>Late metadata</dt>
+    <dd>{{ status.lateness }}</dd>
+  </dl>
+}
+
+<neat-tabs label="Settings" [value]="tab()" (valueChange)="selectTab($event)">
+  <neat-tab label="Metadata" value="Metadata">
+    <ng-template>
+      <div class="panel">
+        @for (section of metadataSections; track section.heading) {
+          <section class="section" [attr.aria-label]="section.heading">
+            <h3 class="section-title">{{ section.heading }}</h3>
+            @for (setting of section.settings; track setting.id) {
+              <app-setting-row [scope]="scope()" [setting]="setting" />
+            }
+            @if (section.note) {
+              <p class="note">{{ section.note }}</p>
+            }
+          </section>
+        }
+      </div>
+    </ng-template>
+  </neat-tab>
+  <neat-tab label="General" value="General">
+    <ng-template>
+      <div class="panel">
+        @if (lateDetails(); as details) {
+          <app-late-notice [details]="details" (raise)="raise($event)" />
+        }
+        @for (setting of generalSettings; track setting.id) {
+          <app-setting-row [scope]="scope()" [setting]="setting" />
+        }
+      </div>
+    </ng-template>
+  </neat-tab>
+</neat-tabs>

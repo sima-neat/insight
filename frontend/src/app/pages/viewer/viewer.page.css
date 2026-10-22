@@ -94,9 +94,3 @@ neat-tile-grid {
   color: var(--muted-foreground);
   font-size: var(--neat-text-sm);
 }
-
-.inspector-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 500;
-}

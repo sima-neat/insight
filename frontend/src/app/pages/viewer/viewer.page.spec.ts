@@ -1,52 +1,18 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { Component } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { provideRouter, Router, RouterOutlet } from '@angular/router';
-import { type NeatFrameStats, NeatShell, NeatVideoTile } from '@sima/neat-ui';
+import { provideRouter, Router } from '@angular/router';
+import { type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui';
 import { FakeConnections } from '../../viewer/fake-connections.testing';
 import { FakeLocalStorage } from '../../viewer/settings/fake-storage.testing';
 import { VfConnections } from '../../viewer/vf/vf-connections';
 import { ViewerTile } from '../../viewer/viewer-tile';
+import { FakeResizeObserver, ViewerShell as Shell } from './viewer-page.testing';
 import { ViewerPage } from './viewer.page';
 
 const VIEWER_URL = '/api/viewer-url';
 const STATS_URL = '/api/ingest/stats';
-
-/** A ResizeObserver that reports only when a test says so, with the box that test chooses. */
-class FakeResizeObserver {
-  static instances: FakeResizeObserver[] = [];
-  readonly observed: Element[] = [];
-
-  constructor(private readonly callback: ResizeObserverCallback) {
-    FakeResizeObserver.instances.push(this);
-  }
-
-  observe(target: Element): void {
-    this.observed.push(target);
-  }
-
-  unobserve(): void {
-    // The kit's slider shares an observer and lets go of its element this way.
-  }
-
-  disconnect(): void {
-    // Nothing to stop: the fake reports only when told to.
-  }
-
-  resize(width: number, height: number): void {
-    const entry = { target: this.observed[0], contentRect: { width, height } };
-    this.callback([entry as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
-  }
-}
-
-/** The app frame, so the page's toolbar has a top bar to render into. */
-@Component({
-  imports: [NeatShell, RouterOutlet],
-  template: `<neat-shell appName="Neat Insight" [navItems]="[]"><router-outlet /></neat-shell>`,
-})
-class Shell {}
 
 const range = (count: number, from = 0) =>
   Array.from({ length: count }, (_, index) => from + index);
@@ -101,10 +67,7 @@ describe('ViewerPage', () => {
   const channelInput = (): HTMLInputElement =>
     toolbar().querySelector('input[aria-label="Go to channel"]')!;
   const slider = (): HTMLElement => toolbar().querySelector('[role="slider"]')!;
-  const gridObserver = () =>
-    FakeResizeObserver.instances.find(
-      (observer) => observer.observed[0]?.tagName === 'NEAT-TILE-GRID',
-    )!;
+  const gridObserver = () => FakeResizeObserver.grid();
   const tileWidth = () =>
     root()
       .querySelector<HTMLElement>('neat-tile-grid .grid')!

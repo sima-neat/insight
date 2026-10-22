@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import type { NeatFrameStats } from '@sima/neat-ui';
 import type { VfStatus } from './vf/channel-status';
+import type { VfSyncBuffer } from './vf/egress-report';
 import type { VfConnection } from './vf/vf-connection';
 import type { VfConnections } from './vf/vf-connections';
 
@@ -16,6 +17,8 @@ export class FakeConnection {
     messagesPerSecond: 0,
   });
   readonly stream = signal<MediaStream | null>(null);
+  /** A receiver that takes the sync buffer, until a test says otherwise. */
+  readonly syncBuffer = signal<VfSyncBuffer>({ supported: true, applied: true, targetMs: 300 });
   readonly syncBuffers: number[] = [];
   readonly retentions: number[] = [];
   readonly frameStats: NeatFrameStats[] = [];

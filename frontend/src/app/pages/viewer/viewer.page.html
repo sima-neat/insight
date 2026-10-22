@@ -94,6 +94,7 @@
     </span>
   </label>
   <button
+    #inspectorToggle
     neatButton
     type="button"
     variant="text"
@@ -141,8 +142,11 @@
   </div>
 
   @if (prefs.inspector()) {
-    <section neatPageAside class="inspector" aria-labelledby="viewer-inspector-title">
-      <h2 id="viewer-inspector-title" class="inspector-title">{{ inspectorTitle() }}</h2>
-    </section>
+    <app-viewer-inspector
+      neatPageAside
+      [channel]="selectedChannel()"
+      [(tab)]="inspectorTab"
+      (dismiss)="closeInspector()"
+    />
   }
 </neat-page>

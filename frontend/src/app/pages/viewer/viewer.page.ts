@@ -35,7 +35,9 @@ import {
   ThemeService,
 } from '@sima/neat-ui';
 import { map } from 'rxjs';
+import { ChannelLateness } from '../../viewer/channel-lateness';
 import { ChannelLiveness } from '../../viewer/channel-liveness';
+import { ViewerInspector } from '../../viewer/inspector/inspector';
 import { LayoutPrefs } from '../../viewer/settings/layout-prefs';
 import type { SettingTab } from '../../viewer/settings/schema';
 import { ViewerStorage } from '../../viewer/settings/storage';
@@ -70,7 +72,7 @@ const DEBUG_FLAG = 'debug';
 
 /**
  * Where the page's key shortcuts stay out of the way: controls that take these keys themselves
- * (text fields, the slider's arrows) and the inspector, whose controls Task 11 fills in.
+ * (text fields, the slider's arrows) and the inspector, which has its own Escape.
  */
 const OWN_KEYS = 'input, select, textarea, [contenteditable], [role="slider"], [neatPageAside]';
 
@@ -100,9 +102,10 @@ function sameArea(a: NeatTileArea | null, b: NeatTileArea | null): boolean {
     NeatSwitch,
     NeatTileGrid,
     NeatTooltip,
+    ViewerInspector,
     ViewerTile,
   ],
-  providers: [VfConnections, ViewerSettingsStore, LayoutPrefs, ChannelLiveness],
+  providers: [VfConnections, ViewerSettingsStore, LayoutPrefs, ChannelLiveness, ChannelLateness],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(window:keydown)': 'onKeydown($event)' },
   templateUrl: './viewer.page.html',
@@ -201,12 +204,8 @@ export class ViewerPage {
       : 'No channel is receiving video.';
   });
 
-  protected readonly inspectorTitle = computed(() => {
-    const channel = this.state.selected();
-    return channel === null ? 'All channels' : `Channel ${channel}`;
-  });
-
   private readonly pageInput = viewChild<ElementRef<HTMLInputElement>>('pageInput');
+  private readonly inspectorToggle = viewChild<ElementRef<HTMLButtonElement>>('inspectorToggle');
   private readonly tiles = viewChildren(ViewerTile, { read: ElementRef<HTMLElement> });
   private readonly injector = inject(Injector);
 
@@ -256,6 +255,23 @@ export class ViewerPage {
 
   protected toggleInspector(): void {
     this.prefs.setInspector(!this.prefs.inspector());
+  }
+
+  /**
+   * Escape in the inspector or its ✕. Focus goes back where the user works: the selected tile, or
+   * with none on screen the toolbar button that opens the inspector again.
+   */
+  protected closeInspector(): void {
+    this.prefs.setInspector(false);
+    afterNextRender(
+      () => {
+        const index = this.state.pageChannels().indexOf(this.state.selected() ?? -1);
+        // The tiles render in pageChannels order.
+        const target = index < 0 ? this.inspectorToggle() : this.tiles()[index];
+        target?.nativeElement.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   /** The late chip: the inspector opens on the channel's General tab, where it can be fixed. */
