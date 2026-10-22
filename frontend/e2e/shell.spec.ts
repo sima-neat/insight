@@ -1,9 +1,21 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, Locator, Page, test } from '@playwright/test';
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const railItem = (page: Page, label: string) =>
   nav(page).getByRole('link', { name: label, exact: true });
 const exitKiosk = (page: Page) => page.getByRole('button', { name: 'Exit kiosk mode' });
+/**
+ * The opacity an element is drawn with, its own times its ancestors': the kit fades the exit
+ * control together with the page toolbar beside it, on an ancestor of the button.
+ */
+const renderedOpacity = (locator: Locator) =>
+  locator.evaluate((element) => {
+    let opacity = 1;
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      opacity *= Number(getComputedStyle(node).opacity);
+    }
+    return opacity;
+  });
 
 test('a deep link opens that page with its rail item current', async ({ page }) => {
   await page.goto('/viewer');
@@ -60,15 +72,15 @@ test.describe('kiosk mode', () => {
     await expect(page).toHaveTitle('Neat Insight · Viewer');
     await expect(page.getByText('The Viewer arrives with plan 2.')).toBeVisible();
 
-    await expect(exitKiosk(page)).toHaveCSS('opacity', '1');
+    await expect.poll(() => renderedOpacity(exitKiosk(page))).toBe(1);
     await page.clock.runFor(3000);
-    await expect(exitKiosk(page)).toHaveCSS('opacity', '0');
+    await expect.poll(() => renderedOpacity(exitKiosk(page))).toBe(0);
 
     // Angular schedules rendering on timers, which are paused too: let a little time pass for it,
     // far short of the idle timeout.
     await page.mouse.move(200, 200);
     await page.clock.runFor(100);
-    await expect(exitKiosk(page)).toHaveCSS('opacity', '1');
+    await expect.poll(() => renderedOpacity(exitKiosk(page))).toBe(1);
 
     await exitKiosk(page).click();
     await page.clock.runFor(100); // rendering again, as above
