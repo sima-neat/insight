@@ -1,0 +1,301 @@
+import { signal } from '@angular/core';
+import type { NeatFrameStats, NeatTileSource } from '@sima/neat-ui';
+import { resolveCodecLabel, offerFailureText, type VfStatus } from './channel-status';
+import { INITIAL_DECODER_HEALTH, updateDecoderHealth, type DecoderHealth } from './decoder-health';
+import { buildEgressReport, type InboundVideoReport, type VfSyncBuffer } from './egress-report';
+import { isRetryable, requestAnswer, type OfferRejectedError } from './signaling';
+
+const STUN_SERVER = 'stun:stun.l.google.com:19302';
+/** Fixed and unlimited, without backoff, as vf's own viewer retries (Inv §4d). */
+const RECONNECT_DELAY_MS = 2000;
+/**
+ * Deliberately longer than the retry delay: a decoder can legitimately produce nothing for a moment
+ * while it waits for a keyframe, and reconnecting is the more expensive response.
+ */
+const DECODER_STALL_MS = 5000;
+/**
+ * ICE often recovers from a brief `disconnected` on its own. One that lasts this long gets a
+ * reconnect instead of a frozen frame until ICE gives up with `failed` (Inv §6.8).
+ */
+const ICE_DISCONNECTED_MS = 5000;
+const STATS_INTERVAL_MS = 1000;
+/** The viewer's default video sync buffer (Inv §5b), until the page sets the channel's own. */
+const DEFAULT_SYNC_BUFFER_MS = 300;
+
+type MetadataListener = (text: string, receivedAt: number) => void;
+
+/** A stats report as the tick reads it: any type, with the inbound-rtp fields when it is one. */
+type InboundRtpReport = RTCStats & InboundVideoReport & { kind?: string; codecId?: string };
+
+/** One peer connection and everything that belongs to it; replaced on every reconnect. */
+interface Session {
+  readonly pc: RTCPeerConnection;
+  readonly receiver: RTCRtpReceiver;
+  readonly channel: RTCDataChannel;
+  readonly statsTimer: ReturnType<typeof setInterval>;
+  iceDisconnectedTimer: ReturnType<typeof setTimeout> | null;
+  /** The previous inbound-rtp sample, for the bitrate. */
+  lastBytes: number | null;
+  lastTimestamp: number | null;
+  /** Kept across samples so a report that omits the codec does not blank it. */
+  codec: string | null;
+  decoderHealth: DecoderHealth;
+}
+
+const CONNECTING: VfStatus = {
+  phase: 'connecting',
+  codec: null,
+  width: null,
+  height: null,
+  fps: null,
+  kbps: 0,
+  messagesPerSecond: 0,
+};
+
+/**
+ * Receives one vf channel over WebRTC: its video as `stream` and its metadata data channel through
+ * `onMetadata`, for a `neat-video-tile`. It signals through Insight's `/api/vf/offer` proxy,
+ * reconnects as vf's viewer always has (Inv §4d), and sends vf the `browser_egress_stats` report
+ * every second (Inv §2c).
+ *
+ * All of it runs outside Angular change detection on WebRTC callbacks and timers. Metadata goes to
+ * the listeners without touching a signal; `status` changes on connection events and at most once
+ * per stats tick.
+ */
+export class VfConnection implements NeatTileSource {
+  private readonly streamState = signal<MediaStream | null>(null);
+  private readonly statusState = signal<VfStatus>(CONNECTING);
+  private readonly syncBufferState = signal<VfSyncBuffer>({
+    supported: false,
+    applied: false,
+    targetMs: 0,
+  });
+
+  readonly stream = this.streamState.asReadonly();
+  readonly status = this.statusState.asReadonly();
+  /** How the receiver took the video sync buffer; the inspector says when it cannot. */
+  readonly syncBuffer = this.syncBufferState.asReadonly();
+
+  private readonly listeners = new Set<MetadataListener>();
+  private session: Session | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private closed = false;
+  private syncBufferMs = DEFAULT_SYNC_BUFFER_MS;
+  private metadataRetentionMs = 0;
+  /** The tile's latest frame stats for the current stream; null until it reports. */
+  private frameStats: NeatFrameStats | null = null;
+
+  constructor(readonly channel: number) {
+    this.connect();
+  }
+
+  onMetadata(listener: MetadataListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /** Sets the receiver's jitter buffer target, now and on every reconnect. */
+  setSyncBuffer(ms: number): void {
+    this.syncBufferMs = ms;
+    if (this.session) this.applySyncBuffer(this.session.receiver);
+  }
+
+  /** The channel's metadata retention; only reported to vf, since the tile applies it. */
+  setMetadataRetention(ms: number): void {
+    this.metadataRetentionMs = ms;
+  }
+
+  /** Takes the tile's `frameStats` output for the next egress report and status line. */
+  reportFrameStats(stats: NeatFrameStats): void {
+    this.frameStats = stats;
+  }
+
+  close(): void {
+    this.closed = true;
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.endSession();
+    this.listeners.clear();
+  }
+
+  private connect(): void {
+    this.endSession();
+    // A retry while vf has nothing to send keeps saying so instead of flickering to "connecting".
+    if (this.statusState().phase !== 'waiting') this.statusState.set(CONNECTING);
+    this.frameStats = null;
+
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: STUN_SERVER }] });
+    const { receiver } = pc.addTransceiver('video', { direction: 'recvonly' });
+    const channel = pc.createDataChannel('metadata', { ordered: true, maxRetransmits: 0 });
+    const session: Session = {
+      pc,
+      receiver,
+      channel,
+      statsTimer: setInterval(() => void this.sample(session), STATS_INTERVAL_MS),
+      iceDisconnectedTimer: null,
+      lastBytes: null,
+      lastTimestamp: null,
+      codec: null,
+      decoderHealth: INITIAL_DECODER_HEALTH,
+    };
+    this.session = session;
+    this.applySyncBuffer(receiver);
+
+    channel.onmessage = (event: MessageEvent) => {
+      // vf sends text frames only; the tile parses and validates them.
+      if (typeof event.data !== 'string') return;
+      const receivedAt = performance.now();
+      for (const listener of this.listeners) listener(event.data, receivedAt);
+    };
+    pc.ontrack = (event) => {
+      if (this.session !== session || event.track.kind !== 'video') return;
+      this.streamState.set(new MediaStream([event.track]));
+    };
+    pc.onconnectionstatechange = () => {
+      if (this.session !== session) return;
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        this.scheduleReconnect();
+      }
+    };
+    pc.oniceconnectionstatechange = () => {
+      if (this.session !== session) return;
+      if (session.iceDisconnectedTimer !== null) clearTimeout(session.iceDisconnectedTimer);
+      session.iceDisconnectedTimer = null;
+      if (pc.iceConnectionState === 'disconnected') {
+        session.iceDisconnectedTimer = setTimeout(
+          () => this.scheduleReconnect(),
+          ICE_DISCONNECTED_MS,
+        );
+      }
+    };
+
+    requestAnswer(pc, `/api/vf/offer?channel=${this.channel}`)
+      .then((answer) => (this.session === session ? pc.setRemoteDescription(answer) : undefined))
+      .catch((error: unknown) => {
+        if (this.session !== session) return;
+        this.endSession();
+        if (isRetryable(error)) {
+          this.statusState.set({ ...CONNECTING, phase: 'waiting' });
+          this.scheduleReconnect();
+        } else {
+          const status = (error as OfferRejectedError).status;
+          this.statusState.set({
+            ...CONNECTING,
+            phase: 'failed',
+            failure: offerFailureText(status),
+          });
+        }
+      });
+  }
+
+  /** One pending reconnect at a time; the next session starts from scratch. */
+  private scheduleReconnect(): void {
+    if (this.closed || this.reconnectTimer !== null) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, RECONNECT_DELAY_MS);
+  }
+
+  private endSession(): void {
+    const session = this.session;
+    if (session === null) return;
+    this.session = null;
+    clearInterval(session.statsTimer);
+    if (session.iceDisconnectedTimer !== null) clearTimeout(session.iceDisconnectedTimer);
+    session.channel.onmessage = null;
+    session.channel.close();
+    // Detached first, so a deliberate close cannot report `closed` and schedule a reconnect.
+    session.pc.ontrack = null;
+    session.pc.onconnectionstatechange = null;
+    session.pc.oniceconnectionstatechange = null;
+    session.pc.close();
+    if (this.streamState() !== null) this.streamState.set(null);
+  }
+
+  private applySyncBuffer(receiver: RTCRtpReceiver): void {
+    this.syncBufferState.set(applyJitterBufferTarget(receiver, this.syncBufferMs));
+  }
+
+  /**
+   * The 1 s stats tick: status line, decoder stall check and egress report, from the inbound-rtp
+   * video report. Only a connected session has stats worth showing.
+   */
+  private async sample(session: Session): Promise<void> {
+    const { pc } = session;
+    if (pc.connectionState !== 'connected') return;
+    let stats: RTCStatsReport;
+    try {
+      stats = await pc.getStats();
+    } catch {
+      // getStats rejects while the connection is closing; the next tick samples again.
+      return;
+    }
+    if (this.session !== session) return;
+
+    let status: VfStatus | null = null;
+    let stalled = false;
+    for (const report of stats.values() as Iterable<InboundRtpReport>) {
+      if (report.type !== 'inbound-rtp' || report.kind !== 'video') continue;
+      const now = Date.now();
+      session.codec = resolveCodecLabel(stats, report) ?? session.codec;
+      const health = updateDecoderHealth(session.decoderHealth, report, now, DECODER_STALL_MS);
+      session.decoderHealth = health;
+      stalled ||= health.stalled;
+
+      const bytes = report.bytesReceived ?? null;
+      const seconds =
+        session.lastTimestamp === null ? 0 : (report.timestamp - session.lastTimestamp) / 1000;
+      const bitrateBps =
+        seconds > 0 && bytes !== null && session.lastBytes !== null
+          ? ((bytes - session.lastBytes) * 8) / seconds
+          : 0;
+      session.lastBytes = bytes;
+      session.lastTimestamp = report.timestamp;
+
+      if (session.channel.readyState === 'open') {
+        const egress = buildEgressReport({
+          channel: this.channel,
+          time: new Date(now),
+          peer: pc,
+          inbound: report,
+          bitrateBps,
+          dataChannelState: session.channel.readyState,
+          frameStats: this.frameStats,
+          videoSyncBufferMs: this.syncBufferMs,
+          metadataRetentionMs: this.metadataRetentionMs,
+          syncBuffer: this.syncBufferState(),
+        });
+        session.channel.send(JSON.stringify(egress));
+      }
+
+      status = {
+        phase: 'connected',
+        codec: session.codec,
+        width: report.frameWidth ?? null,
+        height: report.frameHeight ?? null,
+        fps: report.framesPerSecond ?? null,
+        kbps: bitrateBps / 1000,
+        // The tile counts the valid messages; counting the data channel too would disagree.
+        messagesPerSecond: this.frameStats?.metadataMessagesPerSecond ?? 0,
+      };
+    }
+
+    if (status !== null) this.statusState.set(status);
+    if (stalled) this.scheduleReconnect();
+  }
+}
+
+/**
+ * Asks the receiver to hold video for the sync buffer, so frames wait for metadata that lags them.
+ * Browsers without `jitterBufferTarget` (or that reject the value) play as soon as they can.
+ */
+function applyJitterBufferTarget(receiver: RTCRtpReceiver, targetMs: number): VfSyncBuffer {
+  if (!('jitterBufferTarget' in receiver)) return { supported: false, applied: false, targetMs: 0 };
+  try {
+    receiver.jitterBufferTarget = targetMs;
+    return { supported: true, applied: true, targetMs: Number(receiver.jitterBufferTarget) };
+  } catch {
+    return { supported: true, applied: false, targetMs: 0 };
+  }
+}

@@ -1,6 +1,8 @@
 __pycache__
 mediamtx
 vf
+# `vf` above is the Go binary; the Viewer's vf connection code is source.
+!frontend/src/app/viewer/vf/
 go.mod
 go.sum
 .venv
