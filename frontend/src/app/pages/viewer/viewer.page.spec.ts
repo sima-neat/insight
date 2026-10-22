@@ -318,6 +318,13 @@ describe('ViewerPage', () => {
     expect(shown()).toEqual(range(6));
   });
 
+  it('G (Caps Lock) focuses the page input like g', async () => {
+    await open('/viewer');
+
+    await press('G');
+    expect(document.activeElement).toBe(pageInput());
+  });
+
   it('go to page clamps the page number; a channel jump pages to the channel and selects it', async () => {
     sixPerPage();
     await open('/viewer');

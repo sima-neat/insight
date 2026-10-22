@@ -343,7 +343,9 @@ export class ViewerPage {
         if (fromTile && this.state.page() !== page) this.focusFirstTile();
         break;
       }
-      case 'g': {
+      // G as well, for Caps Lock: Shift+g never gets here.
+      case 'g':
+      case 'G': {
         const input = this.pageInput()?.nativeElement;
         if (input === undefined) return;
         // The g must not land in the field it focuses.
