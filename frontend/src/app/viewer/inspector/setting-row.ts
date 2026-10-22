@@ -83,9 +83,9 @@ function channelCount(count: number): string {
           <span class="label" aria-hidden="true">{{ setting.label }}</span>
           <span class="readout">{{ setting.describe(numberValue()) }}</span>
         </div>
-        <!-- The kit slider cannot take a description yet (a kit gap); its name carries the setting. -->
         <neat-slider
           [label]="fullName()"
+          [describedBy]="describedBy()"
           [min]="setting.min"
           [max]="setting.max"
           [step]="setting.step"
@@ -154,7 +154,7 @@ function channelCount(count: number): string {
           [attr.aria-label]="resetOverridesLabel()"
           (click)="resetOverrides()"
         >
-          Reset those to global
+          {{ resetOverridesText() }}
         </button>
       </div>
     }
@@ -225,17 +225,23 @@ export class SettingRow {
     const channels = this.overriddenOn();
     return `Overridden on ${channelCount(channels.length)}: ${channels.join(', ')}`;
   });
+  /** The button's text; its accessible name starts with it (WCAG 2.5.3, label in name). */
+  protected readonly resetOverridesText = computed(
+    () => `Reset on ${channelCount(this.overriddenOn().length)}`,
+  );
   protected readonly resetOverridesLabel = computed(
-    () =>
-      `Reset ${this.fullName()} on ${channelCount(this.overriddenOn().length)} to the global value`,
+    () => `${this.resetOverridesText()} to the global value: ${this.fullName()}`,
   );
 
-  /** What the control is described by: its hint and its override note, when it has them. */
+  /**
+   * What the control is described by: its hint and its override note, when it has them. Undefined
+   * without either, which both `aria-describedby` and the slider's `describedBy` leave off.
+   */
   protected readonly describedBy = computed(() => {
     const ids: string[] = [];
     if (this.numberSetting()?.hint) ids.push(this.hintId());
     if (this.overrides() || this.overriddenOn().length > 0) ids.push(this.noteId());
-    return ids.length > 0 ? ids.join(' ') : null;
+    return ids.length > 0 ? ids.join(' ') : undefined;
   });
 
   /** Focuses the number field, as after the late notice changed its value. */

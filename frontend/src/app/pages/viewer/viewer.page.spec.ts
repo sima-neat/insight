@@ -195,6 +195,25 @@ describe('ViewerPage', () => {
     expect(tileWidth()).toBe('400px');
   });
 
+  it('fits all with the gap the grid reports, not one of its own', async () => {
+    // A stylesheet that sets the grid's gap to 24 px (jsdom has none, so the grid would use 8).
+    const computed = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) =>
+      element.classList.contains('grid')
+        ? ({ columnGap: '24px' } as CSSStyleDeclaration)
+        : computed(element, pseudo),
+    );
+    await open('/viewer');
+
+    // 16 tiles in 1000×400 fit 167 px wide with an 8 px gap (the test above), 146 px with 24.
+    expect(tileWidth()).toBe('146px');
+    expect(
+      root()
+        .querySelector<HTMLElement>('neat-tile-grid .grid')!
+        .style.getPropertyValue('--grid-gap'),
+    ).toBe('24px');
+  });
+
   it('moving the slider stores the width for the current count only', async () => {
     await open('/viewer');
     expect(storage.readStored('layout')).toBeNull();

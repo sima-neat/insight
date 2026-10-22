@@ -103,7 +103,7 @@
     aria-label="Inspector"
     neatTooltip="Inspector"
     neatTooltipPosition="bottom"
-    [attr.aria-pressed]="prefs.inspector()"
+    [pressed]="prefs.inspector()"
     (click)="toggleInspector()"
   >
     <neat-icon name="info" />
@@ -120,7 +120,6 @@
     <neat-tile-grid
       [tileWidth]="tileWidth()"
       [aspect]="prefs.aspect()"
-      [gap]="gap"
       [count]="state.pageChannels().length"
       (layout)="onLayout($event)"
     >

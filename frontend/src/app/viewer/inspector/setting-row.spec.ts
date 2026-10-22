@@ -229,11 +229,12 @@ describe('SettingRow', () => {
     await render(LINE_WIDTH);
     expect(readout()).toBe('3 px');
     expect(text()).toContain('Overridden on 2 channels: 1, 4');
-    expect(button('Reset those to global')!.getAttribute('aria-label')).toBe(
-      'Reset Line width on 2 channels to the global value',
+    // The visible text starts the accessible name (WCAG 2.5.3, label in name).
+    expect(button('Reset on 2 channels')!.getAttribute('aria-label')).toBe(
+      'Reset on 2 channels to the global value: Line width',
     );
 
-    await click(button('Reset those to global')!);
+    await click(button('Reset on 2 channels')!);
 
     expect(store().overridesOf('general.lineWidth')).toEqual([]);
     expect(storage.readStored('settings:channel:1')).toBeNull();
@@ -249,14 +250,38 @@ describe('SettingRow', () => {
       general: { videoSyncBufferMs: 900 },
     });
     expect(text()).not.toContain('Overridden on');
-    expect(button('Reset those to global')).toBeUndefined();
+    expect(button('Reset on 2 channels')).toBeUndefined();
 
     store().set(6, 'general.lineWidth', 2);
     await fixture.whenStable();
     expect(text()).toContain('Overridden on 1 channel: 6');
-    expect(button('Reset those to global')!.getAttribute('aria-label')).toBe(
-      'Reset Line width on 1 channel to the global value',
+    expect(button('Reset on 1 channel')!.getAttribute('aria-label')).toBe(
+      'Reset on 1 channel to the global value: Line width',
     );
+  });
+
+  it('a slider is described by the override note, like the other controls, so focus announces it', async () => {
+    storage.seed({
+      'settings:channel:1': { version: 10, general: { lineWidth: 6 } },
+      'settings:channel:4': { version: 10, general: { lineWidth: 8 } },
+    });
+    await render(LINE_WIDTH);
+    expect(description(slider())).toBe('Overridden on 2 channels: 1, 4');
+
+    await render(LINE_WIDTH, 1);
+    expect(description(slider())).toBe('overrides global · Global: 3 px');
+
+    await render(LINE_WIDTH, 2);
+    expect(slider().hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('a slider that depends on another is disabled on its thumb, which is what gets focus', async () => {
+    await render(TRAIL_LENGTH, 3);
+    expect(slider().hasAttribute('aria-disabled')).toBe(false);
+
+    store().set('global', 'types.tracking.history.enabled', false);
+    await fixture.whenStable();
+    expect(slider().getAttribute('aria-disabled')).toBe('true');
   });
 
   it('a switch announces what overrides it, globally and on a channel', async () => {
@@ -265,8 +290,8 @@ describe('SettingRow', () => {
     });
     await render(SHOW_DETECTIONS, 'global', 'Object detection: Show overlay');
     expect(description(toggle())).toBe('Overridden on 1 channel: 3');
-    expect(button('Reset those to global')!.getAttribute('aria-label')).toBe(
-      'Reset Object detection: Show overlay on 1 channel to the global value',
+    expect(button('Reset on 1 channel')!.getAttribute('aria-label')).toBe(
+      'Reset on 1 channel to the global value: Object detection: Show overlay',
     );
 
     await render(SHOW_DETECTIONS, 3, 'Object detection: Show overlay');

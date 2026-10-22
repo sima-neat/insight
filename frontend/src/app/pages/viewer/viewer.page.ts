@@ -60,13 +60,6 @@ const SHAPES: readonly NeatSegmentedOption<NeatTileAspect>[] = [
 /** The narrowest tile the size slider offers, in CSS pixels; below it a stream is unreadable. */
 const MIN_TILE_WIDTH = 120;
 
-/**
- * The space between tiles, in CSS pixels, given to the grid explicitly: the fit-all width has to be
- * worked out with the gap the grid packs with, and the grid's layout does not report its own. 8 px
- * is the kit's default gap (`--neat-space-2`) at the browser's default font size.
- */
-const TILE_GAP_PX = 8;
-
 /** The viewer storage name of the console-set debug flag (Inv §4c's `viewerDebug`). */
 const DEBUG_FLAG = 'debug';
 
@@ -76,8 +69,15 @@ const DEBUG_FLAG = 'debug';
  */
 const OWN_KEYS = 'input, select, textarea, [contenteditable], [role="slider"], [neatPageAside]';
 
-function sameArea(a: NeatTileArea | null, b: NeatTileArea | null): boolean {
-  return a === null || b === null ? a === b : a.width === b.width && a.height === b.height;
+/** The grid's content box and the gap between its tiles, in CSS pixels. */
+interface TileSpace extends NeatTileArea {
+  readonly gap: number;
+}
+
+function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
+  return a === null || b === null
+    ? a === b
+    : a.width === b.width && a.height === b.height && a.gap === b.gap;
 }
 
 /**
@@ -122,7 +122,6 @@ export class ViewerPage {
 
   protected readonly shapes = SHAPES;
   protected readonly minTileWidth = MIN_TILE_WIDTH;
-  protected readonly gap = TILE_GAP_PX;
 
   private readonly params = toSignal(
     inject(ActivatedRoute).queryParamMap.pipe(map(readViewerParams)),
@@ -165,8 +164,12 @@ export class ViewerPage {
   /** The inspector's open tab: the late chip opens General, where the raise actions are. */
   readonly inspectorTab = signal<SettingTab>('Metadata');
 
-  /** The grid's content box, from its layout; null until it has measured itself. */
-  private readonly area = signal<NeatTileArea | null>(null, { equal: sameArea });
+  /**
+   * What the fit-all widths are worked out against: the grid's content box and the gap it packed
+   * with, both from its layout. Null until it has measured itself, which is also when its tiles
+   * first show, so the fit never needs a gap the grid has not reported.
+   */
+  private readonly space = signal<TileSpace | null>(null, { equal: sameSpace });
 
   /**
    * The size the user chose for this many channels, else the size at which all of them fit on one
@@ -176,17 +179,17 @@ export class ViewerPage {
     const count = this.channels().length;
     const stored = this.prefs.tileWidthFor(count);
     if (stored !== null) return stored;
-    const area = this.area();
+    const space = this.space();
     // Any width does before the first measurement: the grid shows nothing until it has one.
-    if (area === null) return MIN_TILE_WIDTH;
-    return fitAllTileWidth(area, count, this.prefs.aspect(), TILE_GAP_PX);
+    if (space === null) return MIN_TILE_WIDTH;
+    return fitAllTileWidth(space, count, this.prefs.aspect(), space.gap);
   });
 
   /** The slider ends where one tile fills the area. */
   protected readonly sliderMax = computed(() => {
-    const area = this.area();
-    if (area === null) return MIN_TILE_WIDTH;
-    return Math.max(MIN_TILE_WIDTH, fitAllTileWidth(area, 1, this.prefs.aspect(), TILE_GAP_PX));
+    const space = this.space();
+    if (space === null) return MIN_TILE_WIDTH;
+    return Math.max(MIN_TILE_WIDTH, fitAllTileWidth(space, 1, this.prefs.aspect(), space.gap));
   });
 
   protected readonly channelRange = computed(() => {
@@ -231,7 +234,7 @@ export class ViewerPage {
   }
 
   protected onLayout(layout: NeatTileLayout): void {
-    this.area.set({ width: layout.areaWidth, height: layout.areaHeight });
+    this.space.set({ width: layout.areaWidth, height: layout.areaHeight, gap: layout.gap });
     this.state.perPage.set(layout.perPage);
   }
 
@@ -258,7 +261,7 @@ export class ViewerPage {
   }
 
   /**
-   * Escape in the inspector or its ✕. Focus goes back where the user works: the selected tile, or
+   * Escape in the inspector or its close button. Focus goes back where the user works: the selected tile, or
    * with none on screen the toolbar button that opens the inspector again.
    */
   protected closeInspector(): void {

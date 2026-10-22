@@ -14,6 +14,7 @@ import {
   lateNoticeDetails,
   NeatButton,
   type NeatFrameStats,
+  NeatIcon,
   NeatTab,
   NeatTabs,
   NeatTooltip,
@@ -190,11 +191,20 @@ function describeLateness(reading: LatenessReading | null): string {
  * channel is paged off the grid, the preview's stats keep the connection's status line and vf's
  * egress report current, while lateness stays the grid tile's (R29).
  *
- * Escape inside the panel and the ✕ ask the page to close it, which returns focus to the grid.
+ * Escape inside the panel and the close button ask the page to close it, which returns focus to the grid.
  */
 @Component({
   selector: 'app-viewer-inspector',
-  imports: [LateNotice, NeatButton, NeatTab, NeatTabs, NeatTooltip, NeatVideoTile, SettingRow],
+  imports: [
+    LateNotice,
+    NeatButton,
+    NeatIcon,
+    NeatTab,
+    NeatTabs,
+    NeatTooltip,
+    NeatVideoTile,
+    SettingRow,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     role: 'region',
@@ -209,7 +219,7 @@ export class ViewerInspector {
   readonly channel = input.required<number | null>();
   /** The open tab, which the page also sets (the late chip opens General). */
   readonly tab = model.required<SettingTab>();
-  /** Escape or the ✕: the page closes the panel. */
+  /** Escape or the close button: the page closes the panel. */
   readonly dismiss = output<void>();
 
   private readonly connections = inject(VfConnections);

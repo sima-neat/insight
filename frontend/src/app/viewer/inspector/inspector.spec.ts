@@ -3,7 +3,12 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { type NeatFrameStats, type NeatMetadataSnapshot, NeatVideoTile } from '@sima/neat-ui';
+import {
+  type NeatFrameStats,
+  NeatIcon,
+  type NeatMetadataSnapshot,
+  NeatVideoTile,
+} from '@sima/neat-ui';
 import { FakeResizeObserver, ViewerShell } from '../../pages/viewer/viewer-page.testing';
 import { ViewerPage } from '../../pages/viewer/viewer.page';
 import { FakeConnections } from '../fake-connections.testing';
@@ -150,6 +155,17 @@ describe('ViewerInspector', () => {
     await settle();
   }
 
+  it('closes with an icon-only button that draws the kit’s close icon and is named "Close inspector"', async () => {
+    await open();
+    await click(toolbarButton('Inspector'));
+
+    const close = fixture.debugElement.query(
+      By.css('app-viewer-inspector button[aria-label="Close inspector"]'),
+    );
+    expect(close.nativeElement.textContent.trim()).toBe('');
+    expect(close.query(By.directive(NeatIcon)).componentInstance.name()).toBe('close');
+  });
+
   it('without a selection edits global values and lists overrides per row', async () => {
     storage.seed({
       'settings:channel:2': {
@@ -177,7 +193,7 @@ describe('ViewerInspector', () => {
 
     const confidence = row('Confidence threshold', 'Object detection');
     expect(flat(confidence)).toContain('Overridden on 2 channels');
-    await click(buttonIn(confidence, 'Reset those to global'));
+    await click(buttonIn(confidence, 'Reset on 2 channels'));
     expect(storage.readStored('settings:channel:2')).toBeNull();
     expect(storage.readStored('settings:channel:5')).toBeNull();
     expect(gridTile(2).settings().types['object-detection'].confidenceThreshold).toBe(0);
@@ -406,7 +422,7 @@ describe('ViewerInspector', () => {
     expect(page().selectedChannel()).toBe(2);
     expect(document.activeElement).toBe(tileElement(2));
 
-    // The ✕ does the same.
+    // The close button does the same.
     await click(toolbarButton('Inspector'));
     await click(inspector().querySelector<HTMLElement>('button[aria-label="Close inspector"]')!);
     expect(aside()).toBeNull();
