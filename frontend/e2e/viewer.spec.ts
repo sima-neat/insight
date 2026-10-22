@@ -1,4 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { closeSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, Locator, Page, test } from '@playwright/test';
 
@@ -17,15 +19,24 @@ const LAPTOP = { width: 1366, height: 768 };
 const DESKTOP = { width: 1920, height: 1080 };
 const TABLET = { width: 768, height: 1024 };
 
+/** What vf's ingest stats say while no channel receives anything. */
+const NO_INGEST = { time: '2026-10-22T12:00:00Z', active_ttl_ms: 3000, channels: [] };
+
 /**
- * The Viewer without vf: every offer gets vf's answer while no stream has arrived (503), and Flask
- * allows 16 channels. Resolves to the channels offered, in order, so a test can watch the retries.
+ * The Viewer without vf: every offer gets vf's answer while no stream has arrived (503), ingest
+ * stats list no channel, and Flask allows 16 channels. Every API the page calls is answered here,
+ * so whatever serves the app (the dev server, a deployed build) cannot change what the tests see.
+ * Resolves to the channels offered, in order, so a test can watch the retries.
  */
 async function withoutVf(page: Page): Promise<number[]> {
   const offers: number[] = [];
   await page.route(
     (url) => url.pathname === '/api/viewer-url',
     (route) => route.fulfill({ json: VIEWER_URL_ANSWER }),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/ingest/stats',
+    (route) => route.fulfill({ json: NO_INGEST }),
   );
   await page.route(
     (url) => url.pathname === '/api/vf/offer',
@@ -146,15 +157,19 @@ test.describe('the Viewer without vf', () => {
       await expect(tiles(page)).toHaveCount(SLOTS);
       await expect(tile(page, SLOTS - 1)).toBeVisible();
       await expect.poll(() => misplacedTiles(page)).toEqual([]);
-      expect(await pageOverflow(page)).toEqual([
-        { horizontal: 0, vertical: 0 },
-        { horizontal: 0, vertical: 0 },
-      ]);
+      await expect
+        .poll(() => pageOverflow(page))
+        .toEqual([
+          { horizontal: 0, vertical: 0 },
+          { horizontal: 0, vertical: 0 },
+        ]);
       // R14: the toolbar fits beside the title on a laptop and a desktop; a tablet scrolls it.
-      expect(await topBarSpill(page, viewport === TABLET)).toEqual({
-        spilled: [],
-        toolsOverflow: 0,
-      });
+      await expect
+        .poll(() => topBarSpill(page, viewport === TABLET))
+        .toEqual({
+          spilled: [],
+          toolsOverflow: 0,
+        });
     }
   });
 
@@ -228,10 +243,12 @@ test.describe('the Viewer without vf', () => {
     await expect.poll(() => columns(page)).toBeLessThan(columnsBefore);
     await expect(tile(page, 15)).toBeVisible();
     await expect.poll(() => misplacedTiles(page)).toEqual([]);
-    expect(await pageOverflow(page)).toEqual([
-      { horizontal: 0, vertical: 0 },
-      { horizontal: 0, vertical: 0 },
-    ]);
+    await expect
+      .poll(() => pageOverflow(page))
+      .toEqual([
+        { horizontal: 0, vertical: 0 },
+        { horizontal: 0, vertical: 0 },
+      ]);
 
     await page.getByRole('button', { name: 'Close inspector' }).click();
     await expect(page.locator('app-viewer-inspector')).toHaveCount(0);
@@ -300,9 +317,23 @@ function stopFeed(): void {
   execFileSync(FEED, ['stop', '0'], { stdio: 'inherit' });
 }
 
-/** Starts the feed on channel 0 again and leaves it running after the run, as the run found it. */
-function startFeed(): void {
-  spawn(FEED, ['0'], { detached: true, stdio: 'ignore' }).unref();
+/**
+ * Starts the feed on channel 0 again and leaves it running after the run, as the run found it.
+ * Resolves once the script runs, and rejects if it cannot be started. Its output (only its own, no
+ * page content) goes to `log`; the run's teardown deletes the file with the rest of the output.
+ */
+async function startFeed(log: string): Promise<void> {
+  const output = openSync(log, 'a');
+  try {
+    const feed = spawn(FEED, ['0'], { detached: true, stdio: ['ignore', output, output] });
+    await once(feed, 'spawn');
+    // Later errors (signalling the child) must not take the test runner down with them.
+    feed.on('error', (error) => console.error(`vf-test-feed: ${error.message}`));
+    feed.unref();
+  } finally {
+    // The child has its own copy of the descriptor.
+    closeSync(output);
+  }
 }
 
 /**
@@ -318,6 +349,9 @@ const overlayInk = (channelTile: Locator) =>
     return inked;
   });
 
+/** The status line of the test feed's stream: codec, size and a frame rate near its 15 fps. */
+const FEED_STATUS = /H\.264 · 640×480 · 1[45]\.\d fps/;
+
 /** The kit tile inside a channel's tile, whose `data-state` says whether it plays. */
 const videoTile = (channelTile: Locator) => channelTile.locator('neat-video-tile');
 
@@ -332,7 +366,7 @@ test.describe('a deployed build with the test feed on channel 0', () => {
     await page.goto('/viewer?src=0');
     const channel = tile(page, 0);
 
-    await expect(channel).toContainText('H.264 · 640×480 · 15', { timeout: 15_000 });
+    await expect(channel).toContainText(FEED_STATUS, { timeout: 15_000 });
     await expect(videoTile(channel)).toHaveAttribute('data-state', 'playing');
     await expect.poll(() => overlayInk(channel), { timeout: 10_000 }).toBeGreaterThan(0);
   });
@@ -341,44 +375,62 @@ test.describe('a deployed build with the test feed on channel 0', () => {
     page,
     request,
   }) => {
+    // vf's peers on channel 0, as their browsers report them every second (Inv §2c).
+    const channel0Peers = async () => {
+      const response = await request.get('/api/egress/stats');
+      const stats = (await response.json()) as {
+        channels: {
+          channel: number;
+          peers: {
+            id: number;
+            browser?: { synchronization?: { timestamp_matches?: number } };
+          }[];
+        }[];
+      };
+      return stats.channels.find((entry) => entry.channel === 0)?.peers ?? [];
+    };
+    // Another Viewer open on channel 0 has peers of its own; only this page's count. vf numbers a
+    // channel's peers in order and never reuses a number.
+    const earlier = new Set((await channel0Peers()).map((peer) => peer.id));
+
     await page.goto('/viewer?src=0');
     await expect(videoTile(tile(page, 0))).toHaveAttribute('data-state', 'playing', {
       timeout: 15_000,
     });
 
-    // The browser reports its frame matches to vf every second (Inv §2c), and vf matches the feed's
-    // timestamps only while a viewer is bound to the channel.
-    const timestampMatches = async () => {
-      const response = await request.get('/api/egress/stats');
-      const stats = (await response.json()) as {
-        channels: {
-          channel: number;
-          peers: { browser?: { synchronization?: { timestamp_matches?: number } } }[];
-        }[];
-      };
-      const peers = stats.channels.find((entry) => entry.channel === 0)?.peers ?? [];
-      return Math.max(
+    // vf matches the feed's timestamps only while a viewer is bound to the channel.
+    const timestampMatches = async () =>
+      Math.max(
         0,
-        ...peers.map((peer) => peer.browser?.synchronization?.timestamp_matches ?? 0),
+        ...(await channel0Peers())
+          .filter((peer) => !earlier.has(peer.id))
+          .map((peer) => peer.browser?.synchronization?.timestamp_matches ?? 0),
       );
-    };
     await expect.poll(timestampMatches, { timeout: 10_000 }).toBeGreaterThan(0);
   });
 
   test('stopping the feed turns the tile "stopped" within 3 s; restarting plays again without reload', async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.goto('/viewer?src=0');
     const kitTile = videoTile(tile(page, 0));
     await expect(kitTile).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
 
-    stopFeed();
+    const log = testInfo.outputPath('vf-test-feed.log');
+    // The feed comes back whatever happens here: the next run needs it as this one found it.
     try {
+      stopFeed();
       await expect(kitTile).toHaveAttribute('data-state', 'stopped', { timeout: 3000 });
     } finally {
-      startFeed();
+      await startFeed(log);
     }
-    await expect(kitTile).toHaveAttribute('data-state', 'playing', { timeout: 20_000 });
-    await expect(tile(page, 0)).toContainText('H.264 · 640×480 · 15', { timeout: 10_000 });
+    try {
+      await expect(kitTile).toHaveAttribute('data-state', 'playing', { timeout: 20_000 });
+    } catch (error) {
+      // Why the restarted feed did not play, if the script said: it runs detached.
+      console.error(`vf-test-feed.sh output:\n${readFileSync(log, 'utf8')}`);
+      throw error;
+    }
+    await expect(tile(page, 0)).toContainText(FEED_STATUS, { timeout: 10_000 });
   });
 });

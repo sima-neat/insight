@@ -43,6 +43,20 @@ class ParseRtpTests(unittest.TestCase):
         self.assertIsNone(feed.parse_rtp(b"\x40" + rtp_header(6000)[1:]))  # version 1
 
 
+class FrameEndTests(unittest.TestCase):
+    """Which relayed packets end a video frame, and so get that frame's metadata."""
+
+    def test_the_marker_packet_of_the_video_ends_its_frame(self):
+        self.assertEqual(feed.frame_end(rtp_header(123_456, marker=True)), 123_456)
+
+    def test_other_packets_end_nothing(self):
+        self.assertIsNone(feed.frame_end(rtp_header(123_456, marker=False)))
+        # A marker on another payload type is not the H.264 stream's frame boundary.
+        self.assertIsNone(feed.frame_end(rtp_header(123_456, marker=True, payload_type=97)))
+        self.assertIsNone(feed.frame_end(b"\x40" + rtp_header(123_456, marker=True)[1:]))
+        self.assertIsNone(feed.frame_end(b""))
+
+
 class DetectionMessageTests(unittest.TestCase):
     def test_timestamp_is_whole_ms_that_vf_matches_to_the_frame(self):
         for rtp_timestamp in (0, 89, 90, 6000, 1_234_567_891, 0xFFFFFFFF - 89, 0xFFFFFFFF):
@@ -114,6 +128,8 @@ class FeedTests(unittest.TestCase):
                     except BlockingIOError:
                         break
                     if sock is video:
+                        # As the muxer was told: vf reads one RTP packet per datagram.
+                        self.assertLessEqual(len(data), 1200)
                         packet = feed.parse_rtp(data)
                         self.assertIsNotNone(packet)
                         self.assertEqual(packet.payload_type, 96)

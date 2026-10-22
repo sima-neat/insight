@@ -24,7 +24,7 @@ Usage:
   scripts/vf-test-feed.sh <channel> [--metadata-delay-ms <ms>]   runs until Ctrl-C
   scripts/vf-test-feed.sh stop [<channel>]                       stops that channel's feed, or all
 EOF
-  exit 2
+  exit "${1:-2}"
 }
 
 die() {
@@ -65,33 +65,40 @@ stop_feeds() {
   die "the feed did not stop within 5 s"
 }
 
+# The arguments first: help and mistakes get their answer without a container.
+case "${1:-}" in
+  -h | --help) usage 0 ;;
+  '') usage ;;
+  stop)
+    [[ $# -le 2 ]] || usage
+    action=stop
+    channel=
+    if [[ -n "${2:-}" ]]; then channel=$(channel_number "$2"); fi
+    ;;
+  *)
+    action=start
+    channel=$(channel_number "$1")
+    ;;
+esac
+shift # what follows the channel goes to the sender
+
 CONTAINER=${INSIGHT_SDK_CONTAINER:-$(docker ps --format '{{.Names}}' | grep -m1 'sima-neat-sdk' || true)}
 [[ -n "$CONTAINER" ]] || die "SDK container not running (set INSIGHT_SDK_CONTAINER to pick one)"
 
-case "${1:-}" in
-  stop)
-    [[ $# -le 2 ]] || usage
-    channel=
-    if [[ -n "${2:-}" ]]; then channel=$(channel_number "$2"); fi
-    stop_feeds "$channel"
-    ;;
-  '' | -h | --help)
-    usage
-    ;;
-  *)
-    channel=$(channel_number "$1")
-    shift
-    # Two senders on one port would interleave two streams into garbage.
-    if docker exec "$CONTAINER" pgrep -f "$(feed_pattern "$channel")" >/dev/null; then
-      die "a feed already runs on channel $channel (scripts/vf-test-feed.sh stop $channel)"
-    fi
-    docker exec "$CONTAINER" mkdir -p "$REMOTE_DIR"
-    docker cp --quiet "$SCRIPT_DIR/$SENDER" "$CONTAINER:$REMOTE_SENDER"
-    # docker exec passes no signal into the container, so Ctrl-C stops the sender the way `stop`
-    # does. The client runs in the background because bash runs a trap only once its foreground
-    # command has ended, and with the sender gone the client ends too.
-    trap 'stop_feeds "$channel"; wait' INT TERM HUP
-    docker exec "$CONTAINER" python3 "$REMOTE_SENDER" "$channel" "$@" &
-    wait $! || exit $?
-    ;;
-esac
+if [[ "$action" == stop ]]; then
+  stop_feeds "$channel"
+  exit
+fi
+
+# Two senders on one port would interleave two streams into garbage.
+if docker exec "$CONTAINER" pgrep -f "$(feed_pattern "$channel")" >/dev/null; then
+  die "a feed already runs on channel $channel (scripts/vf-test-feed.sh stop $channel)"
+fi
+docker exec "$CONTAINER" mkdir -p "$REMOTE_DIR"
+docker cp --quiet "$SCRIPT_DIR/$SENDER" "$CONTAINER:$REMOTE_SENDER"
+# docker exec passes no signal into the container, so Ctrl-C stops the sender the way `stop` does.
+# The client runs in the background because bash runs a trap only once its foreground command has
+# ended, and with the sender gone the client ends too.
+trap 'stop_feeds "$channel"; wait' INT TERM HUP
+docker exec "$CONTAINER" python3 "$REMOTE_SENDER" "$channel" "$@" &
+wait $! || exit $?

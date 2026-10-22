@@ -86,8 +86,9 @@ merging.
   at 700 kB, as in the kit showcase, because the kit's shell with Angular's router already brings
   the placeholder app to about 490 kB raw; the 1 MB error ceiling stays. (`angular.json` cannot
   hold comments, so the reason lives here.)
-- **The Viewer** has three layers. The kit draws and knows nothing of vf: `neat-video-tile` plays a
-  `NeatTileSource` and draws its metadata on the matching frames; `neat-tile-grid` packs the tiles.
+- **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`) draws
+  and knows nothing of vf: `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the
+  matching frames; `neat-tile-grid` packs the tiles.
   The app connects, in `src/app/viewer/`: `vf/` (a `VfConnection` per channel, via `/api/vf/offer`),
   `settings/` (overlay settings, layout choices), `viewer-tile.ts` (joins both to a kit tile) and
   `inspector/`. The page, `src/app/pages/viewer/`, owns them while shown: channels, paging, toolbar.

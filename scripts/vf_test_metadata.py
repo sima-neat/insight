@@ -64,6 +64,14 @@ def parse_rtp(datagram: bytes) -> Optional[RtpPacket]:
     )
 
 
+def frame_end(datagram: bytes) -> Optional[int]:
+    """The RTP timestamp of the video frame this packet ends (its marker packet), or None."""
+    packet = parse_rtp(datagram)
+    if packet is None or packet.payload_type != PAYLOAD_TYPE or not packet.marker:
+        return None
+    return packet.timestamp
+
+
 def square_x(seconds: float) -> float:
     return (WIDTH - SQUARE) * abs((seconds / 2) % 2 - 1)
 
@@ -74,6 +82,10 @@ def detection_message(rtp_timestamp: int, first_timestamp: int) -> dict:
     `first_timestamp` is the stream's first RTP timestamp, the frame at t = 0, from which the
     frame's time in the video follows.
     """
+    # Modulo 2^32 ticks, so the time survives the RTP timestamp's wrap. After 2^32 ticks of feed
+    # (about 13 h 15 min) it restarts at 0 while ffmpeg's t runs on: the box then sweeps out of
+    # phase with the square and frame_id starts again from 0, until the feed is restarted. The
+    # `timestamp`, and so vf's matching, does not depend on it.
     seconds = ((rtp_timestamp - first_timestamp) & 0xFFFFFFFF) / RTP_CLOCK_RATE
     # The overlay filter places the square at whole (even) pixels; the margin covers the rounding.
     x = round(square_x(seconds))
@@ -143,12 +155,12 @@ def run_feed(video_address, metadata_address, metadata_delay_s: float, stop: thr
             except socket.timeout:
                 continue
             sender.sendto(datagram, video_address)
-            packet = parse_rtp(datagram)
-            if packet is None or not packet.marker:
+            timestamp = frame_end(datagram)
+            if timestamp is None:
                 continue
             if first_timestamp is None:
-                first_timestamp = packet.timestamp
-            message = encode_message(detection_message(packet.timestamp, first_timestamp))
+                first_timestamp = timestamp
+            message = encode_message(detection_message(timestamp, first_timestamp))
             held.append((time.monotonic() + metadata_delay_s, message))
         return 0
     finally:
