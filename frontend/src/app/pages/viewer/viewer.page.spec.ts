@@ -609,15 +609,67 @@ describe('ViewerPage', () => {
     expect(pageInput().value).toBe('4');
   });
 
-  it('a remembered position the link no longer shows falls back to the first page, nothing selected', async () => {
+  it('a link with another src starts on the first page with nothing selected, even for a shared channel', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(channelInput(), '10');
+    expect(shown()).toEqual(range(6, 6));
+
+    // The same 16 channels in reverse: 6 and 10 are in it too, but this is another view.
+    await leaveAndReturn(`/viewer?src=${range(16).reverse().join(',')}`);
+
+    expect(shown()).toEqual([15, 14, 13, 12, 11, 10]);
+    expect(pageInput().value).toBe('1');
+    expect(page().selectedChannel()).toBeNull();
+  });
+
+  it('the same src restores the position and selection', async () => {
+    sixPerPage();
+    const url = `/viewer?src=${range(16).reverse().join(',')}`;
+    await open(url);
+    await enter(channelInput(), '4');
+    expect(shown()).toEqual([9, 8, 7, 6, 5, 4]);
+
+    await leaveAndReturn(url);
+
+    expect(shown()).toEqual([9, 8, 7, 6, 5, 4]);
+    expect(page().selectedChannel()).toBe(4);
+  });
+
+  it('a link with another max_channels starts on the first page with nothing selected', async () => {
+    storage.seed({ layout: { tileWidths: { 16: 300, 12: 300 } } });
+    await open('/viewer?max_channels=16');
+    await enter(channelInput(), '10');
+    expect(shown()).toEqual(range(6, 6));
+
+    await leaveAndReturn('/viewer?max_channels=12');
+
+    expect(shown()).toEqual(range(6));
+    expect(page().selectedChannel()).toBeNull();
+  });
+
+  it('a selection the link changed in place no longer holds is dropped', async () => {
     sixPerPage();
     await open('/viewer');
     await enter(channelInput(), '10');
 
-    await leaveAndReturn('/viewer?src=0,1,2,3');
+    await navigate('/viewer?src=0,1,2,3');
 
     expect(shown()).toEqual([0, 1, 2, 3]);
-    expect(pageInput().value).toBe('1');
     expect(page().selectedChannel()).toBeNull();
+  });
+
+  it('once the user pages on a restored Viewer, the remembered channel no longer holds the page', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(pageInput(), '3');
+    await leaveAndReturn('/viewer');
+    expect(shown()).toEqual([12, 13, 14, 15]);
+
+    await click(button('Previous page'));
+    expect(shown()).toEqual(range(6, 6));
+    // Four tiles per page: the second page as usual, not a jump back to channel 12's page.
+    await resize(700, 400);
+    expect(shown()).toEqual([4, 5, 6, 7]);
   });
 });

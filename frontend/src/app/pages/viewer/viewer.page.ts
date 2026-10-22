@@ -164,7 +164,8 @@ export class ViewerPage {
    * What the grid shows. While the first answer is awaited it keeps what it showed: on load that is
    * nothing, so no connection is opened per slot only to be closed a moment later, and after
    * switching "Hide empty" on mid-session the tiles stay, so the live ones keep their connections
-   * instead of negotiating new ones when the answer comes.
+   * instead of negotiating new ones when the answer comes. A link changed in place during that wait
+   * (another `src` or limit) also keeps the old channels until the answer; the wait is one request.
    */
   private readonly channels = linkedSignal<readonly number[] | null, readonly number[]>({
     source: this.knownChannels,
@@ -179,7 +180,7 @@ export class ViewerPage {
     () => this.prefs.hideEmpty() && this.liveness.unavailable(),
   );
 
-  protected readonly state = new ViewerState(this.channels, this.session.lastVisit.position);
+  protected readonly state = new ViewerState(this.channels, this.session.startFor(this.params()));
   /** The channel the inspector shows; null for all channels. */
   readonly selectedChannel = this.state.selected.asReadonly();
   /** The inspector's open tab: the late chip opens General, where the raise actions are. */
@@ -256,8 +257,9 @@ export class ViewerPage {
       untracked(() => this.liveness.setEnabled(hideEmpty));
     });
     effect(() => {
-      // Only the link's channels can be selected; one remembered from a visit with another link
-      // (or a link changed in place) is dropped rather than inspected off the grid.
+      // Only the link's channels can be selected; after the link changes in place (or the SDK's
+      // limit was lowered since the visit a selection is remembered from) it is dropped rather
+      // than inspected off the grid.
       const configured = this.configured();
       if (configured === null) return;
       untracked(() => {
@@ -372,8 +374,11 @@ export class ViewerPage {
 
   /** Hands where the user is to the next visit. */
   private rememberVisit(): void {
-    const previous = this.session.lastVisit.position;
+    const { src, maxChannels } = this.params();
+    const link = { src, maxChannels };
+    const previous = this.session.startFor(link);
     this.session.lastVisit = {
+      link,
       position: {
         // A visit that left before showing any channel (the limit or the first ingest stats
         // answer still pending, no live channel) did not move from where the last one was.

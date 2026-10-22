@@ -92,8 +92,8 @@ merging.
   The app connects, in `src/app/viewer/`: `vf/` (a `VfConnection` per channel, via `/api/vf/offer`),
   `settings/` (overlay settings, layout choices), `viewer-tile.ts` (joins both to a kit tile) and
   `inspector/`. The page, `src/app/pages/viewer/`, owns them while shown: channels, paging, toolbar.
-  Leaving it closes every connection; `viewer-session.ts` (root-provided) keeps its page,
-  selection and inspector tab for the next visit.
+  Leaving it closes every connection; `viewer-session.ts` (root-provided) keeps its page and
+  selection for the next visit to the same link, and its inspector tab for any.
 - **Unit tests** use the Angular CLI's runner (Vitest); end-to-end tests use Playwright
   (`frontend/e2e`).
 
