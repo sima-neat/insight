@@ -68,6 +68,8 @@ jobs:
   docs-translations:
     name: Check documentation translations
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
