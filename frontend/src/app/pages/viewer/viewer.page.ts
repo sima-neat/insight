@@ -11,6 +11,5 @@ import { NeatPage } from '@sima/neat-ui';
       <p>The Viewer arrives with plan 2.</p>
     </neat-page>
   `,
-  styleUrl: './viewer.page.css',
 })
 export class ViewerPage {}

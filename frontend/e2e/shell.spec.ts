@@ -88,7 +88,9 @@ test.describe('kiosk mode', () => {
     await expect(exitKiosk(page)).toBeVisible();
   });
 
-  test('the top bar button enters kiosk and moves focus to exit', async ({ page }) => {
+  test('the top bar button enters kiosk and moves focus to exit, and back on leaving', async ({
+    page,
+  }) => {
     await page.goto('/media');
     await page.getByRole('button', { name: 'Kiosk mode' }).click();
 
@@ -99,6 +101,8 @@ test.describe('kiosk mode', () => {
     await page.keyboard.press('Enter');
     await expect(nav(page)).toBeVisible();
     await expect(railItem(page, 'Media')).toHaveAttribute('aria-current', 'page');
+    // The exit control is gone; focus returns to where kiosk mode was entered, not to <body>.
+    await expect(page.getByRole('button', { name: 'Kiosk mode' })).toBeFocused();
   });
 });
 
@@ -157,6 +161,18 @@ test('the kit font loads', async ({ page }) => {
   expect(faces).toContain('loaded');
   expect(faces).not.toContain('error');
   expect(await page.evaluate(() => document.fonts.check('16px Roboto'))).toBe(true);
+});
+
+test('a page keeps the kit page inset from the content area', async ({ page }) => {
+  await page.goto('/media');
+  const text = page.getByText('Media arrives with plan 3.');
+  await expect(text).toBeVisible();
+
+  // neat-page pads by default with --neat-space-6, Tailwind's spacing 6: 1.5rem, 24 px here.
+  const content = (await page.getByRole('main').boundingBox())!;
+  const box = (await text.boundingBox())!;
+  expect(box.x - content.x).toBeCloseTo(24, 0);
+  expect(box.y - content.y).toBeCloseTo(24, 0);
 });
 
 test('collapsed rail items are at least 40 px wide and tall', async ({ page }) => {

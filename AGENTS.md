@@ -41,8 +41,11 @@ Why: tokens are what make light and dark work and keep later rebranding a kit ch
 (deep selectors, `!important`, hard-coded colours) silently break in one theme or after a kit
 update. There are no colour literals (hex, `rgb()`, `hsl()`) in the app; Stylelint enforces this
 on every component stylesheet. The app has no Tailwind setup of its own, so utility classes in app
-templates do nothing reliable. Escape hatch: a look that tokens and inputs cannot reach is a kit
-gap; raise it as a kit change.
+templates do nothing reliable. Besides the colours and `--radius`, the kit stylesheet defines a
+short layout set: `--neat-space-2`, `--neat-space-3`, `--neat-space-4`, `--neat-space-6` (0.5,
+0.75, 1 and 1.5rem) for gaps and insets, and `--neat-text-xs`, `--neat-text-sm` (0.75 and
+0.875rem); use them instead of literal sizes. Escape hatch: a look that tokens and inputs cannot
+reach is a kit gap; raise it as a kit change.
 
 **Component styles live in a `.css` file next to the component, referenced with `styleUrl`, and
 never `@import` anything.**
@@ -56,8 +59,10 @@ stylesheet.
 **Pages fill the content area the shell gives them and own at most one scroll context.**
 Why: nested scroll containers and hard-coded sizes break on other screens and in kiosk mode, where
 the rail and top bar are gone. Wrap each page in `<neat-page>` and never measure or hard-code the
-shell's size. Escape hatch: a page that needs more than one independently scrolling region is a kit
-change, so the layout becomes a supported component.
+shell's size. `neat-page` also gives the page its inset (`padding="page"`, the default), so pages
+add no padding of their own; full-bleed content such as the Viewer's grid uses `padding="none"`.
+Escape hatch: a page that needs more than one independently scrolling region is a kit change, so
+the layout becomes a supported component.
 
 **Raw browser APIs used for performance stay isolated, outside change detection, with tests.**
 WebRTC, video, canvas and Web Audio are fine where performance needs them. Why: such code is fast

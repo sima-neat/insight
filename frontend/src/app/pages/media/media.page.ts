@@ -11,6 +11,5 @@ import { NeatPage } from '@sima/neat-ui';
       <p>Media arrives with plan 3.</p>
     </neat-page>
   `,
-  styleUrl: './media.page.css',
 })
 export class MediaPage {}

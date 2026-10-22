@@ -11,6 +11,5 @@ import { NeatPage } from '@sima/neat-ui';
       <p>Peripherals arrive with plan 4.</p>
     </neat-page>
   `,
-  styleUrl: './peripherals.page.css',
 })
 export class PeripheralsPage {}

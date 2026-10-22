@@ -11,6 +11,5 @@ import { NeatPage } from '@sima/neat-ui';
       <p>Stats arrive with plan 5.</p>
     </neat-page>
   `,
-  styleUrl: './stats.page.css',
 })
 export class StatsPage {}
