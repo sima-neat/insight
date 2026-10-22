@@ -2,6 +2,7 @@ import argparse
 import atexit
 import base64
 import hashlib
+import http.client
 import ipaddress
 import json
 import logging
@@ -187,7 +188,13 @@ def _resolve_frontend_dist() -> Path:
 
 FRONTEND_DIST = _resolve_frontend_dist()
 VIEWER_CHANNEL_COUNT = 80
-DEFAULT_VIDEO_UI_PORT = 8081
+# vf listens on 8081 inside the container. Flask reaches it there, never through the host port the SDK may remap.
+VF_BASE_URL = "https://127.0.0.1:8081"
+VF_STATS_TIMEOUT_SECONDS = 2.0
+# vf answers an offer only after ICE gathering completes, which grows with the number of interfaces.
+VF_OFFER_TIMEOUT_SECONDS = 8.0
+# An SDP offer is a few KiB; vf itself enforces no limit.
+VF_OFFER_MAX_BYTES = 64 * 1024
 
 app = Flask(__name__)
 app.register_blueprint(api_docs_bp)
@@ -690,6 +697,17 @@ def egress_stats():
     return _proxy_vf_stats("/egress/stats", "vf egress stats")
 
 
+def _open_vf(path: str, timeout: float, data: Optional[bytes] = None):
+    """Open ``path`` on vf, as a POST of ``data`` (JSON) when given, and return the response.
+
+    vf presents Insight's own certificate, whose subjects need not include 127.0.0.1, so the connection is
+    not verified; it never leaves the container.
+    """
+    headers = {"Content-Type": "application/json"} if data is not None else {}
+    vf_request = urllib.request.Request(f"{VF_BASE_URL}{path}", data=data, headers=headers)
+    return urllib.request.urlopen(vf_request, timeout=timeout, context=ssl._create_unverified_context())
+
+
 def _proxy_vf_stats(path: str, label: str):
     query = urllib.parse.urlencode(
         {
@@ -698,17 +716,52 @@ def _proxy_vf_stats(path: str, label: str):
             if key in request.args
         }
     )
-    url = f"https://127.0.0.1:8081{path}"
     if query:
-        url = f"{url}?{query}"
+        path = f"{path}?{query}"
 
     try:
-        context = ssl._create_unverified_context()
-        with urllib.request.urlopen(url, timeout=2.0, context=context) as response:
+        with _open_vf(path, VF_STATS_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return jsonify(payload)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
         return _json_error(f"{label} unavailable: {exc}", 502)
+
+
+def _text_response(text: str, status: int):
+    return Response(f"{text}\n", status=status, mimetype="text/plain")
+
+
+# API: relay a browser's WebRTC offer to vf so the viewer needs only Flask's origin.
+@app.post("/api/vf/offer")
+def vf_offer():
+    """Forward the JSON offer for ``channel`` (0-79) to vf and return vf's answer with its status code unchanged.
+
+    The viewer retries 5xx and no-status failures but treats any 4xx as permanent, so vf's own codes
+    pass through as they are and only this proxy's own failures to reach vf become 502 or 504.
+    """
+    channel = request.args.get("channel", "")
+    # str.isdigit() accepts non-ASCII digits that int() would turn into a channel too.
+    if not (channel.isascii() and channel.isdigit() and int(channel) < VIEWER_CHANNEL_COUNT):
+        return _text_response(f"Invalid channel index: expected 0-{VIEWER_CHANNEL_COUNT - 1}", 400)
+    too_large = _text_response(f"Offer larger than {VF_OFFER_MAX_BYTES // 1024} KiB", 413)
+    if request.content_length is not None and request.content_length > VF_OFFER_MAX_BYTES:
+        return too_large
+    # A body without Content-Length (chunked) is only known to be small once read, so read one byte past the limit.
+    offer = request.stream.read(VF_OFFER_MAX_BYTES + 1)
+    if len(offer) > VF_OFFER_MAX_BYTES:
+        return too_large
+
+    try:
+        with _open_vf(f"/offer?channel={int(channel)}", VF_OFFER_TIMEOUT_SECONDS, data=offer) as answer:
+            return Response(answer.read(), status=answer.status, content_type=answer.headers.get("Content-Type"))
+    except urllib.error.HTTPError as exc:
+        # vf's own refusal (http.Error): its status and text are the contract.
+        return Response(exc.read(), status=exc.code, content_type=exc.headers.get("Content-Type"))
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+        reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+        if isinstance(reason, TimeoutError):
+            return _text_response(f"vf did not answer within {VF_OFFER_TIMEOUT_SECONDS:g} s", 504)
+        return _text_response(f"vf unavailable: {reason}", 502)
 
 
 def _is_streamable_media(name: str) -> bool:
@@ -1045,10 +1098,6 @@ def _find_exposed_port(ports, name, protocol=None):
     return None
 
 
-def _resolve_video_ui_port():
-    return _find_exposed_port(_read_exposed_ports_from_port_map(), "videoUI", "tcp") or DEFAULT_VIDEO_UI_PORT
-
-
 def _resolve_webssh_host_port():
     return _find_exposed_port(_read_exposed_ports_from_port_map(), "webSSH", "tcp") or get_webssh_port()
 
@@ -1077,7 +1126,7 @@ def _resolve_webcam_whip_port():
 
     In the SDK the WHIP listener is republished on the host, potentially on a
     different port, so prefer the port map over the container-internal default
-    for the same reason _resolve_video_ui_port() does.
+    for the same reason _resolve_webssh_host_port() does.
     """
     return _find_exposed_port(_read_exposed_ports_from_port_map(), WEBCAM_WHIP_PORT_MAP_NAME, "tcp") or WEBCAM_WHIP_PORT
 
@@ -4208,20 +4257,21 @@ def server_ip():
     return {"ip": get_lan_ip()}
 
 
-# API: build a vf viewer URL for the requested source selection.
+# API: build the URL of the viewer page for the requested source selection.
 @app.get("/api/viewer-url")
 def viewer_url():
-    """Accept query args mode and src; return the browser-reachable HTTPS vf viewer URL."""
-    mode = request.args.get("mode", "light")
+    """Accept query args mode and src; return the URL of the /viewer page on the origin the browser reached us on."""
     max_channels, limit_source, sdk_limited = _resolve_video_channel_capacity()
     channels = _sanitize_viewer_sources(request.args.get("src"), max_channels)
     src = ",".join(str(channel) for channel in channels)
-    host_ip = _request_host_name()
-    viewer_port = _resolve_video_ui_port()
-    query = urllib.parse.urlencode({"mode": mode, "src": src, "max_channels": max_channels})
-    public_url = _format_public_http_url("/static/viewer.html", query)
+    params = {"src": src, "max_channels": max_channels}
+    # An unknown mode is left out so the page applies its own theme, rather than carrying a value it would ignore.
+    mode = request.args.get("mode", "light")
+    if mode in ("light", "dark"):
+        params = {"mode": mode, **params}
+    query = urllib.parse.urlencode(params)
     return {
-        "url": public_url or _format_browser_https_url(host_ip, viewer_port, "/static/viewer.html", query),
+        "url": _format_public_http_url("/viewer", query) or f"{request.host_url}viewer?{query}",
         "max_video_channels": max_channels,
         "channel_limit_source": limit_source,
         "sdk_channel_limited": sdk_limited,

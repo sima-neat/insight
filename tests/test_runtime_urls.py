@@ -41,8 +41,11 @@ class RuntimePublicUrlTests(unittest.TestCase):
         url = response.get_json()["url"]
         parsed = urllib.parse.urlsplit(url)
         self.assertEqual(f"{parsed.scheme}://{parsed.netloc}", "https://insight.example.com")
-        self.assertEqual(parsed.path, "/static/viewer.html")
-        self.assertEqual(urllib.parse.parse_qs(parsed.query)["src"], ["0,1"])
+        self.assertEqual(parsed.path, "/viewer")
+        self.assertEqual(
+            urllib.parse.parse_qs(parsed.query),
+            {"mode": ["dark"], "src": ["0,1"], "max_channels": ["4"]},
+        )
 
     def test_whip_and_mjpeg_use_the_public_origin_but_rtsp_does_not(self):
         with mock.patch.object(app_module, "runtime_network_config", self.config), \

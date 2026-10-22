@@ -23,7 +23,9 @@ class ViewerUrlTests(unittest.TestCase):
         no_board.start()
         self.addCleanup(no_board.stop)
 
-    def test_viewer_url_uses_video_ui_port_from_port_map(self):
+    def test_viewer_url_points_at_the_flask_viewer_route(self):
+        # The viewer is a route of this app now, so its URL is the page's own origin. The vf video port, which the
+        # port map still advertises, no longer takes part.
         ports = [
             {"name": "mainUI", "hostPortStart": 19900, "protocol": "tcp"},
             {"name": "videoUI", "hostPortStart": 18081, "protocol": "tcp"},
@@ -34,13 +36,36 @@ class ViewerUrlTests(unittest.TestCase):
         with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports), \
              mock.patch.object(app_module, "_read_neat_port_map", return_value={}), \
              mock.patch.object(app_module, "is_sima_board", return_value=False):
-            response = self.client.get("/api/viewer-url?mode=dark&src=0,1", headers={"Host": "192.168.1.25:19900"})
+            response = self.client.get("/api/viewer-url?mode=dark&src=0,1", base_url="https://192.168.1.25:19900")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.get_json()["url"],
-            "https://192.168.1.25:18081/static/viewer.html?mode=dark&src=0%2C1&max_channels=80",
+            "https://192.168.1.25:19900/viewer?mode=dark&src=0%2C1&max_channels=80",
         )
+
+    def test_viewer_url_defaults_to_light_mode(self):
+        response = self.client.get("/api/viewer-url", base_url="https://developer.local:9900")
+
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(response.get_json()["url"]).query)
+        self.assertEqual(query["mode"], ["light"])
+
+    def test_viewer_url_drops_an_invalid_mode(self):
+        for mode in ("", "solarized", "DARK", "dark%20", "dark,light"):
+            with self.subTest(mode=mode):
+                response = self.client.get(
+                    f"/api/viewer-url?mode={mode}&src=1", base_url="https://developer.local:9900"
+                )
+                url = urllib.parse.urlsplit(response.get_json()["url"])
+                self.assertEqual(url.path, "/viewer")
+                self.assertEqual(
+                    urllib.parse.parse_qs(url.query), {"src": ["1"], "max_channels": ["80"]}
+                )
+
+    def test_viewer_url_keeps_the_dark_mode(self):
+        response = self.client.get("/api/viewer-url?mode=dark", base_url="https://developer.local:9900")
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(response.get_json()["url"]).query)
+        self.assertEqual(query["mode"], ["dark"])
 
     def test_sdk_viewer_uses_configured_channel_capacity(self):
         with mock.patch.object(app_module, "is_sima_board", return_value=False), \
@@ -157,45 +182,17 @@ class ViewerUrlTests(unittest.TestCase):
         self.assertEqual(payload["channel_limit_source"], "devkit")
         self.assertFalse(payload["sdk_channel_limited"])
 
-    def test_viewer_url_accepts_nested_video_ui_port_name(self):
-        ports = [
-            {"name": "videoUI.tcp", "hostPortStart": "28081", "protocol": "tcp"},
-        ]
-
-        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports):
-            response = self.client.get("/api/viewer-url", headers={"Host": "developer.local:9900"})
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.get_json()["url"].startswith("https://developer.local:28081/"))
-
     def test_viewer_url_preserves_ipv6_host(self):
-        ports = [
-            {"name": "videoUI", "hostPortStart": 18081, "protocol": "tcp"},
-        ]
-
-        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports):
-            response = self.client.get("/api/viewer-url", headers={"Host": "[fd00::23]:19900"})
+        response = self.client.get("/api/viewer-url", base_url="https://[fd00::23]:19900")
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.get_json()["url"].startswith("https://[fd00::23]:18081/"))
+        self.assertTrue(response.get_json()["url"].startswith("https://[fd00::23]:19900/viewer?"))
 
-    def test_viewer_url_falls_back_to_default_port(self):
-        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=[]):
-            response = self.client.get("/api/viewer-url", headers={"Host": "10.0.0.22:9900"})
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.get_json()["url"].startswith("https://10.0.0.22:8081/"))
-
-    def test_viewer_url_ignores_invalid_video_ui_port(self):
-        ports = [
-            {"name": "videoUI", "hostPortStart": 70000, "protocol": "tcp"},
-        ]
-
-        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports):
-            response = self.client.get("/api/viewer-url", headers={"Host": "10.0.0.22:9900"})
+    def test_viewer_url_follows_the_scheme_and_host_without_a_port(self):
+        response = self.client.get("/api/viewer-url", base_url="http://10.0.0.22")
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.get_json()["url"].startswith("https://10.0.0.22:8081/"))
+        self.assertTrue(response.get_json()["url"].startswith("http://10.0.0.22/viewer?"))
 
     def test_devkit_shell_url_uses_webssh_port_from_port_map(self):
         ports = [
