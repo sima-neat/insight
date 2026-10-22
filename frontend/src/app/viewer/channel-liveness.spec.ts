@@ -118,16 +118,38 @@ describe('ChannelLiveness', () => {
     expect(liveness.live()).toEqual(new Set([2]));
   });
 
-  it('keeps the last known set when a request fails', () => {
+  it('is unavailable while the newest request failed, and available again on the next answer', () => {
     liveness.setEnabled(true);
-    http.expectOne(STATS_URL).flush(stats(1));
+    const badGateway = { status: 502, statusText: 'Bad Gateway' };
+    http.expectOne(STATS_URL).flush({ error: 'vf ingest stats unavailable' }, badGateway);
+    expect(liveness.unavailable()).toBe(true);
+    expect(liveness.live()).toBeNull();
 
     vi.advanceTimersByTime(2000);
-    http
-      .expectOne(STATS_URL)
-      .flush({ error: 'vf ingest stats unavailable' }, { status: 502, statusText: 'Bad Gateway' });
-
+    http.expectOne(STATS_URL).flush(stats(1));
+    expect(liveness.unavailable()).toBe(false);
     expect(liveness.live()).toEqual(new Set([1]));
+
+    // A failure after a good answer: the old answer no longer says what is live.
+    vi.advanceTimersByTime(2000);
+    http.expectOne(STATS_URL).flush({ error: 'vf ingest stats unavailable' }, badGateway);
+    expect(liveness.unavailable()).toBe(true);
+    expect(liveness.live()).toBeNull();
+
+    liveness.setEnabled(false);
+    expect(liveness.unavailable()).toBe(false);
+  });
+
+  it('an older request that fails after a newer answer changes nothing', () => {
+    liveness.setEnabled(true);
+    const first = http.expectOne(STATS_URL);
+    vi.advanceTimersByTime(2000);
+    http.expectOne(STATS_URL).flush(stats(2));
+
+    first.flush({ error: 'timeout' }, { status: 504, statusText: 'Gateway Timeout' });
+
+    expect(liveness.unavailable()).toBe(false);
+    expect(liveness.live()).toEqual(new Set([2]));
   });
 
   it('ignores an answer to a request sent before it was disabled', () => {

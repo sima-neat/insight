@@ -1,15 +1,18 @@
 import { HttpClient } from '@angular/common/http';
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
   DestroyRef,
   effect,
-  type ElementRef,
+  ElementRef,
   inject,
+  Injector,
   signal,
   untracked,
   viewChild,
+  viewChildren,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
@@ -133,13 +136,21 @@ export class ViewerPage {
     return limit === null ? null : parseChannelIndices(this.params().src, limit);
   });
 
-  /** What the grid shows: the configured channels, only the live ones while "Hide empty" is on. */
+  /**
+   * What the grid shows: the configured channels, only the live ones while "Hide empty" is on.
+   * Until it is known which are live (the first answer pending, or ingest stats unavailable)
+   * nothing is hidden: an empty grid would say no channel has video, which nobody knows.
+   */
   private readonly channels = computed<readonly number[]>(() => {
     const configured = this.configured() ?? [];
-    if (!this.prefs.hideEmpty()) return configured;
-    const live = this.liveness.live();
-    return live === null ? [] : configured.filter((channel) => live.has(channel));
+    const live = this.prefs.hideEmpty() ? this.liveness.live() : null;
+    return live === null ? configured : configured.filter((channel) => live.has(channel));
   });
+
+  /** "Hide empty" is on but cannot filter, so the grid shows every channel; the page says why. */
+  protected readonly liveUnknown = computed(
+    () => this.prefs.hideEmpty() && this.liveness.unavailable(),
+  );
 
   protected readonly state = new ViewerState(this.channels);
   /** The channel the inspector shows; null for all channels. */
@@ -180,8 +191,10 @@ export class ViewerPage {
   protected readonly emptyText = computed(() => {
     const configured = this.configured();
     if (configured === null || this.channels().length > 0) return null;
-    if (configured.length === 0) return 'The link selects no channels.';
-    return this.liveness.live() === null ? null : 'No channel is receiving video.';
+    // Channels are only ever hidden by a known live set, so none of them is receiving video.
+    return configured.length === 0
+      ? 'The link selects no channels.'
+      : 'No channel is receiving video.';
   });
 
   protected readonly inspectorTitle = computed(() => {
@@ -190,6 +203,8 @@ export class ViewerPage {
   });
 
   private readonly pageInput = viewChild<ElementRef<HTMLInputElement>>('pageInput');
+  private readonly tiles = viewChildren(ViewerTile, { read: ElementRef<HTMLElement> });
+  private readonly injector = inject(Injector);
 
   constructor() {
     effect(() => {
@@ -232,7 +247,7 @@ export class ViewerPage {
   }
 
   protected jumpToChannel(input: HTMLInputElement): void {
-    if (this.state.jumpToChannel(Number.parseInt(input.value, 10))) input.value = '';
+    this.state.jumpToChannel(Number.parseInt(input.value, 10));
   }
 
   protected toggleInspector(): void {
@@ -264,11 +279,15 @@ export class ViewerPage {
     if (event.target instanceof Element && event.target.closest(OWN_KEYS)) return;
     switch (event.key) {
       case 'ArrowLeft':
-        this.state.previous();
+      case 'ArrowRight': {
+        const page = this.state.page();
+        if (event.key === 'ArrowLeft') this.state.previous();
+        else this.state.next();
+        // The focused tile left with its page; keep keyboard focus in the grid, not on <body>.
+        const fromTile = event.target instanceof Element && event.target.closest('app-viewer-tile');
+        if (fromTile && this.state.page() !== page) this.focusFirstTile();
         break;
-      case 'ArrowRight':
-        this.state.next();
-        break;
+      }
       case 'g': {
         const input = this.pageInput()?.nativeElement;
         if (input === undefined) return;
@@ -282,6 +301,11 @@ export class ViewerPage {
         this.state.clearSelection();
         break;
     }
+  }
+
+  /** Focuses the first tile once the new page has rendered. */
+  private focusFirstTile(): void {
+    afterNextRender(() => this.tiles()[0]?.nativeElement.focus(), { injector: this.injector });
   }
 
   private requestServerLimit(): void {

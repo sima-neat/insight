@@ -78,11 +78,12 @@ describe('ViewerPage', () => {
   });
 
   afterEach(() => {
-    http.verify();
     document.documentElement.classList.remove('neat-dark');
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    // Last, so an unanswered request fails only its own test, not the clean-up for the next.
+    http.verify();
   });
 
   const root = (): HTMLElement => fixture.nativeElement;
@@ -95,6 +96,7 @@ describe('ViewerPage', () => {
     [...toolbar().querySelectorAll<HTMLButtonElement>('button[role="switch"]')].find(
       (element) => element.textContent?.trim() === text,
     )!;
+  const notice = () => root().querySelector('[role="status"]')?.textContent?.trim() ?? '';
   const pageInput = (): HTMLInputElement => toolbar().querySelector('input[aria-label="Page"]')!;
   const channelInput = (): HTMLInputElement =>
     toolbar().querySelector('input[aria-label="Go to channel"]')!;
@@ -130,15 +132,27 @@ describe('ViewerPage', () => {
   }
 
   /** Opens `url` in the shell, answers the channel limit if the page asks, and sizes the grid. */
-  async function open(url: string, { limit = 16, area = [1000, 400] } = {}): Promise<void> {
+  /**
+   * Opens `url` in the shell, answers the channel limit if the page asks, and sizes the grid. With
+   * `area: null` the grid is left unmeasured; with `limit: null` the limit request fails.
+   */
+  async function open(
+    url: string,
+    { limit = 16 as number | null, area = [1000, 400] as [number, number] | null } = {},
+  ): Promise<void> {
     fixture = TestBed.createComponent(Shell);
     await TestBed.inject(Router).navigateByUrl(url);
     await settle();
     if (!url.includes('max_channels=')) {
-      http.expectOne(VIEWER_URL).flush({ url: '', max_video_channels: limit });
+      const request = http.expectOne(VIEWER_URL);
+      if (limit === null) {
+        request.flush({ error: 'unavailable' }, { status: 500, statusText: 'Server Error' });
+      } else {
+        request.flush({ url: '', max_video_channels: limit });
+      }
       await settle();
     }
-    await resize(area[0], area[1]);
+    if (area !== null) await resize(area[0], area[1]);
   }
 
   async function navigate(url: string): Promise<void> {
@@ -147,7 +161,10 @@ describe('ViewerPage', () => {
   }
 
   async function press(key: string, init: KeyboardEventInit = {}, target: EventTarget = window) {
-    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...init }));
+    // Cancelable like a real key press, so a control's preventDefault is seen by the page.
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }),
+    );
     await settle();
   }
 
@@ -294,6 +311,8 @@ describe('ViewerPage', () => {
     await enter(channelInput(), '7');
     expect(shown()).toEqual(range(6, 6));
     expect(page().selectedChannel()).toBe(7);
+    // As in 829ec7c, the field keeps what was typed.
+    expect(channelInput().value).toBe('7');
     await enter(channelInput(), '16');
     expect(shown()).toEqual(range(6, 6));
     expect(page().selectedChannel()).toBe(7);
@@ -319,6 +338,8 @@ describe('ViewerPage', () => {
     await open('/viewer');
 
     await click(toggle('Hide empty'));
+    // Until the first answer nothing is known, so nothing is hidden.
+    expect(shown()).toEqual(range(6));
     http.expectOne(STATS_URL).flush({
       channels: [
         { channel: 2, active: true },
@@ -337,6 +358,68 @@ describe('ViewerPage', () => {
     expect(shown()).toEqual(range(6));
     vi.advanceTimersByTime(10_000);
     http.expectNone(STATS_URL);
+  });
+
+  it('with ingest stats unavailable, hide empty shows every channel and says why', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    storage.seed({ layout: { tileWidths: { 16: 300 }, hideEmpty: true } });
+    await open('/viewer');
+    expect(notice()).toBe('');
+
+    http
+      .expectOne(STATS_URL)
+      .flush({ error: 'vf ingest stats unavailable' }, { status: 502, statusText: 'Bad Gateway' });
+    await settle();
+    expect(shown()).toEqual(range(6));
+    expect(notice()).toBe('Live channels unknown: ingest stats unavailable');
+
+    vi.advanceTimersByTime(2000);
+    http.expectOne(STATS_URL).flush({ channels: [{ channel: 3, active: true }] });
+    await settle();
+    expect(shown()).toEqual([3]);
+    expect(notice()).toBe('');
+  });
+
+  it('arrow keys on the tile shape change the shape, not the page', async () => {
+    sixPerPage();
+    await open('/viewer');
+
+    await press('ArrowRight', {}, toolbar().querySelector('[role="radio"][aria-checked="true"]')!);
+
+    expect(storage.readStored('layout')).toMatchObject({ aspect: '1:1' });
+    expect(pageInput().value).toBe('1');
+  });
+
+  it('falls back to all 80 channels when the channel limit cannot be read', async () => {
+    storage.seed({ layout: { tileWidths: { 80: 300 } } });
+    await open('/viewer', { limit: null });
+
+    expect(shown()).toEqual(range(6));
+    expect(toolbar().textContent).toContain('of 14');
+    expect(channelInput().placeholder).toBe('0–79');
+  });
+
+  it('holds no connection before the grid has measured itself', async () => {
+    await open('/viewer', { area: null });
+
+    expect(shown()).toEqual([]);
+    expect(fake.held()).toEqual([]);
+
+    await resize(1000, 400);
+    expect(fake.held()).toEqual(range(16));
+  });
+
+  it('paging from a focused tile moves focus to the first tile of the new page', async () => {
+    sixPerPage();
+    await open('/viewer');
+    tileElement(2).focus();
+
+    await press('ArrowRight', {}, tileElement(2));
+    expect(shown()).toEqual(range(6, 6));
+    expect(document.activeElement).toBe(tileElement(6));
+
+    await press('ArrowLeft', {}, tileElement(6));
+    expect(document.activeElement).toBe(tileElement(0));
   });
 
   it('bars off hides labels, statuses and chips on every tile', async () => {

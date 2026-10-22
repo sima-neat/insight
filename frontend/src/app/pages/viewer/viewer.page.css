@@ -52,12 +52,36 @@
   width: 4.5rem;
 }
 
-/* Grid. Full-bleed in the page, inset by one tile gap so the outer tiles keep off the edges. */
+/*
+ * Grid. Full-bleed in the page, inset by one tile gap so the outer tiles keep off the edges. A
+ * notice above it takes its height from the grid, which measures its own box and repacks.
+ */
 .grid-area {
   position: relative;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
   height: 100%;
   padding: var(--neat-space-2);
+}
+
+neat-tile-grid {
+  flex: 1 1 0;
+}
+
+/* Always in the DOM, so screen readers hear the text when it appears; empty, it takes no room. */
+.notice {
+  flex: none;
+  margin: 0;
+  font-size: var(--neat-text-sm);
+}
+
+.notice:not(:empty) {
+  margin-block-end: var(--neat-space-2);
+  padding: var(--neat-space-2) var(--neat-space-3);
+  border-radius: var(--radius);
+  background: var(--muted);
+  color: var(--muted-foreground);
 }
 
 .empty {

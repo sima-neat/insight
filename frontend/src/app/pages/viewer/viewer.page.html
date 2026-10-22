@@ -111,6 +111,11 @@
 
 <neat-page scroll="none" padding="none" [aside]="prefs.inspector() ? 'open' : 'closed'">
   <div class="grid-area">
+    <p class="notice" role="status">
+      @if (liveUnknown()) {
+        Live channels unknown: ingest stats unavailable
+      }
+    </p>
     <neat-tile-grid
       [tileWidth]="tileWidth()"
       [aspect]="prefs.aspect()"
