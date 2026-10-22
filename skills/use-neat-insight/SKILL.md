@@ -64,7 +64,7 @@ Example `neat --json` shape:
 Endpoint selection rules:
 
 - Browser or external device opening Insight UI: use `insight.webUiUrl` or `mainUI`.
-- Browser opening Video Viewer: prefer `/api/viewer-url`, because it uses the mapped `videoUI` port.
+- Browser opening the Video Viewer: prefer `/api/viewer-url`, because it returns the `/viewer` page on the origin the browser reached Insight on (or the configured public origin).
 - Application inside the SDK container consuming RTSP sources: use `rtsp://127.0.0.1:8554/srcN`.
 - Application on a DevKit or another external machine consuming RTSP sources from SDK Insight: use `rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/srcN`.
 - Application inside the SDK container sending video or metadata to the viewer: use UDP `9000 + channel` and `9100 + channel`.
@@ -82,7 +82,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Peripherals never captures video: SiMa Sentinel on the board discovers the cameras and microphones (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog; only an explicit camera preview captures video and only an explicit microphone test records audio. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
 - Preview is the only Peripherals operation that touches the sensor, and only while it runs: over the board connection Insight runs `gst-launch-1.0` (`libcamerasrc` for MIPI, `v4l2src` on the `/dev/v4l/by-id` path for USB) that writes multipart JPEG (at most 640 px wide, up to 15 fps) to stdout, and relays it at the session's `stream_url` as `multipart/x-mixed-replace`. It uses no vf channel, UDP port, or PyNeat. Discovery never captures. A failed start carries the pipeline's stderr in `detail`. The session's `camera_fps` is the rate the camera runs at: a USB mode's own rate; for MIPI, Sentinel's `max_fps` from one Sentinel rescan after the first frame (no Insight scan is recorded and the preview keeps running), `null` until then or when Sentinel cannot report it.
 - Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; remote Stats still reads its original `cfg.json` target.
-- Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
+- Use `/api/viewer-url` for viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
 - Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
 - Use `neat-insight-metadata-test` or `neat_insight/tools/multisrc-harness.sh` when vf metadata/DataChannel behavior needs reproducible synthetic traffic.
@@ -457,12 +457,12 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 | `GET` | `/api/envinfo` | Return `is_sima_board` and `is_remote_devkit_configured` frontend flags. |
 | `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
 | `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
-| `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the HTTPS vf viewer URL using the mapped `videoUI` port when the SDK port map is available. |
-| `POST` | `/offer?channel=<N>` | Negotiate a vf viewer connection; returns 503 until supported RTP identifies the channel codec, or 415 when the browser cannot decode it. |
+| `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the URL of Insight's `/viewer` page, with `src` and `max_channels` in its query and `mode` only when it is `light` or `dark`. |
+| `POST` | `/api/vf/offer?channel=<N>` | Relay the browser's JSON WebRTC offer to vf and return vf's answer with its status code and body unchanged (`N` is 0-79, offers up to 64 KiB). `400` for an invalid channel and `413` for an oversized offer are answered without calling vf; `502` means vf is unreachable and `504` that it did not answer within 8 s. vf's own `503` (no codec identified yet) and `415` (browser cannot decode the codec) pass through. |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
-Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL uses the backend request host and the mapped `videoUI` port when available, falling back to `8081`.
+Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL is on the same origin as the request (scheme, host and port as the browser reached Insight), or on the launch-URL public origin when one is configured; it no longer points at the `videoUI` port.
 
 Hosted environments can opt into a separate browser-facing network configuration by writing `/home/docker/.insight-config/browser-ice-address` and/or `/home/docker/.insight-config/launch-url` before restarting Insight. The ICE file supplies one IPv4 address to both vf and MediaMTX; the launch URL supplies the trusted origin for viewer, WHIP, and HTTP MJPEG links. Missing files retain the existing `CONTAINER_HOST_IP` and request-host/port-map behavior. A present invalid browser ICE address prevents readiness. An invalid launch URL logs a warning and preserves the request-host/port-map fallback.
 
@@ -520,8 +520,8 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `500` for local processing or stream startup failures.
 - `502` for unreachable or unreadable remote devkit build information, or an unreachable GenAI Studio board.
 - GenAI Studio relay errors carry a `reason`: `400 bad-request` for an invalid board address, `404 not-relayed`, `502 unreachable`, `503 not-configured` or `invalid-address`, and `500 cfg-unreadable` or `cfg-unwritable` when Insight's `cfg.json` cannot be read (nothing is changed or relayed) or saved.
-- `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
-- `503` from vf `/offer` until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
+- `415` from vf `/offer`, passed through by `/api/vf/offer`, when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
+- `503` from vf `/offer`, passed through by `/api/vf/offer`, until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
 - `502` from `/api/mediasrc/pull` when mediamtx refuses or cannot be reached while configuring the slot.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.

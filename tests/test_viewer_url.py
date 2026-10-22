@@ -44,28 +44,24 @@ class ViewerUrlTests(unittest.TestCase):
             "https://192.168.1.25:19900/viewer?mode=dark&src=0%2C1&max_channels=80",
         )
 
-    def test_viewer_url_defaults_to_light_mode(self):
-        response = self.client.get("/api/viewer-url", base_url="https://developer.local:9900")
-
-        query = urllib.parse.parse_qs(urllib.parse.urlsplit(response.get_json()["url"]).query)
-        self.assertEqual(query["mode"], ["light"])
-
-    def test_viewer_url_drops_an_invalid_mode(self):
-        for mode in ("", "solarized", "DARK", "dark%20", "dark,light"):
+    def test_viewer_url_drops_an_absent_or_invalid_mode(self):
+        # Without a valid mode the page keeps the user's own theme.
+        for mode in (None, "", "solarized", "DARK", "dark%20", "dark,light"):
             with self.subTest(mode=mode):
-                response = self.client.get(
-                    f"/api/viewer-url?mode={mode}&src=1", base_url="https://developer.local:9900"
-                )
+                query = "src=1" if mode is None else f"mode={mode}&src=1"
+                response = self.client.get(f"/api/viewer-url?{query}", base_url="https://developer.local:9900")
                 url = urllib.parse.urlsplit(response.get_json()["url"])
                 self.assertEqual(url.path, "/viewer")
                 self.assertEqual(
                     urllib.parse.parse_qs(url.query), {"src": ["1"], "max_channels": ["80"]}
                 )
 
-    def test_viewer_url_keeps_the_dark_mode(self):
-        response = self.client.get("/api/viewer-url?mode=dark", base_url="https://developer.local:9900")
-        query = urllib.parse.parse_qs(urllib.parse.urlsplit(response.get_json()["url"]).query)
-        self.assertEqual(query["mode"], ["dark"])
+    def test_viewer_url_keeps_a_valid_mode(self):
+        for mode in ("light", "dark"):
+            with self.subTest(mode=mode):
+                response = self.client.get(f"/api/viewer-url?mode={mode}", base_url="https://developer.local:9900")
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(response.get_json()["url"]).query)
+                self.assertEqual(query["mode"], [mode])
 
     def test_sdk_viewer_uses_configured_channel_capacity(self):
         with mock.patch.object(app_module, "is_sima_board", return_value=False), \

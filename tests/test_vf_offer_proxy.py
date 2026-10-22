@@ -27,12 +27,13 @@ def vf_answer(status=200, body=ANSWER, content_type="application/json"):
     return response
 
 
-def vf_error(status, text):
+def vf_error(status, text, content_type="text/plain; charset=utf-8", body=None):
     """What urlopen raises when vf replies 4xx or 5xx through http.Error."""
     headers = Message()
-    headers["Content-Type"] = "text/plain; charset=utf-8"
+    if content_type:
+        headers["Content-Type"] = content_type
     return urllib.error.HTTPError(
-        "https://127.0.0.1:8081/offer", status, text, headers, io.BytesIO(f"{text}\n".encode())
+        "https://127.0.0.1:8081/offer", status, text, headers, body or io.BytesIO(f"{text}\n".encode())
     )
 
 
@@ -51,6 +52,8 @@ class VfOfferProxyTests(unittest.TestCase):
             (vf_error(503, "Video codec not available"), 503, b"Video codec not available\n", "text/plain"),
             (vf_error(415, "Browser does not support the channel codec"), 415,
              b"Browser does not support the channel codec\n", "text/plain"),
+            (vf_error(400, "Invalid SDP offer"), 400, b"Invalid SDP offer\n", "text/plain"),
+            (vf_error(500, "PeerConnection failed"), 500, b"PeerConnection failed\n", "text/plain"),
         )
         for outcome, status, body, mimetype in cases:
             with self.subTest(status=status):
@@ -60,6 +63,20 @@ class VfOfferProxyTests(unittest.TestCase):
                 self.assertEqual(response.status_code, status)
                 self.assertEqual(response.get_data(), body)
                 self.assertEqual(response.mimetype, mimetype)
+
+    def test_offer_proxy_labels_a_vf_error_without_content_type_as_text(self):
+        response = self.post(mock.Mock(side_effect=vf_error(503, "Video codec changed", content_type=None)))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.mimetype, "text/plain")
+        self.assertEqual(response.get_data(), b"Video codec changed\n")
+
+    def test_offer_proxy_maps_a_stall_while_reading_a_vf_error_to_504(self):
+        stalled = mock.Mock()
+        stalled.read.side_effect = TimeoutError("timed out")
+        response = self.post(mock.Mock(side_effect=vf_error(503, "Video codec changed", body=stalled)))
+
+        self.assertEqual(response.status_code, 504)
 
     def test_offer_proxy_forwards_the_offer_byte_for_byte_as_json(self):
         urlopen = mock.Mock(return_value=vf_answer())
@@ -71,7 +88,7 @@ class VfOfferProxyTests(unittest.TestCase):
         self.assertEqual(forwarded.get_header("Content-type"), "application/json")
 
     def test_offer_proxy_rejects_bad_channel_without_calling_vf(self):
-        for channel in ("x", "-1", "80", "", "1.5", "+3", "٣"):
+        for channel in ("x", "-1", "80", "", "1.5", "+3", "٣", "007", "9" * 5000):
             with self.subTest(channel=channel):
                 urlopen = mock.Mock()
                 response = self.post(urlopen, query=f"channel={channel}")

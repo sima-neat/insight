@@ -740,8 +740,9 @@ def vf_offer():
     pass through as they are and only this proxy's own failures to reach vf become 502 or 504.
     """
     channel = request.args.get("channel", "")
-    # str.isdigit() accepts non-ASCII digits that int() would turn into a channel too.
-    if not (channel.isascii() and channel.isdigit() and int(channel) < VIEWER_CHANNEL_COUNT):
+    # At most two ASCII digits: str.isdigit() accepts others that int() would read as a channel, and int() raises
+    # on very long digit strings, which would surface as a retryable 500.
+    if not (re.fullmatch(r"[0-9]{1,2}", channel) and int(channel) < VIEWER_CHANNEL_COUNT):
         return _text_response(f"Invalid channel index: expected 0-{VIEWER_CHANNEL_COUNT - 1}", 400)
     too_large = _text_response(f"Offer larger than {VF_OFFER_MAX_BYTES // 1024} KiB", 413)
     if request.content_length is not None and request.content_length > VF_OFFER_MAX_BYTES:
@@ -752,11 +753,21 @@ def vf_offer():
         return too_large
 
     try:
-        with _open_vf(f"/offer?channel={int(channel)}", VF_OFFER_TIMEOUT_SECONDS, data=offer) as answer:
-            return Response(answer.read(), status=answer.status, content_type=answer.headers.get("Content-Type"))
-    except urllib.error.HTTPError as exc:
-        # vf's own refusal (http.Error): its status and text are the contract.
-        return Response(exc.read(), status=exc.code, content_type=exc.headers.get("Content-Type"))
+        try:
+            with _open_vf(f"/offer?channel={int(channel)}", VF_OFFER_TIMEOUT_SECONDS, data=offer) as answer:
+                return Response(
+                    answer.read(),
+                    status=answer.status,
+                    content_type=answer.headers.get("Content-Type", "application/json"),
+                )
+        except urllib.error.HTTPError as refusal:
+            # vf's own refusal (http.Error): its status and text are the contract. Reading its body is
+            # inside the outer try, so a stall there is a timeout like any other.
+            return Response(
+                refusal.read(),
+                status=refusal.code,
+                content_type=refusal.headers.get("Content-Type", "text/plain; charset=utf-8"),
+            )
     except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
         reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
         if isinstance(reason, TimeoutError):
@@ -4265,8 +4276,8 @@ def viewer_url():
     channels = _sanitize_viewer_sources(request.args.get("src"), max_channels)
     src = ",".join(str(channel) for channel in channels)
     params = {"src": src, "max_channels": max_channels}
-    # An unknown mode is left out so the page applies its own theme, rather than carrying a value it would ignore.
-    mode = request.args.get("mode", "light")
+    # Without a valid mode the page keeps the user's own theme.
+    mode = request.args.get("mode")
     if mode in ("light", "dark"):
         params = {"mode": mode, **params}
     query = urllib.parse.urlencode(params)
