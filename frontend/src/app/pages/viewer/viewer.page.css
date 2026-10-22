@@ -1,0 +1,78 @@
+/*
+ * Toolbar. The shell's toolbar row (or kiosk mode's floating bar) lays the controls out; only their
+ * own sizes are set here. It fits a 1366 px wide top bar beside the page title, and where it does
+ * not (a tablet) the row scrolls sideways, so no control may shrink and wrap its label.
+ */
+
+.toggle {
+  flex: none;
+}
+
+.field-label,
+.field {
+  flex: none;
+  font-size: var(--neat-text-sm);
+  white-space: nowrap;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+/* Set apart from the page field, whose "of N" would otherwise read on into "Channel". */
+.channel-jump {
+  margin-inline-start: var(--neat-space-2);
+}
+
+/* The slider fills its box, so the box sets its width. */
+.size-field {
+  flex: none;
+  display: flex;
+  width: 6rem;
+}
+
+.separator {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin-block: var(--neat-space-3);
+  background: var(--border);
+}
+
+/* The kit's text field fills its box too: room for a page number, or a channel range hint. */
+.number-field {
+  flex: none;
+  display: flex;
+  width: 3rem;
+}
+
+.channel-field {
+  width: 4.5rem;
+}
+
+/* Grid. Full-bleed in the page, inset by one tile gap so the outer tiles keep off the edges. */
+.grid-area {
+  position: relative;
+  box-sizing: border-box;
+  height: 100%;
+  padding: var(--neat-space-2);
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-sm);
+}
+
+.inspector-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+}

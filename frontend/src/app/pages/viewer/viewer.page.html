@@ -1,0 +1,143 @@
+<ng-container *neatPageToolbar>
+  <neat-segmented
+    label="Tile shape"
+    [options]="shapes"
+    [value]="prefs.aspect()"
+    (valueChange)="prefs.setAspect($event)"
+  />
+  <span class="field-label" aria-hidden="true">Size</span>
+  <span class="size-field">
+    <neat-slider
+      label="Tile size"
+      [min]="minTileWidth"
+      [max]="sliderMax()"
+      [step]="1"
+      [value]="tileWidth()"
+      (valueChange)="rememberTileWidth($event)"
+    />
+  </span>
+  <button
+    neatSwitch
+    class="toggle"
+    [checked]="prefs.bars()"
+    (checkedChange)="prefs.setBars($event)"
+  >
+    Bars
+  </button>
+  <button
+    neatSwitch
+    class="toggle"
+    [checked]="prefs.hideEmpty()"
+    (checkedChange)="prefs.setHideEmpty($event)"
+  >
+    Hide empty
+  </button>
+
+  <span class="separator" aria-hidden="true"></span>
+
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    iconOnly
+    aria-label="Previous page"
+    neatTooltip="Previous page"
+    neatTooltipPosition="bottom"
+    [disabled]="state.page() === 0"
+    (click)="state.previous()"
+  >
+    <neat-icon name="previous" />
+  </button>
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    iconOnly
+    aria-label="Next page"
+    neatTooltip="Next page"
+    neatTooltipPosition="bottom"
+    [disabled]="state.page() === state.pageCount() - 1"
+    (click)="state.next()"
+  >
+    <neat-icon name="next" />
+  </button>
+  <label class="field">
+    Page
+    <span class="number-field">
+      <input
+        #pageInput
+        neatInput
+        size="small"
+        inputmode="numeric"
+        aria-label="Page"
+        [value]="state.page() + 1"
+        (keydown.enter)="goToPage(pageInput)"
+        (blur)="showCurrentPage(pageInput)"
+      />
+    </span>
+    of {{ state.pageCount() }}
+  </label>
+  <label class="field channel-jump">
+    Channel
+    <span class="number-field channel-field">
+      <input
+        #channelInput
+        neatInput
+        size="small"
+        inputmode="numeric"
+        aria-label="Go to channel"
+        [placeholder]="channelRange()"
+        (keydown.enter)="jumpToChannel(channelInput)"
+      />
+    </span>
+  </label>
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    iconOnly
+    aria-label="Inspector"
+    neatTooltip="Inspector"
+    neatTooltipPosition="bottom"
+    [attr.aria-pressed]="prefs.inspector()"
+    (click)="toggleInspector()"
+  >
+    <neat-icon name="info" />
+  </button>
+</ng-container>
+
+<neat-page scroll="none" padding="none" [aside]="prefs.inspector() ? 'open' : 'closed'">
+  <div class="grid-area">
+    <neat-tile-grid
+      [tileWidth]="tileWidth()"
+      [aspect]="prefs.aspect()"
+      [gap]="gap"
+      [count]="state.pageChannels().length"
+      (layout)="onLayout($event)"
+    >
+      @for (channel of state.pageChannels(); track channel) {
+        <app-viewer-tile
+          tabindex="0"
+          [channel]="channel"
+          [bars]="prefs.bars()"
+          [selected]="state.selected() === channel"
+          (click)="state.select(channel)"
+          (keydown.enter)="state.select(channel)"
+          (lateNotice)="openLateNotice(channel)"
+        />
+      }
+    </neat-tile-grid>
+    @if (emptyText(); as text) {
+      <p class="empty">{{ text }}</p>
+    }
+  </div>
+
+  @if (prefs.inspector()) {
+    <section neatPageAside class="inspector" aria-labelledby="viewer-inspector-title">
+      <h2 id="viewer-inspector-title" class="inspector-title">{{ inspectorTitle() }}</h2>
+    </section>
+  }
+</neat-page>

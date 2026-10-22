@@ -1,0 +1,35 @@
+/* Fills its grid cell; the kit tile inside fills this box. */
+:host {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+/*
+ * Drawn inside the tile, like the kit's selection ring, because the grid clips whatever reaches
+ * past its cells. An outline paints over the tile's own layers.
+ */
+:host(:focus-visible) {
+  outline: var(--neat-focus-ring-width) solid var(--ring);
+  outline-offset: calc(-1 * var(--neat-focus-ring-width));
+}
+
+/* A chip in the tile's bar, which sets its text size; warning colours as for any warning. */
+.late-chip {
+  flex: none;
+  padding: 0 var(--neat-space-2);
+  border: none;
+  border-radius: var(--radius);
+  background: var(--warning);
+  color: var(--warning-foreground);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.late-chip:focus-visible {
+  outline: var(--neat-focus-ring-width) solid var(--ring);
+  outline-offset: 1px;
+}

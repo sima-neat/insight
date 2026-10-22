@@ -70,7 +70,7 @@ test.describe('kiosk mode', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Viewer' })).toHaveCount(0);
     // The page itself stays.
     await expect(page).toHaveTitle('Neat Insight · Viewer');
-    await expect(page.getByText('The Viewer arrives with plan 2.')).toBeVisible();
+    await expect(page.locator('app-viewer-page neat-tile-grid')).toBeVisible();
 
     await expect.poll(() => renderedOpacity(exitKiosk(page))).toBe(1);
     await page.clock.runFor(3000);
