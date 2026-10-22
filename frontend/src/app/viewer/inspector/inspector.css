@@ -21,11 +21,6 @@
   font-weight: 500;
 }
 
-/* Focused after a late notice action, which removes the button that had focus. */
-.title:focus {
-  outline: none;
-}
-
 /* The kit tile fills the box it is given: a 16:9 one across the panel. */
 .preview {
   flex: none;

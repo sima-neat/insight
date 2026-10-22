@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  type ElementRef,
+  inject,
+  input,
+  viewChild,
+} from '@angular/core';
 import { NeatButton, NeatInput, NeatSlider, NeatSwitch, NeatTooltip } from '@sima/neat-ui';
 import type { BooleanSettingId, NumericSettingId } from '../settings/schema';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
@@ -36,22 +44,32 @@ export interface NumberSetting extends SettingBase {
 
 export type SettingControl = SwitchSetting | NumberSetting;
 
+/** "1 channel", "2 channels". */
+function channelCount(count: number): string {
+  return `${count} ${count === 1 ? 'channel' : 'channels'}`;
+}
+
 /**
  * One setting of the inspector, for one scope. It shows the value in effect there and changes it
  * at once, as the scope's own value: on a channel that is an override, marked "overrides global"
- * with a reset to the global value; on "All channels" it is the global value, and the row says
- * how many channels override it, with a reset of those overrides.
+ * beside the global value, with a reset to it; on "All channels" it is the global value, and the
+ * row says which channels override it, with a reset of those overrides.
+ *
+ * The control is named by `name`, which says where the setting belongs when its label alone does
+ * not (the Metadata tab has a "Show overlay" per type), and it is described by the override note,
+ * so the override state is heard on focus.
  */
 @Component({
   selector: 'app-setting-row',
   imports: [NeatButton, NeatInput, NeatSlider, NeatSwitch, NeatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { role: 'group', '[attr.aria-label]': 'setting().label' },
   template: `
     @if (switchSetting(); as setting) {
       <button
         neatSwitch
         class="switch"
+        [attr.aria-label]="fullName()"
+        [attr.aria-describedby]="describedBy()"
         [checked]="switchValue()"
         [disabled]="disabled()"
         (checkedChange)="store.set(scope(), setting.id, $event)"
@@ -65,8 +83,9 @@ export type SettingControl = SwitchSetting | NumberSetting;
           <span class="label" aria-hidden="true">{{ setting.label }}</span>
           <span class="readout">{{ setting.describe(numberValue()) }}</span>
         </div>
+        <!-- The kit slider cannot take a description yet (a kit gap); its name carries the setting. -->
         <neat-slider
-          [label]="setting.label"
+          [label]="fullName()"
           [min]="setting.min"
           [max]="setting.max"
           [step]="setting.step"
@@ -84,8 +103,10 @@ export type SettingControl = SwitchSetting | NumberSetting;
                 neatInput
                 size="small"
                 type="number"
-                inputmode="decimal"
+                inputmode="numeric"
                 [id]="fieldId()"
+                [attr.aria-label]="fullName()"
+                [attr.aria-describedby]="describedBy()"
                 [min]="setting.min"
                 [max]="setting.max"
                 [step]="setting.step"
@@ -101,12 +122,14 @@ export type SettingControl = SwitchSetting | NumberSetting;
         </div>
       }
       @if (setting.hint) {
-        <p class="hint">{{ setting.hint }}</p>
+        <p class="hint" [id]="hintId()">{{ setting.hint }}</p>
       }
     }
     @if (overrides()) {
-      <p class="scope-note">
-        <span class="marker">overrides global</span>
+      <div class="scope-row">
+        <p class="scope-note" [id]="noteId()">
+          <span class="marker">overrides global</span> · Global: {{ globalText() }}
+        </p>
         <button
           neatButton
           type="button"
@@ -118,15 +141,22 @@ export type SettingControl = SwitchSetting | NumberSetting;
         >
           Reset
         </button>
-      </p>
+      </div>
     }
     @if (overriddenOn().length > 0) {
-      <p class="scope-note">
-        <span>{{ overriddenText() }}</span>
-        <button neatButton type="button" variant="text" size="small" (click)="resetOverrides()">
+      <div class="scope-row">
+        <p class="scope-note" [id]="noteId()">{{ overriddenText() }}</p>
+        <button
+          neatButton
+          type="button"
+          variant="text"
+          size="small"
+          [attr.aria-label]="resetOverridesLabel()"
+          (click)="resetOverrides()"
+        >
           Reset those to global
         </button>
-      </p>
+      </div>
     }
   `,
   styleUrl: './setting-row.css',
@@ -134,9 +164,13 @@ export type SettingControl = SwitchSetting | NumberSetting;
 export class SettingRow {
   readonly scope = input.required<SettingsScope>();
   readonly setting = input.required<SettingControl>();
+  /** The control's accessible name; the setting's label when that says enough. */
+  readonly name = input<string | undefined>(undefined);
 
   protected readonly store = inject(ViewerSettingsStore);
+  private readonly field = viewChild<ElementRef<HTMLInputElement>>('field');
 
+  protected readonly fullName = computed(() => this.name() ?? this.setting().label);
   protected readonly channel = computed(() => {
     const scope = this.scope();
     return scope === 'global' ? null : scope;
@@ -161,34 +195,53 @@ export class SettingRow {
     const requires = this.setting().requires;
     return requires !== undefined && !this.store.value(this.scope(), requires);
   });
-  /** Ids are unique: the Viewer has one inspector, which shows one scope at a time. */
+
+  // Ids are unique: the Viewer has one inspector, which shows one scope at a time.
   protected readonly fieldId = computed(() => `setting-${this.setting().id}`);
+  protected readonly hintId = computed(() => `setting-hint-${this.setting().id}`);
+  protected readonly noteId = computed(() => `setting-note-${this.setting().id}`);
 
   /** This channel holds its own value. */
   protected readonly overrides = computed(() => {
     const channel = this.channel();
     return channel !== null && this.store.isOverride(channel, this.setting().id);
   });
-  protected readonly resetLabel = computed(() => {
+  /** The global value in words: on or off, or as the setting describes its numbers. */
+  protected readonly globalText = computed(() => {
     const switchSetting = this.switchSetting();
-    const numberSetting = this.numberSetting();
-    let global = '';
-    if (switchSetting !== null)
-      global = this.store.value('global', switchSetting.id) ? 'on' : 'off';
-    if (numberSetting !== null) {
-      global = numberSetting.describe(this.store.value('global', numberSetting.id));
-    }
-    return `Reset to the global value, ${global}`;
+    if (switchSetting !== null) return this.store.value('global', switchSetting.id) ? 'on' : 'off';
+    const numberSetting = this.numberSetting()!;
+    return numberSetting.describe(this.store.value('global', numberSetting.id));
   });
+  protected readonly resetLabel = computed(
+    () => `Reset ${this.fullName()} to the global value (${this.globalText()})`,
+  );
 
   /** On "All channels", the channels that hold their own value instead of this one. */
   protected readonly overriddenOn = computed(() =>
     this.scope() === 'global' ? this.store.overridesOf(this.setting().id) : [],
   );
   protected readonly overriddenText = computed(() => {
-    const count = this.overriddenOn().length;
-    return `Overridden on ${count} ${count === 1 ? 'channel' : 'channels'}`;
+    const channels = this.overriddenOn();
+    return `Overridden on ${channelCount(channels.length)}: ${channels.join(', ')}`;
   });
+  protected readonly resetOverridesLabel = computed(
+    () =>
+      `Reset ${this.fullName()} on ${channelCount(this.overriddenOn().length)} to the global value`,
+  );
+
+  /** What the control is described by: its hint and its override note, when it has them. */
+  protected readonly describedBy = computed(() => {
+    const ids: string[] = [];
+    if (this.numberSetting()?.hint) ids.push(this.hintId());
+    if (this.overrides() || this.overriddenOn().length > 0) ids.push(this.noteId());
+    return ids.length > 0 ? ids.join(' ') : null;
+  });
+
+  /** Focuses the number field, as after the late notice changed its value. */
+  focusField(): void {
+    this.field()?.nativeElement.focus();
+  }
 
   /**
    * A number field's entry, as the old dialog's fields took it: held to the control's range, and

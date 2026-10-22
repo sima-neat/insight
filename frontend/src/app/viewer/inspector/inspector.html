@@ -1,5 +1,5 @@
 <header class="header">
-  <h2 #titleHeading id="viewer-inspector-title" class="title" tabindex="-1">{{ title() }}</h2>
+  <h2 id="viewer-inspector-title" class="title">{{ title() }}</h2>
   <button
     neatButton
     type="button"
@@ -23,6 +23,7 @@
       [retentionMs]="preview.retentionMs"
       [channel]="preview.channel"
       [bars]="false"
+      (frameStats)="onPreviewStats($event)"
     />
   </div>
 }
@@ -42,10 +43,14 @@
     <ng-template>
       <div class="panel">
         @for (section of metadataSections; track section.heading) {
-          <section class="section" [attr.aria-label]="section.heading">
+          <section class="section">
             <h3 class="section-title">{{ section.heading }}</h3>
             @for (setting of section.settings; track setting.id) {
-              <app-setting-row [scope]="scope()" [setting]="setting" />
+              <app-setting-row
+                [scope]="scope()"
+                [setting]="setting"
+                [name]="section.heading + ': ' + setting.label"
+              />
             }
             @if (section.note) {
               <p class="note">{{ section.note }}</p>

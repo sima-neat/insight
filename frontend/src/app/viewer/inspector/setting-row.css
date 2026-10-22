@@ -46,7 +46,7 @@
   font-size: var(--neat-text-xs);
 }
 
-.scope-note {
+.scope-row {
   display: flex;
   align-items: center;
   justify-content: space-between;

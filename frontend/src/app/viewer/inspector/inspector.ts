@@ -3,25 +3,24 @@ import {
   Component,
   computed,
   effect,
-  type ElementRef,
   inject,
   input,
   model,
   output,
   signal,
-  untracked,
-  viewChild,
+  viewChildren,
 } from '@angular/core';
 import {
   lateNoticeDetails,
-  type NeatLatenessSnapshot,
   NeatButton,
+  type NeatFrameStats,
   NeatTab,
   NeatTabs,
   NeatTooltip,
   NeatVideoTile,
 } from '@sima/neat-ui';
-import { ChannelLateness } from '../channel-lateness';
+import { ChannelLateness, type LatenessReading } from '../channel-lateness';
+import { followSyncSettings } from '../connection-sync';
 import type { NumericSettingId, SettingTab } from '../settings/schema';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
 import { formatChannelStatus } from '../vf/channel-status';
@@ -166,9 +165,13 @@ const GENERAL_SETTINGS: readonly SettingControl[] = [
   },
 ];
 
-/** The status line's lateness: unknown without a grid tile, then what its window holds. */
-function describeLateness(snapshot: NeatLatenessSnapshot | null | undefined): string {
-  if (snapshot === undefined) return '—';
+/**
+ * The status line's lateness, as the channel's grid tile measures it; the preview measures none
+ * that counts (`ChannelLateness`).
+ */
+function describeLateness(reading: LatenessReading | null): string {
+  if (reading === null) return 'Not measured while off the grid';
+  const snapshot = reading.snapshot;
   if (snapshot === null || snapshot.recentLateShare === null) return 'Not measured yet';
   const share = `${Math.round(snapshot.recentLateShare * 100)} % late`;
   const median = snapshot.recentLatenessMedianMs;
@@ -182,8 +185,10 @@ function describeLateness(snapshot: NeatLatenessSnapshot | null | undefined): st
  * channel's grid tile warns of late metadata.
  *
  * The preview is a second kit tile on the channel's one connection, held like the grid tile holds
- * it, so selecting a channel opens no second peer connection. Its stats and lateness are not used:
- * the grid tile reports for the channel (`ChannelLateness`).
+ * it, so selecting a channel opens no second peer connection. While the channel has a grid tile,
+ * that tile reports the channel's frame stats and lateness and the preview's are not used; once the
+ * channel is paged off the grid, the preview's stats keep the connection's status line and vf's
+ * egress report current, while lateness stays the grid tile's (R29).
  *
  * Escape inside the panel and the ✕ ask the page to close it, which returns focus to the grid.
  */
@@ -210,7 +215,7 @@ export class ViewerInspector {
   private readonly connections = inject(VfConnections);
   private readonly store = inject(ViewerSettingsStore);
   private readonly lateness = inject(ChannelLateness);
-  private readonly titleElement = viewChild.required<ElementRef<HTMLElement>>('titleHeading');
+  private readonly rows = viewChildren(SettingRow);
 
   protected readonly metadataSections = METADATA_SECTIONS;
   protected readonly generalSettings = GENERAL_SETTINGS;
@@ -254,7 +259,7 @@ export class ViewerInspector {
       // While connecting the status line is empty; on a tile the label stands in for it.
       stream: formatChannelStatus(connection.status()) || 'Connecting',
       buffer,
-      lateness: describeLateness(this.lateness.of(channel)()?.snapshot),
+      lateness: describeLateness(this.lateness.of(channel)()),
     };
   });
 
@@ -285,23 +290,9 @@ export class ViewerInspector {
       onCleanup(() => this.connections.release(channel));
     });
 
-    // The grid tile keeps the connection in step with the channel's settings, but the channel may
-    // have no grid tile (paged away), and then the preview alone holds the connection, perhaps one
-    // it created. Applying the same values twice changes nothing.
-    effect(() => {
-      const connection = this.connection();
-      const bufferMs = this.sync()?.videoSyncBufferMs;
-      if (connection !== null && bufferMs !== undefined) {
-        untracked(() => connection.setSyncBuffer(bufferMs));
-      }
-    });
-    effect(() => {
-      const connection = this.connection();
-      const retentionMs = this.sync()?.metadataRetentionMs;
-      if (connection !== null && retentionMs !== undefined) {
-        untracked(() => connection.setMetadataRetention(retentionMs));
-      }
-    });
+    // Either holder of the connection may be its only one: the grid tile is gone while the
+    // channel is paged off the grid.
+    followSyncSettings(this.connection, this.sync);
   }
 
   protected selectTab(value: string | undefined): void {
@@ -312,7 +303,8 @@ export class ViewerInspector {
   /**
    * The late notice's actions (Inv §4g): this channel's own buffer, or global raised without ever
    * lowering it. The grid tile sees the buffer change, resets its lateness window and drops the
-   * warning, so the notice and the focused button go; focus stays in the panel, on its title.
+   * warning, so the notice and the focused button go; focus moves to the Video sync buffer field,
+   * which announces the new value.
    */
   protected raise(target: RaiseTarget): void {
     const channel = this.channel();
@@ -320,7 +312,17 @@ export class ViewerInspector {
     if (channel === null || suggested === null) return;
     if (target === 'channel') this.store.set(channel, 'general.videoSyncBufferMs', suggested);
     else this.store.raiseGlobal(channel, 'general.videoSyncBufferMs', suggested);
-    this.titleElement().nativeElement.focus();
+    this.rows()
+      .find((row) => row.setting().id === 'general.videoSyncBufferMs')
+      ?.focusField();
+  }
+
+  /** The preview's stats, which stand in for the grid tile's while the channel has none (R29). */
+  protected onPreviewStats(stats: NeatFrameStats): void {
+    const channel = this.channel();
+    if (channel !== null && this.lateness.of(channel)() === null) {
+      this.connection()?.reportFrameStats(stats);
+    }
   }
 
   protected onKeydown(event: KeyboardEvent): void {

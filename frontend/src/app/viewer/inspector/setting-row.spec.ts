@@ -50,12 +50,13 @@ const TRAIL_LENGTH: SettingControl = {
 
 @Component({
   imports: [SettingRow],
-  template: `<app-setting-row [scope]="scope()" [setting]="setting()" />`,
+  template: `<app-setting-row [scope]="scope()" [setting]="setting()" [name]="name()" />`,
 })
 class Host {
   readonly store = inject(ViewerSettingsStore);
   readonly scope = signal<SettingsScope>('global');
   readonly setting = signal<SettingControl>(SHOW_DETECTIONS);
+  readonly name = signal<string | undefined>(undefined);
 }
 
 describe('SettingRow', () => {
@@ -86,10 +87,13 @@ describe('SettingRow', () => {
     vi.unstubAllGlobals();
   });
 
-  async function render(setting: SettingControl, scope: SettingsScope = 'global') {
+  async function render(setting: SettingControl, scope: SettingsScope = 'global', name?: string) {
+    // One row at a time: two would put the same element ids in the document.
+    fixture?.destroy();
     fixture = TestBed.createComponent(Host);
     fixture.componentInstance.setting.set(setting);
     fixture.componentInstance.scope.set(scope);
+    fixture.componentInstance.name.set(name);
     await fixture.whenStable();
   }
 
@@ -104,6 +108,15 @@ describe('SettingRow', () => {
   const slider = (): HTMLElement => root().querySelector('[role="slider"]')!;
   const field = (): HTMLInputElement => root().querySelector('input')!;
   const readout = () => root().querySelector('.readout')?.textContent?.trim();
+  /** The text of what the element's `aria-describedby` points at, or null without one. */
+  const description = (element: Element) => {
+    const ids = element.getAttribute('aria-describedby');
+    if (ids === null) return null;
+    return ids
+      .split(' ')
+      .map((id) => document.getElementById(id)?.textContent?.replace(/\s+/g, ' ').trim())
+      .join(' ');
+  };
   const sliderDisabled = () => root().querySelector('neat-slider')!.getAttribute('aria-disabled');
 
   async function press(key: string, target: HTMLElement): Promise<void> {
@@ -123,8 +136,12 @@ describe('SettingRow', () => {
   }
 
   it('a switch shows the value in effect and stores the change for its scope', async () => {
-    await render(SHOW_DETECTIONS);
+    await render(SHOW_DETECTIONS, 'global', 'Object detection: Show overlay');
     expect(toggle().textContent?.trim()).toBe('Show overlay');
+    // The section is part of the name: the Metadata tab has a "Show overlay" per type.
+    expect(toggle().getAttribute('aria-label')).toBe('Object detection: Show overlay');
+    expect(root().querySelector('app-setting-row')!.hasAttribute('role')).toBe(false);
+    expect(description(toggle())).toBeNull();
     expect(toggle().getAttribute('aria-checked')).toBe('true');
 
     await click(toggle());
@@ -139,8 +156,8 @@ describe('SettingRow', () => {
   });
 
   it('a slider reads out its value and stores each step', async () => {
-    await render(CONFIDENCE);
-    expect(slider().getAttribute('aria-label')).toBe('Confidence threshold');
+    await render(CONFIDENCE, 'global', 'Object detection: Confidence threshold');
+    expect(slider().getAttribute('aria-label')).toBe('Object detection: Confidence threshold');
     expect(readout()).toBe('0.00');
 
     for (let step = 0; step < 7; step += 1) await press('ArrowRight', slider());
@@ -154,6 +171,8 @@ describe('SettingRow', () => {
     const label = root().querySelector('label')!;
     expect(label.textContent?.trim()).toBe('Video sync buffer');
     expect(label.htmlFor).toBe(field().id);
+    expect(field().getAttribute('aria-label')).toBe('Video sync buffer');
+    expect(field().inputMode).toBe('numeric');
     expect(field().value).toBe('300');
     expect(text()).toContain('ms');
 
@@ -185,15 +204,20 @@ describe('SettingRow', () => {
       auxiliary: {},
     });
     expect(storage.readStored('settings:global')).toBeNull();
-    expect(text()).toContain('overrides global');
+    expect(text()).toContain('overrides global · Global: 300 ms');
+    // The field announces its state on focus.
+    expect(description(field())).toBe('overrides global · Global: 300 ms');
     const reset = button('Reset')!;
-    expect(reset.getAttribute('aria-label')).toBe('Reset to the global value, 300 ms');
+    expect(reset.getAttribute('aria-label')).toBe(
+      'Reset Video sync buffer to the global value (300 ms)',
+    );
 
     await click(reset);
 
     expect(storage.readStored('settings:channel:2')).toBeNull();
     expect(field().value).toBe('300');
     expect(text()).not.toContain('overrides global');
+    expect(description(field())).toBeNull();
   });
 
   it('globally a row says how many channels override it and resets just those', async () => {
@@ -204,7 +228,10 @@ describe('SettingRow', () => {
     });
     await render(LINE_WIDTH);
     expect(readout()).toBe('3 px');
-    expect(text()).toContain('Overridden on 2 channels');
+    expect(text()).toContain('Overridden on 2 channels: 1, 4');
+    expect(button('Reset those to global')!.getAttribute('aria-label')).toBe(
+      'Reset Line width on 2 channels to the global value',
+    );
 
     await click(button('Reset those to global')!);
 
@@ -226,8 +253,27 @@ describe('SettingRow', () => {
 
     store().set(6, 'general.lineWidth', 2);
     await fixture.whenStable();
-    expect(text()).toContain('Overridden on 1 channel');
-    expect(text()).not.toContain('1 channels');
+    expect(text()).toContain('Overridden on 1 channel: 6');
+    expect(button('Reset those to global')!.getAttribute('aria-label')).toBe(
+      'Reset Line width on 1 channel to the global value',
+    );
+  });
+
+  it('a switch announces what overrides it, globally and on a channel', async () => {
+    storage.seed({
+      'settings:channel:3': { version: 10, types: { 'object-detection': { visible: false } } },
+    });
+    await render(SHOW_DETECTIONS, 'global', 'Object detection: Show overlay');
+    expect(description(toggle())).toBe('Overridden on 1 channel: 3');
+    expect(button('Reset those to global')!.getAttribute('aria-label')).toBe(
+      'Reset Object detection: Show overlay on 1 channel to the global value',
+    );
+
+    await render(SHOW_DETECTIONS, 3, 'Object detection: Show overlay');
+    expect(description(toggle())).toBe('overrides global · Global: on');
+    expect(button('Reset')!.getAttribute('aria-label')).toBe(
+      'Reset Object detection: Show overlay to the global value (on)',
+    );
   });
 
   it('a setting that depends on another is disabled while that one is off', async () => {

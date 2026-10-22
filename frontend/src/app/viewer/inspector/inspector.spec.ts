@@ -65,18 +65,18 @@ describe('ViewerInspector', () => {
     )!;
   const headings = () =>
     [...inspector().querySelectorAll('h3')].map((heading) => heading.textContent?.trim());
-  /** The setting row labelled `label`, inside the Metadata section `section` when given. */
+  /**
+   * The setting row whose control is named `label`, prefixed with its Metadata section when
+   * given ("Tracking: Show overlay"), as assistive technology names it.
+   */
   const row = (label: string, section?: string): HTMLElement => {
-    const scope =
-      section === undefined
-        ? inspector()
-        : [...inspector().querySelectorAll('section')].find(
-            (element) => element.querySelector('h3')?.textContent?.trim() === section,
-          )!;
-    return [...scope.querySelectorAll<HTMLElement>('app-setting-row')].find(
-      (element) => element.getAttribute('aria-label') === label,
-    )!;
+    const name = section === undefined ? label : `${section}: ${label}`;
+    return inspector().querySelector(`[aria-label="${name}"]`)!.closest('app-setting-row')!;
   };
+  const rowLabels = () =>
+    [...inspector().querySelectorAll('app-setting-row .label')].map((label) =>
+      label.textContent?.trim(),
+    );
   const buttonIn = (container: Element, label: string): HTMLButtonElement =>
     [...container.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
       element.textContent?.replace(/\s+/g, ' ').trim().startsWith(label),
@@ -195,11 +195,7 @@ describe('ViewerInspector', () => {
 
     await click(tab('General'));
     expect(headings()).toEqual([]);
-    expect(
-      [...inspector().querySelectorAll('app-setting-row')].map((element) =>
-        element.getAttribute('aria-label'),
-      ),
-    ).toEqual(['Video sync buffer', 'Metadata retention', 'Line width']);
+    expect(rowLabels()).toEqual(['Video sync buffer', 'Metadata retention', 'Line width']);
     await type(field('Video sync buffer'), '600');
     expect(fake.connections.get(0)!.syncBuffers.at(-1)).toBe(600);
     expect(fake.connections.get(7)!.syncBuffers.at(-1)).toBe(600);
@@ -279,7 +275,13 @@ describe('ViewerInspector', () => {
 
     expect(fake.holders.get(2)).toBe(1);
     expect(previewTile()!.source()).toBe(fake.connections.get(2));
-    expect(status()).toContainEqual(['Late metadata', '—']);
+    expect(status()).toContainEqual(['Late metadata', 'Not measured while off the grid']);
+
+    // With no grid tile the preview's stats are the only ones: they feed the connection's status
+    // line and vf's egress report (vf-connection.spec covers what the connection makes of them).
+    const previewStats = { metadataMessagesPerSecond: 12 } as NeatFrameStats;
+    previewTile()!.frameStats.emit(previewStats);
+    expect(fake.connections.get(2)!.frameStats).toEqual([previewStats]);
 
     await click(tab('General'));
     await type(field('Video sync buffer'), '900');
@@ -287,6 +289,15 @@ describe('ViewerInspector', () => {
     expect(fake.connections.get(2)!.syncBuffers.at(-1)).toBe(900);
     expect(fake.connections.get(2)!.retentions.at(-1)).toBe(2000);
     expect(previewTile()!.retentionMs()).toBe(2000);
+
+    // Back on the grid, only the grid tile reports again.
+    await press('ArrowLeft');
+    previewTile()!.frameStats.emit({ metadataMessagesPerSecond: 3 } as NeatFrameStats);
+    const gridStats = { metadataMessagesPerSecond: 15 } as NeatFrameStats;
+    gridTile(2).frameStats.emit(gridStats);
+    await settle();
+    expect(fake.connections.get(2)!.frameStats).toEqual([previewStats, gridStats]);
+    expect(status()).toContainEqual(['Late metadata', 'Not measured yet']);
   });
 
   it('with a channel selected shows its stream status, sync buffer and lateness', async () => {
@@ -339,9 +350,9 @@ describe('ViewerInspector', () => {
       general: { videoSyncBufferMs: 1000 },
     });
     expect(fake.connections.get(2)!.syncBuffers.at(-1)).toBe(1000);
-    // The new buffer is still settling: the notice is gone and focus stays in the inspector.
+    // The new buffer is still settling: the notice is gone, and focus is on the changed value.
     expect(notice()).toBeNull();
-    expect(document.activeElement).toBe(inspector().querySelector('h2'));
+    expect(document.activeElement).toBe(field('Video sync buffer'));
 
     // Channel 3 follows 1000 ms and needs 1150 ms: raised for itself, global stays.
     await makeLate(gridTile(3));
@@ -353,6 +364,7 @@ describe('ViewerInspector', () => {
       types: {},
       auxiliary: {},
     });
+    expect(document.activeElement).toBe(field('Video sync buffer'));
     // Never written: still as seeded.
     expect(storage.readStored('settings:global')).toEqual({
       version: 10,
@@ -373,6 +385,7 @@ describe('ViewerInspector', () => {
     expect(storage.readStored('settings:channel:4')).toBeNull();
     expect(fake.connections.get(5)!.syncBuffers.at(-1)).toBe(1150);
     expect(notice()).toBeNull();
+    expect(document.activeElement).toBe(field('Video sync buffer'));
   });
 
   it('Escape closes the inspector and returns focus to the selected tile', async () => {

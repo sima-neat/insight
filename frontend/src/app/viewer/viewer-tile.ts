@@ -17,6 +17,7 @@ import {
   NeatVideoTile,
 } from '@sima/neat-ui';
 import { ChannelLateness } from './channel-lateness';
+import { followSyncSettings } from './connection-sync';
 import { LateChip } from './late-chip';
 import { ViewerSettingsStore } from './settings/viewer-settings.store';
 import { formatChannelStatus } from './vf/channel-status';
@@ -102,27 +103,19 @@ export class ViewerTile {
       onCleanup(() => this.connections.release(channel));
     });
 
-    // Separate from retention: the connection re-applies its jitter buffer target on every call,
-    // and a retention change must not reset the lateness measured for an unchanged buffer.
-    let appliedBufferMs: number | null = null;
+    followSyncSettings(this.connection, this.sync);
+
+    // A new buffer makes the lateness measured with the old one meaningless (Inv §4g).
+    let previousBufferMs: number | null = null;
     effect(() => {
-      const connection = this.connection();
       const bufferMs = this.syncBufferMs();
-      if (connection === null) return;
       untracked(() => {
-        connection.setSyncBuffer(bufferMs);
-        if (appliedBufferMs !== null && appliedBufferMs !== bufferMs) {
-          this.lateChip.bufferChanged(this.tile(), appliedBufferMs, bufferMs, performance.now());
+        if (previousBufferMs !== null && previousBufferMs !== bufferMs) {
+          this.lateChip.bufferChanged(this.tile(), previousBufferMs, bufferMs, performance.now());
           this.lateActive.set(false);
         }
-        appliedBufferMs = bufferMs;
+        previousBufferMs = bufferMs;
       });
-    });
-
-    effect(() => {
-      const connection = this.connection();
-      const retentionMs = this.retentionMs();
-      untracked(() => connection?.setMetadataRetention(retentionMs));
     });
 
     effect((onCleanup) => {
