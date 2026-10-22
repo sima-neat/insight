@@ -121,7 +121,7 @@ metadata: UDP 9100 + N
 
 若傳送端在 DevKit 或其他外部機器上執行，請使用 `neat --json` 中對應的 `videoUDP` 與 `metadataUDP` 主機連接埠範圍。頻道的計算方式相同，但起始連接埠可能不同。
 
-檢視器可以呈現常用視覺輸出（包括物件偵測、分類、姿勢估計、分割和追蹤）的中繼資料疊加層。每個中繼資料類型都有 **Show Overlay** 開關，可在不變更信賴度閾值或樣式的情況下隱藏輸出。姿勢估計也可分別顯示關節標記和地標名稱。與影格相關聯的資料也可顯示在每個頻道的獨立輔助面板中；第一個內建呈現器是 BlazePose 3D。多個輔助檢視會顯示為分頁，面板可以收合、展開或隱藏。通訊協定請參閱[輔助視覺化](auxiliary-visualizations.md)。檢視器設定可調整信賴度閾值、ROI 顯示、追蹤歷史記錄和同步緩衝。中繼資料時間戳使用來源 PTS 毫秒，如果無法使用則會省略。
+檢視器可以呈現常用視覺輸出（包括物件偵測、分類、姿勢估計、分割和追蹤）的中繼資料疊加層。每個中繼資料類型都有 **Show Overlay** 開關，可在不變更信賴度閾值或樣式的情況下隱藏輸出。姿勢估計也可分別顯示關節標記和地標名稱。與影格相關聯的資料也可顯示在每個頻道的獨立輔助面板中；第一個內建呈現器是 BlazePose 3D。多個輔助檢視會顯示為分頁，面板可以收合、展開或隱藏。通訊協定請參閱[輔助視覺化](auxiliary-visualizations.md)。檢視器設定可調整信賴度閾值、ROI 顯示、追蹤歷史記錄和同步緩衝。當影格沒有某類型的中繼資料時（例如推論速度比影片慢），檢視器會繼續繪製該類型的最後一個疊加層，最長 200 毫秒；收到該類型的新訊息時（即使不含任何物件）就會取代它。中繼資料時間戳使用來源 PTS 毫秒，如果無法使用則會省略。
 
 使用視訊檢視器確認：
 
@@ -246,6 +246,65 @@ DevKit 檢視的版面與 Sentinel 本身的終端機儀表板（`simaai-sentine
 ### NEAT 效能分析時間軸
 
 此分頁最後是效能分析時間軸，它會繪製 Insight 從執行中應用程式串流而來的效能分析事件中的數值欄位。它與 Sentinel 無關：它量測的是應用程式，而不是裝置。
+
+## GenAI Studio
+
+GenAI Studio 檢視可在開發板上執行語言、視覺和語音模型。它會與 Neat Apps 的 GenAI Studio 通訊，後者在開發板上以僅後端模式執行；Insight 會轉送所有呼叫，因此瀏覽器不會直接連線到開發板。
+
+請先在開發板的 GenAI Studio 應用程式目錄中啟動後端：
+
+```bash
+./run.sh
+```
+
+第一次開啟時，頁面頂端會顯示簡短的 **Tutorial**，逐一介紹各項功能；隨時可用頁首的 **Tutorial** 再次觀看。頁首包含狀態標籤、**Model** 選擇器及旁邊的 **New chat**（鉛筆）、**Read replies aloud**、**Think first**（對一律直接回答的模型停用）和 **Use my documents**。工具列包含 **Export chat**、**SiMaSentry Solutions**（盾牌）、**Benchmark**（儀表）、**Tutorial**、**Settings** 和 **Full screen**。
+
+狀態標籤以及需要處理時出現的橫幅，會顯示後端狀態和接下來應採取的動作：
+
+- **Not set up**：尚未選取開發板，設定會開啟。請輸入開發板位址，例如 `https://192.168.1.20:5000`。在開發板上，Insight 預設使用本機後端；在 Neat Development Environment 中則預設使用已配對的 DevKit。
+- **Not running**：開發板沒有回應。請使用上述指令啟動後端（**Copy start command** 可複製指令），或檢查位址。
+- **Error**：開發板傳回錯誤，或該位址不是 GenAI Studio。橫幅會顯示開發板的訊息。
+- **Starting**：後端有回應，但模型伺服器尚未就緒。
+- **Busy**：正在載入模型。聊天與語音會等待載入完成。
+- **Incompatible**：開發板的 GenAI Studio API 版本與此 Insight 不相容。請更新橫幅指定的那一方。
+- **Ready**：可使用聊天與語音。開發板上載入失敗的語音也會在此回報。
+
+**No model yet**：當開發板沒有聊天或視覺模型（或只有無法執行的模型）時，聊天會直接說明，而不是讓訊息框維持灰色停用。**Download Qwen3 VL 4B** 會將視覺語言模型 `simaai/Qwen3-VL-4B-Instruct-Autoround-a16w4` 下載到開發板，並在按鈕下方顯示進度，然後載入模型；開發板查詢到下載大小後，按鈕會顯示該大小，若開發板的可用空間比它小則會發出警告。**Browse models** 會開啟 **Settings** 中 **Models** 的 Hugging Face 搜尋，列出開發板可下載的模型。若開發板不允許下載，聊天會提示在開發板上 GenAI Studio 的 `config.local.yaml` 中設定 `server.hub.allow_download: true`，然後重新啟動 GenAI Studio；若開發板無法連線到 Hugging Face，聊天也會說明，**Check again** 可重新檢查。如果 Hugging Face 已將模型改名，下載失敗時會顯示新的 ID，並提議改為下載該模型。
+
+**Chat** 是頁面中央的一段對話。可在訊息框輸入，或按下麥克風、說話後再按一次：語音會轉成文字並送出。使用可辨識影像的模型時，可附加照片、使用此瀏覽器的相機拍攝，或使用接在開發板上的相機拍攝：攝影機按鈕會列出開發板的相機（`/dev/videoN`），**Take a picture** 會將開發板拍攝的照片附加到下一則訊息。開發板相機需要可回報 `board_camera` 功能的 GenAI Studio；較舊版本會隱藏該按鈕，並在相機按鈕的提示中說明原因。回答會隨生成進度顯示，可用停止按鈕提前結束；**New chat** 會重新開始，讓模型忘記先前的對話。**Read aloud** 朗讀一則回答，**Stop speaking** 停止朗讀；**Read replies aloud** 朗讀每則回答，並在其餘內容仍在生成時，從第一句開始朗讀。第一次使用時，瀏覽器會要求麥克風和相機權限。
+
+每則回答下方，Insight 會顯示在瀏覽器中測得的生成速度：
+
+- **First token**：從送出到回答第一段文字出現的時間。
+- **Speed** 和 **Tokens**：每秒 token 數與回答長度。若開發板有回報速度便使用該值，否則由 Insight 在瀏覽器中計算。
+- **Total**：從送出到回答結束的時間。
+- **First audio**、**RTF** 和 **Voice**（朗讀回答時）：開始播放前的時間、即時係數（每秒語音所需的運算秒數；小於 1 表示快於即時）與語音引擎。
+- **Transcribed** 和 **Language**（語音問題下方）：錄音結束到轉成文字的時間，以及辨識到的語言。
+
+**Vision**（訊息框下方的眼睛圖示）會以可容納的最大尺寸（最多為螢幕高度的一半）顯示相機畫面，並在下方顯示最新回答和控制項，類似獨立版 GenAI Studio 的全螢幕視覺功能。選擇 **This browser's camera** 或 **Board camera**（開發板會針對每個問題拍攝新照片；**Take a picture** 可顯示照片以調整取景），輸入問題或選擇 **What do you see?**、**Describe the scene in detail** 或 **Read any text in view**，然後：
+
+- **Ask** 會針對目前照片提問一次。
+- **Loop** 會在每次回答後，針對新照片提出同一個問題，每次送出一個請求，回答間稍作停頓，直到按下 **Stop**。在循環中修改的問題會從下一張照片起生效。啟用 **Read answers aloud** 時，會先朗讀回答，再拍攝下一張照片。
+
+模型變更或不再支援影像、開發板停止回應或開始其他操作、照片或回答失敗（會顯示原因）、開發板位址變更、關閉檢視或離開分頁時，循環也會停止。Vision 問題是獨立請求，不包含聊天記錄，其回答也不會加入聊天。檢視中的 **Full screen** 會使用整個螢幕；Esc 或 **Close** 可返回聊天。
+
+**Export chat** 會將對話儲存為 `.log` 文字檔（`neat-chat-<date>-<time>.log`），頂端記錄匯出時間和模型，接著是每次發言；照片會顯示為 `[image]`。
+
+**SiMaSentry Solutions** 會開啟三個透過 Insight 使用已載入聊天模型的示範應用程式：**SiMaSentry-Med**（臨床聊天與醫療影像檢視）、**SiMaSentry-Safe**（PPE 與危害檢查）和 **SiMaSentry-Sec**（安全監控影像分析與變化偵測）。其照片功能需要可辨識影像的模型。模型在開發板上執行，但這些應用程式的語音輸入使用瀏覽器本身的語音辨識，可能會將音訊傳送至線上服務（Chrome 會如此處理）。應用程式本身的 Home 按鈕、**Back** 或 Esc 可返回啟動器；**Close** 可返回聊天。
+
+**Benchmark** 可測量開發板上的聊天模型。選取一個或多個模型、執行次數（1 到 50）、回答的 token 長度（8 到 2048），以及選填的提示詞，然後按 **Run benchmark**。各模型依序執行，尚未載入的模型會先載入，這可能卸載聊天模型，因此完成後請從 **Model** 選單重新載入。執行期間會顯示進度和回答，**Stop** 可結束執行。結果會比較每秒 token 數（平均值、p90 和標準差）、首個 token 的延遲與回答長度，並醒目標示最快的數值；**Each run** 列出最後一個模型的各次執行。**Download CSV** 和 **Download JSON** 可儲存結果。
+
+**Use my documents** 會根據開發板上的文件資料庫回答：開發板會尋找符合每個問題的段落，在模型回答前加入，並在回答下方註明所用章節（或表示沒有符合的內容）。**Settings** 中的 **Documents** 可查看資料庫內容、上傳 Markdown 檔案（取代現有文件）、重設為預設 SiMa 文件，或清空資料庫。**View documents** 會列出已匯入的來源檔案、章節（區塊）數，以及各章節的標題路徑與文字；可用 **Filter sections…** 尋找段落（最多前 2,000 個章節）。文件功能需要支援文件搜尋的 GenAI Studio，否則開關會停用並顯示原因。
+
+**Settings** 會為每個區域顯示一張卡片：**Board**、**Replies**、**Models**、**Voice**、**Documents** 和 **Troubleshooting**。每張卡片的標題都有一行摘要說明目前的設定，例如 `192.168.1.20:5000 · Ready`、`Default system prompt · longest reply 512 tokens` 或 `Qwen3 VL 4B loaded · 3 models on the board`。
+
+- **Board**：開發板位址。
+- **Replies**：**System prompt** 是每次聊天和 Vision 提問時一併傳送的指示。在您變更之前，欄位會顯示預設值："You are a helpful assistant. Answer clearly and concisely. Use Markdown formatting when it helps. Answer the question in the language it was asked in." 編輯後即取代預設值；**Reset to default** 會恢復預設值，欄位留空時會傳送預設值（不會傳送空白提示）。分頁仍會補上一句話說明訊息是否含有照片，避免小型視覺模型誤判。**Longest reply** 設定回答的最大 token 數（32 到 2048，預設為 512，與獨立版 GenAI Studio 相同），以 `max_tokens` 傳送，不影響有獨立設定的基準測試。此瀏覽器會記住這兩項設定。
+- **Models**：先顯示可用磁碟空間，再將開發板上的每個模型列為一行，包含類型（**Chat**、**Vision** 或 **Speech**）、大小和狀態（**Loaded**、語音模型的 **In use**、**Loading…**、**Not loaded** 或 **Can't run here**，原因顯示在工具提示中）。**Load**、**Unload** 和 **Use** 可變更使用中的模型，橫幅會顯示載入進度。**Delete** 會在確認後從開發板刪除已下載的模型檔案；僅適用於尚未載入且不是使用中語音模型的模型，若開發板拒絕，會顯示原因。**Get more models** 會搜尋 Hugging Face，**Download** 可將模型放到開發板上；若開發板不允許下載，會說明如何允許。
+- **Voice**：語音引擎、聲音和您說的語言。
+- **Documents**：請參閱上方的 **Use my documents**。
+
+如果模型載入失敗或回答停止，請在開發板上重新啟動 GenAI Studio（先執行 `./run.sh stop`，再執行 `./run.sh`）；這會釋放加速器，之後即可重新載入模型。**Settings** 中的 **Troubleshooting** 也提供此說明。
 
 ## 系統資訊
 
