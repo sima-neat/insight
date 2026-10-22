@@ -118,7 +118,7 @@ describe('ChannelLiveness', () => {
     expect(liveness.live()).toEqual(new Set([2]));
   });
 
-  it('is unavailable while the newest request failed, and available again on the next answer', () => {
+  it('is unavailable while the newest request failed, keeping the last answer, until the next one', () => {
     liveness.setEnabled(true);
     const badGateway = { status: 502, statusText: 'Bad Gateway' };
     http.expectOne(STATS_URL).flush({ error: 'vf ingest stats unavailable' }, badGateway);
@@ -130,14 +130,20 @@ describe('ChannelLiveness', () => {
     expect(liveness.unavailable()).toBe(false);
     expect(liveness.live()).toEqual(new Set([1]));
 
-    // A failure after a good answer: the old answer no longer says what is live.
+    // A failure after a good answer keeps that answer: one lost poll must not swing the grid.
     vi.advanceTimersByTime(2000);
     http.expectOne(STATS_URL).flush({ error: 'vf ingest stats unavailable' }, badGateway);
     expect(liveness.unavailable()).toBe(true);
-    expect(liveness.live()).toBeNull();
+    expect(liveness.live()).toEqual(new Set([1]));
+
+    vi.advanceTimersByTime(2000);
+    http.expectOne(STATS_URL).flush(stats(4));
+    expect(liveness.unavailable()).toBe(false);
+    expect(liveness.live()).toEqual(new Set([4]));
 
     liveness.setEnabled(false);
     expect(liveness.unavailable()).toBe(false);
+    expect(liveness.live()).toBeNull();
   });
 
   it('an older request that fails after a newer answer changes nothing', () => {

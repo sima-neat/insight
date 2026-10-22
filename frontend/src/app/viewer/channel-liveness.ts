@@ -28,8 +28,9 @@ export function liveChannels(stats: unknown): ReadonlySet<number> {
  * `/api/ingest/stats` proxy every 2 s, but only while enabled and while the page is visible: a
  * hidden tab shows nothing, so it asks again the moment it shows. A slow answer that arrives after
  * a newer one is dropped, so the newest answer always wins. When the newest request failed (vf down,
- * the proxy answering 502) nothing is known: `live` is null and `unavailable` says why, until a
- * request succeeds again.
+ * the proxy answering 502) `unavailable` says so until a request succeeds again, and `live` keeps
+ * the last good answer: one lost poll must not swing the grid to every channel and back, opening
+ * and closing connections each time.
  *
  * Provided by the Viewer page, so polling ends with it.
  */
@@ -41,9 +42,9 @@ export class ChannelLiveness {
 
   private readonly liveState = signal<ReadonlySet<number> | null>(null);
   private readonly unavailableState = signal(false);
-  /** The live channels; null while disabled, before the first answer and while unavailable. */
+  /** The last good answer's live channels; null while disabled or before any good answer. */
   readonly live = this.liveState.asReadonly();
-  /** The newest request failed, so which channels are live is unknown. */
+  /** The newest request failed, so `live` may be out of date (or, before any answer, absent). */
   readonly unavailable = this.unavailableState.asReadonly();
 
   private enabled = false;
@@ -100,11 +101,14 @@ export class ChannelLiveness {
       });
   }
 
-  /** Takes the outcome of `request` (the live set, or null for a failure) unless a newer one came. */
+  /**
+   * Takes the outcome of `request`, unless a newer one has settled: a good answer replaces the live
+   * set, a failure (null) only marks it unavailable.
+   */
   private settle(request: number, live: ReadonlySet<number> | null): void {
     if (request <= this.shown) return;
     this.shown = request;
-    this.liveState.set(live);
     this.unavailableState.set(live === null);
+    if (live !== null) this.liveState.set(live);
   }
 }

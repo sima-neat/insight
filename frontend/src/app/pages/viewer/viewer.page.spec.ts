@@ -380,6 +380,35 @@ describe('ViewerPage', () => {
     expect(notice()).toBe('');
   });
 
+  it('a stats failure after a good answer keeps the tiles and shows the notice until the next answer', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    storage.seed({ layout: { tileWidths: { 16: 300 }, hideEmpty: true } });
+    await open('/viewer');
+    http.expectOne(STATS_URL).flush({ channels: [{ channel: 3, active: true }] });
+    await settle();
+    expect(shown()).toEqual([3]);
+
+    vi.advanceTimersByTime(2000);
+    http
+      .expectOne(STATS_URL)
+      .flush({ error: 'vf ingest stats unavailable' }, { status: 502, statusText: 'Bad Gateway' });
+    await settle();
+    expect(shown()).toEqual([3]);
+    expect(fake.held()).toEqual([3]);
+    expect(notice()).toBe('Live channels unknown: ingest stats unavailable');
+
+    vi.advanceTimersByTime(2000);
+    http.expectOne(STATS_URL).flush({
+      channels: [
+        { channel: 3, active: true },
+        { channel: 7, active: true },
+      ],
+    });
+    await settle();
+    expect(shown()).toEqual([3, 7]);
+    expect(notice()).toBe('');
+  });
+
   it('arrow keys on the tile shape change the shape, not the page', async () => {
     sixPerPage();
     await open('/viewer');

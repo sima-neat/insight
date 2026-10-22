@@ -138,8 +138,9 @@ export class ViewerPage {
 
   /**
    * What the grid shows: the configured channels, only the live ones while "Hide empty" is on.
-   * Until it is known which are live (the first answer pending, or ingest stats unavailable)
-   * nothing is hidden: an empty grid would say no channel has video, which nobody knows.
+   * Until ingest stats have answered once (the first request pending, or every one failed) nothing
+   * is hidden: an empty grid would say no channel has video, which nobody knows. After that a
+   * failed poll keeps the last answer's channels on screen.
    */
   private readonly channels = computed<readonly number[]>(() => {
     const configured = this.configured() ?? [];
@@ -147,7 +148,10 @@ export class ViewerPage {
     return live === null ? configured : configured.filter((channel) => live.has(channel));
   });
 
-  /** "Hide empty" is on but cannot filter, so the grid shows every channel; the page says why. */
+  /**
+   * "Hide empty" is on but ingest stats are unavailable: the grid shows the last known live channels,
+   * or every channel before any answer, and the page says why.
+   */
   protected readonly liveUnknown = computed(
     () => this.prefs.hideEmpty() && this.liveness.unavailable(),
   );
