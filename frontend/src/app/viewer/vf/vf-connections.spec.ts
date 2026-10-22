@@ -78,4 +78,20 @@ describe('VfConnections', () => {
     expect(third).toHaveBeenCalledOnce();
     expect(first).toHaveBeenCalledOnce();
   });
+
+  it('applies the debug option to the connections it holds and to those it creates later', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const existing = connections.get(1);
+    const setDebug = vi.spyOn(existing, 'setDebug');
+
+    connections.setDebug(true);
+    expect(setDebug).toHaveBeenCalledWith(true);
+    expect(log).not.toHaveBeenCalled();
+
+    connections.get(2);
+    expect(log).toHaveBeenCalledWith('[viewer][ch2]', 'connect start', expect.anything());
+
+    connections.setDebug(false);
+    expect(setDebug).toHaveBeenLastCalledWith(false);
+  });
 });

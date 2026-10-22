@@ -1,3 +1,5 @@
+import { computed, effect, Injector } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { SAMPLE_FRAME_STATS, schemaViolations } from './egress-schema.testing';
 import { VfConnection } from './vf-connection';
 
@@ -6,6 +8,8 @@ let calls: string[];
 
 class FakeDataChannel {
   readyState: RTCDataChannelState = 'connecting';
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   readonly sent: string[] = [];
 
@@ -20,6 +24,11 @@ class FakeDataChannel {
 
   close(): void {
     this.readyState = 'closed';
+  }
+
+  open(): void {
+    this.readyState = 'open';
+    this.onopen?.();
   }
 
   /** vf's side: one text frame. */
@@ -46,6 +55,7 @@ class FakePeerConnection {
   signalingState: RTCSignalingState = 'stable';
   onconnectionstatechange: (() => void) | null = null;
   oniceconnectionstatechange: (() => void) | null = null;
+  onicegatheringstatechange: (() => void) | null = null;
   ontrack: ((event: RTCTrackEvent) => void) | null = null;
   readonly transceivers: { kind: string; init: RTCRtpTransceiverInit }[] = [];
   readonly channels: FakeDataChannel[] = [];
@@ -54,6 +64,8 @@ class FakePeerConnection {
   closed = false;
   /** The inbound-rtp video report getStats returns, if any; a function of the fake clock. */
   inbound: (() => Record<string, unknown>) | null = null;
+  /** While set, getStats waits for it, as a slow browser would. */
+  statsDelay: Promise<void> | null = null;
 
   constructor(readonly config: RTCConfiguration) {
     FakePeerConnection.instances.push(this);
@@ -94,6 +106,7 @@ class FakePeerConnection {
   }
 
   async getStats(): Promise<Map<string, unknown>> {
+    if (this.statsDelay) await this.statsDelay;
     const stats = new Map<string, unknown>([
       ['A1', { id: 'A1', type: 'inbound-rtp', kind: 'audio', bytesReceived: 10 }],
       ['C1', { id: 'C1', type: 'codec', mimeType: 'video/H264' }],
@@ -121,6 +134,11 @@ class FakePeerConnection {
     this.onconnectionstatechange?.();
   }
 
+  setIceGatheringState(state: RTCIceGatheringState): void {
+    this.iceGatheringState = state;
+    this.onicegatheringstatechange?.();
+  }
+
   setIceConnectionState(state: RTCIceConnectionState): void {
     this.iceConnectionState = state;
     this.oniceconnectionstatechange?.();
@@ -130,7 +148,7 @@ class FakePeerConnection {
   connect(): void {
     this.setIceConnectionState('connected');
     this.setConnectionState('connected');
-    this.channel.readyState = 'open';
+    this.channel.open();
     this.inbound = () => {
       const seconds = Date.now() / 1000;
       return {
@@ -260,6 +278,8 @@ describe('VfConnection', () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(FakePeerConnection.instances).toHaveLength(2);
     expect(FakePeerConnection.last.remoteDescription).toStrictEqual(ANSWER);
+    // Answered: no longer waiting for vf, though the first stats are a second away.
+    expect(connection?.status().phase).toBe('connecting');
   });
 
   it('another 4xx fails with its HTTP status and gives up', async () => {
@@ -323,6 +343,44 @@ describe('VfConnection', () => {
     expect(FakePeerConnection.instances).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(FakePeerConnection.instances).toHaveLength(2);
+  });
+
+  it('schedules one reconnect however many triggers fire while it is pending', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    connection = new VfConnection(4, { debug: true });
+    await settle();
+    const pc = FakePeerConnection.last;
+    pc.connect();
+
+    pc.setIceConnectionState('disconnected');
+    await vi.advanceTimersByTimeAsync(4000);
+    pc.setConnectionState('failed');
+    pc.setConnectionState('closed');
+    // The ICE timer fires at 5 s, while the reconnect from `failed` is due at 6 s.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(FakePeerConnection.instances).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(FakePeerConnection.instances).toHaveLength(2);
+
+    const scheduled = log.mock.calls.filter(([, event]) => event === 'reconnecting in 2000 ms');
+    expect(scheduled.map(([, , reason]) => reason)).toEqual(['connection failed']);
+  });
+
+  it('ignores stats that arrive after their session was replaced', async () => {
+    const pc = await open();
+    pc.connect();
+    let release!: () => void;
+    pc.statsDelay = new Promise((resolve) => (release = resolve));
+
+    await vi.advanceTimersByTimeAsync(1000);
+    pc.setConnectionState('failed');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(FakePeerConnection.instances).toHaveLength(2);
+
+    release();
+    await settle();
+    expect(pc.channel.sent).toEqual([]);
+    expect(connection?.status().phase).toBe('connecting');
   });
 
   it('sends one browser_egress_stats per inbound video report with integer u64 fields and every field of Inv §2c', async () => {
@@ -504,5 +562,89 @@ describe('VfConnection', () => {
     pc.setConnectionState('failed');
     await vi.advanceTimersByTimeAsync(2000);
     expect(connection?.stream()).toBeNull();
+  });
+
+  it('logs its events prefixed with the channel when debug is on', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    connection = new VfConnection(4, { debug: true });
+    await settle();
+    const pc = FakePeerConnection.last;
+    pc.setIceGatheringState('gathering');
+    pc.connect();
+    pc.ontrack?.({ track: { kind: 'video', id: 'T1', readyState: 'live' } } as RTCTrackEvent);
+    await vi.advanceTimersByTimeAsync(1000);
+    pc.setConnectionState('failed');
+
+    expect(log.mock.calls.every(([prefix]) => prefix === '[viewer][ch4]')).toBe(true);
+    expect(log.mock.calls.map(([, event]) => event)).toEqual([
+      'connect start',
+      'pc created',
+      'offer answered',
+      'iceGatheringState',
+      'iceConnectionState',
+      'connectionState',
+      'data channel open',
+      'ontrack',
+      'stats',
+      'connectionState',
+      'reconnecting in 2000 ms',
+    ]);
+    expect(log).toHaveBeenCalledWith(
+      '[viewer][ch4]',
+      'reconnecting in 2000 ms',
+      'connection failed',
+    );
+
+    // After the reconnect the old session's handlers are detached: its events log nothing.
+    await vi.advanceTimersByTimeAsync(2000);
+    log.mockClear();
+    pc.setConnectionState('closed');
+    pc.setIceConnectionState('disconnected');
+    pc.setIceGatheringState('complete');
+    pc.channel.open();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('logs nothing when debug is off', async () => {
+    const log = vi.spyOn(console, 'log');
+    respond = rejectedWith(503);
+    const pc = await open();
+    respond = answered;
+    await vi.advanceTimersByTimeAsync(2000);
+    FakePeerConnection.last.connect();
+    await vi.advanceTimersByTimeAsync(3000);
+    pc.setConnectionState('failed');
+
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('can be created inside a computed or an effect without tracking or writing its signals there', async () => {
+    respond = rejectedWith(503);
+    const created = computed(() => new VfConnection(1));
+    const fromComputed = created();
+    await settle();
+    expect(fromComputed.status().phase).toBe('waiting');
+    expect(created(), 'the computed did not come to depend on the status').toBe(fromComputed);
+
+    let runs = 0;
+    let fromEffect: VfConnection | undefined;
+    const watcher = effect(
+      () => {
+        runs += 1;
+        fromEffect = new VfConnection(2);
+      },
+      { injector: TestBed.inject(Injector) },
+    );
+    TestBed.tick();
+    // Status and stream change while vf keeps answering 503; the effect must not run again.
+    await vi.advanceTimersByTimeAsync(6000);
+    TestBed.tick();
+    expect(runs).toBe(1);
+    expect(fromEffect?.status().phase).toBe('waiting');
+
+    watcher.destroy();
+    fromComputed.close();
+    fromEffect?.close();
   });
 });

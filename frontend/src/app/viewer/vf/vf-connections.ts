@@ -9,12 +9,19 @@ import { VfConnection } from './vf-connection';
 @Injectable()
 export class VfConnections implements OnDestroy {
   private readonly entries = new Map<number, { connection: VfConnection; holders: number }>();
+  private debug = false;
+
+  /** Turns console logging of connection events on or off, for current and later connections. */
+  setDebug(enabled: boolean): void {
+    this.debug = enabled;
+    for (const { connection } of this.entries.values()) connection.setDebug(enabled);
+  }
 
   /** The channel's connection, created on first use; every call must be paired with `release`. */
   get(channel: number): VfConnection {
     let entry = this.entries.get(channel);
     if (entry === undefined) {
-      entry = { connection: new VfConnection(channel), holders: 0 };
+      entry = { connection: new VfConnection(channel, { debug: this.debug }), holders: 0 };
       this.entries.set(channel, entry);
     }
     entry.holders += 1;

@@ -1,9 +1,9 @@
-import { signal } from '@angular/core';
+import { signal, untracked } from '@angular/core';
 import type { NeatFrameStats, NeatTileSource } from '@sima/neat-ui';
 import { resolveCodecLabel, offerFailureText, type VfStatus } from './channel-status';
 import { INITIAL_DECODER_HEALTH, updateDecoderHealth, type DecoderHealth } from './decoder-health';
 import { buildEgressReport, type InboundVideoReport, type VfSyncBuffer } from './egress-report';
-import { isRetryable, requestAnswer, type OfferRejectedError } from './signaling';
+import { isRetryable, OfferRejectedError, requestAnswer } from './signaling';
 
 const STUN_SERVER = 'stun:stun.l.google.com:19302';
 /** Fixed and unlimited, without backoff, as vf's own viewer retries (Inv §4d). */
@@ -23,6 +23,9 @@ const STATS_INTERVAL_MS = 1000;
 const DEFAULT_SYNC_BUFFER_MS = 300;
 
 type MetadataListener = (text: string, receivedAt: number) => void;
+type DebugLog = (event: string, details?: unknown) => void;
+
+const NO_LOG: DebugLog = () => undefined;
 
 /** A stats report as the tick reads it: any type, with the inbound-rtp fields when it is one. */
 type InboundRtpReport = RTCStats & InboundVideoReport & { kind?: string; codecId?: string };
@@ -84,9 +87,28 @@ export class VfConnection implements NeatTileSource {
   private metadataRetentionMs = 0;
   /** The tile's latest frame stats for the current stream; null until it reports. */
   private frameStats: NeatFrameStats | null = null;
+  private log: DebugLog = NO_LOG;
 
-  constructor(readonly channel: number) {
-    this.connect();
+  /**
+   * Connects at once. The first session is set up untracked: a connection created inside an
+   * `effect` or `computed` must neither make it depend on the connection's own signals nor write
+   * signals in a reactive context that forbids it.
+   */
+  constructor(
+    readonly channel: number,
+    options: { debug?: boolean } = {},
+  ) {
+    this.setDebug(options.debug ?? false);
+    untracked(() => this.connect());
+  }
+
+  /** Logs the connection's events to the console as `[viewer][chN]` (the viewer's `debug=1`). */
+  setDebug(enabled: boolean): void {
+    const prefix = `[viewer][ch${this.channel}]`;
+    this.log = enabled
+      ? (event, details) =>
+          details === undefined ? console.log(prefix, event) : console.log(prefix, event, details)
+      : NO_LOG;
   }
 
   onMetadata(listener: MetadataListener): () => void {
@@ -123,6 +145,7 @@ export class VfConnection implements NeatTileSource {
     // A retry while vf has nothing to send keeps saying so instead of flickering to "connecting".
     if (this.statusState().phase !== 'waiting') this.statusState.set(CONNECTING);
     this.frameStats = null;
+    this.log('connect start', { videoSyncBufferMs: this.syncBufferMs });
 
     const pc = new RTCPeerConnection({ iceServers: [{ urls: STUN_SERVER }] });
     const { receiver } = pc.addTransceiver('video', { direction: 'recvonly' });
@@ -140,7 +163,10 @@ export class VfConnection implements NeatTileSource {
     };
     this.session = session;
     this.applySyncBuffer(receiver);
+    this.log('pc created', this.syncBufferState());
 
+    channel.onopen = () => this.log('data channel open');
+    channel.onclose = () => this.log('data channel closed');
     channel.onmessage = (event: MessageEvent) => {
       // vf sends text frames only; the tile parses and validates them.
       if (typeof event.data !== 'string') return;
@@ -149,48 +175,64 @@ export class VfConnection implements NeatTileSource {
     };
     pc.ontrack = (event) => {
       if (this.session !== session || event.track.kind !== 'video') return;
+      const { kind, id, readyState } = event.track;
+      this.log('ontrack', { kind, id, readyState });
       this.streamState.set(new MediaStream([event.track]));
     };
     pc.onconnectionstatechange = () => {
       if (this.session !== session) return;
+      this.log('connectionState', pc.connectionState);
       if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        this.scheduleReconnect();
+        this.scheduleReconnect(`connection ${pc.connectionState}`);
       }
     };
     pc.oniceconnectionstatechange = () => {
       if (this.session !== session) return;
+      this.log('iceConnectionState', pc.iceConnectionState);
       if (session.iceDisconnectedTimer !== null) clearTimeout(session.iceDisconnectedTimer);
       session.iceDisconnectedTimer = null;
       if (pc.iceConnectionState === 'disconnected') {
         session.iceDisconnectedTimer = setTimeout(
-          () => this.scheduleReconnect(),
+          () => this.scheduleReconnect(`ICE disconnected for ${ICE_DISCONNECTED_MS} ms`),
           ICE_DISCONNECTED_MS,
         );
       }
     };
+    pc.onicegatheringstatechange = () => {
+      if (this.session === session) this.log('iceGatheringState', pc.iceGatheringState);
+    };
 
     requestAnswer(pc, `/api/vf/offer?channel=${this.channel}`)
-      .then((answer) => (this.session === session ? pc.setRemoteDescription(answer) : undefined))
+      .then(async (answer) => {
+        if (this.session !== session) return;
+        await pc.setRemoteDescription(answer);
+        if (this.session !== session) return;
+        this.log('offer answered');
+        // A retry that got through is no longer waiting for vf, though no stats show it yet.
+        if (this.statusState().phase === 'waiting') this.statusState.set(CONNECTING);
+      })
       .catch((error: unknown) => {
         if (this.session !== session) return;
+        const reason = error instanceof Error ? error.message : String(error);
+        this.log('offer failed', reason);
         this.endSession();
         if (isRetryable(error)) {
           this.statusState.set({ ...CONNECTING, phase: 'waiting' });
-          this.scheduleReconnect();
+          this.scheduleReconnect(`offer failed: ${reason}`);
         } else {
-          const status = (error as OfferRejectedError).status;
-          this.statusState.set({
-            ...CONNECTING,
-            phase: 'failed',
-            failure: offerFailureText(status),
-          });
+          const failure =
+            error instanceof OfferRejectedError
+              ? offerFailureText(error.status)
+              : `Connection failed: ${reason}`;
+          this.statusState.set({ ...CONNECTING, phase: 'failed', failure });
         }
       });
   }
 
   /** One pending reconnect at a time; the next session starts from scratch. */
-  private scheduleReconnect(): void {
+  private scheduleReconnect(reason: string): void {
     if (this.closed || this.reconnectTimer !== null) return;
+    this.log(`reconnecting in ${RECONNECT_DELAY_MS} ms`, reason);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
@@ -203,14 +245,19 @@ export class VfConnection implements NeatTileSource {
     this.session = null;
     clearInterval(session.statsTimer);
     if (session.iceDisconnectedTimer !== null) clearTimeout(session.iceDisconnectedTimer);
+    // Detached first, so a deliberate close cannot report `closed` and schedule a reconnect, and an
+    // old session's events stay out of the log.
+    session.channel.onopen = null;
+    session.channel.onclose = null;
     session.channel.onmessage = null;
     session.channel.close();
-    // Detached first, so a deliberate close cannot report `closed` and schedule a reconnect.
     session.pc.ontrack = null;
     session.pc.onconnectionstatechange = null;
     session.pc.oniceconnectionstatechange = null;
+    session.pc.onicegatheringstatechange = null;
     session.pc.close();
-    if (this.streamState() !== null) this.streamState.set(null);
+    // Not read first: an effect that releases the connection would come to depend on it.
+    this.streamState.set(null);
   }
 
   private applySyncBuffer(receiver: RTCRtpReceiver): void {
@@ -242,6 +289,16 @@ export class VfConnection implements NeatTileSource {
       const health = updateDecoderHealth(session.decoderHealth, report, now, DECODER_STALL_MS);
       session.decoderHealth = health;
       stalled ||= health.stalled;
+      this.log('stats', {
+        framesReceived: report.framesReceived,
+        framesDecoded: report.framesDecoded,
+        framesDropped: report.framesDropped,
+        packetsReceived: report.packetsReceived,
+        packetsLost: report.packetsLost,
+        bytesReceived: report.bytesReceived,
+        fps: report.framesPerSecond,
+        video: this.frameStats?.video,
+      });
 
       const bytes = report.bytesReceived ?? null;
       const seconds =
@@ -282,7 +339,7 @@ export class VfConnection implements NeatTileSource {
     }
 
     if (status !== null) this.statusState.set(status);
-    if (stalled) this.scheduleReconnect();
+    if (stalled) this.scheduleReconnect(`decoder stalled for ${DECODER_STALL_MS} ms`);
   }
 }
 
