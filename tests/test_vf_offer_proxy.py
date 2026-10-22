@@ -42,9 +42,9 @@ class VfOfferProxyTests(unittest.TestCase):
         app_module.app.config.update(TESTING=True)
         self.client = app_module.app.test_client()
 
-    def post(self, urlopen, query="channel=3", body=OFFER):
+    def post(self, urlopen, query="channel=3", body=OFFER, content_type="application/json"):
         with mock.patch.object(app_module.urllib.request, "urlopen", urlopen):
-            return self.client.post(f"/api/vf/offer?{query}", data=body, content_type="application/json")
+            return self.client.post(f"/api/vf/offer?{query}", data=body, content_type=content_type)
 
     def test_offer_proxy_passes_vf_status_and_body_through(self):
         cases = (
@@ -86,6 +86,24 @@ class VfOfferProxyTests(unittest.TestCase):
         self.assertEqual(forwarded.get_method(), "POST")
         self.assertEqual(forwarded.data, OFFER)
         self.assertEqual(forwarded.get_header("Content-type"), "application/json")
+
+    def test_offer_proxy_accepts_json_with_or_without_a_charset(self):
+        for content_type in ("application/json", "application/json; charset=utf-8", "Application/JSON"):
+            with self.subTest(content_type=content_type):
+                urlopen = mock.Mock(return_value=vf_answer())
+                self.assertEqual(self.post(urlopen, content_type=content_type).status_code, 200)
+                urlopen.assert_called_once()
+
+    def test_offer_proxy_rejects_a_body_that_is_not_json_without_calling_vf(self):
+        # A cross-site form or text/plain POST needs no CORS preflight; only JSON can come from the viewer.
+        for content_type in ("text/plain", "application/x-www-form-urlencoded", "multipart/form-data", None):
+            with self.subTest(content_type=content_type):
+                urlopen = mock.Mock()
+                response = self.post(urlopen, content_type=content_type)
+                self.assertEqual(response.status_code, 415)
+                self.assertEqual(response.mimetype, "text/plain")
+                self.assertIn("application/json", response.get_data(as_text=True))
+                urlopen.assert_not_called()
 
     def test_offer_proxy_rejects_bad_channel_without_calling_vf(self):
         for channel in ("x", "-1", "80", "", "1.5", "+3", "٣", "007", "9" * 5000):

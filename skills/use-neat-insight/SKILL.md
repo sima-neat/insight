@@ -458,7 +458,7 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 | `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
 | `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
 | `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the URL of Insight's `/viewer` page, with `src` and `max_channels` in its query and `mode` only when it is `light` or `dark`. |
-| `POST` | `/api/vf/offer?channel=<N>` | Relay the browser's JSON WebRTC offer to vf and return vf's answer with its status code and body unchanged (`N` is 0-79, offers up to 64 KiB). `400` for an invalid channel and `413` for an oversized offer are answered without calling vf; `502` means vf is unreachable and `504` that it did not answer within 8 s. vf's own `503` (no codec identified yet) and `415` (browser cannot decode the codec) pass through. |
+| `POST` | `/api/vf/offer?channel=<N>` | Relay the browser's JSON WebRTC offer to vf and return vf's answer with its status code and body unchanged (`N` is 0-79, offers up to 64 KiB). `400` for an invalid channel, `413` for an oversized offer and `415` for a request that is not `Content-Type: application/json` are answered without calling vf; `502` means vf is unreachable and `504` that it did not answer within 8 s. vf's own `503` (no codec identified yet) and `415` (browser cannot decode the codec) pass through. |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 

@@ -744,6 +744,10 @@ def vf_offer():
     # on very long digit strings, which would surface as a retryable 500.
     if not (re.fullmatch(r"[0-9]{1,2}", channel) and int(channel) < VIEWER_CHANNEL_COUNT):
         return _text_response(f"Invalid channel index: expected 0-{VIEWER_CHANNEL_COUNT - 1}", 400)
+    # The viewer always sends JSON. A cross-site page can send a form or text/plain POST without a CORS preflight,
+    # so anything but JSON is refused before it can open a peer connection through a visitor's browser.
+    if request.mimetype != "application/json":
+        return _text_response("Offer must be sent as application/json", 415)
     too_large = _text_response(f"Offer larger than {VF_OFFER_MAX_BYTES // 1024} KiB", 413)
     if request.content_length is not None and request.content_length > VF_OFFER_MAX_BYTES:
         return too_large

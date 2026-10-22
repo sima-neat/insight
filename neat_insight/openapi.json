@@ -1394,7 +1394,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "The JSON-encoded session description of the browser's offer, at most 64 KiB.",
+          "description": "The JSON-encoded session description of the browser's offer, at most 64 KiB, sent as `application/json` (a `charset` parameter is allowed). Any other `Content-Type` is refused with `415` before vf is called: a cross-site page can send forms and `text/plain` without a CORS preflight.",
           "content": {
             "application/json": {
               "schema": {"type": "object", "required": ["type", "sdp"], "properties": {"type": {"type": "string", "enum": ["offer"]}, "sdp": {"type": "string"}}},
@@ -1406,7 +1406,7 @@
           "200": {"description": "vf's answer, with all host ICE candidates inline.", "content": {"application/json": {"schema": {"type": "object", "required": ["type", "sdp"], "properties": {"type": {"type": "string", "enum": ["answer"]}, "sdp": {"type": "string"}}}}}},
           "400": {"description": "`channel` is not an integer from 0 to 79 (rejected before vf is called), or vf rejected the channel or the SDP.", "content": {"text/plain": {"schema": {"type": "string"}}}},
           "413": {"description": "The offer is larger than 64 KiB.", "content": {"text/plain": {"schema": {"type": "string"}}}},
-          "415": {"description": "From vf: the browser does not support the channel's video codec.", "content": {"text/plain": {"schema": {"type": "string"}}}},
+          "415": {"description": "The request's `Content-Type` is not `application/json` (rejected before vf is called), or, from vf, the browser does not support the channel's video codec.", "content": {"text/plain": {"schema": {"type": "string"}}}},
           "500": {"description": "From vf: the peer connection could not be set up.", "content": {"text/plain": {"schema": {"type": "string"}}}},
           "502": {"description": "vf could not be reached or its TLS handshake failed.", "content": {"text/plain": {"schema": {"type": "string"}}}},
           "503": {"description": "From vf: the channel has no video codec yet, or the codec changed during negotiation. Retry.", "content": {"text/plain": {"schema": {"type": "string"}}}},
