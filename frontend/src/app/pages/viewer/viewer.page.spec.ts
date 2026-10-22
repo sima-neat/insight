@@ -256,6 +256,21 @@ describe('ViewerPage', () => {
     ).toEqual(['16']);
   });
 
+  it('Fit all forgets the width chosen for the displayed count, so all channels fit again', async () => {
+    await open('/viewer');
+    expect(button('Fit all').disabled).toBe(true);
+    expect(button('Fit all').getAttribute('neatTooltip')).toBe('Fit all');
+
+    await press('ArrowRight', {}, slider());
+    expect(tileWidth()).toBe('168px');
+    expect(button('Fit all').disabled).toBe(false);
+
+    await click(button('Fit all'));
+    expect(tileWidth()).toBe('167px');
+    expect((storage.readStored('layout') as { tileWidths: object }).tileWidths).toStrictEqual({});
+    expect(button('Fit all').disabled).toBe(true);
+  });
+
   it('shrinking the area keeps the selected channel on screen', async () => {
     sixPerPage();
     await open('/viewer');

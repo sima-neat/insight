@@ -100,6 +100,19 @@ export class LayoutPrefs {
     }));
   }
 
+  /**
+   * Forgets the width chosen for `count` displayed channels, so they fit all on one page again (the
+   * toolbar's "Fit all"). Forgetting a width that is not stored writes nothing.
+   */
+  forgetTileWidth(count: number): void {
+    if (!this.tileWidths().has(count)) return;
+    this.update((latest) => {
+      const tileWidths = new Map(latest.tileWidths);
+      tileWidths.delete(count);
+      return { ...latest, tileWidths };
+    });
+  }
+
   /** Stores one choice; choosing what is already chosen writes nothing. */
   private choose<K extends 'aspect' | 'bars' | 'hideEmpty' | 'inspector'>(
     key: K,

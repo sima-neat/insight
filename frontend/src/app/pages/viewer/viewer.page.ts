@@ -196,6 +196,11 @@ export class ViewerPage {
     return fitAllTileWidth(space, count, this.prefs.aspect(), space.gap);
   });
 
+  /** The user has chosen a size for this many channels, so "Fit all" has one to forget. */
+  protected readonly sizeChosen = computed(
+    () => this.prefs.tileWidthFor(this.channels().length) !== null,
+  );
+
   /** The slider ends where one tile fills the area. */
   protected readonly sliderMax = computed(() => {
     const space = this.space();
@@ -262,6 +267,11 @@ export class ViewerPage {
 
   protected rememberTileWidth(width: number): void {
     this.prefs.rememberTileWidth(this.channels().length, width);
+  }
+
+  /** Back to the size at which all the displayed channels fit on one page. */
+  protected fitAll(): void {
+    this.prefs.forgetTileWidth(this.channels().length);
   }
 
   protected goToPage(input: HTMLInputElement): void {

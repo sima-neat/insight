@@ -71,6 +71,29 @@ describe('LayoutPrefs', () => {
     expect(reload().tileWidthFor(16)).toBe(260);
   });
 
+  it("forgetTileWidth(count) drops only that count's width, across a reload too", () => {
+    const prefs = open();
+    prefs.rememberTileWidth(16, 240);
+    prefs.rememberTileWidth(4, 500);
+    const width = computed(() => prefs.tileWidthFor(16));
+    expect(width()).toBe(240);
+
+    prefs.forgetTileWidth(16);
+
+    expect(width()).toBeNull();
+    expect(prefs.tileWidthFor(4)).toBe(500);
+    expect((fake.readStored('layout') as { tileWidths: object }).tileWidths).toStrictEqual({
+      4: 500,
+    });
+    expect(reload().tileWidthFor(16)).toBeNull();
+  });
+
+  it('forgetting a width that is not stored writes nothing', () => {
+    const prefs = open();
+    prefs.forgetTileWidth(16);
+    expect(fake.writes).toStrictEqual([]);
+  });
+
   it('tileWidthFor is reactive, so a computed width follows rememberTileWidth', () => {
     const prefs = open();
     const width = computed(() => prefs.tileWidthFor(16));
