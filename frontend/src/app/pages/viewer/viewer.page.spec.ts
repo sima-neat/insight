@@ -367,9 +367,11 @@ describe('ViewerPage', () => {
     await open('/viewer');
 
     await click(toggle('Hide empty'));
-    // Until the first answer it is unknown which channels are live, so none is shown.
-    expect(shown()).toEqual([]);
-    expect(fake.held()).toEqual([]);
+    // Until the first answer the tiles on screen stay, connections and all: the live ones among
+    // them must not reconnect when the answer comes.
+    expect(shown()).toEqual(range(6));
+    expect(fake.held()).toEqual(range(6));
+    expect(fake.released).toEqual([]);
     http.expectOne(STATS_URL).flush({
       channels: [
         { channel: 2, active: true },
@@ -378,6 +380,8 @@ describe('ViewerPage', () => {
     });
     await settle();
     expect(shown()).toEqual([2, 5]);
+    // Only the empty channels let go; 2 and 5 kept the connection they had.
+    expect([...fake.released].sort((a, b) => a - b)).toEqual([0, 1, 3, 4]);
 
     vi.advanceTimersByTime(2000);
     http.expectOne(STATS_URL).flush({ channels: [{ channel: 5, active: true }] });

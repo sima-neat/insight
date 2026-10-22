@@ -9,6 +9,7 @@ import {
   ElementRef,
   inject,
   Injector,
+  linkedSignal,
   signal,
   untracked,
   viewChild,
@@ -147,18 +148,27 @@ export class ViewerPage {
   );
 
   /**
-   * What the grid shows: the configured channels, only the live ones while "Hide empty" is on.
-   * While the first ingest stats answer is awaited no channel is shown, since which are live is not
-   * known: showing them all would open a connection per slot only to close most of them a moment
-   * later. If stats fail before any answer every channel is shown, with a notice: an empty grid
-   * would say no channel has video, which nobody knows. After an answer a failed poll keeps that
-   * answer's channels on screen.
+   * What the grid should show as far as it is known: the configured channels, only the live ones
+   * while "Hide empty" is on, and null while the first ingest stats answer is awaited. If stats fail
+   * before any answer every channel is shown, with a notice: an empty grid would say no channel has
+   * video, which nobody knows. After an answer a failed poll keeps that answer's channels.
    */
-  private readonly channels = computed<readonly number[]>(() => {
-    if (this.liveAwaited()) return [];
+  private readonly knownChannels = computed<readonly number[] | null>(() => {
+    if (this.liveAwaited()) return null;
     const configured = this.configured() ?? [];
     const live = this.prefs.hideEmpty() ? this.liveness.live() : null;
     return live === null ? configured : configured.filter((channel) => live.has(channel));
+  });
+
+  /**
+   * What the grid shows. While the first answer is awaited it keeps what it showed: on load that is
+   * nothing, so no connection is opened per slot only to be closed a moment later, and after
+   * switching "Hide empty" on mid-session the tiles stay, so the live ones keep their connections
+   * instead of negotiating new ones when the answer comes.
+   */
+  private readonly channels = linkedSignal<readonly number[] | null, readonly number[]>({
+    source: this.knownChannels,
+    computation: (known, previous) => known ?? previous?.value ?? [],
   });
 
   /**
