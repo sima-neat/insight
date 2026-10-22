@@ -128,6 +128,35 @@ Useful build options:
 - `--skip-frontend`
 - `--skip-shim` (Linux wheels then run ffmpeg with Nagle enabled)
 
+### Work on the frontend
+
+The frontend is an Angular app in `frontend/` built on the vendored `@sima/neat-ui` kit (see
+[`AGENTS.md`](AGENTS.md)). It needs Node.js 24; `fnm use` picks it up from `.node-version`. Run these
+in `frontend/`:
+
+```bash
+npm ci                        # install, once and after dependency changes
+npm start                     # dev server on http://localhost:4200
+npm test -- --watch=false     # unit tests
+npm run lint                  # ESLint and Stylelint
+npm run build                 # production build into frontend/dist
+npm run e2e                   # end-to-end tests
+```
+
+The dev server serves the app alone, without the Flask backend, which is enough while the pages are
+placeholders. To see the build the way users do, run `npm run build` and start `neat-insight` from
+a source-tree install: Flask serves `frontend/dist` and falls back to `index.html` for client-side
+routes such as `/viewer`.
+
+`npm run e2e` starts the dev server itself. The first run needs Chromium with its system libraries:
+`npx playwright install --with-deps chromium`. To test a build that is already running, for example
+one deployed into the SDK container, point the tests at it; they then record no screenshots or
+traces of it:
+
+```bash
+INSIGHT_BASE_URL=https://127.0.0.1:9900 npm run e2e
+```
+
 ## Testing metadata
 
 `neat-insight` now ships a metadata test sender for vf metadata ports (`9100-9179`).
