@@ -150,8 +150,10 @@ routes such as `/viewer`.
 
 `npm run e2e` starts the dev server itself. The first run needs Chromium with its system libraries:
 `npx playwright install --with-deps chromium`. To test a build that is already running, for example
-one deployed into the SDK container, point the tests at it; they then record no screenshots or
-traces of it:
+one deployed into the SDK container, point the tests at it. They then record no screenshots, videos
+or traces, and delete the test output directory (including Playwright's failure context, which holds
+a snapshot of the page) when the run ends. A failed assertion still prints its message and call log
+in the terminal.
 
 ```bash
 INSIGHT_BASE_URL=https://127.0.0.1:9900 npm run e2e

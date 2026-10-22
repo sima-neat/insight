@@ -46,9 +46,11 @@ test.describe('kiosk mode', () => {
   test('?kiosk hides the chrome; pointer movement reveals exit; exit restores', async ({
     page,
   }) => {
-    // The kit hides the exit button after 2.5 s without pointer activity. A fake clock makes
-    // that idle time pass at once instead of waiting it out.
-    await page.clock.install();
+    // The kit hides the exit button after 2.5 s without pointer activity. The clock is paused from
+    // before the page loads, so that timer advances only when the test runs it: neither a slow
+    // machine nor a fast one changes what the test sees.
+    await page.clock.install({ time: 0 });
+    await page.clock.pauseAt(1000);
     await page.goto('/viewer?kiosk');
 
     await expect(nav(page)).toHaveCount(0);
@@ -59,13 +61,17 @@ test.describe('kiosk mode', () => {
     await expect(page.getByText('The Viewer arrives with plan 2.')).toBeVisible();
 
     await expect(exitKiosk(page)).toHaveCSS('opacity', '1');
-    await page.clock.fastForward(3000);
+    await page.clock.runFor(3000);
     await expect(exitKiosk(page)).toHaveCSS('opacity', '0');
 
+    // Angular schedules rendering on timers, which are paused too: let a little time pass for it,
+    // far short of the idle timeout.
     await page.mouse.move(200, 200);
+    await page.clock.runFor(100);
     await expect(exitKiosk(page)).toHaveCSS('opacity', '1');
 
     await exitKiosk(page).click();
+    await page.clock.runFor(100); // rendering again, as above
     await expect(nav(page)).toBeVisible();
     await expect(page.getByRole('banner')).toBeVisible();
     await expect(exitKiosk(page)).toHaveCount(0);

@@ -110,13 +110,13 @@ private.
 Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 `^22.22.3 || ^24.15.0`, we pin 24). Run these in `frontend/`:
 
-| Command         | What it does                                                                 |
-| --------------- | ---------------------------------------------------------------------------- |
-| `npm start`     | Dev server on `http://localhost:4200`                                        |
-| `npm test`      | Unit tests (`npm test -- --watch=false` runs once and exits)                 |
-| `npm run lint`  | ESLint (angular-eslint, kit-only imports) and Stylelint (no colour literals) |
-| `npm run build` | Production build into `frontend/dist`                                        |
-| `npm run e2e`   | Playwright end-to-end tests (`frontend/e2e`)                                 |
+| Command         | What it does                                                                                        |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| `npm start`     | Dev server on `http://localhost:4200`                                                               |
+| `npm test`      | Unit tests (`npm test -- --watch=false` runs once and exits)                                        |
+| `npm run lint`  | ESLint (angular-eslint, kit-only imports), Stylelint (no colour literals) and a typecheck of `e2e/` |
+| `npm run build` | Production build into `frontend/dist`                                                               |
+| `npm run e2e`   | Playwright end-to-end tests (`frontend/e2e`)                                                        |
 
 The backend's tests run from the repo root with `python -m unittest discover -s tests`. Run lint,
 the unit tests and the build before opening a PR; CI (`.github/workflows/tests.yml`) runs the same.

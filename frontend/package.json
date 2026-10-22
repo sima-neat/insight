@@ -11,7 +11,7 @@
     "start": "ng serve",
     "build": "ng build",
     "test": "ng test",
-    "lint": "ng lint && stylelint \"src/**/*.css\" --allow-empty-input",
+    "lint": "ng lint && stylelint \"src/**/*.css\" --allow-empty-input && tsc -p e2e/tsconfig.json",
     "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
@@ -32,6 +32,7 @@
     "@angular/compiler-cli": "~22.2.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "~1.64.1",
+    "@types/node": "^24.19.2",
     "angular-eslint": "22.6.0",
     "eslint": "^10.12.0",
     "jsdom": "^30.0.0",
