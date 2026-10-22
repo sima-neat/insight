@@ -5,6 +5,7 @@ import {
   normalizeMaxChannels,
   parseChannelIndices,
   readViewerParams,
+  type ViewerPosition,
   ViewerState,
 } from './viewer-state';
 
@@ -65,9 +66,9 @@ describe('readViewerParams', () => {
 });
 
 describe('ViewerState', () => {
-  function create(channels: readonly number[] = range(16)) {
+  function create(channels: readonly number[] = range(16), restored?: ViewerPosition) {
     const list = signal(channels);
-    return { list, state: new ViewerState(list) };
+    return { list, state: new ViewerState(list, restored) };
   }
 
   it('shows no channel until the grid reports how many fit', () => {
@@ -172,5 +173,47 @@ describe('ViewerState', () => {
     expect(state.selected()).toBe(3);
     state.clearSelection();
     expect(state.selected()).toBeNull();
+  });
+
+  it('opens at a remembered position: the page holding its first channel, with its selection', () => {
+    const { state } = create(range(16), { firstChannel: 12, selected: 13 });
+    expect(state.selected()).toBe(13);
+
+    state.perPage.set(6);
+    expect(state.page()).toBe(2);
+    expect(state.pageChannels()).toEqual([12, 13, 14, 15]);
+  });
+
+  it('shows the remembered first channel with a different perPage too', () => {
+    const { state } = create(range(16), { firstChannel: 12, selected: null });
+
+    state.perPage.set(5);
+    expect(state.pageChannels()).toEqual([10, 11, 12, 13, 14]);
+  });
+
+  it('holds the remembered first channel on screen until the user pages', () => {
+    // The channel list can arrive after the grid has measured (the limit, ingest stats).
+    const { list, state } = create([], { firstChannel: 12, selected: null });
+    state.perPage.set(6);
+    expect(state.page()).toBe(0);
+
+    list.set(range(16));
+    expect(state.pageChannels()).toEqual([12, 13, 14, 15]);
+    state.perPage.set(4);
+    expect(state.pageChannels()).toEqual([12, 13, 14, 15]);
+
+    state.previous();
+    expect(state.pageChannels()).toEqual([8, 9, 10, 11]);
+    // From here the page is the user's: a smaller perPage clamps it as usual.
+    state.perPage.set(3);
+    expect(state.pageChannels()).toEqual([6, 7, 8]);
+  });
+
+  it('starts on the first page when the remembered first channel is no longer displayed', () => {
+    const { state } = create(range(8), { firstChannel: 12, selected: null });
+
+    state.perPage.set(3);
+    expect(state.page()).toBe(0);
+    expect(state.pageChannels()).toEqual([0, 1, 2]);
   });
 });

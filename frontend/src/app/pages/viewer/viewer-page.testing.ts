@@ -14,11 +14,14 @@ export class FakeResizeObserver {
     FakeResizeObserver.instances.push(this);
   }
 
-  /** The observer of the Viewer's tile grid, which sets the tile layout. */
+  /**
+   * The observer of the Viewer's tile grid, which sets the tile layout: the newest one, since a
+   * Viewer opened again after navigating away has a grid of its own.
+   */
   static grid(): FakeResizeObserver {
-    return FakeResizeObserver.instances.find(
-      (observer) => observer.observed[0]?.tagName === 'NEAT-TILE-GRID',
-    )!;
+    return FakeResizeObserver.instances
+      .filter((observer) => observer.observed[0]?.tagName === 'NEAT-TILE-GRID')
+      .at(-1)!;
   }
 
   observe(target: Element): void {

@@ -1,5 +1,6 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { Component } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
@@ -17,6 +18,10 @@ const STATS_URL = '/api/ingest/stats';
 const range = (count: number, from = 0) =>
   Array.from({ length: count }, (_, index) => from + index);
 
+/** Another page of the app, to leave the Viewer for. */
+@Component({ template: '' })
+class Elsewhere {}
+
 describe('ViewerPage', () => {
   let storage: FakeLocalStorage;
   let fake: FakeConnections;
@@ -31,7 +36,10 @@ describe('ViewerPage', () => {
     fake = new FakeConnections();
     TestBed.configureTestingModule({
       providers: [
-        provideRouter([{ path: 'viewer', component: ViewerPage }]),
+        provideRouter([
+          { path: 'viewer', component: ViewerPage },
+          { path: 'elsewhere', component: Elsewhere },
+        ]),
         provideHttpClient(),
         provideHttpClientTesting(),
       ],
@@ -94,16 +102,33 @@ describe('ViewerPage', () => {
     await settle();
   }
 
-  /** Opens `url` in the shell, answers the channel limit if the page asks, and sizes the grid. */
+  interface Visit {
+    /** The channel limit Flask answers, or null for a failed request. */
+    readonly limit?: number | null;
+    /** The grid's size, or null to leave it unmeasured. */
+    readonly area?: readonly [number, number] | null;
+  }
+
   /**
    * Opens `url` in the shell, answers the channel limit if the page asks, and sizes the grid. With
    * `area: null` the grid is left unmeasured; with `limit: null` the limit request fails.
    */
-  async function open(
-    url: string,
-    { limit = 16 as number | null, area = [1000, 400] as [number, number] | null } = {},
-  ): Promise<void> {
+  async function open(url: string, visit: Visit = {}): Promise<void> {
     fixture = TestBed.createComponent(Shell);
+    await visitViewer(url, visit);
+  }
+
+  /** Goes to another page of the app and back to the Viewer at `url`, which opens afresh. */
+  async function leaveAndReturn(url: string, visit: Visit = {}): Promise<void> {
+    await navigate('/elsewhere');
+    expect(fixture.debugElement.query(By.directive(ViewerPage))).toBeNull();
+    await visitViewer(url, visit);
+  }
+
+  async function visitViewer(
+    url: string,
+    { limit = 16, area = [1000, 400] }: Visit = {},
+  ): Promise<void> {
     await TestBed.inject(Router).navigateByUrl(url);
     await settle();
     if (!url.includes('max_channels=')) {
@@ -520,5 +545,53 @@ describe('ViewerPage', () => {
 
     fixture.destroy();
     expect(fake.closedAll).toBeGreaterThan(0);
+  });
+
+  it('page, selection and inspector tab survive leaving the Viewer and coming back', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(channelInput(), '10');
+    await click(button('Inspector'));
+    await click(
+      [...root().querySelectorAll<HTMLElement>('aside [role="tab"]')].find(
+        (tab) => tab.textContent?.trim() === 'General',
+      )!,
+    );
+    expect(page().inspectorTab()).toBe('General');
+
+    await leaveAndReturn('/viewer');
+
+    // Leaving closed the connections, as it must; the position came back.
+    expect(fake.closedAll).toBeGreaterThan(0);
+    expect(shown()).toEqual(range(6, 6));
+    expect(pageInput().value).toBe('2');
+    expect(page().selectedChannel()).toBe(10);
+    expect(page().inspectorTab()).toBe('General');
+    expect(root().querySelector('aside')?.textContent).toContain('Channel 10');
+  });
+
+  it('a different number of tiles per page on return still shows the first channel left on screen', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(pageInput(), '3');
+    expect(shown()).toEqual([12, 13, 14, 15]);
+
+    // Four 300 px tiles per page now: channel 12 is on the fourth.
+    await leaveAndReturn('/viewer', { area: [700, 400] });
+
+    expect(shown()).toEqual([12, 13, 14, 15]);
+    expect(pageInput().value).toBe('4');
+  });
+
+  it('a remembered position the link no longer shows falls back to the first page, nothing selected', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(channelInput(), '10');
+
+    await leaveAndReturn('/viewer?src=0,1,2,3');
+
+    expect(shown()).toEqual([0, 1, 2, 3]);
+    expect(pageInput().value).toBe('1');
+    expect(page().selectedChannel()).toBeNull();
   });
 });

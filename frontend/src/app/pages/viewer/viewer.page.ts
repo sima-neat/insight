@@ -43,6 +43,7 @@ import type { SettingTab } from '../../viewer/settings/schema';
 import { ViewerStorage } from '../../viewer/settings/storage';
 import { ViewerSettingsStore } from '../../viewer/settings/viewer-settings.store';
 import { VfConnections } from '../../viewer/vf/vf-connections';
+import { ViewerSession } from '../../viewer/viewer-session';
 import {
   MAX_CHANNELS,
   normalizeMaxChannels,
@@ -87,7 +88,8 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
  * here), and the inspector opens beside the grid.
  *
  * The page owns the channel connections, the settings and the layout choices for as long as it is
- * shown; leaving it closes every connection.
+ * shown; leaving it closes every connection. Where the user was (page, selection, inspector tab)
+ * goes to `ViewerSession` on leaving, and the next visit starts there.
  */
 @Component({
   selector: 'app-viewer-page',
@@ -116,6 +118,7 @@ export class ViewerPage {
   private readonly connections = inject(VfConnections);
   private readonly liveness = inject(ChannelLiveness);
   private readonly storage = inject(ViewerStorage);
+  private readonly session = inject(ViewerSession);
   private readonly theme = inject(ThemeService);
   private readonly http = inject(HttpClient);
   private readonly destroyRef = inject(DestroyRef);
@@ -166,11 +169,11 @@ export class ViewerPage {
     () => this.prefs.hideEmpty() && this.liveness.unavailable(),
   );
 
-  protected readonly state = new ViewerState(this.channels);
+  protected readonly state = new ViewerState(this.channels, this.session.lastVisit.position);
   /** The channel the inspector shows; null for all channels. */
   readonly selectedChannel = this.state.selected.asReadonly();
   /** The inspector's open tab: the late chip opens General, where the raise actions are. */
-  readonly inspectorTab = signal<SettingTab>('Metadata');
+  readonly inspectorTab = signal<SettingTab>(this.session.lastVisit.inspectorTab);
 
   /**
    * What the fit-all widths are worked out against: the grid's content box and the gap it packed
@@ -237,8 +240,19 @@ export class ViewerPage {
       const hideEmpty = this.prefs.hideEmpty();
       untracked(() => this.liveness.setEnabled(hideEmpty));
     });
+    effect(() => {
+      // Only the link's channels can be selected; one remembered from a visit with another link
+      // (or a link changed in place) is dropped rather than inspected off the grid.
+      const configured = this.configured();
+      if (configured === null) return;
+      untracked(() => {
+        const selected = this.state.selected();
+        if (selected !== null && !configured.includes(selected)) this.state.clearSelection();
+      });
+    });
     // Every connection ends with the page, whichever tiles still hold one.
     this.destroyRef.onDestroy(() => this.connections.closeAll());
+    this.destroyRef.onDestroy(() => this.rememberVisit());
   }
 
   protected onLayout(layout: NeatTileLayout): void {
@@ -332,6 +346,20 @@ export class ViewerPage {
         this.state.clearSelection();
         break;
     }
+  }
+
+  /** Hands where the user is to the next visit. */
+  private rememberVisit(): void {
+    const previous = this.session.lastVisit.position;
+    this.session.lastVisit = {
+      position: {
+        // A visit that left before showing any channel (the limit or the first ingest stats
+        // answer still pending, no live channel) did not move from where the last one was.
+        firstChannel: this.state.pageChannels()[0] ?? previous.firstChannel,
+        selected: this.state.selected(),
+      },
+      inspectorTab: this.inspectorTab(),
+    };
   }
 
   /** Focuses the first tile once the new page has rendered. */

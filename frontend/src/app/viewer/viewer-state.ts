@@ -57,6 +57,20 @@ export function readViewerParams(params: ParamMap): ViewerParams {
   };
 }
 
+/** Where the user was in a Viewer: what a Viewer opened again starts from. */
+export interface ViewerPosition {
+  /**
+   * The first channel of the page on screen. A channel rather than a page number, because the
+   * number of tiles per page may differ next time (another window size, the inspector open).
+   */
+  readonly firstChannel: number | null;
+  /** The selected channel, or null for all channels. */
+  readonly selected: number | null;
+}
+
+/** A Viewer opened for the first time: on the first page, with nothing selected. */
+export const START_POSITION: ViewerPosition = { firstChannel: null, selected: null };
+
 interface PagingSource {
   readonly channels: readonly number[];
   readonly perPage: number | null;
@@ -74,6 +88,9 @@ function clamp(value: number, min: number, max: number): number {
  * The Viewer's paging and selection over the channels it displays. `perPage` comes from the tile
  * grid's layout; until the grid has measured itself it is null and no page shows a channel, so no
  * connection is opened for a tile that is then paged away.
+ *
+ * It starts from a `ViewerPosition`: the selection as it was, and the page holding the position's
+ * first channel.
  */
 export class ViewerState {
   /** How many tiles fit on screen, from the grid; null until it reports. */
@@ -82,10 +99,19 @@ export class ViewerState {
   readonly selected = signal<number | null>(null);
 
   /**
+   * The channel the starting position keeps on screen until the user pages. The channel list and
+   * `perPage` settle in steps after the page opens (the channel limit, ingest stats, the grid
+   * measuring and repacking), so the page is placed at every step rather than once.
+   */
+  private readonly anchor = signal<number | null>(null);
+
+  /**
    * The current page, 0-based. When the channels or `perPage` change it is clamped into range,
    * except that a selected channel that was on screen stays on screen: the area shrinking (the
    * inspector opening, a smaller window) must not page the user away from what they inspect. A
-   * selected channel the user had paged away from does not pull them back.
+   * selected channel the user had paged away from does not pull them back. Until the user pages,
+   * the starting position's first channel is kept on screen the same way; when it is not displayed
+   * the page is clamped like any other.
    */
   readonly page = linkedSignal<PagingSource, number>({
     source: () => ({ channels: this.channels(), perPage: this.perPage() }),
@@ -101,6 +127,9 @@ export class ViewerState {
         const index = next.channels.indexOf(selected);
         if (wasShown && index >= 0) return Math.floor(index / next.perPage);
       }
+      const anchor = untracked(this.anchor);
+      const anchored = anchor === null ? -1 : next.channels.indexOf(anchor);
+      if (anchored >= 0) return Math.floor(anchored / next.perPage);
       return clamp(current, 0, pageCountOf(next.channels.length, next.perPage) - 1);
     },
   });
@@ -118,21 +147,30 @@ export class ViewerState {
     return this.channels().slice(start, start + perPage);
   });
 
-  /** @param channels the channels displayed, in order: the configured ones, filtered. */
-  constructor(private readonly channels: Signal<readonly number[]>) {}
+  /**
+   * @param channels the channels displayed, in order: the configured ones, filtered.
+   * @param start where the user was when they last left a Viewer.
+   */
+  constructor(
+    private readonly channels: Signal<readonly number[]>,
+    start: ViewerPosition = START_POSITION,
+  ) {
+    this.selected.set(start.selected);
+    this.anchor.set(start.firstChannel);
+  }
 
   next(): void {
-    this.page.set(Math.min(this.page() + 1, this.pageCount() - 1));
+    this.turnTo(Math.min(this.page() + 1, this.pageCount() - 1));
   }
 
   previous(): void {
-    this.page.set(Math.max(this.page() - 1, 0));
+    this.turnTo(Math.max(this.page() - 1, 0));
   }
 
   /** Goes to the 1-based `page`, clamped into range; anything but a whole number is ignored. */
   goToPage(page: number): void {
     if (!Number.isInteger(page)) return;
-    this.page.set(clamp(page, 1, this.pageCount()) - 1);
+    this.turnTo(clamp(page, 1, this.pageCount()) - 1);
   }
 
   /**
@@ -143,7 +181,7 @@ export class ViewerState {
     const perPage = this.perPage();
     const index = this.channels().indexOf(channel);
     if (perPage === null || index < 0) return;
-    this.page.set(Math.floor(index / perPage));
+    this.turnTo(Math.floor(index / perPage));
     this.selected.set(channel);
   }
 
@@ -153,5 +191,11 @@ export class ViewerState {
 
   clearSelection(): void {
     this.selected.set(null);
+  }
+
+  /** The page the user asked for: from now on the page is theirs, not the starting position's. */
+  private turnTo(page: number): void {
+    this.anchor.set(null);
+    this.page.set(page);
   }
 }
