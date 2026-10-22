@@ -1,9 +1,7 @@
 import { inject, Injectable } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { RouterStateSnapshot, TitleStrategy } from '@angular/router';
-
-/** The product name: the shell's app name and the prefix of every document title. */
-export const APP_NAME = 'Neat Insight';
+import { APP_NAME } from './app-name';
 
 /** Titles the document `Neat Insight · <route title>`, or just the app name on untitled routes. */
 @Injectable()

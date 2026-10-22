@@ -11,11 +11,6 @@ import { NeatPage } from '@sima/neat-ui';
       <p>Media arrives with plan 3.</p>
     </neat-page>
   `,
-  styles: `
-    p {
-      margin: 0;
-      padding: 1.5rem;
-    }
-  `,
+  styleUrl: './media.page.css',
 })
 export class MediaPage {}

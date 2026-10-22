@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { NeatShell } from '@sima/neat-ui';
+import { APP_NAME } from './app-name';
 import { INSIGHT_NAV } from './navigation';
-import { APP_NAME } from './title-strategy';
 
 @Component({
   selector: 'app-root',

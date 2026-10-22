@@ -1,6 +1,7 @@
 {
   "rules": {
     "color-no-hex": true,
-    "function-disallowed-list": ["rgb", "rgba", "hsl", "hsla"]
+    "function-disallowed-list": ["rgb", "rgba", "hsl", "hsla"],
+    "at-rule-disallowed-list": ["import"]
   }
 }

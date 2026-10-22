@@ -11,11 +11,6 @@ import { NeatPage } from '@sima/neat-ui';
       <p>Streaming arrives with plan 3.</p>
     </neat-page>
   `,
-  styles: `
-    p {
-      margin: 0;
-      padding: 1.5rem;
-    }
-  `,
+  styleUrl: './streaming.page.css',
 })
 export class StreamingPage {}

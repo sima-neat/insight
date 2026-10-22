@@ -40,9 +40,18 @@ not ship the workaround in the meantime.
 Why: tokens are what make light and dark work and keep later rebranding a kit change. Overrides
 (deep selectors, `!important`, hard-coded colours) silently break in one theme or after a kit
 update. There are no colour literals (hex, `rgb()`, `hsl()`) in the app; Stylelint enforces this
-for stylesheets. The app has no Tailwind setup of its own, so utility classes in app templates do
-nothing reliable. Escape hatch: a look that tokens and inputs cannot reach is a kit gap; raise it as
-a kit change.
+on every component stylesheet. The app has no Tailwind setup of its own, so utility classes in app
+templates do nothing reliable. Escape hatch: a look that tokens and inputs cannot reach is a kit
+gap; raise it as a kit change.
+
+**Component styles live in a `.css` file next to the component, referenced with `styleUrl`, and
+never `@import` anything.**
+Why: Stylelint reads only stylesheets, so a style written inline in the decorator (`styles:`) would
+escape the colour-literal rules; ESLint rejects inline styles (templates may stay inline). The kit
+stylesheet reaches the app once, through `angular.json`; an `@import` in a component (of
+`tailwindcss`, `tw-animate-css` or the kit stylesheet) would pull a second copy of styles into it,
+so Stylelint rejects `@import`. Escape hatch: none; a component that needs no styles has no
+stylesheet.
 
 **Pages fill the content area the shell gives them and own at most one scroll context.**
 Why: nested scroll containers and hard-coded sizes break on other screens and in kiosk mode, where
@@ -68,7 +77,10 @@ merging.
   where Flask (`_resolve_frontend_dist`) and `build.sh` look for it. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
-  `/static/`, which the hosted mode's public origin routes to vf.
+  `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
+  at 700 kB, as in the kit showcase, because the kit's shell with Angular's router already brings
+  the placeholder app to about 490 kB raw; the 1 MB error ceiling stays. (`angular.json` cannot
+  hold comments, so the reason lives here.)
 - **Unit tests** use the Angular CLI's runner (Vitest); end-to-end tests use Playwright
   (`frontend/e2e`).
 
