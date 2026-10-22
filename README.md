@@ -99,7 +99,7 @@ Use this when you need to modify functionality.
 
 Prerequisites:
 - Python 3.10+
-- Node.js 20+ and npm
+- Node.js 24 and npm for the frontend (`.node-version`)
 - Go 1.24+
 - A C compiler for each Linux target: `gcc` for the host, plus
   `gcc-aarch64-linux-gnu` or `gcc-x86-64-linux-gnu` to cross-build the other

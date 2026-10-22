@@ -476,7 +476,7 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
         fi
     fi
 
-    # Bundle built React frontend into the Python package for wheel installs.
+    # Bundle the built frontend into the Python package for wheel installs.
     if [[ -d "frontend/dist" ]]; then
         echo "📦 Bundling frontend/dist into neat_insight/frontend_dist"
         rm -rf neat_insight/frontend_dist

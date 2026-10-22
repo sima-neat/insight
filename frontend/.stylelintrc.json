@@ -1,0 +1,6 @@
+{
+  "rules": {
+    "color-no-hex": true,
+    "function-disallowed-list": ["rgb", "rgba", "hsl", "hsla"]
+  }
+}

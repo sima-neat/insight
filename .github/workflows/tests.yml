@@ -1,6 +1,6 @@
 name: Tests
 
-# The one test job: it runs on every pull request and on every push to main.
+# The test jobs run on every pull request and on every push to main.
 on:
   pull_request:
   push:
@@ -49,3 +49,32 @@ jobs:
           # ffmpeg is installed above; a missing one must fail the FPS rendition tests, not skip them.
           NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS: "1"
         run: python -m unittest discover -s tests -v
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test -- --watch=false
+
+      - name: Build
+        run: npm run build
