@@ -1,0 +1,392 @@
+import { HttpEventType, provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
+import type { MediaFile, MediaFolder, MediaInfo, MediaNode } from './api';
+import { MediaLibraryService, toFileNodes } from './media-library.service';
+import type { StreamEvent } from './stream-lines';
+
+const TREE_URL = '/api/media-files';
+const SLOTS_URL = '/api/mediasrc';
+const RENDITIONS_URL = '/api/mediasrc/renditions';
+
+const file = (path: string, streamable = true): MediaFile => ({
+  name: path.split('/').pop() ?? path,
+  path,
+  type: 'file',
+  streamable,
+});
+
+const folder = (path: string, children: MediaNode[]): MediaFolder => ({
+  name: `/${path.split('/').pop()}`,
+  path,
+  type: 'folder',
+  streamable_count: countStreamable(children),
+  children,
+});
+
+function countStreamable(nodes: MediaNode[]): number {
+  return nodes.reduce(
+    (sum, node) =>
+      sum + (node.type === 'file' ? Number(node.streamable) : countStreamable(node.children)),
+    0,
+  );
+}
+
+/** Lets the promise chains behind a flushed request run. */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve));
+
+describe('toFileNodes', () => {
+  const tree: MediaNode[] = [
+    folder('catalog', [
+      folder('catalog/street', [
+        file('catalog/street/day.mp4'),
+        file('catalog/street/notes.txt', false),
+      ]),
+      folder('catalog/docs', [file('catalog/docs/readme.txt', false)]),
+    ]),
+    file('clip.mp4'),
+    file('readme.txt', false),
+  ];
+
+  it('tags unstreamable files and greys them in manage mode, and drops the leading slash of folder names', () => {
+    expect(toFileNodes(tree, 'manage')).toEqual([
+      {
+        name: 'catalog',
+        path: 'catalog',
+        type: 'folder',
+        children: [
+          {
+            name: 'street',
+            path: 'catalog/street',
+            type: 'folder',
+            children: [
+              { name: 'day.mp4', path: 'catalog/street/day.mp4', type: 'file' },
+              {
+                name: 'notes.txt',
+                path: 'catalog/street/notes.txt',
+                type: 'file',
+                disabled: true,
+                tag: 'NOT STREAMABLE',
+              },
+            ],
+          },
+          {
+            name: 'docs',
+            path: 'catalog/docs',
+            type: 'folder',
+            children: [
+              {
+                name: 'readme.txt',
+                path: 'catalog/docs/readme.txt',
+                type: 'file',
+                disabled: true,
+                tag: 'NOT STREAMABLE',
+              },
+            ],
+          },
+        ],
+      },
+      { name: 'clip.mp4', path: 'clip.mp4', type: 'file' },
+      {
+        name: 'readme.txt',
+        path: 'readme.txt',
+        type: 'file',
+        disabled: true,
+        tag: 'NOT STREAMABLE',
+      },
+    ]);
+  });
+
+  it('hides unstreamable files in pick mode and greys the folders left with nothing to pick', () => {
+    expect(toFileNodes(tree, 'pick')).toEqual([
+      {
+        name: 'catalog',
+        path: 'catalog',
+        type: 'folder',
+        children: [
+          {
+            name: 'street',
+            path: 'catalog/street',
+            type: 'folder',
+            children: [{ name: 'day.mp4', path: 'catalog/street/day.mp4', type: 'file' }],
+          },
+          { name: 'docs', path: 'catalog/docs', type: 'folder', children: [], disabled: true },
+        ],
+      },
+      { name: 'clip.mp4', path: 'clip.mp4', type: 'file' },
+    ]);
+  });
+
+  it('greys a pick-mode folder whose files are all deeper and all unstreamable, and keeps one with a streamable file only deeper', () => {
+    const nested: MediaNode[] = [
+      folder('a', [folder('a/b', [file('a/b/x.txt', false)])]),
+      folder('c', [folder('c/d', [file('c/d/y.mp4')])]),
+    ];
+    const [a, c] = toFileNodes(nested, 'pick');
+    expect(a.disabled).toBe(true);
+    expect(a.children?.[0].disabled).toBe(true);
+    expect(c.disabled).toBeUndefined();
+  });
+
+  it('maps an empty library to an empty tree, and an empty folder is greyed only in pick mode', () => {
+    expect(toFileNodes([], 'pick')).toEqual([]);
+
+    const empty = [folder('empty', [])];
+    expect(toFileNodes(empty, 'manage')[0].disabled).toBeUndefined();
+    expect(toFileNodes(empty, 'pick')[0].disabled).toBe(true);
+  });
+});
+
+describe('MediaLibraryService', () => {
+  let http: HttpTestingController;
+  let library: MediaLibraryService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    });
+    http = TestBed.inject(HttpTestingController);
+    library = TestBed.inject(MediaLibraryService);
+  });
+
+  afterEach(() => http.verify());
+
+  const video = (filename: string): MediaInfo => ({
+    type: 'video',
+    filename,
+    size_bytes: 10,
+    codec: 'H.264',
+    normalized_codec: 'h264',
+    width: 640,
+    height: 480,
+    duration_ms: 1000,
+    frame_rate: '30/1',
+  });
+
+  describe('refresh', () => {
+    it('loads the tree, and the newest answer wins', async () => {
+      expect(library.tree()).toBeNull();
+      const older = library.refresh();
+      const first = http.expectOne(TREE_URL);
+      const newer = library.refresh();
+      const second = http.expectOne(TREE_URL);
+
+      second.flush([file('new.mp4')]);
+      first.flush([file('old.mp4')]);
+      await Promise.all([older, newer]);
+
+      expect(library.tree()).toEqual([file('new.mp4')]);
+    });
+
+    it('rejects with the server message and keeps the tree it had', async () => {
+      const loaded = library.refresh();
+      http.expectOne(TREE_URL).flush([file('a.mp4')]);
+      await loaded;
+
+      const failed = library.refresh();
+      http
+        .expectOne(TREE_URL)
+        .flush({ error: 'disk gone' }, { status: 500, statusText: 'Server Error' });
+
+      await expect(failed).rejects.toMatchObject({ status: 500, message: 'disk gone' });
+      expect(library.tree()).toEqual([file('a.mp4')]);
+    });
+  });
+
+  describe('info', () => {
+    it('posts the path and resolves with the probe', async () => {
+      const info = library.info('a.mp4');
+      const request = http.expectOne('/api/media-info');
+      expect(request.request.method).toBe('POST');
+      expect(request.request.body).toEqual({ path: 'a.mp4' });
+      request.flush(video('a.mp4'));
+
+      await expect(info).resolves.toEqual(video('a.mp4'));
+    });
+
+    it('ignores a late answer for an earlier path', async () => {
+      const earlier = library.info('a.mp4');
+      const first = http.expectOne('/api/media-info');
+      const later = library.info('b.mp4');
+      const second = http.expectOne('/api/media-info');
+
+      second.flush(video('b.mp4'));
+      first.flush(video('a.mp4'));
+
+      await expect(later).resolves.toEqual(video('b.mp4'));
+      await expect(earlier).resolves.toBeNull();
+    });
+
+    it('also ignores an earlier answer that arrives first, and an earlier failure', async () => {
+      const earlier = library.info('a.mp4');
+      const first = http.expectOne('/api/media-info');
+      const later = library.info('b.mp4');
+      const second = http.expectOne('/api/media-info');
+
+      first.flush({ error: 'not a file' }, { status: 400, statusText: 'Bad Request' });
+      second.flush(video('b.mp4'));
+
+      await expect(earlier).resolves.toBeNull();
+      await expect(later).resolves.toEqual(video('b.mp4'));
+    });
+
+    it('rejects with the server message when the newest request fails', async () => {
+      const info = library.info('a.mp4');
+      http
+        .expectOne('/api/media-info')
+        .flush({ error: 'Probe failed' }, { status: 500, statusText: 'Server Error' });
+
+      await expect(info).rejects.toMatchObject({ status: 500, message: 'Probe failed' });
+    });
+  });
+
+  describe('delete', () => {
+    const DELETE_URL = '/api/delete-media';
+    /** The request a sequential step sends once the one before it has settled. */
+    const nextRequest = (url: string) => vi.waitFor(() => http.expectOne(url));
+
+    /** Answers the three refreshes a delete sends once it has settled. */
+    function answerRefreshes(): void {
+      http.expectOne(TREE_URL).flush([]);
+      http.expectOne(SLOTS_URL).flush([]);
+      http.expectOne(RENDITIONS_URL).flush({ count: 0, bytes: 0 });
+    }
+
+    it('deletes one path after the other, then refreshes the library, the slots and the renditions', async () => {
+      const done = library.delete(['a.mp4', 'b.mp4']);
+
+      const first = http.expectOne(DELETE_URL);
+      expect(first.request.method).toBe('POST');
+      expect(first.request.body).toEqual({ path: 'a.mp4' });
+      // The second waits for the first.
+      http.expectNone(DELETE_URL);
+      first.flush({ message: 'Deleted successfully' });
+
+      const second = await nextRequest(DELETE_URL);
+      expect(second.request.body).toEqual({ path: 'b.mp4' });
+      http.expectNone(TREE_URL);
+      second.flush({ message: 'Deleted successfully' });
+
+      await vi.waitFor(() => answerRefreshes());
+      await expect(done).resolves.toEqual({ deleted: ['a.mp4', 'b.mp4'], failed: [] });
+    });
+
+    it('goes on after a failure and reports each, the first failure first', async () => {
+      const done = library.delete(['a.mp4', 'b.mp4', 'c.mp4']);
+
+      http
+        .expectOne(DELETE_URL)
+        .flush({ error: 'Media file not found' }, { status: 404, statusText: 'Not Found' });
+      (await nextRequest(DELETE_URL)).flush({ message: 'Deleted successfully' });
+      (await nextRequest(DELETE_URL)).flush(
+        { error: 'Invalid path' },
+        { status: 403, statusText: 'Forbidden' },
+      );
+
+      await vi.waitFor(() => answerRefreshes());
+      await expect(done).resolves.toEqual({
+        deleted: ['b.mp4'],
+        failed: [
+          { path: 'a.mp4', message: 'Media file not found' },
+          { path: 'c.mp4', message: 'Invalid path' },
+        ],
+      });
+    });
+
+    it('refreshes even when nothing could be deleted, and does not fail when a refresh does', async () => {
+      const done = library.delete(['a.mp4']);
+      http
+        .expectOne(DELETE_URL)
+        .flush({ error: 'Media file not found' }, { status: 404, statusText: 'Not Found' });
+
+      await vi.waitFor(() => {
+        http
+          .expectOne(TREE_URL)
+          .flush({ error: 'down' }, { status: 502, statusText: 'Bad Gateway' });
+        http
+          .expectOne(SLOTS_URL)
+          .flush({ error: 'down' }, { status: 502, statusText: 'Bad Gateway' });
+        http
+          .expectOne(RENDITIONS_URL)
+          .flush({ error: 'down' }, { status: 502, statusText: 'Bad Gateway' });
+      });
+      await expect(done).resolves.toMatchObject({ deleted: [] });
+    });
+  });
+
+  describe('streamed requests', () => {
+    function run(stream: ReturnType<MediaLibraryService['upload']>): StreamEvent[] {
+      const events: StreamEvent[] = [];
+      stream.subscribe({ next: (event) => events.push(event) });
+      return events;
+    }
+
+    it('upload sends the file, with the conflict choice when there is one, and reports progress', async () => {
+      const upload = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+      const events = run(library.upload(upload, 'replace'));
+
+      const request = http.expectOne('/api/upload/media');
+      const body = request.request.body as FormData;
+      expect(body.get('file')).toBe(upload);
+      expect(body.get('on_conflict')).toBe('replace');
+      request.event({ type: HttpEventType.UploadProgress, loaded: 1, total: 1 });
+      request.flush('Upload complete.\n');
+      http.expectOne(TREE_URL).flush([file('a.mp4')]);
+      await tick();
+
+      expect(events).toEqual([
+        { kind: 'upload', loaded: 1, total: 1 },
+        { kind: 'line', text: 'Upload complete.' },
+        { kind: 'done' },
+      ]);
+      expect(library.tree()).toEqual([file('a.mp4')]);
+    });
+
+    it('upload leaves the server to ask when no choice is given', () => {
+      run(library.upload(new File(['x'], 'a.mp4')));
+      const request = http.expectOne('/api/upload/media');
+      expect((request.request.body as FormData).has('on_conflict')).toBe(false);
+      request.flush('');
+      http.expectOne(TREE_URL).flush([]);
+    });
+
+    it('refreshes the library after a refused upload too, and when the subscriber cancels', () => {
+      let failure: unknown;
+      library.upload(new File(['x'], 'a.mp4')).subscribe({ error: (e: unknown) => (failure = e) });
+      http
+        .expectOne('/api/upload/media')
+        .flush(
+          { error: 'exists', conflict: { existing: 'a.mp4', suggested: 'a_2.mp4' } },
+          { status: 409, statusText: 'Conflict' },
+        );
+      http.expectOne(TREE_URL).flush([]);
+      expect(failure).toMatchObject({ status: 409, body: { conflict: { suggested: 'a_2.mp4' } } });
+
+      const subscription = library.upload(new File(['x'], 'b.mp4')).subscribe();
+      const cancelled = http.expectOne('/api/upload/media');
+      subscription.unsubscribe();
+      expect(cancelled.cancelled).toBe(true);
+      http.expectOne(TREE_URL).flush([]);
+    });
+
+    it('importCatalog and importYoutube post their request and refresh the library', () => {
+      run(library.importCatalog('street/day_720p30.mp4'));
+      const catalog = http.expectOne('/api/import/media-catalog');
+      expect(catalog.request.body).toEqual({ path: 'street/day_720p30.mp4' });
+      catalog.flush('Catalog import complete.\n');
+      http.expectOne(TREE_URL).flush([]);
+
+      const youtube = {
+        url: 'https://youtu.be/abc',
+        target: '720p30' as const,
+        clip_start: 0,
+        clip_duration: 60,
+      };
+      run(library.importYoutube(youtube));
+      const request = http.expectOne('/api/import/youtube');
+      expect(request.request.body).toEqual(youtube);
+      request.flush('YouTube import complete.\n');
+      http.expectOne(TREE_URL).flush([]);
+    });
+  });
+});

@@ -1,5 +1,12 @@
 import { HttpClient, HttpErrorResponse, HttpEvent, HttpEventType } from '@angular/common/http';
-import { catchError, defer, mergeMap, Observable, throwError } from 'rxjs';
+import {
+  catchError,
+  defer,
+  mergeMap,
+  MonoTypeOperatorFunction,
+  Observable,
+  throwError,
+} from 'rxjs';
 
 /**
  * What a streamed text request reports, in order: the request body's upload progress (an upload
@@ -12,7 +19,7 @@ export type StreamEvent =
   | { kind: 'done' };
 
 /**
- * A non-2xx answer or a failed connection. `message` is the server's `error` or `message`;
+ * A non-2xx answer or a failed connection of any API request. `message` is the server's `error` or `message`;
  * `body` is its JSON body untouched (null when there was none), so a caller can read what the
  * message does not carry, such as the `conflict` of an upload's 409. `status` is 0 when the
  * server could not be reached.
@@ -87,14 +94,20 @@ export function postStreamedText(
               return [];
           }
         }),
-        // Anything that is not an HTTP answer (an interceptor's error, say) is not ours to reword.
-        catchError((failure: unknown) =>
-          throwError(() =>
-            failure instanceof HttpErrorResponse ? requestError(failure) : failure,
-          ),
-        ),
+        withRequestErrors(),
       );
   });
+}
+
+/**
+ * Makes a failed request throw a `StreamRequestError` for an HTTP answer or a lost connection,
+ * and anything else (an interceptor's error, say) as it is, since it is not ours to reword. Every
+ * call to the API reports its failures this way, JSON or streamed.
+ */
+export function withRequestErrors<T>(): MonoTypeOperatorFunction<T> {
+  return catchError((failure: unknown) =>
+    throwError(() => (failure instanceof HttpErrorResponse ? requestError(failure) : failure)),
+  );
 }
 
 function requestError(failure: HttpErrorResponse): StreamRequestError {
@@ -108,15 +121,23 @@ function requestError(failure: HttpErrorResponse): StreamRequestError {
   return new StreamRequestError(failure.status, fallback, body);
 }
 
-/** The body of an error answer, which arrives as text because the request asked for text. */
-function jsonBody(text: unknown): Record<string, unknown> | null {
-  if (typeof text !== 'string') return null;
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
+/**
+ * The JSON object an error answer carries. It arrives as text when the request asked for text, as
+ * the parsed object when the request expected JSON, and as text again when that was not JSON. A
+ * failed connection carries a `ProgressEvent` instead, which is no body: only a plain object is.
+ */
+function jsonBody(body: unknown): Record<string, unknown> | null {
+  let parsed = body;
+  if (typeof body === 'string') {
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return null;
+    }
   }
+  return typeof parsed === 'object' &&
+    parsed !== null &&
+    Object.getPrototypeOf(parsed) === Object.prototype
+    ? (parsed as Record<string, unknown>)
+    : null;
 }

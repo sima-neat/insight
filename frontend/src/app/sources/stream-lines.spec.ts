@@ -1,5 +1,6 @@
 import {
   HttpClient,
+  HttpErrorResponse,
   HttpEventType,
   provideHttpClient,
   withInterceptors,
@@ -10,8 +11,14 @@ import {
   type TestRequest,
 } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { throwError } from 'rxjs';
-import { postStreamedText, splitLines, StreamRequestError, type StreamEvent } from './stream-lines';
+import { firstValueFrom, throwError } from 'rxjs';
+import {
+  postStreamedText,
+  splitLines,
+  StreamRequestError,
+  withRequestErrors,
+  type StreamEvent,
+} from './stream-lines';
 
 describe('splitLines', () => {
   it('returns the complete lines and keeps the unfinished one pending', () => {
@@ -251,5 +258,38 @@ describe('postStreamedText with an error that is not an HTTP answer', () => {
     });
 
     expect(error).toBe(boom);
+  });
+});
+
+describe('withRequestErrors', () => {
+  /** What the operator makes of a failure, as a caller of a JSON request sees it. */
+  const failureOf = (failure: unknown): Promise<unknown> =>
+    firstValueFrom(throwError(() => failure).pipe(withRequestErrors())).catch(
+      (error: unknown) => error,
+    );
+
+  it('reads the body of an answer to a JSON request, which Angular has parsed already', async () => {
+    const body = { error: 'src2 is pulling.', reason: 'auth_failed' };
+    const failure = await failureOf(
+      new HttpErrorResponse({ status: 400, statusText: 'Bad Request', error: body }),
+    );
+
+    expect(failure).toBeInstanceOf(StreamRequestError);
+    expect(failure).toMatchObject({ status: 400, message: 'src2 is pulling.', body });
+  });
+
+  it('falls back to the status when the answer was not JSON, and when no answer came', async () => {
+    expect(
+      await failureOf(new HttpErrorResponse({ status: 502, error: '<html>Bad Gateway</html>' })),
+    ).toMatchObject({ status: 502, message: 'Request failed: 502', body: null });
+    expect(await failureOf(new HttpErrorResponse({ status: 0 }))).toMatchObject({
+      status: 0,
+      message: 'Could not reach the server.',
+    });
+  });
+
+  it('leaves anything else as it is', async () => {
+    const boom = new Error('boom');
+    expect(await failureOf(boom)).toBe(boom);
   });
 });

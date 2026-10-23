@@ -1,6 +1,7 @@
 import { HttpClient } from '@angular/common/http';
-import { DestroyRef, DOCUMENT, inject, Injectable, signal } from '@angular/core';
+import { DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { LatestOnly, visiblePoller } from '../polling';
 
 const STATS_URL = '/api/ingest/stats';
 const POLL_INTERVAL_MS = 2000;
@@ -37,7 +38,6 @@ export function liveChannels(stats: unknown): ReadonlySet<number> {
 @Injectable()
 export class ChannelLiveness {
   private readonly http = inject(HttpClient);
-  private readonly document = inject(DOCUMENT);
   private readonly destroyRef = inject(DestroyRef);
 
   private readonly liveState = signal<ReadonlySet<number> | null>(null);
@@ -47,50 +47,21 @@ export class ChannelLiveness {
   /** The newest request failed, so `live` may be out of date (or, before any answer, absent). */
   readonly unavailable = this.unavailableState.asReadonly();
 
-  private enabled = false;
-  private timer: ReturnType<typeof setInterval> | null = null;
-  /** The number of the last request sent, and of the newest one that has settled. */
-  private sent = 0;
-  private shown = 0;
-
-  constructor() {
-    const onVisibilityChange = () => this.schedule();
-    this.document.addEventListener('visibilitychange', onVisibilityChange);
-    this.destroyRef.onDestroy(() => {
-      this.document.removeEventListener('visibilitychange', onVisibilityChange);
-      this.stopTimer();
-    });
-  }
+  private readonly latest = new LatestOnly();
+  private readonly poller = visiblePoller(POLL_INTERVAL_MS, () => this.poll());
 
   setEnabled(enabled: boolean): void {
-    if (enabled === this.enabled) return;
-    this.enabled = enabled;
     if (!enabled) {
       // Answers to requests sent so far describe a moment before this; never show them.
-      this.shown = this.sent;
+      this.latest.discard();
       this.liveState.set(null);
       this.unavailableState.set(false);
     }
-    this.schedule();
-  }
-
-  private schedule(): void {
-    const run = this.enabled && this.document.visibilityState === 'visible';
-    if (run && this.timer === null) {
-      this.poll();
-      this.timer = setInterval(() => this.poll(), POLL_INTERVAL_MS);
-    } else if (!run) {
-      this.stopTimer();
-    }
-  }
-
-  private stopTimer(): void {
-    if (this.timer !== null) clearInterval(this.timer);
-    this.timer = null;
+    this.poller.setActive(enabled);
   }
 
   private poll(): void {
-    const request = ++this.sent;
+    const request = this.latest.next();
     this.http
       .get<unknown>(STATS_URL)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -106,8 +77,7 @@ export class ChannelLiveness {
    * set, a failure (null) only marks it unavailable.
    */
   private settle(request: number, live: ReadonlySet<number> | null): void {
-    if (request <= this.shown) return;
-    this.shown = request;
+    if (!this.latest.accept(request)) return;
     this.unavailableState.set(live === null);
     if (live !== null) this.liveState.set(live);
   }
