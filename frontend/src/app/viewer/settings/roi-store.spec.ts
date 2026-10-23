@@ -130,6 +130,58 @@ describe('RoiStore', () => {
     expect(store.channelsWithOwn()()).toStrictEqual([2, 10]);
   });
 
+  describe('after another tab stores a channel list', () => {
+    // The fake storage stands for the other tab: its write reaches storage, not this store.
+    it('the next write picks it up: own, effective, the owners and useGlobal agree', () => {
+      const store = load({ 'roi:global': stored([SQUARE]) });
+      expect(store.effective(3)()).toStrictEqual([SQUARE]);
+      fake.seed({ 'roi:channel:3': stored([TRIANGLE]) });
+
+      store.set(1, [SQUARE]);
+
+      expect(store.channelsWithOwn()()).toStrictEqual([1, 3]);
+      expect(store.own(3)()).toStrictEqual([TRIANGLE]);
+      expect(store.effective(3)()).toStrictEqual([TRIANGLE]);
+
+      store.useGlobal(3);
+      expect(fake.readRaw('roi:channel:3')).toBeNull();
+      expect(store.own(3)()).toBeNull();
+      expect(store.effective(3)()).toStrictEqual([SQUARE]);
+      expect(store.channelsWithOwn()()).toStrictEqual([1]);
+    });
+
+    it('useGlobal removes it even before this store has seen it', () => {
+      const store = load();
+      store.own(3);
+      fake.seed({ 'roi:channel:3': stored([TRIANGLE]) });
+
+      store.useGlobal(3);
+
+      expect(fake.readRaw('roi:channel:3')).toBeNull();
+      expect(store.channelsWithOwn()()).toStrictEqual([]);
+      expect(load({ 'roi:channel:3': 'x' }).channelsWithOwn()()).toStrictEqual([]);
+    });
+
+    it('keeps the lists it holds, so a write to one channel does not re-resolve the others', () => {
+      const store = load({ 'roi:channel:2': stored([SQUARE]) });
+      const held = store.own(2)();
+      fake.seed({ 'roi:channel:2': stored([TRIANGLE]) });
+
+      store.set(1, []);
+
+      expect(store.own(2)()).toBe(held);
+    });
+  });
+
+  it("ignores a channel name with leading zeros, which is not any channel's name", () => {
+    const store = load({ 'roi:channel:007': stored([SQUARE]), 'roi:channel:7': stored([]) });
+
+    expect(store.own(7)()).toStrictEqual([]);
+    expect(store.channelsWithOwn()()).toStrictEqual([7]);
+    store.set(1, []);
+    expect(store.channelsWithOwn()()).toStrictEqual([1, 7]);
+  });
+
   it('useGlobal on a channel without a list writes nothing', () => {
     const store = load();
 
@@ -209,6 +261,26 @@ describe('RoiStore', () => {
       ]);
 
       expect(store.own('global')()).toStrictEqual([{ type: 'inclusion', points: TRIANGLE.points }]);
+    });
+
+    it('counts the points left after dropping invalid ones against the minimum', () => {
+      const store = load({
+        // JSON stores NaN as null and 1e999 as Infinity, which reads back as one.
+        'roi:global': `{"version":1,"regions":[{"type":"inclusion","points":[{"x":0.1,"y":0.1},{"x":0.9,"y":0.1},{"x":1e999,"y":0.5}]}]}`,
+      });
+
+      expect(store.own('global')()).toStrictEqual([]);
+    });
+
+    it('does not count invalid points against the cap of 256', () => {
+      const invalid = Array.from({ length: 100 }, () => ({ x: null, y: 0.5 }));
+      const store = load({
+        'roi:global': stored([
+          { type: 'inclusion', points: [...invalid, ...points(256)] },
+        ] as unknown as NeatRoiPolygon[]),
+      });
+
+      expect(store.own('global')()![0].points).toStrictEqual(points(256));
     });
 
     it('keeps at most 64 regions of at most 256 points', () => {

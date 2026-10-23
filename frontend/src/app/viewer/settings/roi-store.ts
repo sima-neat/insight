@@ -11,7 +11,8 @@ import { ViewerStorage } from './storage';
 import type { SettingsScope } from './viewer-settings.store';
 
 const GLOBAL_NAME = 'roi:global';
-const CHANNEL_NAME = /^roi:channel:(\d+)$/;
+// No leading zeros: `roi:channel:007` is not channel 7's name, and must not shadow it.
+const CHANNEL_NAME = /^roi:channel:(0|[1-9]\d*)$/;
 const VERSION = 1;
 
 /** A hand-edited or hostile value must not make the viewer draw or hold an unbounded list. */
@@ -86,8 +87,9 @@ function parseRegions(raw: string | null): NeatRoiPolygon[] | null {
  *
  * They are stored apart from the other settings (`roi:global`, `roi:channel:<n>`), so "Reset all
  * channels" leaves them alone. Every stored list is read and cleaned when the store opens; from
- * then on the lists live in signals and each write replaces a whole list. Like the settings store,
- * it does not see what other tabs write until its own next write of that list.
+ * then on the lists live in signals and each write replaces a whole list. Changes other tabs make
+ * show up here only through a write: a channel list this store held none for is picked up by its
+ * next write of any list, and one it already holds, only by its own write of that list.
  *
  * Provided by the Viewer page next to `ViewerSettingsStore`, which reads the effective regions
  * into each channel's overlay settings.
@@ -104,17 +106,7 @@ export class RoiStore {
   private readonly editableGlobal = computed(() => this.global() ?? NO_REGIONS);
 
   constructor() {
-    const owners: number[] = [];
-    for (const name of this.storage.names()) {
-      const match = CHANNEL_NAME.exec(name);
-      if (match === null) continue;
-      const regions = this.read(name);
-      if (regions === null) continue;
-      const channel = Number(match[1]);
-      this.channels.set(channel, signal(regions));
-      owners.push(channel);
-    }
-    this.owners.set(owners.sort((a, b) => a - b));
+    this.owners.set(this.syncOwners());
   }
 
   /** The regions the scope stores itself, or null when it stores none and follows. */
@@ -153,17 +145,19 @@ export class RoiStore {
       this.global.set(cleaned);
     } else {
       this.channelSignal(scope).set(cleaned);
-      this.owners.set(this.storedOwners());
+      this.owners.set(this.syncOwners());
     }
   }
 
   /** Gives back the channel's own list, so the channel follows the global regions again. */
   useGlobal(channel: number): void {
     const own = this.channelSignal(channel);
-    if (own() === null) return;
+    // Judged on storage as well as the signal: a list another tab stored since this store opened
+    // is in storage only, and "Use global" must remove it all the same.
+    if (own() === null && this.storage.get(regionName(channel)) === null) return;
     this.storage.remove(regionName(channel));
     own.set(null);
-    this.owners.set(this.storedOwners());
+    this.owners.set(this.syncOwners());
   }
 
   /** The channels that store a list of their own, in ascending order, read again after each write. */
@@ -184,13 +178,25 @@ export class RoiStore {
     return parseRegions(this.storage.get(name));
   }
 
-  /** The channels with a stored list now, which may include ones another tab wrote. */
-  private storedOwners(): number[] {
-    const owners: number[] = [];
+  /**
+   * Loads the lists stored for channels this store holds none for (another tab may have written
+   * them since it opened), so that the owners and `own()` agree, and returns the channels that
+   * hold a list, ascending. A list this store already holds is kept as it is, so a write to one
+   * channel does not re-resolve the others. Runs inside writes and the constructor, never inside a
+   * computed, where writing a signal is not allowed.
+   */
+  private syncOwners(): number[] {
     for (const name of this.storage.names()) {
       const match = CHANNEL_NAME.exec(name);
-      if (match !== null && this.read(name) !== null) owners.push(Number(match[1]));
+      if (match === null) continue;
+      const own = this.channelSignal(Number(match[1]));
+      if (own() !== null) continue;
+      const regions = this.read(name);
+      if (regions !== null) own.set(regions);
     }
-    return owners.sort((a, b) => a - b);
+    return [...this.channels]
+      .filter(([, own]) => own() !== null)
+      .map(([channel]) => channel)
+      .sort((a, b) => a - b);
   }
 }

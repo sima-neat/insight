@@ -35,7 +35,8 @@ import { ViewerStorage } from './storage';
 export type SettingsScope = 'global' | number;
 
 const GLOBAL_SCOPE = 'settings:global';
-const CHANNEL_SCOPE = /^settings:channel:(\d+)$/;
+// No leading zeros: `settings:channel:007` is not channel 7's name, and must not shadow it.
+const CHANNEL_SCOPE = /^settings:channel:(0|[1-9]\d*)$/;
 
 function scopeName(scope: SettingsScope): string {
   return scope === 'global' ? GLOBAL_SCOPE : `settings:channel:${scope}`;

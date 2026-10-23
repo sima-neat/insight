@@ -1178,6 +1178,14 @@ describe('ViewerSettingsStore', () => {
     expect(fake.readRaw('settings:channel:1')).toBeNull();
   });
 
+  it('ignores a channel scope named with leading zeros', () => {
+    const store = load({ 'settings:channel:007': { version: 10, general: { lineWidth: 6 } } });
+
+    expect(store.overridesOf('general.lineWidth')).toStrictEqual([]);
+    expect(store.channelOverrides()).toStrictEqual({ settings: 0, channels: 0 });
+    expect(store.value(7, 'general.lineWidth')).toBe(3);
+  });
+
   it('a channel overriding again after resetAllChannels is listed and stored afresh', () => {
     const store = load({ 'settings:channel:1': { version: 10, general: { lineWidth: 6 } } });
     store.resetAllChannels();
@@ -1222,6 +1230,21 @@ describe('ViewerSettingsStore', () => {
 
       roi.useGlobal(1);
       expect(resolved().roi).toStrictEqual([SQUARE]);
+    });
+
+    it('resolved(n).roi is the very list effective(n) holds, also after another setting changes', () => {
+      const store = load();
+      const roi = TestBed.inject(RoiStore);
+      roi.set(1, [SQUARE]);
+      const resolved = store.resolved(1);
+      expect(resolved().roi).toBe(roi.effective(1)());
+
+      store.set(1, 'general.lineWidth', 6);
+      expect(resolved().general.lineWidth).toBe(6);
+      expect(resolved().roi).toBe(roi.effective(1)());
+
+      roi.useGlobal(1);
+      expect(resolved().roi).toBe(roi.effective(1)());
     });
 
     it('a region change leaves the sync settings alone', () => {
