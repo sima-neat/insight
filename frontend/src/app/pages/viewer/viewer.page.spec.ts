@@ -601,7 +601,7 @@ describe('ViewerPage', () => {
       expect(page().selectedChannel()).toBe(4);
     });
 
-    it('does not move focus', async () => {
+    it('the handler moves no focus of its own', async () => {
       sixPerPage();
       await open('/viewer');
       await click(tileElement(4));

@@ -78,7 +78,8 @@
   border: none;
   border-radius: var(--radius);
   background: none;
-  font: inherit;
+  font-family: inherit;
+  line-height: inherit;
   cursor: pointer;
 }
 
@@ -140,7 +141,10 @@
   font-size: var(--neat-text-xs);
 }
 
-/* At least 1.5rem high, the smallest target WCAG 2.5.8 accepts; the lines add no padding to it. */
+/*
+ * Lines at least 1.5rem high keep the actions' targets apart (WCAG 2.5.8's spacing exception); the
+ * buttons themselves are only as tall as their text, and the lines add no padding.
+ */
 .line {
   display: flex;
   align-items: center;
@@ -155,6 +159,8 @@
 
 .action {
   color: var(--foreground);
+  /* A button does not inherit its size; the list's text size is the lines'. */
+  font-size: inherit;
   font-weight: 500;
 }
 
