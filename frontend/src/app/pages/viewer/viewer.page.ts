@@ -18,7 +18,6 @@ import {
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
 import {
-  fitAllTileWidth,
   NeatButton,
   NeatIcon,
   NeatInput,
@@ -29,12 +28,15 @@ import {
   NeatPopoverTrigger,
   NeatSlider,
   NeatSwitch,
-  type NeatTileArea,
-  NeatTileGrid,
-  type NeatTileLayout,
   NeatTooltip,
   ThemeService,
 } from '@sima/neat-ui';
+import {
+  fitAllTileWidth,
+  type NeatTileArea,
+  NeatTileGrid,
+  type NeatTileLayout,
+} from '@sima/neat-ui/video';
 import { map } from 'rxjs';
 import { ChannelLateness } from '../../viewer/channel-lateness';
 import { ChannelLiveness } from '../../viewer/channel-liveness';

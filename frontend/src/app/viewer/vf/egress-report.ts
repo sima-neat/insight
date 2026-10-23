@@ -1,4 +1,4 @@
-import type { NeatFrameStats } from '@sima/neat-ui';
+import type { NeatFrameStats } from '@sima/neat-ui/video';
 
 /** The inbound-rtp video fields the report reads; Chrome adds `powerEfficientDecoder`. */
 export type InboundVideoReport = Pick<

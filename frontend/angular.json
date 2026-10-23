@@ -36,10 +36,10 @@
               "budgets": [
                 {
                   // The confirmation dialog (NeatConfirm: the CDK dialog and brain's alert dialog)
-                  // lives in the main bundle and adds about 30 kB; the kit's secondary entry points
-                  // (planned for plan 2b) are the real fix for what the barrel pulls in.
+                  // lives in the main bundle and adds about 30 kB. The video code is not part of it:
+                  // it comes from @sima/neat-ui/video and loads with the Viewer route only.
                   "type": "initial",
-                  "maximumWarning": "750kB",
+                  "maximumWarning": "700kB",
                   "maximumError": "1MB"
                 },
                 {

@@ -1,4 +1,4 @@
-import { NEAT_OVERLAY_DEFAULTS, NEAT_OVERLAY_STYLE_FALLBACK_COLOR } from '@sima/neat-ui';
+import { NEAT_OVERLAY_DEFAULTS, NEAT_OVERLAY_STYLE_FALLBACK_COLOR } from '@sima/neat-ui/video';
 import {
   EMPTY_OVERRIDES,
   holdsSomething,

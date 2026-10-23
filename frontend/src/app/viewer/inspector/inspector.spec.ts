@@ -3,13 +3,8 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import {
-  NeatConfirm,
-  type NeatFrameStats,
-  NeatIcon,
-  type NeatMetadataSnapshot,
-  NeatVideoTile,
-} from '@sima/neat-ui';
+import { NeatConfirm, NeatIcon } from '@sima/neat-ui';
+import { type NeatFrameStats, type NeatMetadataSnapshot, NeatVideoTile } from '@sima/neat-ui/video';
 import { FakeResizeObserver, ViewerShell } from '../../pages/viewer/viewer-page.testing';
 import { ViewerPage } from '../../pages/viewer/viewer.page';
 import { FakeConnections } from '../fake-connections.testing';

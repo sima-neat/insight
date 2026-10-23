@@ -1,4 +1,4 @@
-import { bufferSettleMs } from '@sima/neat-ui';
+import { bufferSettleMs } from '@sima/neat-ui/video';
 import { LateChip, type LatenessSource } from './late-chip';
 
 /** A tile's lateness window as the chip sees it: a share the test sets, and a reset counter. */

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { NeatButton, type NeatLateNoticeBlocker, type NeatLateNoticeDetails } from '@sima/neat-ui';
+import { NeatButton } from '@sima/neat-ui';
+import type { NeatLateNoticeBlocker, NeatLateNoticeDetails } from '@sima/neat-ui/video';
 
 /** Which of the notice's actions was taken: this channel's own buffer, or the global one. */
 export type RaiseTarget = 'channel' | 'global';

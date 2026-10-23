@@ -4,7 +4,7 @@ import { Component } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui';
+import { type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { FakeConnections } from '../../viewer/fake-connections.testing';
 import { FakeLocalStorage } from '../../viewer/settings/fake-storage.testing';
 import { VfConnections } from '../../viewer/vf/vf-connections';

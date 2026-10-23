@@ -1,6 +1,6 @@
 // Test support for the specs of the egress report and the connection that sends it.
 
-import type { NeatFrameStats } from '@sima/neat-ui';
+import type { NeatFrameStats } from '@sima/neat-ui/video';
 
 /**
  * vf's `BrowserEgressReport` (egress_stats.go, Inv §2c). vf unmarshals the whole report at once,

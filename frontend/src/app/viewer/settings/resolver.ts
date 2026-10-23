@@ -4,7 +4,7 @@ import {
   type NeatOverlayLineStyle,
   type NeatOverlaySettings,
   type NeatRoiPolygon,
-} from '@sima/neat-ui';
+} from '@sima/neat-ui/video';
 import {
   AUTO_COLORS_VERSION,
   type AUXILIARY_DEFAULTS,

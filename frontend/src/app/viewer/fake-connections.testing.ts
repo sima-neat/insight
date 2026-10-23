@@ -1,5 +1,5 @@
 import { signal } from '@angular/core';
-import type { NeatFrameStats } from '@sima/neat-ui';
+import type { NeatFrameStats } from '@sima/neat-ui/video';
 import type { VfStatus } from './vf/channel-status';
 import type { VfSyncBuffer } from './vf/egress-report';
 import type { VfConnection } from './vf/vf-connection';

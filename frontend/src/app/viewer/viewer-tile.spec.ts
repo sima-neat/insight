@@ -1,7 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { bufferSettleMs, type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui';
+import { bufferSettleMs, type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { ChannelLateness } from './channel-lateness';
 import { FakeConnections } from './fake-connections.testing';
 import { FakeLocalStorage } from './settings/fake-storage.testing';

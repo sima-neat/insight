@@ -1,4 +1,4 @@
-import { NEAT_OVERLAY_DEFAULTS, type NeatOverlaySettings } from '@sima/neat-ui';
+import { NEAT_OVERLAY_DEFAULTS, type NeatOverlaySettings } from '@sima/neat-ui/video';
 
 /**
  * The viewer settings model, ported from viewer-settings-resolver.js (829ec7c, Inv §5b): every

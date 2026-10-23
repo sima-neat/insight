@@ -1,5 +1,5 @@
 import { Injectable, signal, type Signal, type WritableSignal } from '@angular/core';
-import type { NeatLatenessSnapshot } from '@sima/neat-ui';
+import type { NeatLatenessSnapshot } from '@sima/neat-ui/video';
 
 /** What a channel's grid tile last measured of how late its metadata arrives. */
 export interface LatenessReading {

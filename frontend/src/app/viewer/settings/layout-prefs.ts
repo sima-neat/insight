@@ -1,5 +1,5 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { NEAT_MIN_TILE_WIDTH } from '@sima/neat-ui';
+import { NEAT_MIN_TILE_WIDTH } from '@sima/neat-ui/video';
 import { ViewerStorage } from './storage';
 
 const LAYOUT = 'layout';

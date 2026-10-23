@@ -1,5 +1,5 @@
 import { signal, untracked } from '@angular/core';
-import type { NeatFrameStats, NeatTileSource } from '@sima/neat-ui';
+import type { NeatFrameStats, NeatTileSource } from '@sima/neat-ui/video';
 import { resolveCodecLabel, offerFailureText, type VfStatus } from './channel-status';
 import { INITIAL_DECODER_HEALTH, updateDecoderHealth, type DecoderHealth } from './decoder-health';
 import { buildEgressReport, type InboundVideoReport, type VfSyncBuffer } from './egress-report';

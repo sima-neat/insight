@@ -10,6 +10,7 @@
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
+    "check:bundle": "node scripts/check-bundle-split.mjs",
     "test": "ng test",
     "lint": "ng lint && stylelint \"src/**/*.css\" --allow-empty-input && tsc -p e2e/tsconfig.json",
     "e2e": "playwright test --config e2e/playwright.config.ts"
@@ -22,7 +23,7 @@
     "@angular/forms": "~22.2.0",
     "@angular/platform-browser": "~22.2.0",
     "@angular/router": "~22.2.0",
-    "@sima/neat-ui": "file:vendor/sima-neat-ui-0.4.2.tgz",
+    "@sima/neat-ui": "file:vendor/sima-neat-ui-0.5.0.tgz",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

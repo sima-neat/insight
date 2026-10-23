@@ -1,6 +1,6 @@
 import { computed } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { NEAT_OVERLAY_DEFAULTS, NEAT_OVERLAY_STYLE_FALLBACK_COLOR } from '@sima/neat-ui';
+import { NEAT_OVERLAY_DEFAULTS, NEAT_OVERLAY_STYLE_FALLBACK_COLOR } from '@sima/neat-ui/video';
 import { FakeLocalStorage } from './fake-storage.testing';
 import type { ScopeOverrides } from './resolver';
 import { SCALAR_SETTINGS, TYPE_DEFAULTS, type SettingId } from './schema';

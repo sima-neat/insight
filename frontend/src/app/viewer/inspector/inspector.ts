@@ -12,17 +12,8 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
-import {
-  lateNoticeDetails,
-  NeatButton,
-  NeatConfirm,
-  type NeatFrameStats,
-  NeatIcon,
-  NeatTab,
-  NeatTabs,
-  NeatTooltip,
-  NeatVideoTile,
-} from '@sima/neat-ui';
+import { NeatButton, NeatConfirm, NeatIcon, NeatTab, NeatTabs, NeatTooltip } from '@sima/neat-ui';
+import { lateNoticeDetails, type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { ChannelLateness, type LatenessReading } from '../channel-lateness';
 import { followSyncSettings } from '../connection-sync';
 import type { NumericSettingId, SettingTab } from '../settings/schema';

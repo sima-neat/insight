@@ -79,6 +79,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The video code must load with the Viewer route only, not with the first paint.
+      - name: Check the bundle split
+        run: npm run check:bundle
+
       # The end-to-end tests start the dev server themselves and drive it in Chromium.
       - name: Install Chromium
         run: npx playwright install --with-deps chromium

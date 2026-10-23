@@ -6,7 +6,7 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import type { NeatOverlaySettings } from '@sima/neat-ui';
+import type { NeatOverlaySettings } from '@sima/neat-ui/video';
 import {
   EMPTY_OVERRIDES,
   followedValue,

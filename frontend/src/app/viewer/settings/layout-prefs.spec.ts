@@ -1,6 +1,6 @@
 import { computed } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { NEAT_MIN_TILE_WIDTH } from '@sima/neat-ui';
+import { NEAT_MIN_TILE_WIDTH } from '@sima/neat-ui/video';
 import { FakeLocalStorage } from './fake-storage.testing';
 import { LayoutPrefs } from './layout-prefs';
 

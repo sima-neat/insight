@@ -15,7 +15,7 @@ import {
   type NeatLatenessSnapshot,
   type NeatTileState,
   NeatVideoTile,
-} from '@sima/neat-ui';
+} from '@sima/neat-ui/video';
 import { ChannelLateness } from './channel-lateness';
 import { followSyncSettings } from './connection-sync';
 import { LateChip } from './late-chip';

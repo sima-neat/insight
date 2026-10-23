@@ -92,10 +92,13 @@ merging.
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
   at 700 kB, as in the kit showcase, because the kit's shell with Angular's router already brings
   the placeholder app to about 490 kB raw; the 1 MB error ceiling stays. (`angular.json` cannot
-  hold comments, so the reason lives here.)
-- **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`) draws
-  and knows nothing of vf: `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the
-  matching frames; `neat-tile-grid` packs the tiles.
+  hold comments, so the reason lives here.) The kit's video code is imported from
+  `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and stays out of the
+  initial bundle; `npm run check:bundle` (after a build, and in CI) fails if it leaks into it.
+- **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`; the
+  video part is its `@sima/neat-ui/video` entry point) draws and knows nothing of vf:
+  `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the matching frames;
+  `neat-tile-grid` packs the tiles.
   The app connects, in `src/app/viewer/`: `vf/` (a `VfConnection` per channel, via `/api/vf/offer`),
   `settings/` (overlay settings, layout choices), `viewer-tile.ts` (joins both to a kit tile) and
   `inspector/`. The page, `src/app/pages/viewer/`, owns them while shown: channels, paging, toolbar.
@@ -130,13 +133,14 @@ private.
 Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 `^22.22.3 || ^24.15.0`, we pin 24). Run these in `frontend/`:
 
-| Command         | What it does                                                                                        |
-| --------------- | --------------------------------------------------------------------------------------------------- |
-| `npm start`     | Dev server on `http://localhost:4200`                                                               |
-| `npm test`      | Unit tests (`npm test -- --watch=false` runs once and exits)                                        |
-| `npm run lint`  | ESLint (angular-eslint, kit-only imports), Stylelint (no colour literals) and a typecheck of `e2e/` |
-| `npm run build` | Production build into `frontend/dist`                                                               |
-| `npm run e2e`   | Playwright end-to-end tests (`frontend/e2e`)                                                        |
+| Command                | What it does                                                                                        |
+| ---------------------- | --------------------------------------------------------------------------------------------------- |
+| `npm start`            | Dev server on `http://localhost:4200`                                                               |
+| `npm test`             | Unit tests (`npm test -- --watch=false` runs once and exits)                                        |
+| `npm run lint`         | ESLint (angular-eslint, kit-only imports), Stylelint (no colour literals) and a typecheck of `e2e/` |
+| `npm run build`        | Production build into `frontend/dist`                                                               |
+| `npm run check:bundle` | Checks the built bundle: the kit's video code is in the Viewer's chunk, not the initial one         |
+| `npm run e2e`          | Playwright end-to-end tests (`frontend/e2e`)                                                        |
 
 The backend's tests run from the repo root with `python -m unittest discover -s tests`. Run lint,
 the unit tests and the build before opening a PR; CI (`.github/workflows/tests.yml`) runs the same.

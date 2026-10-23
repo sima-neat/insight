@@ -1,4 +1,4 @@
-import { bufferSettleMs, type NeatMetadataSnapshot, nextWarningActive } from '@sima/neat-ui';
+import { bufferSettleMs, type NeatMetadataSnapshot, nextWarningActive } from '@sima/neat-ui/video';
 
 /** The tile's lateness window, as the chip reads and resets it; `NeatVideoTile` is one. */
 export interface LatenessSource {

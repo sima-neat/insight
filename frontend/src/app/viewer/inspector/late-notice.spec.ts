@@ -1,6 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import type { NeatLateNoticeDetails } from '@sima/neat-ui';
+import type { NeatLateNoticeDetails } from '@sima/neat-ui/video';
 import { LateNotice, type RaiseTarget } from './late-notice';
 
 const RAISE: NeatLateNoticeDetails = {
