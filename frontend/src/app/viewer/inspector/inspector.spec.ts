@@ -1084,6 +1084,38 @@ describe('ViewerInspector', () => {
       });
     });
 
+    it('a bubble Delete on a channel that inherits stores the channel’s own list without that region and leaves the global one alone', async () => {
+      const global = [
+        { type: 'inclusion', points: TRIANGLE },
+        { type: 'exclusion', points: TRIANGLE },
+      ];
+      storage.seed({ 'roi:global': { version: 1, regions: global } });
+      await open();
+      await inspect(2);
+      await click(tab('ROI'));
+      preview().videoBox.set(BOX);
+      await settle();
+      expect(storage.readStored('roi:channel:2')).toBeNull();
+
+      editorElement()
+        .querySelectorAll('polygon')[0]
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await settle();
+      await click(
+        editorElement().querySelector<HTMLButtonElement>(
+          'button[aria-label="Delete Inclusion 1"]',
+        )!,
+      );
+
+      expect(storage.readStored('roi:channel:2')).toStrictEqual({
+        version: 1,
+        regions: [global[1]],
+      });
+      expect(storage.readStored('roi:global')).toStrictEqual({ version: 1, regions: global });
+      expect(lines()).toEqual(['Exclusion 1 Delete', 'Delete all…']);
+      expect(gridTile(3).settings().roi).toStrictEqual(global);
+    });
+
     it('Escape while drawing cancels the open polygon and neither closes the inspector nor deselects the tile', async () => {
       await open();
       await inspect(2);
