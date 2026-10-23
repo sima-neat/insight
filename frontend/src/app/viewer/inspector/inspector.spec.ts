@@ -1,14 +1,23 @@
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { Component, input, output, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import { NeatConfirm, NeatIcon } from '@sima/neat-ui';
-import { type NeatFrameStats, type NeatMetadataSnapshot, NeatVideoTile } from '@sima/neat-ui/video';
+import {
+  type NeatFrameStats,
+  type NeatMetadataSnapshot,
+  type NeatOverlaySettings,
+  NeatRoiEditor,
+  type NeatVideoBox,
+  NeatVideoTile,
+} from '@sima/neat-ui/video';
 import { FakeResizeObserver, ViewerShell } from '../../pages/viewer/viewer-page.testing';
 import { ViewerPage } from '../../pages/viewer/viewer.page';
 import { FakeConnections } from '../fake-connections.testing';
 import { FakeLocalStorage } from '../settings/fake-storage.testing';
+import { LayoutPrefs } from '../settings/layout-prefs';
 import { VfConnections } from '../vf/vf-connections';
 import { ViewerTile } from '../viewer-tile';
 import { ViewerInspector } from './inspector';
@@ -640,4 +649,307 @@ describe('ViewerInspector', () => {
     expect(aside()).toBeNull();
     expect(document.activeElement).toBe(toolbarButton('Inspector'));
   });
+
+  describe('the ROI tab', () => {
+    /** The radio of the ROI tab's Draw control labelled `label`. */
+    const drawRadio = (label: string): HTMLButtonElement =>
+      [...inspector().querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
+        (element) => element.textContent?.trim() === label,
+      )!;
+    const editor = (): NeatRoiEditor | null =>
+      fixture.debugElement.query(By.directive(NeatRoiEditor))?.componentInstance ?? null;
+    const backdropField = (): HTMLInputElement =>
+      inspector().querySelector('input[aria-label="Draw on channel"]')!;
+
+    async function enter(input: HTMLInputElement, value: string): Promise<void> {
+      input.value = value;
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await settle();
+    }
+
+    it('the tabs are Metadata, ROI and General', async () => {
+      await open();
+      await click(toolbarButton('Inspector'));
+
+      expect(
+        [...inspector().querySelectorAll('[role="tab"]')].map((element) =>
+          element.textContent?.trim(),
+        ),
+      ).toEqual(['Metadata', 'ROI', 'General']);
+
+      await click(tab('ROI'));
+      expect(tab('ROI').getAttribute('aria-selected')).toBe('true');
+      expect(rowLabels()).toEqual([]);
+      expect(inspector().querySelector('app-roi-tab')).not.toBeNull();
+    });
+
+    it('with no channel selected the ROI tab previews the first live displayed channel, else the first displayed one', async () => {
+      await open();
+      await click(toolbarButton('Inspector'));
+      expect(previewTile()).toBeNull();
+
+      // Hide empty is off, so no channel is known to be live: the first displayed one.
+      await click(tab('ROI'));
+      expect(title()).toBe('All channels');
+      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(fake.holders.get(0)).toBe(2);
+      expect(backdropField().value).toBe('0');
+      // The backdrop is no selection: the panel has no channel status.
+      expect(status()).toEqual([]);
+
+      // Channel 0 goes from the grid when Hide empty shows only the live channels 3 and 5.
+      const page = fixture.debugElement.query(By.directive(ViewerPage));
+      page.injector.get(LayoutPrefs).setHideEmpty(true);
+      await settle();
+      TestBed.inject(HttpTestingController)
+        .expectOne('/api/ingest/stats')
+        .flush({
+          channels: [
+            { channel: 3, active: true },
+            { channel: 5, active: true },
+          ],
+        });
+      await settle();
+
+      expect(previewTile()!.source()).toBe(fake.connections.get(3));
+      expect(backdropField().value).toBe('3');
+      expect(fake.holders.get(0)).toBeUndefined();
+      expect(fake.holders.get(3)).toBe(2);
+
+      // Other tabs have no preview without a selection, and let the connection go.
+      await click(tab('Metadata'));
+      expect(previewTile()).toBeNull();
+      expect(fake.holders.get(3)).toBe(1);
+    });
+
+    it('Draw on channel switches the backdrop and refuses channels that are not displayed', async () => {
+      await open();
+      await click(toolbarButton('Inspector'));
+      await click(tab('ROI'));
+
+      await enter(backdropField(), '4');
+      expect(previewTile()!.source()).toBe(fake.connections.get(4));
+      expect(fake.holders.get(0)).toBe(1);
+      expect(fake.holders.get(4)).toBe(2);
+
+      // Channel 12 is beyond the link's eight channels.
+      await enter(backdropField(), '12');
+      expect(previewTile()!.source()).toBe(fake.connections.get(4));
+      expect(backdropField().value).toBe('4');
+      expect(fake.connections.has(12)).toBe(false);
+
+      // A selected channel is previewed instead; the backdrop is back when the selection goes.
+      await click(tileElement(6));
+      expect(previewTile()!.source()).toBe(fake.connections.get(6));
+      expect(fake.holders.get(4)).toBe(1);
+      expect(inspector().querySelector('input[aria-label="Draw on channel"]')).toBeNull();
+    });
+
+    it('the preview gets showRoi false and the editor while the ROI tab is open, and neither on other tabs', async () => {
+      const regions = [
+        {
+          type: 'inclusion',
+          points: [
+            { x: 0.1, y: 0.1 },
+            { x: 0.9, y: 0.1 },
+            { x: 0.5, y: 0.9 },
+          ],
+        },
+      ];
+      storage.seed({ 'roi:global': { version: 1, regions } });
+      await open();
+      await inspect(2);
+      expect(previewTile()!.settings().general.showRoi).toBe(true);
+      expect(editor()).toBeNull();
+
+      await click(tab('ROI'));
+      // The editor draws the regions; the tile's overlay would draw them a second time.
+      expect(previewTile()!.settings().general.showRoi).toBe(false);
+      expect(previewTile()!.settings().roi).toStrictEqual(regions);
+      expect(editor()!.regions()).toStrictEqual(regions);
+      expect(editor()!.mode()).toBe('off');
+      expect(
+        inspector().querySelector('neat-video-tile neat-roi-editor[neatTileOverlay]'),
+      ).not.toBeNull();
+      // Only the preview: the channel's grid tile still draws its regions.
+      expect(gridTile(2).settings().general.showRoi).toBe(true);
+
+      await click(tab('General'));
+      expect(previewTile()!.settings().general.showRoi).toBe(true);
+      expect(editor()).toBeNull();
+    });
+
+    it('drawMode resets to Off when the channel or tab changes', async () => {
+      await open();
+      await inspect(2);
+      await click(tab('ROI'));
+
+      await click(drawRadio('Inclusion'));
+      expect(editor()!.mode()).toBe('inclusion');
+
+      await click(tileElement(3));
+      expect(editor()!.mode()).toBe('off');
+      expect(drawRadio('Off').getAttribute('aria-checked')).toBe('true');
+
+      await click(drawRadio('Exclusion'));
+      await click(tab('General'));
+      await click(tab('ROI'));
+      expect(editor()!.mode()).toBe('off');
+      expect(drawRadio('Off').getAttribute('aria-checked')).toBe('true');
+
+      // Deselecting is a change of channel too: to All channels, on the backdrop.
+      await click(drawRadio('Inclusion'));
+      await press('Escape', tileElement(3));
+      expect(title()).toBe('All channels');
+      expect(editor()!.mode()).toBe('off');
+    });
+  });
+
+  /*
+   * Drawing needs the editor to have an image to draw on, which only a playing tile gives it; in
+   * jsdom no video plays, so here the preview is a stand-in tile whose video box the test sets.
+   * The editor and everything around it are the real ones.
+   */
+  describe('drawing on the preview', () => {
+    /** A 200×100 image at the stand-in tile's corner, which jsdom puts at the page origin. */
+    const BOX: NeatVideoBox = { x: 0, y: 0, width: 200, height: 100 };
+
+    beforeEach(() => {
+      TestBed.overrideComponent(ViewerInspector, {
+        remove: { imports: [NeatVideoTile] },
+        add: { imports: [StandInTile] },
+      });
+    });
+
+    const preview = (): StandInTile =>
+      fixture.debugElement.query(By.directive(StandInTile)).componentInstance;
+    const editorElement = (): HTMLElement => inspector().querySelector('neat-roi-editor')!;
+    const drawRadio = (label: string): HTMLButtonElement =>
+      [...inspector().querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
+        (element) => element.textContent?.trim() === label,
+      )!;
+    const lines = () => [...inspector().querySelectorAll('.regions li')].map((line) => flat(line));
+
+    /** Clicks the image at fractions of its size. */
+    async function clickAt(x: number, y: number): Promise<void> {
+      editorElement()
+        .querySelector('svg')!
+        .dispatchEvent(
+          new MouseEvent('click', {
+            clientX: x * BOX.width,
+            clientY: y * BOX.height,
+            button: 0,
+            detail: 1,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      await settle();
+    }
+
+    /** Opens the ROI tab, gives the preview an image and chooses `mode`. */
+    async function drawOn(mode: 'Inclusion' | 'Exclusion'): Promise<void> {
+      await click(tab('ROI'));
+      preview().videoBox.set(BOX);
+      await settle();
+      await click(drawRadio(mode));
+    }
+
+    const TRIANGLE = [
+      { x: 0.1, y: 0.1 },
+      { x: 0.9, y: 0.1 },
+      { x: 0.5, y: 0.9 },
+    ];
+
+    it('a polygon drawn on a channel that inherits stores the global regions plus the new one', async () => {
+      const global = [{ type: 'exclusion', points: TRIANGLE }];
+      storage.seed({ 'roi:global': { version: 1, regions: global } });
+      await open();
+      await inspect(2);
+      await drawOn('Inclusion');
+
+      await clickAt(0.2, 0.2);
+      await clickAt(0.8, 0.2);
+      await clickAt(0.8, 0.8);
+      await clickAt(0.2, 0.2);
+
+      const drawn = {
+        type: 'inclusion',
+        points: [
+          { x: 0.2, y: 0.2 },
+          { x: 0.8, y: 0.2 },
+          { x: 0.8, y: 0.8 },
+        ],
+      };
+      expect(storage.readStored('roi:channel:2')).toStrictEqual({
+        version: 1,
+        regions: [...global, drawn],
+      });
+      expect(storage.readStored('roi:global')).toStrictEqual({ version: 1, regions: global });
+      expect(lines()).toEqual(['Exclusion 1 Delete', 'Inclusion 1 Delete', 'Delete all…']);
+      expect(gridTile(2).settings().roi).toStrictEqual([...global, drawn]);
+      expect(gridTile(3).settings().roi).toStrictEqual(global);
+      // Clicks on the preview neither select nor deselect a tile.
+      expect(page().selectedChannel()).toBe(2);
+    });
+
+    it('on All channels a polygon drawn on the backdrop is a global region', async () => {
+      await open();
+      await click(toolbarButton('Inspector'));
+      await drawOn('Exclusion');
+
+      await clickAt(0.1, 0.1);
+      await clickAt(0.9, 0.1);
+      await clickAt(0.5, 0.9);
+      await clickAt(0.1, 0.1);
+
+      expect(storage.readStored('roi:global')).toStrictEqual({
+        version: 1,
+        regions: [{ type: 'exclusion', points: TRIANGLE }],
+      });
+      expect(gridTile(5).settings().roi).toStrictEqual([{ type: 'exclusion', points: TRIANGLE }]);
+      expect(page().selectedChannel()).toBeNull();
+    });
+
+    it('Escape while drawing cancels the open polygon and neither closes the inspector nor deselects the tile', async () => {
+      await open();
+      await inspect(2);
+      await drawOn('Inclusion');
+      const writes = storage.writes.length;
+
+      await clickAt(0.2, 0.2);
+      await clickAt(0.8, 0.2);
+      await new Promise((resolve) => setTimeout(resolve));
+      // The editor took focus on the first point, so Escape goes to it.
+      expect(document.activeElement).toBe(editorElement());
+      await press('Escape', editorElement());
+
+      expect(aside()).not.toBeNull();
+      expect(page().selectedChannel()).toBe(2);
+      expect(editorElement().querySelector('polyline')).toBeNull();
+      expect(storage.writes).toHaveLength(writes);
+
+      // With nothing open, Escape is the inspector's again.
+      await press('Escape', editorElement());
+      expect(aside()).toBeNull();
+      expect(page().selectedChannel()).toBe(2);
+    });
+  });
 });
+
+/** Stands in for the kit tile in the inspector, with a video box the test sets. */
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector -- it takes the kit tile's place
+  selector: 'neat-video-tile',
+  providers: [{ provide: NeatVideoTile, useExisting: StandInTile }],
+  template: '<ng-content select="[neatTileOverlay]" />',
+})
+class StandInTile {
+  readonly source = input<unknown>();
+  readonly settings = input<NeatOverlaySettings>();
+  readonly retentionMs = input<number>();
+  readonly channel = input<number>();
+  readonly bars = input<boolean>();
+  readonly frameStats = output<NeatFrameStats>();
+  readonly videoBox = signal<NeatVideoBox | null>(null);
+}

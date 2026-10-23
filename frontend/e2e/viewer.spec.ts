@@ -348,7 +348,7 @@ test.describe('the Viewer without vf', () => {
     await footer.click();
     const all = page.getByRole('alertdialog', { name: 'Reset all channels to global?' });
     await expect(all).toContainText(
-      "1 setting on 1 channel goes back to the global values. This can't be undone.",
+      "1 setting on 1 channel goes back to the global values. Regions of interest are kept. This can't be undone.",
     );
     await all.getByRole('button', { name: 'Reset', exact: true }).click();
     await expect(footer).toHaveCount(0);
@@ -541,6 +541,43 @@ test.describe('a deployed build with the test feed on channel 0', () => {
           .map((peer) => peer.browser?.synchronization?.timestamp_matches ?? 0),
       );
     await expect.poll(timestampMatches, { timeout: 10_000 }).toBeGreaterThan(0);
+  });
+
+  test('a region drawn on channel 0 in the ROI tab is listed, survives reload and can be deleted', async ({
+    page,
+  }) => {
+    await page.goto('/viewer?src=0');
+    await expect(videoTile(tile(page, 0))).toHaveAttribute('data-state', 'playing', {
+      timeout: 15_000,
+    });
+    await tile(page, 0).click();
+    await pageTools(page).getByRole('button', { name: 'Inspector' }).click();
+    const inspector = page.locator('app-viewer-inspector');
+    await inspector.getByRole('tab', { name: 'ROI' }).click();
+    await expect(inspector.locator('neat-video-tile')).toHaveAttribute('data-state', 'playing', {
+      timeout: 15_000,
+    });
+    await inspector.getByRole('radio', { name: 'Inclusion' }).click();
+
+    // Three corners of a triangle on the preview's image, then the first again to close it.
+    const image = (await inspector.locator('neat-roi-editor svg').boundingBox())!;
+    const at = (x: number, y: number) =>
+      [image.x + x * image.width, image.y + y * image.height] as const;
+    for (const [x, y] of [at(0.2, 0.2), at(0.8, 0.2), at(0.5, 0.8), at(0.2, 0.2)]) {
+      await page.mouse.click(x, y);
+    }
+
+    const row = inspector.locator('.regions li', { hasText: 'Inclusion 1' });
+    await expect(row).toBeVisible();
+
+    await page.reload();
+    await tile(page, 0).click();
+    await inspector.getByRole('tab', { name: 'ROI' }).click();
+    await expect(row).toBeVisible();
+
+    await inspector.getByRole('button', { name: 'Delete Inclusion 1' }).click();
+    await expect(row).toHaveCount(0);
+    await expect(inspector.getByText('No regions.')).toBeVisible();
   });
 
   test('stopping the feed turns the tile "stopped" within 3 s; restarting plays again without reload', async ({

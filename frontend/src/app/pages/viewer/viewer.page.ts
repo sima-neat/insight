@@ -190,7 +190,7 @@ export class ViewerPage {
    * instead of negotiating new ones when the answer comes. A link changed in place during that wait
    * (another `src` or limit) also keeps the old channels until the answer; the wait is one request.
    */
-  private readonly channels = linkedSignal<readonly number[] | null, readonly number[]>({
+  protected readonly channels = linkedSignal<readonly number[] | null, readonly number[]>({
     source: this.knownChannels,
     computation: (known, previous) => known ?? previous?.value ?? [],
   });

@@ -6,26 +6,37 @@ import {
   type ElementRef,
   inject,
   input,
+  linkedSignal,
   model,
   output,
   signal,
+  untracked,
   viewChild,
   viewChildren,
 } from '@angular/core';
 import { NeatButton, NeatConfirm, NeatIcon, NeatTab, NeatTabs, NeatTooltip } from '@sima/neat-ui';
-import { lateNoticeDetails, type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
+import {
+  lateNoticeDetails,
+  type NeatFrameStats,
+  type NeatRoiDrawMode,
+  NeatRoiEditor,
+  type NeatRoiPolygon,
+  NeatVideoTile,
+} from '@sima/neat-ui/video';
 import { ChannelLateness, type LatenessReading } from '../channel-lateness';
+import { ChannelLiveness } from '../channel-liveness';
 import { followSyncSettings } from '../connection-sync';
+import { RoiStore } from '../settings/roi-store';
 import type { NumericSettingId, SettingTab } from '../settings/schema';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
 import { formatChannelStatus } from '../vf/channel-status';
 import type { VfConnection } from '../vf/vf-connection';
 import { VfConnections } from '../vf/vf-connections';
 import { LateNotice, type RaiseTarget } from './late-notice';
+import { RoiTab } from './roi-tab';
 import { channelCount, type SettingControl, SettingRow, settingCount } from './setting-row';
 
-/** The tabs plan 2a fills; ROI follows in plan 2b. */
-const TABS = ['Metadata', 'General'] as const satisfies readonly SettingTab[];
+const TABS = ['Metadata', 'ROI', 'General'] as const satisfies readonly SettingTab[];
 
 interface MetadataSection {
   readonly heading: string;
@@ -179,6 +190,11 @@ function describeLateness(reading: LatenessReading | null): string {
  * where a change becomes the channel's override. The General tab carries the late notice while the
  * channel's grid tile warns of late metadata.
  *
+ * The ROI tab draws regions of interest on the preview: the selected channel's, or with none
+ * selected the global ones, on a displayed channel's preview chosen as a backdrop. While the tab is
+ * open the preview carries the region editor, which draws the regions itself, so the tile's own
+ * region overlay is off.
+ *
  * The preview is a second kit tile on the channel's one connection, held like the grid tile holds
  * it, so selecting a channel opens no second peer connection. While the channel has a grid tile,
  * that tile reports the channel's frame stats and lateness and the preview's are not used; once the
@@ -193,10 +209,12 @@ function describeLateness(reading: LatenessReading | null): string {
     LateNotice,
     NeatButton,
     NeatIcon,
+    NeatRoiEditor,
     NeatTab,
     NeatTabs,
     NeatTooltip,
     NeatVideoTile,
+    RoiTab,
     SettingRow,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -213,12 +231,16 @@ export class ViewerInspector {
   readonly channel = input.required<number | null>();
   /** The open tab, which the page also sets (the late chip opens General). */
   readonly tab = model.required<SettingTab>();
+  /** The channels the page displays, in order: what the ROI tab's backdrop can be. */
+  readonly channels = input.required<readonly number[]>();
   /** Escape or the close button: the page closes the panel. */
   readonly dismiss = output<void>();
 
   private readonly connections = inject(VfConnections);
   private readonly store = inject(ViewerSettingsStore);
+  private readonly roi = inject(RoiStore);
   private readonly lateness = inject(ChannelLateness);
+  private readonly liveness = inject(ChannelLiveness);
   private readonly confirm = inject(NeatConfirm);
   private readonly rows = viewChildren(SettingRow);
   private readonly heading = viewChild.required<ElementRef<HTMLElement>>('heading');
@@ -237,27 +259,77 @@ export class ViewerInspector {
     () => this.channel() === null && this.store.channelOverrides().settings > 0,
   );
 
+  protected readonly roiOpen = computed(() => this.tab() === 'ROI');
+
+  /**
+   * What a click on the preview does while the ROI tab is open. A new channel or tab starts at
+   * Off, so a click never draws on a preview the user did not choose to draw on.
+   */
+  protected readonly drawMode = linkedSignal({
+    source: () => ({ channel: this.channel(), tab: this.tab() }),
+    computation: (): NeatRoiDrawMode => 'off',
+  });
+
+  /**
+   * The channel the global regions are drawn on, while the ROI tab is open on "All channels".
+   * Opening the tab there picks the first displayed channel that is live, else the first
+   * displayed one; a channel the user picks stays while it is displayed, and once it is not, the
+   * pick is made again. Live channels are known only while "Hide empty" polls for them.
+   */
+  protected readonly backdrop = linkedSignal<
+    { readonly drawing: boolean; readonly channels: readonly number[] },
+    number | null
+  >({
+    source: () => ({
+      drawing: this.channel() === null && this.roiOpen(),
+      channels: this.channels(),
+    }),
+    computation: (next, previous) => {
+      if (!next.drawing) return null;
+      const kept = previous?.value ?? null;
+      if (previous?.source.drawing && kept !== null && next.channels.includes(kept)) return kept;
+      // Read when the pick is made only: a channel going live later does not move the backdrop.
+      const live = untracked(this.liveness.live);
+      return next.channels.find((channel) => live?.has(channel)) ?? next.channels[0] ?? null;
+    },
+  });
+
+  /** The channel the preview shows: the selected one, else the ROI tab's backdrop. */
+  private readonly previewChannel = computed(
+    () => this.channel() ?? (this.roiOpen() ? this.backdrop() : null),
+  );
+
   private readonly connection = signal<VfConnection | null>(null);
   private readonly sync = computed(() => {
-    const channel = this.channel();
+    const channel = this.previewChannel();
     return channel === null ? null : this.store.general(channel)();
   });
 
+  /** The regions the ROI tab edits, as the editor starts from them. */
+  protected readonly editable = computed(() => this.roi.editable(this.scope())());
+
   /** What the preview tile shows; it changes with the channel's settings, not with its stats. */
   protected readonly preview = computed(() => {
-    const channel = this.channel();
+    const channel = this.previewChannel();
     const connection = this.connection();
     const sync = this.sync();
     if (channel === null || connection === null || sync === null) return null;
+    const settings = this.store.resolved(channel)();
     return {
       channel,
       connection,
-      settings: this.store.resolved(channel)(),
+      // The editor draws the regions on the ROI tab; the tile's overlay would draw them twice.
+      settings: this.roiOpen()
+        ? { ...settings, general: { ...settings.general, showRoi: false } }
+        : settings,
       retentionMs: sync.metadataRetentionMs,
     };
   });
 
-  /** The channel's status lines, updated at most once per stats tick. */
+  /**
+   * The selected channel's status lines, updated at most once per stats tick. A backdrop is no
+   * selection and shows none.
+   */
   protected readonly status = computed(() => {
     const channel = this.channel();
     const connection = this.connection();
@@ -292,7 +364,7 @@ export class ViewerInspector {
 
   constructor() {
     effect((onCleanup) => {
-      const channel = this.channel();
+      const channel = this.previewChannel();
       if (channel === null) {
         this.connection.set(null);
         return;
@@ -349,10 +421,18 @@ export class ViewerInspector {
 
   /** The preview's stats, which stand in for the grid tile's while the channel has none (R29). */
   protected onPreviewStats(stats: NeatFrameStats): void {
-    const channel = this.channel();
+    const channel = this.previewChannel();
     if (channel !== null && this.lateness.of(channel)() === null) {
       this.connection()?.reportFrameStats(stats);
     }
+  }
+
+  /**
+   * A polygon closed on the preview: the editor's list is the one it was given, `editable`, with
+   * the polygon appended, so on a channel that inherits it keeps the global regions it showed.
+   */
+  protected addRegion(regions: readonly NeatRoiPolygon[]): void {
+    this.roi.set(this.scope(), regions);
   }
 
   protected onKeydown(event: KeyboardEvent): void {

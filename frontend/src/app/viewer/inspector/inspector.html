@@ -25,7 +25,16 @@
       [channel]="preview.channel"
       [bars]="false"
       (frameStats)="onPreviewStats($event)"
-    />
+    >
+      @if (roiOpen()) {
+        <neat-roi-editor
+          neatTileOverlay
+          [regions]="editable()"
+          [mode]="drawMode()"
+          (regionsChange)="addRegion($event)"
+        />
+      }
+    </neat-video-tile>
   </div>
 }
 @if (status(); as status) {
@@ -58,6 +67,18 @@
             }
           </section>
         }
+      </div>
+    </ng-template>
+  </neat-tab>
+  <neat-tab label="ROI" value="ROI">
+    <ng-template>
+      <div class="panel">
+        <app-roi-tab
+          [scope]="scope()"
+          [channels]="channels()"
+          [(drawMode)]="drawMode"
+          [(backdrop)]="backdrop"
+        />
       </div>
     </ng-template>
   </neat-tab>
