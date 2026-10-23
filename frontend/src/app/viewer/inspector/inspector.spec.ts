@@ -683,12 +683,18 @@ describe('ViewerInspector', () => {
       expect(inspector().querySelector('app-roi-tab')).not.toBeNull();
     });
 
-    it('with no channel selected the ROI tab previews the first live displayed channel, else the first displayed one', async () => {
+    /** The channel's grid tile reports that its video plays, or stops. */
+    async function setPlaying(channel: number, playing: boolean): Promise<void> {
+      gridTile(channel).stateChange.emit(playing ? 'playing' : 'stopped');
+      await settle();
+    }
+
+    it('with no channel playing the ROI tab previews the first displayed one, and another once it leaves the grid', async () => {
       await open();
       await click(toolbarButton('Inspector'));
       expect(previewTile()).toBeNull();
 
-      // Hide empty is off, so no channel is known to be live: the first displayed one.
+      // No grid tile plays: the first displayed channel.
       await click(tab('ROI'));
       expect(title()).toBe('All channels');
       expect(previewTile()!.source()).toBe(fake.connections.get(0));
@@ -720,6 +726,64 @@ describe('ViewerInspector', () => {
       await click(tab('Metadata'));
       expect(previewTile()).toBeNull();
       expect(fake.holders.get(3)).toBe(1);
+    });
+
+    it('with no channel selected the ROI tab previews the first displayed channel that plays, and keeps it while it plays', async () => {
+      await open();
+      await click(toolbarButton('Inspector'));
+      // Hide empty is off: channel 0 is displayed but has no video.
+      await setPlaying(2, true);
+
+      await click(tab('ROI'));
+      expect(previewTile()!.source()).toBe(fake.connections.get(2));
+      expect(backdropField().value).toBe('2');
+
+      // An earlier channel starting to play does not move a backdrop that still plays.
+      await setPlaying(1, true);
+      expect(previewTile()!.source()).toBe(fake.connections.get(2));
+
+      // Once it stops, the first displayed channel that plays takes over, else the first displayed.
+      await setPlaying(2, false);
+      expect(previewTile()!.source()).toBe(fake.connections.get(1));
+      expect(fake.holders.get(2)).toBe(1);
+      await setPlaying(1, false);
+      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+    });
+
+    it('a channel picked in Draw on channel stays while it is displayed, whether it plays or not', async () => {
+      await open();
+      await click(toolbarButton('Inspector'));
+      await setPlaying(2, true);
+      await click(tab('ROI'));
+
+      await enter(backdropField(), '0');
+      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+
+      await setPlaying(3, true);
+      await setPlaying(2, false);
+      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(backdropField().value).toBe('0');
+    });
+
+    it('leaving the ROI tab forgets the pick: ROI, Metadata, ROI derives the backdrop again', async () => {
+      await open();
+      await click(toolbarButton('Inspector'));
+      await click(tab('ROI'));
+      await enter(backdropField(), '4');
+      expect(previewTile()!.source()).toBe(fake.connections.get(4));
+
+      await click(tab('Metadata'));
+      await click(tab('ROI'));
+      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(backdropField().value).toBe('0');
+
+      // The same while channel 5 plays: the default, not the old pick.
+      await enter(backdropField(), '4');
+      await click(tab('General'));
+      await setPlaying(5, true);
+      await click(tab('ROI'));
+      expect(previewTile()!.source()).toBe(fake.connections.get(5));
+      expect(fake.holders.get(4)).toBe(1);
     });
 
     it('Draw on channel switches the backdrop and refuses channels that are not displayed', async () => {

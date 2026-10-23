@@ -339,11 +339,17 @@ describe('RoiTab', () => {
     expect(root().querySelector('.owners')).toBeNull();
   });
 
-  it('a channel has no Draw on channel field and no list of channels', async () => {
+  it('a channel has the Draw control and its list, but no Draw on channel field and no list of channels', async () => {
     await render(1, { 'roi:channel:2': stored([SQUARE]) });
 
+    expect(radios().map((element) => flat(element))).toEqual(['Off', 'Inclusion', 'Exclusion']);
+    expect(flat(root().querySelector('.empty'))).toBe('No regions.');
     expect(backdropField()).toBeNull();
     expect(root().querySelector('.owners')).toBeNull();
+
+    host().roi.set(1, [TRIANGLE]);
+    await settle();
+    expect(lines()).toEqual(['Exclusion 1 Delete', 'Delete all…']);
   });
 
   it('Draw on channel applies a displayed channel on Enter or blur and shows the current one back otherwise', async () => {

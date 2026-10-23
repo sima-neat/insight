@@ -40,6 +40,7 @@ import {
 import { map } from 'rxjs';
 import { ChannelLateness } from '../../viewer/channel-lateness';
 import { ChannelLiveness } from '../../viewer/channel-liveness';
+import { ChannelPlayback } from '../../viewer/channel-playback';
 import { ViewerInspector } from '../../viewer/inspector/inspector';
 import { LayoutPrefs } from '../../viewer/settings/layout-prefs';
 import type { SettingTab } from '../../viewer/settings/schema';
@@ -132,6 +133,7 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
     LayoutPrefs,
     ChannelLiveness,
     ChannelLateness,
+    ChannelPlayback,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(window:keydown)': 'onKeydown($event)', '(click)': 'deselectOnEmptySpace($event)' },

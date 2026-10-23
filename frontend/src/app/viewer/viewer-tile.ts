@@ -17,6 +17,7 @@ import {
   NeatVideoTile,
 } from '@sima/neat-ui/video';
 import { ChannelLateness } from './channel-lateness';
+import { ChannelPlayback } from './channel-playback';
 import { followSyncSettings } from './connection-sync';
 import { LateChip } from './late-chip';
 import { ViewerSettingsStore } from './settings/viewer-settings.store';
@@ -30,7 +31,7 @@ import { VfConnections } from './vf/vf-connections';
  * releases it, and it is where the connection meets the tile: the sync buffer and retention are
  * applied when they change, the tile's frame stats go back to the connection for vf's egress
  * report, and each stats tick decides the "Metadata late" chip, which it also publishes for the
- * inspector (`ChannelLateness`).
+ * inspector (`ChannelLateness`), as it does whether its video plays (`ChannelPlayback`).
  *
  * The page owns selection; the tile only shows it.
  */
@@ -75,6 +76,7 @@ export class ViewerTile {
   private readonly connections = inject(VfConnections);
   private readonly store = inject(ViewerSettingsStore);
   private readonly lateness = inject(ChannelLateness);
+  private readonly playback = inject(ChannelPlayback);
   private readonly tile = viewChild.required(NeatVideoTile);
 
   protected readonly connection = signal<VfConnection | null>(null);
@@ -125,6 +127,12 @@ export class ViewerTile {
         snapshot: this.latenessSnapshot(),
       });
       onCleanup(() => this.lateness.clear(channel));
+    });
+
+    effect((onCleanup) => {
+      const channel = this.channel();
+      this.playback.publish(channel, this.playing());
+      onCleanup(() => this.playback.clear(channel));
     });
   }
 

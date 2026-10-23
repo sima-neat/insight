@@ -10,7 +10,6 @@ import {
   model,
   output,
   signal,
-  untracked,
   viewChild,
   viewChildren,
 } from '@angular/core';
@@ -24,7 +23,7 @@ import {
   NeatVideoTile,
 } from '@sima/neat-ui/video';
 import { ChannelLateness, type LatenessReading } from '../channel-lateness';
-import { ChannelLiveness } from '../channel-liveness';
+import { ChannelPlayback } from '../channel-playback';
 import { followSyncSettings } from '../connection-sync';
 import { RoiStore } from '../settings/roi-store';
 import type { NumericSettingId, SettingTab } from '../settings/schema';
@@ -240,7 +239,7 @@ export class ViewerInspector {
   private readonly store = inject(ViewerSettingsStore);
   private readonly roi = inject(RoiStore);
   private readonly lateness = inject(ChannelLateness);
-  private readonly liveness = inject(ChannelLiveness);
+  private readonly playback = inject(ChannelPlayback);
   private readonly confirm = inject(NeatConfirm);
   private readonly rows = viewChildren(SettingRow);
   private readonly heading = viewChild.required<ElementRef<HTMLElement>>('heading');
@@ -262,36 +261,58 @@ export class ViewerInspector {
   protected readonly roiOpen = computed(() => this.tab() === 'ROI');
 
   /**
+   * The channel and the tab, as a new object whenever either changes. What depends on it starts
+   * over on any change, whether or not anything read it in between: a computed made dirty by a
+   * change returns a new object when next read, even after a change and its undoing.
+   */
+  private readonly roiContext = computed(() => ({ channel: this.channel(), tab: this.tab() }));
+
+  /**
    * What a click on the preview does while the ROI tab is open. A new channel or tab starts at
    * Off, so a click never draws on a preview the user did not choose to draw on.
    */
   protected readonly drawMode = linkedSignal({
-    source: () => ({ channel: this.channel(), tab: this.tab() }),
+    source: this.roiContext,
     computation: (): NeatRoiDrawMode => 'off',
   });
 
   /**
-   * The channel the global regions are drawn on, while the ROI tab is open on "All channels".
-   * Opening the tab there picks the first displayed channel that is live, else the first
-   * displayed one; a channel the user picks stays while it is displayed, and once it is not, the
-   * pick is made again. Live channels are known only while "Hide empty" polls for them.
+   * The channel the user chose in "Draw on channel". Like the draw mode it is forgotten with the
+   * channel or the tab, so leaving the ROI tab and coming back starts from the default backdrop.
    */
-  protected readonly backdrop = linkedSignal<
-    { readonly drawing: boolean; readonly channels: readonly number[] },
+  protected readonly pick = linkedSignal({
+    source: this.roiContext,
+    computation: (): number | null => null,
+  });
+
+  /**
+   * The backdrop when the user has picked none: drawing needs a picture, so a displayed channel
+   * whose grid tile plays. It keeps the one it has while that is displayed and plays, so another
+   * channel starting to play does not move it; otherwise it takes the first displayed channel
+   * that plays, else the first displayed one. It starts over with the channel or the tab.
+   */
+  private readonly defaultBackdrop = linkedSignal<
+    { readonly context: unknown; readonly channels: readonly number[] },
     number | null
   >({
-    source: () => ({
-      drawing: this.channel() === null && this.roiOpen(),
-      channels: this.channels(),
-    }),
-    computation: (next, previous) => {
-      if (!next.drawing) return null;
-      const kept = previous?.value ?? null;
-      if (previous?.source.drawing && kept !== null && next.channels.includes(kept)) return kept;
-      // Read when the pick is made only: a channel going live later does not move the backdrop.
-      const live = untracked(this.liveness.live);
-      return next.channels.find((channel) => live?.has(channel)) ?? next.channels[0] ?? null;
+    source: () => ({ context: this.roiContext(), channels: this.channels() }),
+    computation: ({ context, channels }, previous) => {
+      const playing = (channel: number) => this.playback.of(channel)();
+      const kept =
+        previous !== undefined && previous.source.context === context ? previous.value : null;
+      if (kept !== null && channels.includes(kept) && playing(kept)) return kept;
+      return channels.find(playing) ?? channels[0] ?? null;
     },
+  });
+
+  /**
+   * The channel the global regions are drawn on while the ROI tab is open on "All channels": the
+   * user's pick while it is displayed, else the default. Null otherwise.
+   */
+  protected readonly backdrop = computed(() => {
+    if (this.channel() !== null || !this.roiOpen()) return null;
+    const pick = this.pick();
+    return pick !== null && this.channels().includes(pick) ? pick : this.defaultBackdrop();
   });
 
   /** The channel the preview shows: the selected one, else the ROI tab's backdrop. */

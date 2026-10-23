@@ -3,6 +3,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { bufferSettleMs, type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { ChannelLateness } from './channel-lateness';
+import { ChannelPlayback } from './channel-playback';
 import { FakeConnections } from './fake-connections.testing';
 import { FakeLocalStorage } from './settings/fake-storage.testing';
 import { RoiStore } from './settings/roi-store';
@@ -81,6 +82,7 @@ describe('ViewerTile', () => {
         RoiStore,
         ViewerSettingsStore,
         ChannelLateness,
+        ChannelPlayback,
       ],
     });
     fixture = TestBed.createComponent(Host);
@@ -260,5 +262,22 @@ describe('ViewerTile', () => {
     host().shown.set(false);
     await fixture.whenStable();
     expect(reading()).toBeNull();
+  });
+
+  it('publishes whether it plays for the inspector, and withdraws it when removed', async () => {
+    const playing = TestBed.inject(ChannelPlayback).of(2);
+    expect(playing()).toBe(false);
+
+    await play();
+    expect(playing()).toBe(true);
+
+    kitTile().stateChange.emit('stopped');
+    await fixture.whenStable();
+    expect(playing()).toBe(false);
+
+    await play();
+    host().shown.set(false);
+    await fixture.whenStable();
+    expect(playing()).toBe(false);
   });
 });
