@@ -22,23 +22,7 @@
     [disabled]="!sizeChosen()"
     (click)="fitAll()"
   >
-    <neat-icon name="viewer" />
-  </button>
-  <button
-    neatSwitch
-    class="toggle"
-    [checked]="prefs.bars()"
-    (checkedChange)="prefs.setBars($event)"
-  >
-    Bars
-  </button>
-  <button
-    neatSwitch
-    class="toggle"
-    [checked]="prefs.hideEmpty()"
-    (checkedChange)="prefs.setHideEmpty($event)"
-  >
-    Hide empty
+    <neat-icon name="fit-all" />
   </button>
 
   <span class="separator" aria-hidden="true"></span>
@@ -87,20 +71,66 @@
     </span>
     of {{ state.pageCount() }}
   </label>
-  <label class="field channel-jump">
-    Channel
-    <span class="number-field channel-field">
+
+  <span class="separator" aria-hidden="true"></span>
+
+  <neat-popover label="Go to channel" align="end" [(open)]="channelJumpOpen">
+    <button
+      neatButton
+      neatPopoverTrigger
+      type="button"
+      variant="text"
+      size="small"
+      iconOnly
+      aria-label="Go to channel"
+      neatTooltip="Go to channel"
+      neatTooltipPosition="bottom"
+    >
+      <neat-icon name="search" />
+    </button>
+    <ng-template neatPopoverContent>
       <input
         #channelInput
         neatInput
-        size="small"
         inputmode="numeric"
-        aria-label="Go to channel"
+        aria-label="Channel"
+        aria-describedby="channel-jump-hint"
         [placeholder]="channelRange()"
         (keydown.enter)="jumpToChannel(channelInput)"
       />
-    </span>
-  </label>
+      <p id="channel-jump-hint" class="hint">Enter turns to its page and selects it.</p>
+    </ng-template>
+  </neat-popover>
+  <neat-popover label="View options" align="end">
+    <button
+      neatButton
+      neatPopoverTrigger
+      type="button"
+      variant="text"
+      size="small"
+      iconOnly
+      aria-label="View options"
+      neatTooltip="View options"
+      neatTooltipPosition="bottom"
+    >
+      <neat-icon name="more" />
+    </button>
+    <ng-template neatPopoverContent>
+      <button neatSwitch [checked]="prefs.bars()" (checkedChange)="prefs.setBars($event)">
+        Bars
+      </button>
+      <span class="option">
+        <button
+          neatSwitch
+          [checked]="prefs.hideEmpty()"
+          (checkedChange)="prefs.setHideEmpty($event)"
+        >
+          Hide empty slots
+        </button>
+        <span class="tag">Experimental</span>
+      </span>
+    </ng-template>
+  </neat-popover>
   <button
     #inspectorToggle
     neatButton

@@ -174,15 +174,16 @@ export class ViewerState {
   }
 
   /**
-   * Goes to the page holding `channel` and selects it. A channel that is not displayed (outside
-   * the subset or the limit, or hidden as empty) changes nothing.
+   * Goes to the page holding `channel` and selects it, and says so. A channel that is not
+   * displayed (outside the subset or the limit, or hidden as empty) changes nothing and gives false.
    */
-  jumpToChannel(channel: number): void {
+  jumpToChannel(channel: number): boolean {
     const perPage = this.perPage();
     const index = this.channels().indexOf(channel);
-    if (perPage === null || index < 0) return;
+    if (perPage === null || index < 0) return false;
     this.turnTo(Math.floor(index / perPage));
     this.selected.set(channel);
+    return true;
   }
 
   select(channel: number): void {

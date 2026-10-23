@@ -24,6 +24,9 @@ import {
   NeatInput,
   NeatPage,
   NeatPageToolbar,
+  NeatPopover,
+  NeatPopoverContent,
+  NeatPopoverTrigger,
   NeatSlider,
   NeatSwitch,
   type NeatTileArea,
@@ -59,9 +62,11 @@ const DEBUG_FLAG = 'debug';
 
 /**
  * Where the page's key shortcuts stay out of the way: controls that take these keys themselves
- * (text fields, the slider's arrows) and the inspector, which has its own Escape.
+ * (text fields, the slider's arrows), the inspector, which has its own Escape, and the toolbar's
+ * popovers, whose Escape closes them and nothing else.
  */
-const OWN_KEYS = 'input, select, textarea, [contenteditable], [role="slider"], [neatPageAside]';
+const OWN_KEYS =
+  'input, select, textarea, [contenteditable], [role="slider"], [neatPageAside], [role="dialog"]';
 
 /** The grid's content box and the gap between its tiles, in CSS pixels. */
 interface TileSpace extends NeatTileArea {
@@ -92,6 +97,9 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
     NeatInput,
     NeatPage,
     NeatPageToolbar,
+    NeatPopover,
+    NeatPopoverContent,
+    NeatPopoverTrigger,
     NeatSlider,
     NeatSwitch,
     NeatTileGrid,
@@ -209,6 +217,12 @@ export class ViewerPage {
     return Math.max(MIN_TILE_WIDTH, fitAllTileWidth(space, 1, space.gap));
   });
 
+  /**
+   * Whether the "Go to channel" popover is open. The page holds it so that `/` can open it, and
+   * so that it survives the kiosk bar re-creating the toolbar.
+   */
+  protected readonly channelJumpOpen = signal(false);
+
   protected readonly channelRange = computed(() => {
     const limit = this.limit();
     return limit === null ? '' : `0–${limit - 1}`;
@@ -286,8 +300,9 @@ export class ViewerPage {
     input.value = String(this.state.page() + 1);
   }
 
+  /** Enter in the channel field: a displayed channel is gone to and the popover is done. */
   protected jumpToChannel(input: HTMLInputElement): void {
-    this.state.jumpToChannel(Number.parseInt(input.value, 10));
+    if (this.state.jumpToChannel(Number.parseInt(input.value, 10))) this.channelJumpOpen.set(false);
   }
 
   protected toggleInspector(): void {
@@ -319,9 +334,10 @@ export class ViewerPage {
   }
 
   /**
-   * ArrowLeft and ArrowRight page, `g` goes to the page field, Escape clears the selection. Never
-   * with a modifier (those belong to the browser and the system), and never for a key the focused
-   * control takes itself, as the original viewer did (Inv §4b).
+   * ArrowLeft and ArrowRight page, `g` goes to the page field, `/` opens "Go to channel", Escape
+   * clears the selection. Never with a modifier (those belong to the browser and the system), and
+   * never for a key the focused control takes itself, as the original viewer did (Inv §4b). Shift
+   * is no modifier for `/`: on many layouts (German among them) it is how that key is typed.
    */
   protected onKeydown(event: KeyboardEvent): void {
     if (
@@ -329,7 +345,7 @@ export class ViewerPage {
       event.ctrlKey ||
       event.altKey ||
       event.metaKey ||
-      event.shiftKey
+      (event.shiftKey && event.key !== '/')
     ) {
       return;
     }
@@ -356,6 +372,11 @@ export class ViewerPage {
         input.select();
         break;
       }
+      case '/':
+        // The slash must not land in the field the popover focuses.
+        event.preventDefault();
+        this.channelJumpOpen.set(true);
+        break;
       case 'Escape':
         this.state.clearSelection();
         break;

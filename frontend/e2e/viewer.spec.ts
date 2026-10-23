@@ -60,6 +60,8 @@ const pageTools = (page: Page) => page.getByRole('group', { name: 'Page tools' }
 const pageField = (page: Page) => page.getByRole('textbox', { name: 'Page' });
 /** The page field's label, which ends in "of <page count>". */
 const pageLabel = (page: Page) => page.locator('label').filter({ has: pageField(page) });
+/** A toolbar popover's panel, which lives in the overlay outside the toolbar while it is open. */
+const popover = (page: Page, name: string) => page.getByRole('dialog', { name, exact: true });
 const sizeSlider = (page: Page) => page.getByRole('slider', { name: 'Tile size' });
 
 /**
@@ -142,6 +144,15 @@ const renderedOpacity = (locator: Locator) =>
     return opacity;
   });
 
+/**
+ * Measures with the page clock paused: Angular renders on timers, which are paused too, so each
+ * look lets a little time pass for it first.
+ */
+async function settledLook<T>(page: Page, measure: () => Promise<T>): Promise<T> {
+  await page.clock.runFor(100);
+  return measure();
+}
+
 test.describe('the Viewer without vf', () => {
   test('16 slots at 1366×768, 1920×1080 and 768×1024: every tile fully inside the grid, no page scroll', async ({
     page,
@@ -209,7 +220,8 @@ test.describe('the Viewer without vf', () => {
     await expect(tile(page, 0)).toContainText('0');
     await expect(tile(page, 0)).toContainText('Waiting for stream');
 
-    await pageTools(page).getByRole('switch', { name: 'Bars' }).click();
+    await pageTools(page).getByRole('button', { name: 'View options' }).click();
+    await popover(page, 'View options').getByRole('switch', { name: 'Bars' }).click();
 
     await expect(tiles(page)).toHaveCount(SLOTS);
     await expect(tiles(page)).toHaveText(Array(SLOTS).fill(''));
@@ -230,9 +242,12 @@ test.describe('the Viewer without vf', () => {
       ),
     );
     await page.reload();
-    const channelField = pageTools(page).getByRole('textbox', { name: 'Go to channel' });
+    await pageTools(page).getByRole('button', { name: 'Go to channel' }).click();
+    const channelField = popover(page, 'Go to channel').getByRole('textbox', { name: 'Channel' });
+    await expect(channelField).toBeFocused();
     await channelField.fill('15');
     await channelField.press('Enter');
+    await expect(popover(page, 'Go to channel')).toHaveCount(0);
     await tile(page, 15).click();
     await expect(tile(page, 15)).toHaveAttribute('aria-current', 'true');
     const columnsBefore = await columns(page);
@@ -265,11 +280,7 @@ test.describe('the Viewer without vf', () => {
     // page loads, so that timer advances only when the test runs it (as in shell.spec.ts).
     await page.clock.install({ time: 0 });
     await page.clock.pauseAt(1000);
-    // Angular renders on timers, which are paused too: each look lets a little time pass for it.
-    const settled = async <T>(measure: () => Promise<T>) => {
-      await page.clock.runFor(100);
-      return measure();
-    };
+    const settled = <T>(measure: () => Promise<T>) => settledLook(page, measure);
     await withoutVf(page);
     await page.setViewportSize(LAPTOP);
     await page.goto('/viewer');
@@ -294,6 +305,42 @@ test.describe('the Viewer without vf', () => {
     await expect.poll(() => renderedOpacity(tools)).toBe(0);
     await page.mouse.move(400, 300);
     await expect.poll(() => settled(() => renderedOpacity(tools))).toBe(1);
+  });
+
+  test('kiosk: View options opened from the floating toolbar stays open while the pointer rests on it', async ({
+    page,
+  }) => {
+    // As in the test above, the clock is paused so that the idle timer runs only when told to.
+    await page.clock.install({ time: 0 });
+    await page.clock.pauseAt(1000);
+    const settled = <T>(measure: () => Promise<T>) => settledLook(page, measure);
+    await withoutVf(page);
+    await page.setViewportSize(LAPTOP);
+    // `?kiosk` turns kiosk mode on without asking for fullscreen, which Escape would leave.
+    await page.goto('/viewer?kiosk');
+    await expect.poll(() => settled(() => tiles(page).count())).toBe(SLOTS);
+    // The bar shows on pointer movement, whether or not it has already gone idle.
+    await page.mouse.move(400, 300);
+    const tools = pageTools(page);
+    await expect.poll(() => settled(() => renderedOpacity(tools))).toBe(1);
+
+    await tools.getByRole('button', { name: 'View options' }).click();
+    const panel = popover(page, 'View options');
+    await expect.poll(() => settled(() => panel.isVisible())).toBe(true);
+
+    // The pointer rests on the panel, outside the bar, for longer than the bar's idle time.
+    const box = (await panel.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.clock.runFor(3000);
+    await expect.poll(() => settled(() => panel.isVisible())).toBe(true);
+    await expect.poll(() => settled(() => renderedOpacity(tools))).toBe(1);
+
+    // Closed, the bar may hide again. (By the trigger rather than Escape: a key press leaves focus
+    // visible on the trigger, which keeps the bar shown for keyboard users.)
+    await tools.getByRole('button', { name: 'View options' }).click();
+    await expect.poll(() => settled(() => panel.count())).toBe(0);
+    await page.clock.runFor(3000);
+    await expect.poll(() => settled(() => renderedOpacity(tools))).toBe(0);
   });
 
   test('tiles show "Waiting for stream" while the offer returns 503', async ({ page }) => {

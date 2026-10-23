@@ -4,10 +4,6 @@
  * not (a tablet) the row scrolls sideways, so no control may shrink and wrap its label.
  */
 
-.toggle {
-  flex: none;
-}
-
 .field-label,
 .field {
   flex: none;
@@ -19,11 +15,6 @@
   display: flex;
   align-items: center;
   gap: var(--neat-space-2);
-}
-
-/* Set apart from the page field, whose "of N" would otherwise read on into "Channel". */
-.channel-jump {
-  margin-inline-start: var(--neat-space-2);
 }
 
 /* The slider fills its box, so the box sets its width. */
@@ -41,15 +32,36 @@
   background: var(--border);
 }
 
-/* The kit's text field fills its box too: room for a page number, or a channel range hint. */
+/* The kit's text field fills its box too: room for a page number. */
 .number-field {
   flex: none;
   display: flex;
   width: 3rem;
 }
 
-.channel-field {
-  width: 4.5rem;
+/*
+ * Popovers. Their content sits in the kit's panel, which stacks it with a gap and an inset; only
+ * what the panel does not lay out is set here.
+ */
+.hint {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+/* A label beside a switch that qualifies it, as small as a hint with the outline of a chip. */
+.tag {
+  padding: 0 var(--neat-space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
 }
 
 /*

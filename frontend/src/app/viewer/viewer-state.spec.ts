@@ -157,11 +157,11 @@ describe('ViewerState', () => {
     const { state } = create([9, 3, 1, 7, 5, 2, 8]);
     state.perPage.set(3);
 
-    state.jumpToChannel(5);
+    expect(state.jumpToChannel(5)).toBe(true);
     expect(state.page()).toBe(1);
     expect(state.selected()).toBe(5);
 
-    state.jumpToChannel(4);
+    expect(state.jumpToChannel(4)).toBe(false);
     expect(state.page()).toBe(1);
     expect(state.selected()).toBe(5);
   });
