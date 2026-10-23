@@ -1,6 +1,7 @@
 import argparse
 import atexit
 import base64
+import errno
 import hashlib
 import http.client
 import ipaddress
@@ -2256,16 +2257,33 @@ def _extract_archive(archive_path: Path, destination: Path) -> None:
             tar.extractall(path=destination)
 
 
+# What os.link answers on a filesystem that has no hard links (some NFS and FUSE mounts), or
+# one that cannot link across the staging folder and the target.
+_NO_HARD_LINKS = {errno.EPERM, errno.EXDEV, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EMLINK, errno.ENOSYS}
+
+
 def _move_into_place(staged: Path, target: Path, replacing: bool) -> None:
     """Move a staged file to `target`. Unless replacing, never over a file that appeared since the clash check.
 
     A hard link then unlink fails with FileExistsError where a rename would silently replace
-    the file a simultaneous upload of the same name just saved.
+    the file a simultaneous upload of the same name just saved. Where hard links are not
+    supported, the name is reserved with an exclusive create and the rename lands on that.
     """
     if replacing:
         os.replace(staged, target)
-    else:
+        return
+    try:
         os.link(staged, target)
+    except OSError as exc:
+        if exc.errno not in _NO_HARD_LINKS:
+            raise
+        os.close(os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY))  # FileExistsError on a clash
+        try:
+            os.replace(staged, target)
+        except OSError:
+            target.unlink(missing_ok=True)  # the empty reservation
+            raise
+    else:
         staged.unlink()
 
 
@@ -2295,7 +2313,7 @@ def _stream_file_upload(staged: Path, target: Path, replacing: bool):
 
 
 def _stream_archive_upload(archive_path: Path, target: Path, replacing: bool):
-    yield f"Saved archive to {target / archive_path.name}\n"
+    yield f"Saved archive; extracting into {target}\n"
 
     # Extracted beside the target and moved in only once it is complete: a failure leaves no
     # half-extracted folder, and a replaced folder stays as it was.

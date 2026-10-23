@@ -1,3 +1,4 @@
+import errno
 import io
 import json
 import os
@@ -211,6 +212,49 @@ class UploadFileClashTests(UploadFixture):
                 (self.media_dir / "fresh.mp4").unlink()
                 self.assertEqual(self.media_listing(), ["clip.mp4"])
 
+    def test_without_hard_links_the_upload_still_lands(self):
+        for code in (errno.EPERM, errno.EXDEV, errno.ENOTSUP, errno.EMLINK):
+            with self.subTest(errno=errno.errorcode[code]):
+                with mock.patch.object(app_module.os, "link", side_effect=OSError(code, "no hard links")):
+                    response = self.upload("fresh.mp4", b"new")
+                self.assertEqual(
+                    response.get_data(as_text=True).splitlines(),
+                    [f"Uploaded to {self.media_dir / 'fresh.mp4'}", "Upload complete."],
+                )
+                self.assertEqual((self.media_dir / "fresh.mp4").read_bytes(), b"new")
+                self.assertEqual(self.media_listing(), ["clip.mp4", "fresh.mp4"])
+                (self.media_dir / "fresh.mp4").unlink()
+
+    def test_without_hard_links_a_name_taken_meanwhile_is_still_refused(self):
+        real_open = os.open
+
+        def open_after_a_competitor(path, flags, *args):
+            if Path(path) == self.media_dir / "fresh.mp4":
+                Path(path).write_bytes(b"competitor")  # saved between the clash check and the move
+            return real_open(path, flags, *args)
+
+        with mock.patch.object(app_module.os, "link", side_effect=OSError(errno.EPERM, "no hard links")), \
+                mock.patch.object(app_module.os, "open", open_after_a_competitor):
+            response = self.upload("fresh.mp4", b"new")
+        self.assertEqual(
+            response.get_data(as_text=True).splitlines(),
+            ["Failed to save upload: a file with this name was added meanwhile."],
+        )
+        self.assertEqual((self.media_dir / "fresh.mp4").read_bytes(), b"competitor")
+
+    def test_without_hard_links_a_failed_move_leaves_no_empty_reservation(self):
+        with mock.patch.object(app_module.os, "link", side_effect=OSError(errno.EPERM, "no hard links")), \
+                mock.patch.object(app_module.os, "replace", side_effect=OSError("disk went away")):
+            response = self.upload("fresh.mp4", b"new")
+        self.assertEqual(response.get_data(as_text=True).splitlines(), ["Failed to save upload: disk went away"])
+        self.assertEqual(self.media_listing(), ["clip.mp4"])
+
+    def test_other_link_errors_are_reported_not_worked_around(self):
+        with mock.patch.object(app_module.os, "link", side_effect=OSError(errno.ENOSPC, "No space left")):
+            response = self.upload("fresh.mp4", b"new")
+        self.assertIn("Failed to save upload: ", response.get_data(as_text=True))
+        self.assertEqual(self.media_listing(), ["clip.mp4"])
+
     def test_stale_staging_folders_are_swept_and_nothing_else(self):
         (self.media_dir / ".upload-dead").mkdir()
         (self.media_dir / ".upload-dead" / "clip.mp4").write_bytes(b"half")
@@ -407,7 +451,7 @@ class UploadArchiveTests(UploadFixture):
         lines = response.get_data(as_text=True).splitlines()
         self.assertEqual(
             lines,
-            [f"Saved archive to {self.media_dir / 'fresh' / 'fresh.zip'}", "Archive extracted.", "Upload complete."],
+            [f"Saved archive; extracting into {self.media_dir / 'fresh'}", "Archive extracted.", "Upload complete."],
         )
         self.assertEqual((self.media_dir / "fresh" / "b.mp4").read_bytes(), b"b")
         self.assertEqual(self.media_listing(), ["clips", "clips/a.mp4", "clips/gone.mp4", "fresh", "fresh/b.mp4"])
