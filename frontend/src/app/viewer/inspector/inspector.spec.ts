@@ -765,6 +765,20 @@ describe('ViewerInspector', () => {
       expect(backdropField().value).toBe('0');
     });
 
+    it('typing the channel Draw on channel already shows pins it, whether it plays or not', async () => {
+      await open();
+      await click(toolbarButton('Inspector'));
+      await setPlaying(2, true);
+      await click(tab('ROI'));
+      expect(backdropField().value).toBe('2');
+
+      await enter(backdropField(), '2');
+      await setPlaying(1, true);
+      await setPlaying(2, false);
+      expect(previewTile()!.source()).toBe(fake.connections.get(2));
+      expect(backdropField().value).toBe('2');
+    });
+
     it('leaving the ROI tab forgets the pick: ROI, Metadata, ROI derives the backdrop again', async () => {
       await open();
       await click(toolbarButton('Inspector'));

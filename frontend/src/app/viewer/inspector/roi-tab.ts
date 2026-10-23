@@ -8,11 +8,16 @@ import {
   Injector,
   input,
   model,
+  output,
+  viewChild,
 } from '@angular/core';
 import {
   NeatConfirm,
   NeatInlineButton,
-  NeatInput,
+  NeatLine,
+  NeatLineEnd,
+  NeatLineList,
+  NeatNumberField,
   NeatSegmented,
   type NeatSegmentedOption,
 } from '@sima/neat-ui';
@@ -53,25 +58,24 @@ function listChannels(channels: readonly number[]): string {
  */
 @Component({
   selector: 'app-roi-tab',
-  imports: [NeatInlineButton, NeatInput, NeatSegmented, SettingRow],
+  imports: [
+    NeatInlineButton,
+    NeatLine,
+    NeatLineEnd,
+    NeatLineList,
+    NeatNumberField,
+    NeatSegmented,
+    SettingRow,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (scope() === 'global') {
-      <label class="field">
-        Draw on channel
-        <span class="number-field">
-          <input
-            #backdropInput
-            neatInput
-            size="small"
-            inputmode="numeric"
-            aria-label="Draw on channel"
-            [value]="backdrop() ?? ''"
-            (keydown.enter)="applyBackdrop(backdropInput)"
-            (blur)="applyBackdrop(backdropInput)"
-          />
-        </span>
-      </label>
+    @if (scope() === 'global' && backdrop() !== null) {
+      <neat-number-field
+        label="Draw on channel"
+        [value]="backdrop()!"
+        [accept]="isDisplayed"
+        (commit)="backdropChange.emit($event)"
+      />
     }
     <div class="draw">
       <span class="label" aria-hidden="true">Draw</span>
@@ -87,12 +91,13 @@ function listChannels(channels: readonly number[]): string {
     @if (rows().length === 0) {
       <p class="empty">No regions.</p>
     } @else {
-      <ul class="regions">
+      <ul neatLineList class="regions">
         @for (row of rows(); track $index) {
-          <li class="line">
+          <li neatLine>
             <span>{{ row }}</span>
             <button
               neatInlineButton
+              neatLineEnd
               class="delete"
               type="button"
               [attr.aria-label]="'Delete ' + row"
@@ -102,7 +107,7 @@ function listChannels(channels: readonly number[]): string {
             </button>
           </li>
         }
-        <li class="line">
+        <li neatLine>
           <button neatInlineButton class="delete-all" type="button" (click)="removeAll()">
             Delete all…
           </button>
@@ -135,8 +140,16 @@ export class RoiTab {
   readonly scope = input.required<SettingsScope>();
   /** What a click on the preview does; the inspector resets it when the channel or tab changes. */
   readonly drawMode = model.required<NeatRoiDrawMode>();
-  /** On "All channels", the channel whose preview the regions are drawn on. */
-  readonly backdrop = model<number | null>(null);
+  /**
+   * On "All channels", the channel whose preview the regions are drawn on; null where there is none
+   * to draw on, and the field to choose it is then left out.
+   */
+  readonly backdrop = input<number | null>(null);
+  /**
+   * The channel the user chose in "Draw on channel", the shown one included: choosing is not the
+   * same as the default being in effect, and the owner pins what is chosen.
+   */
+  readonly backdropChange = output<number>();
   /** The channels the Viewer displays, the only ones the backdrop can be. */
   readonly channels = input.required<readonly number[]>();
 
@@ -144,6 +157,7 @@ export class RoiTab {
   private readonly confirm = inject(NeatConfirm);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
+  private readonly draw = viewChild.required(NeatSegmented);
 
   protected readonly drawModes = DRAW_MODES;
   protected readonly settings = ROI_SETTINGS;
@@ -175,16 +189,8 @@ export class RoiTab {
       : `Channels ${listChannels(owners)} use their own regions.`;
   });
 
-  /**
-   * Enter in the field or leaving it: a displayed channel becomes the backdrop and anything else
-   * is dropped; either way the field then shows the backdrop, as the page field does.
-   */
-  protected applyBackdrop(input: HTMLInputElement): void {
-    const typed = input.value.trim();
-    const channel = /^\d+$/.test(typed) ? Number(typed) : Number.NaN;
-    if (this.channels().includes(channel)) this.backdrop.set(channel);
-    input.value = String(this.backdrop() ?? '');
-  }
+  /** The field takes exactly the channels the Viewer displays, which the owner then adopts. */
+  protected readonly isDisplayed = (channel: number): boolean => this.channels().includes(channel);
 
   /**
    * Deletes the region at `index`. Its row's Delete had focus; once the list has rendered, focus
@@ -236,10 +242,7 @@ export class RoiTab {
     this.roi.useGlobal(channel);
   }
 
-  /** Focuses the Draw control where keyboard focus enters it: its checked option. */
   private focusDraw(): void {
-    this.host.nativeElement
-      .querySelector<HTMLElement>('neat-segmented [role="radio"][tabindex="0"]')
-      ?.focus();
+    this.draw().focus();
   }
 }

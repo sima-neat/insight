@@ -503,6 +503,23 @@ describe('ViewerPage', () => {
     expect(shown()).toEqual([12, 13, 14, 15]);
   });
 
+  it('go to page takes whole numbers from 1 to the page count only, and restores anything else', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(pageInput(), '3');
+
+    // "2x" used to go to page 2; a page number is whole digits, so the field restores instead.
+    for (const typed of ['2x', '0', '-1', '', '4']) {
+      await enter(pageInput(), typed);
+      expect(pageInput().value).toBe('3');
+      expect(shown()).toEqual([12, 13, 14, 15]);
+    }
+
+    await enter(pageInput(), '2');
+    expect(pageInput().value).toBe('2');
+    expect(shown()).toEqual([6, 7, 8, 9, 10, 11]);
+  });
+
   it('the toolbar shows slider, Fit all, paging, Go to channel, View options and Inspector, and no switches or channel input', async () => {
     await open('/viewer');
 

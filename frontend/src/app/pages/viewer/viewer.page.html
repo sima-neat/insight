@@ -41,22 +41,15 @@
   >
     <neat-icon name="previous" />
   </button>
-  <label class="field">
-    Page
-    <span class="number-field">
-      <input
-        #pageInput
-        neatInput
-        size="small"
-        inputmode="numeric"
-        aria-label="Page"
-        [value]="state.page() + 1"
-        (keydown.enter)="goToPage(pageInput)"
-        (blur)="showCurrentPage(pageInput)"
-      />
-    </span>
-    of {{ state.pageCount() }}
-  </label>
+  <neat-number-field
+    #pageField
+    label="Page"
+    [value]="state.page() + 1"
+    [accept]="isPage"
+    (commit)="state.goToPage($event)"
+  >
+    <span neatNumberFieldSuffix>of {{ state.pageCount() }}</span>
+  </neat-number-field>
   <button
     neatButton
     type="button"

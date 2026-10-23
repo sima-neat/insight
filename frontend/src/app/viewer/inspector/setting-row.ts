@@ -14,6 +14,9 @@ import {
   NeatIcon,
   NeatInlineButton,
   NeatInput,
+  NeatLine,
+  NeatLineEnd,
+  NeatLineList,
   NeatSlider,
   NeatSwitch,
   NeatTooltip,
@@ -77,7 +80,18 @@ export function settingCount(count: number): string {
  */
 @Component({
   selector: 'app-setting-row',
-  imports: [NeatButton, NeatIcon, NeatInlineButton, NeatInput, NeatSlider, NeatSwitch, NeatTooltip],
+  imports: [
+    NeatButton,
+    NeatIcon,
+    NeatInlineButton,
+    NeatInput,
+    NeatLine,
+    NeatLineEnd,
+    NeatLineList,
+    NeatSlider,
+    NeatSwitch,
+    NeatTooltip,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (switchSetting(); as setting) {
@@ -176,13 +190,14 @@ export function settingCount(count: number): string {
           </button>
         </p>
         @if (open()) {
-          <ul class="list" [id]="listId()">
+          <ul neatLineList class="channels" [id]="listId()">
             @for (line of lines(); track line.channel) {
-              <li class="line">
+              <li neatLine>
                 <span>Channel {{ line.channel }}</span>
                 <span class="value">{{ line.value }}</span>
                 <button
                   neatInlineButton
+                  neatLineEnd
                   class="use-global"
                   type="button"
                   [attr.aria-label]="useGlobalLabel(line.channel)"
@@ -192,7 +207,7 @@ export function settingCount(count: number): string {
                 </button>
               </li>
             }
-            <li class="line">
+            <li neatLine>
               <button
                 neatInlineButton
                 type="button"

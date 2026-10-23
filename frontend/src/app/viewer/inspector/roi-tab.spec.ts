@@ -43,7 +43,8 @@ const stored = (regions: readonly NeatRoiPolygon[]) => ({ version: 1, regions })
       [scope]="scope()"
       [channels]="channels()"
       [(drawMode)]="drawMode"
-      [(backdrop)]="backdrop"
+      [backdrop]="backdrop()"
+      (backdropChange)="choose($event)"
     />
   `,
 })
@@ -53,6 +54,13 @@ class Host {
   readonly channels = signal<readonly number[]>([0, 1, 2, 3]);
   readonly drawMode = signal<NeatRoiDrawMode>('off');
   readonly backdrop = signal<number | null>(0);
+  /** Every channel the user chose, repeats included: the owner pins the backdrop on each. */
+  readonly chosen: number[] = [];
+
+  choose(channel: number | null): void {
+    if (channel !== null) this.chosen.push(channel);
+    this.backdrop.set(channel);
+  }
 }
 
 describe('RoiTab', () => {
@@ -368,11 +376,34 @@ describe('RoiTab', () => {
       expect(field.value).toBe('2');
     }
 
+    // Leaving the field commits what was typed in it.
     field.value = '3';
+    field.dispatchEvent(new Event('input'));
     field.dispatchEvent(new FocusEvent('blur'));
     await settle();
     expect(host().backdrop()).toBe(3);
     expect(field.value).toBe('3');
+  });
+
+  it('Draw on channel reports the shown channel when it is typed again, so the owner can pin it', async () => {
+    await render('global');
+    expect(host().backdrop()).toBe(0);
+
+    await enter(backdropField()!, '0');
+    expect(host().chosen).toEqual([0]);
+
+    // A refused entry chooses nothing.
+    await enter(backdropField()!, '9');
+    expect(host().chosen).toEqual([0]);
+  });
+
+  it('Draw on channel is left out where there is no backdrop to show', async () => {
+    await render('global');
+    host().channels.set([]);
+    host().backdrop.set(null);
+    await settle();
+
+    expect(backdropField()).toBeNull();
   });
 
   it('the Show and Filter switches write the scope’s settings', async () => {

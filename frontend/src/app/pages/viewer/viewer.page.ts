@@ -21,6 +21,7 @@ import {
   NeatButton,
   NeatIcon,
   NeatInput,
+  NeatNumberField,
   NeatPage,
   NeatPageToolbar,
   NeatPopover,
@@ -114,6 +115,7 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
     NeatButton,
     NeatIcon,
     NeatInput,
+    NeatNumberField,
     NeatPage,
     NeatPageToolbar,
     NeatPopover,
@@ -320,7 +322,7 @@ export class ViewerPage {
       : 'No channel is receiving video.';
   });
 
-  private readonly pageInput = viewChild<ElementRef<HTMLInputElement>>('pageInput');
+  private readonly pageField = viewChild('pageField', { read: ElementRef<HTMLElement> });
   private readonly inspectorToggle = viewChild<ElementRef<HTMLButtonElement>>('inspectorToggle');
   private readonly tiles = viewChildren(ViewerTile, { read: ElementRef<HTMLElement> });
   private readonly injector = inject(Injector);
@@ -396,15 +398,9 @@ export class ViewerPage {
     return next ?? ordered[0];
   }
 
-  protected goToPage(input: HTMLInputElement): void {
-    this.state.goToPage(Number.parseInt(input.value, 10));
-    this.showCurrentPage(input);
-  }
-
-  /** The field shows the page on screen again, whatever was typed into it. */
-  protected showCurrentPage(input: HTMLInputElement): void {
-    input.value = String(this.state.page() + 1);
-  }
+  /** Whether the Page field takes a number: one of the pages. */
+  protected readonly isPage = (page: number): boolean =>
+    page >= 1 && page <= this.state.pageCount();
 
   /** Enter in the channel field: a displayed channel is gone to and the popover is done. */
   protected jumpToChannel(input: HTMLInputElement): void {
@@ -483,8 +479,9 @@ export class ViewerPage {
       // G as well, for Caps Lock: Shift+g never gets here.
       case 'g':
       case 'G': {
-        const input = this.pageInput()?.nativeElement;
-        if (input === undefined) return;
+        // The kit's number field has no focus method yet, so the key finds its input.
+        const input = this.pageField()?.nativeElement.querySelector('input');
+        if (!input) return;
         // The g must not land in the field it focuses.
         event.preventDefault();
         input.focus();

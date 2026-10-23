@@ -4,17 +4,10 @@
  * not (a tablet) the row scrolls sideways, so no control may shrink and wrap its label.
  */
 
-.field-label,
-.field {
+.field-label {
   flex: none;
   font-size: var(--neat-text-sm);
   white-space: nowrap;
-}
-
-.field {
-  display: flex;
-  align-items: center;
-  gap: var(--neat-space-2);
 }
 
 /* The slider fills its box, so the box sets its width. */
@@ -35,13 +28,6 @@
   width: 1px;
   margin-block: var(--neat-space-3);
   background: var(--border);
-}
-
-/* The kit's text field fills its box too: room for a page number. */
-.number-field {
-  flex: none;
-  display: flex;
-  width: 3rem;
 }
 
 /*

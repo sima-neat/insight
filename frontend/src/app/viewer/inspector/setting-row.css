@@ -93,36 +93,14 @@
 }
 
 /*
- * The channels, as small lines under a thin rule that starts below the note's dot (the dot is
- * 0.5rem wide, the rule 2px, so their centres line up).
+ * The channels' rule (the kit's line list) starts below the note's dot: the dot is 0.5rem wide, the
+ * rule 2px, so their centres line up.
  */
-.list {
-  margin: 0;
+.channels {
   margin-inline-start: calc(0.25rem - 1px);
-  padding: 0;
-  padding-inline-start: var(--neat-space-3);
-  border-inline-start: 2px solid var(--border);
-  list-style: none;
-  font-size: var(--neat-text-xs);
-}
-
-/*
- * Lines at least 1.5rem high keep the actions' targets apart (WCAG 2.5.8's spacing exception); the
- * buttons themselves are only as tall as their text, and the lines add no padding.
- */
-.line {
-  display: flex;
-  align-items: center;
-  gap: var(--neat-space-2);
-  min-block-size: 1.5rem;
 }
 
 .value {
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
-}
-
-/* The channel's action sits at the end of its line. */
-.use-global {
-  margin-inline-start: auto;
 }
