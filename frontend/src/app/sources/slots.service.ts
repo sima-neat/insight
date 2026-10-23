@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { finalize, firstValueFrom, Observable } from 'rxjs';
+import { finalize, firstValueFrom, Observable, timeout, throwError } from 'rxjs';
 import { LatestOnly, visiblePoller } from '../polling';
 import type {
   AssignRequest,
@@ -22,11 +22,32 @@ import type {
   SuccessResponse,
   TakeoverResponse,
 } from './api';
-import { postStreamedText, withRequestErrors, type StreamEvent } from './stream-lines';
+import {
+  ApiRequestError,
+  postStreamedText,
+  withRequestErrors,
+  type StreamEvent,
+} from './stream-lines';
 
 const SLOTS_URL = '/api/mediasrc';
 const RENDITIONS_URL = '/api/mediasrc/renditions';
 const POLL_INTERVAL_MS = 2000;
+/** A fetch of the slots that has not answered by then counts as failed: it must not stall polling. */
+const FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * Whether `next` shows a slot streaming at a frame rate other than the file's, that did not
+ * stream at that rate in `previous`: the server has just encoded, or reused, a rendition for it.
+ */
+function startedCustomFps(previous: readonly Slot[] | null, next: readonly Slot[]): boolean {
+  /** The frame rate a playing slot streams at when it is not the file's own, else null. */
+  const customFps = (slot: Slot | undefined): number | null =>
+    slot?.state === 'playing' && slot.fps != null && slot.fps !== slot.native_fps ? slot.fps : null;
+  return next.some((slot) => {
+    const fps = customFps(slot);
+    return fps !== null && fps !== customFps(previous?.find((old) => old.index === slot.index));
+  });
+}
 
 /**
  * The 48 streaming slots, as one service for the whole app: Streaming shows and acts on them,
@@ -36,10 +57,11 @@ const POLL_INTERVAL_MS = 2000;
  * **Polling.** The slots are polled every 2 s while at least one page holds a `watch()` and the
  * page is visible; a hidden tab asks again the moment it shows. A poll is skipped while a request
  * is in flight, and the newest answer always wins over an older one that arrives later. A poll
- * that fails changes nothing: the next one tries again.
+ * that fails (or does not answer within 10 s) keeps the last answer and sets `unavailable` until
+ * one succeeds: the next one tries again.
  *
  * **Actions.** Each maps to one endpoint and resolves with its response, or rejects with a
- * `StreamRequestError` carrying the server's message (its `body` keeps what the message does not,
+ * `ApiRequestError` carrying the server's message (its `body` keeps what the message does not,
  * such as the pull route's `reason`). Whatever the outcome, the slots are fetched again before the
  * action settles: another tab or a publisher may have changed the slot (a 409 or 410 says so), and
  * what the caller sees next must be what the server holds. A poll sent before an action settled
@@ -52,6 +74,14 @@ export class SlotsService {
   private readonly slotsState = signal<readonly Slot[] | null>(null);
   /** The newest answer; null before the first one. */
   readonly slots = this.slotsState.asReadonly();
+
+  private readonly unavailableState = signal(false);
+  /**
+   * The newest fetch of the slots failed, so `slots` may be out of date (or, before any answer,
+   * absent) until a fetch succeeds again. A page should say so rather than show a stale slot
+   * as if it were current.
+   */
+  readonly unavailable = this.unavailableState.asReadonly();
 
   private readonly renditionsState = signal<RenditionUsage | null>(null);
   /** The stored FPS renditions, as of the last `refreshRenditions()` or action that changes them. */
@@ -91,16 +121,33 @@ export class SlotsService {
   /**
    * Fetches the slots now, even while a poll is in flight: after a change, the answer must not be
    * one asked for before it. Resolves once answered (or superseded by a newer answer); rejects
-   * with the server's message when the request failed.
+   * with the server's message when the request failed, which also sets `unavailable` unless a
+   * newer request has been sent since.
    */
   async refresh(): Promise<void> {
     const request = this.latest.next();
     this.inFlight++;
     try {
       const slots = await firstValueFrom(
-        this.http.get<Slot[]>(SLOTS_URL).pipe(withRequestErrors()),
+        this.http.get<Slot[]>(SLOTS_URL).pipe(
+          timeout({
+            first: FETCH_TIMEOUT_MS,
+            with: () =>
+              throwError(() => new ApiRequestError(0, 'The server did not answer in time.', null)),
+          }),
+          withRequestErrors(),
+        ),
       );
-      if (this.latest.accept(request)) this.slotsState.set(slots);
+      if (this.latest.accept(request)) {
+        const previous = this.slotsState();
+        this.slotsState.set(slots);
+        this.unavailableState.set(false);
+        // The usage changes when a stream starts at a custom rate, also one another tab started.
+        if (startedCustomFps(previous, slots)) void this.refreshRenditions().catch(() => undefined);
+      }
+    } catch (failure) {
+      if (this.latest.isNewest(request)) this.unavailableState.set(true);
+      throw failure;
     } finally {
       this.inFlight--;
     }
@@ -142,7 +189,7 @@ export class SlotsService {
    */
   prepare(index: number): Observable<StreamEvent> {
     return postStreamedText(this.http, `${SLOTS_URL}/prepare`, { index }).pipe(
-      finalize(() => void this.refreshAfterChange({ renditions: true })),
+      finalize(() => void this.settleChange({ renditions: true })),
     );
   }
 
@@ -218,15 +265,17 @@ export class SlotsService {
     try {
       return await firstValueFrom(call.pipe(withRequestErrors()));
     } finally {
-      await this.refreshAfterChange(options);
+      await this.settleChange(options);
     }
   }
 
-  private async refreshAfterChange({
-    renditions = false,
-  }: {
-    renditions?: boolean;
-  }): Promise<void> {
+  /**
+   * Fetches the slots again (and the rendition usage, for a change that can alter it) once
+   * something has changed them, and resolves when that is done, whether or not it worked. Answers
+   * to polls sent before the change are dropped: they may describe the slots from before it. Every
+   * change to the slots, here or in the library, ends in this.
+   */
+  async settleChange({ renditions = false }: { renditions?: boolean } = {}): Promise<void> {
     this.latest.discard();
     const fetches = [this.refresh()];
     if (renditions) fetches.push(this.refreshRenditions());

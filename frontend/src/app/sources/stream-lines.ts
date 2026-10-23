@@ -19,19 +19,19 @@ export type StreamEvent =
   | { kind: 'done' };
 
 /**
- * A non-2xx answer or a failed connection of any API request. `message` is the server's `error` or `message`;
- * `body` is its JSON body untouched (null when there was none), so a caller can read what the
- * message does not carry, such as the `conflict` of an upload's 409. `status` is 0 when the
- * server could not be reached.
+ * A non-2xx answer or a failed connection of any API request. `message` is the server's `error`
+ * or `message`; `body` is its JSON body untouched (null when there was none), so a caller can
+ * read what the message does not carry, such as the `conflict` of an upload's 409. `status` is 0
+ * when the server could not be reached.
  */
-export class StreamRequestError extends Error {
+export class ApiRequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly body: Record<string, unknown> | null,
   ) {
     super(message);
-    this.name = 'StreamRequestError';
+    this.name = 'ApiRequestError';
   }
 }
 
@@ -100,7 +100,7 @@ export function postStreamedText(
 }
 
 /**
- * Makes a failed request throw a `StreamRequestError` for an HTTP answer or a lost connection,
+ * Makes a failed request throw a `ApiRequestError` for an HTTP answer or a lost connection,
  * and anything else (an interceptor's error, say) as it is, since it is not ours to reword. Every
  * call to the API reports its failures this way, JSON or streamed.
  */
@@ -110,15 +110,15 @@ export function withRequestErrors<T>(): MonoTypeOperatorFunction<T> {
   );
 }
 
-function requestError(failure: HttpErrorResponse): StreamRequestError {
+function requestError(failure: HttpErrorResponse): ApiRequestError {
   const body = jsonBody(failure.error);
   const message = body?.['error'] || body?.['message'];
   if (typeof message === 'string' && message) {
-    return new StreamRequestError(failure.status, message, body);
+    return new ApiRequestError(failure.status, message, body);
   }
   const fallback =
     failure.status === 0 ? 'Could not reach the server.' : `Request failed: ${failure.status}`;
-  return new StreamRequestError(failure.status, fallback, body);
+  return new ApiRequestError(failure.status, fallback, body);
 }
 
 /**

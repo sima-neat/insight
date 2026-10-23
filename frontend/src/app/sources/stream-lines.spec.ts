@@ -15,7 +15,7 @@ import { firstValueFrom, throwError } from 'rxjs';
 import {
   postStreamedText,
   splitLines,
-  StreamRequestError,
+  ApiRequestError,
   withRequestErrors,
   type StreamEvent,
 } from './stream-lines';
@@ -179,8 +179,8 @@ describe('postStreamedText', () => {
     };
     post().flush(JSON.stringify(conflict), { status: 409, statusText: 'Conflict' });
 
-    expect(error).toBeInstanceOf(StreamRequestError);
-    const failure = error as StreamRequestError;
+    expect(error).toBeInstanceOf(ApiRequestError);
+    const failure = error as ApiRequestError;
     expect(failure.status).toBe(409);
     expect(failure.message).toBe('A file with this name exists.');
     expect(failure.body).toEqual(conflict);
@@ -274,7 +274,7 @@ describe('withRequestErrors', () => {
       new HttpErrorResponse({ status: 400, statusText: 'Bad Request', error: body }),
     );
 
-    expect(failure).toBeInstanceOf(StreamRequestError);
+    expect(failure).toBeInstanceOf(ApiRequestError);
     expect(failure).toMatchObject({ status: 400, message: 'src2 is pulling.', body });
   });
 
@@ -286,6 +286,13 @@ describe('withRequestErrors', () => {
       status: 0,
       message: 'Could not reach the server.',
     });
+  });
+
+  it('does not take the event of a lost connection for a body', async () => {
+    const failure = await failureOf(
+      new HttpErrorResponse({ status: 0, error: new ProgressEvent('error') }),
+    );
+    expect(failure).toMatchObject({ status: 0, body: null });
   });
 
   it('leaves anything else as it is', async () => {

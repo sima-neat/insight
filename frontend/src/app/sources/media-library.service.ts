@@ -73,7 +73,7 @@ export interface DeleteOutcome {
  * The media library, for every page that shows or changes it: Media, the picker in Streaming and
  * the import dialog. Nothing else fetches `/api/media-files`.
  *
- * Requests reject with a `StreamRequestError` carrying the server's message. The tree is fetched
+ * Requests reject with a `ApiRequestError` carrying the server's message. The tree is fetched
  * again after every change this service makes (a delete, an upload, an import), whatever its
  * outcome: a failed upload may still have saved the file. A page calls `refresh()` itself when it
  * opens, since the library may have changed meanwhile (another tab, or files put on the device).
@@ -141,19 +141,14 @@ export class MediaLibraryService {
         });
       }
     }
-    await Promise.allSettled([
-      this.refresh(),
-      this.slots.refresh(),
-      this.slots.refreshRenditions(),
-    ]);
+    await Promise.allSettled([this.refresh(), this.slots.settleChange({ renditions: true })]);
     return { deleted, failed };
   }
 
   /**
    * Uploads a file or an archive. Without `onConflict`, a name that exists already is refused
    * with a 409 whose body names it (`conflict.existing`) and the name `keep_both` would use
-   * (`conflict.suggested`); the caller asks and sends the file again with the answer. A replaced
-   * file's slots restart on the new content, which the slot poll shows.
+   * (`conflict.suggested`); the caller asks and sends the file again with the answer.
    *
    * Cold, like the other streamed requests below: the request is sent on subscribe and
    * unsubscribing aborts it. Read the lines with `uploadProgress` and `failureText` from
@@ -179,9 +174,13 @@ export class MediaLibraryService {
 
   private streamed(url: string, body: FormData | object): Observable<StreamEvent> {
     return postStreamedText(this.http, url, body).pipe(
-      // However it ends, including by the caller's unsubscribe. A refresh that fails leaves the
-      // old tree, and the next page that opens the library fetches it again.
-      finalize(() => void this.refresh().catch(() => undefined)),
+      // However it ends, including by the caller's unsubscribe. A Replace restarts the slots of
+      // the file it swaps and drops its renditions, so those are fetched again too. A refresh that
+      // fails leaves the old tree, and the next page that opens the library fetches it again.
+      finalize(() => {
+        void this.refresh().catch(() => undefined);
+        void this.slots.settleChange({ renditions: true });
+      }),
     );
   }
 }

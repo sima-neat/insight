@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import type { MediaFile, MediaFolder, MediaInfo, MediaNode } from './api';
 import { MediaLibraryService, toFileNodes } from './media-library.service';
+import { SlotsService } from './slots.service';
 import type { StreamEvent } from './stream-lines';
 
 const TREE_URL = '/api/media-files';
@@ -163,6 +164,13 @@ describe('MediaLibraryService', () => {
     frame_rate: '30/1',
   });
 
+  /** Answers what a change fetches again once it has settled: the tree, the slots and the renditions. */
+  function answerRefreshes(tree: MediaNode[] = []): void {
+    http.expectOne(TREE_URL).flush(tree);
+    http.expectOne(SLOTS_URL).flush([]);
+    http.expectOne(RENDITIONS_URL).flush({ count: 0, bytes: 0 });
+  }
+
   describe('refresh', () => {
     it('loads the tree, and the newest answer wins', async () => {
       expect(library.tree()).toBeNull();
@@ -245,13 +253,6 @@ describe('MediaLibraryService', () => {
     /** The request a sequential step sends once the one before it has settled. */
     const nextRequest = (url: string) => vi.waitFor(() => http.expectOne(url));
 
-    /** Answers the three refreshes a delete sends once it has settled. */
-    function answerRefreshes(): void {
-      http.expectOne(TREE_URL).flush([]);
-      http.expectOne(SLOTS_URL).flush([]);
-      http.expectOne(RENDITIONS_URL).flush({ count: 0, bytes: 0 });
-    }
-
     it('deletes one path after the other, then refreshes the library, the slots and the renditions', async () => {
       const done = library.delete(['a.mp4', 'b.mp4']);
 
@@ -293,6 +294,29 @@ describe('MediaLibraryService', () => {
       });
     });
 
+    it('drops a slot poll that was already on its way when the delete settled', async () => {
+      const slots = TestBed.inject(SlotsService);
+      // A poll sent before the delete finished: it may still list the deleted file's slots.
+      const poll = slots.refresh();
+      const stale = http.expectOne(SLOTS_URL);
+
+      const done = library.delete(['a.mp4']);
+      http.expectOne(DELETE_URL).flush({ message: 'Deleted successfully' });
+      const tree = await nextRequest(TREE_URL);
+      const fresh = await nextRequest(SLOTS_URL);
+      const renditions = await nextRequest(RENDITIONS_URL);
+
+      stale.flush([{ index: 1, file: 'a.mp4', state: 'playing' }]);
+      await poll;
+      expect(slots.slots()).toBeNull();
+
+      tree.flush([]);
+      fresh.flush([]);
+      renditions.flush({ count: 0, bytes: 0 });
+      await done;
+      expect(slots.slots()).toEqual([]);
+    });
+
     it('refreshes even when nothing could be deleted, and does not fail when a refresh does', async () => {
       const done = library.delete(['a.mp4']);
       http
@@ -331,7 +355,7 @@ describe('MediaLibraryService', () => {
       expect(body.get('on_conflict')).toBe('replace');
       request.event({ type: HttpEventType.UploadProgress, loaded: 1, total: 1 });
       request.flush('Upload complete.\n');
-      http.expectOne(TREE_URL).flush([file('a.mp4')]);
+      answerRefreshes([file('a.mp4')]);
       await tick();
 
       expect(events).toEqual([
@@ -347,7 +371,7 @@ describe('MediaLibraryService', () => {
       const request = http.expectOne('/api/upload/media');
       expect((request.request.body as FormData).has('on_conflict')).toBe(false);
       request.flush('');
-      http.expectOne(TREE_URL).flush([]);
+      answerRefreshes();
     });
 
     it('refreshes the library after a refused upload too, and when the subscriber cancels', () => {
@@ -359,14 +383,14 @@ describe('MediaLibraryService', () => {
           { error: 'exists', conflict: { existing: 'a.mp4', suggested: 'a_2.mp4' } },
           { status: 409, statusText: 'Conflict' },
         );
-      http.expectOne(TREE_URL).flush([]);
+      answerRefreshes();
       expect(failure).toMatchObject({ status: 409, body: { conflict: { suggested: 'a_2.mp4' } } });
 
       const subscription = library.upload(new File(['x'], 'b.mp4')).subscribe();
       const cancelled = http.expectOne('/api/upload/media');
       subscription.unsubscribe();
       expect(cancelled.cancelled).toBe(true);
-      http.expectOne(TREE_URL).flush([]);
+      answerRefreshes();
     });
 
     it('importCatalog and importYoutube post their request and refresh the library', () => {
@@ -374,7 +398,7 @@ describe('MediaLibraryService', () => {
       const catalog = http.expectOne('/api/import/media-catalog');
       expect(catalog.request.body).toEqual({ path: 'street/day_720p30.mp4' });
       catalog.flush('Catalog import complete.\n');
-      http.expectOne(TREE_URL).flush([]);
+      answerRefreshes();
 
       const youtube = {
         url: 'https://youtu.be/abc',
@@ -386,7 +410,7 @@ describe('MediaLibraryService', () => {
       const request = http.expectOne('/api/import/youtube');
       expect(request.request.body).toEqual(youtube);
       request.flush('YouTube import complete.\n');
-      http.expectOne(TREE_URL).flush([]);
+      answerRefreshes();
     });
   });
 });

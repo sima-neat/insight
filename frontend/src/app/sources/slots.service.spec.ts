@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import type { Slot } from './api';
 import { SlotsService } from './slots.service';
-import { StreamRequestError, type StreamEvent } from './stream-lines';
+import { ApiRequestError, type StreamEvent } from './stream-lines';
 
 const SLOTS_URL = '/api/mediasrc';
 const RENDITIONS_URL = '/api/mediasrc/renditions';
@@ -144,6 +144,70 @@ describe('SlotsService', () => {
     });
   });
 
+  describe('unavailable', () => {
+    const badGateway = { status: 502, statusText: 'Bad Gateway' };
+
+    it('is set by a failed poll, keeps the last answer, and clears at the next success', async () => {
+      const release = service.watch();
+      http.expectOne(SLOTS_URL).flush([slot(1, { file: 'a.mp4' })]);
+      await tick();
+      expect(service.unavailable()).toBe(false);
+
+      vi.advanceTimersByTime(2000);
+      http.expectOne(SLOTS_URL).flush({ error: 'down' }, badGateway);
+      await tick();
+      expect(service.unavailable()).toBe(true);
+      expect(service.slots()).toEqual([slot(1, { file: 'a.mp4' })]);
+
+      vi.advanceTimersByTime(2000);
+      http.expectOne(SLOTS_URL).flush([slot(1)]);
+      await tick();
+      expect(service.unavailable()).toBe(false);
+      expect(service.slots()).toEqual([slot(1)]);
+      release();
+    });
+
+    it('is set by a failure before any answer, which leaves slots null', async () => {
+      const refreshed = service.refresh();
+      http.expectOne(SLOTS_URL).flush({ error: 'down' }, badGateway);
+      await expect(refreshed).rejects.toMatchObject({ status: 502 });
+
+      expect(service.unavailable()).toBe(true);
+      expect(service.slots()).toBeNull();
+    });
+
+    it('is not set by an older request that fails after a newer one was sent', async () => {
+      const older = service.refresh();
+      const first = http.expectOne(SLOTS_URL);
+      const newer = service.refresh();
+      const second = http.expectOne(SLOTS_URL);
+
+      second.flush([slot(1)]);
+      first.flush({ error: 'timeout' }, { status: 504, statusText: 'Gateway Timeout' });
+      await newer;
+      await expect(older).rejects.toMatchObject({ status: 504 });
+
+      expect(service.unavailable()).toBe(false);
+      expect(service.slots()).toEqual([slot(1)]);
+    });
+
+    it('treats a poll that never answers as failed, so the next tick polls again', async () => {
+      const release = service.watch();
+      const hung = http.expectOne(SLOTS_URL);
+
+      vi.advanceTimersByTime(10_000);
+      await tick();
+      expect(hung.cancelled).toBe(true);
+      expect(service.unavailable()).toBe(true);
+
+      vi.advanceTimersByTime(2000);
+      http.expectOne(SLOTS_URL).flush([slot(1)]);
+      await tick();
+      expect(service.unavailable()).toBe(false);
+      release();
+    });
+  });
+
   describe('refresh', () => {
     it('drops an answer older than the newest one', async () => {
       const older = service.refresh();
@@ -210,7 +274,7 @@ describe('SlotsService', () => {
       await answerRefresh([slot(2, { state: 'external' })]);
       http.expectOne(RENDITIONS_URL).flush({ count: 0, bytes: 0 });
 
-      await expect(done).rejects.toBeInstanceOf(StreamRequestError);
+      await expect(done).rejects.toBeInstanceOf(ApiRequestError);
       await expect(done).rejects.toMatchObject({
         status: 409,
         message: 'src2 is in use by an external publisher.',
@@ -248,6 +312,24 @@ describe('SlotsService', () => {
       await done;
       expect(service.slots()?.[0].state).toBe('stopped');
       release();
+    });
+
+    it("shows the answer to the newest action when two overlap, not the first one's", async () => {
+      const first = service.stop({ index: 1 });
+      const second = service.assign({ index: 1, file: 'b.mp4' });
+      http.expectOne('/api/mediasrc/stop').flush({ success: true });
+      await tick();
+      // The stop settled, so its refresh is sent while the assign is still running.
+      const afterStop = http.expectOne(SLOTS_URL);
+      http.expectOne('/api/mediasrc/assign').flush({ success: true });
+      await tick();
+      const afterAssign = http.expectOne(SLOTS_URL);
+
+      afterAssign.flush([slot(1, { file: 'b.mp4' })]);
+      afterStop.flush([slot(1, { file: '' })]);
+      await Promise.all([first, second]);
+
+      expect(service.slots()?.[0].file).toBe('b.mp4');
     });
 
     it('assignWebcam, start, startBulk, stop and takeOver each map to their endpoint', async () => {
@@ -330,6 +412,35 @@ describe('SlotsService', () => {
         .flush({ error: 'down' }, { status: 502, statusText: 'Bad Gateway' });
 
       await expect(done).resolves.toMatchObject({ stopped_count: 3 });
+    });
+  });
+
+  describe('renditions', () => {
+    const playing = (fps: number | null, native: number | null = 30) =>
+      slot(1, { file: 'a.mp4', state: 'playing', fps, native_fps: native });
+
+    it('are fetched again when a poll shows a slot newly streaming at a custom frame rate', async () => {
+      const release = service.watch();
+      http.expectOne(SLOTS_URL).flush([slot(1, { file: 'a.mp4' })]);
+      await tick();
+      http.expectNone(RENDITIONS_URL);
+
+      vi.advanceTimersByTime(2000);
+      http.expectOne(SLOTS_URL).flush([playing(15)]);
+      await tick();
+      http.expectOne(RENDITIONS_URL).flush({ count: 1, bytes: 10 });
+      await tick();
+      expect(service.renditions()).toEqual({ count: 1, bytes: 10 });
+
+      // Still the same stream, or at the file's own rate: nothing new to count.
+      vi.advanceTimersByTime(2000);
+      http.expectOne(SLOTS_URL).flush([playing(15)]);
+      await tick();
+      vi.advanceTimersByTime(2000);
+      http.expectOne(SLOTS_URL).flush([playing(30)]);
+      await tick();
+      http.expectNone(RENDITIONS_URL);
+      release();
     });
   });
 
