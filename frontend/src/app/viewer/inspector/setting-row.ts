@@ -8,20 +8,12 @@ import {
   input,
   signal,
 } from '@angular/core';
-import {
-  NeatButton,
-  NeatConfirm,
-  NeatIcon,
-  NeatInlineButton,
-  NeatInput,
-  NeatLine,
-  NeatLineEnd,
-  NeatLineList,
-  NeatNote,
-  NeatSlider,
-  NeatSwitch,
-  NeatTooltip,
-} from '@sima/neat-ui';
+import { NeatButton, NeatIcon, NeatInlineButton, NeatNote, NeatTooltip } from '@sima/neat-ui';
+import { NeatConfirm } from '@sima/neat-ui/confirm';
+import { NeatInput } from '@sima/neat-ui/input';
+import { NeatLine, NeatLineEnd, NeatLineList } from '@sima/neat-ui/line-list';
+import { NeatSlider } from '@sima/neat-ui/slider';
+import { NeatSwitch } from '@sima/neat-ui/switch';
 import type { BooleanSettingId, NumericSettingId } from '../settings/schema';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
 

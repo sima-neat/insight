@@ -4,7 +4,8 @@ import { Component, input, output, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { NeatConfirm, NeatIcon } from '@sima/neat-ui';
+import { NeatIcon } from '@sima/neat-ui';
+import { NeatConfirm } from '@sima/neat-ui/confirm';
 import {
   type NeatFrameStats,
   type NeatMetadataSnapshot,

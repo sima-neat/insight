@@ -10,6 +10,11 @@ const angular = require('angular-eslint');
 const KIT_ONLY_MESSAGE =
   'Import UI from @sima/neat-ui. If it lacks what you need, propose a kit change (see AGENTS.md).';
 
+// `ɵ` names are the kit's shared internals, exported from the primary entry point only so its other
+// entry points can reach them. They carry no stability promise and change without notice.
+const KIT_INTERNALS_MESSAGE =
+  "Names starting with ɵ are the kit's internals, not its public API. If you need one, propose a kit change (see AGENTS.md).";
+
 module.exports = defineConfig([
   {
     files: ['**/*.ts'],
@@ -57,6 +62,11 @@ module.exports = defineConfig([
             {
               group: ['@spartan-ng/*', '@lucide/*', 'primeng/*', '@primeuix/*'],
               message: KIT_ONLY_MESSAGE,
+            },
+            {
+              group: ['@sima/neat-ui', '@sima/neat-ui/*'],
+              importNamePattern: '^ɵ',
+              message: KIT_INTERNALS_MESSAGE,
             },
           ],
         },

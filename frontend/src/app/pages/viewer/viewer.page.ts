@@ -20,19 +20,17 @@ import { ActivatedRoute } from '@angular/router';
 import {
   NeatButton,
   NeatIcon,
-  NeatInput,
   NeatNote,
-  NeatNumberField,
   NeatPage,
   NeatPageToolbar,
-  NeatPopover,
-  NeatPopoverContent,
-  NeatPopoverTrigger,
-  NeatSlider,
-  NeatSwitch,
   NeatTooltip,
   ThemeService,
 } from '@sima/neat-ui';
+import { NeatInput } from '@sima/neat-ui/input';
+import { NeatNumberField } from '@sima/neat-ui/number-field';
+import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-ui/popover';
+import { NeatSlider } from '@sima/neat-ui/slider';
+import { NeatSwitch } from '@sima/neat-ui/switch';
 import {
   fitAllTileWidth,
   type NeatTileArea,

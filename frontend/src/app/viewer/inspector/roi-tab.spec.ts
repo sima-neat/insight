@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import { NeatConfirm } from '@sima/neat-ui';
+import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { type NeatRoiDrawMode, type NeatRoiPolygon, NeatRoiSwatch } from '@sima/neat-ui/video';
 import { By } from '@angular/platform-browser';
 import { FakeLocalStorage } from '../settings/fake-storage.testing';

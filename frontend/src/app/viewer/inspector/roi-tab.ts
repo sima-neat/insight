@@ -11,17 +11,11 @@ import {
   output,
   viewChild,
 } from '@angular/core';
-import {
-  NeatConfirm,
-  NeatInlineButton,
-  NeatLine,
-  NeatLineEnd,
-  NeatLineList,
-  NeatNote,
-  NeatNumberField,
-  NeatSegmented,
-  type NeatSegmentedOption,
-} from '@sima/neat-ui';
+import { NeatInlineButton, NeatNote } from '@sima/neat-ui';
+import { NeatConfirm } from '@sima/neat-ui/confirm';
+import { NeatLine, NeatLineEnd, NeatLineList } from '@sima/neat-ui/line-list';
+import { NeatNumberField } from '@sima/neat-ui/number-field';
+import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { type NeatRoiDrawMode, NeatRoiSwatch, neatRoiNames } from '@sima/neat-ui/video';
 import { RoiStore } from '../settings/roi-store';
 import type { SettingsScope } from '../settings/viewer-settings.store';

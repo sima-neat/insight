@@ -21,4 +21,16 @@ describe('App', () => {
     ]);
     expect(root.querySelector('neat-shell app-viewer-page')).not.toBeNull();
   });
+
+  it('renders the toast host beside the shell, so any page can raise toasts', async () => {
+    TestBed.configureTestingModule({ providers: appConfig.providers });
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const root: HTMLElement = fixture.nativeElement;
+
+    const hosts = root.querySelectorAll('neat-toast-host');
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0].parentElement).toBe(root);
+    expect(root.querySelector('neat-shell neat-toast-host')).toBeNull();
+  });
 });

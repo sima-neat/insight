@@ -29,6 +29,13 @@ the kit's underlying libraries (Spartan UI, Lucide, Tailwind) stay swappable onl
 touches them. ESLint rejects imports of those libraries. Escape hatch: if nothing fits, go to the
 next rule.
 
+Import each component from its own entry point: the primary `@sima/neat-ui` holds the theme, icons,
+shell, page, kiosk, buttons, tooltip and note; everything else has a `@sima/neat-ui/<name>` entry
+(the kit's `AGENTS.md` lists them). Why: the main bundle then carries only the entries the shell
+and the app root import. The compiler rejects a name imported from the wrong entry. Never import a
+name starting with `ɵ`: those are shared internals the kit exports only for its own entries, with
+no stability promise, and ESLint rejects them. Escape hatch: if you need one, propose a kit change.
+
 **If nothing fits, stop and propose a kit change instead of working around it.**
 A kit change is a new component or a new input on an existing one. Why: a workaround here is
 invisible to the other apps on the kit and hardens into a divergent fork; a kit change is reviewed
@@ -90,9 +97,11 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 700 kB, as in the kit showcase. The initial bundle measured 694 kB raw with kit 0.5.3 (main
-  618 kB, styles 76 kB), most of it the kit's shell, the confirmation dialog and Angular with its
-  router, so the warning leaves little headroom on purpose; the 1 MB error ceiling stays.
+  at 700 kB, as in the kit showcase. The initial bundle measured 617 kB raw with kit 0.6.0 (main
+  533 kB, styles 84 kB; 694 kB with kit 0.5.3, before the kit split into per-component entries),
+  most of it the kit's shell, the toast host (rendered in the app root, so it is in main on purpose)
+  and Angular with its router; the warning leaves little headroom on purpose, and the 1 MB error
+  ceiling stays.
   (`angular.json` cannot hold comments, so the reason lives here.) The kit's video code is imported from
   `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and stays out of the
   initial bundle; `npm run check:bundle` (after a build, and in CI) fails if it leaks into it.

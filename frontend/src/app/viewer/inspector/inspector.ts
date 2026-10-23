@@ -13,15 +13,9 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
-import {
-  NeatButton,
-  NeatConfirm,
-  NeatIcon,
-  NeatNote,
-  NeatTab,
-  NeatTabs,
-  NeatTooltip,
-} from '@sima/neat-ui';
+import { NeatButton, NeatIcon, NeatNote, NeatTooltip } from '@sima/neat-ui';
+import { NeatConfirm } from '@sima/neat-ui/confirm';
+import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import {
   lateNoticeDetails,
   type NeatFrameStats,
