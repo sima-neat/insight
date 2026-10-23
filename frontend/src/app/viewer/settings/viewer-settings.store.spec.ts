@@ -712,7 +712,10 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
       },
       'settings:channel:2': {
         version: 10,
-        types: { tracking: { visible: false } },
+        types: {
+          tracking: { visible: false },
+          'object-detection': { objects: [{ label: 'car', color: '#dc2626' }] },
+        },
         auxiliary: { 'blazepose-3d': { enabled: false } },
       },
     });
@@ -729,10 +732,16 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
       general: { lineWidth: 5, showRoi: false },
       types: {},
     });
+    // The class colour row stays; only the auxiliary object goes.
     expect(stored('settings:channel:2')).toStrictEqual({
       version: 10,
       general: { lineWidth: 7 },
-      types: { tracking: { visible: false } },
+      types: {
+        tracking: { visible: false },
+        'object-detection': {
+          objects: [{ label: 'car', color: '#dc2626', style: 'solid', width: 1 }],
+        },
+      },
     });
   });
 
@@ -1169,7 +1178,10 @@ describe('ViewerSettingsStore', () => {
   });
 });
 
-/** The value the resolution gives a channel for `id`: timing values from general(), the rest from resolved(). */
+/**
+ * The value the resolution gives a channel for `id`: timing values from general(), the rest from
+ * resolved().
+ */
 function resolvedValueForId(store: ViewerSettingsStore, channel: number, id: SettingId): unknown {
   if (id === 'general.videoSyncBufferMs') return store.general(channel)().videoSyncBufferMs;
   if (id === 'general.metadataRetentionMs') return store.general(channel)().metadataRetentionMs;
