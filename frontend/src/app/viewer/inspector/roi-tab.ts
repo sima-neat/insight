@@ -21,7 +21,7 @@ import {
   NeatSegmented,
   type NeatSegmentedOption,
 } from '@sima/neat-ui';
-import type { NeatRoiDrawMode } from '@sima/neat-ui/video';
+import { type NeatRoiDrawMode, NeatRoiSwatch, neatRoiNames } from '@sima/neat-ui/video';
 import { RoiStore } from '../settings/roi-store';
 import type { SettingsScope } from '../settings/viewer-settings.store';
 import { type SettingControl, SettingRow } from './setting-row';
@@ -36,8 +36,6 @@ const ROI_SETTINGS: readonly SettingControl[] = [
   { control: 'switch', id: 'general.showRoi', label: 'Show regions' },
   { control: 'switch', id: 'general.applyRoiFiltering', label: 'Filter by regions' },
 ];
-
-const TYPE_NAMES = { inclusion: 'Inclusion', exclusion: 'Exclusion' } as const;
 
 /** "2 and 6", "2, 6 and 9". */
 function listChannels(channels: readonly number[]): string {
@@ -64,6 +62,7 @@ function listChannels(channels: readonly number[]): string {
     NeatLineEnd,
     NeatLineList,
     NeatNumberField,
+    NeatRoiSwatch,
     NeatSegmented,
     SettingRow,
   ],
@@ -96,7 +95,13 @@ function listChannels(channels: readonly number[]): string {
            the buttons and for the specs and e2e tests to find the list. -->
       <ul neatLineList class="regions">
         @for (row of rows(); track $index) {
-          <li neatLine>
+          <li
+            neatLine
+            [class.highlighted]="highlighted() === $index"
+            (pointerenter)="highlighted.set($index)"
+            (pointerleave)="highlighted.set(null)"
+          >
+            <neat-roi-swatch [type]="regions()[$index].type" />
             <span>{{ row }}</span>
             <button
               neatInlineButton
@@ -105,6 +110,8 @@ function listChannels(channels: readonly number[]): string {
               type="button"
               [attr.aria-label]="'Delete ' + row"
               (click)="remove($index)"
+              (focus)="highlighted.set($index)"
+              (blur)="highlighted.set(null)"
             >
               Delete
             </button>
@@ -144,6 +151,12 @@ export class RoiTab {
   /** What a click on the preview does; the inspector resets it when the channel or tab changes. */
   readonly drawMode = model.required<NeatRoiDrawMode>();
   /**
+   * The index of the region the pointer or keyboard focus is on, in the list or on the preview:
+   * the same index the preview's editor takes, so either side marks the other. The inspector owns
+   * it, since the editor is not in this tab.
+   */
+  readonly highlighted = model.required<number | null>();
+  /**
    * On "All channels", the channel whose preview the regions are drawn on; null where there is none
    * to draw on, and the field to choose it is then left out.
    */
@@ -165,13 +178,10 @@ export class RoiTab {
   protected readonly drawModes = DRAW_MODES;
   protected readonly settings = ROI_SETTINGS;
 
-  private readonly regions = computed(() => this.roi.editable(this.scope())());
+  protected readonly regions = computed(() => this.roi.editable(this.scope())());
 
-  /** Each region's name, numbered per type in list order: "Inclusion 1", "Exclusion 1", … */
-  protected readonly rows = computed(() => {
-    const counts = { inclusion: 0, exclusion: 0 };
-    return this.regions().map((region) => `${TYPE_NAMES[region.type]} ${++counts[region.type]}`);
-  });
+  /** Each region's name, as the preview's Delete bubble names it: "Inclusion 1", "Exclusion 1", … */
+  protected readonly rows = computed(() => neatRoiNames(this.regions()));
 
   /** The selected channel, while it stores a list of its own (an empty one included). */
   protected readonly ownChannel = computed(() => {

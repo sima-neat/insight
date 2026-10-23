@@ -18,6 +18,7 @@ import { ViewerPage } from '../../pages/viewer/viewer.page';
 import { FakeConnections } from '../fake-connections.testing';
 import { FakeLocalStorage } from '../settings/fake-storage.testing';
 import { LayoutPrefs } from '../settings/layout-prefs';
+import { RoiStore } from '../settings/roi-store';
 import { VfConnections } from '../vf/vf-connections';
 import { ViewerTile } from '../viewer-tile';
 import { ViewerInspector } from './inspector';
@@ -987,6 +988,100 @@ describe('ViewerInspector', () => {
       });
       expect(gridTile(5).settings().roi).toStrictEqual([{ type: 'exclusion', points: TRIANGLE }]);
       expect(page().selectedChannel()).toBeNull();
+    });
+
+    describe('the highlight shared by the list and the preview', () => {
+      const INCLUSION = { type: 'inclusion' as const, points: TRIANGLE };
+      const EXCLUSION = { type: 'exclusion' as const, points: TRIANGLE };
+      const rows = () => [...inspector().querySelectorAll('.regions li')];
+      const marked = () => rows().map((line) => line.classList.contains('highlighted'));
+      const polygons = () => [...editorElement().querySelectorAll('polygon')];
+      const kitEditor = (): NeatRoiEditor =>
+        fixture.debugElement.query(By.directive(NeatRoiEditor)).componentInstance;
+
+      async function hover(element: Element, type: 'pointerenter' | 'pointerleave'): Promise<void> {
+        element.dispatchEvent(new PointerEvent(type, { bubbles: false }));
+        await settle();
+      }
+
+      beforeEach(async () => {
+        storage.seed({ 'roi:global': { version: 1, regions: [INCLUSION, EXCLUSION] } });
+        await open();
+        await click(toolbarButton('Inspector'));
+        await click(tab('ROI'));
+        preview().videoBox.set(BOX);
+        await settle();
+      });
+
+      it('hovering a row highlights its region in the editor, and the editor’s highlight marks the row', async () => {
+        await hover(rows()[1], 'pointerenter');
+        expect(kitEditor().highlighted()).toBe(1);
+        expect(marked()).toEqual([false, true, false]);
+
+        await hover(rows()[1], 'pointerleave');
+        expect(kitEditor().highlighted()).toBeNull();
+        expect(marked()).toEqual([false, false, false]);
+
+        // The other way: the pointer on a region of the image.
+        await hover(polygons()[0], 'pointerenter');
+        expect(kitEditor().highlighted()).toBe(0);
+        expect(marked()).toEqual([true, false, false]);
+
+        await hover(polygons()[0], 'pointerleave');
+        expect(marked()).toEqual([false, false, false]);
+      });
+
+      it('a Delete from the editor’s right-click bubble writes the store like the list’s Delete', async () => {
+        polygons()[0].dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, cancelable: true }),
+        );
+        await settle();
+        const bubbleDelete = editorElement().querySelector<HTMLButtonElement>(
+          'button[aria-label="Delete Inclusion 1"]',
+        )!;
+        await click(bubbleDelete);
+
+        expect(storage.readStored('roi:global')).toStrictEqual({
+          version: 1,
+          regions: [EXCLUSION],
+        });
+        expect(lines()).toEqual(['Exclusion 1 Delete', 'Delete all…']);
+      });
+
+      it('the highlight does not outlive its region: a list that shrinks past it leaves none marked', async () => {
+        await hover(rows()[1], 'pointerenter');
+        expect(marked()).toEqual([false, true, false]);
+
+        fixture.debugElement
+          .query(By.directive(ViewerInspector))
+          .injector.get(RoiStore)
+          .set('global', [INCLUSION]);
+        await settle();
+
+        expect(kitEditor().highlighted()).toBeNull();
+        expect(marked()).toEqual([false, false]);
+      });
+
+      it('deleting a row by its button moves focus, and the highlight with it', async () => {
+        await hover(rows()[1], 'pointerenter');
+
+        await click(rows()[1].querySelector('button')!);
+
+        // Focus went to the Delete of the row before, which is the region now highlighted.
+        expect(kitEditor().highlighted()).toBe(0);
+        expect(marked()).toEqual([true, false]);
+      });
+
+      it('the highlight is forgotten with the channel and with the tab', async () => {
+        await hover(rows()[0], 'pointerenter');
+        await click(tileElement(3));
+        expect(kitEditor().highlighted()).toBeNull();
+
+        await hover(rows()[0], 'pointerenter');
+        await click(tab('General'));
+        await click(tab('ROI'));
+        expect(kitEditor().highlighted()).toBeNull();
+      });
     });
 
     it('Escape while drawing cancels the open polygon and neither closes the inspector nor deselects the tile', async () => {

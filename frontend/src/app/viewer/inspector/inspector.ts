@@ -277,6 +277,24 @@ export class ViewerInspector {
   });
 
   /**
+   * The region the pointer is on, in the ROI tab's list or on the preview, as an index into
+   * `editable`; the list and the editor both read and write it. It starts over with the channel or
+   * the tab, and with a list that has shrunk past it, so an index never marks a region it was not
+   * set on.
+   */
+  protected readonly highlightedRegion = linkedSignal<
+    { readonly context: unknown; readonly count: number },
+    number | null
+  >({
+    source: () => ({ context: this.roiContext(), count: this.editable().length }),
+    computation: ({ context, count }, previous) => {
+      const kept =
+        previous !== undefined && previous.source.context === context ? previous.value : null;
+      return kept !== null && kept < count ? kept : null;
+    },
+  });
+
+  /**
    * The channel the user chose in "Draw on channel". Like the draw mode it is forgotten with the
    * channel or the tab, so leaving the ROI tab and coming back starts from the default backdrop.
    */

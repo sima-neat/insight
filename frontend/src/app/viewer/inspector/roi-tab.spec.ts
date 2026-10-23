@@ -1,7 +1,8 @@
 import { Component, inject, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatConfirm } from '@sima/neat-ui';
-import type { NeatRoiDrawMode, NeatRoiPolygon } from '@sima/neat-ui/video';
+import { type NeatRoiDrawMode, type NeatRoiPolygon, NeatRoiSwatch } from '@sima/neat-ui/video';
+import { By } from '@angular/platform-browser';
 import { FakeLocalStorage } from '../settings/fake-storage.testing';
 import { RoiStore } from '../settings/roi-store';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
@@ -43,6 +44,7 @@ const stored = (regions: readonly NeatRoiPolygon[]) => ({ version: 1, regions })
       [scope]="scope()"
       [channels]="channels()"
       [(drawMode)]="drawMode"
+      [(highlighted)]="highlighted"
       [backdrop]="backdrop()"
       (backdropChange)="choose($event)"
     />
@@ -53,6 +55,7 @@ class Host {
   readonly scope = signal<SettingsScope>('global');
   readonly channels = signal<readonly number[]>([0, 1, 2, 3]);
   readonly drawMode = signal<NeatRoiDrawMode>('off');
+  readonly highlighted = signal<number | null>(null);
   readonly backdrop = signal<number | null>(0);
   /** Every channel the user chose, repeats included: the owner pins the backdrop on each. */
   readonly chosen: number[] = [];
@@ -175,6 +178,70 @@ describe('RoiTab', () => {
     // The Show and Filter switches, which follow the list.
     expect(switchNamed('Show regions')).not.toBeNull();
     expect(switchNamed('Filter by regions')).not.toBeNull();
+  });
+
+  describe('the region rows', () => {
+    const rowAt = (index: number): HTMLElement =>
+      root().querySelectorAll<HTMLElement>('.regions li')[index];
+    const hover = async (element: Element, type: 'pointerenter' | 'pointerleave') => {
+      element.dispatchEvent(new PointerEvent(type, { bubbles: false }));
+      await settle();
+    };
+
+    it('each region row shows a swatch of its type before the name', async () => {
+      await render('global', { 'roi:global': stored([SQUARE, TRIANGLE, WEDGE]) });
+
+      const swatches = fixture.debugElement
+        .queryAll(By.directive(NeatRoiSwatch))
+        .map((swatch) => swatch.componentInstance.type());
+      expect(swatches).toEqual(['inclusion', 'exclusion', 'inclusion']);
+      for (const index of [0, 1, 2]) {
+        const [swatch, name] = rowAt(index).children;
+        expect(swatch.tagName).toBe('NEAT-ROI-SWATCH');
+        expect(name.tagName).toBe('SPAN');
+      }
+      // Not on the Delete all line, which is no region.
+      expect(rowAt(3).querySelector('neat-roi-swatch')).toBeNull();
+    });
+
+    it('hovering a row sets the highlighted region to its index and leaving clears it', async () => {
+      await render('global', { 'roi:global': stored([SQUARE, TRIANGLE]) });
+
+      await hover(rowAt(1), 'pointerenter');
+      expect(host().highlighted()).toBe(1);
+
+      await hover(rowAt(1), 'pointerleave');
+      expect(host().highlighted()).toBeNull();
+    });
+
+    it('focusing a row’s Delete highlights its region too, and leaving it clears the highlight', async () => {
+      await render('global', { 'roi:global': stored([SQUARE, TRIANGLE]) });
+
+      button('Delete Exclusion 1')!.focus();
+      await settle();
+      expect(host().highlighted()).toBe(1);
+
+      button('Delete Exclusion 1')!.blur();
+      await settle();
+      expect(host().highlighted()).toBeNull();
+    });
+
+    it('the highlighted region’s row is marked, and only that one', async () => {
+      await render('global', { 'roi:global': stored([SQUARE, TRIANGLE]) });
+      const marked = () =>
+        [...root().querySelectorAll('.regions li')].map((line) =>
+          line.classList.contains('highlighted'),
+        );
+      expect(marked()).toEqual([false, false, false]);
+
+      host().highlighted.set(1);
+      await settle();
+      expect(marked()).toEqual([false, true, false]);
+
+      host().highlighted.set(null);
+      await settle();
+      expect(marked()).toEqual([false, false, false]);
+    });
   });
 
   it('the parts come in the spec’s order: field, Draw, hint, list, notes, switches', async () => {

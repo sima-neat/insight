@@ -322,7 +322,7 @@ export class ViewerPage {
       : 'No channel is receiving video.';
   });
 
-  private readonly pageField = viewChild('pageField', { read: ElementRef<HTMLElement> });
+  private readonly pageField = viewChild('pageField', { read: NeatNumberField });
   private readonly inspectorToggle = viewChild<ElementRef<HTMLButtonElement>>('inspectorToggle');
   private readonly tiles = viewChildren(ViewerTile, { read: ElementRef<HTMLElement> });
   private readonly injector = inject(Injector);
@@ -479,13 +479,11 @@ export class ViewerPage {
       // G as well, for Caps Lock: Shift+g never gets here.
       case 'g':
       case 'G': {
-        // The kit's number field has no focus method yet, so the key finds its input.
-        const input = this.pageField()?.nativeElement.querySelector('input');
-        if (!input) return;
+        const field = this.pageField();
+        if (!field) return;
         // The g must not land in the field it focuses.
         event.preventDefault();
-        input.focus();
-        input.select();
+        field.focus();
         break;
       }
       case '/':

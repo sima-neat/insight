@@ -4,6 +4,7 @@ import { Component } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
+import { NeatNumberField } from '@sima/neat-ui';
 import { type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { FakeConnections } from '../../viewer/fake-connections.testing';
 import { FakeLocalStorage } from '../../viewer/settings/fake-storage.testing';
@@ -481,6 +482,20 @@ describe('ViewerPage', () => {
     // Focus is in the page input now, so a further g is typing, not a shortcut.
     await press('ArrowRight', {}, pageInput());
     expect(shown()).toEqual(range(6));
+  });
+
+  it('the g shortcut focuses and selects the Page field through the kit', async () => {
+    const focus = vi.spyOn(NeatNumberField.prototype, 'focus');
+    await open('/viewer');
+
+    await press('g');
+
+    expect(focus).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(pageInput());
+    expect([pageInput().selectionStart, pageInput().selectionEnd]).toEqual([
+      0,
+      pageInput().value.length,
+    ]);
   });
 
   it('G (Caps Lock) focuses the page input like g', async () => {

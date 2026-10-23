@@ -31,6 +31,7 @@
           neatTileOverlay
           [regions]="editable()"
           [mode]="drawMode()"
+          [(highlighted)]="highlightedRegion"
           (regionsChange)="addRegion($event)"
         />
       }
@@ -77,6 +78,7 @@
           [scope]="scope()"
           [channels]="channels()"
           [(drawMode)]="drawMode"
+          [(highlighted)]="highlightedRegion"
           [backdrop]="backdrop()"
           (backdropChange)="pick.set($event)"
         />

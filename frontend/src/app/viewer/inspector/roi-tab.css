@@ -20,3 +20,8 @@
   color: var(--muted-foreground);
   font-size: var(--neat-text-xs);
 }
+
+/* The line of the region the pointer is on, on the list or on the preview. */
+.highlighted {
+  background-color: var(--accent);
+}
