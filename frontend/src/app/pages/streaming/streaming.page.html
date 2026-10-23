@@ -111,8 +111,8 @@
       }
     </p>
     <!--
-      Where the list is narrow (a tablet beside the side panel) the slot and its state stay
-      readable: those columns keep their width, and the others give way.
+      Where the list is narrow (a tablet beside the side panel) the slot, the start of its source
+      and its state stay readable: those columns keep a width, and rate and codec give way.
     -->
     <neat-select-list
       label="Streaming slots"
@@ -123,27 +123,33 @@
       (selectedChange)="select($event)"
       (activated)="openAside()"
     >
-      <ng-template neatColumn="slot" header="Slot" width="3.5rem" let-row>
+      <ng-template neatColumn="slot" header="Slot" width="3rem" let-row>
         <span class="text">{{ row.name }}</span>
       </ng-template>
-      <ng-template neatColumn="kind" header="Kind" width="minmax(0, 2.5rem)" let-row>
-        <span class="kind">{{ row.kind }}</span>
+      <ng-template neatColumn="kind" header="Kind" width="2rem" let-row>
+        <span class="text"
+          ><span class="kind">{{ row.kind }}</span></span
+        >
       </ng-template>
-      <ng-template neatColumn="source" header="Source" width="minmax(0, 3fr)" let-row>
+      <ng-template neatColumn="source" header="Source" width="minmax(2.75rem, 3fr)" let-row>
         <span class="text">{{ row.source }}</span>
       </ng-template>
-      <ng-template neatColumn="state" header="State" width="minmax(5.5rem, 1fr)" let-row>
-        <app-slot-state-chip [state]="row.state" />
+      <ng-template neatColumn="state" header="State" width="minmax(5.25rem, 1fr)" let-row>
+        <app-status-chip [tone]="row.state.tone">{{ row.state.label }}</app-status-chip>
       </ng-template>
       <ng-template neatColumn="rate" header="Rate" width="minmax(0, 1.4fr)" let-row>
-        <span class="text">{{ row.rate }}</span>
+        <span class="text gives-way">{{ row.rate }}</span>
       </ng-template>
       <ng-template neatColumn="codec" header="Codec" width="minmax(0, 0.9fr)" let-row>
-        <span class="text">
-          {{ row.codec }}
+        <span class="text gives-way">
           @if (row.codecWarning; as warning) {
-            <span class="codec-warning" aria-hidden="true" [neatTooltip]="warning">⚠</span>
-            <span class="spoken">{{ warning }}</span>
+            <!-- As #170: the codec in warning colours, the glyph naming the problem. -->
+            <app-status-chip tone="warning">
+              {{ row.codec }}
+              <span role="img" [attr.aria-label]="warning" [neatTooltip]="warning">⚠</span>
+            </app-status-chip>
+          } @else {
+            {{ row.codec }}
           }
         </span>
       </ng-template>
@@ -155,7 +161,7 @@
       @if (selectedRow(); as row) {
         <header class="slot-header">
           <h2>{{ row.name }}</h2>
-          <app-slot-state-chip [state]="row.state" />
+          <app-status-chip [tone]="row.state.tone">{{ row.state.label }}</app-status-chip>
         </header>
       } @else {
         <p neatNote>No slot selected.</p>
@@ -185,6 +191,8 @@
   </neat-dialog-body>
   <neat-dialog-actions>
     <button neatButton type="button" variant="outlined" (click)="dialog.close()">Cancel</button>
-    <button neatButton type="button" (click)="dialog.close(bulkCount())">Start</button>
+    <button neatButton type="button" [disabled]="bulkRunning()" (click)="startBulk(dialog)">
+      Start
+    </button>
   </neat-dialog-actions>
 </ng-template>

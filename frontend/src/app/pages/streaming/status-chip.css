@@ -1,4 +1,4 @@
-/* A small label on a status fill. It truncates rather than widen the column it sits in. */
+/* A short label on a status fill. It truncates rather than widen the column it sits in. */
 :host {
   display: inline-block;
   max-width: 100%;

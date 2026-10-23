@@ -141,8 +141,12 @@ class FakeCameras {
   });
 }
 
+/** A library with streamable files, unless a test sets another answer (or none). */
 class FakeLibrary {
-  readonly tree = signal<readonly MediaNode[] | null>(null);
+  readonly tree = signal<readonly MediaNode[] | null>([
+    { name: '/people', path: 'people', type: 'folder', streamable_count: 1, children: [] },
+    { name: 'cars.mp4', path: 'cars.mp4', type: 'file', streamable: true },
+  ]);
   readonly refresh = vi.fn(async () => undefined);
 }
 
@@ -223,11 +227,11 @@ describe('StreamingPage', () => {
     )!;
   const listbox = (): HTMLElement => root().querySelector('[role="listbox"]')!;
   const rows = (): HTMLElement[] => [...listbox().querySelectorAll<HTMLElement>('[role="option"]')];
-  /** A row's cells as their visible text, in column order: no glyph, no text only read aloud. */
+  /** A row's cells as their text, in column order, without the warning glyph. */
   const cells = (row: HTMLElement): string[] =>
     [...row.querySelectorAll(':scope > div')].map((cell) => {
       const shown = cell.cloneNode(true) as HTMLElement;
-      shown.querySelectorAll('[aria-hidden="true"], .spoken').forEach((part) => part.remove());
+      shown.querySelectorAll('[role="img"]').forEach((glyph) => glyph.remove());
       return shown.textContent!.trim();
     });
   const rowOf = (name: string): HTMLElement => rows().find((row) => cells(row)[0] === name)!;
@@ -285,15 +289,22 @@ describe('StreamingPage', () => {
         '30 fps',
         'AV1',
       ],
-      ['src5', 'URL', '⇠ RTSP · 10.0.0.7:554 · 1920×1080', 'Pulled', '25 fps', 'H.264'],
-      ['src6', 'URL', 'retrying… (connection refused)', 'Unreachable', 'retrying…', ''],
+      ['src5', 'URL', '⇠ RTSP · 10.0.0.7:554 · 1920×1080 · 25 fps', 'Pulled', '25 fps', 'H.264'],
+      [
+        'src6',
+        'URL',
+        '⇠ RTSP · 10.0.0.8:554 · retrying… (connection refused)',
+        'Unreachable',
+        'retrying…',
+        '-',
+      ],
       ['src7', 'VID', 'idle.mp4', 'Idle', '30 fps', 'H.264'],
-      ['src8', '', 'Not assigned', 'Idle', '', ''],
+      ['src8', '', 'Not assigned', 'Idle', '', '-'],
     ]);
-    expect(cells(rowOf('src48'))).toEqual(['src48', '', 'Not assigned', 'Idle', '', '']);
+    expect(cells(rowOf('src48'))).toEqual(['src48', '', 'Not assigned', 'Idle', '', '-']);
     // The chips carry the state's tone for the theme's status colours.
     const tone = (name: string) =>
-      rowOf(name).querySelector('app-slot-state-chip')!.getAttribute('data-tone');
+      rowOf(name).querySelector('app-status-chip')!.getAttribute('data-tone');
     expect(['src1', 'src2', 'src4', 'src5', 'src6'].map(tone)).toEqual([
       'success',
       'neutral',
@@ -301,8 +312,11 @@ describe('StreamingPage', () => {
       'success',
       'warning',
     ]);
-    // The undecodable codec is flagged, and the warning is read with the row.
-    expect(rowOf('src4').textContent).toContain(
+    // The undecodable codec is in warning colours, and its glyph is named by the warning, which
+    // the row is read with.
+    const codec = rowOf('src4').querySelector(':scope > div:last-child app-status-chip')!;
+    expect(codec.getAttribute('data-tone')).toBe('warning');
+    expect(codec.querySelector('[role="img"]')!.getAttribute('aria-label')).toBe(
       'AV1 cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.',
     );
   });
@@ -356,18 +370,15 @@ describe('StreamingPage', () => {
     await open();
     slots.startBulk.mockResolvedValue({
       success: true,
-      requested: 3,
-      targeted: 3,
-      started: [1, 2],
-      already_running: [],
-      errors: [
-        { index: 3, error: 'Webcam is not publishing yet' },
-        { index: 7, error: 'boom' },
-      ],
+      requested: 2,
+      targeted: 2,
+      started: [2],
+      already_running: [1],
+      errors: [{ index: 2, error: 'boom' }],
       skipped_external: [],
-      skipped_pulled: [],
-      message: 'Started 2 source(s), 0 already running, 2 failed.',
-      started_or_running: 2,
+      skipped_pulled: [5],
+      message: 'Started 0 source(s), 1 already running, 1 failed. Skipped pulled: src5.',
+      started_or_running: 1,
     });
 
     await click(toolbarButton('Start…'));
@@ -380,17 +391,24 @@ describe('StreamingPage', () => {
     const slider = dialog.querySelector<HTMLElement>('[role="slider"]')!;
     expect(slider.getAttribute('aria-valuemin')).toBe('1');
     expect(slider.getAttribute('aria-valuemax')).toBe('48');
-    // It starts at the slots that are assigned and not held by a publisher.
-    expect(slider.getAttribute('aria-valuenow')).toBe('4');
-    await press(slider, 'ArrowLeft');
-    expect(dialog.querySelector('output')?.textContent?.trim()).toBe('3');
+    // Ruling Q10: it opens at 1, as #170's did.
+    expect(slider.getAttribute('aria-valuenow')).toBe('1');
+    await press(slider, 'ArrowRight');
+    expect(dialog.querySelector('output')?.textContent?.trim()).toBe('2');
 
     await answer(dialog, 'Start');
 
     expect(bulkDialog()).toBeNull();
-    expect(slots.startBulk).toHaveBeenCalledExactlyOnceWith(3);
-    expect(toasts.status).toHaveBeenCalledWith('Started 2 source(s), 0 already running, 2 failed.');
-    expect(toasts.error).toHaveBeenCalledWith('Failed: src3, src7');
+    expect(slots.startBulk).toHaveBeenCalledExactlyOnceWith(2);
+    expect(toasts.status).toHaveBeenCalledWith(
+      'Started 0 source(s), 1 already running, 1 failed. Skipped pulled: src5.',
+    );
+    expect(toasts.error).toHaveBeenCalledWith('Failed: src2');
+
+    // The next time it opens at the count chosen last.
+    await click(toolbarButton('Start…'));
+    expect(bulkDialog()!.querySelector('[role="slider"]')!.getAttribute('aria-valuenow')).toBe('2');
+    await answer(bulkDialog()!, 'Cancel');
   });
 
   it('Start… cancelled starts nothing', async () => {
@@ -402,7 +420,7 @@ describe('StreamingPage', () => {
     expect(slots.startBulk).not.toHaveBeenCalled();
   });
 
-  it('a refused bulk action shows the server message', async () => {
+  it('a refused bulk start shows the server message and keeps the dialog open to try again', async () => {
     await open();
     slots.startBulk.mockRejectedValue(
       new ApiRequestError(400, 'No assigned sources available to start', null),
@@ -412,6 +430,38 @@ describe('StreamingPage', () => {
 
     expect(toasts.error).toHaveBeenCalledWith('No assigned sources available to start');
     expect(toasts.status).not.toHaveBeenCalled();
+    expect(bulkDialog()).not.toBeNull();
+    await answer(bulkDialog()!, 'Cancel');
+  });
+
+  it('a slot that began changing while the dialog or the menu was open is reported, and nothing is sent (Q9)', async () => {
+    await open();
+    await click(toolbarButton('Start…'));
+    cameras.anyChanging.set(true);
+    await settle();
+    await answer(bulkDialog()!, 'Start');
+
+    expect(toasts.error).toHaveBeenCalledWith(
+      'Waiting for a source change to finish before starting sources.',
+    );
+    expect(slots.startBulk).not.toHaveBeenCalled();
+    // As in #170 the dialog stays, so Start can be pressed again once the change is done.
+    expect(bulkDialog()).not.toBeNull();
+    await answer(bulkDialog()!, 'Cancel');
+
+    cameras.anyChanging.set(false);
+    await settle();
+    await openMore();
+    await click(menuItem('Reset'));
+    cameras.anyChanging.set(true);
+    await settle();
+    await answer(confirmDialog()!, 'Reset');
+
+    expect(toasts.error).toHaveBeenLastCalledWith(
+      'Waiting for a source change to finish before resetting sources.',
+    );
+    expect(cameras.releaseAll).not.toHaveBeenCalled();
+    expect(slots.reset).not.toHaveBeenCalled();
   });
 
   it("Stop all and Auto assign close this browser's webcams first and report the server message", async () => {
@@ -467,9 +517,10 @@ describe('StreamingPage', () => {
     expect(bulk.map((name) => toolbarButton(name).disabled)).toEqual([false, false, false]);
   });
 
-  it('Start… needs a streamable file once the library is known', async () => {
+  it('Start… waits for the library to answer with a streamable file', async () => {
+    library.tree.set(null);
     await open();
-    expect(toolbarButton('Start…').disabled).toBe(false);
+    expect(toolbarButton('Start…').disabled).toBe(true);
 
     library.tree.set([
       { name: 'notes.txt', path: 'notes.txt', type: 'file', streamable: false },
@@ -507,10 +558,10 @@ describe('StreamingPage', () => {
     expect(cameras.releaseAll).not.toHaveBeenCalled();
     expect(slots.reset).not.toHaveBeenCalled();
 
-    expect(menuItem('Clear renditions').textContent?.trim()).toBe('Clear renditions (3 · 1.2 GB)');
+    expect(menuItem('Clear renditions').textContent?.trim()).toBe('Clear renditions (3 · 1.20 GB)');
     await click(menuItem('Clear renditions'));
     expect(confirmText()).toBe(
-      'Clear cached renditions Delete 3 cached rendition(s) (1.2 GB)? They are re-created on the next start. Renditions in use by a playing source are kept. Cancel Clear',
+      'Clear cached renditions Delete 3 cached rendition(s) (1.20 GB)? They are re-created on the next start. Renditions in use by a playing source are kept. Cancel Clear',
     );
     await answer(confirmDialog()!, 'Cancel');
     expect(slots.clearRenditions).not.toHaveBeenCalled();
@@ -520,8 +571,9 @@ describe('StreamingPage', () => {
     expect(cameras.releaseAll).toHaveBeenCalledExactlyOnceWith({ clearAssignments: true });
     expect(slots.reset).toHaveBeenCalledExactlyOnceWith(RELEASED);
     expect(toasts.status).toHaveBeenLastCalledWith('Reset all source assignments.');
-    // The action is done; the menu with it.
+    // The action is done; the menu with it. Every slot is unassigned, and the first shows (#170).
     expect(morePanel()).toBeNull();
+    expect(asideHeading()).toBe('src1');
 
     await openMore();
     await click(menuItem('Clear renditions'));
@@ -532,7 +584,7 @@ describe('StreamingPage', () => {
     );
   });
 
-  it('Clear renditions asks with the usage fetched as it opens, and needs one to clear', async () => {
+  it('Clear renditions asks with the usage fetched as it opens and as it is clicked', async () => {
     slots.renditions.set({ count: 0, bytes: 0 });
     await open();
     expect(slots.refreshRenditions).toHaveBeenCalledTimes(1);
@@ -555,6 +607,19 @@ describe('StreamingPage', () => {
       expect.objectContaining({
         message:
           'Delete 2 cached rendition(s) (2.0 KB)? They are re-created on the next start. Renditions in use by a playing source are kept.',
+      }),
+    );
+    await answer(confirmDialog()!, 'Cancel');
+
+    // Another tab cleared them meanwhile: it still asks, with what is there now, as #170 did.
+    slots.refreshRenditions.mockImplementation(async () => {
+      slots.renditions.set({ count: 0, bytes: 0 });
+    });
+    await click(menuItem('Clear renditions'));
+    expect(ask).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        message:
+          'Delete 0 cached rendition(s) (0 B)? They are re-created on the next start. Renditions in use by a playing source are kept.',
       }),
     );
     await answer(confirmDialog()!, 'Cancel');
@@ -614,13 +679,15 @@ describe('StreamingPage', () => {
   });
 
   it('a failed library or usage fetch on opening is not an error to show', async () => {
+    library.tree.set(null);
     library.refresh.mockRejectedValue(new ApiRequestError(500, 'boom', null));
     slots.refreshRenditions.mockRejectedValue(new ApiRequestError(500, 'boom', null));
     await open();
     await settleOverlay();
 
     expect(toasts.error).not.toHaveBeenCalled();
-    expect(toolbarButton('Start…').disabled).toBe(false);
+    // Without the library Start… stays disabled, as in #170.
+    expect(toolbarButton('Start…').disabled).toBe(true);
   });
 
   it('says so when the slot status could not be refreshed', async () => {

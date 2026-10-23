@@ -17,7 +17,12 @@ import {
   NeatTooltip,
 } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
-import { NeatDialog, NeatDialogActions, NeatDialogBody } from '@sima/neat-ui/dialog';
+import {
+  NeatDialog,
+  NeatDialogActions,
+  NeatDialogBody,
+  type NeatDialogRef,
+} from '@sima/neat-ui/dialog';
 import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-ui/popover';
 import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
@@ -28,8 +33,8 @@ import { CamerasService } from '../../sources/cameras.service';
 import { formatBytes } from '../../sources/format-bytes';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { SlotsService } from '../../sources/slots.service';
-import { isAssigned, isInUse, type SlotRow, slotRow } from './slot-row';
-import { SlotStateChip } from './slot-state-chip';
+import { isInUse, type SlotRow, slotRow } from './slot-row';
+import { StatusChip } from './status-chip';
 
 /** The slots Insight has, `src1`–`src48`: hard-coded as in #170 (the spec keeps it so). */
 const SLOT_COUNT = 48;
@@ -38,6 +43,13 @@ type SlotFilter = 'all' | 'in-use';
 
 /** Why the bulk actions are disabled while a slot is changing (#170's `webcamBusy`). */
 const CHANGING_TOOLTIP = 'Waiting for a source change to finish';
+
+/**
+ * What a bulk action says when a slot began changing after its dialog or menu opened (ruling Q9:
+ * #170's Start message, worded for each action).
+ */
+const changingMessage = (doing: 'starting' | 'stopping' | 'resetting' | 'assigning') =>
+  `Waiting for a source change to finish before ${doing} sources.`;
 
 /** Streamable files anywhere in the library. */
 function streamableCount(tree: readonly MediaNode[]): number {
@@ -85,7 +97,7 @@ function messageOf(failure: unknown): string {
     NeatSelectList,
     NeatSlider,
     NeatTooltip,
-    SlotStateChip,
+    StatusChip,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './streaming.page.html',
@@ -103,12 +115,13 @@ export class StreamingPage {
   protected readonly filter = signal<SlotFilter>('all');
   protected readonly asideOpen = signal(true);
   protected readonly moreOpen = signal(false);
-  /** The count the Start… dialog's slider is at. */
+  /** The count the Start… dialog's slider is at: 1 at first, then the last one chosen (#170). */
   protected readonly bulkCount = signal(1);
 
   /** By index rather than the row: each poll answer brings new rows for the same slots. */
   private readonly selectedIndex = signal<number | null>(null);
-  private readonly bulkRunning = signal(false);
+  /** A bulk action of this page is running; the Start… dialog's Start waits for it. */
+  protected readonly bulkRunning = signal(false);
   private readonly bulkStartDialog = viewChild.required<TemplateRef<unknown>>('bulkStart');
 
   private readonly allRows = computed(() => {
@@ -143,13 +156,10 @@ export class StreamingPage {
   protected readonly autoAssignTooltip = computed(
     () => this.bulkTooltip() ?? 'Auto assign unique media files to all sources',
   );
-  /**
-   * Starting needs a file to stream. Until the library has answered that is not known, and Start…
-   * stays available: the server says so when nothing can start.
-   */
+  /** Starting needs a file to stream: until the library has answered with one, Start… waits (#170). */
   protected readonly noStreamableFile = computed(() => {
     const tree = this.library.tree();
-    return tree !== null && streamableCount(tree) === 0;
+    return tree === null || streamableCount(tree) === 0;
   });
 
   protected readonly hasRenditions = computed(() => (this.slots.renditions()?.count ?? 0) > 0);
@@ -165,8 +175,8 @@ export class StreamingPage {
 
   constructor() {
     inject(DestroyRef).onDestroy(this.slots.watch());
-    // Both only inform the top bar (Start… and the ⋯ menu's count), so a failure here leaves the
-    // defaults; the server still answers each action, and the usage is fetched again on use.
+    // Both only inform the top bar (Start… and the ⋯ menu's count). A failure leaves Start…
+    // disabled and the count unknown, as in #170; the usage is fetched again on use.
     this.library.refresh().catch(() => undefined);
     void this.refreshRenditions();
   }
@@ -190,40 +200,39 @@ export class StreamingPage {
     if (open) void this.refreshRenditions();
   }
 
-  protected autoAssign(): Promise<void> {
-    return this.runBulk(async () => {
+  protected async autoAssign(): Promise<void> {
+    await this.runBulk('assigning', async () => {
       const released = this.cameras.releaseAll({ clearAssignments: true });
       this.toasts.status((await this.slots.autoAssign(released)).message);
     });
   }
 
-  protected stopAll(): Promise<void> {
-    return this.runBulk(async () => {
+  protected async stopAll(): Promise<void> {
+    await this.runBulk('stopping', async () => {
       // The cameras stay picked for their slots: stopping is not reassigning.
       const released = this.cameras.releaseAll();
       this.toasts.status((await this.slots.stopAll(released)).message);
     });
   }
 
-  protected async openBulkStart(): Promise<void> {
-    // The slider starts at what a bulk start can start: the server starts the first `count`
-    // assigned slots, skipping those a publisher or a pull holds.
-    const startable = this.allRows().filter(
-      ({ slot }) => isAssigned(slot) && slot.state !== 'external' && slot.state !== 'pulled',
-    ).length;
-    this.bulkCount.set(Math.min(Math.max(startable, 1), SLOT_COUNT));
-    const count = await this.dialogs.open<number>(this.bulkStartDialog(), {
-      title: 'Bulk Start Streams',
-      size: 'small',
-    }).closed;
-    if (count === undefined) return;
-    await this.runBulk(async () => {
+  protected openBulkStart(): void {
+    this.dialogs.open(this.bulkStartDialog(), { title: 'Bulk Start Streams', size: 'small' });
+  }
+
+  /**
+   * The dialog's Start. As in #170 the dialog closes once the server has answered, and stays open
+   * when the request was refused, or when a slot began changing meanwhile, so it can be tried again.
+   */
+  protected async startBulk(dialog: NeatDialogRef): Promise<void> {
+    const count = this.bulkCount();
+    const started = await this.runBulk('starting', async () => {
       const result = await this.slots.startBulk(count);
       this.toasts.status(result.message);
       if (result.errors.length > 0) {
         this.toasts.error(`Failed: ${result.errors.map(({ index }) => `src${index}`).join(', ')}`);
       }
     });
+    if (started) dialog.close();
   }
 
   protected async reset(): Promise<void> {
@@ -235,18 +244,20 @@ export class StreamingPage {
     });
     if (!confirmed) return;
     this.moreOpen.set(false);
-    await this.runBulk(async () => {
+    await this.runBulk('resetting', async () => {
       const released = this.cameras.releaseAll({ clearAssignments: true });
       this.toasts.status((await this.slots.reset(released)).message);
+      // Every slot is unassigned now; #170 then shows the first.
+      this.selectedIndex.set(1);
     });
   }
 
   protected async clearRenditions(): Promise<void> {
     // The question names what goes, so it asks with the usage as it is now, not as the menu
-    // found it: another tab may have started a slot at a custom rate meanwhile.
+    // found it: another tab may have started or cleared renditions meanwhile. It asks even when
+    // that is none, as #170's dialog did, rather than let the click do nothing.
     await this.refreshRenditions();
-    const usage = this.slots.renditions();
-    if (!usage || usage.count === 0) return;
+    const usage = this.slots.renditions() ?? { count: 0, bytes: 0 };
     const confirmed = await this.confirm.ask({
       title: 'Clear cached renditions',
       message: `Delete ${usage.count} cached rendition(s) (${formatBytes(usage.bytes)})? They are re-created on the next start. Renditions in use by a playing source are kept.`,
@@ -268,16 +279,28 @@ export class StreamingPage {
 
   /**
    * Runs a bulk action with the bulk actions locked, and shows a refusal as the server words it.
-   * Their buttons are disabled while locked; a confirmation answered after a slot began changing
-   * still finds the lock and leaves the slots alone.
+   * Their buttons are disabled while a slot is changing; one that began changing after the action's
+   * dialog or menu opened is reported, as #170 did for Start, and the slots are left alone.
+   * Resolves whether the action went through.
    */
-  private async runBulk(action: () => Promise<void>): Promise<void> {
-    if (this.bulkLocked()) return;
+  private async runBulk(
+    doing: Parameters<typeof changingMessage>[0],
+    action: () => Promise<void>,
+  ): Promise<boolean> {
+    if (this.cameras.anyChanging()) {
+      this.toasts.error(changingMessage(doing));
+      return false;
+    }
+    // Another bulk action of this page is running: its buttons are disabled, so this is a second
+    // click that got in before they were.
+    if (this.bulkRunning()) return false;
     this.bulkRunning.set(true);
     try {
       await action();
+      return true;
     } catch (failure) {
       this.toasts.error(messageOf(failure));
+      return false;
     } finally {
       this.bulkRunning.set(false);
     }

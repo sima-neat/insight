@@ -53,14 +53,14 @@ const columns = (row: ReturnType<typeof slotRow>) => [
 ];
 
 describe('slotRow', () => {
-  it('an unassigned slot: no kind, "Not assigned", Idle, no rate or codec', () => {
+  it('an unassigned slot: no kind, "Not assigned", Idle, no rate, "-" for the codec', () => {
     expect(columns(slotRow(slot(1, { codec: 'unknown' })))).toEqual([
       'src1',
       '',
       'Not assigned',
       'Idle (neutral)',
       '',
-      '',
+      '-',
     ]);
   });
 
@@ -97,6 +97,7 @@ describe('slotRow', () => {
     expect(slotRow(slot(3, { file: 'a.mp4', native_fps: 25, fps: 25 })).rate).toBe('25 fps');
     expect(slotRow(slot(3, { file: 'a.mp4', native_fps: null, fps: null })).rate).toBe('');
     expect(slotRow(slot(3, { file: 'a.mp4', codec: 'unknown' })).codec).toBe('Unknown');
+    expect(slotRow(slot(3, { file: 'a.mp4', codec: '' })).codec).toBe('-');
   });
 
   it('a slot whose rendition is encoding: Encoding, and the percent as its rate', () => {
@@ -145,8 +146,19 @@ describe('slotRow', () => {
         external: external({ protocol: 'webrtc', address: null, width: null, fps: null }),
       }),
     );
-    expect(unprobed.source).toBe('⇢ WEBRTC');
+    expect(unprobed.source).toBe('⇢ WebRTC');
     expect(unprobed.rate).toBe('');
+    // #170's names for the protocols; one it does not know reads in capitals, none as "-".
+    const via = (protocol: string) =>
+      slotRow(slot(6, { state: 'external', external: external({ protocol, address: null }) }))
+        .source;
+    expect([via('rtsps'), via('srt'), via('rtmp'), via('mpegts'), via('')]).toEqual([
+      '⇢ RTSPS · 1280×720 · 30 fps',
+      '⇢ SRT · 1280×720 · 30 fps',
+      '⇢ RTMP · 1280×720 · 30 fps',
+      '⇢ MPEGTS · 1280×720 · 30 fps',
+      '⇢ - · 1280×720 · 30 fps',
+    ]);
   });
 
   it('an external slot keeps showing as external over a file or webcam assignment under it', () => {
@@ -170,9 +182,16 @@ describe('slotRow', () => {
       'AV1 cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.',
     );
     expect(slotRow(slot(8, { file: 'a.mp4', codec: 'h264' })).codecWarning).toBeNull();
+    // A pull warns only while live: until then there is no stream to judge.
+    const pulled = (status: SlotPull['status']) =>
+      slotRow(
+        slot(8, { state: 'pulled', codec: 'vp9', pull: pull({ status, codec_supported: false }) }),
+      ).codecWarning;
+    expect(pulled('live')).toContain('VP9 cannot be decoded');
+    expect(pulled('connecting')).toBeNull();
   });
 
-  it('a pulled slot: URL, its state per pull status, the pull chip and rate', () => {
+  it('a pulled slot: URL, its state per pull status, the pull chip naming the camera, and rate', () => {
     const pulled = (overrides: Partial<SlotPull>, codec = 'h264') =>
       columns(
         slotRow(slot(9, { file: 'under.mp4', state: 'pulled', codec, pull: pull(overrides) })),
@@ -180,7 +199,7 @@ describe('slotRow', () => {
     expect(pulled({})).toEqual([
       'src9',
       'URL',
-      '⇠ RTSP · 10.0.0.7:554 · 1920×1080',
+      '⇠ RTSP · 10.0.0.7:554 · 1920×1080 · 25 fps',
       'Pulled (success)',
       '25 fps',
       'H.264',
@@ -188,18 +207,18 @@ describe('slotRow', () => {
     expect(pulled({ status: 'connecting', fps: null, width: null }, 'none')).toEqual([
       'src9',
       'URL',
-      'connecting…',
+      '⇠ RTSP · 10.0.0.7:554 · connecting…',
       'Connecting… (neutral)',
       '',
-      '',
+      '-',
     ]);
     expect(pulled({ status: 'unreachable', error: 'connection refused' }, 'none')).toEqual([
       'src9',
       'URL',
-      'retrying… (connection refused)',
+      '⇠ RTSP · 10.0.0.7:554 · retrying… (connection refused)',
       'Unreachable (warning)',
       'retrying…',
-      '',
+      '-',
     ]);
     expect(
       pulled(
@@ -209,11 +228,23 @@ describe('slotRow', () => {
     ).toEqual([
       'src9',
       'URL',
-      'The camera rejected the username or password',
+      '⇠ RTSP · 10.0.0.7:554 · The camera rejected the username or password',
       'Auth failed (danger)',
       '',
-      '',
+      '-',
     ]);
+    // What is not known reads as #170 shows it.
+    const bare = slotRow(
+      slot(9, {
+        state: 'pulled',
+        pull: pull({ status: 'auth_failed', scheme: 'rtsps', host: '', error: null }),
+      }),
+    );
+    expect(bare.source).toBe('⇠ RTSPS · - · Auth failed');
+    expect(
+      slotRow(slot(9, { state: 'pulled', pull: pull({ status: 'unreachable', error: null }) }))
+        .source,
+    ).toBe('⇠ RTSP · 10.0.0.7:554 · retrying…');
   });
 });
 

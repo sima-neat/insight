@@ -9,6 +9,7 @@
 
 /* The list fills the page's content box under the notice, and scrolls its rows inside. */
 .slots {
+  container: slots / inline-size;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -23,12 +24,27 @@ neat-select-list {
   padding-block-end: var(--neat-space-2);
 }
 
-/* Cells: one line each, truncated rather than wrapped, so every row keeps the list's row height. */
+/*
+ * Cells: one line each, truncated rather than wrapped, so every row keeps the list's row height,
+ * and clipped to the cell where a narrow list gives a column less room than its content.
+ */
 .text {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * Where the list is too narrow for every column (a tablet beside the side panel), rate and codec
+ * give their room to the slot, its source and its state. What is left of their columns would only
+ * show a sliver of each value, so the values are clipped away entirely; they are still read with
+ * the row, which `visibility` or `display` would prevent.
+ */
+@container slots (width < 28rem) {
+  .gives-way {
+    clip-path: inset(50%);
+  }
 }
 
 /* The kind is a code (VID, CAM, EXT, URL), set off from the source it qualifies. */
@@ -37,21 +53,6 @@ neat-select-list {
   font-size: var(--neat-text-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
-}
-
-.codec-warning {
-  margin-inline-start: 0.25em;
-  cursor: help;
-}
-
-/* Read with the row by assistive technology, not shown: the glyph's tooltip says it for the eye. */
-.spoken {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
 }
 
 /* Side panel. */

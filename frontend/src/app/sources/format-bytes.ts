@@ -1,16 +1,16 @@
-const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
+const KB = 1024;
+const MB = KB * 1024;
+const GB = MB * 1024;
 
 /**
- * A byte count as people read it: "1.2 GB", in the largest binary unit (1 KB = 1024 B) that keeps
- * the number at 1 or more, to one decimal; whole bytes below 1 KB. For the stored renditions and
- * the media library's file sizes alike, so both read the same.
+ * A byte count as #170 shows it: whole bytes below 1 KB, KB and MB to one decimal, GB to two
+ * ("1.20 GB"), binary units (1 KB = 1024 B), and "-" for a count that is not a number. For the
+ * stored renditions and the media library's file sizes alike, so both read the same.
  */
 export function formatBytes(bytes: number): string {
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < UNITS.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return unit === 0 ? `${value} B` : `${value.toFixed(1)} ${UNITS[unit]}`;
+  if (!Number.isFinite(bytes)) return '-';
+  if (bytes < KB) return `${bytes} B`;
+  if (bytes < MB) return `${(bytes / KB).toFixed(1)} KB`;
+  if (bytes < GB) return `${(bytes / MB).toFixed(1)} MB`;
+  return `${(bytes / GB).toFixed(2)} GB`;
 }

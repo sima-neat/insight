@@ -106,10 +106,11 @@ async function withMockedSlots(page: Page): Promise<Mocked> {
   let failing = false;
   const record = (action: string, request: Request) =>
     posts.set(action, [...(posts.get(action) ?? []), request.postDataJSON()]);
-  const bulk = (message: string, extra: object = {}) => ({
+  // The answers say what the server would for the slots above: stop all and reset stop the pulls
+  // and leave the external publisher running, auto assign skips both, and a bulk start only
+  // targets slots with a file (src1, src2, src9; src5's file sits under a pull).
+  const bulk = (message: string, extra: object) => ({
     success: true,
-    skipped_external: [4],
-    skipped_pulled: [5, 6, 7, 8],
     unconfirmed_webcams: [],
     changed_sources: [],
     message,
@@ -134,23 +135,43 @@ async function withMockedSlots(page: Page): Promise<Mocked> {
   const answers: Record<string, object> = {
     'start-bulk': {
       success: true,
-      requested: 0,
-      targeted: 4,
-      started: [2, 9],
+      requested: 3,
+      targeted: 3,
+      started: [9],
       already_running: [1],
-      errors: [{ index: 3, error: 'Webcam is not publishing yet' }],
-      skipped_external: [4],
-      skipped_pulled: [5, 6, 7, 8],
-      message: 'Started 2 source(s), 1 already running, 1 failed.',
-      started_or_running: 3,
+      errors: [
+        {
+          index: 2,
+          error:
+            'Encoding src2 at 15 fps failed. Partial output was removed; the source file is unchanged.',
+        },
+      ],
+      skipped_external: [],
+      skipped_pulled: [5],
+      message: 'Started 1 source(s), 1 already running, 1 failed. Skipped pulled: src5.',
+      started_or_running: 2,
     },
-    'stop-all': bulk('Stopped 2 source(s).', { stopped_count: 2, stopped_pulled: [] }),
-    reset: bulk('Reset all source assignments.', { stopped_pulled: [5, 6, 7, 8] }),
-    'auto-assign-all': bulk('Assigned 2 source(s) with unique media file(s).', {
-      assigned_count: 2,
-      source_count: 48,
-      available_files: 2,
+    'stop-all': bulk('Stopped 6 source(s). External stream(s) left running: src4.', {
+      skipped_external: [4],
+      skipped_pulled: [],
+      stopped_count: 6,
+      stopped_pulled: [5, 6, 7, 8],
     }),
+    reset: bulk('Reset all source assignments. External stream(s) left running: src4.', {
+      skipped_external: [4],
+      skipped_pulled: [],
+      stopped_pulled: [5, 6, 7, 8],
+    }),
+    'auto-assign-all': bulk(
+      'Assigned 2 source(s) with unique media file(s). Skipped external: src4. Skipped pulled: src5, src6, src7, src8.',
+      {
+        skipped_external: [4],
+        skipped_pulled: [5, 6, 7, 8],
+        assigned_count: 2,
+        source_count: 48,
+        available_files: 2,
+      },
+    ),
   };
   for (const [action, answer] of Object.entries(answers)) {
     await page.route(
@@ -180,12 +201,12 @@ const confirmDialog = (page: Page) => page.getByRole('alertdialog');
 const toast = (page: Page, text: string) =>
   page.locator('[data-slot="toast"]').filter({ hasText: text });
 
-/** A row's cells as they read on screen: no glyph, no text that is only read aloud. */
+/** A row's cells as they read on screen, without the warning glyph. */
 function cells(page: Page, name: string): Promise<string[]> {
   return row(page, name).evaluate((option) =>
     [...option.querySelectorAll(':scope > div')].map((cell) => {
       const shown = cell.cloneNode(true) as HTMLElement;
-      shown.querySelectorAll('[aria-hidden="true"], .spoken').forEach((part) => part.remove());
+      shown.querySelectorAll('[role="img"]').forEach((glyph) => glyph.remove());
       return shown.textContent!.trim();
     }),
   );
@@ -279,7 +300,7 @@ test.describe('Streaming with mocked slots', () => {
     expect(await cells(page, 'src5')).toEqual([
       'src5',
       'URL',
-      '⇠ RTSP · 10.0.0.7:554 · 1920×1080',
+      '⇠ RTSP · 10.0.0.7:554 · 1920×1080 · 25 fps',
       'Pulled',
       '25 fps',
       'H.264',
@@ -287,31 +308,34 @@ test.describe('Streaming with mocked slots', () => {
     expect(await cells(page, 'src6')).toEqual([
       'src6',
       'URL',
-      'retrying… (connection refused)',
+      '⇠ RTSP · 10.0.0.8:554 · retrying… (connection refused)',
       'Unreachable',
       'retrying…',
-      '',
+      '-',
     ]);
     expect(await cells(page, 'src7')).toEqual([
       'src7',
       'URL',
-      'The camera rejected the username or password',
+      '⇠ RTSP · 10.0.0.7:554 · The camera rejected the username or password',
       'Auth failed',
       '',
-      '',
+      '-',
     ]);
     expect(await cells(page, 'src8')).toEqual([
       'src8',
       'URL',
-      'connecting…',
+      '⇠ RTSP · 10.0.0.7:554 · connecting…',
       'Connecting…',
       '',
-      '',
+      '-',
     ]);
-    expect(await cells(page, 'src10')).toEqual(['src10', '', 'Not assigned', 'Idle', '', '']);
+    expect(await cells(page, 'src10')).toEqual(['src10', '', 'Not assigned', 'Idle', '', '-']);
 
-    // The undecodable codec's warning shows on hover.
-    await row(page, 'src4').locator('.codec-warning').hover();
+    // The undecodable codec's glyph is named by the warning, which also shows on hover.
+    const glyph = row(page, 'src4').getByRole('img', {
+      name: 'AV1 cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.',
+    });
+    await glyph.hover();
     await expect(page.getByRole('tooltip')).toContainText(
       'AV1 cannot be decoded by Neat video pipelines',
     );
@@ -365,17 +389,26 @@ test.describe('Streaming with mocked slots', () => {
     await tool(page, 'Start…').click();
     const dialog = page.getByRole('dialog', { name: 'Bulk Start Streams' });
     const slider = dialog.getByRole('slider', { name: 'How many streams do you want to start?' });
-    // The slots a bulk start can start: assigned, and held by no publisher or pull.
-    await expect(slider).toHaveAttribute('aria-valuenow', '4');
+    // Q10: it opens at 1, as #170's did.
+    await expect(slider).toHaveAttribute('aria-valuenow', '1');
     await slider.focus();
     await page.keyboard.press('ArrowRight');
-    await expect(dialog.locator('output')).toHaveText('5');
+    await page.keyboard.press('ArrowRight');
+    await expect(dialog.locator('output')).toHaveText('3');
     await dialog.getByRole('button', { name: 'Start', exact: true }).click();
 
     await expect(dialog).toHaveCount(0);
-    await expect(toast(page, 'Started 2 source(s), 1 already running, 1 failed.')).toBeVisible();
-    await expect(toast(page, 'Failed: src3')).toBeVisible();
-    expect(mocked.posts.get('start-bulk')).toEqual([{ count: 5 }]);
+    await expect(
+      toast(page, 'Started 1 source(s), 1 already running, 1 failed. Skipped pulled: src5.'),
+    ).toBeVisible();
+    await expect(toast(page, 'Failed: src2')).toBeVisible();
+    expect(mocked.posts.get('start-bulk')).toEqual([{ count: 3 }]);
+
+    // It opens again at the count chosen last.
+    await tool(page, 'Start…').click();
+    await expect(slider).toHaveAttribute('aria-valuenow', '3');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
   });
 
   test('Reset and Clear renditions ask first; Cancel and Escape change nothing', async ({
@@ -387,11 +420,11 @@ test.describe('Streaming with mocked slots', () => {
 
     await tool(page, 'More actions').click();
     await expect(
-      morePanel(page).getByRole('button', { name: 'Clear renditions (3 · 1.2 GB)' }),
+      morePanel(page).getByRole('button', { name: 'Clear renditions (3 · 1.20 GB)' }),
     ).toBeVisible();
 
     await morePanel(page).getByRole('button', { name: 'Clear renditions' }).click();
-    await expect(confirmDialog(page)).toContainText('Delete 3 cached rendition(s) (1.2 GB)?');
+    await expect(confirmDialog(page)).toContainText('Delete 3 cached rendition(s) (1.20 GB)?');
     await page.keyboard.press('Escape');
     await expect(confirmDialog(page)).toHaveCount(0);
 
@@ -405,7 +438,11 @@ test.describe('Streaming with mocked slots', () => {
 
     await morePanel(page).getByRole('button', { name: 'Reset' }).click();
     await confirmDialog(page).getByRole('button', { name: 'Reset' }).click();
-    await expect(toast(page, 'Reset all source assignments.')).toBeVisible();
+    await expect(
+      toast(page, 'Reset all source assignments. External stream(s) left running: src4.'),
+    ).toBeVisible();
+    // Every slot is unassigned now, and the side panel shows the first, as #170 did.
+    await expect(panel(page).getByRole('heading')).toHaveText('src1');
     await expect(morePanel(page)).toHaveCount(0);
     // No webcam was published from this browser, so none is named as released.
     expect(mocked.posts.get('reset')).toEqual([{ released_webcams: [] }]);
@@ -417,9 +454,16 @@ test.describe('Streaming with mocked slots', () => {
     await expect(rows(page)).toHaveCount(48);
 
     await tool(page, 'Stop all').click();
-    await expect(toast(page, 'Stopped 2 source(s).')).toBeVisible();
+    await expect(
+      toast(page, 'Stopped 6 source(s). External stream(s) left running: src4.'),
+    ).toBeVisible();
     await tool(page, 'Auto assign').click();
-    await expect(toast(page, 'Assigned 2 source(s) with unique media file(s).')).toBeVisible();
+    await expect(
+      toast(
+        page,
+        'Assigned 2 source(s) with unique media file(s). Skipped external: src4. Skipped pulled: src5, src6, src7, src8.',
+      ),
+    ).toBeVisible();
     expect(mocked.posts.get('stop-all')).toEqual([{ released_webcams: [] }]);
     expect(mocked.posts.get('auto-assign-all')).toEqual([{ released_webcams: [] }]);
   });

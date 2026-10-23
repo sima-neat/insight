@@ -53,14 +53,26 @@ const PULL_STATES: Record<SlotPullStatus, SlotStateView> = {
   auth_failed: { label: 'Auth failed', tone: 'danger' },
 };
 
-/** The server's codec names; anything else on the wire (`av1`, `vp9`) reads in capitals. */
+/** The codecs Insight streams (#170's `STREAMING_CODECS`); any other on the wire reads in capitals. */
 const CODEC_LABELS: Readonly<Record<string, string>> = {
   h264: 'H.264',
   h265: 'H.265',
-  hevc: 'H.265',
   mjpeg: 'MJPEG',
   unknown: 'Unknown',
 };
+
+/** #170's names for the protocols MediaMTX reports a publisher by; others read in capitals. */
+const PROTOCOL_LABELS: Readonly<Record<string, string>> = {
+  rtsp: 'RTSP',
+  rtsps: 'RTSPS',
+  webrtc: 'WebRTC',
+  srt: 'SRT',
+  rtmp: 'RTMP',
+  rtmps: 'RTMPS',
+};
+
+/** What a cell shows for a value there is none of, as #170 does. */
+const NONE = '-';
 
 /** A file or a webcam is assigned; a pull or an external publisher may sit over either. */
 export function isAssigned(slot: Slot): boolean {
@@ -99,29 +111,59 @@ export function slotSource(slot: Slot, camera?: Camera): string {
   return slot.file || 'Not assigned';
 }
 
-/** `⇢ RTSP · 192.168.1.20:41234 · 1280×720 · 30 fps`, leaving out what is not known yet. */
+/**
+ * The chips below are #170's (`externalSource.js`) word for word. An external publisher:
+ * `⇢ RTSP · 192.168.1.20:41234 · 1280×720 · 30 fps`, leaving out the address and the video
+ * while they are not known.
+ */
 export function externalChip(external: SlotExternal): string {
-  const parts = [
-    external.protocol.toUpperCase(),
-    external.address,
-    dimensions(external),
-    fpsText(external.fps),
-  ];
-  return `⇢ ${parts.filter(Boolean).join(' · ')}`;
+  const parts = [protocolLabel(external.protocol)];
+  if (external.address) parts.push(external.address);
+  const video = dimensionsText(external);
+  if (video) parts.push(video);
+  return `⇢ ${parts.join(' · ')}`;
 }
 
-/** `⇠ RTSP · 10.0.0.7:554 · 1920×1080` while live, else what the pull is doing about it. */
+/**
+ * A pull always names the camera it pulls from, so a row that cannot reach it says which:
+ * `⇠ RTSP · 10.0.0.7:554 · ` and then the video while live, or what the pull is doing about it.
+ */
 export function pullChip(pull: SlotPull): string {
+  const parts = [protocolLabel(pull.scheme), pull.host || NONE];
   switch (pull.status) {
-    case 'live':
-      return `⇠ ${[pull.scheme.toUpperCase(), pull.host, dimensions(pull)].filter(Boolean).join(' · ')}`;
+    case 'live': {
+      const video = dimensionsText(pull);
+      if (video) parts.push(video);
+      break;
+    }
     case 'unreachable':
-      return pull.error ? `retrying… (${pull.error})` : 'retrying…';
+      parts.push(pull.error ? `retrying… (${pull.error})` : 'retrying…');
+      break;
     case 'auth_failed':
-      return pull.error ?? PULL_STATES.auth_failed.label;
+      parts.push(pull.error || PULL_STATES.auth_failed.label);
+      break;
     case 'connecting':
-      return 'connecting…';
+      parts.push('connecting…');
+      break;
   }
+  return `⇠ ${parts.join(' · ')}`;
+}
+
+export function protocolLabel(protocol: string): string {
+  if (!protocol) return NONE;
+  return PROTOCOL_LABELS[protocol] ?? protocol.toUpperCase();
+}
+
+/** `1280×720 · 30 fps`, each part only once it is known; empty before either is. */
+export function dimensionsText(stream: {
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+}): string {
+  const parts: string[] = [];
+  if (stream.width && stream.height) parts.push(`${stream.width}×${stream.height}`);
+  if (stream.fps) parts.push(`${stream.fps} fps`);
+  return parts.join(' · ');
 }
 
 /**
@@ -143,27 +185,30 @@ export function slotRate(slot: Slot, encode?: Progress): string {
 }
 
 export function codecLabel(codec: string): string {
+  if (!codec) return NONE;
   return CODEC_LABELS[codec] ?? codec.toUpperCase();
 }
 
-/** The codec on the wire or of the assigned media; empty while there is none to name. */
+/** The codec on the wire or of the assigned media; "-" while there is none to name, as in #170. */
 export function slotCodec(slot: Slot): string {
-  if (slot.state === 'pulled' && slot.pull?.status !== 'live') return '';
-  if (slot.state !== 'external' && slot.state !== 'pulled' && !isAssigned(slot)) return '';
-  return slot.codec && slot.codec !== 'none' ? codecLabel(slot.codec) : '';
+  if (slot.state === 'pulled') return slot.pull?.status === 'live' ? codecLabel(slot.codec) : NONE;
+  if (slot.state === 'external') return codecLabel(slot.codec);
+  return isAssigned(slot) ? codecLabel(slot.codec) : NONE;
 }
 
-/** #170's warning for a stream Neat pipelines cannot decode, or null. Only publishers and pulls can carry one. */
+/**
+ * #170's warning for a stream Neat pipelines cannot decode, or null. Only an external publisher,
+ * or a pull while live, can carry one.
+ */
 export function codecWarning(slot: Slot): string | null {
-  const supported =
+  const stream =
     slot.state === 'external'
-      ? slot.external?.codec_supported
-      : slot.state === 'pulled'
-        ? slot.pull?.codec_supported
-        : true;
-  const codec = slotCodec(slot);
-  return codec && supported === false
-    ? `${codec} cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.`
+      ? slot.external
+      : slot.state === 'pulled' && slot.pull?.status === 'live'
+        ? slot.pull
+        : undefined;
+  return stream?.codec_supported === false
+    ? `${codecLabel(slot.codec)} cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.`
     : null;
 }
 
@@ -178,10 +223,6 @@ export function slotRow(slot: Slot, local: SlotLocal = {}): SlotRow {
     codec: slotCodec(slot),
     codecWarning: codecWarning(slot),
   };
-}
-
-function dimensions(stream: { width: number | null; height: number | null }): string | null {
-  return stream.width && stream.height ? `${stream.width}×${stream.height}` : null;
 }
 
 function fpsText(fps: number | null | undefined): string {
