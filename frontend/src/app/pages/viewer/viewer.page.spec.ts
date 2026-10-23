@@ -561,6 +561,58 @@ describe('ViewerPage', () => {
     expect(page().selectedChannel()).toBeNull();
   });
 
+  describe('a click into the grid area', () => {
+    const gridArea = (): HTMLElement => root().querySelector('.grid-area')!;
+
+    it('clears the selection from the gap between tiles and from the grid itself', async () => {
+      sixPerPage();
+      await open('/viewer');
+      await click(tileElement(4));
+      expect(page().selectedChannel()).toBe(4);
+
+      await click(root().querySelector<HTMLElement>('neat-tile-grid .grid')!);
+      expect(page().selectedChannel()).toBeNull();
+
+      await click(tileElement(4));
+      await click(gridArea());
+      expect(page().selectedChannel()).toBeNull();
+    });
+
+    it('on a tile selects it and does not clear it', async () => {
+      sixPerPage();
+      await open('/viewer');
+
+      await click(tileElement(4));
+      expect(page().selectedChannel()).toBe(4);
+
+      // Inside the tile too, on what it draws.
+      await click(tileElement(2).querySelector<HTMLElement>('neat-video-tile')!);
+      expect(page().selectedChannel()).toBe(2);
+    });
+
+    it('in the inspector keeps the selection', async () => {
+      sixPerPage();
+      await open('/viewer');
+      await click(tileElement(4));
+      await click(button('Inspector'));
+
+      await click(root().querySelector<HTMLElement>('aside')!);
+
+      expect(page().selectedChannel()).toBe(4);
+    });
+
+    it('does not move focus', async () => {
+      sixPerPage();
+      await open('/viewer');
+      await click(tileElement(4));
+      tileElement(4).focus();
+
+      await click(root().querySelector<HTMLElement>('neat-tile-grid .grid')!);
+
+      expect(document.activeElement).toBe(tileElement(4));
+    });
+  });
+
   it('hide empty shows only channels live in /api/ingest/stats and stops polling when switched off', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     sixPerPage();

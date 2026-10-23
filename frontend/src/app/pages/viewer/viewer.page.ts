@@ -110,7 +110,7 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
   ],
   providers: [VfConnections, ViewerSettingsStore, LayoutPrefs, ChannelLiveness, ChannelLateness],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(window:keydown)': 'onKeydown($event)' },
+  host: { '(window:keydown)': 'onKeydown($event)', '(click)': 'deselectOnEmptySpace($event)' },
   templateUrl: './viewer.page.html',
   styleUrl: './viewer.page.css',
 })
@@ -331,6 +331,19 @@ export class ViewerPage {
     this.state.select(channel);
     this.inspectorTab.set('General');
     this.prefs.setInspector(true);
+  }
+
+  /**
+   * A click into the grid area that lands on no tile (the gaps, the margin around the grid, the
+   * notice) clears the selection, as Escape does; Escape is its keyboard equivalent, so the area
+   * needs no key handler of its own. A tile's click selects it and bubbles here, so it is told
+   * apart by where it started. The inspector is in the page but outside the grid area.
+   */
+  protected deselectOnEmptySpace(event: MouseEvent): void {
+    if (!(event.target instanceof Element)) return;
+    if (event.target.closest('.grid-area') && !event.target.closest('app-viewer-tile')) {
+      this.state.clearSelection();
+    }
   }
 
   /**

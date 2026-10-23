@@ -179,11 +179,8 @@ export function settingCount(count: number): string {
                 <span>Channel {{ line.channel }}</span>
                 <span class="value">{{ line.value }}</span>
                 <button
-                  neatButton
-                  class="use-global"
+                  class="action use-global"
                   type="button"
-                  variant="text"
-                  size="small"
                   [attr.aria-label]="useGlobalLabel(line.channel)"
                   (click)="useGlobal(line.channel)"
                 >
@@ -193,10 +190,8 @@ export function settingCount(count: number): string {
             }
             <li class="line">
               <button
-                neatButton
+                class="action"
                 type="button"
-                variant="text"
-                size="small"
                 [attr.aria-label]="resetOverridesLabel()"
                 (click)="resetOverrides()"
               >

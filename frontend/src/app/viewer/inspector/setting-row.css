@@ -68,28 +68,37 @@
   gap: var(--neat-space-2);
 }
 
-.disclosure {
-  display: flex;
-  align-items: center;
-  gap: var(--neat-space-2);
+/*
+ * The disclosure and the list's actions are plain buttons: the kit's smallest button is 2rem high,
+ * which would make every line of the list as tall as it is today.
+ */
+.disclosure,
+.action {
   padding: 0;
   border: none;
   border-radius: var(--radius);
   background: none;
-  color: var(--muted-foreground);
   font: inherit;
+  cursor: pointer;
+}
+
+.disclosure:focus-visible,
+.action:focus-visible {
+  outline: var(--neat-focus-ring-width) solid var(--ring);
+  outline-offset: 1px;
+}
+
+.disclosure {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+  color: var(--muted-foreground);
   font-size: var(--neat-text-xs);
   text-align: start;
-  cursor: pointer;
 }
 
 .disclosure:hover {
   color: var(--foreground);
-}
-
-.disclosure:focus-visible {
-  outline: var(--neat-focus-ring-width) solid var(--ring);
-  outline-offset: 1px;
 }
 
 /* The amber of a notice: the setting differs on some channels. */
@@ -117,28 +126,40 @@
   }
 }
 
+/*
+ * The channels, as small lines under a thin rule that starts below the note's dot (the dot is
+ * 0.5rem wide, the rule 2px, so their centres line up).
+ */
 .list {
   margin: 0;
+  margin-inline-start: calc(0.25rem - 1px);
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding-inline-start: var(--neat-space-3);
+  border-inline-start: 2px solid var(--border);
   list-style: none;
+  font-size: var(--neat-text-xs);
 }
 
+/* At least 1.5rem high, the smallest target WCAG 2.5.8 accepts; the lines add no padding to it. */
 .line {
   display: flex;
   align-items: center;
   gap: var(--neat-space-2);
-  padding: var(--neat-space-2);
-}
-
-.line + .line {
-  border-block-start: 1px solid var(--border);
+  min-block-size: 1.5rem;
 }
 
 .value {
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
+}
+
+.action {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.action:hover {
+  text-decoration: underline;
 }
 
 /* The channel's action sits at the end of its line. */

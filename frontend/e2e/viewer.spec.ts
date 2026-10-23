@@ -273,6 +273,27 @@ test.describe('the Viewer without vf', () => {
     await expect.poll(() => misplacedTiles(page)).toEqual([]);
   });
 
+  test('a click into the empty space around the tiles deselects, as Escape does', async ({
+    page,
+  }) => {
+    await withoutVf(page);
+    await page.setViewportSize(LAPTOP);
+    await page.goto('/viewer');
+
+    await tile(page, 3).click();
+    await expect(tile(page, 3)).toHaveAttribute('aria-current', 'true');
+
+    // The grid area's inset, which no tile covers.
+    await page.locator('app-viewer-page .grid-area').click({ position: { x: 2, y: 2 } });
+    await expect(tile(page, 3)).not.toHaveAttribute('aria-current', 'true');
+
+    // The tile still selects, and a click in the inspector keeps the selection.
+    await tile(page, 3).click();
+    await pageTools(page).getByRole('button', { name: 'Inspector' }).click();
+    await page.locator('app-viewer-inspector').click({ position: { x: 4, y: 4 } });
+    await expect(tile(page, 3)).toHaveAttribute('aria-current', 'true');
+  });
+
   test('the inspector lists channel overrides, folded; bulk resets ask first and keep focus in the panel', async ({
     page,
   }) => {
