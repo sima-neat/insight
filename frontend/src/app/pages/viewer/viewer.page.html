@@ -15,14 +15,14 @@
     type="button"
     variant="text"
     size="small"
-    iconOnly
-    aria-label="Fit all"
-    neatTooltip="Fit all"
+    class="fit"
+    [neatTooltip]="fitTooltip()"
     neatTooltipPosition="bottom"
-    [disabled]="!sizeChosen()"
-    (click)="fitAll()"
+    [disabled]="!canFit()"
+    (click)="cycleFit($event)"
   >
-    <neat-icon name="fit-all" />
+    <neat-icon name="fit-all" [size]="16" />
+    {{ fitLabel() }}
   </button>
 
   <span class="separator" aria-hidden="true"></span>

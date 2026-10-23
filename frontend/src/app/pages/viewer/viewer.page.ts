@@ -57,6 +57,20 @@ import { ViewerTile } from '../../viewer/viewer-tile';
 /** The narrowest tile the size slider offers, in CSS pixels; below it a stream is unreadable. */
 const MIN_TILE_WIDTH = 120;
 
+/**
+ * Tiles per page that "Fit" steps through after fitting all: square grids, which fill a 16:9 area
+ * evenly in both directions.
+ */
+const FIT_PRESETS: readonly number[] = [36, 25, 16, 9, 4, 1];
+
+/** A step of "Fit": all the displayed channels on one page, or a number of tiles per page. */
+type Fit = 'all' | number;
+
+/** How the tooltip names a step. */
+function describeFit(fit: Fit): string {
+  return fit === 'all' ? 'fit all' : `fit ${fit}`;
+}
+
 /** The viewer storage name of the console-set debug flag (Inv §4c's `viewerDebug`). */
 const DEBUG_FLAG = 'debug';
 
@@ -193,8 +207,9 @@ export class ViewerPage {
   private readonly space = signal<TileSpace | null>(null, { equal: sameSpace });
 
   /**
-   * The size the user chose for this many channels, else the size at which all of them fit on one
-   * page, which follows the area until the user moves the slider.
+   * The size the user chose for this many channels: a width from the slider, or a fit from "Fit",
+   * which follows the area like the default does. The default is the size at which all of them
+   * fit on one page.
    */
   protected readonly tileWidth = computed(() => {
     const count = this.channels().length;
@@ -203,13 +218,68 @@ export class ViewerPage {
     const space = this.space();
     // Any width does before the first measurement: the grid shows nothing until it has one.
     if (space === null) return MIN_TILE_WIDTH;
-    return fitAllTileWidth(space, count, space.gap);
+    return fitAllTileWidth(space, this.storedFit() ?? count, space.gap);
   });
 
-  /** The user has chosen a size for this many channels, so "Fit all" has one to forget. */
-  protected readonly sizeChosen = computed(
-    () => this.prefs.tileWidthFor(this.channels().length) !== null,
-  );
+  /**
+   * The fit remembered for the displayed count. One at or above the count (only from storage
+   * edited by hand) would make tiles smaller than fitting all, so it is not used.
+   */
+  private readonly storedFit = computed(() => {
+    const count = this.channels().length;
+    const fit = this.prefs.fitFor(count);
+    return fit !== null && fit < count ? fit : null;
+  });
+
+  /**
+   * The steps of "Fit" for the displayed count: all, then the presets below the count. A preset
+   * that comes out at the same tile width as the step before it (in a small area, say) is left
+   * out, so every click changes the grid.
+   */
+  protected readonly fits = computed<Fit[]>(() => {
+    const count = this.channels().length;
+    if (count === 0) return [];
+    const space = this.space();
+    const fits: Fit[] = ['all'];
+    let previous = space === null ? null : fitAllTileWidth(space, count, space.gap);
+    for (const tiles of FIT_PRESETS) {
+      if (tiles >= count) continue;
+      if (space !== null) {
+        const width = fitAllTileWidth(space, tiles, space.gap);
+        if (width === previous) continue;
+        previous = width;
+      }
+      fits.push(tiles);
+    }
+    return fits;
+  });
+
+  /** The step the grid is on; null while it shows a width chosen with the slider. */
+  protected readonly currentFit = computed<Fit | null>(() => {
+    const count = this.channels().length;
+    if (this.prefs.tileWidthFor(count) !== null) return null;
+    return this.storedFit() ?? 'all';
+  });
+
+  protected readonly fitLabel = computed(() => {
+    const fit = this.currentFit();
+    if (fit === null) return 'Fit';
+    return fit === 'all' ? 'Fit all' : `Fit ${fit}`;
+  });
+
+  /** Fit is enabled exactly when a click would do something. */
+  protected readonly canFit = computed(() => this.fitAfter(1) !== null);
+
+  /**
+   * The next step, which the accessible name (the visible label, the current step) does not carry,
+   * against the kit tooltip's rule. Acceptable here: the button works fully without it (a tap
+   * steps and the label shows where it went), keyboard and assistive technology get it as the
+   * description on focus, and Shift has no touch equivalent anyway.
+   */
+  protected readonly fitTooltip = computed(() => {
+    const next = this.fitAfter(1);
+    return next === null ? null : `Next: ${describeFit(next)} (Shift: back)`;
+  });
 
   /** The slider ends where one tile fills the area. */
   protected readonly sliderMax = computed(() => {
@@ -285,9 +355,33 @@ export class ViewerPage {
     this.prefs.rememberTileWidth(this.channels().length, width);
   }
 
-  /** Back to the size at which all the displayed channels fit on one page. */
-  protected fitAll(): void {
-    this.prefs.forgetTileWidth(this.channels().length);
+  /** "Fit": a click steps to the next step, a Shift+click to the one before. */
+  protected cycleFit(event: MouseEvent): void {
+    const next = this.fitAfter(event.shiftKey ? -1 : 1);
+    if (next === null) return;
+    const count = this.channels().length;
+    if (next === 'all') this.prefs.forgetSize(count);
+    else this.prefs.rememberFit(count, next);
+  }
+
+  /**
+   * The step `step` away from the current one, going round; null when there is nothing to step
+   * to. Steps are found by their tiles per page, so a remembered preset that is left out of the
+   * steps (see `fits`) still steps to its neighbours. From a slider width, forward is fitting all
+   * and back the last preset, as if the width sat just before "all".
+   */
+  private fitAfter(step: 1 | -1): Fit | null {
+    const fits = this.fits();
+    const current = this.currentFit();
+    if (fits.length === 0) return null;
+    if (current === null) return step === 1 ? fits[0] : fits[fits.length - 1];
+    if (fits.length < 2) return null;
+    const tiles = (fit: Fit) => (fit === 'all' ? Number.POSITIVE_INFINITY : fit);
+    const ordered = step === 1 ? fits : [...fits].reverse();
+    const next = ordered.find((fit) =>
+      step === 1 ? tiles(fit) < tiles(current) : tiles(fit) > tiles(current),
+    );
+    return next ?? ordered[0];
   }
 
   protected goToPage(input: HTMLInputElement): void {

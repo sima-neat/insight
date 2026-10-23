@@ -45,6 +45,7 @@ describe('LayoutPrefs', () => {
       hideEmpty: true,
       inspector: true,
       tileWidths: { 16: 240 },
+      fits: {},
     });
     const reloaded = reload();
     expect(reloaded.bars()).toBe(false);
@@ -67,14 +68,14 @@ describe('LayoutPrefs', () => {
     expect(reload().tileWidthFor(16)).toBe(260);
   });
 
-  it("forgetTileWidth(count) drops only that count's width, across a reload too", () => {
+  it("forgetSize(count) drops only that count's width, across a reload too", () => {
     const prefs = open();
     prefs.rememberTileWidth(16, 240);
     prefs.rememberTileWidth(4, 500);
     const width = computed(() => prefs.tileWidthFor(16));
     expect(width()).toBe(240);
 
-    prefs.forgetTileWidth(16);
+    prefs.forgetSize(16);
 
     expect(width()).toBeNull();
     expect(prefs.tileWidthFor(4)).toBe(500);
@@ -84,10 +85,93 @@ describe('LayoutPrefs', () => {
     expect(reload().tileWidthFor(16)).toBeNull();
   });
 
-  it('forgetting a width that is not stored writes nothing', () => {
+  it('forgetting a size that is not stored writes nothing', () => {
     const prefs = open();
-    prefs.forgetTileWidth(16);
+    prefs.forgetSize(16);
     expect(fake.writes).toStrictEqual([]);
+  });
+
+  it('fitFor(count) returns what rememberFit stored for that count, reactively and across a reload', () => {
+    const prefs = open();
+    const fit = computed(() => prefs.fitFor(16));
+    expect(fit()).toBeNull();
+
+    prefs.rememberFit(16, 9);
+    prefs.rememberFit(48, 25);
+
+    expect(fit()).toBe(9);
+    expect(prefs.fitFor(48)).toBe(25);
+    expect(prefs.fitFor(4)).toBeNull();
+    expect((fake.readStored('layout') as { fits: object }).fits).toStrictEqual({ 16: 9, 48: 25 });
+    expect(reload().fitFor(16)).toBe(9);
+  });
+
+  it('a count has a width or a fit: remembering one forgets the other', () => {
+    const prefs = open();
+    prefs.rememberTileWidth(16, 240);
+
+    prefs.rememberFit(16, 9);
+    expect(prefs.tileWidthFor(16)).toBeNull();
+    expect(prefs.fitFor(16)).toBe(9);
+
+    prefs.rememberTileWidth(16, 260);
+    expect(prefs.fitFor(16)).toBeNull();
+    expect(prefs.tileWidthFor(16)).toBe(260);
+    expect(fake.readStored('layout')).toMatchObject({ tileWidths: { 16: 260 }, fits: {} });
+  });
+
+  it("forgetSize(count) drops that count's fit as well, and nothing of other counts", () => {
+    const prefs = open();
+    prefs.rememberFit(16, 9);
+    prefs.rememberFit(48, 25);
+
+    prefs.forgetSize(16);
+
+    expect(prefs.fitFor(16)).toBeNull();
+    expect(prefs.fitFor(48)).toBe(25);
+  });
+
+  it('refuses and drops fits that are not positive whole numbers; a stored width beats a fit', () => {
+    fake.seed({
+      layout: {
+        tileWidths: { 9: 300 },
+        fits: { 1: 0, 2: 2.5, 3: '4', 4: -1, 5: 4, x: 4, 9: 4 },
+      },
+    });
+    const prefs = open();
+
+    expect([1, 2, 3, 4, 5, 9].map((count) => prefs.fitFor(count))).toStrictEqual([
+      null,
+      null,
+      null,
+      null,
+      4,
+      null,
+    ]);
+    expect(prefs.tileWidthFor(9)).toBe(300);
+
+    prefs.rememberFit(8, 0);
+    prefs.rememberFit(8, 1.5);
+    prefs.rememberFit(0, 4);
+    expect(prefs.fitFor(8)).toBeNull();
+    expect(prefs.fitFor(0)).toBeNull();
+  });
+
+  it("two viewer tabs keep each other's fits", () => {
+    const first = open();
+    const second = open();
+
+    first.rememberFit(16, 9);
+    second.rememberFit(48, 25);
+
+    expect((fake.readStored('layout') as { fits: object }).fits).toStrictEqual({ 16: 9, 48: 25 });
+  });
+
+  it('remembering the fit already chosen writes nothing', () => {
+    const prefs = open();
+    prefs.rememberFit(16, 9);
+    prefs.rememberFit(16, 9);
+    expect(fake.writes).toHaveLength(1);
   });
 
   it('tileWidthFor is reactive, so a computed width follows rememberTileWidth', () => {
@@ -151,6 +235,7 @@ describe('LayoutPrefs', () => {
       hideEmpty: false,
       inspector: true,
       tileWidths: { 4: 300 },
+      fits: {},
     });
   });
 
@@ -167,6 +252,7 @@ describe('LayoutPrefs', () => {
       hideEmpty: false,
       inspector: false,
       tileWidths: { 4: 500, 16: 240 },
+      fits: {},
     });
     expect(second.tileWidthFor(16)).toBe(240);
   });

@@ -24,6 +24,11 @@
   width: 6rem;
 }
 
+/* Wide enough for its widest label, so the bar does not shift as "Fit" steps. */
+.fit {
+  min-width: 5.5rem;
+}
+
 .separator {
   flex: none;
   align-self: stretch;

@@ -79,8 +79,13 @@ describe('ViewerPage', () => {
   /** The channel field, while the "Go to channel" popover is open. */
   const channelField = (): HTMLInputElement | null =>
     dialog('Go to channel')?.querySelector('input[aria-label="Channel"]') ?? null;
-  /** The label a control is named by. */
-  const labelOf = (element: Element): string | null => element.getAttribute('aria-label');
+  /** A control's accessible name: its `aria-label`, else its text. */
+  const labelOf = (element: Element): string | null =>
+    element.getAttribute('aria-label') ?? element.textContent?.trim() ?? null;
+  /** "Fit", named by its label, which changes as it steps. */
+  const fitButton = (): HTMLButtonElement => toolbar().querySelector('button.fit')!;
+  const fitLabel = () => fitButton().textContent?.trim();
+  const storedLayout = () => storage.readStored('layout') as { tileWidths: object; fits: object };
   const slider = (): HTMLElement => toolbar().querySelector('[role="slider"]')!;
   const gridObserver = () => FakeResizeObserver.grid();
   const tileWidth = () =>
@@ -156,6 +161,18 @@ describe('ViewerPage', () => {
       await settle();
     }
     if (area !== null) await resize(area[0], area[1]);
+  }
+
+  /** The text of the tooltip "Fit" shows on mouse hover. */
+  async function fitTooltip(): Promise<string | undefined> {
+    fitButton().dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+    await settlePopover();
+    const text = document
+      .querySelector('[role="tooltip"]:not([data-state="closed"])')
+      ?.textContent?.trim();
+    fitButton().dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
+    await settlePopover();
+    return text;
   }
 
   async function navigate(url: string): Promise<void> {
@@ -291,19 +308,132 @@ describe('ViewerPage', () => {
     ).toEqual(['16']);
   });
 
-  it('Fit all forgets the width chosen for the displayed count, so all channels fit again', async () => {
+  it('Fit steps all → 9 → 4 → 1 → all for 16 channels, skipping presets at or above the count', async () => {
     await open('/viewer');
-    expect(button('Fit all').disabled).toBe(true);
-    expect(button('Fit all').getAttribute('neatTooltip')).toBe('Fit all');
+    // 16 channels in 1000×400: all fit at 167 px; 36, 25 and 16 are not below the count.
+    expect(fitLabel()).toBe('Fit all');
+    expect(tileWidth()).toBe('167px');
+    expect(await fitTooltip()).toBe('Next: fit 9 (Shift: back)');
+
+    const steps: [string | undefined, string][] = [];
+    for (let step = 0; step < 4; step++) {
+      await click(fitButton());
+      steps.push([fitLabel(), tileWidth()]);
+    }
+
+    // Sized so 9 fit: 227 px, bounded by the height (the grid then packs 4×3); so 4 fit: 348 px
+    // (2×2); so 1 fits: 711 px.
+    expect(steps).toEqual([
+      ['Fit 9', '227px'],
+      ['Fit 4', '348px'],
+      ['Fit 1', '711px'],
+      ['Fit all', '167px'],
+    ]);
+  });
+
+  it('Shift+click steps back, from all to the last preset', async () => {
+    await open('/viewer');
+
+    fitButton().dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await settle();
+    expect(fitLabel()).toBe('Fit 1');
+    expect(await fitTooltip()).toBe('Next: fit all (Shift: back)');
+
+    fitButton().dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await settle();
+    expect(fitLabel()).toBe('Fit 4');
+  });
+
+  it('a fit is stored per count as tiles per page, follows the area, and survives a reload', async () => {
+    await open('/viewer');
+    await click(fitButton());
+    expect(storedLayout()).toMatchObject({ tileWidths: {}, fits: { 16: 9 } });
+
+    // 9 per page in 600×400: 3×3 at 194 px, worked out again for the new area.
+    await resize(600, 400);
+    expect(tileWidth()).toBe('194px');
+
+    await leaveAndReturn('/viewer');
+    expect(fitLabel()).toBe('Fit 9');
+
+    // Four channels have no fit of their own.
+    await navigate('/viewer?src=0,1,2,3');
+    expect(fitLabel()).toBe('Fit all');
+  });
+
+  it('the slider replaces a fit with a width; Fit then shows no step and goes back to all', async () => {
+    await open('/viewer');
+    await click(fitButton());
 
     await press('ArrowRight', {}, slider());
-    expect(tileWidth()).toBe('168px');
-    expect(button('Fit all').disabled).toBe(false);
+    expect(fitLabel()).toBe('Fit');
+    expect(storedLayout()).toMatchObject({ tileWidths: { 16: 228 }, fits: {} });
 
-    await click(button('Fit all'));
+    await click(fitButton());
+    expect(fitLabel()).toBe('Fit all');
     expect(tileWidth()).toBe('167px');
-    expect((storage.readStored('layout') as { tileWidths: object }).tileWidths).toStrictEqual({});
-    expect(button('Fit all').disabled).toBe(true);
+    expect(storedLayout()).toMatchObject({ tileWidths: {}, fits: {} });
+  });
+
+  it('from a slider width, Shift+click goes to the last preset', async () => {
+    await open('/viewer');
+    await press('ArrowRight', {}, slider());
+
+    fitButton().dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await settle();
+
+    expect(fitLabel()).toBe('Fit 1');
+    expect(storedLayout()).toMatchObject({ tileWidths: {}, fits: { 16: 1 } });
+  });
+
+  it('leaves out presets that come out at the width of the step before them', async () => {
+    await open('/viewer');
+    // In 100×100, all 16, 9 and 4 are held at the kit's 64 px minimum; only 1 differs (100 px).
+    await resize(100, 100);
+
+    await click(fitButton());
+    expect(fitLabel()).toBe('Fit 1');
+    await click(fitButton());
+    expect(fitLabel()).toBe('Fit all');
+  });
+
+  it('Fit is disabled when there is nothing to step to', async () => {
+    await open('/viewer?src=3');
+    expect(fitLabel()).toBe('Fit all');
+    expect(fitButton().disabled).toBe(true);
+  });
+
+  it('with one channel and a slider width, Fit goes back to all', async () => {
+    await open('/viewer?src=3');
+    await press('ArrowLeft', {}, slider());
+    expect(fitLabel()).toBe('Fit');
+    expect(fitButton().disabled).toBe(false);
+    expect(await fitTooltip()).toBe('Next: fit all (Shift: back)');
+
+    await click(fitButton());
+
+    expect(fitLabel()).toBe('Fit all');
+    expect(fitButton().disabled).toBe(true);
+    expect(storedLayout()).toMatchObject({ tileWidths: {}, fits: {} });
+  });
+
+  it('a remembered fit the current area leaves out still steps to its neighbours', async () => {
+    storage.seed({ layout: { fits: { 16: 9 } } });
+    await open('/viewer');
+    // In 100×100 only all and 1 differ (see above); 9 is remembered but not a step.
+    await resize(100, 100);
+    expect(fitLabel()).toBe('Fit 9');
+
+    await click(fitButton());
+    expect(fitLabel()).toBe('Fit 1');
+  });
+
+  it('ignores a stored fit at or above the channel count', async () => {
+    storage.seed({ layout: { fits: { 16: 36 } } });
+    await open('/viewer');
+
+    expect(fitLabel()).toBe('Fit all');
+    expect(tileWidth()).toBe('167px');
   });
 
   it('shrinking the area keeps the selected channel on screen', async () => {
