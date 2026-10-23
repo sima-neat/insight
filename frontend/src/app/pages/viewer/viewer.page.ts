@@ -24,12 +24,9 @@ import {
   NeatInput,
   NeatPage,
   NeatPageToolbar,
-  NeatSegmented,
-  type NeatSegmentedOption,
   NeatSlider,
   NeatSwitch,
   type NeatTileArea,
-  type NeatTileAspect,
   NeatTileGrid,
   type NeatTileLayout,
   NeatTooltip,
@@ -53,11 +50,6 @@ import {
   ViewerState,
 } from '../../viewer/viewer-state';
 import { ViewerTile } from '../../viewer/viewer-tile';
-
-const SHAPES: readonly NeatSegmentedOption<NeatTileAspect>[] = [
-  { value: '16:9', label: '16:9', icon: 'aspect-wide' },
-  { value: '1:1', label: '1:1', icon: 'aspect-square' },
-];
 
 /** The narrowest tile the size slider offers, in CSS pixels; below it a stream is unreadable. */
 const MIN_TILE_WIDTH = 120;
@@ -100,7 +92,6 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
     NeatInput,
     NeatPage,
     NeatPageToolbar,
-    NeatSegmented,
     NeatSlider,
     NeatSwitch,
     NeatTileGrid,
@@ -124,7 +115,6 @@ export class ViewerPage {
   private readonly http = inject(HttpClient);
   private readonly destroyRef = inject(DestroyRef);
 
-  protected readonly shapes = SHAPES;
   protected readonly minTileWidth = MIN_TILE_WIDTH;
 
   private readonly params = toSignal(
@@ -204,7 +194,7 @@ export class ViewerPage {
     const space = this.space();
     // Any width does before the first measurement: the grid shows nothing until it has one.
     if (space === null) return MIN_TILE_WIDTH;
-    return fitAllTileWidth(space, count, this.prefs.aspect(), space.gap);
+    return fitAllTileWidth(space, count, space.gap);
   });
 
   /** The user has chosen a size for this many channels, so "Fit all" has one to forget. */
@@ -216,7 +206,7 @@ export class ViewerPage {
   protected readonly sliderMax = computed(() => {
     const space = this.space();
     if (space === null) return MIN_TILE_WIDTH;
-    return Math.max(MIN_TILE_WIDTH, fitAllTileWidth(space, 1, this.prefs.aspect(), space.gap));
+    return Math.max(MIN_TILE_WIDTH, fitAllTileWidth(space, 1, space.gap));
   });
 
   protected readonly channelRange = computed(() => {

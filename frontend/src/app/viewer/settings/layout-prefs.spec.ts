@@ -25,10 +25,9 @@ describe('LayoutPrefs', () => {
     return open();
   }
 
-  it('starts with 16:9 tiles, bars on, all channels and the inspector closed', () => {
+  it('starts with bars on, all channels and the inspector closed', () => {
     const prefs = open();
 
-    expect(prefs.aspect()).toBe('16:9');
     expect(prefs.bars()).toBe(true);
     expect(prefs.hideEmpty()).toBe(false);
     expect(prefs.inspector()).toBe(false);
@@ -36,21 +35,18 @@ describe('LayoutPrefs', () => {
 
   it('keeps every choice across a reload under one viewer key', () => {
     const prefs = open();
-    prefs.setAspect('1:1');
     prefs.setBars(false);
     prefs.setHideEmpty(true);
     prefs.setInspector(true);
     prefs.rememberTileWidth(16, 240);
 
     expect(fake.readStored('layout')).toStrictEqual({
-      aspect: '1:1',
       bars: false,
       hideEmpty: true,
       inspector: true,
       tileWidths: { 16: 240 },
     });
     const reloaded = reload();
-    expect(reloaded.aspect()).toBe('1:1');
     expect(reloaded.bars()).toBe(false);
     expect(reloaded.hideEmpty()).toBe(true);
     expect(reloaded.inspector()).toBe(true);
@@ -106,7 +102,6 @@ describe('LayoutPrefs', () => {
   it('drops stored widths that are not finite or below the kit minimum, and refuses to store them', () => {
     fake.seed({
       layout: {
-        aspect: 'wide',
         bars: 'yes',
         hideEmpty: 1,
         inspector: null,
@@ -123,7 +118,6 @@ describe('LayoutPrefs', () => {
     });
     const prefs = open();
 
-    expect(prefs.aspect()).toBe('16:9');
     expect(prefs.bars()).toBe(true);
     expect(prefs.hideEmpty()).toBe(false);
     expect(prefs.inspector()).toBe(false);
@@ -141,6 +135,25 @@ describe('LayoutPrefs', () => {
     expect(prefs.tileWidthFor(8)).toBeNull();
   });
 
+  it('a layout stored with aspect "1:1" keeps its other choices, and the next write stores no aspect', () => {
+    // Plan 2a stored the tile shape; tiles are 16:9 now, so the choice is dropped on the next write.
+    fake.seed({ layout: { aspect: '1:1', bars: false, tileWidths: { 4: 300 } } });
+    const prefs = open();
+
+    expect(prefs.bars()).toBe(false);
+    expect(prefs.tileWidthFor(4)).toBe(300);
+    expect(fake.writes).toStrictEqual([]);
+
+    prefs.setInspector(true);
+
+    expect(fake.readStored('layout')).toStrictEqual({
+      bars: false,
+      hideEmpty: false,
+      inspector: true,
+      tileWidths: { 4: 300 },
+    });
+  });
+
   it("two viewer tabs keep each other's choices: bars in one does not wipe widths from the other", () => {
     const first = open();
     const second = open();
@@ -150,7 +163,6 @@ describe('LayoutPrefs', () => {
     second.rememberTileWidth(4, 500);
 
     expect(fake.readStored('layout')).toStrictEqual({
-      aspect: '16:9',
       bars: false,
       hideEmpty: false,
       inspector: false,
@@ -161,7 +173,6 @@ describe('LayoutPrefs', () => {
 
   it('choosing what is already chosen writes nothing', () => {
     const prefs = open();
-    prefs.setAspect('16:9');
     prefs.setBars(true);
     prefs.setHideEmpty(false);
     prefs.setInspector(false);
@@ -173,8 +184,8 @@ describe('LayoutPrefs', () => {
   });
 
   it('runs on defaults and keeps changes for the session when storage throws or holds garbage', () => {
-    fake.seed({ layout: '{"aspect":' });
-    expect(open().aspect()).toBe('16:9');
+    fake.seed({ layout: '{"bars":' });
+    expect(open().bars()).toBe(true);
 
     fake.unavailable = true;
     const prefs = reload();

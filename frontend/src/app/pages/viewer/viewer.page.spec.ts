@@ -459,16 +459,6 @@ describe('ViewerPage', () => {
     expect(notice()).toBe('');
   });
 
-  it('arrow keys on the tile shape change the shape, not the page', async () => {
-    sixPerPage();
-    await open('/viewer');
-
-    await press('ArrowRight', {}, toolbar().querySelector('[role="radio"][aria-checked="true"]')!);
-
-    expect(storage.readStored('layout')).toMatchObject({ aspect: '1:1' });
-    expect(pageInput().value).toBe('1');
-  });
-
   it('falls back to all 80 channels when the channel limit cannot be read', async () => {
     storage.seed({ layout: { tileWidths: { 80: 300 } } });
     await open('/viewer', { limit: null });
@@ -528,14 +518,13 @@ describe('ViewerPage', () => {
     expect(button('Inspector').getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('switches the tile shape and stores it', async () => {
+  it('has no tile shape control, and a 1:1 that plan 2a stored fits 16:9 tiles', async () => {
+    storage.seed({ layout: { aspect: '1:1' } });
     await open('/viewer');
 
-    await click(toolbar().querySelector<HTMLElement>('[role="radio"][aria-checked="false"]')!);
-
-    expect(storage.readStored('layout')).toMatchObject({ aspect: '1:1' });
-    // 16 squares in 1000×400 fit at most 128 px wide (6 columns, 3 rows).
-    expect(tileWidth()).toBe('128px');
+    expect(toolbar().querySelector('[role="radio"]')).toBeNull();
+    // The same 167 px as for any 16:9 layout of 16 tiles in 1000×400 (not the 128 px of squares).
+    expect(tileWidth()).toBe('167px');
   });
 
   it('mode=dark applies dark without persisting it', async () => {

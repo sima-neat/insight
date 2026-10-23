@@ -1,10 +1,4 @@
 <ng-container *neatPageToolbar>
-  <neat-segmented
-    label="Tile shape"
-    [options]="shapes"
-    [value]="prefs.aspect()"
-    (valueChange)="prefs.setAspect($event)"
-  />
   <span class="field-label" aria-hidden="true">Size</span>
   <span class="size-field">
     <neat-slider
@@ -133,7 +127,6 @@
     </p>
     <neat-tile-grid
       [tileWidth]="tileWidth()"
-      [aspect]="prefs.aspect()"
       [count]="state.pageChannels().length"
       (layout)="onLayout($event)"
     >

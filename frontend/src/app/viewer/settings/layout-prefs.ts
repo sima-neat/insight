@@ -1,19 +1,16 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { NEAT_MIN_TILE_WIDTH, type NeatTileAspect } from '@sima/neat-ui';
+import { NEAT_MIN_TILE_WIDTH } from '@sima/neat-ui';
 import { ViewerStorage } from './storage';
 
 const LAYOUT = 'layout';
 
 interface Layout {
-  readonly aspect: NeatTileAspect;
   readonly bars: boolean;
   readonly hideEmpty: boolean;
   readonly inspector: boolean;
   /** The tile width chosen with the size slider, per displayed channel count. */
   readonly tileWidths: ReadonlyMap<number, number>;
 }
-
-const ASPECTS: readonly NeatTileAspect[] = ['16:9', '1:1'];
 
 function isTileWidth(width: unknown): width is number {
   return typeof width === 'number' && Number.isFinite(width) && width >= NEAT_MIN_TILE_WIDTH;
@@ -42,9 +39,6 @@ function parseLayout(raw: string | null): Layout {
     }
   }
   return {
-    aspect: ASPECTS.includes(stored['aspect'] as NeatTileAspect)
-      ? (stored['aspect'] as NeatTileAspect)
-      : '16:9',
     bars: flag(stored['bars'], true),
     hideEmpty: flag(stored['hideEmpty'], false),
     inspector: flag(stored['inspector'], false),
@@ -53,10 +47,11 @@ function parseLayout(raw: string | null): Layout {
 }
 
 /**
- * The Viewer's layout choices, stored under one key as they change: tile shape, tile bars, "Hide
- * empty", the inspector, and the tile size per displayed channel count (the spec's "remembered per
- * displayed channel count"). Provided by the Viewer page like the settings store; the choices
- * outlive the page through storage.
+ * The Viewer's layout choices, stored under one key as they change: tile bars, "Hide empty", the
+ * inspector, and the tile size per displayed channel count (the spec's "remembered per displayed
+ * channel count"). Provided by the Viewer page like the settings store; the choices outlive the
+ * page through storage. Tiles are always 16:9, so an `aspect` that plan 2a stored is not read and
+ * the next write leaves it out.
  */
 @Injectable()
 export class LayoutPrefs {
@@ -64,14 +59,9 @@ export class LayoutPrefs {
   private readonly layout = signal(parseLayout(this.storage.get(LAYOUT)));
   private readonly tileWidths = computed(() => this.layout().tileWidths);
 
-  readonly aspect = computed(() => this.layout().aspect);
   readonly bars = computed(() => this.layout().bars);
   readonly hideEmpty = computed(() => this.layout().hideEmpty);
   readonly inspector = computed(() => this.layout().inspector);
-
-  setAspect(aspect: NeatTileAspect): void {
-    this.choose('aspect', aspect);
-  }
 
   setBars(bars: boolean): void {
     this.choose('bars', bars);
@@ -114,7 +104,7 @@ export class LayoutPrefs {
   }
 
   /** Stores one choice; choosing what is already chosen writes nothing. */
-  private choose<K extends 'aspect' | 'bars' | 'hideEmpty' | 'inspector'>(
+  private choose<K extends 'bars' | 'hideEmpty' | 'inspector'>(
     key: K,
     value: Layout[K],
   ): void {
@@ -132,7 +122,6 @@ export class LayoutPrefs {
     this.storage.set(
       LAYOUT,
       JSON.stringify({
-        aspect: next.aspect,
         bars: next.bars,
         hideEmpty: next.hideEmpty,
         inspector: next.inspector,
