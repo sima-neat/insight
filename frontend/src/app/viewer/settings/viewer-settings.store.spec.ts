@@ -626,7 +626,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   });
 
   it('writing own settings stores exactly what is given', () => {
-    // Class rows have no writer until plan 2b, so the channel's row is stored up front.
+    // Class rows have no writer (class colour editing is deferred), so the channel's row is stored up front.
     const store = load({
       'settings:channel:1': {
         version: 10,

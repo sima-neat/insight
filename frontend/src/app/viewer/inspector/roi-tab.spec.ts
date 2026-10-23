@@ -381,6 +381,22 @@ describe('RoiTab', () => {
     expect(document.activeElement).toBe(radio('Exclusion'));
   });
 
+  it('channel 0 gives its own regions back too: the line and its button show, and Use global works', async () => {
+    // Channel 0 is falsy: a truthiness test on the scope would hide the line for the first channel.
+    await render(0, { 'roi:global': stored([SQUARE]), 'roi:channel:0': stored([TRIANGLE]) });
+    expect(flat(root().querySelector('.own'))).toBe('Own regions · Use global');
+    expect(lines()).toEqual(['Exclusion 1 Delete', 'Delete all…']);
+
+    const useGlobal = button('Use the global regions on channel 0')!;
+    expect(useGlobal).not.toBeNull();
+    await click(useGlobal);
+
+    expect(storage.readStored('roi:channel:0')).toBeNull();
+    expect(host().roi.own(0)()).toBeNull();
+    expect(lines()).toEqual(['Inclusion 1 Delete', 'Delete all…']);
+    expect(root().querySelector('.own')).toBeNull();
+  });
+
   it('a channel that inherits has no Own regions line; one with an empty list of its own has', async () => {
     await render(5, { 'roi:global': stored([SQUARE]) });
     expect(root().querySelector('.own')).toBeNull();

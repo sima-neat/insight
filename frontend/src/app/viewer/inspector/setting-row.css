@@ -39,15 +39,6 @@
   color: var(--muted-foreground);
 }
 
-/* The note's disclosure button takes this colour and size from its parent `.note`. */
-.hint,
-.scope-note,
-.note {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
-}
-
 .scope-row {
   display: flex;
   align-items: center;

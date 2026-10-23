@@ -12,15 +12,6 @@
   gap: var(--neat-space-2);
 }
 
-/* The inline buttons in the notes take this colour and size from their parent. */
-.hint,
-.empty,
-.note {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
-}
-
 /* The line of the region the pointer is on, on the list or on the preview. */
 .highlighted {
   background-color: var(--accent);

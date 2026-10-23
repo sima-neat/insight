@@ -17,6 +17,7 @@ import {
   NeatLine,
   NeatLineEnd,
   NeatLineList,
+  NeatNote,
   NeatSlider,
   NeatSwitch,
   NeatTooltip,
@@ -88,6 +89,7 @@ export function settingCount(count: number): string {
     NeatLine,
     NeatLineEnd,
     NeatLineList,
+    NeatNote,
     NeatSlider,
     NeatSwitch,
     NeatTooltip,
@@ -152,12 +154,12 @@ export function settingCount(count: number): string {
         </div>
       }
       @if (setting.hint) {
-        <p class="hint" [id]="hintId()">{{ setting.hint }}</p>
+        <p neatNote [id]="hintId()">{{ setting.hint }}</p>
       }
     }
     @if (overrides()) {
       <div class="scope-row">
-        <p class="scope-note" [id]="noteId()">
+        <p neatNote [id]="noteId()">
           <span class="marker">overrides global</span> · Global: {{ globalText() }}
         </p>
         <button
@@ -175,7 +177,7 @@ export function settingCount(count: number): string {
     }
     @if (overriddenOn().length > 0) {
       <div class="overrides">
-        <p class="note">
+        <p neatNote>
           <button
             neatInlineButton
             type="button"

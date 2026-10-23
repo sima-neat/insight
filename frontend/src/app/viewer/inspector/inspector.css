@@ -65,12 +65,6 @@
   font-weight: 600;
 }
 
-.note {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
-}
-
 .footer {
   display: flex;
   justify-content: flex-end;

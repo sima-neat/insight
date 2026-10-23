@@ -34,12 +34,6 @@
  * Popovers. Their content sits in the kit's panel, which stacks it with a gap and an inset; only
  * what the panel does not lay out is set here.
  */
-.hint {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
-}
-
 .option {
   display: flex;
   align-items: center;

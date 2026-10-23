@@ -578,6 +578,14 @@ test.describe('a deployed build with the test feed on channel 0', () => {
     await inspector.getByRole('button', { name: 'Delete Inclusion 1' }).click();
     await expect(row).toHaveCount(0);
     await expect(inspector.getByText('No regions.')).toBeVisible();
+
+    // Channel 0 now has a list of its own (an empty one), and can give it back like any channel.
+    const useGlobal = inspector.getByRole('button', {
+      name: 'Use the global regions on channel 0',
+    });
+    await expect(useGlobal).toBeVisible();
+    await useGlobal.click();
+    await expect(useGlobal).toHaveCount(0);
   });
 
   test('stopping the feed turns the tile "stopped" within 3 s; restarting plays again without reload', async ({

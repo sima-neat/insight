@@ -858,6 +858,39 @@ describe('ViewerInspector', () => {
       expect(editor()).toBeNull();
     });
 
+    it('the preview filters by the regions the editor shows, not by the backdrop channel’s own', async () => {
+      const points = [
+        { x: 0.1, y: 0.1 },
+        { x: 0.9, y: 0.1 },
+        { x: 0.5, y: 0.9 },
+      ];
+      const global = [{ type: 'inclusion', points }];
+      const own = [{ type: 'exclusion', points }];
+      storage.seed({
+        'roi:global': { version: 1, regions: global },
+        'roi:channel:0': { version: 1, regions: own },
+      });
+      await open();
+      await click(toolbarButton('Inspector'));
+      await click(tab('ROI'));
+
+      // All channels, drawn on channel 0, which has a list of its own: the editor shows the global one.
+      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(editor()!.regions()).toStrictEqual(global);
+      expect(previewTile()!.settings().roi).toStrictEqual(global);
+      // The grid tile of that channel still filters by its own regions.
+      expect(gridTile(0).settings().roi).toStrictEqual(own);
+
+      // A selected channel: its own list, which is also what the editor shows.
+      await click(tileElement(0));
+      expect(editor()!.regions()).toStrictEqual(own);
+      expect(previewTile()!.settings().roi).toStrictEqual(own);
+
+      // Other tabs show no editor, so the preview keeps the channel’s effective regions.
+      await click(tab('General'));
+      expect(previewTile()!.settings().roi).toStrictEqual(own);
+    });
+
     it('drawMode resets to Off when the channel or tab changes', async () => {
       await open();
       await inspect(2);

@@ -13,7 +13,15 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
-import { NeatButton, NeatConfirm, NeatIcon, NeatTab, NeatTabs, NeatTooltip } from '@sima/neat-ui';
+import {
+  NeatButton,
+  NeatConfirm,
+  NeatIcon,
+  NeatNote,
+  NeatTab,
+  NeatTabs,
+  NeatTooltip,
+} from '@sima/neat-ui';
 import {
   lateNoticeDetails,
   type NeatFrameStats,
@@ -208,6 +216,7 @@ function describeLateness(reading: LatenessReading | null): string {
     LateNotice,
     NeatButton,
     NeatIcon,
+    NeatNote,
     NeatRoiEditor,
     NeatTab,
     NeatTabs,
@@ -357,9 +366,15 @@ export class ViewerInspector {
     return {
       channel,
       connection,
-      // The editor draws the regions on the ROI tab; the tile's overlay would draw them twice.
+      // The editor draws the regions on the ROI tab; the tile's overlay would draw them twice. The
+      // tile filters by the regions the editor shows (on "All channels" the global ones, even where
+      // the backdrop channel has a list of its own), not by what the channel resolves to.
       settings: this.roiOpen()
-        ? { ...settings, general: { ...settings.general, showRoi: false } }
+        ? {
+            ...settings,
+            general: { ...settings.general, showRoi: false },
+            roi: this.editable(),
+          }
         : settings,
       retentionMs: sync.metadataRetentionMs,
     };

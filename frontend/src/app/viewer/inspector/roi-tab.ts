@@ -17,6 +17,7 @@ import {
   NeatLine,
   NeatLineEnd,
   NeatLineList,
+  NeatNote,
   NeatNumberField,
   NeatSegmented,
   type NeatSegmentedOption,
@@ -61,6 +62,7 @@ function listChannels(channels: readonly number[]): string {
     NeatLine,
     NeatLineEnd,
     NeatLineList,
+    NeatNote,
     NeatNumberField,
     NeatRoiSwatch,
     NeatSegmented,
@@ -81,7 +83,7 @@ function listChannels(channels: readonly number[]): string {
       <span class="label" aria-hidden="true">Draw</span>
       <neat-segmented label="Draw" [options]="drawModes" [(value)]="drawMode" />
     </div>
-    <p class="hint">
+    <p neatNote class="hint">
       @if (drawMode() === 'off') {
         Regions filter what the viewer shows; the pipeline still detects everything.
       } @else {
@@ -89,10 +91,11 @@ function listChannels(channels: readonly number[]): string {
       }
     </p>
     @if (rows().length === 0) {
-      <p class="empty">No regions.</p>
+      <p neatNote class="empty">No regions.</p>
     } @else {
       <!-- "regions", "delete" and "delete-all" carry no styles: they are hooks, for remove() to find
-           the buttons and for the specs and e2e tests to find the list. -->
+           the buttons and for the specs and e2e tests to find the list. "hint", "empty", "own" and
+           "owners" are hooks of the same kind, for the specs. -->
       <ul neatLineList class="regions">
         @for (row of rows(); track $index) {
           <li
@@ -124,21 +127,23 @@ function listChannels(channels: readonly number[]): string {
         </li>
       </ul>
     }
-    @if (ownChannel(); as channel) {
-      <p class="note own">
+    <!-- Channel 0 is a channel: test against null, not for truthiness. -->
+    @let own = ownChannel();
+    @if (own !== null) {
+      <p neatNote class="own">
         Own regions ·
         <button
           neatInlineButton
           type="button"
-          [attr.aria-label]="'Use the global regions on channel ' + channel"
-          (click)="useGlobal(channel)"
+          [attr.aria-label]="'Use the global regions on channel ' + own"
+          (click)="useGlobal(own)"
         >
           Use global
         </button>
       </p>
     }
     @if (ownersText(); as text) {
-      <p class="note owners">{{ text }}</p>
+      <p neatNote class="owners">{{ text }}</p>
     }
     @for (setting of settings; track setting.id) {
       <app-setting-row [scope]="scope()" [setting]="setting" />

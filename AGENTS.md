@@ -90,7 +90,7 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 700 kB, as in the kit showcase. The initial bundle measured 694 kB raw with kit 0.5.2 (main
+  at 700 kB, as in the kit showcase. The initial bundle measured 694 kB raw with kit 0.5.3 (main
   618 kB, styles 76 kB), most of it the kit's shell, the confirmation dialog and Angular with its
   router, so the warning leaves little headroom on purpose; the 1 MB error ceiling stays.
   (`angular.json` cannot hold comments, so the reason lives here.) The kit's video code is imported from
@@ -101,7 +101,10 @@ merging.
   `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the matching frames;
   `neat-tile-grid` packs the tiles.
   The app connects, in `src/app/viewer/`: `vf/` (a `VfConnection` per channel, via `/api/vf/offer`),
-  `settings/` (overlay settings, layout choices), `viewer-tile.ts` (joins both to a kit tile) and
+  `settings/` (overlay settings, layout choices, and the regions of interest in `RoiStore`, which
+  has its own storage names, `roi:global` and `roi:channel:<n>`; regions are display-only and never
+  leave the browser), `viewer-tile.ts` (joins both to a kit tile), `channel-playback.ts`
+  (`ChannelPlayback`: which grid tiles are playing, for the inspector's ROI backdrop) and
   `inspector/`. The page, `src/app/pages/viewer/`, owns them while shown: channels, paging, toolbar.
   Leaving it closes every connection; `viewer-session.ts` (root-provided) keeps its page and
   selection for the next visit to the same link, and its inspector tab for any.
