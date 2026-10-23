@@ -90,9 +90,10 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 700 kB, as in the kit showcase, because the kit's shell with Angular's router already brings
-  the placeholder app to about 490 kB raw; the 1 MB error ceiling stays. (`angular.json` cannot
-  hold comments, so the reason lives here.) The kit's video code is imported from
+  at 700 kB, as in the kit showcase. The initial bundle measured 689 kB raw with kit 0.5.0 (main
+  613 kB, styles 76 kB), most of it the kit's shell, the confirmation dialog and Angular with its
+  router, so the warning leaves little headroom on purpose; the 1 MB error ceiling stays.
+  (`angular.json` cannot hold comments, so the reason lives here.) The kit's video code is imported from
   `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and stays out of the
   initial bundle; `npm run check:bundle` (after a build, and in CI) fails if it leaks into it.
 - **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`; the

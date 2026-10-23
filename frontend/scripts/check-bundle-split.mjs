@@ -16,14 +16,31 @@ const MARKER = 'neat-video-tile';
 const dist = process.argv[2] ?? 'dist';
 
 // The initial chunks are what index.html loads on its own: the entry script and the chunks it
-// preloads.
+// preloads. Tags are read attribute by attribute, so neither the attribute order nor the quote
+// style of the build output matters.
+function attributes(tag) {
+  const found = {};
+  for (const [, name, doubleQuoted, singleQuoted, bare] of tag.matchAll(
+    /\s([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g,
+  )) {
+    found[name.toLowerCase()] = doubleQuoted ?? singleQuoted ?? bare ?? '';
+  }
+  return found;
+}
+
 const html = readFileSync(join(dist, 'index.html'), 'utf8');
-const initial = new Set(
-  [
-    ...html.matchAll(/<script[^>]*\ssrc="([^"]+\.js)"/g),
-    ...html.matchAll(/<link[^>]*rel="modulepreload"[^>]*\shref="([^"]+\.js)"/g),
-  ].map((match) => match[1]),
-);
+const initial = new Set();
+for (const [tag] of html.matchAll(/<(?:script|link)\s[^>]*>/gi)) {
+  const { src, href, rel } = attributes(tag);
+  const file = tag.toLowerCase().startsWith('<script')
+    ? src
+    : rel === 'modulepreload'
+      ? href
+      : null;
+  if (file?.endsWith('.js')) {
+    initial.add(file);
+  }
+}
 if (initial.size === 0) {
   console.error(`No initial scripts found in ${join(dist, 'index.html')}.`);
   process.exit(1);
