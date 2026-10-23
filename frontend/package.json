@@ -22,7 +22,7 @@
     "@angular/forms": "~22.2.0",
     "@angular/platform-browser": "~22.2.0",
     "@angular/router": "~22.2.0",
-    "@sima/neat-ui": "file:vendor/sima-neat-ui-0.4.0.tgz",
+    "@sima/neat-ui": "file:vendor/sima-neat-ui-0.4.1.tgz",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },
