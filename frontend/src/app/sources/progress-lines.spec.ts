@@ -1,9 +1,12 @@
 import {
   catalogProgress,
+  failureText,
   isProgressFailure,
+  mergePrepareProgress,
   prepareProgress,
   uploadProgress,
   youtubeProgress,
+  type Progress,
 } from './progress-lines';
 
 describe('uploadProgress', () => {
@@ -314,6 +317,10 @@ describe('failure lines', () => {
     });
   });
 
+  it('prepare: gives a bare Error line a message', () => {
+    expect(prepareProgress('Error:')).toEqual({ failed: 'The server reported an error.' });
+  });
+
   it('trims the line it reports', () => {
     expect(catalogProgress('  Catalog import failed: boom \r')).toEqual({
       failed: 'Catalog import failed: boom',
@@ -323,5 +330,113 @@ describe('failure lines', () => {
   it('tells a failure from progress', () => {
     expect(isProgressFailure({ failed: 'x' })).toBe(true);
     expect(isProgressFailure({ title: 'x', detail: '', percent: null })).toBe(false);
+  });
+});
+
+describe('mergePrepareProgress', () => {
+  const encoding = 'Encoding a/clip.mp4 at 15 fps (libx264)...';
+
+  it('keeps the encoding title and encoder when a progress line arrives', () => {
+    const started = mergePrepareProgress(null, encoding);
+    expect(started).toEqual({
+      title: 'Encoding 15 fps rendition…',
+      detail: 'libx264',
+      percent: null,
+    });
+
+    expect(mergePrepareProgress(started as Progress, 'progress 12.5/60.0')).toEqual({
+      title: 'Encoding 15 fps rendition…',
+      detail: 'libx264',
+      percent: 20,
+    });
+  });
+
+  it('keeps following the percent through later progress lines', () => {
+    let state = mergePrepareProgress(null, encoding);
+    state = mergePrepareProgress(state as Progress, 'progress 12.5/60.0');
+    state = mergePrepareProgress(state as Progress, 'progress 30.0/60.0');
+    expect(state).toMatchObject({ title: 'Encoding 15 fps rendition…', percent: 50 });
+  });
+
+  it('shows a progress line as it is when no encoding line came first', () => {
+    expect(mergePrepareProgress(null, 'progress 12.5/60.0')).toEqual(
+      prepareProgress('progress 12.5/60.0'),
+    );
+    const waiting = mergePrepareProgress(null, 'Waiting for another rendition to finish encoding…');
+    expect(mergePrepareProgress(waiting as Progress, 'progress 1.0/60.0')).toEqual(
+      prepareProgress('progress 1.0/60.0'),
+    );
+  });
+
+  it('replaces the display for any other line, and reports failures', () => {
+    const encoding15 = mergePrepareProgress(null, encoding) as Progress;
+    expect(mergePrepareProgress(encoding15, 'Rendition ready: .renditions/a.mp4')).toEqual({
+      title: 'Rendition ready',
+      detail: '.renditions/a.mp4',
+      percent: null,
+    });
+    expect(mergePrepareProgress(encoding15, 'Error: boom')).toEqual({ failed: 'boom' });
+  });
+
+  it('leaves the display as it was for a blank line', () => {
+    const encoding15 = mergePrepareProgress(null, encoding) as Progress;
+    expect(mergePrepareProgress(encoding15, '')).toBe(encoding15);
+    expect(mergePrepareProgress(null, '')).toBeNull();
+  });
+});
+
+describe('failureText', () => {
+  it('is null when nothing failed', () => {
+    expect(
+      failureText(['Preparing file 1/1: a.mp4', 'Optimized a.mp4: H.264', 'Upload complete.']),
+    ).toBeNull();
+    expect(failureText([])).toBeNull();
+  });
+
+  it('gives a one-line failure as it is', () => {
+    expect(
+      failureText(['Uploaded to /media/a.mp4', 'FFmpeg is not installed; keeping original a.mp4.']),
+    ).toBe('FFmpeg is not installed; keeping original a.mp4.');
+  });
+
+  it('adds the diagnostic lines the server prints under a failure', () => {
+    expect(
+      failureText([
+        'Downloading YouTube video: 12%',
+        'YouTube import failed: ERROR: unable to download video data',
+        'HTTP Error 403: Forbidden',
+        '[download] giving up after 3 retries',
+      ]),
+    ).toBe(
+      'YouTube import failed: ERROR: unable to download video data\nHTTP Error 403: Forbidden\n[download] giving up after 3 retries',
+    );
+  });
+
+  it('stops at the next line the server prints, so an archive carries on past a failed file', () => {
+    expect(
+      failureText([
+        'Preparing file 1/2: a.mp4',
+        'FFmpeg conversion failed for a.mp4: moov atom not found',
+        'Invalid data found when processing input',
+        'Preparing file 2/2: b.mp4',
+        'FFmpeg conversion failed for b.mp4: second',
+        'Upload complete.',
+      ]),
+    ).toBe(
+      'FFmpeg conversion failed for a.mp4: moov atom not found\nInvalid data found when processing input',
+    );
+  });
+
+  it('gives an Error line without its prefix', () => {
+    expect(
+      failureText(['Encoding a.mp4 at 15 fps (libx264)...', 'Error: ffmpeg exited with status 1']),
+    ).toBe('ffmpeg exited with status 1');
+    expect(failureText(['Error:'])).toBe('The server reported an error.');
+  });
+
+  it('ignores blank lines and surrounding whitespace', () => {
+    expect(failureText(['', '  Catalog import failed: boom \r', ''])).toBe(
+      'Catalog import failed: boom',
+    );
   });
 });

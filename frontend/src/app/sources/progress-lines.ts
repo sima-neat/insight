@@ -7,8 +7,21 @@
  * and these parsers are the only way to tell it from a success. Every line the server prints on a
  * failure is matched; #170 matched only two of the upload ones and showed the rest as success.
  *
- * Titles carry no scope or subject ("1/3", the file's name): the caller knows both and the
- * server's own lines carry what it knows.
+ * What a caller must do, because the lines alone do not say it:
+ * - **A `failed` line is not the end.** The server keeps going: an archive upload moves on to its
+ *   next file after `FFmpeg conversion failed` and still prints `Upload complete.`. Read to the
+ *   stream's `done`, record the first failure per request, and never unsubscribe on `failed`:
+ *   unsubscribing makes the server stop its subprocesses and abandon the remaining files.
+ * - **A failure spans several lines.** yt-dlp and FFmpeg failures print up to four diagnostic
+ *   lines after the first, which would parse as ordinary progress and overwrite a failure shown
+ *   from the first line. Collect the request's lines and take the full message from
+ *   `failureText` once the stream is done.
+ * - **A failed upload may still have saved the file.** The FFmpeg and FFprobe "not installed;
+ *   keeping original" lines fail the upload (the file is saved but not prepared for streaming).
+ *   Refresh the media library after every upload, whatever its outcome.
+ * - **Titles carry no scope or subject** ("1/3", the file's name): the caller knows both, and the
+ *   server's own lines carry what it knows. Prepare lines are the exception that needs state:
+ *   merge them with `mergePrepareProgress`.
  */
 
 export interface Progress {
@@ -26,6 +39,9 @@ export interface ProgressFailure {
 export function isProgressFailure(result: Progress | ProgressFailure): result is ProgressFailure {
   return 'failed' in result;
 }
+
+/** What a bare `Error:` line, which carries no message, fails with. */
+const EMPTY_ERROR = 'The server reported an error.';
 
 const BYTES_PER_MB = 1024 * 1024;
 
@@ -56,7 +72,10 @@ const OPTIMIZING_ELAPSED = /^Optimizing .*?:\s+(.+ processed)$/;
 const OPTIMIZING_START = /^Optimizing (.+?) for low-latency/;
 const OPTIMIZED = /^Optimized (.+?):/;
 
-/** `POST /api/upload/media`. */
+/**
+ * `POST /api/upload/media`. A failed line does not mean the file is gone: see the header on
+ * refreshing the library and on reading on after a failure.
+ */
 export function uploadProgress(line: string): Progress | ProgressFailure | null {
   return parseLine(line, UPLOAD_FAILURE, (text) => {
     const percent = OPTIMIZING_PERCENT.exec(text);
@@ -176,11 +195,15 @@ const PREPARE_ERROR = /^Error:\s*/;
  * `POST /api/mediasrc/prepare`. A line that is not one of the known ones is the title as it is
  * (the "waiting" and "no rendition needed" lines). An `Error:` line fails with its message
  * alone: the caller words the failure itself ("Encoding src3 at 15 fps failed ...").
+ *
+ * This parser keeps no state, but #170's display did: a `progress N/T` line only updated the
+ * numbers and left the "Encoding 15 fps rendition…" title from the line before. Feed the lines
+ * through `mergePrepareProgress` to get that.
  */
 export function prepareProgress(line: string): Progress | ProgressFailure | null {
   const text = line.trim();
   if (!text) return null;
-  if (PREPARE_ERROR.test(text)) return { failed: text.replace(PREPARE_ERROR, '') };
+  if (PREPARE_ERROR.test(text)) return { failed: text.replace(PREPARE_ERROR, '') || EMPTY_ERROR };
 
   const progress = PREPARE_PROGRESS.exec(text);
   if (progress) {
@@ -203,4 +226,58 @@ export function prepareProgress(line: string): Progress | ProgressFailure | null
       return { title, detail: after(text, `${title}:`), percent: null };
   }
   return { title: text, detail: '', percent: null };
+}
+
+const PREPARE_PROGRESS_TITLE = 'Encoding rendition…';
+
+/**
+ * The prepare display after `line`, given what it showed before (null at the start). A bare
+ * `progress N/T` line keeps the earlier "Encoding 15 fps rendition…" title and its encoder detail
+ * and takes only the new percent, as #170 did; every other line replaces the display. A blank
+ * line leaves it as it was.
+ */
+export function mergePrepareProgress(
+  previous: Progress | null,
+  line: string,
+): Progress | ProgressFailure | null {
+  const next = prepareProgress(line);
+  if (next === null) return previous;
+  if (
+    !isProgressFailure(next) &&
+    next.title === PREPARE_PROGRESS_TITLE &&
+    previous?.title.startsWith('Encoding ') &&
+    previous.title !== PREPARE_PROGRESS_TITLE
+  ) {
+    return { ...previous, percent: next.percent };
+  }
+  return next;
+}
+
+// Lines the server prints that are not the diagnostics of a failure before them.
+const SERVER_LINE =
+  /^(?:Preparing file |Optimizing |Optimized |Keeping |Uploaded to |Saved |Archive extracted\.|Upload complete\.|No MP4 files found|Downloading |Capturing |Preparing YouTube |Validating YouTube |YouTube import complete\.|Catalog import complete\.|Encoding |progress |Reusing rendition|Rendition ready|Waiting for another rendition|Source frame rate matches)/;
+
+const isFailureLine = (text: string): boolean =>
+  UPLOAD_FAILURE.test(text) ||
+  CATALOG_FAILURE.test(text) ||
+  YOUTUBE_FAILURE.test(text) ||
+  PREPARE_ERROR.test(text);
+
+/**
+ * The message of the first failure in the lines of one finished response, or null when none
+ * failed. It includes the diagnostic lines the server prints under a failure (yt-dlp's and
+ * FFmpeg's last four), up to the next line the server prints itself, joined by line breaks. An
+ * `Error:` line gives its message without the prefix, as `prepareProgress` does.
+ */
+export function failureText(lines: readonly string[]): string | null {
+  const texts = lines.map((line) => line.trim()).filter(Boolean);
+  const first = texts.findIndex(isFailureLine);
+  if (first < 0) return null;
+
+  const message = [texts[first].replace(PREPARE_ERROR, '') || EMPTY_ERROR];
+  for (const text of texts.slice(first + 1)) {
+    if (SERVER_LINE.test(text) || isFailureLine(text)) break;
+    message.push(text);
+  }
+  return message.join('\n');
 }

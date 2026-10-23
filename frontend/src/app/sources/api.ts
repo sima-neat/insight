@@ -99,7 +99,11 @@ export interface Slot {
   /** Transports the detected codec allows. */
   allowed_transports: SlotTransport[];
   urls: SlotUrls;
-  readers: SlotReader[];
+  /**
+   * Clients reading the slot. Absent on a webcam slot that no external publisher holds: the
+   * server sets it only on the file, pulled and externally held branches.
+   */
+  readers?: SlotReader[];
   external?: SlotExternal;
   pull?: SlotPull;
   /** Requested output frame rate; null streams at the source rate. */

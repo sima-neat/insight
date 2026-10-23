@@ -1,10 +1,16 @@
-import { HttpClient, HttpEventType, provideHttpClient } from '@angular/common/http';
+import {
+  HttpClient,
+  HttpEventType,
+  provideHttpClient,
+  withInterceptors,
+} from '@angular/common/http';
 import {
   HttpTestingController,
   provideHttpClientTesting,
   type TestRequest,
 } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { throwError } from 'rxjs';
 import { postStreamedText, splitLines, StreamRequestError, type StreamEvent } from './stream-lines';
 
 describe('splitLines', () => {
@@ -202,7 +208,7 @@ describe('postStreamedText', () => {
     request.error(new ProgressEvent('error'));
 
     expect(events).toEqual([{ kind: 'line', text: 'Encoding a.mp4 at 15 fps (libx264)...' }]);
-    expect(error).toMatchObject({ status: 0, body: null });
+    expect(error).toMatchObject({ status: 0, body: null, message: 'Could not reach the server.' });
   });
 
   it('aborts the request when the subscriber unsubscribes', () => {
@@ -229,5 +235,21 @@ describe('postStreamedText', () => {
       { kind: 'line', text: 'b' },
     ]);
     expect(second.filter((event) => event.kind === 'line')).toEqual([{ kind: 'line', text: 'c' }]);
+  });
+});
+
+describe('postStreamedText with an error that is not an HTTP answer', () => {
+  it('passes it on as it is', () => {
+    const boom = new Error('boom');
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(withInterceptors([() => throwError(() => boom)]))],
+    });
+    let error: unknown;
+
+    postStreamedText(TestBed.inject(HttpClient), '/api/x', {}).subscribe({
+      error: (e: unknown) => (error = e),
+    });
+
+    expect(error).toBe(boom);
   });
 });

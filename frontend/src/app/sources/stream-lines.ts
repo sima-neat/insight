@@ -87,7 +87,12 @@ export function postStreamedText(
               return [];
           }
         }),
-        catchError((failure: HttpErrorResponse) => throwError(() => requestError(failure))),
+        // Anything that is not an HTTP answer (an interceptor's error, say) is not ours to reword.
+        catchError((failure: unknown) =>
+          throwError(() =>
+            failure instanceof HttpErrorResponse ? requestError(failure) : failure,
+          ),
+        ),
       );
   });
 }
