@@ -35,8 +35,11 @@
             "production": {
               "budgets": [
                 {
+                  // The confirmation dialog (NeatConfirm: the CDK dialog and brain's alert dialog)
+                  // lives in the main bundle and adds about 30 kB; the kit's secondary entry points
+                  // (planned for plan 2b) are the real fix for what the barrel pulls in.
                   "type": "initial",
-                  "maximumWarning": "700kB",
+                  "maximumWarning": "750kB",
                   "maximumError": "1MB"
                 },
                 {

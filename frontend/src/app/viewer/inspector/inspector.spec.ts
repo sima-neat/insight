@@ -4,6 +4,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import {
+  NeatConfirm,
   type NeatFrameStats,
   NeatIcon,
   type NeatMetadataSnapshot,
@@ -110,6 +111,47 @@ describe('ViewerInspector', () => {
       .find((element) => element.textContent?.trim() === term)
       ?.nextElementSibling?.textContent?.trim();
 
+  const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+  /** The dialog's title, message and buttons, in order. */
+  const dialogText = () =>
+    [...(dialog()?.querySelectorAll('h2, p, button') ?? [])]
+      .map((part) => part.textContent?.trim())
+      .join(' ');
+  const footerButton = () =>
+    [...inspector().querySelectorAll<HTMLButtonElement>('button')].find((element) =>
+      element.textContent?.trim().startsWith('Reset all channels to global'),
+    );
+  /** The Go to channel popover, which the page's `/` shortcut opens. */
+  const channelJump = () => document.querySelector('[role="dialog"][aria-label="Go to channel"]');
+
+  /** Lets a dialog open or close: it moves focus after rendering and closes a frame later. */
+  async function settleDialog(): Promise<void> {
+    for (let turn = 0; turn < 3; turn++) {
+      await new Promise((resolve) => setTimeout(resolve));
+      await settle();
+    }
+  }
+
+  /** Presses the open dialog's button and waits for it to close. */
+  async function answer(label: string): Promise<void> {
+    await settleDialog();
+    [...dialog()!.querySelectorAll('button')]
+      .find((element) => element.textContent?.trim() === label)!
+      .click();
+    await settleDialog();
+  }
+
+  /** Four settings on three channels: what the reset-all question counts. */
+  const FOUR_ON_THREE = {
+    'settings:global': { version: 10, general: { lineWidth: 4 } },
+    'settings:channel:1': { version: 10, general: { lineWidth: 6, videoSyncBufferMs: 900 } },
+    'settings:channel:2': {
+      version: 10,
+      types: { 'object-detection': { confidenceThreshold: 0.5 } },
+    },
+    'settings:channel:5': { version: 10, types: { segmentation: { visible: false } } },
+  };
+
   /** Opens the Viewer with eight channels in a 1000×400 grid. */
   async function open(): Promise<void> {
     fixture = TestBed.createComponent(ViewerShell);
@@ -193,7 +235,9 @@ describe('ViewerInspector', () => {
 
     const confidence = row('Confidence threshold', 'Object detection');
     expect(flat(confidence)).toContain('Overridden on 2 channels');
+    await click(buttonIn(confidence, 'Overridden on 2 channels'));
     await click(buttonIn(confidence, 'Reset on 2 channels'));
+    await answer('Reset');
     expect(storage.readStored('settings:channel:2')).toBeNull();
     expect(storage.readStored('settings:channel:5')).toBeNull();
     expect(gridTile(2).settings().types['object-detection'].confidenceThreshold).toBe(0);
@@ -250,6 +294,145 @@ describe('ViewerInspector', () => {
     expect(gridTile(2).settings().types.tracking.visible).toBe(false);
     expect(gridTile(3).settings().types.tracking.visible).toBe(true);
     expect(previewTile()!.settings().types.tracking.visible).toBe(false);
+  });
+
+  it('has no reset-all footer while no channel holds a value', async () => {
+    await open();
+    await click(toolbarButton('Inspector'));
+
+    expect(footerButton()).toBeUndefined();
+  });
+
+  it('the footer asks with "4 settings on 3 channels go back…", and only on All channels', async () => {
+    storage.seed(FOUR_ON_THREE);
+    await open();
+    await click(toolbarButton('Inspector'));
+    const ask = vi.spyOn(TestBed.inject(NeatConfirm), 'ask');
+
+    footerButton()!.click();
+    await settleDialog();
+
+    expect(ask).toHaveBeenCalledExactlyOnceWith({
+      title: 'Reset all channels to global?',
+      message: "4 settings on 3 channels go back to the global values. This can't be undone.",
+      confirmLabel: 'Reset',
+      tone: 'danger',
+    });
+    expect(dialogText()).toBe(
+      "Reset all channels to global? 4 settings on 3 channels go back to the global values. This can't be undone. Cancel Reset",
+    );
+    await answer('Cancel');
+
+    await click(tileElement(1));
+    expect(title()).toBe('Channel 1');
+    expect(footerButton()).toBeUndefined();
+  });
+
+  it('the footer goes with the last channel value and comes back with the next', async () => {
+    storage.seed({ 'settings:channel:3': { version: 10, general: { lineWidth: 6 } } });
+    await open();
+    await click(toolbarButton('Inspector'));
+    await click(tab('General'));
+    expect(footerButton()).toBeDefined();
+
+    await click(buttonIn(row('Line width'), 'Overridden on 1 channel'));
+    await click(buttonIn(row('Line width'), 'Use global'));
+    expect(footerButton()).toBeUndefined();
+
+    await click(tileElement(3));
+    await type(field('Video sync buffer'), '800');
+    await press('Escape', tileElement(3));
+    expect(title()).toBe('All channels');
+    expect(footerButton()).toBeDefined();
+  });
+
+  it('asks in the singular for one setting on one channel', async () => {
+    storage.seed({ 'settings:channel:3': { version: 10, general: { lineWidth: 6 } } });
+    await open();
+    await click(toolbarButton('Inspector'));
+
+    footerButton()!.click();
+    await settleDialog();
+
+    expect(dialogText()).toContain(
+      "1 setting on 1 channel goes back to the global values. This can't be undone.",
+    );
+  });
+
+  it('asks with the plural verb for several settings on one channel', async () => {
+    storage.seed({
+      'settings:channel:3': { version: 10, general: { lineWidth: 6, videoSyncBufferMs: 900 } },
+    });
+    await open();
+    await click(toolbarButton('Inspector'));
+
+    footerButton()!.click();
+    await settleDialog();
+
+    expect(dialogText()).toContain(
+      "2 settings on 1 channel go back to the global values. This can't be undone.",
+    );
+  });
+
+  it('Cancel and Escape change nothing; the keys the page binds do not act behind the dialog', async () => {
+    storage.seed(FOUR_ON_THREE);
+    await open();
+    await click(toolbarButton('Inspector'));
+    const writes = storage.writes.length;
+    const opener = footerButton()!;
+    opener.focus();
+    opener.click();
+    await settleDialog();
+
+    // `/` would open Go to channel, and an arrow turn the page, if the page took them.
+    const cancel = dialog()!.querySelector<HTMLElement>('button')!;
+    expect(document.activeElement).toBe(cancel);
+    await press('/', cancel);
+    await press('ArrowRight', cancel);
+    await settleDialog();
+    expect(channelJump()).toBeNull();
+    expect(dialog()).not.toBeNull();
+
+    await press('Escape', cancel);
+    await settleDialog();
+
+    expect(dialog()).toBeNull();
+    expect(aside()).not.toBeNull();
+    expect(storage.writes).toHaveLength(writes);
+    expect(document.activeElement).toBe(opener);
+
+    opener.click();
+    await answer('Cancel');
+    expect(storage.writes).toHaveLength(writes);
+    expect(footerButton()).toBeDefined();
+  });
+
+  it('confirming reset-all clears every channel override; the footer disappears and focus goes to the heading', async () => {
+    storage.seed(FOUR_ON_THREE);
+    await open();
+    await click(toolbarButton('Inspector'));
+    await click(tab('General'));
+    expect(gridTile(1).settings().general.lineWidth).toBe(6);
+    const opener = footerButton()!;
+    opener.focus();
+    opener.click();
+    await settleDialog();
+
+    await answer('Reset');
+
+    for (const channel of [1, 2, 5]) {
+      expect(storage.readStored(`settings:channel:${channel}`)).toBeNull();
+    }
+    expect(storage.readStored('settings:global')).toEqual(FOUR_ON_THREE['settings:global']);
+    expect(gridTile(1).settings().general.lineWidth).toBe(4);
+    expect(gridTile(5).settings().types.segmentation.visible).toBe(true);
+    expect(footerButton()).toBeUndefined();
+    expect(flat(row('Line width'))).not.toContain('Overridden');
+    // The button that opened the dialog is gone; the heading takes focus, though it is no tab stop.
+    expect(opener.isConnected).toBe(false);
+    const heading = inspector().querySelector('h2')!;
+    expect(document.activeElement).toBe(heading);
+    expect(heading.tabIndex).toBe(-1);
   });
 
   it('the preview shares the tile’s MediaStream: no second VfConnection is created', async () => {

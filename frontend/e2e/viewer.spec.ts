@@ -273,6 +273,72 @@ test.describe('the Viewer without vf', () => {
     await expect.poll(() => misplacedTiles(page)).toEqual([]);
   });
 
+  test('the inspector lists channel overrides, folded; bulk resets ask first and keep focus in the panel', async ({
+    page,
+  }) => {
+    await withoutVf(page);
+    await page.setViewportSize(LAPTOP);
+    await page.goto('/viewer');
+    await page.evaluate(() => {
+      const scope = (settings: object) => JSON.stringify({ version: 10, general: settings });
+      localStorage.setItem('neat-insight:viewer:settings:channel:3', scope({ lineWidth: 6 }));
+      localStorage.setItem(
+        'neat-insight:viewer:settings:channel:7',
+        scope({ lineWidth: 8, videoSyncBufferMs: 900 }),
+      );
+    });
+    await page.reload();
+    await pageTools(page).getByRole('button', { name: 'Inspector' }).click();
+    const inspector = page.locator('app-viewer-inspector');
+    await inspector.getByRole('tab', { name: 'General' }).click();
+
+    // Folded by default; a click shows the channels with their values.
+    const note = inspector.getByRole('button', { name: 'Overridden on 2 channels' });
+    await expect(note).toHaveAttribute('aria-expanded', 'false');
+    await expect(inspector.getByText('Channel 3')).toHaveCount(0);
+    await note.click();
+    await expect(note).toHaveAttribute('aria-expanded', 'true');
+    await expect(inspector.getByText('Channel 3')).toBeVisible();
+    await expect(inspector.getByText('6 px')).toBeVisible();
+
+    // The bulk reset asks, with Cancel focused; Escape changes nothing.
+    const reset = inspector.getByRole('button', { name: /^Reset on 2 channels/ });
+    await reset.click();
+    const dialog = page.getByRole('alertdialog', { name: 'Reset Line width on 2 channels?' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(
+      "They go back to the global value (3 px). This can't be undone.",
+    );
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(reset).toBeFocused();
+    await expect(note).toBeVisible();
+
+    // Resetting the one setting leaves channel 7's sync buffer, so the footer stays.
+    await reset.click();
+    await dialog.getByRole('button', { name: 'Reset', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(note).toHaveCount(0);
+    await expect(inspector.getByRole('slider', { name: 'Line width' })).toBeFocused();
+    const footer = inspector.getByRole('button', { name: /^Reset all channels to global/ });
+    await expect(footer).toBeVisible();
+
+    await footer.click();
+    const all = page.getByRole('alertdialog', { name: 'Reset all channels to global?' });
+    await expect(all).toContainText(
+      "1 setting on 1 channel goes back to the global values. This can't be undone.",
+    );
+    await all.getByRole('button', { name: 'Reset', exact: true }).click();
+    await expect(footer).toHaveCount(0);
+    await expect(inspector.getByRole('heading', { name: 'All channels' })).toBeFocused();
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).filter((key) => key.includes(':settings:channel:')),
+      ),
+    ).toEqual([]);
+  });
+
   test('kiosk: grid repacks to the full screen; the toolbar shows on pointer movement', async ({
     page,
   }) => {

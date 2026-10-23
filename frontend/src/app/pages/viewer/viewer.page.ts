@@ -63,10 +63,11 @@ const DEBUG_FLAG = 'debug';
 /**
  * Where the page's key shortcuts stay out of the way: controls that take these keys themselves
  * (text fields, the slider's arrows), the inspector, which has its own Escape, and the toolbar's
- * popovers, whose Escape closes them and nothing else.
+ * popovers, whose Escape closes them and nothing else. A dialog the page opens, such as a
+ * confirmation, is modal: its buttons take the keys and nothing behind it does.
  */
 const OWN_KEYS =
-  'input, select, textarea, [contenteditable], [role="slider"], [neatPageAside], [role="dialog"]';
+  'input, select, textarea, [contenteditable], [role="slider"], [neatPageAside], [role="dialog"], [role="alertdialog"]';
 
 /** The grid's content box and the gap between its tiles, in CSS pixels. */
 interface TileSpace extends NeatTileArea {

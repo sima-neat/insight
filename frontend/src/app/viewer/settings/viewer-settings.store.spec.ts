@@ -1,3 +1,4 @@
+import { computed } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { NEAT_OVERLAY_DEFAULTS, NEAT_OVERLAY_STYLE_FALLBACK_COLOR } from '@sima/neat-ui';
 import { FakeLocalStorage } from './fake-storage.testing';
@@ -1139,6 +1140,91 @@ describe('ViewerSettingsStore', () => {
 
     expect(fake.writes).toStrictEqual([]);
     expect(store.resolved(1)()).toBe(resolved);
+  });
+
+  it('channelOverrides counts own values across channel scopes and the channels holding them', () => {
+    const store = load({
+      'settings:global': { version: 10, general: { lineWidth: 4, videoSyncBufferMs: 500 } },
+      'settings:channel:1': { version: 10, general: { lineWidth: 6, videoSyncBufferMs: 900 } },
+      'settings:channel:4': { version: 10, types: { tracking: { visible: false } } },
+      'settings:channel:6': { version: 10, general: { lineWidth: 2 } },
+      // Holds nothing, as a scope another tab emptied without removing would.
+      'settings:channel:7': { version: 10 },
+      'settings:channel:9': 'not json',
+    });
+
+    expect(store.channelOverrides()).toStrictEqual({ settings: 4, channels: 3 });
+  });
+
+  it('channelOverrides reads the scopes as stored now, including those another tab wrote', () => {
+    const store = load();
+    expect(store.channelOverrides()).toStrictEqual({ settings: 0, channels: 0 });
+
+    fake.seed({ 'settings:channel:5': { version: 10, general: { lineWidth: 6 } } });
+
+    expect(store.channelOverrides()).toStrictEqual({ settings: 1, channels: 1 });
+  });
+
+  it('channelOverrides changes with this store’s own writes, for a computed that reads it', () => {
+    const store = load();
+    const overrides = TestBed.runInInjectionContext(() => computed(() => store.channelOverrides()));
+    expect(overrides()).toStrictEqual({ settings: 0, channels: 0 });
+
+    store.set(2, 'general.lineWidth', 6);
+    expect(overrides()).toStrictEqual({ settings: 1, channels: 1 });
+
+    store.resetOverride(2, 'general.lineWidth');
+    expect(overrides()).toStrictEqual({ settings: 0, channels: 0 });
+
+    store.set(3, 'general.lineWidth', 6);
+    store.resetAllChannels();
+    expect(overrides()).toStrictEqual({ settings: 0, channels: 0 });
+  });
+
+  it('resetAllChannels empties every channel scope, removes its storage key, and leaves global alone', () => {
+    const store = load({
+      'settings:global': { version: 10, general: { lineWidth: 4 } },
+      'settings:channel:1': { version: 10, general: { lineWidth: 6 } },
+      'settings:channel:4': { version: 10, types: { tracking: { visible: false } } },
+      'settings:channel:9': 'not json',
+    });
+    const global = fake.readRaw('settings:global');
+    // A channel the store opened never saw a value on, and one it resolved before the reset.
+    const resolved = store.resolved(1);
+    expect(resolved().general.lineWidth).toBe(6);
+
+    store.resetAllChannels();
+
+    expect(fake.readRaw('settings:channel:1')).toBeNull();
+    expect(fake.readRaw('settings:channel:4')).toBeNull();
+    expect(fake.readRaw('settings:channel:9')).toBeNull();
+    expect(fake.readRaw('settings:global')).toBe(global);
+    expect(writesTo('settings:global')).toStrictEqual([]);
+    expect(resolved().general.lineWidth).toBe(4);
+    expect(store.isOverride(1, 'general.lineWidth')).toBe(false);
+    expect(store.overridesOf('general.lineWidth')).toStrictEqual([]);
+    expect(store.channelOverrides()).toStrictEqual({ settings: 0, channels: 0 });
+    expect(reload().overridesOf('general.lineWidth')).toStrictEqual([]);
+  });
+
+  it('resetAllChannels also removes what another tab stored since this store read', () => {
+    const store = load({ 'settings:channel:1': { version: 10, general: { lineWidth: 6 } } });
+    fake.seed({ 'settings:channel:5': { version: 10, general: { lineWidth: 8 } } });
+
+    store.resetAllChannels();
+
+    expect(fake.readRaw('settings:channel:5')).toBeNull();
+    expect(fake.readRaw('settings:channel:1')).toBeNull();
+  });
+
+  it('a channel overriding again after resetAllChannels is listed and stored afresh', () => {
+    const store = load({ 'settings:channel:1': { version: 10, general: { lineWidth: 6 } } });
+    store.resetAllChannels();
+
+    store.set(1, 'general.lineWidth', 7);
+
+    expect(store.overridesOf('general.lineWidth')).toStrictEqual([1]);
+    expect(store.channelOverrides()).toStrictEqual({ settings: 1, channels: 1 });
   });
 });
 

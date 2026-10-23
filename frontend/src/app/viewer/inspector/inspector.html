@@ -1,5 +1,6 @@
 <header class="header">
-  <h2 id="viewer-inspector-title" class="title">{{ title() }}</h2>
+  <!-- Focusable by script only, as the place focus goes when what had it is gone. -->
+  <h2 #heading id="viewer-inspector-title" class="title" tabindex="-1">{{ title() }}</h2>
   <button
     neatButton
     type="button"
@@ -73,3 +74,11 @@
     </ng-template>
   </neat-tab>
 </neat-tabs>
+
+@if (canResetAll()) {
+  <div class="footer">
+    <button neatButton type="button" variant="outlined" (click)="resetAll()">
+      Reset all channels to global…
+    </button>
+  </div>
+}

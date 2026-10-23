@@ -2,12 +2,21 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
-  type ElementRef,
+  ElementRef,
+  effect,
   inject,
   input,
-  viewChild,
+  signal,
 } from '@angular/core';
-import { NeatButton, NeatInput, NeatSlider, NeatSwitch, NeatTooltip } from '@sima/neat-ui';
+import {
+  NeatButton,
+  NeatConfirm,
+  NeatIcon,
+  NeatInput,
+  NeatSlider,
+  NeatSwitch,
+  NeatTooltip,
+} from '@sima/neat-ui';
 import type { BooleanSettingId, NumericSettingId } from '../settings/schema';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
 
@@ -45,15 +54,21 @@ export interface NumberSetting extends SettingBase {
 export type SettingControl = SwitchSetting | NumberSetting;
 
 /** "1 channel", "2 channels". */
-function channelCount(count: number): string {
+export function channelCount(count: number): string {
   return `${count} ${count === 1 ? 'channel' : 'channels'}`;
+}
+
+/** "1 setting", "2 settings". */
+export function settingCount(count: number): string {
+  return `${count} ${count === 1 ? 'setting' : 'settings'}`;
 }
 
 /**
  * One setting of the inspector, for one scope. It shows the value in effect there and changes it
  * at once, as the scope's own value: on a channel that is an override, marked "overrides global"
  * beside the global value, with a reset to it; on "All channels" it is the global value, and the
- * row says which channels override it, with a reset of those overrides.
+ * row says how many channels override it. That note unfolds into the channels and their values,
+ * each with a "Use global" that applies at once, and a reset of all of them, which asks first.
  *
  * The control is named by `name`, which says where the setting belongs when its label alone does
  * not (the Metadata tab has a "Show overlay" per type), and it is described by the override note,
@@ -61,7 +76,7 @@ function channelCount(count: number): string {
  */
 @Component({
   selector: 'app-setting-row',
-  imports: [NeatButton, NeatInput, NeatSlider, NeatSwitch, NeatTooltip],
+  imports: [NeatButton, NeatIcon, NeatInput, NeatSlider, NeatSwitch, NeatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (switchSetting(); as setting) {
@@ -144,18 +159,52 @@ function channelCount(count: number): string {
       </div>
     }
     @if (overriddenOn().length > 0) {
-      <div class="scope-row">
-        <p class="scope-note" [id]="noteId()">{{ overriddenText() }}</p>
+      <div class="overrides">
         <button
-          neatButton
           type="button"
-          variant="text"
-          size="small"
-          [attr.aria-label]="resetOverridesLabel()"
-          (click)="resetOverrides()"
+          class="disclosure"
+          [id]="noteId()"
+          [attr.aria-expanded]="open()"
+          [attr.aria-controls]="open() ? listId() : null"
+          (click)="open.set(!open())"
         >
-          {{ resetOverridesText() }}
+          <span class="dot" aria-hidden="true"></span>
+          {{ overriddenText() }}
+          <neat-icon class="chevron" [class.open]="open()" name="next" [size]="16" />
         </button>
+        @if (open()) {
+          <ul class="list" [id]="listId()">
+            @for (line of lines(); track line.channel) {
+              <li class="line">
+                <span>Channel {{ line.channel }}</span>
+                <span class="value">{{ line.value }}</span>
+                <button
+                  neatButton
+                  class="use-global"
+                  type="button"
+                  variant="text"
+                  size="small"
+                  [attr.aria-label]="useGlobalLabel(line.channel)"
+                  (click)="useGlobal(line.channel)"
+                >
+                  Use global
+                </button>
+              </li>
+            }
+            <li class="line">
+              <button
+                neatButton
+                type="button"
+                variant="text"
+                size="small"
+                [attr.aria-label]="resetOverridesLabel()"
+                (click)="resetOverrides()"
+              >
+                {{ resetOverridesText() }}
+              </button>
+            </li>
+          </ul>
+        }
       </div>
     }
   `,
@@ -168,7 +217,8 @@ export class SettingRow {
   readonly name = input<string | undefined>(undefined);
 
   protected readonly store = inject(ViewerSettingsStore);
-  private readonly field = viewChild<ElementRef<HTMLInputElement>>('field');
+  private readonly confirm = inject(NeatConfirm);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   protected readonly fullName = computed(() => this.name() ?? this.setting().label);
   protected readonly channel = computed(() => {
@@ -200,6 +250,7 @@ export class SettingRow {
   protected readonly fieldId = computed(() => `setting-${this.setting().id}`);
   protected readonly hintId = computed(() => `setting-hint-${this.setting().id}`);
   protected readonly noteId = computed(() => `setting-note-${this.setting().id}`);
+  protected readonly listId = computed(() => `setting-overrides-${this.setting().id}`);
 
   /** This channel holds its own value. */
   protected readonly overrides = computed(() => {
@@ -207,12 +258,9 @@ export class SettingRow {
     return channel !== null && this.store.isOverride(channel, this.setting().id);
   });
   /** The global value in words: on or off, or as the setting describes its numbers. */
-  protected readonly globalText = computed(() => {
-    const switchSetting = this.switchSetting();
-    if (switchSetting !== null) return this.store.value('global', switchSetting.id) ? 'on' : 'off';
-    const numberSetting = this.numberSetting()!;
-    return numberSetting.describe(this.store.value('global', numberSetting.id));
-  });
+  protected readonly globalText = computed(() =>
+    this.valueText(this.store.value('global', this.setting().id)),
+  );
   protected readonly resetLabel = computed(
     () => `Reset ${this.fullName()} to the global value (${this.globalText()})`,
   );
@@ -221,16 +269,26 @@ export class SettingRow {
   protected readonly overriddenOn = computed(() =>
     this.scope() === 'global' ? this.store.overridesOf(this.setting().id) : [],
   );
-  protected readonly overriddenText = computed(() => {
-    const channels = this.overriddenOn();
-    return `Overridden on ${channelCount(channels.length)}: ${channels.join(', ')}`;
+  /** Each overriding channel with its value, for the list. */
+  protected readonly lines = computed(() => {
+    const id = this.setting().id;
+    return this.overriddenOn().map((channel) => ({
+      channel,
+      value: this.valueText(this.store.value(channel, id), true),
+    }));
   });
+  /** Whether the list is unfolded. */
+  protected readonly open = signal(false);
+  protected readonly overriddenText = computed(
+    () => `Overridden on ${channelCount(this.overriddenOn().length)}`,
+  );
   /** The button's text; its accessible name starts with it (WCAG 2.5.3, label in name). */
   protected readonly resetOverridesText = computed(
-    () => `Reset on ${channelCount(this.overriddenOn().length)}`,
+    () => `Reset on ${channelCount(this.overriddenOn().length)}…`,
   );
   protected readonly resetOverridesLabel = computed(
-    () => `${this.resetOverridesText()} to the global value: ${this.fullName()}`,
+    () =>
+      `Reset on ${channelCount(this.overriddenOn().length)} to the global value: ${this.fullName()}`,
   );
 
   /**
@@ -244,9 +302,21 @@ export class SettingRow {
     return ids.length > 0 ? ids.join(' ') : undefined;
   });
 
-  /** Focuses the number field, as after the late notice changed its value. */
-  focusField(): void {
-    this.field()?.nativeElement.focus();
+  constructor() {
+    // Not remembered: once the last override has gone, the note comes back folded.
+    effect(() => {
+      if (this.overriddenOn().length === 0) this.open.set(false);
+    });
+  }
+
+  /**
+   * Focuses the control, for after something that held focus went: the late notice's button, or
+   * the list of overriding channels once none is left.
+   */
+  focusControl(): void {
+    this.host.nativeElement
+      .querySelector<HTMLElement>('input, [role="switch"], [role="slider"]')
+      ?.focus();
   }
 
   /**
@@ -262,8 +332,48 @@ export class SettingRow {
     field.value = String(this.numberValue());
   }
 
-  protected resetOverrides(): void {
+  protected useGlobalLabel(channel: number): string {
+    return `Use global value on channel ${channel}: ${this.fullName()}`;
+  }
+
+  /**
+   * Gives the channel's value back at once (Inv §5c). Its line goes, and with it the focus, so
+   * focus moves first to a neighbouring line, or to the control when this was the last.
+   */
+  protected useGlobal(channel: number): void {
+    const buttons = this.host.nativeElement.querySelectorAll<HTMLElement>('.use-global');
+    const index = this.overriddenOn().indexOf(channel);
+    const neighbour = buttons[index + 1] ?? buttons[index - 1];
+    if (neighbour === undefined) this.focusControl();
+    else neighbour.focus();
+    this.store.resetOverride(channel, this.setting().id);
+  }
+
+  /**
+   * Asks, then gives back every channel's value for this setting, for the channels that hold one
+   * when Reset is pressed. The list that opened the dialog goes with the last of them, and the
+   * dialog gives focus back to it, so focus goes to the control instead.
+   */
+  protected async resetOverrides(): Promise<void> {
     const id = this.setting().id;
-    for (const channel of this.overriddenOn()) this.store.resetOverride(channel, id);
+    const count = this.overriddenOn().length;
+    const confirmed = await this.confirm.ask({
+      title: `Reset ${this.fullName()} on ${channelCount(count)}?`,
+      message: `${count === 1 ? 'It goes' : 'They go'} back to the global value (${this.globalText()}). This can't be undone.`,
+      confirmLabel: 'Reset',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    this.focusControl();
+    for (const channel of this.store.overridesOf(id)) this.store.resetOverride(channel, id);
+  }
+
+  /** A value in words: a switch as on or off ("On", "Off" listed alone), a number as described. */
+  private valueText(value: boolean | number, listed = false): string {
+    if (typeof value === 'boolean') {
+      const word = value ? 'on' : 'off';
+      return listed ? word.charAt(0).toUpperCase() + word.slice(1) : word;
+    }
+    return this.numberSetting()!.describe(value);
   }
 }

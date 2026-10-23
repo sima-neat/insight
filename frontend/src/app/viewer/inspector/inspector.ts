@@ -3,16 +3,19 @@ import {
   Component,
   computed,
   effect,
+  type ElementRef,
   inject,
   input,
   model,
   output,
   signal,
+  viewChild,
   viewChildren,
 } from '@angular/core';
 import {
   lateNoticeDetails,
   NeatButton,
+  NeatConfirm,
   type NeatFrameStats,
   NeatIcon,
   NeatTab,
@@ -28,7 +31,7 @@ import { formatChannelStatus } from '../vf/channel-status';
 import type { VfConnection } from '../vf/vf-connection';
 import { VfConnections } from '../vf/vf-connections';
 import { LateNotice, type RaiseTarget } from './late-notice';
-import { type SettingControl, SettingRow } from './setting-row';
+import { channelCount, type SettingControl, SettingRow, settingCount } from './setting-row';
 
 /** The tabs plan 2a fills; ROI and 3D Pose follow in plan 2b. */
 const TABS = ['Metadata', 'General'] as const satisfies readonly SettingTab[];
@@ -225,7 +228,9 @@ export class ViewerInspector {
   private readonly connections = inject(VfConnections);
   private readonly store = inject(ViewerSettingsStore);
   private readonly lateness = inject(ChannelLateness);
+  private readonly confirm = inject(NeatConfirm);
   private readonly rows = viewChildren(SettingRow);
+  private readonly heading = viewChild.required<ElementRef<HTMLElement>>('heading');
 
   protected readonly metadataSections = METADATA_SECTIONS;
   protected readonly generalSettings = GENERAL_SETTINGS;
@@ -235,6 +240,11 @@ export class ViewerInspector {
     const channel = this.channel();
     return channel === null ? 'All channels' : `Channel ${channel}`;
   });
+
+  /** On "All channels", whether some channel holds a value of its own to reset. */
+  protected readonly canResetAll = computed(
+    () => this.channel() === null && this.store.channelOverrides().settings > 0,
+  );
 
   private readonly connection = signal<VfConnection | null>(null);
   private readonly sync = computed(() => {
@@ -324,7 +334,26 @@ export class ViewerInspector {
     else this.store.raiseGlobal(channel, 'general.videoSyncBufferMs', suggested);
     this.rows()
       .find((row) => row.setting().id === 'general.videoSyncBufferMs')
-      ?.focusField();
+      ?.focusControl();
+  }
+
+  /**
+   * Asks, then gives every channel's own values back. The scopes to count and reset are those
+   * stored when the question is asked and when Reset is pressed. The button that opened the
+   * dialog goes with the last value, and the dialog gives focus back to it, so focus goes to the
+   * heading, which names the panel.
+   */
+  protected async resetAll(): Promise<void> {
+    const { settings, channels } = this.store.channelOverrides();
+    const confirmed = await this.confirm.ask({
+      title: 'Reset all channels to global?',
+      message: `${settingCount(settings)} on ${channelCount(channels)} ${settings === 1 ? 'goes' : 'go'} back to the global values. This can't be undone.`,
+      confirmLabel: 'Reset',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    this.heading().nativeElement.focus();
+    this.store.resetAllChannels();
   }
 
   /** The preview's stats, which stand in for the grid tile's while the channel has none (R29). */

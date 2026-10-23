@@ -21,7 +21,13 @@ import {
   withOwnValue,
   withoutOwnValue,
 } from './resolver';
-import { type SettingId, type SettingValues, SETTINGS_VERSION, type SyncSettings } from './schema';
+import {
+  type SettingId,
+  type SettingValues,
+  SCALAR_SETTINGS,
+  SETTINGS_VERSION,
+  type SyncSettings,
+} from './schema';
 import { ViewerStorage } from './storage';
 
 /** The global settings, or a channel's own values over them. */
@@ -32,6 +38,11 @@ const CHANNEL_SCOPE = /^settings:channel:(\d+)$/;
 
 function scopeName(scope: SettingsScope): string {
   return scope === 'global' ? GLOBAL_SCOPE : `settings:channel:${scope}`;
+}
+
+/** How many settings the scope holds its own value for. */
+function ownValueCount(own: ScopeOverrides): number {
+  return SCALAR_SETTINGS.filter(({ id }) => ownValue(own, id) !== undefined).length;
 }
 
 /**
@@ -55,6 +66,11 @@ export class ViewerSettingsStore {
   private readonly channels = new Map<number, WritableSignal<ScopeOverrides>>();
   /** The channels that have held a value of their own, for overridesOf. */
   private readonly ownerChannels = signal<readonly number[]>([]);
+  /**
+   * Counts the changes this store made to channel scopes, so that `channelOverrides`, which reads
+   * storage, is read again by whatever computed it.
+   */
+  private readonly channelChanges = signal(0);
   private readonly resolvedCache = new Map<number, Signal<NeatOverlaySettings>>();
   private readonly syncCache = new Map<number, Signal<SyncSettings>>();
 
@@ -136,6 +152,35 @@ export class ViewerSettingsStore {
   }
 
   /**
+   * How many own values the channel scopes hold in all, and on how many channels, as stored now
+   * rather than as this store last read them (see `write`). It is read again after each change
+   * this store makes to a channel scope; one another tab makes shows up with the next such change.
+   */
+  channelOverrides(): { settings: number; channels: number } {
+    this.channelChanges();
+    let settings = 0;
+    let channels = 0;
+    for (const name of this.channelScopeNames()) {
+      const count = ownValueCount(this.read(name));
+      settings += count;
+      if (count > 0) channels += 1;
+    }
+    return { settings, channels };
+  }
+
+  /**
+   * Every channel gives up every own value, so all channels follow global, and no channel scope
+   * stays in storage. The channels are those stored now, which may include ones another tab
+   * wrote, and the global scope is untouched.
+   */
+  resetAllChannels(): void {
+    for (const name of this.channelScopeNames()) this.storage.remove(name);
+    for (const own of this.channels.values()) own.set(EMPTY_OVERRIDES);
+    this.ownerChannels.set([]);
+    this.channelChanges.update((changes) => changes + 1);
+  }
+
+  /**
    * The late notice's global action (Inv §4g, `applyGlobalGeneral`): the channel gives up its own
    * value and follows global, which is raised to `value` when below it and never lowered. Both
    * scopes change before anything reads them again, so no one sees half of it.
@@ -151,6 +196,10 @@ export class ViewerSettingsStore {
     if (raised) this.write('global', (latest) => withOwnValue(latest, id, target));
     this.resetOverride(channel, id);
     return { raised };
+  }
+
+  private channelScopeNames(): string[] {
+    return this.storage.names().filter((name) => CHANNEL_SCOPE.test(name));
   }
 
   private channelSignal(channel: number): WritableSignal<ScopeOverrides> {
@@ -188,6 +237,7 @@ export class ViewerSettingsStore {
       if (!this.ownerChannels().includes(scope)) {
         this.ownerChannels.update((owners) => [...owners, scope].sort((a, b) => a - b));
       }
+      this.channelChanges.update((changes) => changes + 1);
     }
     // A scope left holding nothing is removed rather than stored as an empty stub.
     if (holdsSomething(own)) {

@@ -60,3 +60,88 @@
   color: var(--foreground);
   font-weight: 500;
 }
+
+/* On "All channels": the note that unfolds into the channels overriding the setting. */
+.overrides {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+}
+
+.disclosure {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--neat-text-xs);
+  text-align: start;
+  cursor: pointer;
+}
+
+.disclosure:hover {
+  color: var(--foreground);
+}
+
+.disclosure:focus-visible {
+  outline: var(--neat-focus-ring-width) solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* The amber of a notice: the setting differs on some channels. */
+.dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.chevron {
+  display: flex;
+  margin-inline-start: auto;
+  transition: transform 100ms;
+}
+
+.chevron.open {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  list-style: none;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+  padding: var(--neat-space-2);
+}
+
+.line + .line {
+  border-block-start: 1px solid var(--border);
+}
+
+.value {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The channel's action sits at the end of its line. */
+.use-global {
+  margin-inline-start: auto;
+}

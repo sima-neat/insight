@@ -70,3 +70,8 @@
   color: var(--muted-foreground);
   font-size: var(--neat-text-xs);
 }
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+}
