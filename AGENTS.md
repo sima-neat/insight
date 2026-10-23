@@ -36,6 +36,13 @@ once and benefits every app. Escape hatch: write the proposal (what you need, wh
 components fall short, the API you would like) and raise it with the maintainer before building; do
 not ship the workaround in the meantime.
 
+**A styled pattern lives in one place.**
+App-specific markup and its styling may stay inline in the component that uses it while it has one
+use. The second use turns it into a shared component: an app component if it knows Insight's data,
+a kit proposal (previous rule) if it does not. Why: copies of styled markup drift apart, and a fix
+to one copy silently misses the others. Escape hatch: none; copying now and extracting later is
+the failure this rule exists to prevent.
+
 **Style through theme tokens and component inputs.**
 Why: tokens are what make light and dark work and keep later rebranding a kit change. Overrides
 (deep selectors, `!important`, hard-coded colours) silently break in one theme or after a kit
