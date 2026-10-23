@@ -3,13 +3,15 @@ import { NEAT_OVERLAY_DEFAULTS, type NeatOverlaySettings } from '@sima/neat-ui/v
 /**
  * The viewer settings model, ported from viewer-settings-resolver.js (829ec7c, Inv §5b): every
  * setting a scope can own, with its default and the range its value is held to. A stored scope is
- * `{ version, general, types, auxiliary }`, and a setting's id is its path in that object.
+ * `{ version, general, types }`, and a setting's id is its path in that object. Plan 2a also stored
+ * an `auxiliary` object (the BlazePose 3D panel's settings); the panel is a non-goal, so scopes
+ * still holding one are read without it and the next write leaves it out.
  */
 
 export const SETTINGS_VERSION = 10;
 
 /**
- * Versions stored in the `{ version, general, types, auxiliary }` shape. An entry with any other
+ * Versions stored in the `{ version, general, types }` shape. An entry with any other
  * version (or none) is read as the flat shape the first viewer stored.
  */
 export const SUPPORTED_SETTINGS_VERSIONS: ReadonlySet<unknown> = new Set([
@@ -51,19 +53,6 @@ export type SyncSettings = Pick<GeneralSettings, 'videoSyncBufferMs' | 'metadata
 
 export type TypeSettings = NeatOverlaySettings['types'];
 
-export type PanelMode = 'compact' | 'collapsed' | 'expanded';
-
-/** The BlazePose 3D panel (plan 2b), whose settings already live in every scope. */
-export interface AuxiliarySettings {
-  readonly enabled: boolean;
-  readonly panelMode: PanelMode;
-  /** 0..1 */
-  readonly backgroundTransparency: number;
-  readonly yawDegrees: number;
-  readonly pitchDegrees: number;
-  readonly showReferenceBox: boolean;
-}
-
 // The overlay defaults are the kit's, so a tile with nothing stored draws exactly as the kit's own
 // default settings would; the resolver spec pins the values (Inv §5b).
 export const GENERAL_DEFAULTS: GeneralSettings = {
@@ -73,22 +62,6 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
 };
 
 export const TYPE_DEFAULTS: TypeSettings = NEAT_OVERLAY_DEFAULTS.types;
-
-// Only the BlazePose 3D renderer has settings in 2a. The original also kept enabled/panelMode for
-// any other renderer the auxiliary panel met; nothing in 2a writes those, and plan 2b's panel
-// extends this schema for them (R24).
-export const AUXILIARY_DEFAULTS: { readonly 'blazepose-3d': AuxiliarySettings } = {
-  'blazepose-3d': {
-    enabled: true,
-    panelMode: 'compact',
-    backgroundTransparency: 0,
-    yawDegrees: -45,
-    pitchDegrees: 20,
-    showReferenceBox: true,
-  },
-};
-
-export const PANEL_MODES: readonly PanelMode[] = ['compact', 'collapsed', 'expanded'];
 
 /** Every setting a scope can own, by id, with the type of its value. */
 export interface SettingValues {
@@ -111,12 +84,6 @@ export interface SettingValues {
   'types.classification.visible': boolean;
   'types.pose-estimation.showKeypoints': boolean;
   'types.pose-estimation.showKeypointLabels': boolean;
-  'auxiliary.blazepose-3d.enabled': boolean;
-  'auxiliary.blazepose-3d.panelMode': PanelMode;
-  'auxiliary.blazepose-3d.backgroundTransparency': number;
-  'auxiliary.blazepose-3d.yawDegrees': number;
-  'auxiliary.blazepose-3d.pitchDegrees': number;
-  'auxiliary.blazepose-3d.showReferenceBox': boolean;
 }
 
 export type SettingId = keyof SettingValues;
@@ -151,12 +118,9 @@ export const NUMBER_RANGES: Readonly<Record<NumericSettingId, NumberRange>> = {
   'types.tracking.confidenceThreshold': { min: 0, max: 1, integer: false },
   'types.tracking.history.trailLength': { min: 1, max: 120, integer: true },
   'types.tracking.history.lostTrackTtlMs': { min: 0, max: 30000, integer: true },
-  'auxiliary.blazepose-3d.backgroundTransparency': { min: 0, max: 1, integer: false },
-  'auxiliary.blazepose-3d.yawDegrees': { min: -180, max: 180, integer: true },
-  'auxiliary.blazepose-3d.pitchDegrees': { min: -60, max: 60, integer: true },
 };
 
-export type SettingTab = 'General' | 'ROI' | 'Metadata' | '3D Pose';
+export type SettingTab = 'General' | 'ROI' | 'Metadata';
 
 export interface ScalarSetting {
   readonly id: SettingId;
@@ -200,17 +164,10 @@ export const SCALAR_SETTINGS: readonly ScalarSetting[] = [
   scalar('types.classification.visible', 'Metadata', 'classification'),
   scalar('types.pose-estimation.showKeypoints', 'Metadata', 'pose-estimation'),
   scalar('types.pose-estimation.showKeypointLabels', 'Metadata', 'pose-estimation'),
-  scalar('auxiliary.blazepose-3d.enabled', '3D Pose'),
-  scalar('auxiliary.blazepose-3d.panelMode', '3D Pose'),
-  scalar('auxiliary.blazepose-3d.backgroundTransparency', '3D Pose'),
-  scalar('auxiliary.blazepose-3d.yawDegrees', '3D Pose'),
-  scalar('auxiliary.blazepose-3d.pitchDegrees', '3D Pose'),
-  scalar('auxiliary.blazepose-3d.showReferenceBox', '3D Pose'),
 ];
 
 /** The defaults in the stored shape, so a setting's default is found by its path like any value. */
 export const DEFAULTS_ROOT = {
   general: GENERAL_DEFAULTS,
   types: TYPE_DEFAULTS,
-  auxiliary: AUXILIARY_DEFAULTS,
 };

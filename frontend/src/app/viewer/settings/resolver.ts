@@ -7,14 +7,12 @@ import {
 } from '@sima/neat-ui/video';
 import {
   AUTO_COLORS_VERSION,
-  type AUXILIARY_DEFAULTS,
   CLASS_STYLE_TYPES,
   DEFAULTS_ROOT,
   GENERAL_DEFAULTS,
   type GeneralSettings,
   NUMBER_RANGES,
-  PANEL_MODES,
-  type PanelMode,
+  type NumericSettingId,
   PREVIOUS_VIDEO_SYNC_DEFAULT_MS,
   SCALAR_SETTINGS,
   type SettingId,
@@ -49,16 +47,15 @@ type Own<T> = {
 export interface ScopeOverrides {
   readonly general: Own<GeneralSettings>;
   readonly types: Own<TypeSettings>;
-  readonly auxiliary: Own<typeof AUXILIARY_DEFAULTS>;
 }
 
-export const EMPTY_OVERRIDES: ScopeOverrides = { general: {}, types: {}, auxiliary: {} };
+export const EMPTY_OVERRIDES: ScopeOverrides = { general: {}, types: {} };
 
 type Tree = Readonly<Record<string, unknown>>;
 
-/** A scope under construction: the three sections, nothing owned yet. */
+/** A scope under construction: both sections, nothing owned yet. */
 function emptyTree(): Tree {
-  return { general: {}, types: {}, auxiliary: {} };
+  return { general: {}, types: {} };
 }
 
 // Arrays count as objects, as they did in the original; they simply hold none of the keys read.
@@ -86,8 +83,7 @@ function withValueAt(node: Tree, path: readonly string[], value: unknown): Tree 
 
 /**
  * A copy of `node` without the value at `path`. An object left empty below a section (general,
- * types, auxiliary) goes too, so giving back a channel's last 3D pose value leaves no explicit
- * panel settings, as in the original, and no empty `history: {}` stays behind either.
+ * types) goes too, so no empty `history: {}` stays behind.
  */
 function withoutValueAt(node: Tree, path: readonly string[], depth = 0): Tree {
   const [key, ...rest] = path;
@@ -103,10 +99,6 @@ function parseNumber(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function isPanelMode(value: unknown): value is PanelMode {
-  return PANEL_MODES.includes(value as PanelMode);
-}
-
 function defaultValue<Id extends SettingId>(id: Id): SettingValues[Id] {
   return valueAt(DEFAULTS_ROOT, settingPath(id)) as SettingValues[Id];
 }
@@ -114,7 +106,7 @@ function defaultValue<Id extends SettingId>(id: Id): SettingValues[Id] {
 /**
  * Normalizes one raw value the way the original's per-section normalizers did. Anything not of
  * the setting's kind falls back to its default: a boolean keeps only a boolean, a number is parsed,
- * clamped to its range and rounded where whole, the panel mode keeps only a known mode.
+ * clamped to its range and rounded where whole.
  * `sourceVersion` is the version the value was stored at, for the 350 ms migration.
  */
 export function normalizeSettingValue<Id extends SettingId>(
@@ -126,17 +118,15 @@ export function normalizeSettingValue<Id extends SettingId>(
   if (typeof fallback === 'boolean') {
     return (typeof raw === 'boolean' ? raw : fallback) as SettingValues[Id];
   }
-  if (typeof fallback === 'number') {
-    const { min, max, integer } = NUMBER_RANGES[id as keyof typeof NUMBER_RANGES];
-    const clamped = Math.max(min, Math.min(max, parseNumber(raw, fallback)));
-    const value = integer ? Math.round(clamped) : clamped;
-    const isOldDefault =
-      id === 'general.videoSyncBufferMs' &&
-      sourceVersion < VIDEO_SYNC_DEFAULT_CHANGED_VERSION &&
-      value === PREVIOUS_VIDEO_SYNC_DEFAULT_MS;
-    return (isOldDefault ? GENERAL_DEFAULTS.videoSyncBufferMs : value) as SettingValues[Id];
-  }
-  return (isPanelMode(raw) ? raw : fallback) as SettingValues[Id];
+  // Every setting that is not a boolean is a number with a range.
+  const { min, max, integer } = NUMBER_RANGES[id as NumericSettingId];
+  const clamped = Math.max(min, Math.min(max, parseNumber(raw, fallback as number)));
+  const value = integer ? Math.round(clamped) : clamped;
+  const isOldDefault =
+    id === 'general.videoSyncBufferMs' &&
+    sourceVersion < VIDEO_SYNC_DEFAULT_CHANGED_VERSION &&
+    value === PREVIOUS_VIDEO_SYNC_DEFAULT_MS;
+  return (isOldDefault ? GENERAL_DEFAULTS.videoSyncBufferMs : value) as SettingValues[Id];
 }
 
 const LINE_STYLES: readonly NeatOverlayLineStyle[] = ['solid', 'dashed', 'dotted'];

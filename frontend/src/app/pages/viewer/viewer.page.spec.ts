@@ -554,6 +554,20 @@ describe('ViewerPage', () => {
     expect(shown()).toEqual([3]);
   });
 
+  it('the Hide empty slots switch is described by the Experimental tag', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await openViewOptions();
+
+    const describedBy = toggle('Hide empty slots').getAttribute('aria-describedby');
+
+    expect(describedBy).not.toBeNull();
+    expect(dialog('View options')!.querySelector(`#${describedBy}`)?.textContent?.trim()).toBe(
+      'Experimental',
+    );
+    expect(toggle('Bars').hasAttribute('aria-describedby')).toBe(false);
+  });
+
   it('page shortcuts stay out of View options; Escape closes it without clearing the selection', async () => {
     sixPerPage();
     await open('/viewer');

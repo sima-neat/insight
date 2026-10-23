@@ -122,12 +122,13 @@
       <span class="option">
         <button
           neatSwitch
+          aria-describedby="hide-empty-experimental"
           [checked]="prefs.hideEmpty()"
           (checkedChange)="prefs.setHideEmpty($event)"
         >
           Hide empty slots
         </button>
-        <span class="tag">Experimental</span>
+        <span id="hide-empty-experimental" class="tag">Experimental</span>
       </span>
     </ng-template>
   </neat-popover>

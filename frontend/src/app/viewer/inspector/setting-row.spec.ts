@@ -190,7 +190,6 @@ describe('SettingRow', () => {
       version: 10,
       general: {},
       types: { 'object-detection': { visible: false } },
-      auxiliary: {},
     });
   });
 
@@ -240,7 +239,6 @@ describe('SettingRow', () => {
       version: 10,
       general: { videoSyncBufferMs: 800 },
       types: {},
-      auxiliary: {},
     });
     expect(storage.readStored('settings:global')).toBeNull();
     expect(text()).toContain('overrides global · Global: 300 ms');
@@ -351,7 +349,6 @@ describe('SettingRow', () => {
       version: 10,
       general: { videoSyncBufferMs: 900 },
       types: {},
-      auxiliary: {},
     });
     expect(overrideNote()!.textContent?.trim()).toBe('Overridden on 2 channels');
     expect(overrideLines()).toEqual([
@@ -477,7 +474,6 @@ describe('SettingRow', () => {
       version: 10,
       general: { videoSyncBufferMs: 900 },
       types: {},
-      auxiliary: {},
     });
     expect(store().value('global', 'general.lineWidth')).toBe(4);
   });

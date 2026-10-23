@@ -243,7 +243,6 @@ describe('ViewerInspector', () => {
       version: 10,
       general: {},
       types: { segmentation: { visible: false } },
-      auxiliary: {},
     });
     expect(gridTile(0).settings().types.segmentation.visible).toBe(false);
     expect(gridTile(7).settings().types.segmentation.visible).toBe(false);
@@ -268,7 +267,6 @@ describe('ViewerInspector', () => {
       version: 10,
       general: { videoSyncBufferMs: 800 },
       types: {},
-      auxiliary: {},
     });
     expect(storage.readStored('settings:global')).toBeNull();
     expect(flat(row('Video sync buffer'))).toContain('overrides global');
@@ -556,7 +554,6 @@ describe('ViewerInspector', () => {
       version: 10,
       general: { videoSyncBufferMs: 1150 },
       types: {},
-      auxiliary: {},
     });
     expect(document.activeElement).toBe(field('Video sync buffer'));
     // Never written: still as seeded.
@@ -574,7 +571,6 @@ describe('ViewerInspector', () => {
       version: 10,
       general: { videoSyncBufferMs: 1150 },
       types: {},
-      auxiliary: {},
     });
     expect(storage.readStored('settings:channel:4')).toBeNull();
     expect(fake.connections.get(5)!.syncBuffers.at(-1)).toBe(1150);

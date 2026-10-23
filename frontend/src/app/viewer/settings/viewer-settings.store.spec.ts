@@ -79,35 +79,22 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
     expect(store.value('global', 'general.videoSyncBufferMs')).toBe(300);
   });
 
-  it('auxiliary mutations migrate legacy settings without creating channel overrides', () => {
+  it('legacy settings migrate on read, in the global scope and in channel scopes alike', () => {
     const store = load({
       'settings:global': JSON.stringify({
         version: 9,
         general: { metadataRetentionMs: 2500 },
         types: { 'pose-estimation': { visible: false } },
       }),
-      'settings:channel:0': JSON.stringify({
-        version: 3,
-        general: { videoSyncBufferMs: 350 },
-        auxiliary: { 'blazepose-3d': { panelMode: 'expanded' } },
-      }),
-      'settings:channel:1': JSON.stringify({
-        version: 3,
-        general: { videoSyncBufferMs: 350 },
-        auxiliary: { 'blazepose-3d': { panelMode: 'expanded' } },
-      }),
+      'settings:channel:0': JSON.stringify({ version: 3, general: { videoSyncBufferMs: 350 } }),
+      'settings:channel:1': JSON.stringify({ version: 3, general: { videoSyncBufferMs: 350 } }),
     });
-
-    store.set(0, 'auxiliary.blazepose-3d.panelMode', 'collapsed');
-    store.resetOverride(1, 'auxiliary.blazepose-3d.panelMode');
 
     for (const channel of [0, 1]) {
       expect(store.general(channel)().videoSyncBufferMs).toBe(300);
       expect(store.general(channel)().metadataRetentionMs).toBe(2500);
       expect(store.resolved(channel)().types['pose-estimation'].visible).toBe(false);
     }
-    expect(store.value(0, 'auxiliary.blazepose-3d.panelMode')).toBe('collapsed');
-    expect(stored('settings:channel:1')?.auxiliary['blazepose-3d']).toBeUndefined();
   });
 
   it('version two settings migrate without retaining overlay delay', () => {
@@ -130,20 +117,13 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
     expect(settings !== null && 'metadataDelay' in settings.general).toBe(false);
   });
 
-  it('viewer settings resolve and clear independent channel overrides', () => {
+  it('viewer settings resolve independent channel overrides', () => {
     const store = load({
       'settings:global': JSON.stringify({
         version: 9,
         types: {
           'object-detection': { visible: false, confidenceThreshold: 0.8 },
           'pose-estimation': { showKeypoints: false, showKeypointLabels: true },
-        },
-        auxiliary: {
-          'blazepose-3d': {
-            yawDegrees: -20,
-            backgroundTransparency: 0.35,
-            showReferenceBox: false,
-          },
         },
       }),
       'settings:channel:2': JSON.stringify({
@@ -152,38 +132,16 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
           'object-detection': { visible: true },
           'pose-estimation': { showKeypoints: true, showKeypointLabels: false },
         },
-        auxiliary: {
-          'blazepose-3d': {
-            enabled: false,
-            yawDegrees: 75,
-            panelMode: 'expanded',
-            backgroundTransparency: 0.8,
-          },
-        },
       }),
     });
 
-    expect(store.value(1, 'auxiliary.blazepose-3d.backgroundTransparency')).toBe(0.35);
-    expect(store.value(2, 'auxiliary.blazepose-3d.backgroundTransparency')).toBe(0.8);
     expect(store.resolved(1)().types['object-detection'].visible).toBe(false);
     expect(store.resolved(2)().types['object-detection'].visible).toBe(true);
     expect(store.resolved(2)().types['pose-estimation'].showKeypoints).toBe(true);
     expect(store.resolved(2)().types['pose-estimation'].showKeypointLabels).toBe(false);
-    store.set(3, 'auxiliary.blazepose-3d.enabled', true);
-    store.set(3, 'auxiliary.blazepose-3d.panelMode', 'expanded');
+    store.set(3, 'types.pose-estimation.visible', true);
     expect(store.resolved(3)().types['object-detection'].confidenceThreshold).toBe(0.8);
-    expect(store.value(3, 'auxiliary.blazepose-3d.panelMode')).toBe('expanded');
-    // The original changed the global value through the dialog's full save (dropped).
-    store.set('global', 'auxiliary.blazepose-3d.backgroundTransparency', 0.6);
-    expect(store.value(3, 'auxiliary.blazepose-3d.backgroundTransparency')).toBe(0.6);
-    expect(store.value(3, 'auxiliary.blazepose-3d.panelMode')).toBe('expanded');
     expect(TYPE_DEFAULTS['pose-estimation'].showKeypointLabels).toBe(false);
-    expect(stored('settings:channel:2')?.auxiliary['blazepose-3d']).toBeDefined();
-    for (const key of ['enabled', 'yawDegrees', 'panelMode', 'backgroundTransparency'] as const) {
-      store.resetOverride(2, `auxiliary.blazepose-3d.${key}`);
-    }
-    expect(stored('settings:channel:2')?.auxiliary['blazepose-3d']).toBeUndefined();
-    expect(store.value(2, 'auxiliary.blazepose-3d.showReferenceBox')).toBe(false);
   });
 
   it('resolved object styles contain only user entries, no injected default', () => {
@@ -720,13 +678,10 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
       'types.object-detection.confidenceThreshold': 0.6,
       'types.tracking.history.trailLength': 50,
       'types.pose-estimation.visible': false,
-      'auxiliary.blazepose-3d.yawDegrees': 30,
     } as const;
     const channelValues = {
       'types.classification.visible': false,
       'types.pose-estimation.showKeypointLabels': true,
-      'auxiliary.blazepose-3d.panelMode': 'expanded',
-      'auxiliary.blazepose-3d.backgroundTransparency': 0.4,
       'general.metadataRetentionMs': 5000,
       'general.lineWidth': 6,
       'general.applyRoiFiltering': false,
@@ -747,58 +702,50 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
     }
   });
 
-  it('a channel owns overlay and 3D pose settings like any other, and gives them back', () => {
+  it('a scope stored with auxiliary.blazepose-3d values loads its other settings, and the next write stores no auxiliary key', () => {
+    // Plan 2a stored the 3D pose settings; the auxiliary panel is a non-goal, so they are not read.
     const store = load({
       'settings:global': {
         version: 10,
-        types: { 'pose-estimation': { visible: false } },
-        auxiliary: { 'blazepose-3d': { yawDegrees: -20 } },
+        general: { lineWidth: 5 },
+        auxiliary: { 'blazepose-3d': { yawDegrees: -20, panelMode: 'expanded' } },
+      },
+      'settings:channel:2': {
+        version: 10,
+        types: { tracking: { visible: false } },
+        auxiliary: { 'blazepose-3d': { enabled: false } },
       },
     });
 
-    store.set(2, 'types.pose-estimation.visible', true);
-    store.set(2, 'auxiliary.blazepose-3d.yawDegrees', 75);
-    store.set(2, 'auxiliary.blazepose-3d.backgroundTransparency', 3);
+    expect(store.value('global', 'general.lineWidth')).toBe(5);
+    expect(store.resolved(2)().types.tracking.visible).toBe(false);
+    expect(writesTo('settings:global')).toStrictEqual([]);
 
-    expect(stored('settings:channel:2')?.auxiliary).toStrictEqual({
-      'blazepose-3d': { yawDegrees: 75, backgroundTransparency: 1 },
+    store.set('global', 'general.showRoi', false);
+    store.set(2, 'general.lineWidth', 7);
+
+    expect(stored('settings:global')).toStrictEqual({
+      version: 10,
+      general: { lineWidth: 5, showRoi: false },
+      types: {},
     });
-    expect(ownValues(store, 2)).toStrictEqual({
-      'types.pose-estimation.visible': true,
-      'auxiliary.blazepose-3d.backgroundTransparency': 1,
-      'auxiliary.blazepose-3d.yawDegrees': 75,
+    expect(stored('settings:channel:2')).toStrictEqual({
+      version: 10,
+      general: { lineWidth: 7 },
+      types: { tracking: { visible: false } },
     });
-    expect(store.resolved(2)().types['pose-estimation'].visible).toBe(true);
-    expect(store.value(2, 'auxiliary.blazepose-3d.yawDegrees')).toBe(75);
-    expect(store.value('global', 'auxiliary.blazepose-3d.yawDegrees')).toBe(-20);
-    expect(store.value('global', 'auxiliary.blazepose-3d.pitchDegrees')).toBe(20);
-    expect(listOverrides(store, 'auxiliary.blazepose-3d.yawDegrees')).toStrictEqual([
-      { channel: 2, value: 75 },
-    ]);
-
-    // Changing a general value of the channel keeps its 3D pose values.
-    store.set(2, 'general.videoSyncBufferMs', 600);
-    expect(stored('settings:channel:2')?.auxiliary['blazepose-3d']?.yawDegrees).toBe(75);
-
-    // Giving every 3D value back leaves no explicit panel settings for the channel.
-    store.resetOverride(2, 'auxiliary.blazepose-3d.yawDegrees');
-    store.resetOverride(2, 'auxiliary.blazepose-3d.backgroundTransparency');
-    expect(stored('settings:channel:2')?.auxiliary['blazepose-3d']).toBeUndefined();
-    expect(store.value(2, 'auxiliary.blazepose-3d.yawDegrees')).toBe(-20);
   });
 
-  it('a channel whose only own values are 3D pose settings still counts and is removed when they go', () => {
+  it('a channel holding only auxiliary values is not listed in channelOverrides()', () => {
     const store = load({
       'settings:channel:4': {
         version: 10,
         auxiliary: { 'blazepose-3d': { panelMode: 'collapsed' } },
       },
+      'settings:channel:5': { version: 10, general: { lineWidth: 6 } },
     });
 
-    expect(store.overridesOf('auxiliary.blazepose-3d.panelMode')).toStrictEqual([4]);
-    store.resetOverride(4, 'auxiliary.blazepose-3d.panelMode');
-    expect(stored('settings:channel:4')).toBeNull();
-    expect(store.overridesOf('auxiliary.blazepose-3d.panelMode')).toStrictEqual([]);
+    expect(store.channelOverrides()).toStrictEqual({ settings: 1, channels: 1 });
   });
 
   it('clearing one own value keeps the others and the class colour entries', () => {
@@ -976,13 +923,11 @@ describe('ViewerSettingsStore', () => {
       version: 10,
       general: { lineWidth: 5, showRoi: false },
       types: { tracking: { visible: false } },
-      auxiliary: {},
     });
     expect(stored('settings:global')).toStrictEqual({
       version: 10,
       general: { lineWidth: 2 },
       types: { segmentation: { maskOpacity: 0.1 } },
-      auxiliary: {},
     });
     // A tab takes up what it found when it wrote.
     expect(second.resolved(1)().general.showRoi).toBe(false);
@@ -994,7 +939,6 @@ describe('ViewerSettingsStore', () => {
       version: 10,
       general: { showRoi: false },
       types: { tracking: { visible: false } },
-      auxiliary: {},
     });
   });
 
@@ -1038,7 +982,6 @@ describe('ViewerSettingsStore', () => {
       version: 10,
       general: {},
       types: { tracking: { visible: false } },
-      auxiliary: {},
     });
   });
 
@@ -1058,7 +1001,6 @@ describe('ViewerSettingsStore', () => {
       version: 10,
       general: {},
       types: { segmentation: { maskOpacity: 0.2 } },
-      auxiliary: {},
     });
     for (const channel of channels.filter((channel) => channel !== 2)) {
       expect(store.resolved(channel)().types.segmentation.maskOpacity).toBe(0.2);
@@ -1107,7 +1049,6 @@ describe('ViewerSettingsStore', () => {
         version: 10,
         general: { lineWidth: 'wide', showRoi: 'no' },
         types: { tracking: { history: 'long' }, segmentation: null },
-        auxiliary: 5,
       },
     });
     for (const channel of [0, 1, 2, 3]) {
@@ -1228,15 +1169,10 @@ describe('ViewerSettingsStore', () => {
   });
 });
 
-/**
- * The value the resolution gives a channel for `id`. Overlay settings come from resolved(), the
- * timing values from general(). The 3D pose values have no resolved view until the auxiliary panel
- * (plan 2b) needs one, so they are read back through value().
- */
+/** The value the resolution gives a channel for `id`: timing values from general(), the rest from resolved(). */
 function resolvedValueForId(store: ViewerSettingsStore, channel: number, id: SettingId): unknown {
   if (id === 'general.videoSyncBufferMs') return store.general(channel)().videoSyncBufferMs;
   if (id === 'general.metadataRetentionMs') return store.general(channel)().metadataRetentionMs;
-  if (id.startsWith('auxiliary.')) return store.value(channel, id);
   return id
     .split('.')
     .reduce<unknown>(

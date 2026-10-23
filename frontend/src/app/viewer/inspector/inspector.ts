@@ -24,7 +24,7 @@ import { VfConnections } from '../vf/vf-connections';
 import { LateNotice, type RaiseTarget } from './late-notice';
 import { channelCount, type SettingControl, SettingRow, settingCount } from './setting-row';
 
-/** The tabs plan 2a fills; ROI and 3D Pose follow in plan 2b. */
+/** The tabs plan 2a fills; ROI follows in plan 2b. */
 const TABS = ['Metadata', 'General'] as const satisfies readonly SettingTab[];
 
 interface MetadataSection {

@@ -8,13 +8,7 @@ import {
   withOwnValue,
   withoutOwnValue,
 } from './resolver';
-import {
-  AUXILIARY_DEFAULTS,
-  GENERAL_DEFAULTS,
-  SCALAR_SETTINGS,
-  SETTINGS_VERSION,
-  TYPE_DEFAULTS,
-} from './schema';
+import { GENERAL_DEFAULTS, SCALAR_SETTINGS, SETTINGS_VERSION, TYPE_DEFAULTS } from './schema';
 
 // Ported from viewerSettings.test.js (829ec7c). There the resolver's normalizeSettings filled in
 // every default; here a scope is only ever read as its own values (settingsOverrides) and the
@@ -52,18 +46,11 @@ describe('viewer settings resolver', () => {
     expect(own.general.metadataRetentionMs).toBe(2500);
   });
 
-  it('BlazePose 3D settings normalize values and drop unknown keys', () => {
+  it('a scope holds only the known settings; style keys of an old pose renderer are dropped', () => {
+    // Deliberate change: the original kept these style keys (copied by Object.assign) although
+    // nothing read them.
     const own = settingsOverrides({
       version: 6,
-      auxiliary: {
-        'blazepose-3d': {
-          panelMode: 'floating',
-          backgroundTransparency: 3,
-          unknownKey: true,
-          yawDegrees: 999,
-          pitchDegrees: -999,
-        },
-      },
       types: {
         'pose-estimation': {
           poseStrokeColor: '#123456',
@@ -72,31 +59,23 @@ describe('viewer settings resolver', () => {
         },
       },
     });
-    const pose3D = own.auxiliary['blazepose-3d'];
 
-    expect({ ...AUXILIARY_DEFAULTS['blazepose-3d'] }).toStrictEqual({
-      enabled: true,
-      panelMode: 'compact',
-      backgroundTransparency: 0,
-      yawDegrees: -45,
-      pitchDegrees: 20,
-      showReferenceBox: true,
-    });
-    expect({
-      panelMode: pose3D?.panelMode,
-      backgroundTransparency: pose3D?.backgroundTransparency,
-      yawDegrees: pose3D?.yawDegrees,
-      pitchDegrees: pose3D?.pitchDegrees,
-    }).toStrictEqual({
-      panelMode: 'compact',
-      backgroundTransparency: 1,
-      yawDegrees: 180,
-      pitchDegrees: -60,
-    });
-    expect(pose3D !== undefined && 'unknownKey' in pose3D).toBe(false);
-    // Deliberate change: the original kept these style keys of an old pose renderer (copied by
-    // Object.assign) although nothing read them. A scope holds only the known settings now.
     expect(own.types['pose-estimation']).toBeUndefined();
+  });
+
+  it('a stored auxiliary object is not read, so a scope holding only that holds nothing', () => {
+    const own = settingsOverrides({
+      version: 10,
+      general: { lineWidth: 5 },
+      auxiliary: { 'blazepose-3d': { yawDegrees: 30, panelMode: 'expanded' } },
+    });
+
+    expect(own).toStrictEqual({ general: { lineWidth: 5 }, types: {} });
+    expect(
+      holdsSomething(
+        settingsOverrides({ version: 10, auxiliary: { 'blazepose-3d': { enabled: false } } }),
+      ),
+    ).toBe(false);
   });
 
   it('the metadata type defaults are those of Inv §5b', () => {
@@ -126,7 +105,7 @@ describe('viewer settings resolver', () => {
     ).toStrictEqual({
       videoSyncBufferMs: 600,
     });
-    expect(settingsOverrides(null)).toStrictEqual({ general: {}, types: {}, auxiliary: {} });
+    expect(settingsOverrides(null)).toStrictEqual({ general: {}, types: {} });
   });
 
   it('the scalar settings list has every switchable id, each with its tab and metadata type', () => {
@@ -168,12 +147,6 @@ describe('viewer settings resolver', () => {
         tab: 'Metadata',
         metadataType: 'pose-estimation',
       },
-      { id: 'auxiliary.blazepose-3d.enabled', tab: '3D Pose', metadataType: null },
-      { id: 'auxiliary.blazepose-3d.panelMode', tab: '3D Pose', metadataType: null },
-      { id: 'auxiliary.blazepose-3d.backgroundTransparency', tab: '3D Pose', metadataType: null },
-      { id: 'auxiliary.blazepose-3d.yawDegrees', tab: '3D Pose', metadataType: null },
-      { id: 'auxiliary.blazepose-3d.pitchDegrees', tab: '3D Pose', metadataType: null },
-      { id: 'auxiliary.blazepose-3d.showReferenceBox', tab: '3D Pose', metadataType: null },
     ]);
   });
 
@@ -216,7 +189,6 @@ describe('viewer settings resolver', () => {
           history: { enabled: false, trailLength: 120, lostTrackTtlMs: 4000 },
         },
       },
-      auxiliary: {},
     });
   });
 
@@ -256,24 +228,24 @@ describe('viewer settings resolver', () => {
       'text',
       42,
       [],
-      { version: 10, general: null, types: 'x', auxiliary: [] },
-      { version: 10, types: { tracking: { history: 5 } }, auxiliary: { 'blazepose-3d': null } },
+      { version: 10, general: null, types: 'x' },
+      { version: 10, types: { tracking: { history: 5 } } },
     ]) {
-      expect(settingsOverrides(raw)).toStrictEqual({ general: {}, types: {}, auxiliary: {} });
+      expect(settingsOverrides(raw)).toStrictEqual({ general: {}, types: {} });
     }
   });
 
   it('a scope gives a value back without leaving empty containers behind', () => {
     let own = withOwnValue(EMPTY_OVERRIDES, 'types.tracking.history.trailLength', 25);
-    own = withOwnValue(own, 'auxiliary.blazepose-3d.yawDegrees', 30);
+    own = withOwnValue(own, 'general.lineWidth', 6);
     expect(holdsSomething(own)).toBe(true);
     expect(resolveValue(EMPTY_OVERRIDES, own, 'types.tracking.history.trailLength')).toBe(25);
 
     own = withoutOwnValue(own, 'types.tracking.history.trailLength');
-    own = withoutOwnValue(own, 'auxiliary.blazepose-3d.yawDegrees');
-    expect(own).toStrictEqual({ general: {}, types: {}, auxiliary: {} });
+    own = withoutOwnValue(own, 'general.lineWidth');
+    expect(own).toStrictEqual({ general: {}, types: {} });
     expect(holdsSomething(own)).toBe(false);
     // The original object is never changed.
-    expect(EMPTY_OVERRIDES).toStrictEqual({ general: {}, types: {}, auxiliary: {} });
+    expect(EMPTY_OVERRIDES).toStrictEqual({ general: {}, types: {} });
   });
 });
