@@ -195,6 +195,29 @@ class UploadFileClashTests(UploadFixture):
         self.upload("other.mp4", b"new", on_conflict="replace")
         self.remove_renditions.assert_not_called()
 
+    def test_a_name_taken_by_a_simultaneous_upload_is_never_overwritten(self):
+        real_link = os.link
+
+        def link_after_a_competitor(source, destination):
+            Path(destination).write_bytes(b"competitor")  # saved between the clash check and the move
+            return real_link(source, destination)
+
+        for fields in ({}, {"on_conflict": "keep_both"}):
+            with self.subTest(fields=fields), mock.patch.object(app_module.os, "link", link_after_a_competitor):
+                response = self.upload("fresh.mp4", b"new", **fields)
+                lines = response.get_data(as_text=True).splitlines()
+                self.assertEqual(lines, ["Failed to save upload: a file with this name was added meanwhile."])
+                self.assertEqual((self.media_dir / "fresh.mp4").read_bytes(), b"competitor")
+                (self.media_dir / "fresh.mp4").unlink()
+                self.assertEqual(self.media_listing(), ["clip.mp4"])
+
+    def test_stale_staging_folders_are_swept_and_nothing_else(self):
+        (self.media_dir / ".upload-dead").mkdir()
+        (self.media_dir / ".upload-dead" / "clip.mp4").write_bytes(b"half")
+        (self.media_dir / ".hidden-other").mkdir()
+        app_module._remove_stale_upload_stages()
+        self.assertEqual(self.media_listing(), [".hidden-other", "clip.mp4"])
+
     def test_replacing_a_folder_with_a_file_is_refused(self):
         (self.media_dir / "folder.mp4").mkdir()
         response = self.upload("folder.mp4", b"new", on_conflict="replace")
@@ -267,20 +290,23 @@ class ReplaceRestartsSlotsTests(UploadFixture):
         self.upload("clip.mp4", b"new", on_conflict="replace")
         self.assertEqual(events, ["optimise", "start"])
 
-    def test_a_failed_restart_prints_an_error_line_and_the_upload_still_completes(self):
+    def test_a_failed_restart_prints_a_warning_line_and_the_upload_still_completes(self):
         self.seed_slots()
         self.start_stream.return_value = (False, "ffmpeg exploded", None)
-        response = self.upload("clip.mp4", b"new", on_conflict="replace")
+        with self.assertLogs(level="WARNING"):
+            response = self.upload("clip.mp4", b"new", on_conflict="replace")
         lines = response.get_data(as_text=True).splitlines()
-        self.assertIn("Error: Could not restart src3: ffmpeg exploded", lines)
+        self.assertIn("Could not restart src3: ffmpeg exploded", lines)
+        self.assertFalse([line for line in lines if line.startswith("Error:")], "Error: means the response failed")
         self.assertEqual(lines[-1], "Upload complete.")
         self.assertEqual(self.slot(3)["state"], "stopped")
 
     def test_a_restart_that_raises_is_reported_and_does_not_end_the_stream(self):
         self.seed_slots()
         self.start_stream.side_effect = RuntimeError("no mediamtx")
-        lines = self.upload("clip.mp4", b"new", on_conflict="replace").get_data(as_text=True).splitlines()
-        self.assertIn("Error: Could not restart src3: no mediamtx", lines)
+        with self.assertLogs(level="WARNING"):
+            lines = self.upload("clip.mp4", b"new", on_conflict="replace").get_data(as_text=True).splitlines()
+        self.assertIn("Could not restart src3: no mediamtx", lines)
         self.assertEqual(lines[-1], "Upload complete.")
 
     def test_an_externally_held_slot_is_never_touched(self):
@@ -309,6 +335,7 @@ class ReplaceRestartsSlotsTests(UploadFixture):
             slots = app_module.load_sources()
             slots[2]["file"] = "other.mp4"
             app_module.save_sources(slots)
+            app_module._bump_slot(3)  # what the assign route does
             return iter(())
 
         self.optimize.side_effect = reassign
@@ -316,6 +343,46 @@ class ReplaceRestartsSlotsTests(UploadFixture):
         self.assertNotIn("src3", response.get_data(as_text=True))
         self.start_stream.assert_not_called()
         self.assertEqual(self.slot(3)["file"], "other.mp4")
+
+    def test_a_slot_stopped_by_someone_during_the_upload_is_not_restarted(self):
+        self.seed_slots()
+        self.optimize.side_effect = lambda root: app_module._bump_slot(3) or iter(())
+        response = self.upload("clip.mp4", b"new", on_conflict="replace")
+        self.assertNotIn("src3", response.get_data(as_text=True))
+        self.start_stream.assert_not_called()
+
+    def test_slots_restart_when_the_client_goes_away_mid_stream(self):
+        self.seed_slots()
+        response = self.client.post(
+            "/api/upload/media",
+            data={"file": (io.BytesIO(b"new"), "clip.mp4"), "on_conflict": "replace"},
+            content_type="multipart/form-data",
+            buffered=False,
+        )
+        first = next(iter(response.response))
+        self.assertTrue(first.decode().startswith("Uploaded to "))
+        self.start_stream.assert_not_called()
+        response.close()  # what the server does on a broken pipe
+        self.start_stream.assert_called_once()
+        self.assertEqual(self.slot(3)["state"], "playing")
+
+    def test_slots_restart_when_optimising_raises(self):
+        self.seed_slots()
+        self.optimize.side_effect = RuntimeError("ffprobe crashed")
+        with self.assertRaises(RuntimeError):
+            self.upload("clip.mp4", b"new", on_conflict="replace")
+        self.start_stream.assert_called_once()
+        self.assertEqual(self.slot(3)["state"], "playing")
+
+    def test_a_save_that_fails_reports_it_and_the_slots_go_back_to_the_old_file(self):
+        self.seed_slots()
+        with mock.patch.object(app_module.os, "replace", side_effect=OSError("disk went away")):
+            response = self.upload("clip.mp4", b"new", on_conflict="replace")
+        lines = response.get_data(as_text=True).splitlines()
+        self.assertEqual(lines, ["Failed to save upload: disk went away"])
+        self.assertEqual((self.media_dir / "clip.mp4").read_bytes(), b"old")
+        self.assertEqual(self.slot(3)["state"], "playing")
+        self.start_stream.assert_called_once()
 
     def test_keep_both_never_stops_the_slots(self):
         self.seed_slots()
@@ -338,8 +405,10 @@ class UploadArchiveTests(UploadFixture):
     def test_new_archive_extracts_into_its_folder_with_the_existing_lines(self):
         response = self.upload("fresh.zip", zip_bytes({"b.mp4": b"b"}))
         lines = response.get_data(as_text=True).splitlines()
-        self.assertTrue(lines[0].startswith("Saved archive to "))
-        self.assertEqual(lines[1:], ["Archive extracted.", "Upload complete."])
+        self.assertEqual(
+            lines,
+            [f"Saved archive to {self.media_dir / 'fresh' / 'fresh.zip'}", "Archive extracted.", "Upload complete."],
+        )
         self.assertEqual((self.media_dir / "fresh" / "b.mp4").read_bytes(), b"b")
         self.assertEqual(self.media_listing(), ["clips", "clips/a.mp4", "clips/gone.mp4", "fresh", "fresh/b.mp4"])
         self.optimize.assert_called_once_with(self.media_dir / "fresh")
@@ -434,22 +503,28 @@ class ReplaceArchiveRestartsSlotsTests(UploadFixture):
             {"index": 1, "file": "clips/a.mp4", **playing},
             {"index": 2, "file": "clips/gone.mp4", **playing},
             {"index": 3, "file": "elsewhere.mp4", **playing},
+            {"index": 4, "file": "clips/gone.mp4", **{**playing, "state": "stopped"}},
         )
 
-    def test_slots_streaming_files_of_the_replaced_folder_restart_or_report(self):
-        def start(index, path, *args, **kwargs):
-            if not Path(path).is_file():
-                return False, "No such file", None
-            return True, None, 101
-
-        self.start_stream.side_effect = start
+    def test_slots_streaming_files_of_the_replaced_folder_restart(self):
         response = self.upload("clips.zip", zip_bytes({"a.mp4": b"new-a"}), on_conflict="replace")
         lines = response.get_data(as_text=True).splitlines()
         self.assertIn("Restarted src1.", lines)
-        self.assertTrue(any(line.startswith("Error: Could not restart src2: ") for line in lines))
         self.assertEqual(lines[-1], "Upload complete.")
-        self.assertEqual(sorted(call.args[0] for call in self.stop_stream.call_args_list), [1, 2])
+        stopped = {call.args[0] for call in self.stop_stream.call_args_list}
+        self.assertTrue({1, 2} <= stopped and 3 not in stopped, stopped)
+        self.assertEqual(self.slot(1)["state"], "playing")
         self.assertEqual(self.slot(3)["state"], "playing")
+
+    def test_slots_assigned_to_files_the_new_archive_lacks_are_unassigned_not_restarted(self):
+        response = self.upload("clips.zip", zip_bytes({"a.mp4": b"new-a"}), on_conflict="replace")
+        text = response.get_data(as_text=True)
+        self.assertNotIn("src2", text)
+        self.assertNotIn("src4", text)
+        for index in (2, 4):  # one was playing, one only assigned: both are cleared as delete-media does
+            self.assertEqual((self.slot(index)["file"], self.slot(index)["state"]), ("", "stopped"), f"src{index}")
+        self.assertEqual(self.slot(1)["file"], "clips/a.mp4")
+        self.assertEqual(self.slot(3)["file"], "elsewhere.mp4")
 
     def test_renditions_of_every_old_file_in_the_folder_are_forgotten(self):
         self.upload("clips.zip", zip_bytes({"a.mp4": b"new-a"}), on_conflict="replace")

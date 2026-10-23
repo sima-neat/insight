@@ -2183,13 +2183,16 @@ def _media_files_under(folder: Path) -> set[str]:
     }
 
 
-def _stop_slots_streaming(file_names: set[str]) -> list[int]:
-    """Stop the file slots that are streaming one of `file_names`, as /api/mediasrc/stop would; returns their indexes.
+def _stop_slots_streaming(file_names: set[str]) -> dict[int, int]:
+    """Stop the file slots that are streaming one of `file_names`, as /api/mediasrc/stop would.
 
-    Webcam, externally held and pulled slots are not ours to stop, and a slot that is only
-    assigned the file (not playing) keeps streaming nothing, so none of them is touched.
+    Returns {slot index: the slot's generation right after the stop}, which
+    _restart_file_slots uses to tell a slot nobody touched since from one that was stopped,
+    cleared or reassigned meanwhile. Webcam, externally held and pulled slots are not ours to
+    stop, and a slot that is only assigned the file (not playing) streams nothing, so none of
+    them is touched.
     """
-    stopped = []
+    stopped: dict[int, int] = {}
     for src in load_sources():
         index = src["index"]
         if src.get("type") != SOURCE_TYPE_FILE or src.get("state") != "playing" or (src.get("file") or "") not in file_names:
@@ -2199,23 +2202,33 @@ def _stop_slots_streaming(file_names: set[str]) -> list[int]:
         if _external_holder(index) and not media_stream_is_running(index):
             continue
         identity = (src.get("type"), src.get("file"))
-        if _update_source_slot(index, lambda slot: (slot.get("type"), slot.get("file")) == identity, _file_slot_stopper(index)):
-            stopped.append(index)
+        mark_stopped = _file_slot_stopper(index)
+
+        def stop_and_note(slot, index=index, mark_stopped=mark_stopped):
+            mark_stopped(slot)
+            stopped[index] = _slot_generation(index)  # after the bump, under the same lock
+
+        _update_source_slot(index, lambda slot: (slot.get("type"), slot.get("file")) == identity, stop_and_note)
     return stopped
 
 
-def _restart_file_slots(indexes: list[int], file_names: set[str]):
-    """Start the slots _stop_slots_streaming stopped again; yields one `Restarted srcN.` or error line per slot.
+def _restart_file_slots(pending: dict[int, int]):
+    """Start the slots _stop_slots_streaming stopped again, emptying `pending` as it goes.
 
-    A failure must not end the upload, whose files are already in place, so it is reported
-    as a line. A slot that was reassigned or started by someone else since is left alone.
+    Yields `Restarted srcN.` per slot, or `Could not restart srcN: <reason>` (a warning, not a
+    failure of the upload: its files are already in place). A slot whose generation moved on
+    since the stop (stopped, cleared, reassigned or started by someone else) is left alone.
+    `pending` shrinks before each start, so a generator closed midway leaves exactly the slots
+    not yet handled for the caller's `finally` to drain.
     """
-    for index in indexes:
+    while pending:
+        index = next(iter(pending))
+        stopped_generation = pending.pop(index)
         try:
             with _sources_lock:  # the snapshot and its generation belong together
                 src = next(s for s in load_sources() if s["index"] == index)
                 generation = _slot_generation(index)
-            if src.get("type") != SOURCE_TYPE_FILE or src.get("state") == "playing" or (src.get("file") or "") not in file_names:
+            if generation != stopped_generation:
                 continue
             ok, err, _status = _start_source_slot(src, generation=generation)
         except Exception as exc:
@@ -2224,7 +2237,7 @@ def _restart_file_slots(indexes: list[int], file_names: set[str]):
             yield f"Restarted src{index}.\n"
         else:
             logging.warning("Could not restart src%s after its media was replaced: %s", index, err)
-            yield f"Error: Could not restart src{index}: {err}\n"
+            yield f"Could not restart src{index}: {err}\n"
 
 
 def _extract_archive(archive_path: Path, destination: Path) -> None:
@@ -2243,57 +2256,84 @@ def _extract_archive(archive_path: Path, destination: Path) -> None:
             tar.extractall(path=destination)
 
 
+def _move_into_place(staged: Path, target: Path, replacing: bool) -> None:
+    """Move a staged file to `target`. Unless replacing, never over a file that appeared since the clash check.
+
+    A hard link then unlink fails with FileExistsError where a rename would silently replace
+    the file a simultaneous upload of the same name just saved.
+    """
+    if replacing:
+        os.replace(staged, target)
+    else:
+        os.link(staged, target)
+        staged.unlink()
+
+
 def _stream_file_upload(staged: Path, target: Path, replacing: bool):
     replaced = {target.relative_to(MEDIA_DIR).as_posix()} if replacing else set()
-    stopped = _stop_slots_streaming(replaced)
+    pending = _stop_slots_streaming(replaced)
     try:
-        os.replace(staged, target)
-    except OSError:
-        # The old file is still there, so the slots go back to it; the error ends the stream.
-        for _line in _restart_file_slots(stopped, replaced):
+        try:
+            _move_into_place(staged, target, replacing)
+        except FileExistsError:
+            yield "Failed to save upload: a file with this name was added meanwhile.\n"
+            return
+        except OSError as exc:
+            yield f"Failed to save upload: {exc}\n"
+            return
+        _remove_renditions(replaced)  # the content changed
+        yield f"Uploaded to {target}\n"
+        yield from _optimize_media_files(target)
+        yield from _restart_file_slots(pending)
+        yield "Upload complete.\n"
+    finally:
+        # Whatever ended the stream (a failure line, an exception while optimising, the client
+        # going away), the slots stopped above must not stay stopped. Nothing is yielded here:
+        # a closed generator may not yield.
+        for _line in _restart_file_slots(pending):
             pass
-        raise
-    _remove_renditions(replaced)  # the content changed
-    yield f"Uploaded to {target}\n"
-    yield from _optimize_media_files(target)
-    yield from _restart_file_slots(stopped, replaced)
-    yield "Upload complete.\n"
 
 
 def _stream_archive_upload(archive_path: Path, target: Path, replacing: bool):
-    yield f"Saved archive to {archive_path}\n"
+    yield f"Saved archive to {target / archive_path.name}\n"
 
     # Extracted beside the target and moved in only once it is complete: a failure leaves no
     # half-extracted folder, and a replaced folder stays as it was.
     stage = archive_path.parent
     extracted = stage / "extracted"
     replaced: set[str] = set()
-    stopped: list[int] = []
+    pending: dict[int, int] = {}
     try:
-        extracted.mkdir()
-        _extract_archive(archive_path, extracted)
-        if replacing:
-            replaced = _media_files_under(target)
-            stopped = _stop_slots_streaming(replaced)
-            previous = stage / "previous"  # deleted with the stage
-            target.rename(previous)
-            try:
+        try:
+            extracted.mkdir()
+            _extract_archive(archive_path, extracted)
+            if replacing:
+                replaced = _media_files_under(target)
+                pending.update(_stop_slots_streaming(replaced))
+                previous = stage / "previous"  # deleted with the stage
+                target.rename(previous)
+                try:
+                    extracted.rename(target)
+                except OSError:
+                    previous.rename(target)
+                    raise
+            else:
                 extracted.rename(target)
-            except OSError:
-                previous.rename(target)
-                raise
-        else:
-            extracted.rename(target)
-    except Exception as exc:
-        for _line in _restart_file_slots(stopped, replaced):
+        except Exception as exc:
+            yield f"Failed to extract archive: {exc}\n"
+            return
+        # Files the new archive lacks are gone like deleted ones: their slots are unassigned,
+        # as delete-media does, instead of being left on a missing file.
+        _clear_slots_assigned_to({name for name in replaced if not (MEDIA_DIR / name).is_file()})
+        _remove_renditions(replaced)  # the content changed
+        yield "Archive extracted.\n"
+        yield from _optimize_media_files(target)
+        yield from _restart_file_slots(pending)
+        yield "Upload complete.\n"
+    finally:
+        # See _stream_file_upload: every exit restarts what was stopped, without yielding.
+        for _line in _restart_file_slots(pending):
             pass
-        yield f"Failed to extract archive: {exc}\n"
-        return
-    _remove_renditions(replaced)  # the content changed
-    yield "Archive extracted.\n"
-    yield from _optimize_media_files(target)
-    yield from _restart_file_slots(stopped, replaced)
-    yield "Upload complete.\n"
 
 
 # API: upload a media file or archive into the neat-insight media library.
@@ -2361,6 +2401,36 @@ def upload_media():
     return response
 
 
+def _remove_stale_upload_stages() -> None:
+    """Delete `.upload-*` staging folders in the media root that a killed upload left behind."""
+    for stale in MEDIA_DIR.glob(".upload-*"):
+        shutil.rmtree(stale, ignore_errors=True)
+
+
+def _clear_slots_assigned_to(removed_names: set[str], link_prefix: Optional[str] = None) -> None:
+    """Stop and unassign every slot whose file is in `removed_names`, whatever its state.
+
+    `link_prefix` also catches files reached through a linked folder; those names are added to
+    `removed_names`, which the caller then uses to forget their renditions.
+    """
+    with _sources_lock:
+        sources = load_sources()
+        modified = False
+        for src in sources:
+            assigned = (src.get("file") or "").replace(os.path.sep, "/")
+            if link_prefix and assigned.startswith(link_prefix):
+                removed_names.add(assigned)
+            if assigned in removed_names:
+                _bump_slot(src["index"])
+                stop_media_stream(src["index"])
+                src["file"] = ""
+                src["state"] = "stopped"
+                src["fps"] = None
+                modified = True
+        if modified:
+            save_sources(sources)
+
+
 def _remove_renditions(file_names) -> None:
     """Forget the cached FPS renditions of media files that were deleted or whose content changed."""
     for file_name in sorted(file_names):
@@ -2401,22 +2471,7 @@ def delete_media():
             removed_files = [Path(root) / name for root, _dirs, names in os.walk(full_path) for name in names]
             removed_names = {os.path.relpath(path, MEDIA_DIR).replace(os.path.sep, "/") for path in removed_files}
 
-        with _sources_lock:
-            sources = load_sources()
-            modified = False
-            for src in sources:
-                assigned = (src.get("file") or "").replace(os.path.sep, "/")
-                if link_prefix and assigned.startswith(link_prefix):
-                    removed_names.add(assigned)
-                if assigned in removed_names:
-                    _bump_slot(src["index"])
-                    stop_media_stream(src["index"])
-                    src["file"] = ""
-                    src["state"] = "stopped"
-                    src["fps"] = None
-                    modified = True
-            if modified:
-                save_sources(sources)
+        _clear_slots_assigned_to(removed_names, link_prefix)
 
         # Unlink first, then forget renditions: an encode that publishes before the unlink is
         # cleaned up by remove_source, and one that publishes after it finds no source and aborts.
@@ -4488,6 +4543,7 @@ def main():
 
     ensure_sys_metrics_publisher_started()
     reset_sources()
+    _remove_stale_upload_stages()
 
     ssl_context = check_and_generate_mkcert_certificate(args.port)
     server_ssl_context = ssl_context
