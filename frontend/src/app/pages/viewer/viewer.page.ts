@@ -43,6 +43,7 @@ import { ChannelLiveness } from '../../viewer/channel-liveness';
 import { ViewerInspector } from '../../viewer/inspector/inspector';
 import { LayoutPrefs } from '../../viewer/settings/layout-prefs';
 import type { SettingTab } from '../../viewer/settings/schema';
+import { RoiStore } from '../../viewer/settings/roi-store';
 import { ViewerStorage } from '../../viewer/settings/storage';
 import { ViewerSettingsStore } from '../../viewer/settings/viewer-settings.store';
 import { VfConnections } from '../../viewer/vf/vf-connections';
@@ -124,7 +125,14 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
     ViewerInspector,
     ViewerTile,
   ],
-  providers: [VfConnections, ViewerSettingsStore, LayoutPrefs, ChannelLiveness, ChannelLateness],
+  providers: [
+    VfConnections,
+    RoiStore,
+    ViewerSettingsStore,
+    LayoutPrefs,
+    ChannelLiveness,
+    ChannelLateness,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(window:keydown)': 'onKeydown($event)', '(click)': 'deselectOnEmptySpace($event)' },
   templateUrl: './viewer.page.html',

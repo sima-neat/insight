@@ -338,7 +338,7 @@ export class ViewerInspector {
     const { settings, channels } = this.store.channelOverrides();
     const confirmed = await this.confirm.ask({
       title: 'Reset all channels to global?',
-      message: `${settingCount(settings)} on ${channelCount(channels)} ${settings === 1 ? 'goes' : 'go'} back to the global values. This can't be undone.`,
+      message: `${settingCount(settings)} on ${channelCount(channels)} ${settings === 1 ? 'goes' : 'go'} back to the global values. Regions of interest are kept. This can't be undone.`,
       confirmLabel: 'Reset',
       tone: 'danger',
     });

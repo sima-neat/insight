@@ -21,6 +21,7 @@ import {
   withOwnValue,
   withoutOwnValue,
 } from './resolver';
+import { RoiStore } from './roi-store';
 import {
   type SettingId,
   type SettingValues,
@@ -55,11 +56,15 @@ function ownValueCount(own: ScopeOverrides): number {
  * every frame) and a change re-resolves only the channels it reaches: a channel's change its own,
  * a global change every channel. Changes other tabs make show up here only through a write.
  *
+ * The regions of interest are not settings: `RoiStore` keeps them under their own names, and each
+ * channel's resolved settings carry the regions in effect for it.
+ *
  * Provided by the Viewer page, so it ends with the page and the next visit reads storage afresh.
  */
 @Injectable()
 export class ViewerSettingsStore {
   private readonly storage = inject(ViewerStorage);
+  private readonly roi = inject(RoiStore);
   private readonly global = signal(this.read(GLOBAL_SCOPE));
   // A plain map rather than a signal: `resolved(n)` may add a channel while a template or computed
   // reads it, where writing a signal is not allowed. A channel added that way holds nothing yet.
@@ -91,7 +96,8 @@ export class ViewerSettingsStore {
     let resolved = this.resolvedCache.get(channel);
     if (resolved === undefined) {
       const own = this.channelSignal(channel);
-      resolved = computed(() => resolveOverlaySettings(this.global(), own()));
+      const roi = this.roi.effective(channel);
+      resolved = computed(() => resolveOverlaySettings(this.global(), own(), roi()));
       this.resolvedCache.set(channel, resolved);
     }
     return resolved;

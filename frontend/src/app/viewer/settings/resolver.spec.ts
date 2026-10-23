@@ -153,9 +153,28 @@ describe('viewer settings resolver', () => {
   // New tests for this port.
 
   it('resolving with nothing stored gives the kit overlay defaults with no ROI', () => {
-    expect(resolveOverlaySettings(EMPTY_OVERRIDES, EMPTY_OVERRIDES)).toStrictEqual(
+    expect(resolveOverlaySettings(EMPTY_OVERRIDES, EMPTY_OVERRIDES, [])).toStrictEqual(
       NEAT_OVERLAY_DEFAULTS,
     );
+  });
+
+  it('resolving takes the regions as given, whatever the scopes hold', () => {
+    const roi = [
+      {
+        type: 'inclusion' as const,
+        points: [
+          { x: 0.1, y: 0.1 },
+          { x: 0.9, y: 0.1 },
+          { x: 0.5, y: 0.9 },
+        ],
+      },
+    ];
+    const own = withOwnValue(EMPTY_OVERRIDES, 'general.lineWidth', 5);
+
+    const resolved = resolveOverlaySettings(own, EMPTY_OVERRIDES, roi);
+
+    expect(resolved.roi).toBe(roi);
+    expect(resolved.general.lineWidth).toBe(5);
   });
 
   it('a legacy flat scope maps its keys and gives pose and classification nothing (R23)', () => {

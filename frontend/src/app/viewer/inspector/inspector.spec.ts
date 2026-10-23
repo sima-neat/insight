@@ -307,12 +307,13 @@ describe('ViewerInspector', () => {
 
     expect(ask).toHaveBeenCalledExactlyOnceWith({
       title: 'Reset all channels to global?',
-      message: "4 settings on 3 channels go back to the global values. This can't be undone.",
+      message:
+        "4 settings on 3 channels go back to the global values. Regions of interest are kept. This can't be undone.",
       confirmLabel: 'Reset',
       tone: 'danger',
     });
     expect(dialogText()).toBe(
-      "Reset all channels to global? 4 settings on 3 channels go back to the global values. This can't be undone. Cancel Reset",
+      "Reset all channels to global? 4 settings on 3 channels go back to the global values. Regions of interest are kept. This can't be undone. Cancel Reset",
     );
     await answer('Cancel');
 
@@ -348,7 +349,7 @@ describe('ViewerInspector', () => {
     await settleDialog();
 
     expect(dialogText()).toContain(
-      "1 setting on 1 channel goes back to the global values. This can't be undone.",
+      "1 setting on 1 channel goes back to the global values. Regions of interest are kept. This can't be undone.",
     );
   });
 
@@ -363,7 +364,7 @@ describe('ViewerInspector', () => {
     await settleDialog();
 
     expect(dialogText()).toContain(
-      "2 settings on 1 channel go back to the global values. This can't be undone.",
+      "2 settings on 1 channel go back to the global values. Regions of interest are kept. This can't be undone.",
     );
   });
 
@@ -426,6 +427,35 @@ describe('ViewerInspector', () => {
     const heading = inspector().querySelector('h2')!;
     expect(document.activeElement).toBe(heading);
     expect(heading.tabIndex).toBe(-1);
+  });
+
+  it('the footer asks with a note that regions of interest are kept, and confirming keeps them', async () => {
+    const regions = {
+      version: 1,
+      regions: [
+        {
+          type: 'inclusion',
+          points: [
+            { x: 0.1, y: 0.1 },
+            { x: 0.9, y: 0.1 },
+            { x: 0.5, y: 0.9 },
+          ],
+        },
+      ],
+    };
+    storage.seed({ ...FOUR_ON_THREE, 'roi:global': regions, 'roi:channel:1': regions });
+    await open();
+    await click(toolbarButton('Inspector'));
+    footerButton()!.click();
+    await settleDialog();
+    expect(dialogText()).toContain('Regions of interest are kept.');
+
+    await answer('Reset');
+
+    expect(storage.readStored('settings:channel:1')).toBeNull();
+    expect(storage.readStored('roi:global')).toStrictEqual(regions);
+    expect(storage.readStored('roi:channel:1')).toStrictEqual(regions);
+    expect(gridTile(1).settings().roi).toStrictEqual(regions.regions);
   });
 
   it('the preview shares the tile’s MediaStream: no second VfConnection is created', async () => {

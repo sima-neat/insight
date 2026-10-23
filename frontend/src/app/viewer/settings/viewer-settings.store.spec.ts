@@ -1,15 +1,26 @@
 import { computed } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { NEAT_OVERLAY_DEFAULTS, NEAT_OVERLAY_STYLE_FALLBACK_COLOR } from '@sima/neat-ui/video';
+import {
+  NEAT_OVERLAY_DEFAULTS,
+  NEAT_OVERLAY_STYLE_FALLBACK_COLOR,
+  type NeatRoiPolygon,
+} from '@sima/neat-ui/video';
 import { FakeLocalStorage } from './fake-storage.testing';
 import type { ScopeOverrides } from './resolver';
 import { SCALAR_SETTINGS, TYPE_DEFAULTS, type SettingId } from './schema';
+import { RoiStore } from './roi-store';
 import { ViewerSettingsStore } from './viewer-settings.store';
 
 type StoredScope = ScopeOverrides & { readonly version: number };
 type Failures = Partial<Pick<FakeLocalStorage, 'failWrites' | 'failWritesFor' | 'unavailable'>>;
 
 let fake: FakeLocalStorage;
+
+/** A new browser session: the Viewer page provides the regions next to the settings. */
+function newSession(): void {
+  TestBed.resetTestingModule();
+  TestBed.configureTestingModule({ providers: [RoiStore] });
+}
 
 /** A store for the Viewer opened again in the same browser session. */
 function openStore(): ViewerSettingsStore {
@@ -25,13 +36,13 @@ function load(stored: Record<string, unknown> = {}, failures: Failures = {}): Vi
   fake.seed(stored);
   Object.assign(fake, failures);
   vi.stubGlobal('localStorage', fake);
-  TestBed.resetTestingModule();
+  newSession();
   return openStore();
 }
 
 /** A new browser session on the same storage: what a page reload sees. */
 function reload(): ViewerSettingsStore {
-  TestBed.resetTestingModule();
+  newSession();
   return openStore();
 }
 
@@ -1175,6 +1186,73 @@ describe('ViewerSettingsStore', () => {
 
     expect(store.overridesOf('general.lineWidth')).toStrictEqual([1]);
     expect(store.channelOverrides()).toStrictEqual({ settings: 1, channels: 1 });
+  });
+
+  describe('regions of interest', () => {
+    const SQUARE: NeatRoiPolygon = {
+      type: 'inclusion',
+      points: [
+        { x: 0.1, y: 0.1 },
+        { x: 0.9, y: 0.1 },
+        { x: 0.5, y: 0.9 },
+      ],
+    };
+    const TRIANGLE: NeatRoiPolygon = {
+      type: 'exclusion',
+      points: [
+        { x: 0.2, y: 0.2 },
+        { x: 0.4, y: 0.2 },
+        { x: 0.3, y: 0.4 },
+      ],
+    };
+
+    it('resolved(n).roi follows RoiStore.effective(n)', () => {
+      const store = load();
+      const roi = TestBed.inject(RoiStore);
+      const resolved = store.resolved(1);
+      expect(resolved().roi).toStrictEqual([]);
+
+      roi.set('global', [SQUARE]);
+      expect(resolved().roi).toStrictEqual([SQUARE]);
+      expect(store.resolved(2)().roi).toStrictEqual([SQUARE]);
+
+      roi.set(1, [TRIANGLE]);
+      expect(resolved().roi).toStrictEqual([TRIANGLE]);
+      expect(store.resolved(2)().roi).toStrictEqual([SQUARE]);
+
+      roi.useGlobal(1);
+      expect(resolved().roi).toStrictEqual([SQUARE]);
+    });
+
+    it('a region change leaves the sync settings alone', () => {
+      const store = load();
+      const sync = store.general(1)();
+
+      TestBed.inject(RoiStore).set(1, [SQUARE]);
+
+      expect(store.general(1)()).toBe(sync);
+    });
+
+    it('resetAllChannels keeps roi:global and every roi:channel:<n>', () => {
+      const regions = { version: 1, regions: [SQUARE] };
+      const store = load({
+        'settings:channel:1': { version: 10, general: { lineWidth: 6 } },
+        'roi:global': regions,
+        'roi:channel:1': regions,
+        'roi:channel:4': { version: 1, regions: [] },
+      });
+      const roi = TestBed.inject(RoiStore);
+
+      store.resetAllChannels();
+
+      expect(fake.readRaw('settings:channel:1')).toBeNull();
+      expect(fake.readStored('roi:global')).toStrictEqual(regions);
+      expect(fake.readStored('roi:channel:1')).toStrictEqual(regions);
+      expect(fake.readStored('roi:channel:4')).toStrictEqual({ version: 1, regions: [] });
+      expect(fake.writes.filter(({ key }) => key.includes(':roi:'))).toStrictEqual([]);
+      expect(roi.channelsWithOwn()()).toStrictEqual([1, 4]);
+      expect(store.resolved(1)().roi).toStrictEqual([SQUARE]);
+    });
   });
 });
 

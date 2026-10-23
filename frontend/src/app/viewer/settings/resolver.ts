@@ -303,13 +303,15 @@ function resolveClassStyles(
   return [...byLabel.values()];
 }
 
-// The ROI editor and its storage arrive with plan 2b; until then no channel has regions.
-const NO_ROI: readonly NeatRoiPolygon[] = [];
-
-/** The settings a channel's overlays are drawn with. */
+/**
+ * The settings a channel's overlays are drawn with. The regions of interest are stored apart from
+ * the other settings (they replace as a whole, not value by value), so the caller resolves them
+ * and passes them in.
+ */
 export function resolveOverlaySettings(
   global: ScopeOverrides,
   channel: ScopeOverrides,
+  roi: readonly NeatRoiPolygon[],
 ): NeatOverlaySettings {
   const value = <Id extends SettingId>(id: Id) => resolveValue(global, channel, id);
   return {
@@ -348,7 +350,7 @@ export function resolveOverlaySettings(
         visible: value('types.classification.visible'),
       },
     },
-    roi: NO_ROI,
+    roi,
   };
 }
 
