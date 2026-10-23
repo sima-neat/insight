@@ -1,4 +1,5 @@
 import { expect, Locator, Page, test } from '@playwright/test';
+import { DESKTOP, LAPTOP, TABLET, topBarSpill } from './layout';
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const railItem = (page: Page, label: string) =>
@@ -202,11 +203,7 @@ test('collapsed rail items are at least 40 px wide and tall', async ({ page }) =
   }
 });
 
-for (const viewport of [
-  { width: 1366, height: 768 },
-  { width: 768, height: 1024 },
-  { width: 1920, height: 1080 },
-]) {
+for (const viewport of [LAPTOP, TABLET, DESKTOP]) {
   test(`no page-level scrolling at ${viewport.width}×${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto('/streaming');
@@ -222,22 +219,8 @@ for (const viewport of [
     expect(overflow.horizontal).toBeLessThanOrEqual(0);
     expect(overflow.vertical).toBeLessThanOrEqual(0);
 
-    // The top bar's own items (not the paths inside icons) must not spill out of it.
-    const spilled = await page.evaluate(() => {
-      const bar = document.querySelector('header')!.getBoundingClientRect();
-      return [...document.querySelectorAll('header *:not(svg *)')]
-        .filter((el) => {
-          const box = el.getBoundingClientRect();
-          return (
-            box.width > 0 &&
-            (box.left < bar.left - 0.5 ||
-              box.right > bar.right + 0.5 ||
-              box.top < bar.top - 0.5 ||
-              box.bottom > bar.bottom + 0.5)
-          );
-        })
-        .map((el) => el.outerHTML.slice(0, 80));
-    });
-    expect(spilled).toEqual([]);
+    // The top bar's own items (not the paths inside icons) must not spill out of it. Streaming's
+    // page tools do not fit beside the title on a tablet, where they scroll sideways (R14).
+    expect(await topBarSpill(page, viewport === TABLET)).toEqual({ spilled: [], toolsOverflow: 0 });
   });
 }

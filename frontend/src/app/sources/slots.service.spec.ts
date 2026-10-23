@@ -515,6 +515,53 @@ describe('SlotsService', () => {
       http.expectOne(SLOTS_URL).flush([slot(2)]);
       http.expectOne(RENDITIONS_URL).flush({ count: 0, bytes: 0 });
     });
+
+    it('shows the encode under its slot while it runs, until the slots are fetched again', async () => {
+      prepare();
+      expect(service.encodes().get(2)).toEqual({
+        title: 'Preparing rendition…',
+        detail: '',
+        percent: null,
+      });
+      const request = http.expectOne('/api/mediasrc/prepare');
+      request.event({
+        type: HttpEventType.DownloadProgress,
+        loaded: 3,
+        partialText: 'Encoding a.mp4 at 15 fps (libx264)...\nprogress 3/10\n',
+      });
+      expect(service.encodes().get(2)).toEqual({
+        title: 'Encoding 15 fps rendition…',
+        detail: 'libx264',
+        percent: 30,
+      });
+      // A failure is the subscriber's to word; the encode shows what it reached until it ends.
+      request.flush('Encoding a.mp4 at 15 fps (libx264)...\nprogress 3/10\nError: disk full\n');
+      expect(service.encodes().get(2)?.percent).toBe(30);
+
+      // Until the slots say what the server holds now, the slot is not shown idle in between.
+      http.expectOne(SLOTS_URL).flush([slot(2)]);
+      http.expectOne(RENDITIONS_URL).flush({ count: 0, bytes: 0 });
+      await tick();
+      expect(service.encodes().has(2)).toBe(false);
+    });
+
+    it('stops showing a cancelled or refused encode once the slots are fetched again', async () => {
+      const { subscription } = prepare();
+      http.expectOne('/api/mediasrc/prepare');
+      subscription.unsubscribe();
+      http.expectOne(SLOTS_URL).flush([slot(2)]);
+      http.expectOne(RENDITIONS_URL).flush({ count: 0, bytes: 0 });
+      await tick();
+      expect(service.encodes().size).toBe(0);
+
+      prepare();
+      http.expectOne('/api/mediasrc/prepare').flush({ error: 'No file assigned' }, conflict);
+      expect(service.encodes().has(2)).toBe(true);
+      http.expectOne(SLOTS_URL).flush([slot(2)]);
+      http.expectOne(RENDITIONS_URL).flush({ count: 0, bytes: 0 });
+      await tick();
+      expect(service.encodes().size).toBe(0);
+    });
   });
 
   describe('assignedTo', () => {

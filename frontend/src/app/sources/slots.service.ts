@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { finalize, firstValueFrom, Observable, timeout, throwError } from 'rxjs';
+import { defer, finalize, firstValueFrom, Observable, tap, timeout, throwError } from 'rxjs';
 import { LatestOnly, visiblePoller } from '../polling';
 import type {
   AssignRequest,
@@ -22,6 +22,7 @@ import type {
   SuccessResponse,
   TakeoverResponse,
 } from './api';
+import { isProgressFailure, mergePrepareProgress, type Progress } from './progress-lines';
 import {
   ApiRequestError,
   postStreamedText,
@@ -34,6 +35,8 @@ const RENDITIONS_URL = '/api/mediasrc/renditions';
 const POLL_INTERVAL_MS = 2000;
 /** A fetch of the slots that has not answered by then counts as failed: it must not stall polling. */
 const FETCH_TIMEOUT_MS = 10_000;
+/** What an encode shows before the server's first line (#170's label). */
+const PREPARING: Progress = { title: 'Preparing rendition…', detail: '', percent: null };
 
 /**
  * Whether `next` shows a slot streaming at a frame rate other than the file's, that did not
@@ -86,6 +89,14 @@ export class SlotsService {
   private readonly renditionsState = signal<RenditionUsage | null>(null);
   /** The stored FPS renditions, as of the last `refreshRenditions()` or action that changes them. */
   readonly renditions = this.renditionsState.asReadonly();
+
+  private readonly encodesState = signal<ReadonlyMap<number, Progress>>(new Map());
+  /**
+   * The FPS renditions being encoded, by slot: how far each `prepare` has got, merged from the
+   * server's lines. The server knows nothing of an encode until it has finished (the slot stays
+   * stopped), so this is the only place it shows; the list and the slot's panel read it alike.
+   */
+  readonly encodes = this.encodesState.asReadonly();
 
   private readonly slotsByFile = computed(() => {
     const byFile = new Map<string, Slot[]>();
@@ -185,12 +196,33 @@ export class SlotsService {
    * subscribe, and unsubscribing cancels the encode (the server stops FFmpeg and removes the
    * partial file). Emits the server's lines (read them with `mergePrepareProgress` from
    * `progress-lines.ts`); a refused request errors with the server's message. The slots and the
-   * rendition usage are fetched again however it ends.
+   * rendition usage are fetched again however it ends. While it runs, `encodes` shows its progress.
    */
   prepare(index: number): Observable<StreamEvent> {
-    return postStreamedText(this.http, `${SLOTS_URL}/prepare`, { index }).pipe(
-      finalize(() => void this.settleChange({ renditions: true })),
-    );
+    return defer(() => {
+      // Each run knows its entry by identity (a copy, never the shared constant), so a run that
+      // ends after a newer one began on the same slot leaves the newer run's progress alone.
+      const run = { progress: { ...PREPARING } };
+      this.setEncode(index, run.progress);
+      return postStreamedText(this.http, `${SLOTS_URL}/prepare`, { index }).pipe(
+        tap((event) => {
+          // A newer run on the slot has taken its entry over.
+          if (event.kind !== 'line' || this.encodes().get(index) !== run.progress) return;
+          const next = mergePrepareProgress(run.progress, event.text);
+          // A failure is the subscriber's to word; until the run ends it shows what it reached.
+          if (next === null || isProgressFailure(next)) return;
+          run.progress = next;
+          this.setEncode(index, next);
+        }),
+        // The slot shows as encoding until the slots are fetched again, so it does not flash idle
+        // between the encode's end and the answer that shows what the server did next.
+        finalize(() => {
+          void this.settleChange({ renditions: true }).then(() => {
+            if (this.encodes().get(index) === run.progress) this.setEncode(index, null);
+          });
+        }),
+      );
+    });
   }
 
   /** A file slot that still lacks its rendition encodes it first, which is why the usage is fetched again. */
@@ -264,6 +296,15 @@ export class SlotsService {
   clearRenditions(): Promise<RenditionsCleared> {
     return this.act(this.http.post<RenditionsCleared>(`${RENDITIONS_URL}/clear`, {}), {
       renditions: true,
+    });
+  }
+
+  private setEncode(index: number, progress: Progress | null): void {
+    this.encodesState.update((all) => {
+      const next = new Map(all);
+      if (progress) next.set(index, progress);
+      else next.delete(index);
+      return next;
     });
   }
 

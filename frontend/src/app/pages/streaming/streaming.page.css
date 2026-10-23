@@ -1,0 +1,92 @@
+/*
+ * Toolbar. The shell's toolbar row (or kiosk mode's floating bar) lays the controls out, and on a
+ * tablet scrolls it sideways. The ⋯ menu's panel stacks its items; they keep their own width, and
+ * their tooltips open to the left, where they cover no other item.
+ */
+.menu-item {
+  align-self: flex-start;
+}
+
+/* The list fills the page's content box under the notice, and scrolls its rows inside. */
+.slots {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+neat-select-list {
+  flex: 1 1 0;
+}
+
+/* Empty, the notice takes no room; it stays in the DOM so its text is announced when it appears. */
+.notice:not(:empty) {
+  padding-block-end: var(--neat-space-2);
+}
+
+/* Cells: one line each, truncated rather than wrapped, so every row keeps the list's row height. */
+.text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The kind is a code (VID, CAM, EXT, URL), set off from the source it qualifies. */
+.kind {
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.codec-warning {
+  margin-inline-start: 0.25em;
+  cursor: help;
+}
+
+/* Read with the row by assistive technology, not shown: the glyph's tooltip says it for the eye. */
+.spoken {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Side panel. */
+.slot-header {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+.slot-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+/* Start… dialog: the slider takes the row, the readout its number's width. */
+.question {
+  margin: 0 0 var(--neat-space-3);
+  font-size: var(--neat-text-sm);
+}
+
+.count-field {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-3);
+  margin-block-end: var(--neat-space-2);
+}
+
+.count-field neat-slider {
+  flex: 1 1 0;
+}
+
+.count-field output {
+  min-width: 2ch;
+  font-size: var(--neat-text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
