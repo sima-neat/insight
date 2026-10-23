@@ -343,7 +343,7 @@
       "post": {
         "tags": ["Media imports"],
         "summary": "Upload media or a media archive",
-        "description": "Uploads one local file using multipart field `file`. Archives (`zip`, `tar`, `gz`, and `tar.gz`) are safely extracted beneath the media root, and compatible MP4 files may be optimized for browser playback after upload. The response is a plain-text progress stream, so clients should consume it through the final line rather than treating the first bytes as completion.",
+        "description": "Uploads one local file using multipart field `file`. Archives (`zip`, `tar`, `gz`, and `tar.gz`) are safely extracted into a folder named after the archive beneath the media root, and compatible MP4 files may be optimized for browser playback after upload. A name that is already taken (for an archive, its folder) is refused with 409 unless `on_conflict` says what to do: `replace` swaps the content in (an archive is extracted aside first and swapped in only if extraction succeeds, so a failed replace leaves the old folder), forgets the replaced files' cached FPS renditions, and restarts the file slots that were streaming them (a `Restarted srcN.` or `Error: Could not restart srcN: ...` line per slot; webcam, externally held and pulled slots are never touched); `keep_both` saves under the next free `name_2` .. `name_999`. Refusals (400, 409) are real statuses answered before anything is saved. Once accepted, the response is a plain-text progress stream that is HTTP 200 even when it fails, so clients should read every line: a failure prints a line such as `Failed to extract archive: ...` and ends without `Upload complete.`.",
         "operationId": "uploadMedia",
         "x-codeSamples": [
           {
@@ -359,13 +359,45 @@
               "schema": {
                 "type": "object",
                 "required": ["file"],
-                "properties": {"file": {"type": "string", "format": "binary"}}
+                "properties": {
+                  "file": {"type": "string", "format": "binary"},
+                  "on_conflict": {
+                    "type": "string",
+                    "enum": ["ask", "keep_both", "replace"],
+                    "default": "ask",
+                    "description": "What to do when the target name (for an archive, its folder) already exists. `ask` (the default) answers 409 and saves nothing; `keep_both` saves under the next free `name_2`; `replace` overwrites the file or swaps the folder's contents."
+                  }
+                }
               }
             }
           }
         },
         "responses": {
-          "200": {"$ref": "#/components/responses/ProgressStream"}
+          "200": {"$ref": "#/components/responses/ProgressStream"},
+          "400": {"description": "No file was provided, the file name has no usable characters, `on_conflict` is not one of its values, or `replace` would turn a file into a folder or the reverse.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "409": {
+            "description": "The name is taken and `on_conflict` was absent or `ask`. Nothing was saved; repeat the request with `replace` or `keep_both`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["error", "conflict"],
+                  "properties": {
+                    "error": {"type": "string"},
+                    "conflict": {
+                      "type": "object",
+                      "required": ["existing", "suggested"],
+                      "properties": {
+                        "existing": {"type": "string", "description": "Media-relative path of the existing file, or of the folder an archive would extract into."},
+                        "suggested": {"type": "string", "description": "Media-relative path `keep_both` would use."}
+                      }
+                    }
+                  }
+                },
+                "example": {"error": "A file with this name exists.", "conflict": {"existing": "person_clip.mp4", "suggested": "person_clip_2.mp4"}}
+              }
+            }
+          }
         }
       }
     },

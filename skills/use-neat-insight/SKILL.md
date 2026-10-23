@@ -75,7 +75,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 ## Operating Rules
 
 - Call `/api/health` first when connecting to a running neat-insight instance.
-- Use JSON request bodies for POST endpoints except `/api/upload/media`, which uses multipart form field `file`.
+- Use JSON request bodies for POST endpoints except `/api/upload/media`, which uses multipart form field `file` and an optional `on_conflict` (`ask`, `keep_both`, `replace`); a name that is already taken answers 409 unless `on_conflict` is set.
 - Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
 - Use `/api/mediasrc` to read source state before changing assignments or playback.
 - Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments and cached FPS renditions for deleted files, including files inside a deleted directory.
@@ -348,7 +348,7 @@ Dropped segments warn once per channel and id in the browser console. Check ther
 | Method | Path | Request | Response |
 | --- | --- | --- | --- |
 | `GET` | `/api/media-files` | None | Recursive folder tree under the media directory; hidden files and macOS archive metadata are omitted. File nodes carry `streamable` (accepted by the media-source streamer), folder nodes carry `streamable_count`; the UI hides files with `streamable: false`. |
-| `POST` | `/api/upload/media` | Multipart form field `file` | Streaming `text/plain` progress while saving a file or extracting `zip`, `tar`, `gz`, or `tar.gz` archives. |
+| `POST` | `/api/upload/media` | Multipart form field `file`, optional `on_conflict` (`ask` default, `keep_both`, `replace`) | Streaming `text/plain` progress while saving a file or extracting `zip`, `tar`, `gz`, or `tar.gz` archives (into a folder named after the archive). A taken name (for an archive, its folder) answers 409 `{error, conflict: {existing, suggested}}` and saves nothing unless `on_conflict` is `keep_both` (saves as `name_2`) or `replace` (restarts file slots that were streaming the replaced file). The stream is HTTP 200 even on failure: look for `Failed to extract archive:` and a missing `Upload complete.`. |
 | `POST` | `/api/delete-media` | JSON `{"path": "relative/path"}` | `{"message": "Deleted successfully"}`; clears media-source assignments and cached FPS renditions for deleted files (directories included). |
 | `POST` | `/api/media-info` | JSON `{"path": "relative/path"}` | File size plus image dimensions for JPG/PNG or video track metadata from ffprobe, including detected codec when available. |
 | `GET` | `/api/media-preview/mjpeg?path=<path>` | Query string | Multipart MJPEG preview for MJPEG media files that browsers cannot preview directly. |

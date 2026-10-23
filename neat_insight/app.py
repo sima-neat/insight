@@ -2167,59 +2167,207 @@ def import_youtube_media():
     )
 
 
+UPLOAD_CONFLICT_MODES = ("ask", "keep_both", "replace")
+
+
+def _is_archive_upload(lower_filename: str) -> bool:
+    return lower_filename.rsplit(".", 1)[-1] in ("zip", "tar", "gz") or lower_filename.endswith(".tar.gz")
+
+
+def _media_files_under(folder: Path) -> set[str]:
+    """Media-relative POSIX names of every file below `folder`."""
+    return {
+        Path(root, name).relative_to(MEDIA_DIR).as_posix()
+        for root, _dirs, names in os.walk(folder)
+        for name in names
+    }
+
+
+def _stop_slots_streaming(file_names: set[str]) -> list[int]:
+    """Stop the file slots that are streaming one of `file_names`, as /api/mediasrc/stop would; returns their indexes.
+
+    Webcam, externally held and pulled slots are not ours to stop, and a slot that is only
+    assigned the file (not playing) keeps streaming nothing, so none of them is touched.
+    """
+    stopped = []
+    for src in load_sources():
+        index = src["index"]
+        if src.get("type") != SOURCE_TYPE_FILE or src.get("state") != "playing" or (src.get("file") or "") not in file_names:
+            continue
+        if _pull_record(index):
+            continue
+        if _external_holder(index) and not media_stream_is_running(index):
+            continue
+        identity = (src.get("type"), src.get("file"))
+        if _update_source_slot(index, lambda slot: (slot.get("type"), slot.get("file")) == identity, _file_slot_stopper(index)):
+            stopped.append(index)
+    return stopped
+
+
+def _restart_file_slots(indexes: list[int], file_names: set[str]):
+    """Start the slots _stop_slots_streaming stopped again; yields one `Restarted srcN.` or error line per slot.
+
+    A failure must not end the upload, whose files are already in place, so it is reported
+    as a line. A slot that was reassigned or started by someone else since is left alone.
+    """
+    for index in indexes:
+        try:
+            with _sources_lock:  # the snapshot and its generation belong together
+                src = next(s for s in load_sources() if s["index"] == index)
+                generation = _slot_generation(index)
+            if src.get("type") != SOURCE_TYPE_FILE or src.get("state") == "playing" or (src.get("file") or "") not in file_names:
+                continue
+            ok, err, _status = _start_source_slot(src, generation=generation)
+        except Exception as exc:
+            ok, err = False, str(exc)
+        if ok:
+            yield f"Restarted src{index}.\n"
+        else:
+            logging.warning("Could not restart src%s after its media was replaced: %s", index, err)
+            yield f"Error: Could not restart src{index}: {err}\n"
+
+
+def _extract_archive(archive_path: Path, destination: Path) -> None:
+    """Extract a zip or tar archive into `destination`, refusing members that would land outside it."""
+    if archive_path.name.lower().endswith(".zip"):
+        import zipfile
+
+        with zipfile.ZipFile(archive_path, "r") as zip_ref:
+            _validate_archive_members(destination, zip_ref.namelist())
+            zip_ref.extractall(destination)
+    else:
+        import tarfile
+
+        with tarfile.open(archive_path, "r:*") as tar:
+            _validate_archive_members(destination, [member.name for member in tar.getmembers()])
+            tar.extractall(path=destination)
+
+
+def _stream_file_upload(staged: Path, target: Path, replacing: bool):
+    replaced = {target.relative_to(MEDIA_DIR).as_posix()} if replacing else set()
+    stopped = _stop_slots_streaming(replaced)
+    try:
+        os.replace(staged, target)
+    except OSError:
+        # The old file is still there, so the slots go back to it; the error ends the stream.
+        for _line in _restart_file_slots(stopped, replaced):
+            pass
+        raise
+    _remove_renditions(replaced)  # the content changed
+    yield f"Uploaded to {target}\n"
+    yield from _optimize_media_files(target)
+    yield from _restart_file_slots(stopped, replaced)
+    yield "Upload complete.\n"
+
+
+def _stream_archive_upload(archive_path: Path, target: Path, replacing: bool):
+    yield f"Saved archive to {archive_path}\n"
+
+    # Extracted beside the target and moved in only once it is complete: a failure leaves no
+    # half-extracted folder, and a replaced folder stays as it was.
+    stage = archive_path.parent
+    extracted = stage / "extracted"
+    replaced: set[str] = set()
+    stopped: list[int] = []
+    try:
+        extracted.mkdir()
+        _extract_archive(archive_path, extracted)
+        if replacing:
+            replaced = _media_files_under(target)
+            stopped = _stop_slots_streaming(replaced)
+            previous = stage / "previous"  # deleted with the stage
+            target.rename(previous)
+            try:
+                extracted.rename(target)
+            except OSError:
+                previous.rename(target)
+                raise
+        else:
+            extracted.rename(target)
+    except Exception as exc:
+        for _line in _restart_file_slots(stopped, replaced):
+            pass
+        yield f"Failed to extract archive: {exc}\n"
+        return
+    _remove_renditions(replaced)  # the content changed
+    yield "Archive extracted.\n"
+    yield from _optimize_media_files(target)
+    yield from _restart_file_slots(stopped, replaced)
+    yield "Upload complete.\n"
+
+
 # API: upload a media file or archive into the neat-insight media library.
 @app.post("/api/upload/media")
 def upload_media():
-    """Accept multipart form field 'file' and stream plain-text progress while saving or extracting media."""
-    def generate():
-        uploaded_file = request.files.get("file")
-        if not uploaded_file or uploaded_file.filename == "":
-            yield "No file provided.\n"
-            return
+    """Accept multipart fields 'file' and optional 'on_conflict' (ask, keep_both, replace); stream plain-text progress.
 
-        filename = secure_filename(uploaded_file.filename)
-        lower_filename = filename.lower()
-        file_ext = lower_filename.rsplit(".", 1)[-1]
+    Everything that can be refused is decided before the stream starts, so a refusal is a
+    real status: 400 for a bad request, 409 for a name that is taken and was not asked to
+    be replaced or kept alongside. The generator then only does the work.
+    """
+    uploaded_file = request.files.get("file")
+    if not uploaded_file or uploaded_file.filename == "":
+        return _json_error("No file provided.")
+    filename = secure_filename(uploaded_file.filename)
+    if not filename:
+        return _json_error("The file name has no usable characters.")
+    on_conflict = request.form.get("on_conflict", "ask")
+    if on_conflict not in UPLOAD_CONFLICT_MODES:
+        return _json_error(f"on_conflict must be one of: {', '.join(UPLOAD_CONFLICT_MODES)}.")
 
-        if file_ext in ["zip", "tar", "gz"] or lower_filename.endswith(".tar.gz"):
-            base_name = os.path.splitext(os.path.splitext(filename)[0])[0]
-            target_dir = MEDIA_DIR / base_name
-            target_dir.mkdir(parents=True, exist_ok=True)
-            temp_path = target_dir / filename
-            uploaded_file.save(temp_path)
-            yield f"Saved archive to {temp_path}\n"
+    is_archive = _is_archive_upload(filename.lower())
+    # An archive extracts into a folder named after it, so it clashes on that folder.
+    rel_path = Path(os.path.splitext(os.path.splitext(filename)[0])[0] if is_archive else filename)
+    replacing = False
+    try:
+        target = _ensure_media_target_path(MEDIA_DIR / rel_path)
+        if target.exists():
+            if on_conflict == "keep_both":
+                target = _unique_media_path(rel_path)
+            elif on_conflict == "replace":
+                if target.is_dir() != is_archive:
+                    return _json_error(f"Cannot replace a {'file' if is_archive else 'folder'} with a {'folder' if is_archive else 'file'}.")
+                replacing = True
+            else:
+                suggested = _unique_media_path(rel_path).relative_to(MEDIA_DIR).as_posix()
+                return (
+                    jsonify({
+                        "error": "A file with this name exists.",
+                        "conflict": {"existing": rel_path.as_posix(), "suggested": suggested},
+                    }),
+                    409,
+                )
+    except (ValueError, RuntimeError) as exc:
+        return _json_error(str(exc))
 
-            try:
-                if lower_filename.endswith(".zip"):
-                    import zipfile
+    # Staged before the response starts: the request's files are closed once the view returns,
+    # and a save that fails (a full disk) is then a real 500. The stage is a hidden folder in
+    # the media root, on the target's filesystem so moving in is atomic, which the library
+    # tree skips. Staging also keeps a file being replaced intact, and the slots streaming it
+    # running, until the new content is complete.
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(dir=MEDIA_DIR, prefix=".upload-"))
+    try:
+        staged = stage / filename
+        uploaded_file.save(staged)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
 
-                    with zipfile.ZipFile(temp_path, "r") as zip_ref:
-                        _validate_archive_members(target_dir, zip_ref.namelist())
-                        zip_ref.extractall(target_dir)
-                else:
-                    import tarfile
+    stream = _stream_archive_upload if is_archive else _stream_file_upload
+    response = Response(stream_with_context(stream(staged, target, replacing)), mimetype="text/plain")
+    # Also takes whatever a failed extraction left, and a replaced folder's old content.
+    response.call_on_close(lambda: shutil.rmtree(stage, ignore_errors=True))
+    return response
 
-                    with tarfile.open(temp_path, "r:*") as tar:
-                        _validate_archive_members(target_dir, [member.name for member in tar.getmembers()])
-                        tar.extractall(path=target_dir)
-                yield "Archive extracted.\n"
-            except Exception as exc:
-                yield f"Failed to extract archive: {exc}\n"
-                return
-            finally:
-                if temp_path.exists():
-                    temp_path.unlink(missing_ok=True)
-            yield from _optimize_media_files(target_dir)
-            yield "Upload complete.\n"
-            return
 
-        target_path = MEDIA_DIR / filename
-        uploaded_file.save(target_path)
-        yield f"Uploaded to {target_path}\n"
-        yield from _optimize_media_files(target_path)
-        yield "Upload complete.\n"
-
-    return Response(stream_with_context(generate()), mimetype="text/plain")
+def _remove_renditions(file_names) -> None:
+    """Forget the cached FPS renditions of media files that were deleted or whose content changed."""
+    for file_name in sorted(file_names):
+        try:
+            renditions.remove_source(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name)
+        except Exception as exc:
+            logging.warning("Failed to remove renditions for %s: %s", file_name, exc)
 
 
 # API: delete one media library file or directory.
@@ -2278,11 +2426,7 @@ def delete_media():
             full_path.unlink()
         else:
             shutil.rmtree(full_path)
-        for file_name in sorted(removed_names):
-            try:
-                renditions.remove_source(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name)
-            except Exception as exc:
-                logging.warning("Failed to remove renditions for %s: %s", file_name, exc)
+        _remove_renditions(removed_names)
         return {"message": "Deleted successfully"}
     except Exception as exc:
         return _json_error(str(exc), 500)
@@ -3673,6 +3817,17 @@ def _stop_pull(index):
     return record
 
 
+def _file_slot_stopper(index):
+    """The `apply` step that stops slot `index`'s file stream and records it as stopped, for _update_source_slot."""
+
+    def mark_stopped(slot):
+        _bump_slot(index)  # also abandons a start still preparing its rendition
+        stop_media_stream(index)
+        slot["state"] = "stopped"
+
+    return mark_stopped
+
+
 # API: stop one RTSP media source.
 @app.post("/api/mediasrc/stop")
 def stop_source():
@@ -3719,14 +3874,9 @@ def stop_source():
     # now carries a stream this request never looked at, and must not be
     # stopped or marked stopped on the strength of one that is gone. So the
     # file slot's ffmpeg is stopped only here, after the identity check.
-    def mark_stopped(slot):
-        _bump_slot(index)  # also abandons a start still preparing its rendition
-        stop_media_stream(index)
-        slot["state"] = "stopped"
-
     identity = (source_type, snapshot.get("file"))
     updated = _update_source_slot(
-        index, lambda slot: (slot.get("type"), slot.get("file")) == identity, mark_stopped
+        index, lambda slot: (slot.get("type"), slot.get("file")) == identity, _file_slot_stopper(index)
     )
     if updated is None:
         if source_type == SOURCE_TYPE_WEBCAM:
