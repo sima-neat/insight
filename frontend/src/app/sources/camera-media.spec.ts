@@ -57,6 +57,12 @@ describe('browserCameraMedia', () => {
     await expect(media.enumerateDevices()).rejects.toThrow('This browser cannot access cameras.');
   });
 
+  it('reports no video capabilities in a browser that cannot tell, so publishing refuses with the H.264 message', () => {
+    vi.stubGlobal('RTCRtpSender', {});
+
+    expect(browserCameraMedia(undefined).videoCapabilities()).toBe(null);
+  });
+
   it('creates peer connections and reads the video capabilities from the browser globals', () => {
     class FakePeerConnection {}
     const getCapabilities = vi.fn(() => ({

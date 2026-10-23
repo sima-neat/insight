@@ -55,7 +55,11 @@ export function browserCameraMedia(
       return () => target.removeEventListener('devicechange', listener);
     },
     createPeer: () => new RTCPeerConnection(),
-    videoCapabilities: () => RTCRtpSender.getCapabilities('video'),
+    // Not every browser has the static method; null lets the publish refuse with the H.264 message.
+    videoCapabilities: () =>
+      typeof RTCRtpSender.getCapabilities === 'function'
+        ? RTCRtpSender.getCapabilities('video')
+        : null,
   };
 }
 

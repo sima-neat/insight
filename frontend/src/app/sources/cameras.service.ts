@@ -171,7 +171,6 @@ export class CamerasService {
       const probe = await this.media.getUserMedia({ video: true });
       probe.getTracks().forEach((track) => track.stop());
       this.accessState.set('granted');
-      await this.refreshCameras();
     } catch (failure) {
       this.errorState.set(describeWebcamError(failure));
       // A refusal is `denied`. Any other failure (no camera, one in use) says nothing new about
@@ -179,6 +178,14 @@ export class CamerasService {
       this.accessState.set(
         isPermissionDenied(failure) ? 'denied' : before === 'denied' ? 'unknown' : before,
       );
+      return;
+    }
+    // Access is granted whether or not the list can be read; say so when it cannot, as the user
+    // has just asked for it and would otherwise see no cameras and no reason.
+    try {
+      await this.listCameras();
+    } catch (failure) {
+      this.errorState.set(describeWebcamError(failure));
     }
   }
 
@@ -289,6 +296,8 @@ export class CamerasService {
       peer?: PublishPeer;
       watcher?: DisconnectWatcher;
       session?: WebcamSession;
+      /** Whether `session` is in the registry: only a start that is still current registers. */
+      registered?: boolean;
     } = {};
 
     try {
@@ -319,14 +328,18 @@ export class CamerasService {
       peer.addEventListener('connectionstatechange', () => watcher.update(peer.connectionState));
 
       const { answerSdp, deleteUrl, sessionId } = await publishWebcamOffer(peer, whipUrl);
-      // MediaMTX holds a session for this path from the POST onward, so the session is registered
-      // the moment the POST returns, before the supersession check and before the answer is
-      // applied. Either failure then reaches the catch with the delete URL in hand and releases
-      // the path, instead of leaving the resource occupying it until MediaMTX times it out.
+      // MediaMTX holds a session for this path from the POST onward, so the session is built the
+      // moment the POST returns, before the supersession check and before the answer is applied.
+      // Either failure then reaches the catch with the delete URL in hand and releases the path,
+      // instead of leaving the resource occupying it until MediaMTX times it out. It enters the
+      // registry only while this start is current: a superseded start that wrote its session
+      // would replace the newer start's, which would then be in no registry and could not be
+      // closed.
       const session: WebcamSession = { pc: peer, stream, deleteUrl, sessionId, watcher };
       built.session = session;
-      this.sessions.set(slot, session);
       if (superseded()) throw new StartSuperseded();
+      this.sessions.set(slot, session);
+      built.registered = true;
       await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
       if (superseded()) throw new StartSuperseded();
       this.setStream(slot, stream);
@@ -341,7 +354,7 @@ export class CamerasService {
           // `expect_type`: if another tab turned this slot into a file between polls, the server
           // answers 410 (terminal below) instead of starting that file. `superseded()` only
           // catches changes this tab made; another tab's does not move this generation.
-          return this.slots.start({ index: slot, expect_type: 'webcam' });
+          return this.slots.confirmWebcamStart(slot);
         },
         // Stop retrying on outcomes that will not change within the window:
         // - 410: another tab made the slot a file source; it can never become ours.
@@ -353,15 +366,18 @@ export class CamerasService {
             (error instanceof ApiRequestError && (error.status === 410 || error.status === 502)),
         },
       );
+      // The loop does not settle per attempt (that would delay each 250 ms step by two refetches);
+      // the server now says playing, so fetch the slots once.
+      await this.slots.settleChange();
     } catch (failure) {
-      if (!built.session) {
-        // Failed before the session was registered, with the camera open or the connection
-        // built, say: nothing tracks them yet, so release them here.
+      if (!built.registered) {
+        // Failed or abandoned before the session was registered, with the camera open, the
+        // connection built or the offer accepted, say: nothing tracks them, so release them here.
         built.watcher?.cancel();
         closeWebcamSession({
           stream: built.stream ?? null,
           pc: built.peer ?? null,
-          deleteUrl: null,
+          deleteUrl: built.session?.deleteUrl ?? null,
         });
       } else if (this.sessions.get(slot) === built.session) {
         this.teardown(slot);
@@ -387,15 +403,18 @@ export class CamerasService {
     });
   }
 
-  /** Lists the cameras, and drops the choice of any slot whose camera has gone. */
+  /** Lists the cameras on a `devicechange` or at start, where a failure leaves the list as it was. */
   private async refreshCameras(): Promise<void> {
+    await this.listCameras().catch(() => undefined);
+  }
+
+  /**
+   * Lists the cameras, and abandons the slots whose camera has gone. Rejects when the browser
+   * cannot list devices.
+   */
+  private async listCameras(): Promise<void> {
     const request = this.latestListing.next();
-    let devices;
-    try {
-      devices = await this.media.enumerateDevices();
-    } catch {
-      return; // The list stays as it was.
-    }
+    const devices = await this.media.enumerateDevices();
     if (!this.latestListing.accept(request)) return;
     const cameras = camerasFromDevices(devices);
     this.camerasState.set(cameras);
@@ -405,7 +424,9 @@ export class CamerasService {
       if (available.has(camera.deviceId)) continue;
       // A choice this tab never published is only a local one: there is nothing to stop, and the
       // slot may well be another browser's. A published one is stopped like a lost connection.
+      // A start still in flight is abandoned either way: it would publish a camera that is gone.
       const session = this.sessions.get(slot);
+      this.invalidate(slot);
       this.setCamera(slot, null);
       if (session) this.inBackground(this.stopBound(slot, session));
     }

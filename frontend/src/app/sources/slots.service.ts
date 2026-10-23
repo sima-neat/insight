@@ -200,6 +200,20 @@ export class SlotsService {
     });
   }
 
+  /**
+   * One attempt of the webcam start's confirm loop: asks the server to start the slot, only if it
+   * is still a webcam (410 otherwise). Unlike every other action it does not settle: the loop
+   * repeats every 250 ms while MediaMTX has not seen the path, and each refused attempt would
+   * otherwise wait for a refetch of the slots and the renditions before the next. The caller
+   * settles once, when the loop ends.
+   */
+  confirmWebcamStart(index: number): Promise<SuccessResponse> {
+    const body: StartRequest = { index, expect_type: 'webcam' };
+    return firstValueFrom(
+      this.http.post<SuccessResponse>(`${SLOTS_URL}/start`, body).pipe(withRequestErrors()),
+    );
+  }
+
   /** Starts the first `count` assigned slots in index order, skipping external and pulled ones. */
   startBulk(count: number): Promise<BulkStartResult> {
     const body: StartBulkRequest = { count };

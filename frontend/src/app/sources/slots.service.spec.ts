@@ -332,6 +332,27 @@ describe('SlotsService', () => {
       expect(service.slots()?.[0].file).toBe('b.mp4');
     });
 
+    it('confirmWebcamStart posts expect_type webcam and fetches nothing, whatever the outcome', async () => {
+      const first = service.confirmWebcamStart(3);
+      const request = http.expectOne('/api/mediasrc/start');
+      expect(request.request.body).toEqual({ index: 3, expect_type: 'webcam' });
+      request.flush({ success: true });
+      await expect(first).resolves.toEqual({ success: true });
+
+      const second = service.confirmWebcamStart(3);
+      http
+        .expectOne('/api/mediasrc/start')
+        .flush({ error: 'Webcam is not publishing yet' }, conflict);
+      await expect(second).rejects.toMatchObject({
+        status: 409,
+        message: 'Webcam is not publishing yet',
+      });
+
+      await tick();
+      http.expectNone(SLOTS_URL);
+      http.expectNone(RENDITIONS_URL);
+    });
+
     it('assignWebcam, start, startBulk, stop and takeOver each map to their endpoint', async () => {
       const cases: [string, () => Promise<unknown>, object][] = [
         ['/api/mediasrc/assign-webcam', () => service.assignWebcam({ index: 1 }), { index: 1 }],

@@ -91,6 +91,8 @@ export class FakeCameraMedia implements CameraMedia {
   readonly peers: FakePeer[] = [];
   /** Codecs the browser says it can send; H.264 by default. */
   codecs: { mimeType: string }[] = [{ mimeType: 'video/VP8' }, { mimeType: 'video/H264' }];
+  /** Set to make the next `enumerateDevices` fail with it. */
+  enumerationFailure: unknown = null;
   /** Set to make the next `getUserMedia` fail with it. */
   openFailure: unknown = null;
   /** Set to make the next peer's `setRemoteDescription` wait for the test. */
@@ -114,6 +116,11 @@ export class FakeCameraMedia implements CameraMedia {
   }
 
   async enumerateDevices(): Promise<readonly DeviceInfo[]> {
+    if (this.enumerationFailure) {
+      const failure = this.enumerationFailure;
+      this.enumerationFailure = null;
+      throw failure;
+    }
     return this.devices;
   }
 
