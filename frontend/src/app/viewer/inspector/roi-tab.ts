@@ -69,10 +69,11 @@ function listChannels(channels: readonly number[]): string {
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (scope() === 'global' && backdrop() !== null) {
+    @let drawOn = backdrop();
+    @if (scope() === 'global' && drawOn !== null) {
       <neat-number-field
         label="Draw on channel"
-        [value]="backdrop()!"
+        [value]="drawOn"
         [accept]="isDisplayed"
         (commit)="backdropChange.emit($event)"
       />
@@ -91,6 +92,8 @@ function listChannels(channels: readonly number[]): string {
     @if (rows().length === 0) {
       <p class="empty">No regions.</p>
     } @else {
+      <!-- "regions", "delete" and "delete-all" carry no styles: they are hooks, for remove() to find
+           the buttons and for the specs and e2e tests to find the list. -->
       <ul neatLineList class="regions">
         @for (row of rows(); track $index) {
           <li neatLine>

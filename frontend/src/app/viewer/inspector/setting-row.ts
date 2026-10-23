@@ -195,6 +195,7 @@ export function settingCount(count: number): string {
               <li neatLine>
                 <span>Channel {{ line.channel }}</span>
                 <span class="value">{{ line.value }}</span>
+                <!-- "use-global" carries no styles: useGlobal() finds the buttons by it. -->
                 <button
                   neatInlineButton
                   neatLineEnd

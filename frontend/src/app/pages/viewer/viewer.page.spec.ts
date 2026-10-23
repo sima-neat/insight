@@ -490,34 +490,60 @@ describe('ViewerPage', () => {
     expect(document.activeElement).toBe(pageInput());
   });
 
-  it('go to page clamps the page number', async () => {
+  it('go to page refuses a page past the last: the page stays and the field shows it', async () => {
+    sixPerPage();
+    await open('/viewer');
+    expect(pageInput().value).toBe('1');
+
+    // Clamping would have turned to page 3; the field refuses instead.
+    await enter(pageInput(), '9');
+    expect(pageInput().value).toBe('1');
+    expect(shown()).toEqual(range(6));
+  });
+
+  it('leaving the Page field commits what was typed, and leaving it untouched changes nothing', async () => {
     sixPerPage();
     await open('/viewer');
 
-    await enter(pageInput(), '3');
-    expect(shown()).toEqual([12, 13, 14, 15]);
-    await enter(pageInput(), '9');
-    expect(pageInput().value).toBe('3');
-    await enter(pageInput(), 'x');
-    expect(pageInput().value).toBe('3');
-    expect(shown()).toEqual([12, 13, 14, 15]);
+    pageInput().focus();
+    pageInput().value = '2';
+    pageInput().dispatchEvent(new Event('input'));
+    pageInput().blur();
+    await settlePopover();
+    expect(pageInput().value).toBe('2');
+    expect(shown()).toEqual(range(6, 6));
+
+    pageInput().focus();
+    pageInput().blur();
+    await settlePopover();
+    expect(pageInput().value).toBe('2');
+    expect(shown()).toEqual(range(6, 6));
+
+    // Typed and refused: the field goes back to the page on screen.
+    pageInput().focus();
+    pageInput().value = '9';
+    pageInput().dispatchEvent(new Event('input'));
+    pageInput().blur();
+    await settlePopover();
+    expect(pageInput().value).toBe('2');
+    expect(shown()).toEqual(range(6, 6));
   });
 
   it('go to page takes whole numbers from 1 to the page count only, and restores anything else', async () => {
     sixPerPage();
     await open('/viewer');
-    await enter(pageInput(), '3');
+    await enter(pageInput(), '2');
 
-    // "2x" used to go to page 2; a page number is whole digits, so the field restores instead.
-    for (const typed of ['2x', '0', '-1', '', '4']) {
+    // "3x" used to go to page 3; a page number is whole digits, so the field restores instead.
+    for (const typed of ['3x', '0', '-1', '', '4']) {
       await enter(pageInput(), typed);
-      expect(pageInput().value).toBe('3');
-      expect(shown()).toEqual([12, 13, 14, 15]);
+      expect(pageInput().value).toBe('2');
+      expect(shown()).toEqual(range(6, 6));
     }
 
-    await enter(pageInput(), '2');
-    expect(pageInput().value).toBe('2');
-    expect(shown()).toEqual([6, 7, 8, 9, 10, 11]);
+    await enter(pageInput(), '3');
+    expect(pageInput().value).toBe('3');
+    expect(shown()).toEqual([12, 13, 14, 15]);
   });
 
   it('the toolbar shows slider, Fit all, paging, Go to channel, View options and Inspector, and no switches or channel input', async () => {

@@ -167,7 +167,10 @@ export class ViewerState {
     this.turnTo(Math.max(this.page() - 1, 0));
   }
 
-  /** Goes to the 1-based `page`, clamped into range; anything but a whole number is ignored. */
+  /**
+   * Goes to the 1-based `page`, clamped into range; anything but a whole number is ignored. The
+   * Page field refuses out-of-range numbers before it gets here, so the clamp is for other callers.
+   */
   goToPage(page: number): void {
     if (!Number.isInteger(page)) return;
     this.turnTo(clamp(page, 1, this.pageCount()) - 1);
