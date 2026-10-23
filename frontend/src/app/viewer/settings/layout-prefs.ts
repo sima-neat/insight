@@ -104,10 +104,7 @@ export class LayoutPrefs {
   }
 
   /** Stores one choice; choosing what is already chosen writes nothing. */
-  private choose<K extends 'bars' | 'hideEmpty' | 'inspector'>(
-    key: K,
-    value: Layout[K],
-  ): void {
+  private choose<K extends 'bars' | 'hideEmpty' | 'inspector'>(key: K, value: Layout[K]): void {
     if (this.layout()[key] === value) return;
     this.update((latest) => ({ ...latest, [key]: value }));
   }

@@ -48,6 +48,17 @@ const TRAIL_LENGTH: SettingControl = {
   describe: (value) => `${value} positions`,
   requires: 'types.tracking.history.enabled',
 };
+const LOST_TRACK_TTL: SettingControl = {
+  control: 'number',
+  id: 'types.tracking.history.lostTrackTtlMs',
+  label: 'Keep lost tracks for',
+  min: 0,
+  max: 10000,
+  step: 250,
+  unit: 'ms',
+  describe: (value) => `${value} ms`,
+  requires: 'types.tracking.history.enabled',
+};
 
 @Component({
   imports: [SettingRow],
@@ -525,6 +536,48 @@ describe('SettingRow', () => {
     await click(overrideNote()!);
     await click(button('Use global')!);
     expect(document.activeElement).toBe(toggle());
+  });
+
+  describe('with a number field that is disabled', () => {
+    const ttl = (value: number) => ({
+      version: 10,
+      types: { tracking: { history: { lostTrackTtlMs: value } } },
+    });
+
+    /** Track history is off globally, so the field is natively disabled and cannot take focus. */
+    async function renderDisabled(channels: Record<string, unknown>) {
+      storage.seed(channels);
+      await render(LOST_TRACK_TTL);
+      store().set('global', 'types.tracking.history.enabled', false);
+      await fixture.whenStable();
+      expect(field().disabled).toBe(true);
+      await click(overrideNote()!);
+    }
+
+    it('keeps focus on the setting’s label after a confirmed reset', async () => {
+      await renderDisabled({ 'settings:channel:1': ttl(1500), 'settings:channel:2': ttl(3000) });
+      const bulk = button('Reset on 2 channels…')!;
+      bulk.focus();
+      bulk.click();
+      await settleDialog();
+
+      dialogButton('Reset')!.click();
+      await settleDialog();
+
+      expect(bulk.isConnected).toBe(false);
+      expect(document.activeElement).toBe(root().querySelector('label'));
+    });
+
+    it('keeps focus on the setting’s label after the last Use global, without a new tab stop', async () => {
+      await renderDisabled({ 'settings:channel:1': ttl(1500) });
+
+      await click(button('Use global')!);
+
+      expect(overrideNote()).toBeNull();
+      const label = root().querySelector('label')!;
+      expect(document.activeElement).toBe(label);
+      expect(label.tabIndex).toBe(-1);
+    });
   });
 
   it('a slider is described by the override note, like the other controls, so focus announces it', async () => {

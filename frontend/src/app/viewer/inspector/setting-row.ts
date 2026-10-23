@@ -311,12 +311,24 @@ export class SettingRow {
 
   /**
    * Focuses the control, for after something that held focus went: the late notice's button, or
-   * the list of overriding channels once none is left.
+   * the list of overriding channels once none is left. A disabled number field cannot take focus
+   * (a slider stays focusable), so focus then goes to the row's label, which is focusable by
+   * script only.
    */
   focusControl(): void {
-    this.host.nativeElement
-      .querySelector<HTMLElement>('input, [role="switch"], [role="slider"]')
-      ?.focus();
+    const row = this.host.nativeElement;
+    const control = row.querySelector<HTMLElement>(
+      'input:not(:disabled), [role="switch"], [role="slider"]',
+    );
+    if (control !== null) {
+      control.focus();
+      return;
+    }
+    const label = row.querySelector<HTMLElement>('.label');
+    if (label !== null) {
+      label.tabIndex = -1;
+      label.focus();
+    }
   }
 
   /**
@@ -371,8 +383,8 @@ export class SettingRow {
   /** A value in words: a switch as on or off ("On", "Off" listed alone), a number as described. */
   private valueText(value: boolean | number, listed = false): string {
     if (typeof value === 'boolean') {
-      const word = value ? 'on' : 'off';
-      return listed ? word.charAt(0).toUpperCase() + word.slice(1) : word;
+      if (listed) return value ? 'On' : 'Off';
+      return value ? 'on' : 'off';
     }
     return this.numberSetting()!.describe(value);
   }
