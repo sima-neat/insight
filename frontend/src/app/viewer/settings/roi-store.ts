@@ -89,7 +89,8 @@ function parseRegions(raw: string | null): NeatRoiPolygon[] | null {
  * channels" leaves them alone. Every stored list is read and cleaned when the store opens; from
  * then on the lists live in signals and each write replaces a whole list. Changes other tabs make
  * show up here only through a write: a channel list this store held none for is picked up by its
- * next write of any list, and one it already holds, only by its own write of that list.
+ * next write of a channel's list (or a "Use global"), and one it already holds, only by its own
+ * write of that list.
  *
  * Provided by the Viewer page next to `ViewerSettingsStore`, which reads the effective regions
  * into each channel's overlay settings.
