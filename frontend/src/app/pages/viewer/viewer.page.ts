@@ -218,8 +218,7 @@ export class ViewerPage {
   });
 
   /**
-   * Whether the "Go to channel" popover is open. The page holds it so that `/` can open it, and
-   * so that it survives the kiosk bar re-creating the toolbar.
+   * Whether the "Go to channel" popover is open. The page holds it so that `/` can open it.
    */
   protected readonly channelJumpOpen = signal(false);
 

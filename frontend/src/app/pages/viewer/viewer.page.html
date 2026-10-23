@@ -41,20 +41,6 @@
   >
     <neat-icon name="previous" />
   </button>
-  <button
-    neatButton
-    type="button"
-    variant="text"
-    size="small"
-    iconOnly
-    aria-label="Next page"
-    neatTooltip="Next page"
-    neatTooltipPosition="bottom"
-    [disabled]="state.page() === state.pageCount() - 1"
-    (click)="state.next()"
-  >
-    <neat-icon name="next" />
-  </button>
   <label class="field">
     Page
     <span class="number-field">
@@ -71,6 +57,20 @@
     </span>
     of {{ state.pageCount() }}
   </label>
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    iconOnly
+    aria-label="Next page"
+    neatTooltip="Next page"
+    neatTooltipPosition="bottom"
+    [disabled]="state.page() === state.pageCount() - 1"
+    (click)="state.next()"
+  >
+    <neat-icon name="next" />
+  </button>
 
   <span class="separator" aria-hidden="true"></span>
 

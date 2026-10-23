@@ -381,8 +381,8 @@ describe('ViewerPage', () => {
       'Tile size',
       'Fit all',
       'Previous page',
-      'Next page',
       'Page',
+      'Next page',
       'Go to channel',
       'View options',
       'Inspector',
@@ -449,10 +449,10 @@ describe('ViewerPage', () => {
     await enter(pageInput(), '3');
     expect(shown()).toEqual([12, 13, 14, 15]);
 
-    await jumpTo(7);
+    await jumpTo(6);
 
     expect(shown()).toEqual(range(6, 6));
-    expect(page().selectedChannel()).toBe(7);
+    expect(page().selectedChannel()).toBe(6);
     expect(dialog('Go to channel')).toBeNull();
     expect(document.activeElement).toBe(button('Go to channel'));
   });
@@ -510,6 +510,8 @@ describe('ViewerPage', () => {
       expect(dialog('Go to channel')).toBeNull();
     }
     await press('/', {}, slider());
+    await settlePopover();
+    expect(dialog('Go to channel')).toBeNull();
     await click(button('Inspector'));
     await press('/', {}, root().querySelector('aside [neatPageAside]')!);
     await settlePopover();
