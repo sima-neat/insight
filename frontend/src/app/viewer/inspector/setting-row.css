@@ -39,8 +39,10 @@
   color: var(--muted-foreground);
 }
 
+/* The note's disclosure button takes this colour and size from its parent `.note`. */
 .hint,
-.scope-note {
+.scope-note,
+.note {
   margin: 0;
   color: var(--muted-foreground);
   font-size: var(--neat-text-xs);
@@ -53,9 +55,7 @@
   gap: var(--neat-space-2);
 }
 
-/*
- * Set off from the muted note by colour and weight; primary orange is too light for text this small.
- */
+/* Set off from the muted note by colour and weight. */
 .marker {
   color: var(--foreground);
   font-weight: 500;
@@ -66,40 +66,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--neat-space-2);
-}
-
-/*
- * The disclosure and the list's actions are plain buttons: the kit's smallest button is 2rem high,
- * which would make every line of the list as tall as it is today.
- */
-.disclosure,
-.action {
-  padding: 0;
-  border: none;
-  border-radius: var(--radius);
-  background: none;
-  font-family: inherit;
-  line-height: inherit;
-  cursor: pointer;
-}
-
-.disclosure:focus-visible,
-.action:focus-visible {
-  outline: var(--neat-focus-ring-width) solid var(--ring);
-  outline-offset: 1px;
-}
-
-.disclosure {
-  display: flex;
-  align-items: center;
-  gap: var(--neat-space-2);
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
-  text-align: start;
-}
-
-.disclosure:hover {
-  color: var(--foreground);
 }
 
 /* The amber of a notice: the setting differs on some channels. */
@@ -113,7 +79,6 @@
 
 .chevron {
   display: flex;
-  margin-inline-start: auto;
   transition: transform 100ms;
 }
 
@@ -155,17 +120,6 @@
 .value {
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
-}
-
-.action {
-  color: var(--foreground);
-  /* A button does not inherit its size; the list's text size is the lines'. */
-  font-size: inherit;
-  font-weight: 500;
-}
-
-.action:hover {
-  text-decoration: underline;
 }
 
 /* The channel's action sits at the end of its line. */

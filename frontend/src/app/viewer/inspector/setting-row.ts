@@ -12,6 +12,7 @@ import {
   NeatButton,
   NeatConfirm,
   NeatIcon,
+  NeatInlineButton,
   NeatInput,
   NeatSlider,
   NeatSwitch,
@@ -76,7 +77,7 @@ export function settingCount(count: number): string {
  */
 @Component({
   selector: 'app-setting-row',
-  imports: [NeatButton, NeatIcon, NeatInput, NeatSlider, NeatSwitch, NeatTooltip],
+  imports: [NeatButton, NeatIcon, NeatInlineButton, NeatInput, NeatSlider, NeatSwitch, NeatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (switchSetting(); as setting) {
@@ -160,18 +161,20 @@ export function settingCount(count: number): string {
     }
     @if (overriddenOn().length > 0) {
       <div class="overrides">
-        <button
-          type="button"
-          class="disclosure"
-          [id]="noteId()"
-          [attr.aria-expanded]="open()"
-          [attr.aria-controls]="open() ? listId() : null"
-          (click)="open.set(!open())"
-        >
-          <span class="dot" aria-hidden="true"></span>
-          {{ overriddenText() }}
-          <neat-icon class="chevron" [class.open]="open()" name="next" [size]="16" />
-        </button>
+        <p class="note">
+          <button
+            neatInlineButton
+            type="button"
+            [id]="noteId()"
+            [attr.aria-expanded]="open()"
+            [attr.aria-controls]="open() ? listId() : null"
+            (click)="open.set(!open())"
+          >
+            <span class="dot" aria-hidden="true"></span>
+            {{ overriddenText() }}
+            <neat-icon class="chevron" [class.open]="open()" name="next" [size]="16" />
+          </button>
+        </p>
         @if (open()) {
           <ul class="list" [id]="listId()">
             @for (line of lines(); track line.channel) {
@@ -179,7 +182,8 @@ export function settingCount(count: number): string {
                 <span>Channel {{ line.channel }}</span>
                 <span class="value">{{ line.value }}</span>
                 <button
-                  class="action use-global"
+                  neatInlineButton
+                  class="use-global"
                   type="button"
                   [attr.aria-label]="useGlobalLabel(line.channel)"
                   (click)="useGlobal(line.channel)"
@@ -190,7 +194,7 @@ export function settingCount(count: number): string {
             }
             <li class="line">
               <button
-                class="action"
+                neatInlineButton
                 type="button"
                 [attr.aria-label]="resetOverridesLabel()"
                 (click)="resetOverrides()"
