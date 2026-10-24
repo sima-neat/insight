@@ -1,0 +1,160 @@
+/**
+ * The board's words: what the pill, the board dialog and its form say about the board, as pure
+ * functions of the board state (#170's `peripherals/model.js`, copy per Inv-PB §2.1 and §2.5).
+ * #170's tones map to the kit's: ok `success`, warn `warning`, periph-danger `danger`, none
+ * `neutral`.
+ */
+
+import type { NeatTone } from '@sima/neat-ui';
+import type {
+  BoardDefaults,
+  BoardSource,
+  BoardState,
+  BoardStatus,
+  BoardTarget,
+  CameraSetup,
+  SshAddress,
+} from './api';
+import type { BoardProblem } from './board-error';
+
+/** A connection state in words: the long label (the dialog), the short one (the pill's chip). */
+export interface ConnectionState {
+  label: string;
+  short: string;
+  tone: NeatTone;
+}
+
+export interface BoardChip {
+  label: string;
+  tone: NeatTone;
+}
+
+/** The top bar's pill: which board, its state as a chip, and the tooltip that says both in full. */
+export interface BoardIndicator {
+  label: string;
+  chip: BoardChip;
+  tooltip: string;
+}
+
+/** The board form's fields as typed: the port stays text until `validateBoardForm` reads it. */
+export interface BoardFormValues {
+  host: string;
+  port: string;
+  user: string;
+}
+
+const SOURCES: Record<BoardSource, string> = {
+  'on-board': 'On this board',
+  'sdk-env': 'SDK DevKit',
+  manual: 'Manual',
+};
+
+export function connectionState(status: BoardStatus): ConnectionState {
+  if (status.state === 'connected')
+    return { label: 'Connected', short: 'Connected', tone: 'success' };
+  if (status.state === 'error')
+    return { label: 'Connection failed', short: 'Error', tone: 'danger' };
+  return { label: 'Not checked', short: 'Not checked', tone: 'neutral' };
+}
+
+/**
+ * The pill's words. The state is the last good answer; `error` the last read failure, which wins
+ * over it so that a board Insight can no longer read never looks fine (Inv-PB §6.1): the pill
+ * keeps naming the last known board and says why it could not be read. Loading is only the
+ * moment before the first answer, when there is neither.
+ */
+export function boardIndicator(
+  state: BoardState | null,
+  error: BoardProblem | null,
+): BoardIndicator {
+  if (error) {
+    return {
+      label: state ? targetName(state.target) : 'Board',
+      chip: { label: 'Error', tone: 'danger' },
+      tooltip: `Could not read the board: ${error.message}`,
+    };
+  }
+  if (!state) {
+    return {
+      label: 'Board',
+      chip: { label: 'Loading…', tone: 'neutral' },
+      tooltip: 'Loading the selected board',
+    };
+  }
+  const target = state.target;
+  if (!target) {
+    return {
+      label: targetName(target),
+      chip: { label: 'Not selected', tone: 'warning' },
+      tooltip: 'No board is selected. Open board settings to choose one.',
+    };
+  }
+  const connection = connectionState(state.status);
+  return {
+    label: targetName(target),
+    chip: { label: connection.short, tone: connection.tone },
+    tooltip: `${target.label} — ${connection.label}. Open board settings.`,
+  };
+}
+
+/**
+ * Which machine, in the words the rest of the SDK uses for it. "sima@host" is the connection
+ * string, which belongs in the dialog, not the pill.
+ */
+function targetName(target: BoardTarget | null): string {
+  if (!target) return 'No board';
+  if (target.mode === 'local') return 'This board';
+  return `${target.source === 'sdk-env' ? 'DevKit' : 'Board'}: ${target.host}`;
+}
+
+export function sourceLabel(source: BoardSource): string {
+  return SOURCES[source] ?? '';
+}
+
+/** The target Insight falls back to without a manual one, for the form's "Default: …" hint; '' for none. */
+export function defaultTargetText(defaults: BoardDefaults): string {
+  if (defaults.on_board) return 'this board (Insight is running on it)';
+  const env = defaults.sdk_env;
+  if (env?.host) return `${env.user || 'sima'}@${env.host}:${env.port || 22} (paired SDK DevKit)`;
+  return '';
+}
+
+/** The form starts from the saved manual target, else the SSH target in use, else the paired DevKit. */
+export function initialBoardForm(state: BoardState | null): BoardFormValues {
+  const ssh = state?.target?.mode === 'ssh' ? state.target : null;
+  const from = state?.saved ?? ssh ?? state?.defaults.sdk_env ?? null;
+  return { host: from?.host || '', port: String(from?.port || 22), user: from?.user || 'sima' };
+}
+
+/**
+ * Checks the form before it is sent: the request body, or the first problem in #170's words. The
+ * server checks again (`validate_ssh_target`), with its own messages.
+ */
+export function validateBoardForm(
+  values: BoardFormValues,
+): { body: SshAddress } | { error: string } {
+  const host = values.host.trim();
+  const user = values.user.trim();
+  const port = Number(values.port);
+  if (!host) return { error: 'Enter the board host name or IP address.' };
+  if (/\s/.test(host)) return { error: 'The host cannot contain spaces.' };
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return { error: 'The SSH port must be a whole number from 1 to 65535.' };
+  }
+  if (!user) return { error: 'Enter the SSH user, usually "sima".' };
+  return { body: { host, port, user } };
+}
+
+/** "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo" reads as "modalix-som-waveshare-ARDU-IMX477-1CAM". */
+export function overlayName(file: string): string {
+  return (file.split('/').pop() ?? '').replace(/\.dtbo$/i, '');
+}
+
+/** The board facts for the camera setup, as [term, value] rows; each is left out when Sentinel did not report it. */
+export function cameraSetupRows(setup: CameraSetup | null): [term: string, value: string][] {
+  const rows: [term: string, value: string][] = [];
+  if (setup?.model) rows.push(['Model', setup.model]);
+  const overlays = (setup?.overlays ?? []).map(overlayName).filter(Boolean);
+  if (overlays.length) rows.push(['Camera setup', overlays.join(', ')]);
+  return rows;
+}
