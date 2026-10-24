@@ -165,7 +165,11 @@
                 [selected]="selectedVariant()"
                 (selectedChange)="pickVariant($event)"
               >
-                <!-- Beside the sources the list is narrower: it gives up Dimensions, then Codec. -->
+                <!--
+                  Beside the sources the list is narrower: it gives up Dimensions, then Codec. Fixed
+                  widths for the same reason as the by-type list's (its heading row is a grid of
+                  its own).
+                -->
                 <ng-template
                   neatColumn="profile"
                   header="Resolution & FPS"

@@ -136,6 +136,7 @@ describe('ImportDialog', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     delete (Element.prototype as Partial<Element>).scrollIntoView;
   });
 
