@@ -244,6 +244,30 @@ describe('MicrophonePanel', () => {
     expect(
       panel().querySelector('app-device-details button[aria-expanded]')?.getAttribute('aria-expanded'),
     ).toBe('false');
+
+    // A problem the backend reports with the device shows under the title, as #170's panel did.
+    fixture.componentInstance.microphone.set({
+      ...webcamMic,
+      errors: [
+        {
+          code: 'capture_unreadable',
+          message: 'The capture formats could not be read.',
+          hint: 'Replug the microphone, then refresh.',
+        },
+      ],
+    });
+    await settle();
+    expect(callouts()).toEqual([
+      {
+        tone: 'danger',
+        announce: null,
+        heading: 'The capture formats could not be read.',
+        body: 'Replug the microphone, then refresh.',
+      },
+    ]);
+    expect(panel().querySelector('neat-callout')!.previousElementSibling!.textContent!.trim()).toBe(
+      'Part of HD Webcam C270',
+    );
     fixture.destroy();
 
     // A device that does not report its formats, and one that lists none.
@@ -259,6 +283,8 @@ describe('MicrophonePanel', () => {
   it('records with the meter and the clock, plays back by itself, then offers Replay', async () => {
     await open();
     await answerRead(null);
+    // No audio context before a click: one made without a gesture would stay suspended.
+    expect(FakeAudioContext.made).toHaveLength(0);
     expect(button().textContent!.trim()).toBe('Test microphone');
     expect(meterReads()).toBeUndefined();
     expect(caption()).toBe('');
@@ -355,9 +381,15 @@ describe('MicrophonePanel', () => {
     expect(button().textContent!.trim()).toBe('Stop recording');
     expect(caption()).toBe('Recording · 0:12');
     expect(meterReads()).toBe(-20);
+    // Taken up with no click: no audio context yet.
+    expect(FakeAudioContext.made).toHaveLength(0);
 
-    // Stop names the recording taken up.
+    // Stop names the recording taken up, and its click makes the playback level (ruling F11).
     button().click();
+    expect(FakeAudioContext.made).toHaveLength(1);
+    const [context] = FakeAudioContext.made;
+    expect(context.sources).toHaveLength(1);
+    expect(context.sources[0]).toBe(audio());
     await settle();
     const stop = http.expectOne({ method: 'POST', url: STOP_URL });
     expect(stop.request.body).toEqual({ token: 'other' });
@@ -366,6 +398,8 @@ describe('MicrophonePanel', () => {
     await nextPoll();
     await answerRead(readyTest({ token: 'other' }));
     expect(caption()).toBe('Recording playing');
+    context.analysers[0].level = 0.25;
+    expect(meterReads()).toBeCloseTo(-12.04, 2);
     audio().dispatchEvent(new Event('ended'));
     await settle();
     expect(replayButton()).toBeDefined();
@@ -463,9 +497,15 @@ describe('MicrophonePanel', () => {
     expect(button().textContent!.trim()).toBe('Stop recording');
     expect(button().hasAttribute('aria-disabled')).toBe(false);
     expect(caption()).toBe('Recording · 0:04');
-    const [failure] = callouts();
-    expect(failure).toMatchObject({ tone: 'danger', announce: 'alert' });
-    expect(failure.heading).not.toBe('');
+    // The stop's answer was lost on the way: #170's network words (ruling Q6).
+    expect(callouts()).toEqual([
+      {
+        tone: 'danger',
+        announce: 'alert',
+        heading: 'Could not reach the Insight server.',
+        body: 'Check that Insight is still running, then retry.',
+      },
+    ]);
 
     // The board's test is gone before it finished (an Insight restart, another tab's test).
     await nextPoll();

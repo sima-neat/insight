@@ -194,13 +194,16 @@ export class MicrophonePanel {
     }
     // A recording ends in a playback, which may start with no click of its own (a recording
     // that reaches the board's 30 s): the level is made now, while a click lets audio start.
-    this.preparePlayback();
     if (action.action === 'stop') {
+      this.preparePlayback();
       void this.micTest.stop();
       return;
     }
-    const generation = this.board.state()?.generation;
-    if (generation !== undefined) void this.micTest.start(this.microphone(), generation);
+    // The page shows device panels only once the board is read, so `shown` is there.
+    const shown = this.shown();
+    if (!shown) return;
+    this.preparePlayback();
+    void this.micTest.start(this.microphone(), shown.generation);
   }
 
   protected replay(): void {
