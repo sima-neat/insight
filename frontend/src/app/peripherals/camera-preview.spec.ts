@@ -339,4 +339,61 @@ describe('CameraPreview', () => {
     vi.advanceTimersByTime(PREVIEW_POLL_MS * 2);
     http.expectNone(() => true);
   });
+
+  // Coming back to Peripherals while the last visit's start is still out (task 12's M-1): the
+  // next visit waits for this before it reads the preview and starts it again.
+  it("release settles once this page's preview has stopped, a start still in flight included", async () => {
+    let settled = false;
+    const started = preview.start(imx477, mode30, 3);
+    void preview.release().then(() => (settled = true));
+    await settle();
+    expect(settled).toBe(false);
+    await answerStart(live30);
+    expect(settled).toBe(false);
+    await answerStop(live30.id);
+    await started;
+    expect(settled).toBe(true);
+
+    // A live preview: settled once its stop answered, failed or not.
+    const live = TestBed.runInInjectionContext(() => new CameraPreview());
+    live.adopt(live30);
+    await answerRead(live30);
+    let stopped = false;
+    void live.release().then(() => (stopped = true));
+    await settle();
+    expect(stopped).toBe(false);
+    http
+      .expectOne(stopUrl(live30.id))
+      .flush({ error: 'SSH failed', code: 'unreachable' }, badGateway);
+    await settle();
+    expect(stopped).toBe(true);
+
+    // Nothing to stop: settled at once.
+    const idle = TestBed.runInInjectionContext(() => new CameraPreview());
+    await expect(idle.release()).resolves.toBeUndefined();
+  });
+
+  it('resumable names the camera, mode and board of a preview this page starts or shows live, and nothing else', async () => {
+    expect(preview.resumable()).toBeNull();
+
+    // Starting: what was asked for, on the board shown.
+    const started = preview.start(imx477, mode30, 3);
+    expect(preview.resumable()).toEqual({ cameraId: imx477.id, mode: mode30, generation: 3 });
+    await answerStart(live30);
+    await started;
+    // Live: what the board streams.
+    expect(preview.resumable()).toEqual({ cameraId: imx477.id, mode: mode30, generation: 3 });
+    await answerRead(live30);
+
+    const stopping = preview.stop();
+    expect(preview.resumable()).toBeNull();
+    await answerStop(live30.id);
+    await stopping;
+    expect(preview.resumable()).toBeNull();
+
+    // Another tab's preview is that tab's to keep.
+    await adoptLive({ ...live30, viewer: true });
+    expect(preview.resumable()).toBeNull();
+    preview.release();
+  });
 });

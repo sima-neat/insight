@@ -1,0 +1,8 @@
+:host {
+  display: block;
+}
+
+/* Each banner keeps a gap to the next one and to the list under them; none takes room while absent. */
+neat-callout {
+  margin-block-end: var(--neat-space-2);
+}

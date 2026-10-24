@@ -1,15 +1,330 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
-import { NeatPage } from '@sima/neat-ui';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  DestroyRef,
+  inject,
+  linkedSignal,
+  signal,
+} from '@angular/core';
+import {
+  NeatAsidePanel,
+  NeatAsideTitle,
+  NeatAsideToggle,
+  NeatButton,
+  NeatIcon,
+  NeatNote,
+  NeatPage,
+  NeatPageToolbar,
+  NeatTooltip,
+} from '@sima/neat-ui';
+import { NeatCallout } from '@sima/neat-ui/callout';
+import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
+import { NeatStatusChip } from '@sima/neat-ui/status-chip';
+import { AsidePrefs } from '../../aside-prefs';
+import { problemOf, type BoardProblem } from '../../board/board-error';
+import { BoardProblemNotice } from '../../board/board-problem-notice';
+import { BoardService } from '../../board/board.service';
+import { CellText } from '../../cell-text';
+import { ticking } from '../../clock';
+import type {
+  CameraItem,
+  PeripheralItem,
+  PeripheralSnapshot,
+  PreviewSession,
+} from '../../peripherals/api';
+import { previewBlock } from '../../peripherals/camera-modes';
+import { CameraPreview } from '../../peripherals/camera-preview';
+import {
+  type DeviceActivity,
+  deviceGroups,
+  deviceRow,
+  type DeviceRow,
+  isCamera,
+  isScanned,
+  isSnapshotStale,
+  resolveDeviceId,
+} from '../../peripherals/devices';
+import { MicTest } from '../../peripherals/mic-test';
+import { PeripheralsSession, type PreviewResume } from '../../peripherals/peripherals-session';
+import { PeripheralsService } from '../../peripherals/peripherals.service';
+import { formatRelativeTime } from '../../relative-time';
+import { TopBarDialogs } from '../../top-bar-dialogs';
+import { PeripheralsBanners } from './peripherals-banners';
 
-/** Placeholder until plan 4 delivers the page. */
+/** What stands in the page's main column: the device list, or why there is none (Inv-PB §1.1). */
+type Body = 'loading' | 'read-failed' | 'no-target' | 'list';
+
+/** The device the side panel is about: a listed one, or one the last scan reported removed. */
+interface ShownDevice {
+  id: string;
+  name: string;
+}
+
+/**
+ * Peripherals: the selected board's devices in one list grouped by kind, with the selected device
+ * in the side panel (spec, "Peripherals page"; #170's `PeripheralsView`, Inv-PB §1.1 and §3.1).
+ * The scan is `PeripheralsService`'s, which outlives the page; the camera preview and the
+ * microphone test are this page's (`CameraPreview` and `MicTest`, provided here), so leaving the
+ * page ends what they run.
+ *
+ * **Entering** reads the board, the snapshot and the running preview together. A preview running
+ * then is adopted, its camera selected and its mode remembered; otherwise the preview this page
+ * left running on the last visit (`PeripheralsSession.resume`) starts again once, while its board
+ * and camera are still there. Then the board's first scan runs by itself, once per board
+ * (`scanOnce`).
+ *
+ * **Leaving** records the preview to start again, then stops it (`CameraPreview.release`). The
+ * next visit waits until that stop has answered, a start still in flight included, so that it
+ * does not find the old preview still running on the board.
+ *
+ * **The board changing** under the page (another tab, the board dialog, a re-read on focus) shows
+ * the board-changed banner over a snapshot of the old board; the preview controller lets go of the
+ * old board's preview, which the backend stopped (Review Focus 1). The page does not scan the new
+ * board by itself then: Refresh now does.
+ */
 @Component({
   selector: 'app-peripherals-page',
-  imports: [NeatPage],
+  imports: [
+    BoardProblemNotice,
+    CellText,
+    NeatAsidePanel,
+    NeatAsideTitle,
+    NeatAsideToggle,
+    NeatButton,
+    NeatCallout,
+    NeatColumn,
+    NeatIcon,
+    NeatNote,
+    NeatPage,
+    NeatPageToolbar,
+    NeatSelectList,
+    NeatStatusChip,
+    NeatTooltip,
+    PeripheralsBanners,
+  ],
+  providers: [CameraPreview, MicTest],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <neat-page>
-      <p>Peripherals arrive with plan 4.</p>
-    </neat-page>
-  `,
+  templateUrl: './peripherals.page.html',
+  styleUrl: './peripherals.page.css',
 })
-export class PeripheralsPage {}
+export class PeripheralsPage {
+  protected readonly board = inject(BoardService);
+  protected readonly peripherals = inject(PeripheralsService);
+  private readonly session = inject(PeripheralsSession);
+  private readonly preview = inject(CameraPreview);
+  private readonly micTest = inject(MicTest);
+  private readonly dialogs = inject(TopBarDialogs);
+  protected readonly asides = inject(AsidePrefs);
+  protected readonly asideOpen = computed(() => this.asides.open('peripherals'));
+
+  /** This visit's read of the snapshot has answered, or failed. */
+  private readonly loaded = signal(false);
+  /** Why this visit's read of the snapshot failed (ruling Q9); null while it did not. */
+  protected readonly loadError = signal<BoardProblem | null>(null);
+  /** The preview of the last visit to start again, until this visit has decided on it. */
+  private pendingResume: PreviewResume | null = null;
+  private destroyed = false;
+
+  /** For "Scanning… N s". */
+  private readonly now = ticking(1000);
+  /** For "Scanned … ago", which moves in steps of 10 s and more. */
+  private readonly scannedNow = ticking(10_000);
+
+  protected readonly target = computed(() => this.board.state()?.target ?? null);
+  protected readonly scanned = computed(() => isScanned(this.peripherals.snapshot()));
+  protected readonly stale = computed(() =>
+    isSnapshotStale(this.board.state(), this.peripherals.snapshot()),
+  );
+
+  /**
+   * In priority order (ruling F35): loading while the board's first read or this visit's first
+   * snapshot read is out (a snapshot read before, on an earlier visit, shows at once); the board
+   * could not be read with no state known; no board is selected. A read failure with a last good
+   * state keeps the list: the pill says the read failed.
+   */
+  protected readonly body = computed<Body>(() => {
+    const state = this.board.state();
+    if (state === null && this.board.error() === null) return 'loading';
+    if (this.peripherals.snapshot() === null && !this.loaded()) return 'loading';
+    if (state === null) return 'read-failed';
+    if (state.target === null) return 'no-target';
+    return 'list';
+  });
+
+  /**
+   * Which camera this page previews and which microphone it tests, for the rows' chips (ruling
+   * F23). Compared by value, so that a preview's rate arriving or a test's progress does not
+   * rebuild the rows.
+   */
+  private readonly activity = computed<DeviceActivity>(
+    () => {
+      const preview = this.preview.state();
+      const test = this.micTest.state();
+      return {
+        previewing:
+          preview.status === 'live' || preview.status === 'elsewhere'
+            ? (preview.session?.camera_id ?? null)
+            : null,
+        testing: test.status === 'recording' || test.status === 'playing' ? test.micId : null,
+      };
+    },
+    { equal: (a, b) => a.previewing === b.previewing && a.testing === b.testing },
+  );
+
+  protected readonly list = computed(() => {
+    const { groups, items } = deviceGroups(this.peripherals.snapshot());
+    const activity = this.activity();
+    return { groups, rows: items.map((item) => deviceRow(item, activity)) };
+  });
+
+  /**
+   * The selected device's id: where the last visit left it, then whatever the user picks. A
+   * rescan keeps it while the device is listed, or reported removed (its panel says so);
+   * otherwise the first device is selected (`resolveDeviceId`).
+   */
+  private readonly selectedId = linkedSignal<PeripheralSnapshot | null, string | null>({
+    source: this.peripherals.snapshot,
+    computation: (snapshot, previous) => {
+      const wanted = previous ? previous.value : this.session.selectedId;
+      return snapshot === null ? wanted : resolveDeviceId(snapshot, wanted);
+    },
+  });
+  protected readonly selectedRow = computed(
+    () => this.list().rows.find((row) => row.item.id === this.selectedId()) ?? null,
+  );
+  /** The side panel's device, as a list of one (or none) that the panel is keyed on. */
+  protected readonly selectedDevices = computed<ShownDevice[]>(() => {
+    const id = this.selectedId();
+    const row = this.selectedRow();
+    if (row) return [{ id: row.item.id, name: row.name }];
+    const removed = this.peripherals
+      .snapshot()
+      ?.changes?.removed.find((device) => device.id === id);
+    return removed ? [{ id: removed.id, name: removed.name || removed.id }] : [];
+  });
+
+  protected readonly scannedText = computed(() => {
+    const snapshot = this.peripherals.snapshot();
+    if (!isScanned(snapshot)) return '';
+    const ago = formatRelativeTime(snapshot.scanned_at, this.scannedNow());
+    return ago ? `Scanned ${ago}` : '';
+  });
+  protected readonly scanning = computed(() => this.peripherals.scanning() !== null);
+  protected readonly refreshLabel = computed(() => {
+    const since = this.peripherals.scanning();
+    if (since === null) return 'Refresh';
+    return `Scanning… ${Math.max(0, Math.round((this.now() - since) / 1000))} s`;
+  });
+  /** #170's status line for screen readers (ruling F28): a scan running, or a stale snapshot. */
+  protected readonly scanStatus = computed(() => {
+    if (this.scanning()) return `Scanning ${this.target()?.label || 'the board'}`;
+    return this.stale() ? 'The board changed. Refresh before starting a preview.' : '';
+  });
+  /** Where the empty-kind guidance says it looked: the scanned board, else the selected one. */
+  protected readonly scannedLabel = computed(
+    () => this.peripherals.snapshot()?.board.label || this.target()?.label || '',
+  );
+  protected readonly hasIssues = computed(
+    () => (this.peripherals.snapshot()?.issues.length ?? 0) > 0,
+  );
+
+  /** A row's identity across scans. */
+  protected readonly rowKey = (row: DeviceRow): string => row.item.id;
+  /** A row's group is its device's kind (`deviceGroups` keys the groups by kind). */
+  protected readonly groupOf = (row: DeviceRow): string => row.item.kind;
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroyed = true;
+      this.session.selectedId = this.selectedId();
+      // A preview of the last visit this one had no time to decide on is kept for the next one.
+      this.session.resume = this.preview.resumable() ?? this.pendingResume;
+      const earlier = this.session.leaving;
+      this.session.leaving = Promise.all([earlier, this.preview.release()]).then(() => undefined);
+    });
+    void this.enter();
+  }
+
+  protected select(row: DeviceRow | null): void {
+    if (row) this.selectedId.set(row.item.id);
+  }
+
+  /** Enter or a click on a row: the device's controls are in the side panel, so the panel opens. */
+  protected openAside(): void {
+    this.asides.setOpen('peripherals', true);
+  }
+
+  protected openBoard(): void {
+    void this.dialogs.openBoard();
+  }
+
+  /**
+   * Scans the board. This page's preview is stopped first: the backend stops it for the scan
+   * anyway, and the page would otherwise show a preview that ended without a word.
+   */
+  protected async refresh(): Promise<void> {
+    if (this.scanning() || !this.target()) return;
+    await this.preview.leave();
+    await this.peripherals.refresh();
+  }
+
+  private async enter(): Promise<void> {
+    const leaving = this.session.leaving;
+    this.pendingResume = this.session.resume;
+    this.session.resume = null;
+    // The board is read too, as #170 did: the automatic scan and the resume are decided on the
+    // board as it is now, which may have changed (or Insight restarted) while the page was away.
+    const [loadError, running] = await Promise.all([
+      this.peripherals.load().then(
+        () => null,
+        (failure: unknown) => problemOf(failure),
+      ),
+      // The last visit's preview may still be stopping, or starting, on the board.
+      leaving.then(() => this.preview.current()).catch(() => null),
+      this.board.reload(),
+    ]);
+    this.loaded.set(true);
+    this.loadError.set(loadError);
+    if (this.destroyed) return;
+    const resume = this.pendingResume;
+    this.pendingResume = null;
+    if (running && running.state !== 'stopped') this.adopt(running);
+    else if (resume) this.resume(resume);
+    const board = this.board.state();
+    if (board) this.peripherals.scanOnce(board);
+  }
+
+  /** Shows a preview running as the page opens: its camera selected, its mode remembered. */
+  private adopt(session: PreviewSession): void {
+    this.preview.adopt(session);
+    if (!session.camera_id) return;
+    this.selectedId.set(session.camera_id);
+    this.session.modes.set(session.camera_id, session.mode);
+  }
+
+  /**
+   * Starts the preview the last visit left running, on the board it ran on and while the scan
+   * still lists its camera; never one that Start would refuse (`previewBlock`), such as a camera
+   * kept from an earlier scan.
+   */
+  private resume(resume: PreviewResume): void {
+    const board = this.board.state();
+    const snapshot = this.peripherals.snapshot();
+    if (!board || board.generation !== resume.generation) return;
+    if (snapshot?.generation !== resume.generation) return;
+    const camera = snapshot.items.find(
+      (item: PeripheralItem): item is CameraItem => item.id === resume.cameraId && isCamera(item),
+    );
+    if (!camera) return;
+    const block = previewBlock({
+      camera,
+      selection: resume.mode,
+      stale: this.stale(),
+      target: board.target,
+    });
+    if (block.blocked) return;
+    this.selectedId.set(camera.id);
+    void this.preview.start(camera, resume.mode, resume.generation);
+  }
+}

@@ -18,12 +18,18 @@ describe('AsidePrefs', () => {
     const prefs = TestBed.inject(AsidePrefs);
     expect(prefs.open('streaming')).toBe(true);
     expect(prefs.open('media')).toBe(true);
+    expect(prefs.open('peripherals')).toBe(true);
 
     prefs.setOpen('media', false);
     expect(prefs.open('media')).toBe(false);
     expect(prefs.open('streaming')).toBe(true);
     expect(storage.values.get('neat-insight:media:aside')).toBe('closed');
     expect(storage.values.has('neat-insight:streaming:aside')).toBe(false);
+
+    prefs.setOpen('peripherals', false);
+    expect(prefs.open('peripherals')).toBe(false);
+    expect(prefs.open('media')).toBe(false);
+    expect(storage.values.get('neat-insight:peripherals:aside')).toBe('closed');
   });
 
   it('reads what an earlier session stored, as after a reload', () => {

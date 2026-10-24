@@ -1,0 +1,139 @@
+<ng-container *neatPageToolbar>
+  @if (scannedText(); as scanned) {
+    <span neatNote>{{ scanned }}</span>
+  }
+  <!-- While it scans it waits with aria-disabled rather than disabled, which would drop the focus. -->
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    [neatTooltip]="target() ? null : 'Select a board first'"
+    neatTooltipPosition="bottom"
+    [disabled]="!target()"
+    [attr.aria-disabled]="scanning() || null"
+    (click)="refresh()"
+  >
+    <neat-icon name="refresh" />
+    {{ refreshLabel() }}
+  </button>
+  <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('peripherals', $event)" />
+</ng-container>
+
+<neat-page scroll="none" [aside]="asideOpen() ? 'open' : 'closed'">
+  <div class="column">
+    <p class="scan-status" role="status">{{ scanStatus() }}</p>
+    <app-peripherals-banners [loadError]="loadError()" (refresh)="refresh()" />
+
+    @switch (body()) {
+      @case ('loading') {
+        <p neatNote class="state">Loading peripherals…</p>
+      }
+      @case ('read-failed') {
+        <app-board-problem-notice class="state" [problem]="board.error()!" announce>
+          <button
+            neatButton
+            neatCalloutActions
+            type="button"
+            size="small"
+            variant="outlined"
+            (click)="openBoard()"
+          >
+            Open board settings
+          </button>
+        </app-board-problem-notice>
+      }
+      @case ('no-target') {
+        <neat-callout class="state" tone="info" heading="No board selected" [headingLevel]="2">
+          <p>Insight needs a board before it can discover peripherals.</p>
+          <button
+            neatButton
+            neatCalloutActions
+            type="button"
+            size="small"
+            variant="outlined"
+            (click)="openBoard()"
+          >
+            Choose a board
+          </button>
+        </neat-callout>
+      }
+      @default {
+        <!--
+          Where the list is narrow (a tablet beside the side panel) the connection gives its room
+          up under 28rem (448px): the name and the state say the most, and the panel's Details
+          name the connection too.
+        -->
+        <neat-select-list
+          label="Devices"
+          [items]="list().rows"
+          [trackBy]="rowKey"
+          [groups]="list().groups"
+          [groupOf]="groupOf"
+          [selected]="selectedRow()"
+          (selectedChange)="select($event)"
+          (activated)="openAside()"
+        >
+          <ng-template neatColumn="icon" width="auto" let-row>
+            <neat-icon [name]="row.icon" />
+          </ng-template>
+          <ng-template neatColumn="device" header="Device" width="minmax(0, 1fr)" let-row>
+            <app-cell-text
+              >{{ row.name }}
+              @if (row.subtitle) {
+                <span class="subtitle">{{ row.subtitle }}</span>
+              }
+            </app-cell-text>
+          </ng-template>
+          <ng-template
+            neatColumn="connection"
+            header="Connection"
+            width="auto"
+            [hideBelow]="448"
+            let-row
+          >
+            <app-cell-text>{{ row.connection }}</app-cell-text>
+          </ng-template>
+          <ng-template neatColumn="state" header="State" width="auto" let-row>
+            <neat-status-chip [tone]="row.chip.tone">{{ row.chip.label }}</neat-status-chip>
+          </ng-template>
+        </neat-select-list>
+      }
+    }
+  </div>
+
+  @if (asideOpen()) {
+    <section neatPageAside neatAsidePanel aria-label="Selected device">
+      <!--
+        One panel per device: choosing another device builds the panel afresh, so nothing picked
+        for one device carries over to the next.
+      -->
+      @for (device of selectedDevices(); track device.id) {
+        <h2 neatAsideTitle>{{ device.name }}</h2>
+      } @empty {
+        @if (body() === 'list') {
+          <!-- #170's guidance where there is no device to show (ruling F28). -->
+          @if (!scanned()) {
+            @if (scanning()) {
+              <p neatNote>Scanning {{ target()?.label }}…</p>
+            } @else if (!peripherals.scanError()) {
+              <p neatNote>Not scanned yet. Refresh to discover devices on {{ target()?.label }}.</p>
+            }
+          } @else {
+            <neat-callout tone="info" [heading]="'No cameras detected on ' + scannedLabel()">
+              <p>
+                @if (hasIssues()) {
+                  Check the notes above.
+                }
+                Connect a camera (power the board off before attaching a MIPI camera), then refresh.
+              </p>
+            </neat-callout>
+            <neat-callout tone="info" [heading]="'No microphones detected on ' + scannedLabel()">
+              <p>Connect a USB microphone, then refresh.</p>
+            </neat-callout>
+          }
+        }
+      }
+    </section>
+  }
+</neat-page>

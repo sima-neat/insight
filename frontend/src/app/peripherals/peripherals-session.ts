@@ -22,4 +22,10 @@ export class PeripheralsSession {
   readonly modes = new Map<string, CameraModeChoice>();
   /** Leaving Peripherals stops its preview and coming back starts it again (spec). */
   resume: PreviewResume | null = null;
+  /**
+   * Settles once the previews of the visits left so far are stopped, starts still in flight
+   * included (`CameraPreview.release`). The next visit waits for it before it reads the running
+   * preview and starts `resume`: the old start may still be running on the board.
+   */
+  leaving: Promise<void> = Promise.resolve();
 }

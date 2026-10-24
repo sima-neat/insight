@@ -388,4 +388,79 @@ describe('PeripheralsService', () => {
     expect(service.scanError()).toBeNull();
     expect(toasts.status).toHaveBeenCalledTimes(1);
   });
+
+  // A board change waits for the scan running on the board (the backend's board lock), so a scan
+  // of the new board queues behind the old one for at least that scan's board re-read.
+  it("Scanning… counts from when this board's scan starts, never the old board's, and does not blink off in between", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const t0 = Date.parse('2026-10-25T10:00:00Z');
+      vi.setSystemTime(t0);
+      boardGeneration.set(3);
+      const first = service.load();
+      http.expectOne(LOAD_URL).flush(snapshot(3, null));
+      await first;
+      service.scanOnce(board(3));
+      expect(service.scanning()).toBe(t0);
+      const [old] = refreshes();
+
+      // The board changes 20 s into the old scan, and the new board's scan is queued.
+      vi.setSystemTime(t0 + 20_000);
+      boardGeneration.set(4);
+      const entered = service.load();
+      http.expectOne(LOAD_URL).flush(snapshot(4, null));
+      await entered;
+      service.scanOnce(board(4));
+      expect(service.scanning()).toBe(t0 + 20_000);
+
+      // The old scan answers; the board re-read after it is still out.
+      const reread = deferredReload();
+      vi.setSystemTime(t0 + 25_000);
+      old.flush(snapshot(3, [item('camera', 'c1')]));
+      await tick();
+      expect(refreshes()).toHaveLength(0);
+      expect(service.scanning()).not.toBeNull();
+
+      vi.setSystemTime(t0 + 26_000);
+      reread.resolve();
+      await tick();
+      const [scan] = refreshes();
+      expect(scan).toBeDefined();
+      expect(service.scanning()).toBe(t0 + 26_000);
+      scan.flush(snapshot(4, [item('camera', 'c1')]));
+      await tick();
+      expect(service.scanning()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The board generation is Insight's counter in memory: a restart starts it over, so the
+  // generations this app recorded as scanned name other boards' scans than the restarted Insight's.
+  it('scanOnce scans again once an Insight restart lowered the board generation', async () => {
+    for (const generation of [1, 2]) {
+      boardGeneration.set(generation);
+      const entered = service.load();
+      http.expectOne(LOAD_URL).flush(snapshot(generation, null));
+      await entered;
+      service.scanOnce(board(generation));
+      refreshes()[0].flush(unreachable, badGateway);
+      await tick();
+    }
+
+    // Insight restarted: the board is generation 1 again, and its scan cache is empty.
+    boardGeneration.set(1);
+    const after = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(1, null));
+    await after;
+    service.scanOnce(board(1));
+    expect(refreshes()).toHaveLength(1);
+  });
+
+  /** Holds the board re-read that ends every scan until the test resolves it. */
+  function deferredReload(): { resolve(): void } {
+    let resolve!: () => void;
+    boardReload.mockImplementationOnce(() => new Promise<void>((done) => (resolve = done)));
+    return { resolve: () => resolve() };
+  }
 });

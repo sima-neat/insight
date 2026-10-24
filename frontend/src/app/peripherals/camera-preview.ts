@@ -28,6 +28,7 @@ import {
   streamErrorEvent,
   watchPreview,
 } from './preview-state';
+import type { PreviewResume } from './peripherals-session';
 
 const PREVIEW_URL = '/api/peripherals/preview';
 const START_URL = '/api/peripherals/cameras/preview';
@@ -67,6 +68,10 @@ export class CameraPreview {
   readonly state = this.stateValue.asReadonly();
 
   private shown = NOTHING_SHOWN;
+  /** The board generation of the last start asked for (`start`'s `generation`). */
+  private startedOn: number | null = null;
+  /** The starts asked for by the page that have not settled yet, restarts within them included. */
+  private readonly starts = new Set<Promise<void>>();
   /** Set by `release()`: the page is gone, so nothing is watched any more. */
   private released = false;
 
@@ -123,9 +128,21 @@ export class CameraPreview {
    * generation (`previewBlock`'s `stale`): such a start is superseded from the outset, so its
    * refusal would not be shown.
    */
-  async start(camera: CameraItem, mode: CameraModeChoice, generation: number): Promise<void> {
+  start(camera: CameraItem, mode: CameraModeChoice, generation: number): Promise<void> {
+    const run = this.runStart(camera, mode, generation);
+    this.starts.add(run);
+    void run.finally(() => this.starts.delete(run));
+    return run;
+  }
+
+  private async runStart(
+    camera: CameraItem,
+    mode: CameraModeChoice,
+    generation: number,
+  ): Promise<void> {
     const selection: CameraSelection = { ...mode, id: camera.id };
     this.shown = { cameraId: camera.id, selection };
+    this.startedOn = generation;
     await runPreviewStart(
       { cameraId: camera.id, generation, mode: selection },
       {
@@ -209,14 +226,45 @@ export class CameraPreview {
   }
 
   /**
+   * What to start again when the page comes back (spec: leaving Peripherals stops the preview,
+   * coming back starts it again): the camera, mode and board generation of this page's preview
+   * while it starts (what was asked for) or is live (what the board streams). Null otherwise: one
+   * stopping or failed has nothing to come back to, and one shown in another tab is that tab's.
+   */
+  resumable(): PreviewResume | null {
+    const { status, session } = this.stateValue();
+    if (status === 'live' && session) {
+      const { format, width, height, fps } = session.mode;
+      return {
+        cameraId: session.camera_id,
+        mode: { format, width, height, fps },
+        generation: session.generation,
+      };
+    }
+    const selection = this.shown.selection;
+    if (status === 'starting' && selection && this.startedOn !== null) {
+      const { format, width, height, fps } = selection;
+      return {
+        cameraId: selection.id,
+        mode: { format, width, height, fps },
+        generation: this.startedOn,
+      };
+    }
+    return null;
+  }
+
+  /**
    * Called when the page is destroyed. This page's preview, live or starting, is stopped at once
    * rather than left to the backend's 15 s reaper (Review Focus 2): a live one with a POST, one
    * still starting as soon as its session id arrives. One shown in another tab is that tab's to
-   * stop, so it is only let go of here.
+   * stop, so it is only let go of here. Settles once those stops have answered (failed or not)
+   * and every start still out has settled: the page's next visit waits for it before it reads
+   * the preview and starts it again, or its start would find the old one still running on the
+   * board and adopt a preview about to be stopped (task 12's M-1). Never rejects.
    */
-  release(): void {
+  release(): Promise<void> {
     this.released = true;
-    void this.leave();
+    return Promise.all([this.leave(), ...this.starts]).then(() => undefined);
   }
 
   private async post(camera: CameraItem, mode: CameraSelection): Promise<PreviewSession> {

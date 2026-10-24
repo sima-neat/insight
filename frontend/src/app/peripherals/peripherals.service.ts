@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { inject, Injectable, signal } from '@angular/core';
+import { effect, inject, Injectable, signal } from '@angular/core';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { firstValueFrom } from 'rxjs';
 import type { BoardState } from '../board/api';
@@ -37,7 +37,12 @@ export class PeripheralsService {
   readonly snapshot = this.snapshotValue.asReadonly();
 
   private readonly scanningValue = signal<number | null>(null);
-  /** When the running scan started (epoch ms), for its "Scanning… N s"; null while none runs. */
+  /**
+   * When the scan of the board now asked for started (epoch ms), for its "Scanning… N s"; null
+   * while none runs or waits. A scan queued behind another board's counts from when it was
+   * queued, and again from when its own request goes out, never with the old board's time. It
+   * stays set between the two, so the count does not blink off while the old scan ends.
+   */
   readonly scanning = this.scanningValue.asReadonly();
 
   private readonly scanErrorValue = signal<BoardProblem | null>(null);
@@ -54,11 +59,20 @@ export class PeripheralsService {
   /** The scan running or queued last, and the board generation it was started for. */
   private running: { generation: number | null; done: Promise<void> } | null = null;
   /**
-   * The board generations scanned by `scanOnce` in this app session. A generation is recorded
-   * when its scan starts, so a failed automatic scan is not repeated on the next visit (#170
-   * repeated it on every mount, Inv-PB §6.9); Refresh is the way to try again.
+   * The board generations scanned by `scanOnce` in this app session, since Insight last
+   * restarted as far as this app can tell (`noteGeneration`). A generation is recorded when its
+   * scan starts, so a failed automatic scan is not repeated on the next visit (#170 repeated it
+   * on every mount, Inv-PB §6.9); Refresh is the way to try again.
    */
   private readonly autoScanned = new Set<number>();
+  /** The board generation last seen, to notice when it goes down. */
+  private lastGeneration: number | null = null;
+
+  constructor() {
+    // Watched for as long as the app runs, so that a restart is noticed while the page is not
+    // shown too (the board is re-read on focus).
+    effect(() => this.noteGeneration(this.board.generation()));
+  }
 
   /**
    * Reads the current snapshot. Resolves once the answer is applied or dropped. No board selected
@@ -96,6 +110,7 @@ export class PeripheralsService {
    * it after `load()`.
    */
   scanOnce(board: BoardState): void {
+    this.noteGeneration(board.generation);
     const snapshot = this.snapshotValue();
     if (!board.target || snapshot === null) return;
     if (snapshot.generation !== board.generation || isScanned(snapshot)) return;
@@ -115,13 +130,18 @@ export class PeripheralsService {
     // With nothing running, the request goes out now, so `scanning` is set when this returns. A
     // queued scan whose board was left again while it waited is skipped: the scan queued after it
     // is for the board now selected.
+    // A queued scan counts from now: the running one is another board's, whose time says
+    // nothing about this one.
+    if (running) this.scanningValue.set(Date.now());
     const started = running
       ? running.done.then(() => (this.isPast(generation) ? undefined : this.scan(generation)))
       : this.scan(generation);
     const entry: { generation: number | null; done: Promise<void> } = {
       generation,
       done: started.finally(() => {
-        if (this.running === entry) this.running = null;
+        if (this.running !== entry) return;
+        this.running = null;
+        this.scanningValue.set(null);
       }),
     };
     this.running = entry;
@@ -147,9 +167,8 @@ export class PeripheralsService {
         this.scanErrorValue.set(problemOf(failure));
         this.scanErrorGeneration = generation;
       }
-    } finally {
-      this.scanningValue.set(null);
     }
+    // `scanning` is cleared once no scan is queued after this one (`scanFor`).
     await this.board.reload();
   }
 
@@ -165,6 +184,18 @@ export class PeripheralsService {
   private isPast(generation: number | null): boolean {
     const selected = this.board.generation();
     return generation !== null && selected !== null && generation < selected;
+  }
+
+  /**
+   * The generation counter starts over when Insight restarts, so a lower generation than the last
+   * one seen means the generations recorded as auto-scanned named the old Insight's boards: the
+   * restarted Insight's first scan of the board must not be skipped for them. (A restart that
+   * lands on the generation seen last cannot be told apart without a server identity.)
+   */
+  private noteGeneration(generation: number | null): void {
+    if (generation === null) return;
+    if (this.lastGeneration !== null && generation < this.lastGeneration) this.autoScanned.clear();
+    this.lastGeneration = generation;
   }
 
   private apply(snapshot: PeripheralSnapshot): void {
