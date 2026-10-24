@@ -53,20 +53,19 @@
   <neat-tab label="Metadata" value="Metadata">
     <ng-template>
       <div neatAsidePanel class="panel">
+        <!-- One column: a heading sits nearer its settings than the settings before it. -->
         @for (section of metadataSections; track section.heading) {
-          <section neatAsidePanel>
-            <h3 neatAsideHeading>{{ section.heading }}</h3>
-            @for (setting of section.settings; track setting.id) {
-              <app-setting-row
-                [scope]="scope()"
-                [setting]="setting"
-                [name]="section.heading + ': ' + setting.label"
-              />
-            }
-            @if (section.note) {
-              <p neatNote>{{ section.note }}</p>
-            }
-          </section>
+          <h3 neatAsideHeading>{{ section.heading }}</h3>
+          @for (setting of section.settings; track setting.id) {
+            <app-setting-row
+              [scope]="scope()"
+              [setting]="setting"
+              [name]="section.heading + ': ' + setting.label"
+            />
+          }
+          @if (section.note) {
+            <p neatNote>{{ section.note }}</p>
+          }
         }
       </div>
     </ng-template>
