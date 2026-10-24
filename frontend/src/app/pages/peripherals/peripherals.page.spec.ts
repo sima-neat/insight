@@ -264,7 +264,8 @@ describe('PeripheralsPage', () => {
       notes: [],
       errors: [],
     });
-    await visit({ snapshot: peripheralSnapshot([imx477, lidar('os-1'), lidar('os-2')]) });
+    const noted = { ...lidar('os-1'), notes: ['Reported by a newer SiMa Sentinel.'] };
+    await visit({ snapshot: peripheralSnapshot([imx477, noted, lidar('os-2')]) });
     expect(groups()[2]).toEqual({
       heading: 'LiDAR · 2',
       muted: true,
@@ -274,6 +275,21 @@ describe('PeripheralsPage', () => {
       ],
     });
     expect(iconOf(rowOf('Ouster os-1'))).toBe('lidar');
+
+    // Its panel says so, under its name and chip, with what the backend reports in Details.
+    rowOf('Ouster os-1').click();
+    await settle();
+    expect(aside()!.querySelector('h2')?.textContent?.trim()).toBe('Ouster os-1');
+    expect(aside()!.querySelector('app-panel-title neat-status-chip')?.textContent?.trim()).toBe(
+      'Not supported yet',
+    );
+    expect(aside()!.querySelector('p[neatNote]')?.textContent?.trim()).toBe(
+      'Insight does not read this device kind yet.',
+    );
+    expect(aside()!.querySelector('app-camera-panel')).toBeNull();
+    expect(aside()!.querySelector('app-device-details li')?.textContent?.trim()).toBe(
+      'Reported by a newer SiMa Sentinel.',
+    );
   });
 
   // F23: the list belongs to the page, so the page tells each row what this page does with it.
@@ -373,6 +389,13 @@ describe('PeripheralsPage', () => {
     expect(pageInjector().get(CameraPreview).state().status).toBe('idle');
     expect(chipOf(imx477.name)).toBe('Available');
     expect(posts(stopUrl(live30.id))).toHaveLength(0);
+    // The camera's Start waits for a refresh, and says so.
+    const start = aside()!.querySelector<HTMLButtonElement>('app-camera-panel .actions button')!;
+    expect(start.textContent!.trim()).toBe('Start preview');
+    expect(start.disabled).toBe(true);
+    expect(aside()!.textContent).toContain(
+      'The board changed after this scan. Refresh before starting a preview.',
+    );
 
     // Leaving records nothing to start again, and stops nothing.
     await leave();
@@ -498,12 +521,51 @@ describe('PeripheralsPage', () => {
     await visit({ preview: webcam });
     expect(selectedRow()).toBe(rowOf('HD Webcam C270'));
     expect(chipOf('HD Webcam C270')).toBe('Previewing');
-    expect(TestBed.inject(PeripheralsSession).modes.get(usb.id)).toEqual(
+    expect(TestBed.inject(PeripheralsSession).modes().get(usb.id)).toEqual(
       sel('MJPG', 1280, 720, 30),
     );
     expect(pageInjector().get(CameraPreview).state().status).toBe('live');
     expect(posts(START_URL)).toHaveLength(0);
     expect(TestBed.inject(PeripheralsSession).resume).toBeNull();
+  });
+
+  // F23: the panel's title carries the row's chip, Previewing included.
+  it("the side panel shows the selected camera's panel, titled with its row's chip", async () => {
+    await visit({ preview: live30 });
+    const panel = aside()!.querySelector('app-camera-panel')!;
+    expect(panel.querySelector('h2')?.textContent?.trim()).toBe(imx477.name);
+    expect(panel.querySelector('app-panel-title neat-status-chip')?.textContent?.trim()).toBe(
+      'Previewing',
+    );
+    expect(panel.querySelector('app-preview-frame img')?.getAttribute('src')).toBe(
+      live30.stream_url,
+    );
+    await leave();
+    answer('POST', stopUrl(live30.id), { session: null });
+  });
+
+  it('leaving a camera stops its preview: another device selected, or the side panel closed', async () => {
+    await visit({ preview: live30 });
+    const preview = pageInjector().get(CameraPreview);
+    rowOf('HD Webcam C270').click();
+    await settle();
+    expect(answer('POST', stopUrl(live30.id), { session: null })).toBe(1);
+    await settle();
+    expect(preview.state().status).toBe('idle');
+
+    // Back on the camera, started again from its panel; then the side panel closes.
+    rowOf(imx477.name).click();
+    await settle();
+    aside()!.querySelector<HTMLButtonElement>('app-camera-panel .actions button')!.click();
+    await settle();
+    answer('POST', START_URL, { session: live30 });
+    await settle();
+    expect(preview.state().status).toBe('live');
+    toolbar().querySelector<HTMLButtonElement>('neat-aside-toggle button')!.click();
+    await settle();
+    expect(answer('POST', stopUrl(live30.id), { session: null })).toBe(1);
+    await settle();
+    expect(preview.state().status).toBe('idle');
   });
 
   it('no target and a failed board read replace the list with their callouts', async () => {
@@ -622,7 +684,13 @@ describe('PeripheralsPage', () => {
     answer('GET', BOARD_URL, devkit);
     await settle();
     expect(selectedRow()).toBeUndefined();
-    expect(aside()?.querySelector('h2')?.textContent?.trim()).toBe('Yeti Nano');
+    expect(aside()?.querySelector('neat-callout [role="heading"]')?.textContent?.trim()).toBe(
+      'Yeti Nano is no longer detected',
+    );
+    expect(aside()!.querySelector('neat-callout')!.getAttribute('tone')).toBe('info');
+    expect(aside()!.textContent).toContain(
+      'It was disconnected since the last refresh. Reconnect it and refresh, or pick another device from the list.',
+    );
 
     // Coming back finds it where it was left.
     await leave();

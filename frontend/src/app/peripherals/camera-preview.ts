@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { effect, inject, Injectable, signal, untracked } from '@angular/core';
+import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { problemOf } from '../board/board-error';
 import { BoardService } from '../board/board.service';
@@ -67,7 +67,13 @@ export class CameraPreview {
   private readonly stateValue = signal<PreviewState>(PREVIEW_IDLE);
   readonly state = this.stateValue.asReadonly();
 
-  private shown = NOTHING_SHOWN;
+  private readonly shown = signal(NOTHING_SHOWN);
+  /**
+   * The camera of the preview this page holds: the session's once there is one, else the camera
+   * the last start was asked for (one still starting, or failed); null once stopped or let go of.
+   * The camera's panel shows the preview by it, and the page leaves it when that panel goes.
+   */
+  readonly camera = computed(() => this.stateValue().session?.camera_id ?? this.shown().cameraId);
   /** The board generation of the last start asked for (`start`'s `generation`). */
   private startedOn: number | null = null;
   /** The starts asked for by the page that have not settled yet, restarts within them included. */
@@ -143,7 +149,7 @@ export class CameraPreview {
     generation: number,
   ): Promise<void> {
     const selection: CameraSelection = { ...mode, id: camera.id };
-    this.shown = { cameraId: camera.id, selection };
+    this.shown.set({ cameraId: camera.id, selection });
     this.startedOn = generation;
     await runPreviewStart(
       { cameraId: camera.id, generation, mode: selection },
@@ -168,7 +174,7 @@ export class CameraPreview {
    * start still out, which makes the stop once it answers).
    */
   async stop(): Promise<void> {
-    this.shown = NOTHING_SHOWN;
+    this.shown.set(NOTHING_SHOWN);
     const { status, session } = this.stateValue();
     if (status === 'stopping') {
       await Promise.all([this.stopping, ...this.starts]);
@@ -185,7 +191,7 @@ export class CameraPreview {
    */
   async leave(): Promise<void> {
     if (this.stateValue().status === 'elsewhere') {
-      this.shown = NOTHING_SHOWN;
+      this.shown.set(NOTHING_SHOWN);
       this.dispatch({ type: 'reset' });
     } else {
       await this.stop();
@@ -197,7 +203,7 @@ export class CameraPreview {
    * refused start found. The page selects its camera and mode (`adoptedSelection`).
    */
   adopt(session: PreviewSession): void {
-    this.shown = { cameraId: session.camera_id, selection: adoptedSelection(session) };
+    this.shown.set({ cameraId: session.camera_id, selection: adoptedSelection(session) });
     this.dispatch({ type: 'adopt', session });
   }
 
@@ -208,10 +214,10 @@ export class CameraPreview {
    */
   async changeMode(camera: CameraItem, mode: CameraModeChoice): Promise<void> {
     const selection: CameraSelection = { ...mode, id: camera.id };
-    if (this.shown.cameraId === camera.id) this.shown = { cameraId: camera.id, selection };
+    if (this.shown().cameraId === camera.id) this.shown.set({ cameraId: camera.id, selection });
     const state = this.stateValue();
     if (!state.session || !previewNeedsRestart(state, camera.id, mode)) return;
-    this.shown = { cameraId: camera.id, selection };
+    this.shown.set({ cameraId: camera.id, selection });
     const requested = { cameraId: camera.id, generation: state.session.generation };
     if (!(await this.stopSession(state.session.id))) return;
     // A mode picked while the stop ran made no restart of its own (the preview was stopping), so
@@ -248,7 +254,7 @@ export class CameraPreview {
         generation: session.generation,
       };
     }
-    const selection = this.shown.selection;
+    const selection = this.shown().selection;
     if (status === 'starting' && selection && this.startedOn !== null) {
       const { format, width, height, fps } = selection;
       return {
@@ -320,7 +326,7 @@ export class CameraPreview {
   }
 
   private view(): PreviewView {
-    return { ...this.shown, generation: this.board.generation() };
+    return { ...this.shown(), generation: this.board.generation() };
   }
 
   private dispatch(event: PreviewEvent): void {

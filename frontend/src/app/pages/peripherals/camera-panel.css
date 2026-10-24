@@ -1,0 +1,47 @@
+.status {
+  margin: 0;
+  font-size: var(--neat-text-sm);
+}
+
+.modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+}
+
+/* The two pickers side by side, as wide as each other; each fills its column. */
+.pickers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--neat-space-3);
+}
+
+/* The button row and, under it, why Start cannot start. */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+}
+
+.blocked {
+  margin: 0;
+  padding-inline-start: var(--neat-space-4);
+}
+
+/*
+ * The board's output is a log: kept as it came, wrapped to the panel rather than scrolled
+ * sideways, and scrolled within a few lines' height. It takes the focus (tabindex) so that a
+ * keyboard can scroll it.
+ */
+.output {
+  margin: 0;
+  max-block-size: 12rem;
+  overflow: auto;
+  font-size: var(--neat-text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.output:focus-visible {
+  outline: 2px solid var(--ring);
+}

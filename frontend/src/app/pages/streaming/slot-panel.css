@@ -1,9 +1,3 @@
-.slot-header {
-  display: flex;
-  align-items: center;
-  gap: var(--neat-space-2);
-}
-
 .text {
   margin: 0;
   font-size: var(--neat-text-sm);

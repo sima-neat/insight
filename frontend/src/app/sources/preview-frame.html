@@ -1,4 +1,6 @@
-@if (file(); as file) {
+@if (stream(); as stream) {
+  <img appEndsStream [src]="stream.src" [alt]="stream.alt" (error)="streamError.emit()" />
+} @else if (file(); as file) {
   @if (file.kind === 'video') {
     <video [src]="file.src" controls autoplay muted loop playsinline [muted]="true"></video>
   } @else {

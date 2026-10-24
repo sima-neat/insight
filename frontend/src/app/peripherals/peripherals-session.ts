@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import type { CameraModeChoice } from './api';
 
 /** A preview the user left running when leaving Peripherals, to start again on coming back. */
@@ -18,8 +18,13 @@ export interface PreviewResume {
 export class PeripheralsSession {
   /** The selected device's item id; null before the first selection. */
   selectedId: string | null = null;
-  /** The mode the user picked per camera, by item id; a camera without one uses its default. */
-  readonly modes = new Map<string, CameraModeChoice>();
+  private readonly modesValue = signal<ReadonlyMap<string, CameraModeChoice>>(new Map());
+  /**
+   * The mode the user picked per camera, by item id; a camera without one uses its default. A
+   * signal, since the page also sets it (a preview adopted as it opens) while that camera's panel
+   * may already show.
+   */
+  readonly modes = this.modesValue.asReadonly();
   /** Leaving Peripherals stops its preview and coming back starts it again (spec). */
   resume: PreviewResume | null = null;
   /**
@@ -28,4 +33,8 @@ export class PeripheralsSession {
    * preview and starts `resume`: the old start may still be running on the board.
    */
   leaving: Promise<void> = Promise.resolve();
+
+  setMode(cameraId: string, mode: CameraModeChoice): void {
+    this.modesValue.update((modes) => new Map(modes).set(cameraId, mode));
+  }
 }

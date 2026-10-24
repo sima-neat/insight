@@ -1,6 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import { filePreview, type FilePreview, PreviewFrame } from './preview-frame';
+import { filePreview, type FilePreview, PreviewFrame, type PreviewStream } from './preview-frame';
 
 describe('filePreview', () => {
   it('previews MJPEG through the server’s MJPEG route, by codec or by extension', () => {
@@ -45,12 +45,16 @@ describe('filePreview', () => {
 @Component({
   imports: [PreviewFrame],
   template: `@if (shown()) {
-    <app-preview-frame [file]="file()"><p class="projected">Nothing to show</p></app-preview-frame>
+    <app-preview-frame [file]="file()" [stream]="stream()" (streamError)="streamErrors = streamErrors + 1"
+      ><p class="projected">Nothing to show</p></app-preview-frame
+    >
   }`,
 })
 class Host {
   readonly shown = signal(true);
   readonly file = signal<FilePreview | null>(null);
+  readonly stream = signal<PreviewStream | null>(null);
+  streamErrors = 0;
 }
 
 describe('PreviewFrame', () => {
@@ -84,6 +88,28 @@ describe('PreviewFrame', () => {
     expect(root().querySelector('app-preview-frame .projected')?.textContent).toBe(
       'Nothing to show',
     );
+  });
+
+  it('shows a live stream as an image named by its alt, in place of the file, and reports a stream it cannot load', async () => {
+    await show(filePreview('stills/b.png', false));
+    fixture.componentInstance.stream.set({
+      src: '/api/peripherals/cameras/preview/8f1c/stream',
+      alt: 'Live preview of imx477',
+    });
+    await fixture.whenStable();
+    const images = root().querySelectorAll('img');
+    expect(images).toHaveLength(1);
+    expect(images[0].getAttribute('src')).toBe('/api/peripherals/cameras/preview/8f1c/stream');
+    expect(images[0].alt).toBe('Live preview of imx477');
+
+    images[0].dispatchEvent(new Event('error'));
+    expect(fixture.componentInstance.streamErrors).toBe(1);
+
+    // Its load ends when the stream goes, as an MJPEG file's does.
+    fixture.componentInstance.stream.set(null);
+    await fixture.whenStable();
+    expect(images[0].hasAttribute('src')).toBe(false);
+    expect(root().querySelector('img')!.getAttribute('alt')).toBe('stills/b.png');
   });
 
   it('ends an MJPEG image’s stream when the image goes, since a browser would keep it loading', async () => {

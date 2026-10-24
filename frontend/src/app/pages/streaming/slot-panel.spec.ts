@@ -291,7 +291,7 @@ describe('SlotPanel', () => {
     slots.slots.set([fileSlot(2, { state: 'playing' })]);
     await open();
     expect(text(root().querySelector('h2')!)).toBe('src2');
-    expect(text(root().querySelector('header neat-status-chip')!)).toBe('Live');
+    expect(text(root().querySelector('app-panel-title neat-status-chip')!)).toBe('Live');
     expect(root().querySelector('app-slot-preview')).not.toBeNull();
   });
 
@@ -535,7 +535,7 @@ describe('SlotPanel', () => {
     expect(slots.prepare).toHaveBeenCalledWith(2);
     expect(slots.start).not.toHaveBeenCalled();
     expect(encodeTitle()).toBe('Preparing rendition…');
-    expect(text(root().querySelector('header neat-status-chip')!)).toBe('Encoding');
+    expect(text(root().querySelector('app-panel-title neat-status-chip')!)).toBe('Encoding');
     // The rate cannot change while the encode runs.
     expect(field('Frames per second').disabled).toBe(true);
 

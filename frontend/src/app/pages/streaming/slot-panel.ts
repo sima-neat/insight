@@ -17,7 +17,6 @@ import {
   NeatAsideActions,
   NeatAsideHeading,
   NeatAsidePanel,
-  NeatAsideTitle,
   NeatButton,
   NeatCode,
   NeatInlineButton,
@@ -34,9 +33,9 @@ import { NeatProgress } from '@sima/neat-ui/progress';
 import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
-import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { copyText } from '../../clipboard';
+import { PanelTitle } from '../../panel-title';
 import type { Slot, SlotTransport } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
@@ -128,7 +127,6 @@ function formFor(slot: Slot): SourceForm {
     MediaPicker,
     NeatAsideActions,
     NeatAsideHeading,
-    NeatAsideTitle,
     NeatButton,
     NeatCode,
     NeatColumn,
@@ -142,8 +140,8 @@ function formFor(slot: Slot): SourceForm {
     NeatSegmented,
     NeatSelect,
     NeatSelectList,
-    NeatStatusChip,
     NeatTooltip,
+    PanelTitle,
     SlotPreview,
   ],
   hostDirectives: [NeatAsidePanel],

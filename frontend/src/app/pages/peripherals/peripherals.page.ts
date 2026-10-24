@@ -3,13 +3,14 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   inject,
   linkedSignal,
   signal,
+  untracked,
 } from '@angular/core';
 import {
   NeatAsidePanel,
-  NeatAsideTitle,
   NeatAsideToggle,
   NeatButton,
   NeatIcon,
@@ -42,6 +43,7 @@ import {
   deviceRow,
   type DeviceRow,
   isCamera,
+  isMicrophone,
   isScanned,
   isSnapshotStale,
   resolveDeviceId,
@@ -50,17 +52,24 @@ import { MicTest } from '../../peripherals/mic-test';
 import { PeripheralsSession, type PreviewResume } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import { ListColumn } from '../../list-column';
+import { PanelTitle } from '../../panel-title';
 import { formatRelativeTime } from '../../relative-time';
 import { TopBarDialogs } from '../../top-bar-dialogs';
+import { CameraPanel } from './camera-panel';
+import { DeviceDetails } from './device-details';
 import { PeripheralsBanners } from './peripherals-banners';
 
 /** What stands in the page's main column: the device list, or why there is none (Inv-PB §1.1). */
 type Body = 'loading' | 'read-failed' | 'no-target' | 'list';
 
-/** The device the side panel is about: a listed one, or one the last scan reported removed. */
+/**
+ * The device the side panel is about: a listed one, with its row, or one the last scan reported
+ * removed (no row), whose panel says it is gone.
+ */
 interface ShownDevice {
   id: string;
   name: string;
+  row: DeviceRow | null;
 }
 
 /**
@@ -90,10 +99,11 @@ interface ShownDevice {
   imports: [
     Announcement,
     BoardProblemNotice,
+    CameraPanel,
     CellText,
+    DeviceDetails,
     ListColumn,
     NeatAsidePanel,
-    NeatAsideTitle,
     NeatAsideToggle,
     NeatButton,
     NeatCallout,
@@ -105,6 +115,7 @@ interface ShownDevice {
     NeatSelectList,
     NeatStatusChip,
     NeatTooltip,
+    PanelTitle,
     PeripheralsBanners,
   ],
   providers: [CameraPreview, MicTest],
@@ -210,11 +221,20 @@ export class PeripheralsPage {
   protected readonly selectedDevices = computed<ShownDevice[]>(() => {
     const id = this.selectedId();
     const row = this.selectedRow();
-    if (row) return [{ id: row.item.id, name: row.name }];
+    if (row) return [{ id: row.item.id, name: row.name, row }];
     const removed = this.peripherals
       .snapshot()
       ?.changes?.removed.find((device) => device.id === id);
-    return removed ? [{ id: removed.id, name: removed.name || removed.id }] : [];
+    return removed ? [{ id: removed.id, name: removed.name || removed.id, row: null }] : [];
+  });
+  /**
+   * The camera whose panel shows, which is where its preview shows: none while the side panel is
+   * closed, a body state stands in the list's place, or another kind of device is selected.
+   */
+  private readonly panelCamera = computed(() => {
+    const row = this.selectedRow();
+    if (!this.asideOpen() || this.body() !== 'list' || !row || !isCamera(row.item)) return null;
+    return row.item.id;
   });
 
   protected readonly scannedText = computed(() => {
@@ -246,6 +266,8 @@ export class PeripheralsPage {
   protected readonly rowKey = (row: DeviceRow): string => row.item.id;
   /** A row's group is its device's kind (`deviceGroups` keys the groups by kind). */
   protected readonly groupOf = (row: DeviceRow): string => row.item.kind;
+  protected readonly isCamera = isCamera;
+  protected readonly isMicrophone = isMicrophone;
 
   constructor() {
     inject(DestroyRef).onDestroy(() => {
@@ -255,6 +277,19 @@ export class PeripheralsPage {
       this.session.resume = this.preview.resumable() ?? this.pendingResume;
       const earlier = this.session.leaving;
       this.session.leaving = Promise.all([earlier, this.preview.release()]).then(() => undefined);
+    });
+    // The preview shows in its camera's panel: when that panel goes (another device selected, the
+    // side panel closed), the page leaves the preview, as #170 did when the camera changed. It
+    // runs on what is shown and whose preview it is, not on the preview's state: a stop that
+    // fails keeps the preview, which must not send the stop again by itself.
+    effect(() => {
+      const shown = this.panelCamera();
+      const previewed = this.preview.camera();
+      untracked(() => {
+        const { status } = this.preview.state();
+        const active = status === 'starting' || status === 'live' || status === 'elsewhere';
+        if (active && previewed !== shown) void this.preview.leave();
+      });
     });
     void this.enter();
   }
@@ -324,7 +359,7 @@ export class PeripheralsPage {
     this.preview.adopt(session);
     if (!session.camera_id) return;
     this.selectedId.set(session.camera_id);
-    this.session.modes.set(session.camera_id, session.mode);
+    this.session.setMode(session.camera_id, session.mode);
   }
 
   /**

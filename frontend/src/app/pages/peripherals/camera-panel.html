@@ -1,0 +1,122 @@
+<app-panel-title [chip]="chip()">{{ camera().name }}</app-panel-title>
+@if (summary()) {
+  <p neatNote>{{ summary() }}</p>
+}
+
+<app-preview-frame [stream]="stream()" (streamError)="streamFailed()" />
+<p class="status">{{ statusLine() }}</p>
+<app-announcement>{{ announcement() }}</app-announcement>
+
+<!-- Above the modes: "No usable modes" points up to the message that says why. -->
+@for (problem of camera().errors; track $index) {
+  <neat-callout tone="danger" [heading]="problem.message">
+    @if (problem.hint) {
+      <p>{{ problem.hint }}</p>
+    }
+  </neat-callout>
+}
+
+@if (selection(); as selection) {
+  <div class="modes">
+    <div class="pickers">
+      <neat-select
+        label="Pixel format"
+        showLabel
+        [options]="formats()"
+        [value]="selection.format"
+        (valueChange)="pickFormat($event)"
+      />
+      <neat-select
+        label="Resolution"
+        showLabel
+        [options]="sizes()"
+        [value]="sizeValue()"
+        (valueChange)="pickSize($event)"
+      />
+    </div>
+    @if (selectionNotice()) {
+      <p neatNote role="status">{{ selectionNotice() }}</p>
+    }
+  </div>
+} @else {
+  <neat-callout tone="warning" heading="No usable modes">
+    <p>
+      {{
+        camera().modes_source === 'live'
+          ? 'None of the formats this camera reports can be used. Open the list below for the reason for each one.'
+          : 'Modes could not be read from this camera; the message above says why and how to fix it.'
+      }}
+    </p>
+    @if (blockedSummary()) {
+      <neat-collapsible [label]="blockedSummary()">
+        <ul class="blocked">
+          @for (option of blockedFormats(); track option.value) {
+            <li>
+              <strong>{{ option.value }}</strong>: {{ option.reason }}
+            </li>
+          }
+        </ul>
+      </neat-collapsible>
+    }
+  </neat-callout>
+}
+
+<!--
+  One button for Start and Stop: a press changes what it does, and the focus stays on it. While the
+  board starts or stops the preview it waits with aria-disabled rather than disabled, which would
+  drop the focus.
+-->
+<div class="actions">
+  <div neatAsideActions>
+    <button
+      neatButton
+      type="button"
+      size="small"
+      [variant]="action().stop ? 'outlined' : 'primary'"
+      [disabled]="startBlocked()"
+      [attr.aria-disabled]="action().waiting || null"
+      [attr.aria-describedby]="startBlocked() ? reasonId : null"
+      (click)="act()"
+    >
+      {{ action().label }}
+    </button>
+  </div>
+  @if (startBlocked()) {
+    <p neatNote [id]="reasonId">{{ block().reason }}</p>
+  }
+</div>
+
+<!-- Under the Start row, which is the retry; it never replaces the row. -->
+@if (error(); as error) {
+  <neat-callout tone="danger" announce="alert" [heading]="error.message">
+    <!-- One recovery line: the board's own hint when it sent one, Insight's otherwise. -->
+    @if (error.hint || error.action) {
+      <p>{{ error.hint || error.action }}</p>
+    }
+    @if (error.otherCamera) {
+      <p>
+        The running preview is on <code neatCode>{{ error.otherCamera }}</code>.
+      </p>
+    }
+    <!-- Folded, so a failed start stays one row; the video is the panel's only large part. -->
+    @if (error.detail) {
+      <neat-collapsible label="Board output">
+        <pre class="output" tabindex="0" aria-label="Board output"><code>{{ error.detail }}</code></pre>
+      </neat-collapsible>
+    }
+    @if (errorOpensBoard()) {
+      <button
+        neatButton
+        neatCalloutActions
+        type="button"
+        size="small"
+        variant="outlined"
+        (click)="openBoard()"
+      >
+        Open board settings
+      </button>
+    }
+  </neat-callout>
+}
+
+<app-device-details [item]="camera()" />

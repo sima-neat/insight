@@ -111,7 +111,28 @@
       <!-- Only beside the list: a body state in its place says why there is nothing to show. -->
       @if (body() === 'list') {
         @for (device of selectedDevices(); track device.id) {
-          <h2 neatAsideTitle>{{ device.name }}</h2>
+          @if (device.row; as row) {
+            @if (isCamera(row.item)) {
+              <app-camera-panel [camera]="row.item" [chip]="row.chip" />
+            } @else if (isMicrophone(row.item)) {
+              <app-panel-title [chip]="row.chip">{{ row.name }}</app-panel-title>
+            } @else {
+              <app-panel-title [chip]="row.chip">{{ row.name }}</app-panel-title>
+              <p neatNote>Insight does not read this device kind yet.</p>
+              <app-device-details [item]="row.item" />
+            }
+          } @else {
+            <neat-callout
+              tone="info"
+              [heading]="device.name + ' is no longer detected'"
+              [headingLevel]="2"
+            >
+              <p>
+                It was disconnected since the last refresh. Reconnect it and refresh, or pick another
+                device from the list.
+              </p>
+            </neat-callout>
+          }
         } @empty {
           <!-- #170's guidance where there is no device to show (ruling F28). -->
           @if (!scanned()) {

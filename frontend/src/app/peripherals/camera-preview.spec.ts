@@ -296,6 +296,29 @@ describe('CameraPreview', () => {
     http.expectNone(() => true);
   });
 
+  it("camera names the camera of the page's preview: a start's before it answers, the session's after, none once stopped", async () => {
+    expect(preview.camera()).toBeNull();
+    const started = preview.start(usb, sel('MJPG', 1280, 720, 30), 3);
+    // No session yet: the camera is the one the start was asked for.
+    expect(preview.camera()).toBe(usb.id);
+    http
+      .expectOne({ method: 'POST', url: START_URL })
+      .flush({ error: 'Camera busy', code: 'camera_in_use' }, badGateway);
+    await started;
+    // A failed start stays that camera's, with its failure.
+    expect(preview.state().status).toBe('error');
+    expect(preview.camera()).toBe(usb.id);
+
+    await adoptLive();
+    expect(preview.camera()).toBe(imx477.id);
+    const stopping = preview.stop();
+    // While it stops, the session still names its camera.
+    expect(preview.camera()).toBe(imx477.id);
+    await answerStop(live30.id);
+    await stopping;
+    expect(preview.camera()).toBeNull();
+  });
+
   it('release stops a live preview and a start still in flight once its session id arrives', async () => {
     await adoptLive();
     preview.release();

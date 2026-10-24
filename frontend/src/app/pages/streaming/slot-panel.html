@@ -1,7 +1,4 @@
-<header class="slot-header">
-  <h2 neatAsideTitle>{{ row().name }}</h2>
-  <neat-status-chip [tone]="row().state.tone">{{ row().state.label }}</neat-status-chip>
-</header>
+<app-panel-title [chip]="row().state">{{ row().name }}</app-panel-title>
 
 <app-slot-preview [slot]="slot()" [localStream]="localStream()" />
 

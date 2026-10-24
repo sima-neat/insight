@@ -6,6 +6,7 @@ import {
   ElementRef,
   inject,
   input,
+  output,
 } from '@angular/core';
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm']);
@@ -18,6 +19,12 @@ export interface FilePreview {
   readonly src: string;
   /** The file's library path, which names the picture. */
   readonly path: string;
+}
+
+/** A live MJPEG stream the frame plays as an image, and the words that name its picture. */
+export interface PreviewStream {
+  readonly src: string;
+  readonly alt: string;
 }
 
 /** `/media/<path>` serves the library's files; each segment is encoded, the slashes kept. */
@@ -60,11 +67,13 @@ export class EndsStream {
 }
 
 /**
- * The box a preview shows in, for Streaming's slot panel and Media's side panel alike: 16:9 like
- * most streams, the picture letterboxed inside it, square as the Viewer's tiles are. Given a
- * library `file` (see `filePreview`) it shows that file: a video plays muted and looping, with
- * its controls. Its content shows in the same box, layered over the file, for what a caller shows
- * instead (a live picture, a message); a caller shows one or the other.
+ * The box a preview shows in, for Streaming's slot panel, Media's side panel and Peripherals'
+ * camera panel alike: 16:9 like most streams, the picture letterboxed inside it, square as the
+ * Viewer's tiles are. Given a library `file` (see `filePreview`) it shows that file: a video plays
+ * muted and looping, with its controls. Given a live `stream` it shows that instead, and reports a
+ * stream it cannot load (`streamError`). Its content shows in the same box, layered over the file,
+ * for what a caller shows instead (a live picture of its own, a message); a caller shows one or
+ * the other.
  */
 @Component({
   selector: 'app-preview-frame',
@@ -75,4 +84,6 @@ export class EndsStream {
 })
 export class PreviewFrame {
   readonly file = input<FilePreview | null>(null);
+  readonly stream = input<PreviewStream | null>(null);
+  readonly streamError = output<void>();
 }
