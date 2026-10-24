@@ -10,7 +10,6 @@ import {
   Component,
   computed,
   DestroyRef,
-  Directive,
   effect,
   ElementRef,
   inject,
@@ -33,6 +32,7 @@ import {
   timeout,
 } from 'rxjs';
 import type { Slot } from '../../sources/api';
+import { EndsStream, filePreview, PreviewFrame } from '../../sources/preview-frame';
 import { isLive, previewSrc } from './slot-row';
 
 /** How often the live image is checked for its first frame (#170). */
@@ -40,32 +40,8 @@ const FRAME_CHECK_MS = 100;
 /** How long the check of a failed preview waits for the server before calling it unavailable. */
 const PROBE_TIMEOUT_MS = 3000;
 
-const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm']);
-const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png']);
-
 /** Why the live preview failed: the server's cap on previews open at once (429), or anything else. */
 export type PreviewFailure = 'busy' | 'failed';
-
-/** How a file that is not live is previewed, and from where (#170's Source Preview). */
-type FilePreview = { kind: 'image' | 'video'; src: string } | null;
-
-/** `/media/<path>` serves the library's files; each segment is encoded, the slashes kept. */
-const mediaUrl = (path: string) => `/media/${path.split('/').map(encodeURIComponent).join('/')}`;
-
-function filePreview(slot: Slot): FilePreview {
-  if (!slot.file) return null;
-  // The streamer reads MJPEG (and a JPEG) through FFmpeg; the browser gets it as multipart MJPEG.
-  if (slot.codec === 'mjpeg') {
-    return {
-      kind: 'image',
-      src: `/api/media-preview/mjpeg?path=${encodeURIComponent(slot.file)}`,
-    };
-  }
-  const extension = slot.file.split('.').pop()?.toLowerCase() ?? '';
-  if (VIDEO_EXTENSIONS.has(extension)) return { kind: 'video', src: mediaUrl(slot.file) };
-  if (IMAGE_EXTENSIONS.has(extension)) return { kind: 'image', src: mediaUrl(slot.file) };
-  return null;
-}
 
 /**
  * Calls `onFrame` once the image shows its first frame, checking every 100 ms; returns the stop.
@@ -110,20 +86,6 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
 }
 
 /**
- * Ends the load of the image it sits on when the image leaves the page. A browser keeps loading a
- * multipart MJPEG image after the element is dropped, so a preview removed from the page would go
- * on decoding, and hold one of the server's four preview sessions, until the stream ends (#170
- * cleared the source for this). Removing the source aborts it.
- */
-@Directive({ selector: 'img[appEndsStream]' })
-export class EndsStream {
-  constructor() {
-    const image = inject<ElementRef<HTMLImageElement>>(ElementRef).nativeElement;
-    inject(DestroyRef).onDestroy(() => image.removeAttribute('src'));
-  }
-}
-
-/**
  * What the selected slot shows (spec, "Live preview"): the stream for every kind while it is live,
  * through the server's MJPEG preview route; the file itself, labelled so, for a file slot that is
  * not; and the local camera of a webcam this browser publishes until its stream is live. There is
@@ -133,7 +95,7 @@ export class EndsStream {
  */
 @Component({
   selector: 'app-slot-preview',
-  imports: [EndsStream, NeatButton, NeatProgress],
+  imports: [EndsStream, NeatButton, NeatProgress, PreviewFrame],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './slot-preview.html',
   styleUrl: './slot-preview.css',
@@ -175,10 +137,13 @@ export class SlotPreview {
     () => this.liveSources().length > 0 && this.shownSrc() !== this.liveSrc(),
   );
 
-  /** A file slot that is not live shows its file; a pull or a publisher shows only its stream. */
+  /**
+   * A file slot that is not live shows its file; a pull or a publisher shows only its stream. The
+   * streamer reads MJPEG (and a JPEG) through FFmpeg, which the slot's codec tells.
+   */
   protected readonly file = computed(() => {
     const slot = this.slot();
-    return slot.state === 'stopped' ? filePreview(slot) : null;
+    return slot.state === 'stopped' ? filePreview(slot.file, slot.codec === 'mjpeg') : null;
   });
   /** The webcam's own camera, until its stream is live. */
   protected readonly camera = computed(() =>

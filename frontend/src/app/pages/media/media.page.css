@@ -1,0 +1,24 @@
+/* The browser fills the page's content box under the notice, and scrolls its rows inside. */
+.library {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+neat-file-browser {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* Empty, the notice takes no room; it stays in the DOM so its text is announced when it appears. */
+.notice:not(:empty) {
+  padding-block-end: var(--neat-space-2);
+}
+
+/* One line per cell, truncated rather than wrapped, so every row keeps the list's row height. */
+.text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

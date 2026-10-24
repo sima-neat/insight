@@ -1,0 +1,58 @@
+@switch (view()) {
+  @case ('several') {
+    <h2 #lead tabindex="-1">{{ checked().length }} selected</h2>
+    <ul class="paths">
+      @for (path of checked(); track path) {
+        <li>
+          <code>{{ path }}</code>
+        </li>
+      }
+    </ul>
+    <div class="buttons">
+      <button neatButton type="button" variant="text" size="small" (click)="clearChecked()">
+        Clear {{ checked().length }}
+      </button>
+      <button
+        neatButton
+        type="button"
+        variant="outlined"
+        size="small"
+        [disabled]="deleting()"
+        (click)="delete()"
+      >
+        Delete…
+      </button>
+    </div>
+  }
+  @case ('one') {
+    <h2 #lead tabindex="-1" class="path">{{ selected() }}</h2>
+    @if (preview(); as preview) {
+      <app-preview-frame [file]="preview" />
+    }
+    <div class="buttons">
+      <button
+        neatButton
+        type="button"
+        variant="outlined"
+        size="small"
+        [disabled]="deleting()"
+        (click)="delete()"
+      >
+        Delete…
+      </button>
+    </div>
+    <dl class="details">
+      @if (infoError(); as error) {
+        <dt>Error</dt>
+        <dd>{{ error }}</dd>
+      }
+      @for (row of infoRows(); track row.label) {
+        <dt>{{ row.label }}</dt>
+        <dd>{{ row.value }}</dd>
+      }
+    </dl>
+  }
+  @default {
+    <p #lead neatNote tabindex="-1">Select a file.</p>
+  }
+}

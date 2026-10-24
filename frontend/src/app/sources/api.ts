@@ -284,8 +284,8 @@ export interface ImageMediaInfo extends MediaInfoBase {
 
 export interface VideoMediaInfo extends MediaInfoBase {
   type: 'video';
-  /** Display name, for example `H.264`. */
-  codec: string;
+  /** Display name, for example `H.264`; ffprobe's own name for others; null when it names none. */
+  codec: string | null;
   normalized_codec: 'h264' | 'h265' | 'mjpeg' | 'unknown' | null;
   width: number | null;
   height: number | null;

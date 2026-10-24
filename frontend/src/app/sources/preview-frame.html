@@ -1,0 +1,8 @@
+@if (file(); as file) {
+  @if (file.kind === 'video') {
+    <video [src]="file.src" controls autoplay muted loop playsinline [muted]="true"></video>
+  } @else {
+    <img appEndsStream [src]="file.src" [alt]="file.path" />
+  }
+}
+<ng-content />

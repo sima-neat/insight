@@ -1,4 +1,4 @@
-<div class="frame">
+<app-preview-frame [file]="file()">
   @for (src of liveSources(); track src) {
     <img
       #live
@@ -24,13 +24,7 @@
       }
     } @else if (camera()) {
       <video #camera autoplay muted playsinline [muted]="true"></video>
-    } @else if (file(); as file) {
-      @if (file.kind === 'video') {
-        <video [src]="file.src" controls autoplay muted loop playsinline [muted]="true"></video>
-      } @else {
-        <img appEndsStream [src]="file.src" [alt]="slot().file" />
-      }
-    } @else if (idleText()) {
+    } @else if (!file() && idleText()) {
       <p class="message">{{ idleText() }}</p>
     }
   }
@@ -41,7 +35,7 @@
       <span>Connecting to src{{ slot().index }}…</span>
     }
   </div>
-</div>
+</app-preview-frame>
 @if (file()) {
   <p class="caption">File preview</p>
 }

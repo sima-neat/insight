@@ -1,0 +1,64 @@
+/* One column in the page's side panel, which scrolls it. */
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+/* A path has no spaces to break at. */
+.path,
+code {
+  overflow-wrap: anywhere;
+}
+
+/* Monospace runs wide, so a step smaller than the text around it. */
+code {
+  font-size: 0.9em;
+}
+
+.paths {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+  margin: 0;
+  padding: 0;
+  font-size: var(--neat-text-sm);
+  list-style: none;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+/* The info table: names muted in one column, values beside them. */
+.details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--neat-space-2) var(--neat-space-3);
+  margin: 0;
+  font-size: var(--neat-text-sm);
+}
+
+.details:empty {
+  display: none;
+}
+
+.details dt {
+  color: var(--muted-foreground);
+}
+
+.details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}

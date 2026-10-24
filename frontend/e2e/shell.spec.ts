@@ -177,8 +177,8 @@ test('the kit font loads', async ({ page }) => {
 });
 
 test('a page keeps the kit page inset from the content area', async ({ page }) => {
-  await page.goto('/media');
-  const text = page.getByText('Media arrives with plan 3.');
+  await page.goto('/peripherals');
+  const text = page.getByText('Peripherals arrive with plan 4.');
   await expect(text).toBeVisible();
 
   // neat-page pads by default with --neat-space-6, Tailwind's spacing 6: 1.5rem, 24 px here.
