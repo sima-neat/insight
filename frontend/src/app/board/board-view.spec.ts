@@ -127,10 +127,11 @@ describe('boardIndicator', () => {
       target: target({ label: 'sima@10.0.0.4', host: '10.0.0.4' }),
       status: { state: 'connected', checked_at: null, error: null },
     });
+    // The tooltip names the board in full, as it does in every other state: the label may be cut.
     expect(boardIndicator(connected, unreachable)).toEqual({
       label: 'Board: 10.0.0.4',
       chip: { label: 'Error', tone: 'danger' },
-      tooltip: 'Could not read the board: Could not reach the Insight server.',
+      tooltip: 'sima@10.0.0.4 — Could not read the board: Could not reach the Insight server.',
     });
     // A last state with no board selected keeps saying so (ruling Q4).
     expect(boardIndicator(board({ target: null }), unreachable)).toEqual({

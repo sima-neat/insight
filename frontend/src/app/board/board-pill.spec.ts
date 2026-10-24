@@ -84,7 +84,7 @@ describe('BoardPill', () => {
     expect(chip(button).textContent?.trim()).toBe('Error');
     expect(tone(button)).toBe('danger');
     expect(await tooltip(button)).toBe(
-      'Could not read the board: Could not reach the Insight server.',
+      'sima@192.168.1.20 — Could not read the board: Could not reach the Insight server.',
     );
 
     // It follows the service: the next good answer clears the error.

@@ -26,16 +26,17 @@ export function pageOverflow(page: Page) {
  * The top bar's items that spill out of it, and how far the page tools overflow their region. With
  * `toolbarMayScroll` (Ruling R14: tablets) the tools may overflow and scroll sideways: whatever is
  * inside their region counts as clipped by it, so only the region itself has to stay in the bar.
+ * A page without tools (Stats) has no region, which overflows by nothing.
  */
 export function topBarSpill(page: Page, toolbarMayScroll: boolean) {
   return page.evaluate((mayScroll) => {
     // The shell's top bar is the first header; a page may have headers of its own (a panel's).
     const header = document.querySelector('header')!;
     const bar = header.getBoundingClientRect();
-    const tools = header.querySelector('[role="group"][aria-label="Page tools"]')!;
+    const tools = header.querySelector('[role="group"][aria-label="Page tools"]');
     const spilled = [...header.querySelectorAll('*:not(svg *)')]
       .filter((element) => {
-        if (mayScroll && tools.contains(element) && element !== tools) return false;
+        if (mayScroll && tools?.contains(element) && element !== tools) return false;
         const box = element.getBoundingClientRect();
         return (
           box.width > 0 &&
@@ -46,6 +47,7 @@ export function topBarSpill(page: Page, toolbarMayScroll: boolean) {
         );
       })
       .map((element) => element.outerHTML.slice(0, 80));
-    return { spilled, toolsOverflow: mayScroll ? 0 : tools.scrollWidth - tools.clientWidth };
+    const toolsOverflow = mayScroll || !tools ? 0 : tools.scrollWidth - tools.clientWidth;
+    return { spilled, toolsOverflow };
   }, toolbarMayScroll);
 }

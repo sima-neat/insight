@@ -1,17 +1,18 @@
 // Fails when code that belongs to a lazy route is in the initial bundle, or is missing from the
 // build.
 //
-// The Viewer's video code (`@sima/neat-ui/video`) and the Streaming and Media pages, with the kit
-// entries only they use, are meant to load with their routes, and the top bar's board and System Info
-// dialogs on their first open, so the first paint does not pay for them. The compiler already rejects video
+// The Viewer's video code (`@sima/neat-ui/video`) and the Streaming, Media and Peripherals pages,
+// with the kit entries only they use, are meant to load with their routes, and the top bar's board
+// and System Info dialogs on their first open, so the first paint does not pay for them. The compiler already rejects video
 // symbols imported from the kit's primary entry point, but nothing else notices when an import in
 // the shared code (a page, the shell, `app.config`) drags one of these into the main chunk. This
 // script checks the result: each marker below is a component selector, a string that survives
 // minification, so it shows where the code ended up.
 //
 // `neat-toast-host` and `neat-status-chip` are not markers on purpose: the app root renders the
-// toast host and the top bar's board pill shows its state in a status chip, so those two kit
-// entries are in the initial bundle by design.
+// toast host, and the top bar's board pill, on every page, shows the board's state in a status
+// chip, so those two kit entries are in the initial bundle by design (the status chip is the one
+// kit entry the pill adds there).
 //
 // Usage: node scripts/check-bundle-split.mjs [dist-dir]   (default: dist, after `npm run build`)
 import { readdirSync, readFileSync } from 'node:fs';
@@ -23,6 +24,11 @@ const LAZY_CODE = [
   { marker: 'neat-video-tile', what: 'the video code', route: 'the Viewer route' },
   { marker: 'app-streaming-page', what: 'the Streaming page', route: 'the Streaming route' },
   { marker: 'app-media-page', what: 'the Media page', route: 'the Media route' },
+  {
+    marker: 'app-peripherals-page',
+    what: 'the Peripherals page',
+    route: 'the Peripherals route',
+  },
   // The kit entries the two pages use (the file browser, the checked and selection lists, dialogs).
   { marker: 'neat-file-browser', what: 'the kit’s file browser', route: 'Streaming and Media' },
   { marker: 'neat-select-list', what: 'the kit’s select list', route: 'Streaming and Media' },
@@ -42,13 +48,15 @@ const LAZY_CODE = [
   {
     marker: 'neat-collapsible',
     what: 'the kit’s collapsible',
-    route: 'the board and System Info dialogs',
+    route: 'Peripherals and the board and System Info dialogs',
   },
   {
     marker: 'neat-callout',
     what: 'the kit’s callout',
-    route: 'the board and System Info dialogs and the Viewer',
+    route: 'Peripherals, the Viewer and the board and System Info dialogs',
   },
+  // The microphone test's meter, on the Peripherals route only.
+  { marker: 'neat-level-meter', what: 'the kit’s level meter', route: 'the Peripherals route' },
 ];
 const dist = process.argv[2] ?? 'dist';
 

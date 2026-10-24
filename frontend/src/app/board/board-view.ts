@@ -53,10 +53,12 @@ export function boardIndicator(
   error: BoardProblem | null,
 ): BoardIndicator {
   if (error) {
+    // The last known board is named in full, as in every other state: the label may be cut.
+    const named = state?.target ? `${state.target.label} — ` : '';
     return {
       label: state ? targetName(state.target) : 'Board',
       chip: { label: 'Error', tone: 'danger' },
-      tooltip: `Could not read the board: ${error.message}`,
+      tooltip: `${named}Could not read the board: ${error.message}`,
     };
   }
   if (!state) {

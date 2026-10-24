@@ -1,5 +1,5 @@
 import { expect, Locator, Page, test } from '@playwright/test';
-import { TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
 import { answerTopBar } from './top-bar';
 
 // The top bar's pill reads the board on every page.
@@ -253,5 +253,23 @@ for (const { name, size } of VIEWPORTS) {
     // The top bar's own items (not the paths inside icons) must not spill out of it. Streaming's
     // page tools do not fit beside the title on a tablet, where they scroll sideways (R14).
     expect(await topBarSpill(page, size === TABLET)).toEqual({ spilled: [], toolsOverflow: 0 });
+  });
+}
+
+// Every page holds the top bar's pill and System Info without a spill: Media, Streaming, Viewer and
+// Peripherals check it in their own specs with their content; Stats, a placeholder until plan 5,
+// here.
+for (const { name, size } of VIEWPORTS) {
+  test(`Stats fits beside the pill and System Info at ${name}`, async ({ page }) => {
+    await page.setViewportSize(size);
+    await page.goto('/stats');
+    await expect(page.locator('app-board-pill button')).toContainText('Not checked');
+    await expect(page.getByRole('button', { name: 'System information' })).toBeVisible();
+
+    expect(await pageOverflow(page)).toEqual([
+      { horizontal: 0, vertical: 0 },
+      { horizontal: 0, vertical: 0 },
+    ]);
+    expect(await topBarSpill(page, false)).toEqual({ spilled: [], toolsOverflow: 0 });
   });
 }

@@ -8,6 +8,7 @@ import { BoardProblem } from '../board/board-error';
 import { BoardService } from '../board/board.service';
 import type { PeripheralItem, PeripheralSnapshot } from './api';
 import { PeripheralsService } from './peripherals.service';
+import { peripheralSnapshot } from './snapshots.testing';
 
 const LOAD_URL = '/api/peripherals';
 const REFRESH_URL = '/api/peripherals/refresh';
@@ -26,30 +27,20 @@ function item(kind: string, id: string): PeripheralItem {
   };
 }
 
+/**
+ * A snapshot of board `generation` on the manually entered board: unscanned for `null` items,
+ * otherwise a scan whose id names its generation, so that a test can tell which scan was applied.
+ */
 function snapshot(
   generation: number,
   items: PeripheralItem[] | null,
   label = 'sima@192.168.2.2',
 ): PeripheralSnapshot {
-  const scanned = items !== null;
-  return {
-    board: {
-      label,
-      source: 'manual',
-      hostname: null,
-      machine: null,
-      build_version: null,
-      fingerprint: null,
-    },
+  return peripheralSnapshot(items, {
+    board: { label, source: 'manual' },
     generation,
-    scan_id: scanned ? `7:${generation}` : null,
-    scanned_at: scanned ? '2026-10-25T10:00:00Z' : null,
-    ...(scanned ? { scan_ms: 1200 } : {}),
-    items: items ?? [],
-    issues: [],
-    changes: null,
-    camera_setup: null,
-  };
+    ...(items === null ? {} : { scan_id: `7:${generation}` }),
+  });
 }
 
 function board(generation: number, withTarget = true): BoardState {

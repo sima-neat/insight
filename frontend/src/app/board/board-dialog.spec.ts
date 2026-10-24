@@ -3,8 +3,8 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatButton } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { PeripheralSnapshot } from '../peripherals/api';
 import { PeripheralsService } from '../peripherals/peripherals.service';
+import { peripheralSnapshot } from '../peripherals/snapshots.testing';
 import type { BoardState, ShellInfo } from './api';
 import { openBoardDialog } from './board-dialog';
 import { BoardProblem } from './board-error';
@@ -40,29 +40,15 @@ const failed = (overrides: Partial<BoardState> = {}) =>
     ...overrides,
   });
 
-function snapshot(generation: number, overrides: Partial<PeripheralSnapshot> = {}) {
-  return {
-    board: {
-      label: DEVKIT.label,
-      source: 'sdk-env',
-      hostname: null,
-      machine: null,
-      build_version: null,
-      fingerprint: null,
-    },
+/** A scan of board `generation` that read the board's camera setup, as the dialog's Details show it. */
+const scanOf = (generation: number) =>
+  peripheralSnapshot([], {
     generation,
-    scan_id: `7:${generation}`,
-    scanned_at: '2026-10-25T10:00:00Z',
-    items: [],
-    issues: [],
-    changes: null,
     camera_setup: {
       model: 'SiMa.ai Modalix SoM 16Gig Board',
       overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo'],
     },
-    ...overrides,
-  } satisfies PeripheralSnapshot;
-}
+  });
 
 describe('BoardDialog', () => {
   let board: FakeBoard;
@@ -452,7 +438,7 @@ describe('BoardDialog', () => {
         board: { hostname: 'devkit', machine: null, build_version: '2.0.0', fingerprint: 'f' },
       }),
     );
-    peripherals.snapshot.set(snapshot(4));
+    peripherals.snapshot.set(scanOf(4));
     await open();
     expect(peripherals.load).toHaveBeenCalledTimes(1);
 
@@ -483,7 +469,7 @@ describe('BoardDialog', () => {
     ]);
 
     // A scan of another board generation says nothing about this one's camera setup.
-    peripherals.snapshot.set(snapshot(3));
+    peripherals.snapshot.set(scanOf(3));
     await settle();
     expect(facts()).toEqual([
       ['Hostname', 'devkit'],

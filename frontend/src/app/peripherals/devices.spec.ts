@@ -22,6 +22,7 @@ import {
   tierInfo,
 } from './devices';
 import { onboardMic, yeti } from './microphones.testing';
+import { peripheralSnapshot } from './snapshots.testing';
 
 // #170's fixtures (model.test.js), typed: the cameras come from `cameras.testing.ts`, the
 // microphones from `microphones.testing.ts`.
@@ -42,32 +43,7 @@ function other(kind: string, id: string, connection = 'i2c'): OtherItem {
   };
 }
 
-function snapshotOf(
-  items: PeripheralItem[],
-  overrides: Partial<PeripheralSnapshot> = {},
-): PeripheralSnapshot {
-  return {
-    board: {
-      label: 'sima@192.168.2.2',
-      source: 'sdk-env',
-      hostname: 'modalix',
-      machine: 'aarch64',
-      build_version: '2.0.0',
-      fingerprint: 'SHA256:abc',
-    },
-    generation: 3,
-    scan_id: '42:2026-09-21T10:00:00Z',
-    scanned_at: '2026-09-21T10:00:00Z',
-    scan_ms: 3400,
-    items,
-    issues: [],
-    changes: null,
-    camera_setup: null,
-    ...overrides,
-  };
-}
-
-const snapshot = snapshotOf([usb, imx477, yeti, imx568, inUse], {
+const snapshot = peripheralSnapshot([usb, imx477, yeti, imx568, inUse], {
   issues: [
     {
       severity: 'info',
@@ -94,7 +70,7 @@ const snapshot = snapshotOf([usb, imx477, yeti, imx568, inUse], {
   },
 });
 
-const unscanned = snapshotOf([], { scan_id: null, scanned_at: null, scan_ms: undefined });
+const unscanned = peripheralSnapshot(null);
 
 /** The ids of each group's items, in the order the list shows them. */
 function idsByGroup(snap: PeripheralSnapshot): Record<string, string[]> {
@@ -116,13 +92,15 @@ describe('the device model', () => {
   });
 
   it('microphones are grouped USB first, then on-board, after the cameras', () => {
-    const ids = deviceGroups(snapshotOf([onboardMic, imx477, yeti])).items.map((item) => item.id);
+    const ids = deviceGroups(peripheralSnapshot([onboardMic, imx477, yeti])).items.map(
+      (item) => item.id,
+    );
     expect(ids).toEqual([imx477.id, yeti.id, onboardMic.id]);
   });
 
   it('a kind the backend invents appears automatically, after the known ones', () => {
     const { groups, items } = deviceGroups(
-      snapshotOf([
+      peripheralSnapshot([
         other('radar', 'r1'),
         imx477,
         other('radar', 'r2'),
@@ -156,7 +134,7 @@ describe('the device model', () => {
       { key: 'microphone', label: 'Microphones · 1', muted: false },
       { key: 'lidar', label: 'LiDAR · none found', muted: true },
     ]);
-    expect(deviceGroups(snapshotOf([yeti])).groups[0]).toEqual({
+    expect(deviceGroups(peripheralSnapshot([yeti])).groups[0]).toEqual({
       key: 'camera',
       label: 'Cameras · none found',
       muted: true,
@@ -174,7 +152,7 @@ describe('the device model', () => {
     }
     // A LiDAR Insight cannot show yet is counted and muted, its rows saying so (ruling F27).
     const lidar = other('lidar', 'l1', 'usb');
-    const scanned = deviceGroups(snapshotOf([lidar, other('lidar', 'l2', 'usb')]));
+    const scanned = deviceGroups(peripheralSnapshot([lidar, other('lidar', 'l2', 'usb')]));
     expect(scanned.groups[2]).toEqual({ key: 'lidar', label: 'LiDAR · 2', muted: true });
     expect(deviceRow(lidar, idle)).toMatchObject({
       icon: 'lidar',
@@ -185,7 +163,9 @@ describe('the device model', () => {
   it('a device with an unknown connection is listed, not dropped', () => {
     const gmsl: CameraItem = { ...imx568, id: 'gmsl:cam', connection: 'gmsl' };
     const bluetooth: MicrophoneItem = { ...yeti, id: 'bt:mic', connection: 'bluetooth' };
-    expect(idsByGroup(snapshotOf([gmsl, usb, imx477, bluetooth, onboardMic, yeti]))).toEqual({
+    expect(
+      idsByGroup(peripheralSnapshot([gmsl, usb, imx477, bluetooth, onboardMic, yeti])),
+    ).toEqual({
       camera: [imx477.id, usb.id, gmsl.id],
       microphone: [yeti.id, onboardMic.id, bluetooth.id],
       lidar: [],
@@ -347,12 +327,12 @@ describe('the device model', () => {
     // Removed devices stay selected so the panel can explain.
     expect(resolveDeviceId(snapshot, 'mipi:gone')).toBe('mipi:gone');
     expect(resolveDeviceId(snapshot, 'usb:unknown')).toBe(imx477.id);
-    expect(resolveDeviceId(snapshotOf([]), 'usb:unknown')).toBeNull();
+    expect(resolveDeviceId(peripheralSnapshot([]), 'usb:unknown')).toBeNull();
     expect(resolveDeviceId(null, null)).toBeNull();
   });
 
   it('the selected microphone survives refreshes and removals', () => {
-    const mics = snapshotOf([onboardMic, yeti], {
+    const mics = peripheralSnapshot([onboardMic, yeti], {
       changes: {
         added: [],
         removed: [{ id: 'usb:0c76:161f:1-3.2:c0', name: 'USB PnP Audio Device' }],
@@ -399,7 +379,7 @@ describe('the device model', () => {
       model: 'SiMa.ai Modalix SoM 16Gig Board',
       overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo'],
     };
-    const scanned = snapshotOf([], { camera_setup: cameraSetup });
+    const scanned = peripheralSnapshot([], { camera_setup: cameraSetup });
     expect(boardCameraSetup({ generation: 3 }, scanned)).toBe(cameraSetup);
     // The selected board changed since the scan.
     expect(boardCameraSetup({ generation: 4 }, scanned)).toBeNull();

@@ -92,20 +92,63 @@ merging.
   A new page needs both, and `navigation.spec.ts` checks that they agree. The old app's paths keep
   working: `/rtsp` and `/visualizer` redirect to their pages, and `/` and unknown paths (old
   `/workspace` and `/genai` bookmarks) land on Streaming.
-- **Side panels.** Viewer, Streaming and Media open their side panel with the kit's
+- **Side panels.** Viewer, Streaming, Media and Peripherals open their side panel with the kit's
   `neat-aside-toggle` ("Side panel") and build it from the kit's aside parts (`neatAsidePanel`,
   `neatAsideTitle`, `neatAsideHeading`, `neatAsideActions`, `neatCode`). Whether a page's panel is
-  open is remembered per page in storage: the Viewer in its layout (`LayoutPrefs`), Streaming and
-  Media in `AsidePrefs` (`neat-insight:<page>:aside`). Where the user was on a page (Viewer
-  position, Streaming's slot, Media's folder and selection) lives in memory for the next visit
-  (`ViewerSession`, `SourcesSession`). Streaming's and Media's list sits under the stale-status
-  notice in `app-slots-column`.
+  open is remembered per page in storage: the Viewer in its layout (`LayoutPrefs`), Streaming,
+  Media and Peripherals in `AsidePrefs` (`neat-insight:<page>:aside`). Where the user was on a page
+  (Viewer position, Streaming's slot, Media's folder and selection, Peripherals' device and modes)
+  lives in memory for the next visit (`ViewerSession`, `SourcesSession`, `PeripheralsSession`).
+- **Shared app components.** Each is a styled pattern with more than one use (the one-place rule
+  above), so use it instead of writing the markup again:
+  - `app-list-column` lays out a list page's main column for `neat-page scroll="none"`: what
+    stands above the list (a notice, banners) takes the height it needs and the list scrolls its
+    rows in the rest. Streaming's and Media's list sits in `app-slots-column`, which adds their
+    stale-status notice; Peripherals puts its banners there.
+  - `app-announcement` is a status line said to screen readers and never shown (`role="status"`),
+    for news the screen already shows another way. It is the app's one copy of the `sr-only` rule:
+    the app has no Tailwind, so the kit's utility does not reach it.
+  - `app-panel-title` opens a side panel: the subject as its heading (`neatAsideTitle`) with its
+    state chip beside it (Streaming's slot panel, Peripherals' device panels). It is parked for a
+    kit change: `neatAsideTitle` gaining a chip slot would replace it.
+  - `app-board-problem-notice` says why the board cannot be used, with the way out where there is
+    one: `auth_failed`'s `ssh-copy-id` command with Copy, `host_key_changed`'s fingerprints with
+    Trust new key… (which asks first), and the caller's own actions (Retry, Open board settings).
+    The board dialog and Peripherals use it.
+- **Key/value lists** use the kit's `neatDetails`. Lists that should start their values in one
+  column but cannot share a grid (System Info's sections open and close on their own) set the
+  kit's `--neat-details-term-width` on a common ancestor rather than restyling the list's grid
+  from app CSS.
+- **The top bar** carries the page's title and tools, then its end items (`neatTopbarEnd`) on
+  every page: the board pill (`app-board-pill`), which names the board Insight uses and its state
+  and opens the board dialog, and System Info's ⓘ. `TopBarDialogs` opens both dialogs, from there
+  and from any page that links to them (Peripherals' "Open board settings"); each opens once at a
+  time, and a chunk that cannot be loaded says so in a toast. The dialogs are imported on their
+  first open, not with the top bar: whatever the top bar imports statically is in the initial
+  bundle on every page, and the dialogs, with the kit entries only they use, would cost every first
+  paint for something most visits never open.
+- **The board** has one reader and writer, `BoardService` (root-provided): the pill, the board
+  dialog, Peripherals and (with plan 5) Stats read its state, and its actions (select, Check again,
+  trust a host key) answer with the fresh state; page code never fetches `/api/board` itself. It is
+  re-read when the window regains focus and after every action, never polled on a timer:
+  `GET /api/board` does not connect to the board, and the pages' own board traffic keeps its
+  status current. Answers arrive out of order, so a stale one is dropped; every response that
+  describes the board carries its `generation`, and an answer for another generation is never
+  applied.
+- **Peripherals** splits its state by how long it lives. `PeripheralsService` (root) holds the
+  board's scan: the snapshot read from `GET /api/peripherals`, Refresh, and the automatic first
+  scan, which runs once per board generation in an app session rather than on every visit.
+  `PeripheralsSession` (root) remembers where the user left the page. `CameraPreview` and
+  `MicTest` are provided by the page, so they live exactly as long as it: leaving Peripherals stops
+  the camera preview (the next visit starts it again, once), and a microphone recording is left to
+  finish on the board for the next visit to take up. The backend runs one preview and one test per
+  Insight; the controllers handle another tab holding them.
 - **Build output.** `npm run build` writes the app to `frontend/dist` with `index.html` at its root,
   where Flask (`_resolve_frontend_dist`) and `build.sh` look for it. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 700 kB, as in the kit showcase. The initial bundle measures 684 kB raw with kit 0.10.1 (the
+  at 700 kB, as in the kit showcase. The initial bundle measures 684.5 kB raw with kit 0.10.2 (the
   shared chunk 572 kB, main 21 kB, styles 91 kB; 672 kB with kit 0.10.0 before the board pill and
   System Info's button; 650 kB with kit 0.9.0; 694 kB with kit 0.5.3, before the kit split into per-component entries),
   most of it the kit's shell, the toast host (rendered in the app root, so it is in main on purpose)
@@ -114,13 +157,18 @@ merging.
   ceiling stays.
   (`angular.json` cannot hold comments, so the reason lives here.) The kit's video code is imported from
   `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and stays out of the
-  initial bundle. Streaming and Media are lazy routes too, and so are the kit entries only they use
-  (`/file-browser`, `/select-list`, `/dialog`). The top bar's board and System Info dialogs are
-  imported on their first open (`TopBarDialogs`), with the kit entries they bring (`/collapsible`,
-  `/callout`).
+  initial bundle. Streaming, Media and Peripherals are lazy routes too, and so are the kit entries
+  only they use (`/file-browser`, `/select-list`, `/dialog`, and Peripherals' `/level-meter`). The
+  top bar's board and System Info dialogs are imported on their first open (`TopBarDialogs`), with
+  the kit entries they bring (`/collapsible`, `/callout`, which Peripherals and the Viewer use
+  too).
   `npm run check:bundle` (after a build, and in CI) fails if any of that leaks into the initial
-  bundle; the toast host and the board pill's status chip are the kit entries that are there on
-  purpose.
+  bundle, or goes missing from the build: its markers are the selectors of the Viewer's video tile,
+  the three lazy pages (`app-streaming-page`, `app-media-page`, `app-peripherals-page`), the two
+  dialogs (`app-board-dialog`, `app-system-info-dialog`) and those kit entries. The toast host and
+  the status chip are the kit entries that are there on purpose: the app root renders the toast
+  host, and the board pill shows its state in a status chip on every page. A new lazy page or
+  dialog adds its selector.
 - **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`; the
   video part is its `@sima/neat-ui/video` entry point) draws and knows nothing of vf:
   `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the matching frames;
@@ -168,7 +216,7 @@ Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 | `npm test`             | Unit tests (`npm test -- --watch=false` runs once and exits)                                        |
 | `npm run lint`         | ESLint (angular-eslint, kit-only imports), Stylelint (no colour literals) and a typecheck of `e2e/` |
 | `npm run build`        | Production build into `frontend/dist`                                                               |
-| `npm run check:bundle` | Checks the built bundle: video code, Streaming and Media stay out of the initial one                |
+| `npm run check:bundle` | Checks the built bundle: the video code, lazy pages and top-bar dialogs stay out of the initial one |
 | `npm run e2e`          | Playwright end-to-end tests (`frontend/e2e`)                                                        |
 
 The backend's tests run from the repo root with `python -m unittest discover -s tests`. Run lint,
