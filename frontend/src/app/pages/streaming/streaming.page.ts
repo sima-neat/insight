@@ -39,6 +39,7 @@ import { SlotControl } from './slot-control';
 import { SlotPanel } from './slot-panel';
 import { isInUse, type SlotRow, slotRow } from '../../sources/slot-row';
 import { StatusChip } from './status-chip';
+import { messageOf } from '../../sources/stream-lines';
 
 /** The slots Insight has, `src1`–`src48`: hard-coded as in #170 (the spec keeps it so). */
 const SLOT_COUNT = 48;
@@ -67,10 +68,6 @@ function streamableCount(tree: readonly MediaNode[]): number {
 function clearedMessage({ removed, freed_bytes, kept }: RenditionsCleared): string {
   const keptText = kept.length > 0 ? ` ${kept.length} kept: in use by a playing source.` : '';
   return `Removed ${removed} rendition(s), freed ${formatBytes(freed_bytes)}.${keptText}`;
-}
-
-function messageOf(failure: unknown): string {
-  return failure instanceof Error ? failure.message : String(failure);
 }
 
 /**

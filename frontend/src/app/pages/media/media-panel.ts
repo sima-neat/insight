@@ -19,7 +19,7 @@ import type { Slot } from '../../sources/api';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { filePreview, PreviewFrame } from '../../sources/preview-frame';
 import { SlotsService } from '../../sources/slots.service';
-import { slotName } from '../../sources/slot-row';
+import { slotName, SLOTS_NOT_CHECKED } from '../../sources/slot-row';
 import { mediaInfoRows } from './media-info';
 
 /**
@@ -29,6 +29,7 @@ import { mediaInfoRows } from './media-info';
 export function deleteQuestion(
   paths: readonly string[],
   inUse: readonly Slot[],
+  checked: boolean,
 ): NeatConfirmOptions {
   const several = paths.length > 1;
   const files = several
@@ -38,9 +39,10 @@ export function deleteQuestion(
     inUse.length > 0
       ? ` In use on ${inUse.map(slotName).join(', ')}; those slots are cleared.`
       : '';
+  const unchecked = checked ? '' : ` ${SLOTS_NOT_CHECKED}`;
   return {
     title: several ? 'Delete Files' : 'Delete File',
-    message: `Delete ${files}?${slots}`,
+    message: `Delete ${files}?${slots}${unchecked}`,
     confirmLabel: 'Delete',
     tone: 'danger',
   };
@@ -131,10 +133,13 @@ export class MediaPanel {
     this.asking = true;
     let confirmed: boolean;
     try {
-      // Asked with the slots as they are now; a failed fetch asks with the last known ones,
-      // which the page says are stale.
-      await this.slots.refresh().catch(() => undefined);
-      confirmed = await this.confirm.ask(deleteQuestion(paths, this.inUseOn(paths)));
+      // Asked with the slots as they are now; a failed fetch asks with the last known ones and
+      // says so (ruling Q16).
+      const checked = await this.slots.refresh().then(
+        () => true,
+        () => false,
+      );
+      confirmed = await this.confirm.ask(deleteQuestion(paths, this.inUseOn(paths), checked));
     } finally {
       this.asking = false;
     }

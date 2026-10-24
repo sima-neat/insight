@@ -1,5 +1,5 @@
 import type { Slot, UploadConflictBody } from './api';
-import { slotName } from './slot-row';
+import { slotName, SLOTS_NOT_CHECKED } from './slot-row';
 import { ApiRequestError } from './stream-lines';
 
 /**
@@ -17,8 +17,11 @@ export type UploadConflict = UploadConflictBody['conflict'];
 export interface NameClash {
   /** "clip.mp4 already exists." */
   readonly question: string;
-  /** "In use on src3, src9": the slots a Replace restarts on the new content; null for none. */
-  readonly inUse: string | null;
+  /**
+   * Under the question: "In use on src3, src9", the slots a Replace restarts on the new content,
+   * and whether those could not be checked again before asking.
+   */
+  readonly notes: readonly string[];
 }
 
 /** The clash a refused upload names, or null for any other failure. */
@@ -45,13 +48,18 @@ export function isArchiveUpload(fileName: string): boolean {
 /**
  * The question for a clash, named by the server's name for what exists (the file, or an
  * archive's folder), with the slots that use it (`SlotsService.assignedTo`, or `assignedUnder`
- * for a folder).
+ * for a folder). `checked` is false when the slots could not be fetched again before asking, so
+ * those named are the last known ones.
  */
-export function nameClash(conflict: UploadConflict, slotsUsing: readonly Slot[]): NameClash {
-  return {
-    question: `${conflict.existing} already exists.`,
-    inUse: slotsUsing.length > 0 ? `In use on ${slotsUsing.map(slotName).join(', ')}` : null,
-  };
+export function nameClash(
+  conflict: UploadConflict,
+  slotsUsing: readonly Slot[],
+  checked: boolean,
+): NameClash {
+  const notes: string[] = [];
+  if (slotsUsing.length > 0) notes.push(`In use on ${slotsUsing.map(slotName).join(', ')}`);
+  if (!checked) notes.push(SLOTS_NOT_CHECKED);
+  return { question: `${conflict.existing} already exists.`, notes };
 }
 
 /**

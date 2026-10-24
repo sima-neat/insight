@@ -10,13 +10,10 @@ import {
 } from '../../sources/fps';
 import { failureText } from '../../sources/progress-lines';
 import { SlotsService } from '../../sources/slots.service';
+import { messageOf } from '../../sources/stream-lines';
 
 /** How a start ended: started, cancelled while encoding, or skipped because its rate commit failed. */
 export type StartOutcome = 'started' | 'cancelled' | 'skipped';
-
-function messageOf(failure: unknown): string {
-  return failure instanceof Error ? failure.message : String(failure);
-}
 
 /**
  * The Streaming side panel's work on a slot that has to outlive the panel: the panel shows one

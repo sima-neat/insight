@@ -36,6 +36,14 @@ export class ApiRequestError extends Error {
 }
 
 /**
+ * The message to show for a failure: an `Error`'s message (an `ApiRequestError` carries the
+ * server's), anything else as text. Every caller that reports a failure words it this way.
+ */
+export function messageOf(failure: unknown): string {
+  return failure instanceof Error ? failure.message : String(failure);
+}
+
+/**
  * Splits streamed text into lines. `pending` is the unfinished line carried over from the last
  * chunk (start with ''); the returned `pending` is the one to carry into the next. Blank lines
  * are dropped. Flush the last line, which has no break after it, with `splitLines(pending, '\n')`.

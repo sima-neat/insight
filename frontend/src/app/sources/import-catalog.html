@@ -38,6 +38,7 @@
             {{ typeRows().length }} matching assets / {{ typeSelection().length }} selected
           </p>
           <neat-select-list
+            class="list"
             label="Catalog assets"
             emptyLabel="No catalog assets match the selected type filters."
             [items]="typeRows()"
@@ -102,6 +103,7 @@
               </app-import-preview>
               <app-catalog-filters [assets]="sourceAssets()" [(filter)]="state.filter" />
               <neat-select-list
+                class="list"
                 label="Catalog variants"
                 emptyLabel="No variants match the selected filters."
                 [items]="variantRows()"

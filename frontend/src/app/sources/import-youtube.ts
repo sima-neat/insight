@@ -21,6 +21,7 @@ import { ImportRunner } from './import-runner';
 import { ImportSession } from './import-session';
 import { ImportSummary } from './import-summary';
 import { MediaLibraryService } from './media-library.service';
+import { messageOf } from './stream-lines';
 
 const TARGETS: readonly NeatSelectOption<YoutubeTarget>[] = [
   { value: '1080p30', label: '1080p30' },
@@ -111,6 +112,9 @@ export class ImportYoutube {
   });
   protected readonly previewNotes = computed(() => [
     this.state.preview()?.normalized_url ?? '',
+    ...(this.state.preview()?.is_live
+      ? ['Live stream import is clipped to the selected duration.']
+      : []),
     `Insight will import up to ${this.minutes()} minute(s) from ${this.state.start() || '0:00'} as ${this.state.target()} H.264 with B-frames disabled.`,
   ]);
   protected readonly canImport = computed(
@@ -146,11 +150,7 @@ export class ImportYoutube {
     } catch (failure) {
       if (this.state.url().trim() !== url) return;
       this.state.preview.set(null);
-      this.state.error.set(
-        failure instanceof Error && failure.message
-          ? failure.message
-          : 'Could not validate YouTube URL.',
-      );
+      this.state.error.set(messageOf(failure) || 'Could not validate YouTube URL.');
     } finally {
       this.state.validating.set(false);
     }

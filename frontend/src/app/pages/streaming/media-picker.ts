@@ -23,6 +23,7 @@ import {
   revealIn,
 } from '../../sources/media-browser';
 import { MediaLibraryService, toFileNodes } from '../../sources/media-library.service';
+import { messageOf } from '../../sources/stream-lines';
 
 /**
  * The content of the "Source for srcN" dialog that the side panel's Change… opens: the media
@@ -89,7 +90,7 @@ export class MediaPicker {
 
   constructor() {
     this.library.refresh().catch((failure: unknown) => {
-      this.toasts.error(failure instanceof Error ? failure.message : String(failure));
+      this.toasts.error(messageOf(failure));
     });
   }
 

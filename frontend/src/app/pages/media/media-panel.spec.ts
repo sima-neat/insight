@@ -296,7 +296,7 @@ describe('MediaPanel', () => {
     expect(library.delete).not.toHaveBeenCalled();
   });
 
-  it('asks with the last known slots when they cannot be fetched again', async () => {
+  it('asks with the last known slots when they cannot be fetched again, and says so (Q16)', async () => {
     slots.slots.set([slot(4, { file: 'a.mp4' })]);
     slots.refresh.mockRejectedValueOnce(
       new ApiRequestError(500, 'MediaMTX is not answering', null),
@@ -306,7 +306,7 @@ describe('MediaPanel', () => {
     await settleOverlay();
 
     expect(confirmText()).toBe(
-      'Delete File | Delete this media file a.mp4? In use on src4; those slots are cleared.',
+      'Delete File | Delete this media file a.mp4? In use on src4; those slots are cleared. Could not check which slots use these files.',
     );
     await answer('Delete');
     expect(library.delete).toHaveBeenCalledWith(['a.mp4']);

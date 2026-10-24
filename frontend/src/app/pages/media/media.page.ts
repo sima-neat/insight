@@ -28,6 +28,7 @@ import { SlotsNotice } from '../../sources/slots-notice';
 import { SlotsService } from '../../sources/slots.service';
 import { slotName, slotState } from '../../sources/slot-row';
 import { MediaPanel } from './media-panel';
+import { messageOf } from '../../sources/stream-lines';
 
 /** "src3 · Live, src9 · Idle": the slots a file is assigned to, with their state as Streaming words it. */
 function inUseText(slots: readonly Slot[], encodes: ReadonlyMap<number, Progress>): string {
@@ -104,7 +105,7 @@ export class MediaPage {
   constructor() {
     inject(DestroyRef).onDestroy(this.slots.watch());
     this.library.refresh().catch((failure: unknown) => {
-      this.toasts.error(failure instanceof Error ? failure.message : String(failure));
+      this.toasts.error(messageOf(failure));
     });
   }
 

@@ -25,7 +25,7 @@ import {
   youtubeProgress,
 } from './progress-lines';
 import { SlotsService } from './slots.service';
-import type { StreamEvent } from './stream-lines';
+import { messageOf, type StreamEvent } from './stream-lines';
 
 /** The import dialog's tabs, and the kind of work each starts. */
 export type ImportKind = 'local' | 'catalog' | 'youtube';
@@ -56,9 +56,6 @@ const scoped = (title: string, position: number, total: number): string =>
 const about = (subject: string, detail: string): string =>
   detail && detail !== subject ? `${subject} - ${detail}` : subject;
 
-const messageOf = (failure: unknown): string =>
-  failure instanceof Error ? failure.message : String(failure);
-
 /** How one file of an upload ended. */
 type FileOutcome =
   | { readonly kind: 'uploaded'; readonly path: string | null }
@@ -80,7 +77,8 @@ type Ending =
  * and the failure, and the outcome is a toast as #170's was. When the last dialog lets go while
  * work runs (navigation closes a dialog even while it is busy), the progress moves into a progress
  * toast that reports to the end; a clash that can no longer be asked is skipped and the toast says
- * so (ruling Q17), since a 409 saved nothing.
+ * so (ruling Q17), since a 409 saved nothing. A dialog opened again while the work runs takes it
+ * back from the toast: the progress, the clashes and the outcome are the dialog's again.
  *
  * The streamed lines are read as `progress-lines.ts` tells a caller to: to the end, never
  * unsubscribing on a failure line, with the failure taken from all of the request's lines. The
@@ -114,20 +112,28 @@ export class ImportRunner {
   private toast: NeatProgressToast | null = null;
   private answerClash: ((choice: ClashChoice) => void) | null = null;
   private abortRequest: (() => void) | null = null;
+  private current: Promise<ImportOutcome> | null = null;
 
   /**
    * Shows the work in the caller (the dialog) until the returned function is called. Letting go
-   * while work runs moves its progress into a toast for the rest of it.
+   * while work runs moves its progress into a toast for the rest of it; holding again takes it
+   * back from the toast.
    */
   hold(): () => void {
     this.holders++;
     this.failureState.set(null);
+    this.takeFromToast();
     let released = false;
     return () => {
       if (released) return;
       released = true;
       if (--this.holders === 0 && this.busy()) this.moveToToast();
     };
+  }
+
+  /** The work running, to its outcome; null while none runs. A dialog opened meanwhile awaits it. */
+  running(): Promise<ImportOutcome> | null {
+    return this.current;
   }
 
   /** Answers the name clash waiting for one. */
@@ -146,47 +152,43 @@ export class ImportRunner {
    * fails its file and the next one still uploads; the outcome is ok when every file was
    * uploaded or skipped.
    */
-  async upload(files: readonly File[]): Promise<ImportOutcome> {
-    this.start('local');
-    let uploaded = 0;
-    let skippedByChoice = 0;
-    let path: string | null = null;
-    const failures: string[] = [];
-    const unasked: string[] = [];
+  upload(files: readonly File[]): Promise<ImportOutcome> {
+    return this.run('local', async () => {
+      let uploaded = 0;
+      let skippedByChoice = 0;
+      let path: string | null = null;
+      const failures: string[] = [];
+      const unasked: string[] = [];
 
-    for (const [index, file] of files.entries()) {
-      const outcome = await this.uploadFile(file, index + 1, files.length);
-      if (outcome.kind === 'skipped') {
-        if (outcome.unasked) unasked.push(outcome.unasked);
-        else skippedByChoice++;
-        continue;
+      for (const [index, file] of files.entries()) {
+        const outcome = await this.uploadFile(file, index + 1, files.length);
+        if (outcome.kind === 'skipped') {
+          if (outcome.unasked) unasked.push(outcome.unasked);
+          else skippedByChoice++;
+          continue;
+        }
+        if (outcome.kind === 'failed') failures.push(outcome.message);
+        else uploaded++;
+        path = outcome.path ?? path;
       }
-      if (outcome.kind === 'failed') failures.push(outcome.message);
-      else uploaded++;
-      path = outcome.path ?? path;
-    }
 
-    const attempted = files.length - skippedByChoice - unasked.length;
-    const skipped = unasked.map((text) => ` ${text}`).join('');
-    if (failures.length === 0) {
-      return this.finish({
-        ok: true,
+      const attempted = files.length - skippedByChoice - unasked.length;
+      const skipped = unasked.map((text) => ` ${text}`).join('');
+      if (failures.length === 0) {
+        return { ok: true, path, message: `Uploaded and prepared ${uploaded} file(s).${skipped}` };
+      }
+      return {
+        ok: false,
         path,
-        message: `Uploaded and prepared ${uploaded} file(s).${skipped}`,
-      });
-    }
-    return this.finish({
-      ok: false,
-      path,
-      failure: `Uploaded and prepared ${uploaded}/${attempted} file(s).${skipped} ${failures[0]}`,
+        failure: `Uploaded and prepared ${uploaded}/${attempted} file(s).${skipped} ${failures[0]}`,
+      };
     });
   }
 
   /** Imports catalog assets one after the other, stopping at the first that fails, as #170 did. */
-  async importCatalog(assets: readonly CatalogAsset[]): Promise<ImportOutcome> {
-    this.start('catalog');
-    let path: string | null = null;
-    try {
+  importCatalog(assets: readonly CatalogAsset[]): Promise<ImportOutcome> {
+    return this.run('catalog', async () => {
+      let path: string | null = null;
       for (const [index, asset] of assets.entries()) {
         const position = index + 1;
         const label = catalogAssetLabel(asset);
@@ -201,39 +203,41 @@ export class ImportRunner {
             this.showLine(catalogProgress(line), position, assets.length, label),
           )) ?? [];
         const failure = failureText(lines);
-        if (failure) return this.finish({ ok: false, path, failure });
+        if (failure) return { ok: false, path, failure };
         path = lastSaved(lines) ?? path;
       }
-    } catch (failure) {
-      return this.finish({ ok: false, path, failure: messageOf(failure) });
-    }
-    return this.finish({ ok: true, path, message: `Imported ${assets.length} catalog asset(s).` });
+      return { ok: true, path, message: `Imported ${assets.length} catalog asset(s).` };
+    });
   }
 
   /** Imports a YouTube clip; `cancel` aborts it. */
-  async importYoutube(request: YoutubeImportRequest): Promise<ImportOutcome> {
-    this.start('youtube');
-    this.show({ title: 'Importing YouTube video', detail: request.target, percent: null });
-    try {
+  importYoutube(request: YoutubeImportRequest): Promise<ImportOutcome> {
+    return this.run('youtube', async () => {
+      this.show({ title: 'Importing YouTube video', detail: request.target, percent: null });
       const lines = await this.read(this.library.importYoutube(request), (line) =>
         this.showLine(youtubeProgress(line), 1, 1, request.target),
       );
-      if (lines === null) {
-        return this.finish({ ok: false, path: null, message: 'YouTube import canceled.' });
-      }
+      if (lines === null) return { ok: false, path: null, message: 'YouTube import canceled.' };
       const failure = failureText(lines);
-      if (failure) return this.finish({ ok: false, path: null, failure });
-      return this.finish({ ok: true, path: lastSaved(lines), message: 'Imported YouTube video.' });
-    } catch (failure) {
-      return this.finish({ ok: false, path: null, failure: messageOf(failure) });
-    }
+      if (failure) return { ok: false, path: null, failure };
+      return { ok: true, path: lastSaved(lines), message: 'Imported YouTube video.' };
+    });
   }
 
-  private start(kind: ImportKind): void {
-    if (this.busy()) throw new Error('An import is running already.');
+  /**
+   * Runs one piece of work from start to outcome. Whatever happens in it, a failure included that
+   * no request reported, the outcome is reported and the runner is free again.
+   */
+  private run(kind: ImportKind, work: () => Promise<Ending>): Promise<ImportOutcome> {
+    if (this.busy()) return Promise.reject(new Error('An import is running already.'));
     this.jobState.set(kind);
     this.failureState.set(null);
     if (this.holders === 0) this.moveToToast();
+    const outcome = work()
+      .catch((failure: unknown): Ending => ({ ok: false, path: null, failure: messageOf(failure) }))
+      .then((ending) => this.finish(ending));
+    this.current = outcome;
+    return outcome;
   }
 
   /** Reports the outcome where the work is shown, and frees the runner for the next. */
@@ -252,6 +256,7 @@ export class ImportRunner {
     }
     this.toast = null;
     this.abortRequest = null;
+    this.current = null;
     this.progressState.set(null);
     this.jobState.set(null);
     return { ok: ending.ok, path: ending.path };
@@ -265,6 +270,17 @@ export class ImportRunner {
     if (progress) this.show(progress);
     // No one is left to answer; `upload` records it as skipped.
     this.answerClash?.('skip');
+  }
+
+  /**
+   * Shows the work in a dialog again. The kit's progress toast cannot be removed, only settled,
+   * so it settles with a status that says where the work went.
+   */
+  private takeFromToast(): void {
+    const job = this.job();
+    if (!job || !this.toast) return;
+    this.toast.done(`${TOAST_TITLES[job]} continues in the import dialog.`);
+    this.toast = null;
   }
 
   private show(progress: Progress): void {
@@ -355,7 +371,7 @@ export class ImportRunner {
 
   /**
    * Reads a streamed request to its end and resolves with its lines, or with null when
-   * `abortRequest` aborted it; rejects when the request failed.
+   * `abortRequest` aborted it; rejects when the request failed or a handler threw.
    */
   private read(
     stream: Observable<StreamEvent>,
@@ -366,11 +382,18 @@ export class ImportRunner {
       const lines: string[] = [];
       const subscription = stream.subscribe({
         next: (event) => {
-          if (event.kind === 'upload') onUpload?.(event.loaded, event.total);
-          else if (event.kind === 'line') {
-            lines.push(event.text);
-            onLine(event.text);
-          } else resolve(lines);
+          try {
+            if (event.kind === 'upload') onUpload?.(event.loaded, event.total);
+            else if (event.kind === 'line') {
+              lines.push(event.text);
+              onLine(event.text);
+            } else resolve(lines);
+          } catch (failure) {
+            // A failure of ours, not the server's: RxJS would only log it, and the request would
+            // read on with nothing to show it. It fails the request instead.
+            subscription.unsubscribe();
+            reject(failure);
+          }
         },
         error: reject,
       });
@@ -383,11 +406,15 @@ export class ImportRunner {
 
   /**
    * Asks what to do about a clash, naming the slots a Replace would restart: fetched again first,
-   * as before any replace (spec, "In use"). Skipped without asking once no dialog shows the work.
+   * as before any replace (spec, "In use"), or the last known ones, said to be so, when that
+   * fetch fails (Q16). Skipped without asking once no dialog shows the work.
    */
   private async ask(conflict: UploadConflict, archive: boolean): Promise<ClashChoice> {
     if (this.toast) return 'skip';
-    await this.slots.refresh().catch(() => undefined);
+    const checked = await this.slots.refresh().then(
+      () => true,
+      () => false,
+    );
     if (this.toast) return 'skip';
     const using = archive
       ? this.slots.assignedUnder(conflict.existing)
@@ -395,7 +422,7 @@ export class ImportRunner {
     try {
       return await new Promise<ClashChoice>((resolve) => {
         this.answerClash = resolve;
-        this.clashState.set(nameClash(conflict, using));
+        this.clashState.set(nameClash(conflict, using, checked));
       });
     } finally {
       this.answerClash = null;

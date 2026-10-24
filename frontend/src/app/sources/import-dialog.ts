@@ -85,6 +85,10 @@ export class ImportDialog {
 
   constructor() {
     inject(DestroyRef).onDestroy(this.runner.hold());
+    // Opened while earlier work runs (it went on in a toast when its dialog went): holding the
+    // runner took it back, and this dialog sees it to the end as if it had started it.
+    const running = this.runner.running();
+    if (running) void inject(ImportSession).run(() => running);
 
     // Focus follows the work. A clash puts it on Keep both, the answer that loses nothing. When
     // the control that had it goes (an answered clash, Cancel Import) or is disabled (the drop

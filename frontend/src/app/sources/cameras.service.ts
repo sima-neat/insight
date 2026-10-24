@@ -4,7 +4,7 @@ import { LatestOnly } from '../polling';
 import type { AssignRequest, PublisherRelease, ReleasedWebcam, SuccessResponse } from './api';
 import { CAMERA_MEDIA, type PublishPeer } from './camera-media';
 import { SlotsService } from './slots.service';
-import { ApiRequestError } from './stream-lines';
+import { ApiRequestError, messageOf } from './stream-lines';
 import {
   camerasFromDevices,
   closeAllWebcamSessions,
@@ -496,8 +496,6 @@ export class CamerasService {
 
   /** For a failure nobody is waiting on: the user still has to hear of it. */
   private inBackground(work: Promise<unknown>): void {
-    work.catch((failure: unknown) =>
-      this.toasts.error(failure instanceof Error ? failure.message : String(failure)),
-    );
+    work.catch((failure: unknown) => this.toasts.error(messageOf(failure)));
   }
 }

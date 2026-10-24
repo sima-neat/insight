@@ -16,7 +16,7 @@
 }
 
 /* A list fills the height it is given and scrolls its rows inside it. */
-neat-select-list {
+.list {
   display: flex;
   block-size: 12rem;
 }
@@ -28,9 +28,10 @@ neat-select-list {
   gap: var(--neat-space-4);
 }
 
+/* The sources list is as tall as the detail beside it, and at least as tall as a list. */
 .sources {
+  display: flex;
   flex: 1 1 12rem;
-  block-size: auto;
   min-block-size: 12rem;
 }
 

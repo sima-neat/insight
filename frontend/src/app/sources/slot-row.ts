@@ -73,6 +73,13 @@ const PROTOCOL_LABELS: Readonly<Record<string, string>> = {
   rtmps: 'RTMPS',
 };
 
+/**
+ * What a warning about the slots using some files adds when the slots could not be fetched again
+ * before it (ruling Q16): the slots it names are the last known ones. Media's delete confirmation
+ * and the import dialog's name clash say it alike.
+ */
+export const SLOTS_NOT_CHECKED = 'Could not check which slots use these files.';
+
 /** What a cell shows for a value there is none of, as #170 does. */
 const NONE = '-';
 

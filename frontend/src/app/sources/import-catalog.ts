@@ -33,6 +33,7 @@ import { ImportPreview } from './import-preview';
 import { ImportSummary } from './import-summary';
 import type { FilePreview } from './preview-frame';
 import { codecLabel } from './slot-row';
+import { messageOf } from './stream-lines';
 
 /** A catalog asset as a list row shows it. */
 interface AssetRow {
@@ -217,7 +218,7 @@ export class ImportCatalog {
     try {
       this.state.index.set(await this.library.catalog());
     } catch (failure) {
-      this.state.error.set(failure instanceof Error ? failure.message : String(failure));
+      this.state.error.set(messageOf(failure));
     } finally {
       this.state.loading.set(false);
     }

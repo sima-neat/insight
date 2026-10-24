@@ -69,7 +69,7 @@ describe('ImportRunner', () => {
     expect(slots.refresh).toHaveBeenCalled();
     expect(runner.clash()).toEqual({
       question: 'clips already exists.',
-      inUse: 'In use on src2, src5',
+      notes: ['In use on src2, src5'],
     });
     runner.answer('replace');
     await tick();
@@ -173,6 +173,59 @@ describe('ImportRunner', () => {
     release();
     runner.hold();
     expect(runner.failure()).toBeNull();
+  });
+
+  it('a clash whose slots could not be fetched again names the last known ones and says so (Q16)', async () => {
+    slots.slots.set([fileSlot(3, 'a.mp4')]);
+    slots.refresh.mockRejectedValueOnce(new ApiRequestError(500, 'MediaMTX is down', null));
+    void runner.upload([new File(['x'], 'a.mp4')]);
+    refuse(library.last, 'a.mp4', 'a_2.mp4');
+    await tick();
+
+    expect(runner.clash()).toEqual({
+      question: 'a.mp4 already exists.',
+      notes: ['In use on src3', 'Could not check which slots use these files.'],
+    });
+  });
+
+  it('a dialog opened while the work is in a toast takes it back, and asks its clashes', async () => {
+    const outcome = runner.upload([new File(['x'], 'a.mp4'), new File(['y'], 'b.mp4')]);
+    release();
+    const [toast] = toasts.progressToasts;
+    expect(toast.title).toBe('Uploading media');
+
+    runner.hold();
+    expect(toast.done).toHaveBeenCalledWith('Uploading media continues in the import dialog.');
+    lines(library.last, 'Uploaded to /data/media/a.mp4', 'Optimizing a.mp4: 40% (00:04 / 00:10)');
+    expect(toast.update).not.toHaveBeenCalledWith(
+      'Preparing media 1/2 · a.mp4 - 00:04 / 00:10',
+      40,
+    );
+    expect(runner.progress()?.percent).toBe(40);
+    lines(library.last, 'Upload complete.');
+    done(library.last);
+    await tick();
+
+    refuse(library.last, 'b.mp4', 'b_2.mp4');
+    await tick();
+    expect(runner.clash()?.question).toBe('b.mp4 already exists.');
+    runner.answer('skip');
+
+    await expect(outcome).resolves.toEqual({ ok: true, path: 'a.mp4' });
+    expect(toasts.status).toHaveBeenCalledWith('Uploaded and prepared 1 file(s).');
+    expect(toasts.progressToasts).toHaveLength(1);
+  });
+
+  it('a failure of its own while reading frees the runner and is reported', async () => {
+    toasts.error.mockImplementationOnce(() => {
+      throw new Error('toast host gone');
+    });
+    const outcome = runner.upload([new File(['x'], 'a.mp4')]);
+    lines(library.last, 'Could not restart src4: MediaMTX is down');
+
+    await expect(outcome).resolves.toEqual({ ok: false, path: null });
+    expect(runner.busy()).toBe(false);
+    expect(runner.failure()).toBe('Uploaded and prepared 0/1 file(s). a.mp4: toast host gone');
   });
 
   it('refuses to start while work runs', async () => {

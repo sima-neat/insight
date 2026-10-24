@@ -83,6 +83,28 @@ interface Mocked {
   add(path: string): void;
 }
 
+/** `nodes` with the file at `segments` added, under the folders those name (each counts it). */
+function insert(nodes: object[], segments: string[], parent: string): object[] {
+  const [first, ...rest] = segments;
+  const path = parent ? `${parent}/${first}` : first;
+  if (rest.length === 0) return [...nodes, file(path)];
+  const existing = nodes.find((node) => (node as { path: string }).path === path) as
+    { children: object[]; streamable_count: number } | undefined;
+  const folder = existing ?? {
+    name: `/${first}`,
+    path,
+    type: 'folder',
+    streamable_count: 0,
+    children: [],
+  };
+  const updated = {
+    ...folder,
+    streamable_count: folder.streamable_count + 1,
+    children: insert(folder.children, rest, path),
+  };
+  return existing ? nodes.map((node) => (node === existing ? updated : node)) : [...nodes, updated];
+}
+
 /**
  * Insight's media and slot APIs without a board: the library above, its files' info, the slots
  * that use them, and a delete that removes the file from the tree (and clears its slots), so the
@@ -97,18 +119,8 @@ async function withMockedMedia(page: Page): Promise<Mocked> {
     ...TREE.filter(remains).map((node) =>
       'children' in node ? { ...node, children: node.children.filter(remains) } : node,
     ),
-    // An imported file shows in a folder of its own, as catalog and YouTube imports save them.
-    ...added.map((path) =>
-      path.includes('/')
-        ? {
-            name: `/${path.split('/')[0]}`,
-            path: path.split('/')[0],
-            type: 'folder',
-            streamable_count: 1,
-            children: [file(path)],
-          }
-        : file(path),
-    ),
+    // An imported file lands in the folders its path names, as catalog and YouTube imports save it.
+    ...added.reduce<object[]>((nodes, path) => insert(nodes, path.split('/'), ''), []),
   ];
 
   await page.route(
@@ -450,10 +462,10 @@ test.describe('Import with mocked APIs', () => {
       (url) => url.pathname === '/api/import/media-catalog',
       (route) => {
         imported.push((route.request().postDataJSON() as { path: string }).path);
-        mocked.add('catalog/street_720p30_30fps_h264.mp4');
+        mocked.add('catalog/street/street_720p30_30fps_h264.mp4');
         return route.fulfill({
           contentType: 'text/plain',
-          body: 'Downloading catalog asset: 100% (3145728 / 3145728 bytes)\nSaved catalog asset to catalog/street_720p30_30fps_h264.mp4\nCatalog import complete.\n',
+          body: 'Downloading catalog asset: 100% (3145728 / 3145728 bytes)\nSaved catalog asset to catalog/street/street_720p30_30fps_h264.mp4\nCatalog import complete.\n',
         });
       },
     );
@@ -470,8 +482,48 @@ test.describe('Import with mocked APIs', () => {
     expect(imported).toEqual(['street/street_720p30_30fps_h264.mp4']);
     await expect(toast(page, 'Imported 1 catalog asset(s).')).toBeVisible();
     await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText(
-      'catalog/street_720p30_30fps_h264.mp4',
+      'catalog/street/street_720p30_30fps_h264.mp4',
     );
+    // Revealed two folders down, where the server saves it.
+    await expect(page.getByRole('navigation', { name: 'Current folder' })).toContainText('street');
+  });
+
+  test('the dialog keeps its height whichever tab is open, at 1366×768 and 1920×1080', async ({
+    page,
+  }) => {
+    await withMockedMedia(page);
+    await page.route(
+      (url) => url.pathname === '/api/media-catalog',
+      (route) => route.fulfill({ json: CATALOG }),
+    );
+    const height = () =>
+      importDialog(page).evaluate((dialog) => dialog.getBoundingClientRect().height);
+    const tab = (name: string) => importDialog(page).getByRole('tab', { name, exact: true });
+
+    for (const viewport of [LAPTOP, DESKTOP]) {
+      await page.setViewportSize(viewport);
+      await page.goto('/media');
+      await tool(page, 'Import…').click();
+      await expect(tab('Local files')).toHaveAttribute('aria-selected', 'true');
+      // Measured once the opening animation, which scales the dialog, is over.
+      await expect.poll(height).toBeGreaterThan(0);
+      await page.waitForTimeout(300);
+      const local = await height();
+
+      await tab('Catalog').click();
+      await expect(
+        importDialog(page).getByRole('listbox', { name: 'Catalog assets' }),
+      ).toBeVisible();
+      expect(await height()).toBe(local);
+      await tab('Catalog by asset name').click();
+      await expect(
+        importDialog(page).getByRole('listbox', { name: 'Catalog variants' }),
+      ).toBeVisible();
+      expect(await height()).toBe(local);
+      await tab('YouTube').click();
+      await expect(importDialog(page).getByLabel('YouTube URL')).toBeVisible();
+      expect(await height()).toBe(local);
+    }
   });
 
   test('a YouTube link is validated before import, and Cancel Import aborts the import', async ({

@@ -58,6 +58,7 @@ import {
   streamUrl,
 } from '../../sources/slot-row';
 import { StatusChip } from './status-chip';
+import { messageOf } from '../../sources/stream-lines';
 
 /** Which form the source switch shows. */
 type SourceForm = 'file' | 'camera' | 'url';
@@ -93,10 +94,6 @@ let nextPanelId = 0;
 function formFor(slot: Slot): SourceForm {
   if (slot.state === 'pulled') return 'url';
   return slot.type === 'webcam' ? 'camera' : 'file';
-}
-
-function messageOf(failure: unknown): string {
-  return failure instanceof Error ? failure.message : String(failure);
 }
 
 /**

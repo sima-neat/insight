@@ -17,8 +17,8 @@
       @if (runner.clash(); as clash) {
         <div class="clash" role="group" [attr.aria-label]="clash.question">
           <p>{{ clash.question }}</p>
-          @if (clash.inUse; as inUse) {
-            <p neatNote>{{ inUse }}</p>
+          @for (note of clash.notes; track $index) {
+            <p neatNote>{{ note }}</p>
           }
           <div class="answers">
             <button

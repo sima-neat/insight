@@ -27,7 +27,3 @@ p {
   display: flex;
   gap: var(--neat-space-2);
 }
-
-.actions:empty {
-  display: none;
-}

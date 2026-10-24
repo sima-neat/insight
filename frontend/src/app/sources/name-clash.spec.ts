@@ -46,13 +46,23 @@ describe('isArchiveUpload', () => {
 
 describe('nameClash', () => {
   it('asks about the name the server has', () => {
-    expect(nameClash(CONFLICT, [])).toEqual({ question: 'clip.mp4 already exists.', inUse: null });
+    expect(nameClash(CONFLICT, [], true)).toEqual({
+      question: 'clip.mp4 already exists.',
+      notes: [],
+    });
   });
 
   it('names the slots that use what a Replace swaps', () => {
-    expect(nameClash(CONFLICT, [slot(3, 'clip.mp4'), slot(9, 'clip.mp4')])).toEqual({
+    expect(nameClash(CONFLICT, [slot(3, 'clip.mp4'), slot(9, 'clip.mp4')], true)).toEqual({
       question: 'clip.mp4 already exists.',
-      inUse: 'In use on src3, src9',
+      notes: ['In use on src3, src9'],
+    });
+  });
+
+  it('says when the slots could not be checked, under the last known ones (Q16)', () => {
+    expect(nameClash(CONFLICT, [slot(3, 'clip.mp4')], false)).toEqual({
+      question: 'clip.mp4 already exists.',
+      notes: ['In use on src3', 'Could not check which slots use these files.'],
     });
   });
 });

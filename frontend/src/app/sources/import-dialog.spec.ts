@@ -358,6 +358,74 @@ describe('ImportDialog', () => {
     expect(toasts.status).not.toHaveBeenCalled();
   });
 
+  it('opened again while the work is in a toast, the dialog takes it back to the end', async () => {
+    await open();
+    await drop('a.mp4', 'b.mp4');
+    TestBed.inject(Location).back();
+    await settle();
+    const [toast] = toasts.progressToasts;
+
+    await TestBed.inject(Router).navigateByUrl('/media');
+    await settle();
+    await open();
+    expect(toast.done).toHaveBeenCalledWith('Uploading media continues in the import dialog.');
+    expect(progress()!.title).toBe('Uploading media 1/2');
+    // It is this dialog's work now: not dismissed by Escape, and it closes when the work is done.
+    await escape();
+    expect(dialog()).not.toBeNull();
+
+    lines(library.last, 'Uploaded to /data/media/a.mp4', 'Upload complete.');
+    done(library.last);
+    await settle();
+    refuse(library.last, 'b.mp4', 'b_2.mp4');
+    await settle();
+    expect(clash()).toEqual(['b.mp4 already exists.', 'Replace', 'Keep both', 'Skip']);
+    await click(button('Skip'));
+
+    expect(dialog()).toBeNull();
+    expect(opener.result).toBe('a.mp4');
+    expect(toasts.status).toHaveBeenCalledWith('Uploaded and prepared 1 file(s).');
+  });
+
+  it('an archive clashes on its folder and names the slots streaming files in it', async () => {
+    slots.slots.set([fileSlot(2, 'clips/a.mp4'), fileSlot(6, 'clips/deep/b.mp4')]);
+    await open();
+    await drop('clips.zip');
+    refuse(library.last, 'clips', 'clips_2');
+    await settle();
+    expect(clash()).toEqual([
+      'clips already exists.',
+      'In use on src2, src6',
+      'Replace',
+      'Keep both',
+      'Skip',
+    ]);
+    await click(button('Replace'));
+    expect(library.last.body).toEqual({ name: 'clips.zip', onConflict: 'replace' });
+    lines(library.last, 'Saved archive; extracting into /data/media/clips', 'Archive extracted.');
+    lines(library.last, 'Restarted src2.', 'Restarted src6.', 'Upload complete.');
+    done(library.last);
+    await settle();
+
+    expect(dialog()).toBeNull();
+    expect(opener.result).toBe('clips');
+  });
+
+  it('a clash whose slots could not be checked says so (Q16)', async () => {
+    slots.refresh.mockRejectedValueOnce(new Error('MediaMTX is down'));
+    await open();
+    await drop('a.mp4');
+    refuse(library.last, 'a.mp4', 'a_2.mp4');
+    await settle();
+    expect(clash()).toEqual([
+      'a.mp4 already exists.',
+      'Could not check which slots use these files.',
+      'Replace',
+      'Keep both',
+      'Skip',
+    ]);
+  });
+
   it('catalog filters are one component used by both modes; Import imports the picked asset', async () => {
     library.catalog.mockResolvedValue(CATALOG);
     await open();
@@ -441,6 +509,42 @@ describe('ImportDialog', () => {
     expect(toasts.status).toHaveBeenCalledWith('YouTube import canceled.');
     expect(dialog()).not.toBeNull();
     expect(button('Cancel Import')).toBeUndefined();
+  });
+
+  it('a live link says the clip length caps the import, as #170 did', async () => {
+    library.validateYoutube.mockResolvedValue({ ...PREVIEW, is_live: true });
+    await open('youtube');
+    await type(field('YouTube URL'), 'https://youtu.be/abc');
+    await click(button('Validate'));
+    const notes = [...dialog()!.querySelectorAll('app-import-preview p')].map(text);
+    expect(notes).toEqual([
+      'https://www.youtube.com/watch?v=abc',
+      'Live stream import is clipped to the selected duration.',
+      'Insight will import up to 5 minute(s) from 30 as 1080p30 H.264 with B-frames disabled.',
+    ]);
+  });
+
+  it('a failed YouTube import keeps the dialog open and shows the whole failure', async () => {
+    library.validateYoutube.mockResolvedValue(PREVIEW);
+    await open('youtube');
+    await type(field('YouTube URL'), 'https://youtu.be/abc');
+    await click(button('Validate'));
+    await click(button('Import'));
+    lines(
+      library.last,
+      'Downloading YouTube video: 12%',
+      'YouTube import failed: ERROR: unable to download video data',
+      'HTTP Error 403: Forbidden',
+    );
+    done(library.last);
+    await settle();
+
+    const failure =
+      'YouTube import failed: ERROR: unable to download video data\nHTTP Error 403: Forbidden';
+    expect(dialog()).not.toBeNull();
+    expect(alert()).toBe(failure.replace('\n', ' '));
+    expect(toasts.error).toHaveBeenCalledWith(failure);
+    expect(button('Import')!.disabled).toBe(false);
   });
 
   it('the preview frames YouTube’s embed page only', async () => {
