@@ -26,6 +26,21 @@ export const TOP_BAR_BOARD: BoardState = {
   board: null,
 };
 
+/** A board whose name runs far past the pill's label cap: a long host name, entered by hand. */
+export const LONG_HOST = 'devkit-lab-bench-07.vision.corp.example.com';
+export const LONG_BOARD: BoardState = {
+  ...TOP_BAR_BOARD,
+  target: {
+    mode: 'ssh',
+    source: 'manual',
+    host: LONG_HOST,
+    port: 22,
+    user: 'sima',
+    label: `sima@${LONG_HOST}`,
+  },
+  saved: { host: LONG_HOST, port: 22, user: 'sima' },
+};
+
 /**
  * What `GET /api/sysinfo` answers without the `neat` command (`_missing_neat_sysinfo_payload`,
  * enriched from the SDK's port map), so that no test depends on the machine running it.

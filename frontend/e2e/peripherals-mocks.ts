@@ -218,9 +218,9 @@ const UNSCANNED: PeripheralSnapshot = {
   camera_setup: null,
 };
 
-/** A scan of the DevKit, made now: two cameras (MIPI and USB), one microphone, no LiDAR. */
-function scanned(): PeripheralSnapshot {
-  const scannedAt = new Date().toISOString();
+/** A scan of the DevKit, made `at` (now): two cameras (MIPI and USB), one microphone, no LiDAR. */
+function scanned(at = new Date()): PeripheralSnapshot {
+  const scannedAt = at.toISOString();
   return {
     ...UNSCANNED,
     board: { ...UNSCANNED.board, ...CONNECTED_BOARD.board! },
@@ -337,6 +337,8 @@ export class FakePeripheralsBackend {
   scanFailure: { status: number; body: object } | null = null;
   /** The preview's stream answers 409 `preview_active`: another tab claimed it first. */
   streamTaken = false;
+  /** Set while a refresh is held open (`holdScans`): the refresh answers once it resolves. */
+  private held: Promise<void> | null = null;
 
   /** Every POST, in order. */
   private readonly posts: Posted[] = [];
@@ -356,6 +358,21 @@ export class FakePeripheralsBackend {
   /** The paths posted, in order: what the page asked the board to do. */
   postedPaths(): string[] {
     return this.posts.map((post) => post.path);
+  }
+
+  /** The board was scanned `minutes` ago: the page opens on that scan and scans nothing by itself. */
+  scannedAgo(minutes: number): void {
+    this.snapshot = scanned(new Date(Date.now() - minutes * 60_000));
+  }
+
+  /** Holds every refresh open until the returned function is called. */
+  holdScans(): () => void {
+    let release!: () => void;
+    this.held = new Promise<void>((resolve) => (release = resolve));
+    return () => {
+      this.held = null;
+      release();
+    };
   }
 
   /**
@@ -430,8 +447,9 @@ export class FakePeripheralsBackend {
     );
     await page.route(
       (url) => url.pathname === '/api/peripherals/refresh',
-      (route) => {
+      async (route) => {
         record(route.request());
+        await this.held;
         if (this.scanFailure) {
           return route.fulfill({ status: this.scanFailure.status, json: this.scanFailure.body });
         }

@@ -1,7 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
 import { BOARD_UNREACHABLE, C270, FakePeripheralsBackend, IMX477, YETI } from './peripherals-mocks';
-import { answerTopBar } from './top-bar';
+import { answerTopBar, LONG_BOARD } from './top-bar';
 
 // The top bar's pill reads the board on every page; the backend below answers it for these tests.
 test.beforeEach(({ page }) => answerTopBar(page));
@@ -336,4 +336,38 @@ test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side pane
       await tool(page, 'Side panel').click();
     }
   }
+});
+
+// Final review M-7: the widest top bar Peripherals shows: a board name at the pill's cap, Not
+// checked, an old scan and a scan running for a while.
+test('Peripherals fits with its widest top bar: a long board name, an old scan and Scanning… N s', async ({
+  page,
+}) => {
+  const backend = new FakePeripheralsBackend();
+  backend.board = LONG_BOARD;
+  backend.scannedAgo(59);
+  await backend.install(page);
+  await page.clock.install();
+  await page.goto('/peripherals');
+  await expect(page.locator('app-board-pill button')).toContainText('Not checked');
+  await expect(page.getByRole('group', { name: 'Page tools' })).toContainText('Scanned 59 min ago');
+  const release = backend.holdScans();
+  await tool(page, 'Refresh').click();
+  await page.clock.fastForward(12_000);
+  await expect(tool(page, 'Scanning… 12 s')).toBeVisible();
+
+  for (const { size } of VIEWPORTS) {
+    await page.setViewportSize(size);
+    await expect
+      .poll(() => topBarSpill(page, size === TABLET))
+      .toEqual({ spilled: [], toolsOverflow: 0 });
+    await expect
+      .poll(() => pageOverflow(page))
+      .toEqual([
+        { horizontal: 0, vertical: 0 },
+        { horizontal: 0, vertical: 0 },
+      ]);
+  }
+  release();
+  await expect(tool(page, 'Refresh')).toBeVisible();
 });

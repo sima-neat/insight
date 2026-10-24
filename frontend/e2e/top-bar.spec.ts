@@ -1,21 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { LAPTOP, topBarSpill } from './layout';
-import { answerTopBar, TOP_BAR_BOARD } from './top-bar';
-
-/** A board whose name runs far past the pill's label cap: a long host name, entered by hand. */
-const LONG_HOST = 'devkit-lab-bench-07.vision.corp.example.com';
-const LONG_BOARD = {
-  ...TOP_BAR_BOARD,
-  target: {
-    mode: 'ssh',
-    source: 'manual',
-    host: LONG_HOST,
-    port: 22,
-    user: 'sima',
-    label: `sima@${LONG_HOST}`,
-  },
-  saved: { host: LONG_HOST, port: 22, user: 'sima' },
-};
+import { answerTopBar, LONG_BOARD, LONG_HOST } from './top-bar';
 
 /** The top bar's System Info button, ⓘ, after the pill. */
 const systemInfo = (page: Page) => page.getByRole('button', { name: 'System information' });
