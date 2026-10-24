@@ -290,16 +290,15 @@ function idsByGroup(snap: PeripheralSnapshot): Record<string, string[]> {
 
 describe('the device model', () => {
   // #170's grouping tests, on one list: a connection now orders rows within their kind's group.
-  it('cameras are grouped MIPI first, then USB, and other kinds are left out of their group', () => {
-    expect(idsByGroup(snapshot)['camera']).toEqual([imx477.id, imx568.id, inUse.id, usb.id]);
-    expect(idsByGroup(snapshotOf([yeti]))['camera']).toEqual([]);
+  // On one list, a kind's group is the run of its items: the microphone follows the cameras.
+  it('cameras are grouped MIPI first, then USB, ahead of the other kinds', () => {
+    const ids = deviceGroups(snapshot).items.map((item) => item.id);
+    expect(ids).toEqual([imx477.id, imx568.id, inUse.id, usb.id, yeti.id]);
   });
 
-  it('microphones are grouped USB first, then on-board, and cameras are left out', () => {
-    expect(idsByGroup(snapshotOf([onboardMic, imx477, yeti]))['microphone']).toEqual([
-      yeti.id,
-      onboardMic.id,
-    ]);
+  it('microphones are grouped USB first, then on-board, after the cameras', () => {
+    const ids = deviceGroups(snapshotOf([onboardMic, imx477, yeti])).items.map((item) => item.id);
+    expect(ids).toEqual([imx477.id, yeti.id, onboardMic.id]);
   });
 
   it('a kind the backend invents appears automatically, after the known ones', () => {
@@ -415,6 +414,12 @@ describe('the device model', () => {
   it('a camera id prefers the stable name', () => {
     const named = { ...imx477, name: 'Front camera', model: null };
     expect(deviceRow(named, idle).subtitle).toBe(imx477.device.camera_name);
+    // Without libcamera's name, the by-id link before the node, whose number can change.
+    const linked = {
+      ...named,
+      device: { ...named.device, camera_name: null, by_id: '/dev/v4l/by-id/platform-imx477-video' },
+    };
+    expect(deviceRow(linked, idle).subtitle).toBe('/dev/v4l/by-id/platform-imx477-video');
     const unnamed = { ...named, device: { ...named.device, camera_name: null } };
     expect(deviceRow(unnamed, idle).subtitle).toBe('/dev/video3');
   });

@@ -1,5 +1,6 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { BoardState } from '../board/api';
@@ -84,17 +85,23 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve));
 describe('PeripheralsService', () => {
   let http: HttpTestingController;
   let boardReload: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  /** The selected board's generation, as `BoardService.generation()` reports it. */
+  const boardGeneration = signal<number | null>(1);
   let toasts: { status: ReturnType<typeof vi.fn<(message: string) => void>> };
   let service: PeripheralsService;
 
   beforeEach(() => {
     boardReload = vi.fn(() => Promise.resolve());
+    boardGeneration.set(1);
     toasts = { status: vi.fn() };
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
-        { provide: BoardService, useValue: { reload: boardReload } },
+        {
+          provide: BoardService,
+          useValue: { reload: boardReload, generation: boardGeneration.asReadonly() },
+        },
         { provide: NeatToasts, useValue: toasts },
       ],
     });
@@ -140,6 +147,19 @@ describe('PeripheralsService', () => {
     expect(problem).toBeInstanceOf(BoardProblem);
     expect((problem as BoardProblem).code).toBe('internal');
     expect(service.snapshot()?.generation).toBe(2);
+
+    // A newer read that failed still answered for the older one, which is not applied after it.
+    const older2 = service.load();
+    const newer2 = service.load();
+    const [slow, fast] = http.match(LOAD_URL);
+    fast.flush(
+      { error: 'No board is selected.', code: 'no_target', hint: 'Enter the board.' },
+      { status: 409, statusText: 'Conflict' },
+    );
+    await newer2;
+    slow.flush(snapshot(2, [item('camera', 'c1')]));
+    await older2;
+    expect(service.snapshot()?.scan_id).toBeNull();
   });
 
   it('refresh reloads the board after success and failure, and concurrent calls share one request', async () => {
@@ -222,8 +242,11 @@ describe('PeripheralsService', () => {
     await reload;
     service.scanOnce(board(1));
     expect(refreshes()).toHaveLength(0);
+    // The failure is still this board's, and still shown.
+    expect(service.scanError()?.code).toBe('unreachable');
 
     // Another board is scanned once, and a scanned snapshot never scans by itself.
+    boardGeneration.set(2);
     const next = service.load();
     http.expectOne(LOAD_URL).flush(snapshot(2, null));
     await next;
@@ -233,10 +256,76 @@ describe('PeripheralsService', () => {
     service.scanOnce(board(2));
     expect(refreshes()).toHaveLength(0);
 
+    boardGeneration.set(3);
     const scanned = service.load();
     http.expectOne(LOAD_URL).flush(snapshot(3, [item('camera', 'c1')]));
     await scanned;
     service.scanOnce(board(3));
     expect(refreshes()).toHaveLength(0);
+  });
+
+  // Review Focus 1: a scan can take half a minute, and the board can change meanwhile.
+  it("a scan for a board the user has left is never applied and does not use up the new board's first scan", async () => {
+    boardGeneration.set(3);
+    const first = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(3, null));
+    await first;
+    service.scanOnce(board(3));
+    const [old] = refreshes();
+
+    // The board changes, and the page is entered again for it.
+    boardGeneration.set(4);
+    const reload = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(4, null));
+    await reload;
+    service.scanOnce(board(4));
+    // The backend runs one scan at a time: the new board's waits for the old one.
+    expect(refreshes()).toHaveLength(0);
+
+    old.flush(snapshot(3, [item('camera', 'c1')]));
+    await tick();
+    expect(service.snapshot()?.generation).toBe(4);
+    expect(service.snapshot()?.scan_id).toBeNull();
+    expect(toasts.status).not.toHaveBeenCalled();
+
+    const [scan] = refreshes();
+    expect(scan).toBeDefined();
+    scan.flush(snapshot(4, [item('camera', 'c1')], 'sima@192.168.2.9'));
+    await tick();
+    expect(service.snapshot()?.generation).toBe(4);
+    expect(service.snapshot()?.scan_id).toBe('7:4');
+    expect(toasts.status).toHaveBeenCalledExactlyOnceWith(
+      'Scan complete: 1 camera, 0 microphones on sima@192.168.2.9.',
+    );
+  });
+
+  it("a scan failure is the scanned board's: not reported for another, and gone once another board's snapshot is in", async () => {
+    // The old board's scan fails because the board changed under it.
+    const old = service.refresh();
+    boardGeneration.set(2);
+    refreshes()[0].flush(
+      {
+        error: 'The selected board changed while this request was running.',
+        code: 'stale_snapshot',
+      },
+      { status: 409, statusText: 'Conflict' },
+    );
+    await old;
+    expect(service.scanError()).toBeNull();
+
+    // A failure of the current board's scan shows until a snapshot of another board is applied.
+    const failed = service.refresh();
+    refreshes()[0].flush(unreachable, badGateway);
+    await failed;
+    expect(service.scanError()?.code).toBe('unreachable');
+    const same = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(2, null));
+    await same;
+    expect(service.scanError()?.code).toBe('unreachable');
+    boardGeneration.set(3);
+    const other = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(3, null));
+    await other;
+    expect(service.scanError()).toBeNull();
   });
 });

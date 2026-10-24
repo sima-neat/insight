@@ -41,11 +41,18 @@ export class PeripheralsService {
   readonly scanning = this.scanningValue.asReadonly();
 
   private readonly scanErrorValue = signal<BoardProblem | null>(null);
-  /** Why the last scan failed; cleared when the next one starts. */
+  /**
+   * Why the last scan of the current board failed; cleared when the next scan starts and when a
+   * snapshot of another board generation is applied (the service outlives the page, and an old
+   * board's failure says nothing about the new one).
+   */
   readonly scanError = this.scanErrorValue.asReadonly();
+  /** The board generation `scanError` was a scan of. */
+  private scanErrorGeneration: number | null = null;
 
   private readonly latest = new LatestOnly();
-  private running: Promise<void> | null = null;
+  /** The scan running or queued last, and the board generation it was started for. */
+  private running: { generation: number | null; done: Promise<void> } | null = null;
   /**
    * The board generations scanned by `scanOnce` in this app session. A generation is recorded
    * when its scan starts, so a failed automatic scan is not repeated on the next visit (#170
@@ -65,23 +72,22 @@ export class PeripheralsService {
       const snapshot = await firstValueFrom(
         this.http.get<PeripheralSnapshot>(SNAPSHOT_URL).pipe(withRequestErrors()),
       );
-      if (this.latest.accept(request)) this.snapshotValue.set(snapshot);
+      if (this.latest.accept(request)) this.apply(snapshot);
     } catch (failure) {
+      // A failure answers for the reads sent before it as well, as a success would.
+      if (!this.latest.isNewest(request) || !this.latest.accept(request)) return;
       const problem = problemOf(failure);
-      if (problem.code !== 'no_target' && this.latest.isNewest(request)) throw problem;
+      if (problem.code !== 'no_target') throw problem;
     }
   }
 
   /**
-   * Scans the board. Resolves when the scan ended and the board was reloaded; never rejects,
-   * since a failure is reported in `scanError`. A call while a scan runs joins it: the backend
-   * would coalesce a second request into the running scan anyway.
+   * Scans the selected board. Resolves when the scan ended and the board was reloaded; never
+   * rejects, since a failure is reported in `scanError`. A call while a scan of the same board
+   * runs joins it: the backend would coalesce a second request into the running scan anyway.
    */
   refresh(): Promise<void> {
-    this.running ??= this.scan().finally(() => {
-      this.running = null;
-    });
-    return this.running;
+    return this.scanFor(this.board.generation());
   }
 
   /**
@@ -95,26 +101,69 @@ export class PeripheralsService {
     if (snapshot.generation !== board.generation || isScanned(snapshot)) return;
     if (this.autoScanned.has(board.generation)) return;
     this.autoScanned.add(board.generation);
-    void this.refresh();
+    void this.scanFor(board.generation);
   }
 
-  private async scan(): Promise<void> {
+  /**
+   * Joins the running scan when it is one of `generation`; otherwise queues a scan after it. A
+   * scan started for an earlier board answers for that board only, and the backend runs one scan
+   * at a time, so joining it would leave the new board unscanned.
+   */
+  private scanFor(generation: number | null): Promise<void> {
+    const running = this.running;
+    if (running && running.generation === generation) return running.done;
+    const entry: { generation: number | null; done: Promise<void> } = {
+      generation,
+      // With nothing running, the request goes out now, so `scanning` is set when this returns.
+      done: (running
+        ? running.done.then(() => this.scan(generation))
+        : this.scan(generation)
+      ).finally(() => {
+        if (this.running === entry) this.running = null;
+      }),
+    };
+    this.running = entry;
+    return entry.done;
+  }
+
+  private async scan(generation: number | null): Promise<void> {
     this.scanningValue.set(Date.now());
     this.scanErrorValue.set(null);
     try {
       const snapshot = await firstValueFrom(
         this.http.post<PeripheralSnapshot>(REFRESH_URL, {}).pipe(withRequestErrors()),
       );
-      // Reads still out were answered from the cache before this scan and would undo it.
-      this.latest.discard();
-      this.snapshotValue.set(snapshot);
-      this.toasts.status(scanCompleteMessage(snapshot));
+      if (!this.isPast(snapshot.generation)) {
+        // Reads still out were answered from the cache before this scan and would undo it.
+        this.latest.discard();
+        this.apply(snapshot);
+        this.toasts.status(scanCompleteMessage(snapshot));
+      }
     } catch (failure) {
-      this.scanErrorValue.set(problemOf(failure));
+      // A scan of a board the user has left failed for that board, typically because it changed.
+      if (generation === null || !this.isPast(generation)) {
+        this.scanErrorValue.set(problemOf(failure));
+        this.scanErrorGeneration = generation;
+      }
     } finally {
       this.scanningValue.set(null);
     }
     await this.board.reload();
+  }
+
+  /**
+   * An answer for this generation describes a board the user has left: generations only go up,
+   * and a newer one is shown or selected (Review Focus 1, never apply a previous generation).
+   */
+  private isPast(generation: number): boolean {
+    const shown = this.snapshotValue()?.generation ?? -Infinity;
+    return generation < Math.max(shown, this.board.generation() ?? -Infinity);
+  }
+
+  private apply(snapshot: PeripheralSnapshot): void {
+    if (this.isPast(snapshot.generation)) return;
+    this.snapshotValue.set(snapshot);
+    if (this.scanErrorGeneration !== snapshot.generation) this.scanErrorValue.set(null);
   }
 }
 
