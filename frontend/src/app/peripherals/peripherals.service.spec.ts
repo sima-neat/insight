@@ -320,6 +320,19 @@ describe('PeripheralsService', () => {
     expect(service.scanError()).toBeNull();
   });
 
+  // Final review M-6: the old board's failure must not stand beside "Board changed — refresh".
+  it('a scan failure goes as soon as the board changes, before any snapshot of the new board', async () => {
+    const failed = service.refresh();
+    refreshes()[0].flush(unreachable, badGateway);
+    await failed;
+    TestBed.tick();
+    expect(service.scanError()?.code).toBe('unreachable');
+
+    boardGeneration.set(2);
+    TestBed.tick();
+    expect(service.scanError()).toBeNull();
+  });
+
   // The board generation is a counter in Insight's memory: it starts over when Insight restarts,
   // while this app keeps running.
   it('after an Insight restart, answers for the restarted board apply although its generation is lower', async () => {

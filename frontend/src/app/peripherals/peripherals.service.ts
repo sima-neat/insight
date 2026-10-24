@@ -47,9 +47,10 @@ export class PeripheralsService {
 
   private readonly scanErrorValue = signal<BoardProblem | null>(null);
   /**
-   * Why the last scan of the current board failed; cleared when the next scan starts and when a
-   * snapshot of another board generation is applied (the service outlives the page, and an old
-   * board's failure says nothing about the new one).
+   * Why the last scan of the current board failed; cleared when the next scan starts and when the
+   * board moves to another generation, or a snapshot of one is applied (the service outlives the
+   * page, and an old board's failure says nothing about the new one: it must not stand beside
+   * "Board changed — refresh", offering the old board's settings).
    */
   readonly scanError = this.scanErrorValue.asReadonly();
   /** The board generation `scanError` was a scan of. */
@@ -187,15 +188,17 @@ export class PeripheralsService {
   }
 
   /**
-   * The generation counter starts over when Insight restarts, so a lower generation than the last
-   * one seen means the generations recorded as auto-scanned named the old Insight's boards: the
-   * restarted Insight's first scan of the board must not be skipped for them. (A restart that
-   * lands on the generation seen last cannot be told apart without a server identity.)
+   * Notes the board's generation. The counter starts over when Insight restarts, so a lower
+   * generation than the last one seen means the generations recorded as auto-scanned named the old
+   * Insight's boards: the restarted Insight's first scan of the board must not be skipped for them.
+   * (A restart that lands on the generation seen last cannot be told apart without a server
+   * identity.) A scan failure of another generation is dropped (`scanError`).
    */
   private noteGeneration(generation: number | null): void {
     if (generation === null) return;
     if (this.lastGeneration !== null && generation < this.lastGeneration) this.autoScanned.clear();
     this.lastGeneration = generation;
+    if (this.scanErrorGeneration !== generation) this.scanErrorValue.set(null);
   }
 
   private apply(snapshot: PeripheralSnapshot): void {
