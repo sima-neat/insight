@@ -210,14 +210,16 @@ describe('ImportDialog', () => {
     await settle();
   }
 
-  /** The progress card: its title, percent and detail, and the bar's value. */
+  /** The work's readout (the kit's titled progress): title and percent, detail, the bar's value. */
   const progress = () => {
-    const card = dialog()!.querySelector('.progress');
-    return card
+    const readout = dialog()!.querySelector('.work [data-slot="progress-readout"]');
+    return readout
       ? {
-          title: [...card.querySelectorAll('.title span')].map(text).join(' '),
-          detail: text(card.querySelector('.detail')),
-          value: card.querySelector('[role="progressbar"]')!.getAttribute('aria-valuenow'),
+          title: [...readout.querySelector('[data-slot="progress-title"]')!.children]
+            .map(text)
+            .join(' '),
+          detail: text(readout.querySelector('[data-slot="progress-detail"]')),
+          value: readout.querySelector('[role="progressbar"]')!.getAttribute('aria-valuenow'),
         }
       : null;
   };

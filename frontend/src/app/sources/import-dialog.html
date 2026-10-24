@@ -52,16 +52,11 @@
         </div>
       }
       @if (runner.progress(); as progress) {
-        <div class="progress">
-          <p class="title">
-            <span>{{ progress.title }}</span>
-            @if (progress.percent !== null) {
-              <span>{{ progress.percent }}%</span>
-            }
-          </p>
-          <p class="detail">{{ progress.detail }}</p>
-          <neat-progress [label]="progress.title" [value]="progress.percent" />
-        </div>
+        <neat-progress
+          [heading]="progress.title"
+          [detail]="progress.detail"
+          [value]="progress.percent"
+        />
       }
       @if (runner.failure(); as failure) {
         <neat-error-note>{{ failure }}</neat-error-note>

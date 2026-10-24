@@ -258,7 +258,13 @@ describe('SlotPanel', () => {
     }
     return values;
   };
-  const encodeStatus = () => root().querySelector('.encode');
+  /** The encode's readout: the kit's titled progress. */
+  const encodeStatus = () => root().querySelector('[data-slot="progress-readout"]');
+  /** The readout's title line: the title, then the percent. */
+  const encodeTitle = () =>
+    [...encodeStatus()!.querySelector('[data-slot="progress-title"]')!.children]
+      .map((part) => text(part))
+      .join(' ');
 
   async function click(element: HTMLElement | undefined): Promise<void> {
     expect(element, 'the element to click').toBeDefined();
@@ -491,7 +497,7 @@ describe('SlotPanel', () => {
     await click(button('Start'));
     expect(slots.prepare).toHaveBeenCalledWith(2);
     expect(slots.start).not.toHaveBeenCalled();
-    expect(text(encodeStatus()!)).toContain('Preparing rendition…');
+    expect(encodeTitle()).toBe('Preparing rendition…');
     expect(text(root().querySelector('header neat-status-chip')!)).toBe('Encoding');
     // The rate cannot change while the encode runs.
     expect(field('Frames per second').disabled).toBe(true);
@@ -510,9 +516,11 @@ describe('SlotPanel', () => {
       ]),
     );
     await fixture.whenStable();
-    expect(text(encodeStatus()!)).toContain('Encoding 15 fps rendition… 42%');
+    expect(encodeTitle()).toBe('Encoding 15 fps rendition… 42%');
     // #170's line under it (Q13 a).
-    expect(text(encodeStatus()!.querySelector('.encode-detail')!)).toBe('0:25 / 1:00 · libx264');
+    expect(text(encodeStatus()!.querySelector('[data-slot="progress-detail"]')!)).toBe(
+      '0:25 / 1:00 · libx264',
+    );
     // The progress belongs to the frame rate it encodes.
     expect(encodeStatus()!.closest('[aria-label="Output frame rate"], .frame-rate')).not.toBeNull();
     expect(
@@ -543,7 +551,7 @@ describe('SlotPanel', () => {
     await settle();
     expect(slots.startAfterPrepare).toHaveBeenCalledWith(2);
     // Starting stream…: still encoding to the eye, but the encode is over, so nothing to cancel.
-    expect(text(encodeStatus()!)).toContain('Starting stream… 99%');
+    expect(encodeTitle()).toBe('Starting stream… 99%');
     expect(button('Cancel encoding')!.getAttribute('aria-disabled')).toBe('true');
     button('Cancel encoding')!.click();
     expect(slots.prepares[0].cancelled).toBe(false);

@@ -39,30 +39,3 @@
   flex-wrap: wrap;
   gap: var(--neat-space-2);
 }
-
-.progress {
-  display: flex;
-  flex-direction: column;
-  gap: var(--neat-space-2);
-  font-size: var(--neat-text-sm);
-}
-
-.progress p {
-  margin: 0;
-}
-
-/* The title, and the percent at the end of its line. */
-.title {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--neat-space-3);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-.detail {
-  overflow: hidden;
-  color: var(--muted-foreground);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}

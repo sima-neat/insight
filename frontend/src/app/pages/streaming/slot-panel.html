@@ -218,18 +218,7 @@
       }
       <p neatNote>{{ renditionHint() }}</p>
       @if (encode(); as encode) {
-        <div class="encode">
-          <neat-progress [value]="encode.percent" [label]="encode.title" />
-          <p class="encode-title">
-            <span role="status">{{ encode.title }}</span>
-            @if (encode.percent !== null) {
-              {{ encode.percent }}%
-            }
-          </p>
-          @if (encode.detail) {
-            <p class="encode-detail">{{ encode.detail }}</p>
-          }
-        </div>
+        <neat-progress [heading]="encode.title" [detail]="encode.detail" [value]="encode.percent" />
       }
     </div>
   }
