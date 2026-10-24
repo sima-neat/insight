@@ -93,3 +93,14 @@ export function portSummary(port: ExposedPort): string {
   const range = end === null || end === undefined || end === start ? `${start}` : `${start}–${end}`;
   return port.protocol ? `${port.protocol.toUpperCase()} ${range}` : range;
 }
+
+/**
+ * The muted line under a component: the latest version when it differs from the installed one
+ * (an update to take; equal, it would only repeat the version above), else what `neat` says
+ * about the component, else its virtual environment. Empty when there is none.
+ */
+export function componentNote(component: SystemComponent): string {
+  const { latestVersion, version } = component;
+  if (latestVersion && latestVersion !== version) return `Latest ${latestVersion}`;
+  return component.detail || component.venv || '';
+}

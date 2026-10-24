@@ -4,10 +4,12 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   inject,
   Injector,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NeatButton, NeatCode, NeatNote } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
@@ -15,10 +17,10 @@ import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatDialog, NeatDialogActions, NeatDialogBody, NeatDialogRef } from '@sima/neat-ui/dialog';
 import { NeatErrorNote } from '@sima/neat-ui/field';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
-import { firstValueFrom } from 'rxjs';
 import { messageOf, withRequestErrors } from '../sources/stream-lines';
 import type { SystemInfo } from './api';
 import {
+  componentNote,
   componentStatus,
   componentVersion,
   displayValue,
@@ -85,6 +87,7 @@ function entriesOf(section: Record<string, unknown> | undefined): Entry[] {
 })
 export class SystemInfoDialog {
   private readonly http = inject(HttpClient);
+  private readonly destroyRef = inject(DestroyRef);
   protected readonly dialog = inject<NeatDialogRef<void>>(NeatDialogRef);
 
   /** The last good answer; null until the first one. */
@@ -92,6 +95,8 @@ export class SystemInfoDialog {
   /** Why the newest request failed; cleared by the next good answer. */
   protected readonly failure = signal<string | null>(null);
   protected readonly loading = signal(false);
+  /** What a screen reader is told when a Refresh has replaced the data (a failure is an alert). */
+  protected readonly announcement = signal('');
 
   /** `neat` is not installed: the sections that only it can fill are not shown. */
   protected readonly neatMissing = computed(() => this.info()?.missing?.includes('neat') ?? false);
@@ -115,7 +120,7 @@ export class SystemInfoDialog {
       name: component.name || readableKey(key),
       version: componentVersion(component),
       status: componentStatus(component),
-      note: component.latestVersion || component.detail || component.venv || '',
+      note: componentNote(component),
     })),
   );
 
@@ -127,21 +132,32 @@ export class SystemInfoDialog {
   );
 
   constructor() {
-    void this.refresh();
+    this.refresh();
   }
 
-  protected async refresh(): Promise<void> {
+  /**
+   * The request ends with the dialog: `neat` takes seconds, and a reopened dialog would otherwise
+   * start a second run beside the one nobody is waiting for.
+   */
+  protected refresh(): void {
     if (this.loading()) return;
     this.loading.set(true);
-    try {
-      this.info.set(
-        await firstValueFrom(this.http.get<SystemInfo>(SYSINFO_URL).pipe(withRequestErrors())),
-      );
-      this.failure.set(null);
-    } catch (failure) {
-      this.failure.set(messageOf(failure));
-    } finally {
-      this.loading.set(false);
-    }
+    this.announcement.set('');
+    this.http
+      .get<SystemInfo>(SYSINFO_URL)
+      .pipe(withRequestErrors(), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (info) => {
+          // Said for a Refresh only: the first answer replaces "Loading system information…".
+          if (this.info()) this.announcement.set('System information refreshed.');
+          this.info.set(info);
+          this.failure.set(null);
+          this.loading.set(false);
+        },
+        error: (failure: unknown) => {
+          this.failure.set(messageOf(failure));
+          this.loading.set(false);
+        },
+      });
   }
 }

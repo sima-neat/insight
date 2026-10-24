@@ -147,3 +147,56 @@ test('System information opens from the top bar, tells what it can without neat,
   await expect(dialog).toBeHidden();
   await expect(button).toBeFocused();
 });
+
+test('every list in System information starts its values in the same column', async ({ page }) => {
+  await answerTopBar(page);
+  await page.route(
+    (url) => url.pathname === '/api/sysinfo',
+    (route) =>
+      route.fulfill({
+        json: {
+          environment: {
+            label: 'SDK on a DevKit',
+            sdkVersion: '2.1.0',
+            devkitBuildVersion: '2.1.0-b12',
+          },
+          insight: { serviceState: 'Running', webUiUrl: 'https://10.1.1.5:9900' },
+          components: {
+            neatCore: { name: 'Neat core', version: '1.4.0', updateAvailable: false },
+            neatInsight: {
+              name: 'A component with a very long name that has to wrap',
+              version: '0.9.1',
+            },
+          },
+          exposedPorts: [
+            { name: 'rtp.udp', protocol: 'udp', hostPortStart: 9000, hostPortEnd: 9079 },
+          ],
+          updateCheck: { offline: false, status: 'Current' },
+        },
+      }),
+  );
+  await page.setViewportSize(LAPTOP);
+  await page.goto('/stats');
+  await systemInfo(page).click();
+  const dialog = page.getByRole('dialog', { name: 'System information' });
+  await dialog.getByRole('button', { name: 'Components' }).click();
+  await dialog.getByRole('button', { name: 'Exposed ports' }).click();
+  await expect(dialog.getByText('RTP UDP')).toBeVisible();
+
+  const columns = await dialog.evaluate((root) =>
+    [...root.querySelectorAll('dl')].map((list) => {
+      const dd = list.querySelector('dd')!.getBoundingClientRect();
+      return {
+        valueStart: Math.round(dd.left),
+        // No term runs into the values, however long it is.
+        termsFit: [...list.querySelectorAll('dt')].every(
+          (dt) => dt.getBoundingClientRect().right <= dd.left,
+        ),
+      };
+    }),
+  );
+  // Environment, Insight, Components, Exposed ports and Update check.
+  expect(columns).toHaveLength(5);
+  expect(new Set(columns.map((column) => column.valueStart)).size).toBe(1);
+  expect(columns.every((column) => column.termsFit)).toBe(true);
+});

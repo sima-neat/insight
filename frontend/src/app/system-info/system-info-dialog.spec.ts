@@ -24,7 +24,12 @@ function sysinfo(overrides: Partial<SystemInfo> = {}): SystemInfo {
     components: {
       neatCore: { name: 'Neat core', version: '1.4.0', tag: 'v1.4.0', channel: 'stable' },
       insight: { version: '0.9.1', latestVersion: '0.10.0', updateAvailable: true },
-      sdkTools: { version: '2.1.0', updateAvailable: false, venv: '/opt/sdk' },
+      sdkTools: {
+        version: '2.1.0',
+        latestVersion: '2.1.0',
+        updateAvailable: false,
+        venv: '/opt/sdk',
+      },
       webssh: { installed: false, updateAvailable: false, detail: 'Not installed' },
     },
     exposedPorts: [
@@ -180,8 +185,9 @@ describe('SystemInfoDialog', () => {
           .nextElementSibling,
       );
     expect(line('Neat core')).toBe('1.4.0 / tag v1.4.0 / channel stable');
-    // No name: the key, as words. The latest version is the muted line.
-    expect(line('Insight')).toBe('0.9.1 Update available 0.10.0');
+    // No name: the key, as words. The latest version is the muted line, when it is news.
+    expect(line('Insight')).toBe('0.9.1 Update available Latest 0.10.0');
+    // The latest version equal to the installed one repeats it: the line is the venv instead.
     expect(line('SDK tools')).toBe('2.1.0 Current /opt/sdk');
     // Not installed: no update status, #170 showed "-" (Inv-PB §1.6).
     expect(line('Webssh')).toBe('- Not installed');
@@ -261,7 +267,10 @@ describe('SystemInfoDialog', () => {
   it('a failed Refresh keeps the shown data and says it could not refresh', async () => {
     await open(sysinfo());
     section('Components')!.querySelector('button')!.click();
+    section('Environment')!.querySelector('button')!.click();
     await settle();
+    expect(expanded('Components')).toBe('true');
+    expect(expanded('Environment')).toBe('false');
 
     button('Refresh').click();
     await settle();
@@ -275,8 +284,9 @@ describe('SystemInfoDialog', () => {
       'Could not refresh: The neat command timed out while collecting system information.',
     );
     expect(rows('Insight')).toContain('Service state: Running');
-    // The sections stay as they were, including the one the user opened.
+    // The sections stay as they were: the one the user opened and the one they closed.
     expect(expanded('Components')).toBe('true');
+    expect(expanded('Environment')).toBe('false');
 
     // The next good answer clears it.
     button('Refresh').click();
@@ -284,6 +294,40 @@ describe('SystemInfoDialog', () => {
     reply(sysinfo());
     await settle();
     expect(errorNote()).toBeNull();
+  });
+
+  it('closing the dialog ends the request, and opening it again asks anew', async () => {
+    openSystemInfoDialog(TestBed.inject(Injector));
+    await settle();
+    const first = http.expectOne('/api/sysinfo');
+    button('Close').click();
+    await settle();
+    // neat runs for seconds: nobody is waiting for this answer any more.
+    expect(first.cancelled).toBe(true);
+
+    await open(sysinfo());
+    expect(rows('Insight')).toHaveLength(3);
+  });
+
+  it('tells a screen reader when a Refresh has replaced the data, not for the first answer', async () => {
+    await open(sysinfo());
+    const announcement = () => text(dialog().querySelector('[role="status"]'));
+    expect(announcement()).toBe('');
+
+    button('Refresh').click();
+    await settle();
+    expect(announcement()).toBe('');
+    reply(sysinfo());
+    await settle();
+    expect(announcement()).toBe('System information refreshed.');
+
+    // Cleared when the next Refresh starts, so that the same words are said again.
+    button('Refresh').click();
+    await settle();
+    expect(announcement()).toBe('');
+    reply(sysinfo());
+    await settle();
+    expect(announcement()).toBe('System information refreshed.');
   });
 
   it('Close closes the dialog', async () => {

@@ -1,8 +1,8 @@
 <!-- Environment, Insight and Update check read alike: a list of what neat reported, or why there is none. -->
-<ng-template #facts let-label="label" let-entries="entries">
+<ng-template #keyValues let-label="label" let-entries="entries">
   <neat-collapsible [label]="label" [open]="true" [headingLevel]="3">
     @if (entries.length) {
-      <dl neatDetails>
+      <dl neatDetails class="facts">
         @for (entry of entries; track entry[0]) {
           <dt>{{ entry[0] }}</dt>
           <dd>{{ entry[1] }}</dd>
@@ -16,6 +16,8 @@
 
 <neat-dialog-body>
   <div class="info">
+    <!-- Always there, so that it is a live region before it has something to say. -->
+    <div class="announcement" role="status">{{ announcement() }}</div>
     @if (info()) {
       <p neatNote>{{ identity() }}</p>
       @if (failure(); as failure) {
@@ -29,16 +31,18 @@
         </neat-callout>
       } @else {
         <ng-container
-          *ngTemplateOutlet="facts; context: { label: 'Environment', entries: environment() }"
+          *ngTemplateOutlet="keyValues; context: { label: 'Environment', entries: environment() }"
         />
       }
 
-      <ng-container *ngTemplateOutlet="facts; context: { label: 'Insight', entries: insight() }" />
+      <ng-container
+        *ngTemplateOutlet="keyValues; context: { label: 'Insight', entries: insight() }"
+      />
 
       @if (!neatMissing()) {
         <neat-collapsible label="Components" [headingLevel]="3">
           @if (components().length) {
-            <dl neatDetails>
+            <dl neatDetails class="facts">
               @for (component of components(); track component.key) {
                 <dt>{{ component.name }}</dt>
                 <dd>
@@ -62,7 +66,7 @@
 
       <neat-collapsible label="Exposed ports" [headingLevel]="3">
         @if (ports().length) {
-          <dl neatDetails>
+          <dl neatDetails class="facts">
             @for (port of ports(); track $index) {
               <dt>{{ port.name }}</dt>
               <dd>{{ port.summary }}</dd>
@@ -75,7 +79,7 @@
 
       @if (!neatMissing()) {
         <ng-container
-          *ngTemplateOutlet="facts; context: { label: 'Update check', entries: updateCheck() }"
+          *ngTemplateOutlet="keyValues; context: { label: 'Update check', entries: updateCheck() }"
         />
       }
     } @else if (failure(); as failure) {

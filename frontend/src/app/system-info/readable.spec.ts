@@ -1,4 +1,5 @@
 import {
+  componentNote,
   componentStatus,
   componentVersion,
   displayValue,
@@ -95,5 +96,24 @@ describe('portSummary', () => {
     expect(portSummary({ name: 'x', protocol: 'tcp', hostPortStart: 80 })).toBe('TCP 80');
     expect(portSummary({ name: 'x', hostPortStart: 80 })).toBe('80');
     expect(portSummary({ name: 'x', protocol: 'tcp', hostPortStart: null })).toBe('-');
+  });
+});
+
+describe('componentNote', () => {
+  it('says the latest version only when it differs from the installed one', () => {
+    expect(componentNote({ version: '0.9.1', latestVersion: '0.10.0' })).toBe('Latest 0.10.0');
+    // Nothing installed to compare with: the latest is still news.
+    expect(componentNote({ latestVersion: '0.10.0' })).toBe('Latest 0.10.0');
+    expect(componentNote({ version: '0.9.2', latestVersion: '0.9.2' })).toBe('');
+  });
+
+  it('otherwise gives the detail, then the venv, as they are', () => {
+    expect(
+      componentNote({ version: '0.9.2', latestVersion: '0.9.2', detail: 'Not installed' }),
+    ).toBe('Not installed');
+    expect(componentNote({ detail: 'From a wheel', venv: '/opt/sdk' })).toBe('From a wheel');
+    expect(componentNote({ venv: '/opt/sdk' })).toBe('/opt/sdk');
+    expect(componentNote({})).toBe('');
+    expect(componentNote({ latestVersion: null, detail: null, venv: '' })).toBe('');
   });
 });
