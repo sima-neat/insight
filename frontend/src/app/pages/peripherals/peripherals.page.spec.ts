@@ -732,9 +732,12 @@ describe('PeripheralsPage', () => {
     expect(dialogs.openBoard).toHaveBeenCalledTimes(1);
     // Nothing to scan, and no Refresh until a board is chosen.
     expect(posts(REFRESH_URL)).toHaveLength(0);
-    expect(refreshButton().disabled).toBe(true);
-    // A disabled button takes no keyboard focus: the focus event stands in for the pointer's
-    // hover, which jsdom cannot give (the kit opens the tooltip on both).
+    // Final review M-5: it keeps the focus (aria-disabled), so a keyboard reaches its tooltip.
+    expect(refreshButton().disabled).toBe(false);
+    expect(refreshButton().getAttribute('aria-disabled')).toBe('true');
+    refreshButton().click();
+    await settle();
+    expect(posts(REFRESH_URL)).toHaveLength(0);
     expect(await tooltip(refreshButton())).toBe('Select a board first');
 
     // A board read that fails with no state to fall back on says why, with the board settings.

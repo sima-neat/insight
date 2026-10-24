@@ -2,7 +2,11 @@
   @if (scannedText(); as scanned) {
     <span neatNote>{{ scanned }}</span>
   }
-  <!-- While it scans it waits with aria-disabled rather than disabled, which would drop the focus. -->
+  <!--
+    Without a board, or while it scans, it waits with aria-disabled rather than disabled: a disabled
+    button drops the focus and takes none, so a keyboard would never reach the tooltip that says
+    why. `refresh()` ignores the press then.
+  -->
   <button
     neatButton
     type="button"
@@ -10,8 +14,7 @@
     size="small"
     [neatTooltip]="target() ? null : 'Select a board first'"
     neatTooltipPosition="bottom"
-    [disabled]="!target()"
-    [attr.aria-disabled]="scanning() || null"
+    [attr.aria-disabled]="!target() || scanning() || null"
     (click)="refresh()"
   >
     <neat-icon name="refresh" />
