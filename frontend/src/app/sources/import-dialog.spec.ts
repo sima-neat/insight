@@ -170,6 +170,19 @@ describe('ImportDialog', () => {
   const options = (label: string) => [
     ...list(label).querySelectorAll<HTMLElement>('[role="option"]'),
   ];
+  /** A list's column headings and its rows as their cells' text (a checked list's boxes have none). */
+  const table = (label: string) => ({
+    headings: [
+      ...list(label)
+        .closest('neat-select-list')!
+        .querySelectorAll('[data-slot="select-list-header"] span'),
+    ]
+      .map(text)
+      .filter(Boolean),
+    rows: options(label).map((row) =>
+      [...row.querySelectorAll(':scope > div')].map(text).filter(Boolean),
+    ),
+  });
   /** A list's rows, each as its cells' text (a checked list's boxes have none). */
   const rows = (label: string) =>
     options(label).map((row) =>
@@ -449,11 +462,15 @@ describe('ImportDialog', () => {
       [...filters()[0].querySelectorAll('label')].map((label) => label.textContent?.trim()),
     ).toEqual(['Resolution & FPS', 'Codec']);
     // By asset type, every importable asset; the preview clip is not one.
-    expect(rows('Catalog assets')).toEqual([
-      'Alley 720p30 / 30 fps / H.264 / 1280x720 / 1.0 MB',
-      'Alley 720p30 / 30 fps / H.265 / 1280x720 / 1.0 MB',
-      'Street 1080p30 / 30 fps / H.265 / 1280x720 / 1.0 MB',
-    ]);
+    // In columns, as a table reads.
+    expect(table('Catalog assets')).toEqual({
+      headings: ['Name', 'Resolution & FPS', 'Codec', 'Dimensions', 'Size'],
+      rows: [
+        ['Alley', '720p30', 'H.264', '1280x720', '1.0 MB'],
+        ['Alley', '720p30', 'H.265', '1280x720', '1.0 MB'],
+        ['Street', '1080p30', 'H.265', '1280x720', '1.0 MB'],
+      ],
+    });
     await pick(filters()[0].querySelectorAll('neat-select')[1], 'H.265');
     expect(rows('Catalog assets')).toHaveLength(2);
     expect(text()).toContain('2 matching assets / 0 selected');
@@ -463,7 +480,10 @@ describe('ImportDialog', () => {
     expect(filters()).toHaveLength(1);
     expect(text(filters()[0])).toContain('H.265');
     expect(rows('Catalog sources')).toEqual(['Alley 2 variants', 'Street 1 variants']);
-    expect(rows('Catalog variants')).toEqual(['720p30 / 30 fps / H.265 / 1280x720 1.0 MB']);
+    expect(table('Catalog variants')).toEqual({
+      headings: ['Resolution & FPS', 'Codec', 'Dimensions', 'Size'],
+      rows: [['720p30', 'H.265', '1280x720', '1.0 MB']],
+    });
     expect(text()).toContain('A narrow alley');
 
     await click(tab('Catalog by asset type'));
@@ -479,6 +499,55 @@ describe('ImportDialog', () => {
     expect(dialog()).toBeNull();
     expect(opener.result).toBe('catalog/street/1080_hevc.mp4');
     expect(toasts.status).toHaveBeenCalledWith('Imported 1 catalog asset(s).');
+  });
+
+  it('narrower catalog lists give up Dimensions first, then Codec', async () => {
+    library.catalog.mockResolvedValue(CATALOG);
+    // The lists measure their width as they first render.
+    let listWidth = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return { width: this.tagName === 'NEAT-SELECT-LIST' ? listWidth : 0 } as DOMRect;
+    });
+    const headingsAt = async (width: number, mode: string, label: string) => {
+      listWidth = width;
+      await click(tab(mode === 'type' ? 'Catalog by asset name' : 'Catalog by asset type'));
+      await click(tab(mode === 'type' ? 'Catalog by asset type' : 'Catalog by asset name'));
+      return table(label).headings;
+    };
+    await open('catalog');
+
+    expect(await headingsAt(600, 'type', 'Catalog assets')).toEqual([
+      'Name',
+      'Resolution & FPS',
+      'Codec',
+      'Dimensions',
+      'Size',
+    ]);
+    expect(await headingsAt(500, 'type', 'Catalog assets')).toEqual([
+      'Name',
+      'Resolution & FPS',
+      'Codec',
+      'Size',
+    ]);
+    expect(await headingsAt(400, 'type', 'Catalog assets')).toEqual([
+      'Name',
+      'Resolution & FPS',
+      'Size',
+    ]);
+    expect(await headingsAt(420, 'name', 'Catalog variants')).toEqual([
+      'Resolution & FPS',
+      'Codec',
+      'Dimensions',
+      'Size',
+    ]);
+    expect(await headingsAt(360, 'name', 'Catalog variants')).toEqual([
+      'Resolution & FPS',
+      'Codec',
+      'Size',
+    ]);
+    expect(await headingsAt(300, 'name', 'Catalog variants')).toEqual(['Resolution & FPS', 'Size']);
   });
 
   it('by asset type, assets are checked and imported one after the other (Q17)', async () => {

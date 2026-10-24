@@ -16,6 +16,7 @@ import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import { CellText } from '../cell-text';
 import type { CatalogAsset, CatalogIndex, CatalogSource } from './api';
 import {
+  assetDimensions,
   assetMatchesSearch,
   assetsOfSource,
   catalogAssetLabel,
@@ -37,12 +38,17 @@ import type { FilePreview } from './preview-frame';
 import { codecLabel } from './slot-row';
 import { messageOf } from './stream-lines';
 
-/** A catalog asset as a list row shows it. */
+/** A catalog asset as a list row shows it: a cell per column, "-" for what the index omits. */
 interface AssetRow {
   readonly asset: CatalogAsset;
   /** The source's title, as the by-type list names an asset. */
   readonly source: string;
+  /** All of it on one line, for the summary under a list. */
   readonly label: string;
+  /** Resolution & FPS: the profile, as the filter of that name offers it. */
+  readonly profile: string;
+  readonly codec: string;
+  readonly dimensions: string;
   readonly size: string;
 }
 
@@ -52,6 +58,9 @@ interface SourceRow {
   /** Its importable variants, whatever the filter. */
   readonly variants: number;
 }
+
+/** A cell with nothing to show, as Streaming's and Media's lists say it. */
+const NONE = '-';
 
 const byAssetPath = (row: AssetRow) => row.asset.path;
 const bySourceId = (row: SourceRow) => row.source.id;
@@ -109,6 +118,16 @@ export class ImportCatalog {
   private readonly library = inject(MediaLibraryService);
 
   protected readonly byAssetPath = byAssetPath;
+  /**
+   * The list widths (CSS px) below which a column gives way, Dimensions before Codec: the by-type
+   * list has the dialog's width, the variants share it with the sources beside them.
+   */
+  protected readonly narrow = {
+    typeDimensions: 560,
+    typeCodec: 440,
+    variantDimensions: 400,
+    variantCodec: 320,
+  } as const;
   protected readonly bySourceId = bySourceId;
 
   protected readonly importing = computed(() => this.runner.job() === 'catalog');
@@ -283,6 +302,9 @@ export class ImportCatalog {
       asset,
       source: sources.get(asset.source_id)?.title || asset.source_title || asset.source_id,
       label: catalogAssetLabel(asset),
+      profile: asset.profile || NONE,
+      codec: asset.codec ? codecLabel(asset.codec) : NONE,
+      dimensions: assetDimensions(asset) || NONE,
       size: formatBytes(asset.bytes || 0),
     }));
   }

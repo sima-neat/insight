@@ -16,13 +16,18 @@ export interface CatalogFilter {
   readonly codec: string;
 }
 
+/** "1280x720", or '' while the index does not say. */
+export function assetDimensions(asset: CatalogAsset): string {
+  return asset.width && asset.height ? `${asset.width}x${asset.height}` : '';
+}
+
 /** "720p30 / 30 fps / H.264 / 1280x720", leaving out what the index does not say. */
 export function catalogAssetLabel(asset: CatalogAsset): string {
   return [
     asset.profile,
     asset.fps ? `${asset.fps} fps` : '',
     asset.codec ? codecLabel(asset.codec) : '',
-    asset.width && asset.height ? `${asset.width}x${asset.height}` : '',
+    assetDimensions(asset),
   ]
     .filter(Boolean)
     .join(' / ');

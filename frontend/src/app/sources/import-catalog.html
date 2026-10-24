@@ -69,11 +69,42 @@
             [(checked)]="state.typePaths"
             (activated)="toggleType($event)"
           >
-            <ng-template neatColumn="source" width="minmax(0, 1fr)" let-row>
+            <!--
+              A narrower dialog gives up Dimensions first, then Codec. No column sizes to its
+              content: the heading row is a grid of its own, so an auto width would differ from
+              the rows' and push the headings off their columns.
+            -->
+            <ng-template neatColumn="source" header="Name" width="minmax(0, 1.4fr)" let-row>
               <app-cell-text>{{ row.source }}</app-cell-text>
             </ng-template>
-            <ng-template neatColumn="variant" width="minmax(0, 2fr)" let-row>
-              <app-cell-text>{{ row.label }} / {{ row.size }}</app-cell-text>
+            <ng-template
+              neatColumn="profile"
+              header="Resolution & FPS"
+              width="minmax(0, 1.2fr)"
+              let-row
+            >
+              <app-cell-text>{{ row.profile }}</app-cell-text>
+            </ng-template>
+            <ng-template
+              neatColumn="codec"
+              header="Codec"
+              width="minmax(0, 0.8fr)"
+              [hideBelow]="narrow.typeCodec"
+              let-row
+            >
+              <app-cell-text>{{ row.codec }}</app-cell-text>
+            </ng-template>
+            <ng-template
+              neatColumn="dimensions"
+              header="Dimensions"
+              width="minmax(0, 1fr)"
+              [hideBelow]="narrow.typeDimensions"
+              let-row
+            >
+              <app-cell-text>{{ row.dimensions }}</app-cell-text>
+            </ng-template>
+            <ng-template neatColumn="size" header="Size" width="5rem" let-row>
+              <app-cell-text class="size">{{ row.size }}</app-cell-text>
             </ng-template>
           </neat-select-list>
           <app-import-summary
@@ -134,10 +165,36 @@
                 [selected]="selectedVariant()"
                 (selectedChange)="pickVariant($event)"
               >
-                <ng-template neatColumn="label" width="minmax(0, 1fr)" let-row>
-                  <app-cell-text>{{ row.label }}</app-cell-text>
+                <!-- Beside the sources the list is narrower: it gives up Dimensions, then Codec. -->
+                <ng-template
+                  neatColumn="profile"
+                  header="Resolution & FPS"
+                  width="minmax(0, 1.2fr)"
+                  let-row
+                >
+                  <app-cell-text>{{ row.profile }}</app-cell-text>
                 </ng-template>
-                <ng-template neatColumn="size" width="auto" let-row>{{ row.size }}</ng-template>
+                <ng-template
+                  neatColumn="codec"
+                  header="Codec"
+                  width="minmax(0, 0.8fr)"
+                  [hideBelow]="narrow.variantCodec"
+                  let-row
+                >
+                  <app-cell-text>{{ row.codec }}</app-cell-text>
+                </ng-template>
+                <ng-template
+                  neatColumn="dimensions"
+                  header="Dimensions"
+                  width="minmax(0, 1fr)"
+                  [hideBelow]="narrow.variantDimensions"
+                  let-row
+                >
+                  <app-cell-text>{{ row.dimensions }}</app-cell-text>
+                </ng-template>
+                <ng-template neatColumn="size" header="Size" width="5rem" let-row>
+                  <app-cell-text class="size">{{ row.size }}</app-cell-text>
+                </ng-template>
               </neat-select-list>
               <app-import-summary
                 [heading]="selectedVariant()?.label ?? 'No variant selected'"
