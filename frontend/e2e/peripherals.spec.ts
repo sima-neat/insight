@@ -22,6 +22,28 @@ const rail = (page: Page, name: string) =>
 const toast = (page: Page, text: string) =>
   page.locator('[data-slot="toast"]').filter({ hasText: text });
 
+/**
+ * Whether the side panel title's chip lies inside the panel, and level with the heading's first
+ * line (its middle within that line's height).
+ */
+function titleChipFit(page: Page): Promise<{ inside: boolean; firstLine: boolean }> {
+  return panel(page)
+    .locator('app-panel-title')
+    .first()
+    .evaluate((title) => {
+      const box = (element: Element) => element.getBoundingClientRect();
+      const chip = box(title.querySelector('neat-status-chip')!);
+      const heading = title.querySelector('h2')!;
+      const lineHeight = parseFloat(getComputedStyle(heading).lineHeight);
+      const panelBox = box(title.closest('[aria-label="Selected device"]')!);
+      const middle = (chip.top + chip.bottom) / 2;
+      return {
+        inside: chip.left >= panelBox.left && chip.right <= panelBox.right,
+        firstLine: middle >= box(heading).top && middle <= box(heading).top + lineHeight,
+      };
+    });
+}
+
 function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -295,6 +317,9 @@ test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side pane
     await page.setViewportSize(size);
     for (const sidePanel of [true, false]) {
       await expect(panel(page)).toHaveCount(sidePanel ? 1 : 0);
+      // Final review I-2: the MIPI camera's long device path wraps, so its chip stays in the panel,
+      // on the title's first line.
+      if (sidePanel) expect(await titleChipFit(page)).toEqual({ inside: true, firstLine: true });
       await expect
         .poll(() => pageOverflow(page))
         .toEqual([
