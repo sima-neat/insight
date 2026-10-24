@@ -104,12 +104,13 @@ export class BoardDialog {
    * selection stays under the form instead, where it was typed.
    */
   protected readonly actionError = signal<BoardProblem | null>(null);
-  /** What the notice shows while a board is in use: the action's own problem, else the state's. */
-  protected readonly problem = computed(() => {
-    const state = this.board.state();
-    if (!state?.target) return null;
-    const recorded = state.status.error;
-    return this.actionError() ?? (recorded ? problemOf(recorded) : null);
+  /**
+   * The connection error the board state repeats, for the notice while a board is in use and no
+   * action of this dialog failed (an action's own problem wins over it).
+   */
+  protected readonly recordedProblem = computed(() => {
+    const recorded = this.board.state()?.status.error;
+    return recorded ? problemOf(recorded) : null;
   });
 
   private readonly injector = inject(Injector);
@@ -221,15 +222,14 @@ export class BoardDialog {
       await this.board.trustHostKey(fingerprint);
       this.actionError.set(null);
       this.toasts.status('Host key updated. Check again to connect.');
-      // Trust new key… went with the notice: the next step is Check again.
-      afterNextRender(() => this.checkButton()?.nativeElement.focus(), {
-        injector: this.injector,
-      });
     } catch (failure) {
       this.actionError.set(problemOf(failure));
     } finally {
       this.busy.set(null);
     }
+    // Trust new key… goes with the warning either way. The next step is Check again: to connect
+    // after a trust, and to read the key afresh after a refusal, as the server's hint asks.
+    afterNextRender(() => this.checkButton()?.nativeElement.focus(), { injector: this.injector });
   }
 
   protected retry(): void {

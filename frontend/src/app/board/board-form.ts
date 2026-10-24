@@ -1,12 +1,18 @@
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
+  type ElementRef,
   inject,
+  Injector,
   linkedSignal,
   model,
   output,
   signal,
+  untracked,
+  viewChild,
 } from '@angular/core';
 import { NeatButton, NeatNote } from '@sima/neat-ui';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
@@ -21,7 +27,7 @@ import {
   defaultTargetText,
   initialBoardForm,
   validateBoardForm,
-} from './board-view';
+} from './board-form-values';
 
 /** The board dialog's actions; one runs at a time (#170's single `busy`). */
 export type BoardAction = 'check' | 'shell' | 'select' | 'trust';
@@ -57,6 +63,8 @@ export class BoardForm {
 
   private readonly board = inject(BoardService);
   private readonly toasts = inject(NeatToasts);
+  private readonly injector = inject(Injector);
+  private readonly hostField = viewChild<ElementRef<HTMLInputElement>>('host');
 
   protected readonly hasTarget = computed(() => !!this.board.state()?.target);
   /**
@@ -80,6 +88,15 @@ export class BoardForm {
   private readonly edited = signal<BoardFormValues | null>(null);
   protected readonly values = computed(() => this.edited() ?? initialBoardForm(this.board.state()));
   protected readonly error = signal('');
+
+  constructor() {
+    // A refusal is about the board it was typed for; once the board changes otherwise (another
+    // tab, a terminal, Use default elsewhere) it says nothing more (#170 cleared it on every action).
+    effect(() => {
+      this.board.generation();
+      untracked(() => this.error.set(''));
+    });
+  }
 
   protected set(field: keyof BoardFormValues, value: string): void {
     this.edited.set({ ...this.values(), [field]: value });
@@ -109,6 +126,8 @@ export class BoardForm {
   }
 
   protected cancel(): void {
+    // Not while a save runs: its refusal would arrive in a closed section, unseen.
+    if (this.busy() === 'select') return;
     this.edited.set(null);
     this.error.set('');
     this.open.set(false);
@@ -129,10 +148,18 @@ export class BoardForm {
     }
   }
 
-  /** With no board left to use (Use default without a default), the form stays open to enter one. */
+  /**
+   * With no board left to use (Use default without a default), the form stays open to enter one.
+   * The section does not close then, so its trigger does not take the focus; Use default and
+   * Cancel went with the saved target, so the focus goes to the host field, where the next step
+   * is (#170's focus return).
+   */
   private done(state: BoardState, message: string): void {
     this.edited.set(null);
     this.open.set(!state.target);
+    if (!state.target) {
+      afterNextRender(() => this.hostField()?.nativeElement.focus(), { injector: this.injector });
+    }
     this.selected.emit(state);
     this.toasts.status(message);
   }

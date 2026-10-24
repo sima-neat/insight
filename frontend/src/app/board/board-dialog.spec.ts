@@ -337,6 +337,8 @@ describe('BoardDialog', () => {
     expect(statusLine()).toMatch(/^Connection failed /);
     // The action's own problem wins over the one the state repeats.
     expect(text(notice())).toBe('SSH key authentication failed.');
+    // Said as it appears, as #170's role="alert": the failure has no toast.
+    expect(notice()!.querySelector('neat-callout')!.getAttribute('role')).toBe('alert');
     expect(toasts.status).not.toHaveBeenCalled();
     expect(toasts.error).not.toHaveBeenCalled();
     expect(button('Check again').getAttribute('aria-disabled')).toBeNull();
@@ -354,6 +356,8 @@ describe('BoardDialog', () => {
     board.state.set(failed());
     await open();
     expect(text(notice())).toBe('SSH key authentication failed.');
+    // A problem already there when the dialog opens is not shouted.
+    expect(notice()!.querySelector('neat-callout')!.getAttribute('role')).toBeNull();
 
     board.state.set(boardState());
     await settle();
@@ -409,6 +413,9 @@ describe('BoardDialog', () => {
     expect(words(notice())).toBe(
       'That host key is not the one the board presented. Test the connection again and confirm the fingerprint it reports.',
     );
+    expect(notice()!.querySelector('neat-callout')!.getAttribute('role')).toBe('alert');
+    // Trust new key… went with the warning; the server asks to check again, so the focus goes there.
+    expect(document.activeElement).toBe(button('Check again'));
     expect(toasts.status).toHaveBeenCalledTimes(1);
   });
 

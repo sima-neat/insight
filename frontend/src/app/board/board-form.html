@@ -62,7 +62,14 @@
         </button>
       }
       @if (hasTarget()) {
-        <button neatButton type="button" size="small" variant="text" (click)="cancel()">
+        <button
+          neatButton
+          type="button"
+          size="small"
+          variant="text"
+          [attr.aria-disabled]="busy() === 'select' ? true : null"
+          (click)="cancel()"
+        >
           Cancel
         </button>
       }

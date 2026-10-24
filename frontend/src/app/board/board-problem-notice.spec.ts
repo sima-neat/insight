@@ -1,4 +1,5 @@
 import { Component, getDebugNode, signal } from '@angular/core';
+import { deferred } from './board.testing';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
@@ -12,6 +13,7 @@ import { BoardProblemNotice } from './board-problem-notice';
     <app-board-problem-notice
       [problem]="problem()"
       [busy]="busy()"
+      [announce]="announce()"
       (trust)="trusted.push($event)"
     />
   `,
@@ -19,6 +21,7 @@ import { BoardProblemNotice } from './board-problem-notice';
 class Host {
   readonly problem = signal<BoardProblem>(new BoardProblem('', '', '', {}));
   readonly busy = signal(false);
+  readonly announce = signal(false);
   readonly trusted: string[] = [];
 }
 
@@ -173,6 +176,30 @@ describe('BoardProblemNotice', () => {
     expect(confirm.ask.mock.calls[0][0].message).toMatch(
       /^Trust the new key only if this board was/,
     );
+  });
+
+  it('a key that changed again while the confirmation was open is not trusted', async () => {
+    const callout = await show(
+      keyChanged({ host: '192.168.1.20', presented_fingerprint: PRESENTED }),
+    );
+    const answer = deferred<boolean>();
+    confirm.ask.mockReturnValue(answer.promise);
+    button(callout, 'Trust new key…').click();
+    await settle();
+
+    // A re-read while the user compared fingerprints: the board now presents another key.
+    await show(keyChanged({ host: '192.168.1.20', presented_fingerprint: 'SHA256:other' }));
+    answer.resolve(true);
+    await settle();
+    expect(fixture.componentInstance.trusted).toEqual([]);
+  });
+
+  it('says a problem as an alert only when asked to, for an action that just failed', async () => {
+    const callout = await show(authFailed);
+    expect(callout.getAttribute('role')).toBeNull();
+    fixture.componentInstance.announce.set(true);
+    await settle();
+    expect(fixture.nativeElement.querySelector('neat-callout').getAttribute('role')).toBe('alert');
   });
 
   it('other problems are a danger callout with the message and hint', async () => {

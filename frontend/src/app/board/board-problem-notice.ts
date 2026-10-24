@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import {
+  booleanAttribute,
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  output,
+} from '@angular/core';
 import { NeatButton, NeatCode, NeatNote } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
@@ -27,7 +35,7 @@ const COPY_REFUSED =
   template: `
     @let shown = problem();
     @if (shown.code === 'host_key_changed') {
-      <neat-callout tone="warning">
+      <neat-callout tone="warning" [announce]="announce() ? 'alert' : null">
         <div class="body">
           <p>{{ shown.message }}</p>
           @if (shown.hint) {
@@ -54,7 +62,7 @@ const COPY_REFUSED =
         </button>
       </neat-callout>
     } @else {
-      <neat-callout tone="danger">
+      <neat-callout tone="danger" [announce]="announce() ? 'alert' : null">
         <div class="body">
           <p>{{ shown.message }}</p>
           @if (shown.hint) {
@@ -86,6 +94,11 @@ export class BoardProblemNotice {
   readonly problem = input.required<BoardProblem>();
   /** Another board action runs: Trust waits for it. */
   readonly busy = input(false);
+  /**
+   * Say the problem as it appears (`role="alert"`, as #170's notice): for an action that just
+   * failed, which has no toast. Not for one already there when the dialog opens.
+   */
+  readonly announce = input(false, { transform: booleanAttribute });
   /** The presented fingerprint the user confirmed trusting. */
   readonly trust = output<string>();
 
@@ -118,7 +131,9 @@ export class BoardProblemNotice {
       confirmLabel: 'Trust new key',
       tone: 'danger',
     });
-    if (confirmed) this.trust.emit(presented);
+    // The board may present another key by now (a re-read while the user compared fingerprints):
+    // what was confirmed is not that one.
+    if (confirmed && this.presented() === presented) this.trust.emit(presented);
   }
 }
 

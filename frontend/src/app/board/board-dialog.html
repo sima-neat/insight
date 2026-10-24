@@ -51,12 +51,23 @@
       <p neatNote role="status">Loading board…</p>
     }
 
-    @if (problem(); as problem) {
-      <app-board-problem-notice
-        [problem]="problem"
-        [busy]="busy() !== null"
-        (trust)="trust($event)"
-      />
+    @if (board.state()?.target) {
+      <!-- Two branches, so that an action's own problem is a new notice that is said as it
+           appears, while one already recorded when the dialog opens is not. -->
+      @if (actionError(); as own) {
+        <app-board-problem-notice
+          [problem]="own"
+          [busy]="busy() !== null"
+          announce
+          (trust)="trust($event)"
+        />
+      } @else if (recordedProblem(); as recorded) {
+        <app-board-problem-notice
+          [problem]="recorded"
+          [busy]="busy() !== null"
+          (trust)="trust($event)"
+        />
+      }
     }
 
     @if (board.error(); as readFailure) {

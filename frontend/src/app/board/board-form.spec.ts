@@ -167,6 +167,11 @@ describe('BoardForm', () => {
     // One action at a time: the dialog sees the save, and the form says it runs.
     expect(fixture.componentInstance.busy()).toBe('select');
     expect(button('Saving…')).toBeDefined();
+    // Cancel waits too: closing now would hide a refusal that arrives later.
+    expect(button('Cancel')!.getAttribute('aria-disabled')).toBe('true');
+    button('Cancel')!.click();
+    await settle();
+    expect(isOpen()).toBe(true);
 
     const selected = boardState({ target: MANUAL, saved: MANUAL, defaults: PAIRED, generation: 2 });
     board.state.set(selected);
@@ -232,6 +237,8 @@ describe('BoardForm', () => {
     await press('Use default');
     expect(toasts.status).toHaveBeenLastCalledWith('Manual board cleared.');
     expect(isOpen()).toBe(true);
+    // Use default and Cancel went with the saved target; the next step is to enter a board.
+    expect(document.activeElement).toBe(field('Host or IP address'));
   });
 
   it('a server refusal stays under the form', async () => {
@@ -256,6 +263,19 @@ describe('BoardForm', () => {
     // The next attempt starts clean.
     board.select.mockResolvedValue(boardState({ target: MANUAL, saved: MANUAL }));
     await press('Save');
+    expect(errorNote()).toBe('');
+  });
+
+  it('a refusal goes when the board changes otherwise', async () => {
+    await render(boardState());
+    board.select.mockRejectedValue(new BoardProblem('Enter a valid SSH user name.', '', '', {}));
+    await type('Host or IP address', '10.0.0.4');
+    await press('Save');
+    expect(errorNote()).toBe('Enter a valid SSH user name.');
+
+    // Another tab or a terminal selected a board meanwhile; the refusal was about the old one.
+    board.state.set(boardState({ generation: 2 }));
+    await settle();
     expect(errorNote()).toBe('');
   });
 });
