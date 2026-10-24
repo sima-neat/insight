@@ -119,6 +119,20 @@ code {
   font-variant-numeric: tabular-nums;
 }
 
+/* The URL and its Copy, apart, wrapping as one when the URL is long. */
+.details .url {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--neat-space-2);
+}
+
+.frame-rate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
 /* The codec warning reads on a line of its own under the video it is about. */
 .warning {
   display: block;

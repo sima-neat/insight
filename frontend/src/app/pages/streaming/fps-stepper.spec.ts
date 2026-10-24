@@ -82,11 +82,16 @@ describe('FpsStepper', () => {
     field().focus();
     field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await fixture.whenStable();
-    // Enter leaves the field, which commits.
-    expect(document.activeElement).not.toBe(field());
+    expect(host.commits).toEqual([12]);
+    // Enter keeps the focus in the field, and leaving it afterwards commits nothing more.
+    expect(document.activeElement).toBe(field());
+    await blur();
     expect(host.commits).toEqual([12]);
 
     await type('300');
+    await blur();
+    expect(host.commits).toEqual([12, 300]);
+    // Leaving a field that was not typed in chooses nothing.
     await blur();
     expect(host.commits).toEqual([12, 300]);
   });

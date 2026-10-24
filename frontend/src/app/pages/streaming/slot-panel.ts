@@ -1,9 +1,12 @@
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
   DOCUMENT,
+  type ElementRef,
   inject,
+  Injector,
   input,
   linkedSignal,
   signal,
@@ -11,7 +14,13 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { NeatButton, NeatInlineButton, NeatNote, NeatTooltip } from '@sima/neat-ui';
+import {
+  NeatButton,
+  type NeatButtonVariant,
+  NeatInlineButton,
+  NeatNote,
+  NeatTooltip,
+} from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatDialog, type NeatDialogRef } from '@sima/neat-ui/dialog';
 import { NeatInput } from '@sima/neat-ui/input';
@@ -40,6 +49,7 @@ import {
   pullSourceText,
   pullStatusLabel,
   readersText,
+  slotCodec,
   type SlotRow,
   slotOutput,
   streamUrl,
@@ -61,6 +71,20 @@ const TRANSPORT_LABELS: Record<SlotTransport, string> = { rtsp: 'RTSP', http: 'H
 const STREAM_URL = /^rtsps?:\/\//i;
 
 const COPY_REFUSED = 'Could not copy the URL: the browser refused access to the clipboard.';
+
+/** The slot's main action, one button whatever it is (see the template). */
+interface PrimaryAction {
+  readonly kind: 'start' | 'stop' | 'cancel' | 'takeOver' | 'stopPulling';
+  readonly label: string;
+  readonly variant: NeatButtonVariant;
+  /** Why the action cannot be taken at all; the button is then disabled. */
+  readonly blocker: string | null;
+  /** The action waits for something in flight: the button stays focusable, and a press does nothing. */
+  readonly waiting: boolean;
+  readonly tooltip: string | null;
+}
+
+let nextPanelId = 0;
 
 /** The form for what the slot holds: a webcam its camera, a pull its URL, anything else its file. */
 function formFor(slot: Slot): SourceForm {
@@ -124,9 +148,14 @@ export class SlotPanel {
   private readonly confirm = inject(NeatConfirm);
   private readonly toasts = inject(NeatToasts);
   private readonly clipboard = inject(DOCUMENT).defaultView?.navigator.clipboard;
+  private readonly injector = inject(Injector);
 
   private readonly pickerTemplate = viewChild.required<TemplateRef<unknown>>('picker');
   private readonly stepper = viewChild(FpsStepper);
+  private readonly primaryButton = viewChild.required<ElementRef<HTMLButtonElement>>('primary');
+  private readonly changeButton = viewChild<ElementRef<HTMLButtonElement>>('change');
+
+  protected readonly fpsReasonId = `slot-panel-${nextPanelId++}-fps-reason`;
 
   protected readonly slot = computed(() => this.row().slot);
   protected readonly index = computed(() => this.slot().index);
@@ -140,6 +169,11 @@ export class SlotPanel {
   protected readonly url = linkedSignal({ source: this.index, computation: () => '' });
   protected readonly username = linkedSignal({ source: this.index, computation: () => '' });
   protected readonly password = linkedSignal({ source: this.index, computation: () => '' });
+  /** The last pull's refusal, shown under the form (#170's dialog did) as well as in a toast. */
+  protected readonly pullError = linkedSignal<number, string | null>({
+    source: this.index,
+    computation: () => null,
+  });
   private readonly fpsInvalid = linkedSignal({ source: this.index, computation: () => false });
   protected readonly pickedCamera = linkedSignal<string | null>(
     () => this.cameras.assignments().get(this.index())?.deviceId ?? null,
@@ -185,18 +219,51 @@ export class SlotPanel {
       : `Start src${this.index()}`;
   });
 
+  protected readonly action = computed<PrimaryAction>(() => {
+    const plain = { blocker: null, waiting: this.busy(), tooltip: null };
+    switch (this.slot().state) {
+      case 'external':
+        return { ...plain, kind: 'takeOver', label: 'Take over…', variant: 'danger' };
+      case 'pulled':
+        return { ...plain, kind: 'stopPulling', label: 'Stop pulling', variant: 'outlined' };
+    }
+    if (this.encode()) {
+      // Once the encode is over the start that follows it cannot be cancelled.
+      return {
+        ...plain,
+        kind: 'cancel',
+        label: 'Cancel encoding',
+        variant: 'outlined',
+        waiting: !this.preparing(),
+      };
+    }
+    if (this.playing()) return { ...plain, kind: 'stop', label: 'Stop', variant: 'outlined' };
+    return {
+      kind: 'start',
+      label: 'Start',
+      variant: 'primary',
+      blocker: this.startBlocker(),
+      waiting: this.busy(),
+      tooltip: this.startTooltip(),
+    };
+  });
+
   // Frame rate (file slots).
   protected readonly hasFrameRate = computed(() => !this.isWebcam() && !this.held());
   protected readonly fpsDisabled = computed(
     () => !this.slot().file || !this.canStream() || this.slot().codec === 'mjpeg',
   );
-  protected readonly fpsLocked = computed(() => this.playing() || this.encode() !== null);
-  protected readonly fpsTooltip = computed(() => {
+  /** Also while the slot is busy: a commit posts the file the slot has, and must not race a change. */
+  protected readonly fpsLocked = computed(
+    () => this.playing() || this.encode() !== null || this.busy(),
+  );
+  /** Why the rate cannot be changed, said under the stepper (#170 put it in a tooltip). */
+  protected readonly fpsReason = computed(() => {
     const slot = this.slot();
     if (!slot.file) return 'Assign media before choosing a frame rate';
     if (slot.codec === 'mjpeg') return 'FPS changes are not supported for MJPEG sources';
     if (this.playing()) return 'Stop the source to change its frame rate';
-    return `Output frame rate for src${slot.index} (source ${slot.native_fps ?? '?'} fps)`;
+    return null;
   });
   protected readonly nativeRate = computed(() =>
     isNativeRate(this.slot().fps, this.slot().native_fps),
@@ -283,7 +350,8 @@ export class SlotPanel {
     const dimensions = dimensionsText(stream);
     const showWarning = slot.state === 'external' || slot.pull?.status === 'live';
     return {
-      video: `${codecLabel(slot.codec)}${dimensions ? ` · ${dimensions}` : ''}`,
+      // A pull names no codec until it is live: "-", as the list says.
+      video: `${slotCodec(slot)}${dimensions ? ` · ${dimensions}` : ''}`,
       warning:
         showWarning && !stream.codec_supported
           ? `${codecLabel(slot.codec)} cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.`
@@ -308,7 +376,24 @@ export class SlotPanel {
 
   // Actions.
 
-  protected async start(): Promise<void> {
+  /** The main action's button. A press while it waits does nothing. */
+  protected async runAction(): Promise<void> {
+    const action = this.action();
+    if (action.waiting || action.blocker !== null) return;
+    switch (action.kind) {
+      case 'start':
+        return this.start();
+      case 'stop':
+      case 'stopPulling':
+        return this.stop();
+      case 'cancel':
+        return this.cancelEncoding();
+      case 'takeOver':
+        return this.takeOver();
+    }
+  }
+
+  private async start(): Promise<void> {
     const index = this.index();
     await this.act(async () => {
       if ((await this.control.start(index)) === 'cancelled') {
@@ -317,7 +402,7 @@ export class SlotPanel {
     });
   }
 
-  protected async stop(): Promise<void> {
+  private async stop(): Promise<void> {
     const index = this.index();
     const webcam = this.isWebcam();
     // A webcam is this browser's to end; the cameras service stops it bound to its session.
@@ -328,11 +413,11 @@ export class SlotPanel {
     );
   }
 
-  protected cancelEncoding(): void {
+  private cancelEncoding(): void {
     this.control.cancelEncoding(this.index());
   }
 
-  protected async takeOver(): Promise<void> {
+  private async takeOver(): Promise<void> {
     const slot = this.slot();
     const name = `src${slot.index}`;
     const confirmed = await this.confirm.ask({
@@ -358,10 +443,11 @@ export class SlotPanel {
 
   /** The picker's Assign: the dialog closes once the file is assigned, and stays for a retry if not. */
   protected async assignPicked(dialog: NeatDialogRef, file: string): Promise<void> {
+    const index = this.index();
     this.pickerBusy.set(true);
     dialog.setDismissible(false);
     try {
-      await this.cameras.assignFile({ index: this.index(), file });
+      await this.control.run(index, () => this.cameras.assignFile({ index, file }));
       dialog.close();
     } catch (failure) {
       this.toasts.error(messageOf(failure));
@@ -371,10 +457,16 @@ export class SlotPanel {
     }
   }
 
-  /** Unassigns the slot (`file: ''`), ending this browser's webcam on it first. */
+  /**
+   * Unassigns the slot (`file: ''`), ending this browser's webcam on it first. There is nothing to
+   * clear afterwards, so the focus goes on to Change… (or, from the camera form, the main action).
+   */
   protected async clear(): Promise<void> {
     const index = this.index();
-    await this.act(() => this.cameras.assignFile({ index, file: '' }));
+    const cleared = await this.act(() =>
+      this.control.run(index, () => this.cameras.assignFile({ index, file: '' })),
+    );
+    if (cleared) this.focusAfterRender(() => this.changeButton() ?? this.primaryButton());
   }
 
   protected async requestCameraAccess(): Promise<void> {
@@ -389,29 +481,38 @@ export class SlotPanel {
     const deviceId = this.pickedCamera();
     if (deviceId === null) return;
     const index = this.index();
-    await this.act(() => this.cameras.assign(index, deviceId));
+    const assigned = await this.act(() =>
+      this.control.run(index, () => this.cameras.assign(index, deviceId)),
+    );
+    // What comes next for a camera picked is starting it.
+    if (assigned) this.focusAfterRender(() => this.primaryButton());
   }
 
   protected async pull(): Promise<void> {
     if (!this.canPull()) return;
     const index = this.index();
     this.pulling.set(true);
+    this.pullError.set(null);
     try {
-      await this.act(async () => {
-        const pulled = await this.control.run(index, () =>
-          this.slots.pull({
-            index,
-            url: this.url().trim(),
-            username: this.username().trim(),
-            password: this.password(),
-          }),
-        );
-        // A credential is kept no longer than it is needed.
-        this.password.set('');
-        // Named from the server's record, which carries no credentials, never from the typed URL.
-        if (pulled.pull)
-          this.toasts.status(`src${index} is pulling from ${pullSourceText(pulled.pull)}.`);
-      });
+      const pulled = await this.control.run(index, () =>
+        this.slots.pull({
+          index,
+          url: this.url().trim(),
+          username: this.username().trim(),
+          password: this.password(),
+        }),
+      );
+      // A credential is kept no longer than it is needed.
+      this.password.set('');
+      // Named from the server's record, which carries no credentials, never from the typed URL.
+      if (pulled.pull) {
+        this.toasts.status(`src${index} is pulling from ${pullSourceText(pulled.pull)}.`);
+      }
+      // The form goes with the pull; its main action, Stop pulling, stays.
+      this.focusAfterRender(() => this.primaryButton());
+    } catch (failure) {
+      this.pullError.set(messageOf(failure));
+      this.toasts.error(messageOf(failure));
     } finally {
       this.pulling.set(false);
     }
@@ -450,12 +551,22 @@ export class SlotPanel {
     }
   }
 
-  /** Runs an action and shows a refusal as the server words it. */
-  private async act(action: () => Promise<unknown>): Promise<void> {
+  /** Runs an action and shows a refusal as the server words it; resolves whether it went through. */
+  private async act(action: () => Promise<unknown>): Promise<boolean> {
     try {
       await action();
+      return true;
     } catch (failure) {
       this.toasts.error(messageOf(failure));
+      return false;
     }
+  }
+
+  /**
+   * Moves the focus once the page shows what the action changed: the target may be disabled
+   * until then (while the slot was busy), and a disabled button takes no focus.
+   */
+  private focusAfterRender(target: () => ElementRef<HTMLElement> | undefined): void {
+    afterNextRender({ read: () => target()?.nativeElement.focus() }, { injector: this.injector });
   }
 }

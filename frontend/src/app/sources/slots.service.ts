@@ -241,7 +241,8 @@ export class SlotsService {
    * as the encode ends, while its entry still shows, and this one takes the entry over.
    */
   async startAfterPrepare(index: number): Promise<SuccessResponse> {
-    const starting: Progress = { detail: this.encodes().get(index)?.detail ?? '', ...STARTING };
+    // The encode's detail stays ("1:00 / 1:00 · libx264"), as in #170.
+    const starting: Progress = { detail: '', ...this.encodes().get(index), ...STARTING };
     this.setEncode(index, starting);
     try {
       return await this.start({ index });

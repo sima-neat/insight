@@ -5,275 +5,248 @@
 
 <app-slot-preview [slot]="slot()" [localStream]="localStream()" />
 
+<!--
+  One element for the slot's main action, whatever it is now (Start, Stop, Cancel encoding, Take
+  over…, Stop pulling): a press changes the action, and the focus stays on the button. While the
+  slot is busy it waits with aria-disabled rather than disabled, which would drop the focus.
+-->
 <div class="buttons">
-  @switch (slot().state) {
-    @case ('external') {
-      <button
-        neatButton
-        type="button"
-        variant="danger"
-        size="small"
-        [disabled]="busy()"
-        (click)="takeOver()"
-      >
-        Take over…
-      </button>
-    }
-    @case ('pulled') {
-      <button
-        neatButton
-        type="button"
-        variant="outlined"
-        size="small"
-        [disabled]="busy()"
-        (click)="stop()"
-      >
-        Stop pulling
-      </button>
-    }
-    @default {
-      @if (encode()) {
-        <!-- Only an encode can be cancelled; the start that follows it cannot. -->
-        <button
-          neatButton
-          type="button"
-          variant="outlined"
-          size="small"
-          [disabled]="!preparing()"
-          (click)="cancelEncoding()"
-        >
-          Cancel encoding
-        </button>
-      } @else if (playing()) {
-        <button
-          neatButton
-          type="button"
-          variant="outlined"
-          size="small"
-          [disabled]="busy()"
-          (click)="stop()"
-        >
-          Stop
-        </button>
-      } @else {
-        <button
-          neatButton
-          type="button"
-          size="small"
-          [neatTooltip]="startTooltip()"
-          [disabled]="busy() || startBlocker() !== null"
-          (click)="start()"
-        >
-          Start
-        </button>
-      }
-    }
-  }
+  <button
+    #primary
+    neatButton
+    type="button"
+    size="small"
+    [variant]="action().variant"
+    [neatTooltip]="action().tooltip"
+    [disabled]="action().blocker !== null"
+    [attr.aria-disabled]="action().waiting || null"
+    (click)="runAction()"
+  >
+    {{ action().label }}
+  </button>
 </div>
 
-@if (encode(); as encode) {
-  <div class="encode">
-    <neat-progress [value]="encode.percent" [label]="encode.title" />
-    <p class="encode-title">
-      <span role="status">{{ encode.title }}</span>
-      @if (encode.percent !== null) {
-        {{ encode.percent }}%
-      }
-    </p>
-    @if (encode.detail) {
-      <p class="encode-detail">{{ encode.detail }}</p>
-    }
-  </div>
-}
-
-<h3>Source</h3>
-<neat-segmented label="Source" [options]="sourceForms" [(value)]="form" />
-@switch (form()) {
-  @case ('file') {
-    <p class="text">File: {{ fileDetail() }}</p>
-    <div class="buttons">
-      <button
-        neatButton
-        type="button"
-        variant="outlined"
-        size="small"
-        [disabled]="busy() || encode() !== null"
-        (click)="openPicker()"
-      >
-        Change…
-      </button>
-      <button
-        neatButton
-        type="button"
-        variant="text"
-        size="small"
-        [disabled]="busy() || encode() !== null || !slot().file"
-        (click)="clear()"
-      >
-        Clear
-      </button>
-    </div>
-  }
-  @case ('camera') {
-    <p neatNote>
-      The browser publishes the camera to <code>rtsp://…/src{{ index() }}</code> while this tab
-      stays open.
-    </p>
-    @if (cameras.state() === 'unsupported') {
-      <p neatNote>This browser cannot access cameras.</p>
-    } @else {
-      @if (cameras.cameras().length > 0) {
-        <neat-select-list
-          class="cameras"
-          label="Cameras"
-          [items]="cameras.cameras()"
-          [trackBy]="cameraKey"
-          [selected]="pickedCameraItem()"
-          (selectedChange)="selectCamera($event)"
+@if (!held()) {
+  <h3>Source</h3>
+  <neat-segmented label="Source" [options]="sourceForms" [(value)]="form" />
+  @switch (form()) {
+    @case ('file') {
+      <p class="text">File: {{ fileDetail() }}</p>
+      <div class="buttons">
+        <button
+          #change
+          neatButton
+          type="button"
+          variant="outlined"
+          size="small"
+          [disabled]="busy() || encode() !== null"
+          (click)="openPicker()"
         >
-          <ng-template neatColumn="camera" let-camera>{{ camera.label }}</ng-template>
-        </neat-select-list>
-      } @else if (!cameras.error()) {
-        <p neatNote>No cameras enabled yet. Insight needs this browser's permission to use them.</p>
-      }
-      @if (cameras.error(); as error) {
-        <p class="error" role="alert">{{ error }}</p>
-      }
-    }
-    <div class="buttons">
-      <button
-        neatButton
-        type="button"
-        variant="outlined"
-        size="small"
-        neatTooltip="Ask this browser for camera access, then use a camera as a live source in Streaming"
-        [disabled]="cameras.state() === 'requesting' || cameras.state() === 'unsupported'"
-        (click)="requestCameraAccess()"
-      >
-        {{ accessLabel() }}
-      </button>
-      @if (isWebcam()) {
+          Change…
+        </button>
         <button
           neatButton
           type="button"
           variant="text"
           size="small"
-          [disabled]="busy()"
+          [disabled]="busy() || encode() !== null || !slot().file"
           (click)="clear()"
         >
           Clear
         </button>
-      }
-      <button
-        neatButton
-        type="button"
-        size="small"
-        [disabled]="!canAssignCamera()"
-        (click)="assignCamera()"
-      >
-        Assign
-      </button>
-    </div>
-  }
-  @case ('url') {
-    <form class="pull" (submit)="$event.preventDefault(); pull()">
-      <p neatNote>
-        Insight pulls the stream and forwards it unchanged to
-        <code>rtsp://…/src{{ index() }}</code
-        >. RTSP and RTSPS only.
-      </p>
-      @if (isWebcam()) {
-        <p neatNote>
-          This slot is a webcam source. Clear it on the Camera tab before pulling a stream into it.
-        </p>
-      }
-      <label class="field"
-        ><span>Stream URL</span
-        ><input
-          #urlField
-          neatInput
-          size="small"
-          type="url"
-          placeholder="rtsp://192.168.1.10:554/stream1"
-          [value]="url()"
-          (input)="url.set(urlField.value)"
-      /></label>
-      <div class="credentials">
-        <label class="field"
-          ><span>Username</span
-          ><input
-            #userField
-            neatInput
-            size="small"
-            type="text"
-            autocomplete="off"
-            [value]="username()"
-            (input)="username.set(userField.value)"
-        /></label>
-        <label class="field"
-          ><span>Password</span
-          ><input
-            #passwordField
-            neatInput
-            size="small"
-            type="password"
-            autocomplete="new-password"
-            [value]="password()"
-            (input)="password.set(passwordField.value)"
-        /></label>
       </div>
+    }
+    @case ('camera') {
       <p neatNote>
-        Most IP cameras need a username and password. Credentials typed into the URL work too and
-        are never shown again.
+        The browser publishes the camera to <code>rtsp://…/src{{ index() }}</code> while this tab
+        stays open.
       </p>
+      @if (cameras.state() === 'unsupported') {
+        <p neatNote>This browser cannot access cameras.</p>
+      } @else {
+        @if (cameras.cameras().length > 0) {
+          <neat-select-list
+            class="cameras"
+            label="Cameras"
+            [items]="cameras.cameras()"
+            [trackBy]="cameraKey"
+            [selected]="pickedCameraItem()"
+            (selectedChange)="selectCamera($event)"
+          >
+            <ng-template neatColumn="camera" let-camera>{{ camera.label }}</ng-template>
+          </neat-select-list>
+        } @else if (!cameras.error()) {
+          <p neatNote>
+            No cameras enabled yet. Insight needs this browser's permission to use them.
+          </p>
+        }
+        @if (cameras.error(); as error) {
+          <p class="error" role="alert">{{ error }}</p>
+        }
+      }
       <div class="buttons">
-        <button neatButton type="submit" size="small" [disabled]="!canPull()">
-          {{ pulling() ? 'Checking…' : 'Pull' }}
+        <button
+          neatButton
+          type="button"
+          variant="outlined"
+          size="small"
+          neatTooltip="Ask this browser for camera access, then use a camera as a live source in Streaming"
+          [disabled]="cameras.state() === 'requesting' || cameras.state() === 'unsupported'"
+          (click)="requestCameraAccess()"
+        >
+          {{ accessLabel() }}
+        </button>
+        @if (isWebcam()) {
+          <button
+            neatButton
+            type="button"
+            variant="text"
+            size="small"
+            [disabled]="busy()"
+            (click)="clear()"
+          >
+            Clear
+          </button>
+        }
+        <button
+          neatButton
+          type="button"
+          size="small"
+          [disabled]="!canAssignCamera()"
+          (click)="assignCamera()"
+        >
+          Assign
         </button>
       </div>
-    </form>
+    }
+    @case ('url') {
+      <form class="pull" (submit)="$event.preventDefault(); pull()">
+        <p neatNote>
+          Insight pulls the stream and forwards it unchanged to
+          <code>rtsp://…/src{{ index() }}</code
+          >. RTSP and RTSPS only.
+        </p>
+        @if (isWebcam()) {
+          <p neatNote>
+            This slot is a webcam source. Clear it on the Camera tab before pulling a stream into
+            it.
+          </p>
+        }
+        <label class="field"
+          ><span>Stream URL</span
+          ><input
+            #urlField
+            neatInput
+            size="small"
+            type="url"
+            placeholder="rtsp://192.168.1.10:554/stream1"
+            [value]="url()"
+            (input)="url.set(urlField.value)"
+        /></label>
+        <div class="credentials">
+          <label class="field"
+            ><span>Username</span
+            ><input
+              #userField
+              neatInput
+              size="small"
+              type="text"
+              autocomplete="off"
+              [value]="username()"
+              (input)="username.set(userField.value)"
+          /></label>
+          <label class="field"
+            ><span>Password</span
+            ><input
+              #passwordField
+              neatInput
+              size="small"
+              type="password"
+              autocomplete="new-password"
+              [value]="password()"
+              (input)="password.set(passwordField.value)"
+          /></label>
+        </div>
+        <p neatNote>
+          Most IP cameras need a username and password. Credentials typed into the URL work too and
+          are never shown again.
+        </p>
+        @if (pullError(); as error) {
+          <p class="error" role="alert">{{ error }}</p>
+        }
+        <div class="buttons">
+          <button neatButton type="submit" size="small" [disabled]="!canPull()">
+            {{ pulling() ? 'Checking…' : 'Pull' }}
+          </button>
+        </div>
+      </form>
+    }
   }
-}
 
-@if (hasFrameRate()) {
-  <h3>Output frame rate</h3>
-  <div class="fps" role="group" aria-label="Output frame rate" [neatTooltip]="fpsTooltip()">
-    <app-fps-stepper
-      [value]="slot().fps ?? null"
-      [nativeFps]="slot().native_fps ?? null"
-      [disabled]="fpsDisabled()"
-      [locked]="fpsLocked()"
-      (commit)="commitFps($event)"
-      (invalidChange)="setFpsInvalid($event)"
+  @if (hasFrameRate()) {
+    <div class="frame-rate">
+      <h3>Output frame rate</h3>
+      <div
+        class="fps"
+        role="group"
+        aria-label="Output frame rate"
+        [attr.aria-describedby]="fpsReason() ? fpsReasonId : null"
+      >
+        <app-fps-stepper
+          [value]="slot().fps ?? null"
+          [nativeFps]="slot().native_fps ?? null"
+          [disabled]="fpsDisabled()"
+          [locked]="fpsLocked()"
+          (commit)="commitFps($event)"
+          (invalidChange)="setFpsInvalid($event)"
+        />
+        <button
+          neatButton
+          type="button"
+          variant="outlined"
+          size="small"
+          [neatTooltip]="
+            nativeRate()
+              ? 'Already streaming at the source frame rate'
+              : 'Stream at the source frame rate again'
+          "
+          [disabled]="fpsDisabled() || fpsLocked() || nativeRate()"
+          (click)="commitFps(null)"
+        >
+          {{ nativeLabel() }}
+        </button>
+      </div>
+      @if (fpsReason(); as reason) {
+        <p neatNote [id]="fpsReasonId">{{ reason }}</p>
+      }
+      <p neatNote>{{ renditionHint() }}</p>
+      @if (encode(); as encode) {
+        <div class="encode">
+          <neat-progress [value]="encode.percent" [label]="encode.title" />
+          <p class="encode-title">
+            <span role="status">{{ encode.title }}</span>
+            @if (encode.percent !== null) {
+              {{ encode.percent }}%
+            }
+          </p>
+          @if (encode.detail) {
+            <p class="encode-detail">{{ encode.detail }}</p>
+          }
+        </div>
+      }
+    </div>
+  }
+
+  @if (transportOptions().length > 1) {
+    <neat-select
+      label="Transport"
+      showLabel
+      [options]="transportOptions()"
+      [value]="transport()"
+      [disabled]="busy()"
+      (valueChange)="setTransport($event)"
     />
-    <button
-      neatButton
-      type="button"
-      variant="outlined"
-      size="small"
-      [neatTooltip]="
-        nativeRate()
-          ? 'Already streaming at the source frame rate'
-          : 'Stream at the source frame rate again'
-      "
-      [disabled]="fpsDisabled() || fpsLocked() || nativeRate()"
-      (click)="commitFps(null)"
-    >
-      {{ nativeLabel() }}
-    </button>
-  </div>
-  <p neatNote>{{ renditionHint() }}</p>
-}
-
-@if (transportOptions().length > 1) {
-  <neat-select
-    label="Transport"
-    showLabel
-    [options]="transportOptions()"
-    [value]="transport()"
-    [disabled]="busy()"
-    (valueChange)="setTransport($event)"
-  />
+  }
 }
 
 <h3>Details</h3>
@@ -310,7 +283,7 @@
   }
   @if (streamUrl(); as url) {
     <dt>URL</dt>
-    <dd>
+    <dd class="url">
       <code>{{ url }}</code>
       <button
         neatInlineButton

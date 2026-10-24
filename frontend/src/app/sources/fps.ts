@@ -61,20 +61,6 @@ export function needsRendition(slot: Pick<Slot, 'fps' | 'native_fps'> | null | u
   return slot != null && slot.fps != null && slot.fps !== slot.native_fps;
 }
 
-/**
- * True when a slot in `next` plays at a custom rate it did not play at in `previous`: a start that
- * may have encoded a rendition, from this page, another tab or the API.
- */
-export function renditionMayHaveChanged(
-  previous: readonly Pick<Slot, 'index' | 'file' | 'fps' | 'state'>[],
-  next: readonly Pick<Slot, 'index' | 'file' | 'fps' | 'state'>[],
-): boolean {
-  const playing = (slot: Pick<Slot, 'file' | 'fps' | 'state'>) =>
-    slot.state === 'playing' && slot.fps != null ? `${slot.file}@${slot.fps}` : null;
-  const before = new Map(previous.map((slot) => [slot.index, playing(slot)]));
-  return next.some((slot) => playing(slot) != null && playing(slot) !== before.get(slot.index));
-}
-
 /** How a frame-rate commit ended: the rate the server took, or a refusal (already reported). */
 export type CommitResult = { ok: true; fps: number | null } | { ok: false };
 

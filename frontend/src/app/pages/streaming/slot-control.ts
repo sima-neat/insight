@@ -42,7 +42,10 @@ export class SlotControl {
 
   /** How many panel actions are in flight, per slot. */
   private readonly busyCounts = signal<ReadonlyMap<number, number>>(new Map());
-  /** Slots with a panel action in flight: their controls wait, so a second click cannot race it. */
+  /**
+   * Slots with a panel action in flight, frame-rate commits aside: their controls wait, so a second
+   * click cannot race it.
+   */
   readonly busy = computed<ReadonlySet<number>>(() => new Set(this.busyCounts().keys()));
 
   private readonly preparingState = signal<ReadonlySet<number>>(new Set());
@@ -90,8 +93,9 @@ export class SlotControl {
    * rendition. Rejects with a message to show.
    */
   start(index: number): Promise<StartOutcome> {
+    // Taken before `run`, which waits for it too and by then the commit is no longer pending.
+    const pending = this.commits.get(index);
     return this.run(index, async () => {
-      const pending = this.commits.get(index);
       const current = this.slots.slots()?.find((slot) => slot.index === index);
       const slot = withCommittedFps(current, pending ? await pending : undefined);
       if (!slot) return 'skipped';
@@ -114,10 +118,16 @@ export class SlotControl {
     this.cancels.get(index)?.();
   }
 
-  /** Runs work on a slot with the slot `busy` until it settles. */
+  /**
+   * Runs work on a slot with the slot `busy` until it settles. It starts once a rate commit on its
+   * way to the slot has landed: a commit posts the file the slot had, and work running beside it
+   * (a Clear, another file, a camera) could be undone by it. The commit itself is not `busy`: the
+   * click on Start that follows the blur which commits must still go through.
+   */
   async run<T>(index: number, work: () => Promise<T>): Promise<T> {
     this.adjustBusy(index, 1);
     try {
+      await this.commits.get(index);
       return await work();
     } finally {
       this.adjustBusy(index, -1);

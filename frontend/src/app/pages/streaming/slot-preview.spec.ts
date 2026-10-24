@@ -1,9 +1,9 @@
-import { HttpHeaderResponse, provideHttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaderResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import type { Slot, SlotPull } from '../../sources/api';
-import { SlotPreview } from './slot-preview';
+import { previewFailure, SlotPreview } from './slot-preview';
 
 function slot(index: number, overrides: Partial<Slot> = {}): Slot {
   return {
@@ -110,11 +110,13 @@ describe('SlotPreview', () => {
     expect(root().querySelector('neat-progress')).toBeNull();
     expect(text()).not.toContain('File preview');
 
-    // The server's cap on previews: it says so and offers a fresh attempt.
-    live.dispatchEvent(new Event('error'));
+    // The server's cap on previews refuses a new stream: it says so and offers a fresh attempt.
+    host.slot.set(slot(2, { state: 'playing', file: 'cars.mp4', codec: 'h264' }));
+    await fixture.whenStable();
+    image()!.dispatchEvent(new Event('error'));
     await fixture.whenStable();
     http
-      .expectOne((request) => request.url.startsWith('/stream/preview/src1.mjpg'))
+      .expectOne((request) => request.url.startsWith('/stream/preview/src2.mjpg'))
       .flush({ error: 'Too many previews open' }, { status: 429, statusText: 'Too Many Requests' });
     await fixture.whenStable();
     expect(image()).toBeNull();
@@ -123,8 +125,8 @@ describe('SlotPreview', () => {
     vi.setSystemTime(1_737_000_005_000);
     button('Retry').click();
     await fixture.whenStable();
-    expect(image()!.getAttribute('src')).toBe('/stream/preview/src1.mjpg?t=1737000005000');
-    expect(text()).toContain('Connecting to src1…');
+    expect(image()!.getAttribute('src')).toBe('/stream/preview/src2.mjpg?t=1737000005000');
+    expect(text()).toContain('Connecting to src2…');
   });
 
   it('another failure says the preview is unavailable, with Retry', async () => {
@@ -213,6 +215,40 @@ describe('SlotPreview', () => {
     expect(image()!.getAttribute('src')).toBe('/stream/preview/src3.mjpg?t=1737000000000');
   });
 
+  it('ends a live or MJPEG image’s stream when the image goes, since a browser would keep it loading', async () => {
+    await show(slot(1, { state: 'external' }));
+    const first = image()!;
+    host.slot.set(slot(4, { state: 'external' }));
+    await fixture.whenStable();
+    expect(first.hasAttribute('src')).toBe(false);
+    expect(image()!.getAttribute('src')).toContain('/stream/preview/src4.mjpg');
+
+    // A Retry is a new image, and the failed one is let go.
+    const second = image()!;
+    host.slot.set(slot(4, { file: 'cam.mjpeg', codec: 'mjpeg' }));
+    await fixture.whenStable();
+    expect(second.hasAttribute('src')).toBe(false);
+    const file = image()!;
+    expect(file.getAttribute('src')).toContain('/api/media-preview/mjpeg');
+
+    host.shown.set(false);
+    await fixture.whenStable();
+    expect(file.hasAttribute('src')).toBe(false);
+  });
+
+  it('a stream that failed after showing frames is unavailable without asking again: the cap only refuses a new one', async () => {
+    await show(slot(1, { state: 'external' }));
+    const live = image()!;
+    decodeFirstFrame(live);
+    vi.advanceTimersByTime(100);
+    await fixture.whenStable();
+    live.dispatchEvent(new Event('error'));
+    await fixture.whenStable();
+    http.expectNone((request) => request.url.startsWith('/stream/preview/'));
+    expect(text()).toContain('Preview unavailable.');
+    expect(text()).not.toContain('too many');
+  });
+
   it('stops looking for the first frame when the slot changes or the preview goes', async () => {
     await show(slot(1, { state: 'external' }));
     expect(vi.getTimerCount()).toBe(1);
@@ -227,5 +263,47 @@ describe('SlotPreview', () => {
     host.shown.set(false);
     await fixture.whenStable();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('previewFailure', () => {
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    // RxJS schedules its timeout with an interval.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.verify();
+    vi.useRealTimers();
+  });
+
+  it('gives up after 3 s on a request that does not answer, and ends it', () => {
+    const outcomes: string[] = [];
+    previewFailure(TestBed.inject(HttpClient), '/stream/preview/src1.mjpg?t=1').subscribe(
+      (outcome) => outcomes.push(outcome),
+    );
+    const probe = http.expectOne('/stream/preview/src1.mjpg?t=1');
+    vi.advanceTimersByTime(2999);
+    expect(outcomes).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(outcomes).toEqual(['failed']);
+    expect(probe.cancelled).toBe(true);
+  });
+
+  it('reads a 429 from the headers as the cap on previews', () => {
+    const outcomes: string[] = [];
+    previewFailure(TestBed.inject(HttpClient), '/stream/preview/src1.mjpg?t=1').subscribe(
+      (outcome) => outcomes.push(outcome),
+    );
+    const probe = http.expectOne('/stream/preview/src1.mjpg?t=1');
+    probe.event(new HttpHeaderResponse({ status: 429, statusText: 'Too Many Requests' }));
+    expect(outcomes).toEqual(['busy']);
+    expect(probe.cancelled).toBe(true);
   });
 });

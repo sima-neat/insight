@@ -24,11 +24,18 @@
  *   merge them with `mergePrepareProgress`.
  */
 
+import { formatFpsProgress } from './fps';
+
 export interface Progress {
   title: string;
   detail: string;
   /** 0..100, or null while the length of the work is unknown. */
   percent: number | null;
+  /**
+   * The encoder a rendition encode runs with (prepare lines only), kept so that the progress lines
+   * after it can name it in their detail, as #170's "0:25 / 1:00 · libx264" did.
+   */
+  encoder?: string;
 }
 
 export interface ProgressFailure {
@@ -212,14 +219,19 @@ export function prepareProgress(line: string): Progress | ProgressFailure | null
     const known = total > 0;
     return {
       title: 'Encoding rendition…',
-      detail: known ? `${progress[1]} / ${progress[2]} s` : `${progress[1]} s`,
+      detail: formatFpsProgress({ seconds, total: known ? total : null }),
       // Capped below 100: the rendition is not ready, and the stream not started, until the end.
       percent: known ? Math.min(99, Math.floor((seconds / total) * 100)) : null,
     };
   }
   const encoding = PREPARE_ENCODING.exec(text);
   if (encoding) {
-    return { title: `Encoding ${encoding[1]} fps rendition…`, detail: encoding[2], percent: null };
+    return {
+      title: `Encoding ${encoding[1]} fps rendition…`,
+      detail: encoding[2],
+      percent: null,
+      encoder: encoding[2],
+    };
   }
   for (const title of ['Reusing rendition', 'Rendition ready']) {
     if (text.startsWith(`${title}:`))
@@ -232,9 +244,9 @@ const PREPARE_PROGRESS_TITLE = 'Encoding rendition…';
 
 /**
  * The prepare display after `line`, given what it showed before (null at the start). A bare
- * `progress N/T` line keeps the earlier "Encoding 15 fps rendition…" title and its encoder detail
- * and takes only the new percent, as #170 did; every other line replaces the display. A blank
- * line leaves it as it was.
+ * `progress N/T` line keeps the earlier "Encoding 15 fps rendition…" title and takes the new
+ * percent, with the time and the encoder as the detail ("0:25 / 1:00 · libx264"), as #170 did;
+ * every other line replaces the display. A blank line leaves it as it was.
  */
 export function mergePrepareProgress(
   previous: Progress | null,
@@ -248,7 +260,8 @@ export function mergePrepareProgress(
     previous?.title.startsWith('Encoding ') &&
     previous.title !== PREPARE_PROGRESS_TITLE
   ) {
-    return { ...previous, percent: next.percent };
+    const encoder = previous.encoder ? ` · ${previous.encoder}` : '';
+    return { ...previous, percent: next.percent, detail: `${next.detail}${encoder}` };
   }
   return next;
 }

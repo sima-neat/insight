@@ -23,8 +23,8 @@
     [value]="draft()"
     [disabled]="inert()"
     (input)="edit(field.value)"
-    (blur)="commitDraft()"
-    (keydown.enter)="$event.preventDefault(); field.blur()"
+    (blur)="left()"
+    (keydown.enter)="$event.preventDefault(); commitDraft()"
   />
   <span class="unit" aria-hidden="true">fps</span>
 </span>

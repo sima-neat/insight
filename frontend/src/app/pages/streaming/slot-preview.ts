@@ -10,8 +10,9 @@ import {
   Component,
   computed,
   DestroyRef,
+  Directive,
   effect,
-  type ElementRef,
+  ElementRef,
   inject,
   input,
   linkedSignal,
@@ -21,12 +22,23 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NeatButton } from '@sima/neat-ui';
 import { NeatProgress } from '@sima/neat-ui/progress';
-import { catchError, filter, map, type Observable, of, type Subscription, take } from 'rxjs';
+import {
+  catchError,
+  filter,
+  map,
+  type Observable,
+  of,
+  type Subscription,
+  take,
+  timeout,
+} from 'rxjs';
 import type { Slot } from '../../sources/api';
 import { isLive, previewSrc } from './slot-row';
 
 /** How often the live image is checked for its first frame (#170). */
 const FRAME_CHECK_MS = 100;
+/** How long the check of a failed preview waits for the server before calling it unavailable. */
+const PROBE_TIMEOUT_MS = 3000;
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm']);
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png']);
@@ -75,10 +87,11 @@ export function watchFirstFrame(
 }
 
 /**
- * Why a preview image failed to load, which the image cannot say: the same URL is asked again
+ * Why a new preview image failed to load, which the image cannot say: the same URL is asked again
  * and only the status is read. The preview route checks its cap before it starts FFmpeg, so a 429
- * answers at once; the request ends as soon as the status is known, so a stream that answers this
- * time is dropped at its headers.
+ * answers at once. With the XHR backend the status of a stream that answers this time arrives with
+ * its first bytes, so that request does start a preview session, which ends as soon as the status
+ * is read. A server that does not answer within 3 s counts as unavailable.
  */
 export function previewFailure(http: HttpClient, url: string): Observable<PreviewFailure> {
   const failureOf = (status: number): PreviewFailure => (status === 429 ? 'busy' : 'failed');
@@ -89,10 +102,25 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
     ),
     take(1),
     map((event) => failureOf(event.status)),
+    timeout(PROBE_TIMEOUT_MS),
     catchError((failure: unknown) =>
       of(failureOf(failure instanceof HttpErrorResponse ? failure.status : 0)),
     ),
   );
+}
+
+/**
+ * Ends the load of the image it sits on when the image leaves the page. A browser keeps loading a
+ * multipart MJPEG image after the element is dropped, so a preview removed from the page would go
+ * on decoding, and hold one of the server's four preview sessions, until the stream ends (#170
+ * cleared the source for this). Removing the source aborts it.
+ */
+@Directive({ selector: 'img[appEndsStream]' })
+export class EndsStream {
+  constructor() {
+    const image = inject<ElementRef<HTMLImageElement>>(ElementRef).nativeElement;
+    inject(DestroyRef).onDestroy(() => image.removeAttribute('src'));
+  }
 }
 
 /**
@@ -105,7 +133,7 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
  */
 @Component({
   selector: 'app-slot-preview',
-  imports: [NeatButton, NeatProgress],
+  imports: [EndsStream, NeatButton, NeatProgress],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './slot-preview.html',
   styleUrl: './slot-preview.css',
@@ -193,8 +221,15 @@ export class SlotPreview {
     });
   }
 
-  /** The live image failed: find out why before saying so. */
+  /**
+   * The live image failed. Only a new stream can meet the server's cap on previews (429), so one
+   * that has shown frames is simply unavailable; for one that has not, find out which it is.
+   */
   protected failed(src: string): void {
+    if (this.shownSrc() === src) {
+      this.failure.set('failed');
+      return;
+    }
     this.failure.set('checking');
     this.probe?.unsubscribe();
     this.probe = previewFailure(this.http, src)

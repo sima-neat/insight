@@ -237,4 +237,20 @@ describe('SlotControl', () => {
     await expect(running).rejects.toThrow('refused');
     expect(control.busy().has(4)).toBe(false);
   });
+
+  it('run waits for a frame-rate commit on its way to the slot, so the two never race', async () => {
+    const assigned = deferred<SuccessResponse>();
+    slots.assign.mockReturnValueOnce(assigned.promise);
+    void control.commitFps(slot(2), 15);
+    const work = vi.fn(async () => 'done');
+    const running = control.run(2, work);
+    await flush();
+    expect(work).not.toHaveBeenCalled();
+    expect(control.busy().has(2)).toBe(true);
+    assigned.resolve(OK);
+    await expect(running).resolves.toBe('done');
+    // Another slot's work does not wait for it.
+    void control.commitFps(slot(2), 20);
+    await expect(control.run(7, async () => 'other')).resolves.toBe('other');
+  });
 });

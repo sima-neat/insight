@@ -1,4 +1,3 @@
-import type { SlotState } from './api';
 import {
   allCommitsSucceeded,
   formatFpsProgress,
@@ -7,12 +6,12 @@ import {
   isNativeRate,
   needsRendition,
   parseFps,
-  renditionMayHaveChanged,
   stepFps,
   withCommittedFps,
 } from './fps';
 
-// #170's `fps.test.js`, ported with its assertions unchanged.
+// #170's `fps.test.js`, ported with its assertions unchanged. `renditionMayHaveChanged` and its
+// test are left out (ruling Q13): `SlotsService`'s `startedCustomFps` is the app's one rule for it.
 describe('fps', () => {
   it('constants match the backend minimum', () => {
     expect(FPS_MIN).toBe(1);
@@ -87,37 +86,5 @@ describe('fps', () => {
       ]),
     ).toBe(true);
     expect(allCommitsSucceeded([{ ok: true, fps: 15 }, { ok: false }])).toBe(false);
-  });
-
-  it('renditionMayHaveChanged spots a slot that started playing at a custom FPS', () => {
-    // Owner review (O9): the 2 s poll asks for rendition usage only when a start may have made one.
-    const slot = (state: SlotState, fps: number | null, file = 'clip.mp4') => ({
-      index: 1,
-      file,
-      fps,
-      state,
-    });
-    expect(renditionMayHaveChanged([slot('stopped', 15)], [slot('playing', 15)])).toBe(true);
-    expect(
-      renditionMayHaveChanged([slot('playing', 15)], [slot('playing', 20)]),
-      'restarted at another rate',
-    ).toBe(true);
-    expect(
-      renditionMayHaveChanged([slot('playing', 15)], [slot('playing', 15, 'other.mp4')]),
-      'restarted with another file',
-    ).toBe(true);
-    expect(renditionMayHaveChanged([], [slot('playing', 15)]), 'first poll').toBe(true);
-    expect(
-      renditionMayHaveChanged([slot('playing', 15)], [slot('playing', 15)]),
-      'still playing',
-    ).toBe(false);
-    expect(
-      renditionMayHaveChanged([slot('stopped', null)], [slot('playing', null)]),
-      'native rate makes no rendition',
-    ).toBe(false);
-    expect(
-      renditionMayHaveChanged([slot('playing', 15)], [slot('stopped', 15)]),
-      'a stop keeps the rendition',
-    ).toBe(false);
   });
 });

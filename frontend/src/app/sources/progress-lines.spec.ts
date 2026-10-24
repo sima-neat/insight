@@ -215,10 +215,10 @@ describe('youtubeProgress', () => {
 });
 
 describe('prepareProgress', () => {
-  it('reads the seconds encoded, the total and the percent', () => {
+  it('reads the seconds encoded, the total and the percent, as #170 showed them (m:ss)', () => {
     expect(prepareProgress('progress 12.5/60.0')).toEqual({
       title: 'Encoding rendition…',
-      detail: '12.5 / 60.0 s',
+      detail: '0:12 / 1:00',
       percent: 20,
     });
   });
@@ -232,12 +232,12 @@ describe('prepareProgress', () => {
   it('shows the seconds alone when the total is unknown or zero', () => {
     expect(prepareProgress('progress 12.5')).toEqual({
       title: 'Encoding rendition…',
-      detail: '12.5 s',
+      detail: '0:12',
       percent: null,
     });
     expect(prepareProgress('progress 12.5/0.0')).toEqual({
       title: 'Encoding rendition…',
-      detail: '12.5 s',
+      detail: '0:12',
       percent: null,
     });
   });
@@ -247,6 +247,7 @@ describe('prepareProgress', () => {
       title: 'Encoding 15 fps rendition…',
       detail: 'libx264',
       percent: null,
+      encoder: 'libx264',
     });
   });
 
@@ -336,26 +337,33 @@ describe('failure lines', () => {
 describe('mergePrepareProgress', () => {
   const encoding = 'Encoding a/clip.mp4 at 15 fps (libx264)...';
 
-  it('keeps the encoding title and encoder when a progress line arrives', () => {
+  it("keeps the encoding title when a progress line arrives, and shows #170's 'm:ss / m:ss · encoder'", () => {
     const started = mergePrepareProgress(null, encoding);
     expect(started).toEqual({
       title: 'Encoding 15 fps rendition…',
       detail: 'libx264',
       percent: null,
+      encoder: 'libx264',
     });
 
     expect(mergePrepareProgress(started as Progress, 'progress 12.5/60.0')).toEqual({
       title: 'Encoding 15 fps rendition…',
-      detail: 'libx264',
+      detail: '0:12 / 1:00 · libx264',
       percent: 20,
+      encoder: 'libx264',
     });
   });
 
-  it('keeps following the percent through later progress lines', () => {
+  it('keeps following the time and percent through later progress lines', () => {
     let state = mergePrepareProgress(null, encoding);
     state = mergePrepareProgress(state as Progress, 'progress 12.5/60.0');
     state = mergePrepareProgress(state as Progress, 'progress 30.0/60.0');
-    expect(state).toMatchObject({ title: 'Encoding 15 fps rendition…', percent: 50 });
+    expect(state).toEqual({
+      title: 'Encoding 15 fps rendition…',
+      detail: '0:30 / 1:00 · libx264',
+      percent: 50,
+      encoder: 'libx264',
+    });
   });
 
   it('shows a progress line as it is when no encoding line came first', () => {

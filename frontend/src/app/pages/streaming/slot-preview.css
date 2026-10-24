@@ -4,14 +4,14 @@
   gap: var(--neat-space-2);
 }
 
-/* The picture's box: 16:9 like most streams, the picture letterboxed inside it. */
+/* The picture's box: 16:9 like most streams, the picture letterboxed inside it; square, as the
+   Viewer's tiles are. */
 .frame {
   position: relative;
   display: grid;
   place-items: center;
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  border-radius: var(--radius);
   background: var(--muted);
 }
 

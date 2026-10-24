@@ -531,8 +531,9 @@ describe('SlotsService', () => {
       });
       expect(service.encodes().get(2)).toEqual({
         title: 'Encoding 15 fps rendition…',
-        detail: 'libx264',
+        detail: '0:03 / 0:10 · libx264',
         percent: 30,
+        encoder: 'libx264',
       });
       // A failure is the subscriber's to word; the encode shows what it reached until it ends.
       request.flush('Encoding a.mp4 at 15 fps (libx264)...\nprogress 3/10\nError: disk full\n');
@@ -577,8 +578,9 @@ describe('SlotsService', () => {
       const started = service.startAfterPrepare(2);
       expect(service.encodes().get(2)).toEqual({
         title: 'Starting stream…',
-        detail: 'libx264',
+        detail: '0:09 / 0:10 · libx264',
         percent: 99,
+        encoder: 'libx264',
       });
       const start = http.expectOne('/api/mediasrc/start');
       expect(start.request.body).toEqual({ index: 2 });

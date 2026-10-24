@@ -15,7 +15,8 @@ import { parseFps, stepFps } from '../../sources/fps';
 /**
  * A slot's output frame rate (#170's `FpsStepper`): − and + step by 5 down to 1, with no upper
  * bound, and the field takes any whole number. A step commits at once; a typed number commits on
- * Enter or when the field is left. A draft that is not a whole number of at least 1 is marked
+ * Enter, which keeps the focus in the field, or when the field is left after typing (leaving an
+ * untouched field chooses nothing, so tabbing past it commits nothing). A draft that is not a whole number of at least 1 is marked
  * invalid while it is typed (`invalidChange`, so the panel can hold Start); leaving it, or an
  * emptied field, puts the rate back and commits nothing. A rate equal to the one shown is no
  * change and is not committed.
@@ -45,6 +46,8 @@ export class FpsStepper {
   protected readonly inert = computed(() => this.disabled() || this.locked());
   protected readonly draft = signal('');
   protected readonly invalid = signal(false);
+  /** Typed in since the field last showed the rate or committed. */
+  private edited = false;
 
   constructor() {
     effect(() => {
@@ -55,6 +58,7 @@ export class FpsStepper {
 
   /** Shows the slot's rate again, after a commit the server refused. */
   reset(): void {
+    this.edited = false;
     const effective = this.effective();
     this.draft.set(effective == null ? '' : String(effective));
     this.markInvalid(false);
@@ -66,11 +70,17 @@ export class FpsStepper {
   }
 
   protected edit(text: string): void {
+    this.edited = true;
     this.draft.set(text);
     this.markInvalid(text.trim() !== '' && parseFps(text) === null);
   }
 
-  /** Leaving the field: an accepted rate is committed, anything else puts the rate back. */
+  /** Leaving the field after typing in it. */
+  protected left(): void {
+    if (this.edited) this.commitDraft();
+  }
+
+  /** Enter, or leaving: an accepted rate is committed, anything else puts the rate back. */
   protected commitDraft(): void {
     const parsed = parseFps(this.draft());
     if (parsed === null) this.reset();
@@ -78,6 +88,7 @@ export class FpsStepper {
   }
 
   private commitRate(fps: number): void {
+    this.edited = false;
     this.markInvalid(false);
     if (fps !== this.effective()) this.commit.emit(fps);
   }

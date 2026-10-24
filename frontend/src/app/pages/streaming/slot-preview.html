@@ -2,6 +2,7 @@
   @for (src of liveSources(); track src) {
     <img
       #live
+      appEndsStream
       [src]="src"
       [alt]="'Live preview of src' + slot().index"
       [class.waiting]="connecting()"
@@ -27,7 +28,7 @@
       @if (file.kind === 'video') {
         <video [src]="file.src" controls autoplay muted loop playsinline [muted]="true"></video>
       } @else {
-        <img [src]="file.src" [alt]="slot().file" />
+        <img appEndsStream [src]="file.src" [alt]="slot().file" />
       }
     } @else if (idleText()) {
       <p class="message">{{ idleText() }}</p>
