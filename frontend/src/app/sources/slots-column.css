@@ -1,0 +1,9 @@
+/*
+ * The notice takes the height it needs (none while empty) and the list the rest. A grid row with
+ * no minimum lets the list be shorter than its rows, so it scrolls them instead of growing.
+ */
+:host {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+}

@@ -1,5 +1,5 @@
 <header class="slot-header">
-  <h2>{{ row().name }}</h2>
+  <h2 neatAsideTitle>{{ row().name }}</h2>
   <neat-status-chip [tone]="row().state.tone">{{ row().state.label }}</neat-status-chip>
 </header>
 
@@ -10,7 +10,7 @@
   over…, Stop pulling): a press changes the action, and the focus stays on the button. While the
   slot is busy it waits with aria-disabled rather than disabled, which would drop the focus.
 -->
-<div class="buttons">
+<div neatAsideActions>
   <button
     #primary
     neatButton
@@ -27,12 +27,12 @@
 </div>
 
 @if (!held()) {
-  <h3>Source</h3>
+  <h3 neatAsideHeading>Source</h3>
   <neat-segmented label="Source" [options]="sourceForms" [(value)]="form" />
   @switch (form()) {
     @case ('file') {
       <p class="text">File: {{ fileDetail() }}</p>
-      <div class="buttons">
+      <div neatAsideActions>
         <button
           #change
           neatButton
@@ -58,8 +58,8 @@
     }
     @case ('camera') {
       <p neatNote>
-        The browser publishes the camera to <code>rtsp://…/src{{ index() }}</code> while this tab
-        stays open.
+        The browser publishes the camera to <code neatCode>rtsp://…/src{{ index() }}</code> while
+        this tab stays open.
       </p>
       @if (cameras.state() === 'unsupported') {
         <p neatNote>This browser cannot access cameras.</p>
@@ -84,7 +84,7 @@
           <neat-error-note>{{ error }}</neat-error-note>
         }
       }
-      <div class="buttons">
+      <div neatAsideActions>
         <button
           neatButton
           type="button"
@@ -123,7 +123,7 @@
       <form class="pull" (submit)="$event.preventDefault(); pull()">
         <p neatNote>
           Insight pulls the stream and forwards it unchanged to
-          <code>rtsp://…/src{{ index() }}</code
+          <code neatCode>rtsp://…/src{{ index() }}</code
           >. RTSP and RTSPS only.
         </p>
         @if (isWebcam()) {
@@ -171,7 +171,7 @@
         @if (pullError(); as error) {
           <neat-error-note>{{ error }}</neat-error-note>
         }
-        <div class="buttons">
+        <div neatAsideActions>
           <button neatButton type="submit" size="small" [disabled]="!canPull()">
             {{ pulling() ? 'Checking…' : 'Pull' }}
           </button>
@@ -182,7 +182,7 @@
 
   @if (hasFrameRate()) {
     <div class="frame-rate">
-      <h3>Output frame rate</h3>
+      <h3 neatAsideHeading>Output frame rate</h3>
       <div
         class="fps"
         role="group"
@@ -246,13 +246,13 @@
   }
 }
 
-<h3>Details</h3>
+<h3 neatAsideHeading>Details</h3>
 <dl neatDetails>
   @if (holder(); as holder) {
     @if (pullSource(); as source) {
       <dt>Source</dt>
       <dd>
-        <code>{{ source }}</code>
+        <code neatCode>{{ source }}</code>
       </dd>
       <dt>Status</dt>
       <dd>{{ pullStatus() }}</dd>
@@ -272,7 +272,7 @@
     <dd>
       {{ output() }}
       @if (streamingRendition(); as rendition) {
-        · streaming rendition <code>{{ rendition }}</code>
+        · streaming rendition <code neatCode>{{ rendition }}</code>
       } @else if (renditionPending()) {
         (rendition will be created on start)
       }
@@ -281,7 +281,7 @@
   @if (streamUrl(); as url) {
     <dt>URL</dt>
     <dd class="url">
-      <code>{{ url }}</code>
+      <code neatCode>{{ url }}</code>
       <button
         neatInlineButton
         type="button"

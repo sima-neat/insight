@@ -13,7 +13,15 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
-import { NeatButton, NeatIcon, NeatNote, NeatTooltip } from '@sima/neat-ui';
+import {
+  NeatAsideHeading,
+  NeatAsidePanel,
+  NeatAsideTitle,
+  NeatButton,
+  NeatIcon,
+  NeatNote,
+  NeatTooltip,
+} from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
@@ -209,6 +217,9 @@ function describeLateness(reading: LatenessReading | null): string {
   selector: 'app-viewer-inspector',
   imports: [
     LateNotice,
+    NeatAsideHeading,
+    NeatAsidePanel,
+    NeatAsideTitle,
     NeatButton,
     NeatDetails,
     NeatIcon,
@@ -221,6 +232,7 @@ function describeLateness(reading: LatenessReading | null): string {
     RoiTab,
     SettingRow,
   ],
+  hostDirectives: [NeatAsidePanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     role: 'region',

@@ -3,25 +3,11 @@
     <neat-icon name="upload" />
     Import…
   </button>
-  <button
-    neatButton
-    type="button"
-    variant="text"
-    size="small"
-    iconOnly
-    aria-label="Side panel"
-    neatTooltip="Side panel"
-    neatTooltipPosition="bottom"
-    [pressed]="asideOpen()"
-    (click)="toggleAside()"
-  >
-    <neat-icon name="info" />
-  </button>
+  <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('media', $event)" />
 </ng-container>
 
 <neat-page scroll="none" [aside]="asideOpen() ? 'open' : 'closed'">
-  <div class="library">
-    <app-slots-notice />
+  <app-slots-column>
     @if (loading()) {
       <p neatNote>Loading media…</p>
     } @else {
@@ -41,7 +27,7 @@
         </ng-template>
       </neat-file-browser>
     }
-  </div>
+  </app-slots-column>
 
   @if (asideOpen()) {
     <section neatPageAside aria-label="Selected media">

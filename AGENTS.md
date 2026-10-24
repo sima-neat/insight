@@ -92,6 +92,14 @@ merging.
   A new page needs both, and `navigation.spec.ts` checks that they agree. The old app's paths keep
   working: `/rtsp` and `/visualizer` redirect to their pages, and `/` and unknown paths (old
   `/workspace` and `/genai` bookmarks) land on Streaming.
+- **Side panels.** Viewer, Streaming and Media open their side panel with the kit's
+  `neat-aside-toggle` ("Side panel") and build it from the kit's aside parts (`neatAsidePanel`,
+  `neatAsideTitle`, `neatAsideHeading`, `neatAsideActions`, `neatCode`). Whether a page's panel is
+  open is remembered per page in storage: the Viewer in its layout (`LayoutPrefs`), Streaming and
+  Media in `AsidePrefs` (`neat-insight:<page>:aside`). Where the user was on a page (Viewer
+  position, Streaming's slot, Media's folder and selection) lives in memory for the next visit
+  (`ViewerSession`, `SourcesSession`). Streaming's and Media's list sits under the stale-status
+  notice in `app-slots-column`.
 - **Build output.** `npm run build` writes the app to `frontend/dist` with `index.html` at its root,
   where Flask (`_resolve_frontend_dist`) and `build.sh` look for it. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves

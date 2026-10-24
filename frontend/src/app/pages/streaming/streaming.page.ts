@@ -9,6 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import {
+  NeatAsideToggle,
   NeatButton,
   NeatIcon,
   NeatNote,
@@ -29,13 +30,15 @@ import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatSlider } from '@sima/neat-ui/slider';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { AsidePrefs } from '../../aside-prefs';
 import { CellText } from '../../cell-text';
 import type { MediaNode, RenditionsCleared } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
 import { formatBytes } from '../../sources/format-bytes';
 import { MediaLibraryService } from '../../sources/media-library.service';
-import { SlotsNotice } from '../../sources/slots-notice';
+import { SlotsColumn } from '../../sources/slots-column';
 import { SlotsService } from '../../sources/slots.service';
+import { SourcesSession } from '../sources-session';
 import { SlotControl } from './slot-control';
 import { SlotPanel } from './slot-panel';
 import { isInUse, type SlotRow, slotRow } from '../../sources/slot-row';
@@ -84,6 +87,7 @@ function clearedMessage({ removed, freed_bytes, kept }: RenditionsCleared): stri
   selector: 'app-streaming-page',
   imports: [
     CellText,
+    NeatAsideToggle,
     NeatButton,
     NeatColumn,
     NeatDialogActions,
@@ -101,7 +105,7 @@ function clearedMessage({ removed, freed_bytes, kept }: RenditionsCleared): stri
     NeatStatusChip,
     NeatTooltip,
     SlotPanel,
-    SlotsNotice,
+    SlotsColumn,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './streaming.page.html',
@@ -118,13 +122,18 @@ export class StreamingPage {
 
   protected readonly slotCount = SLOT_COUNT;
   protected readonly filter = signal<SlotFilter>('all');
-  protected readonly asideOpen = signal(true);
+  protected readonly asides = inject(AsidePrefs);
+  protected readonly asideOpen = computed(() => this.asides.open('streaming'));
   protected readonly moreOpen = signal(false);
   /** The count the Start… dialog's slider is at: 1 at first, then the last one chosen (#170). */
   protected readonly bulkCount = signal(1);
 
-  /** By index rather than the row: each poll answer brings new rows for the same slots. */
-  private readonly selectedIndex = signal<number | null>(null);
+  private readonly session = inject(SourcesSession);
+  /**
+   * By index rather than the row: each poll answer brings new rows for the same slots. Where the
+   * last visit left it, src1 on the first (#170).
+   */
+  private readonly selectedIndex = signal<number | null>(this.session.streaming.slot);
   /** A bulk action of this page is running; the Start… dialog's Start waits for it. */
   protected readonly bulkRunning = signal(false);
   private readonly bulkStartDialog = viewChild.required<TemplateRef<unknown>>('bulkStart');
@@ -184,7 +193,9 @@ export class StreamingPage {
   protected readonly rowKey = (row: SlotRow): number => row.slot.index;
 
   constructor() {
-    inject(DestroyRef).onDestroy(this.slots.watch());
+    const destroyRef = inject(DestroyRef);
+    destroyRef.onDestroy(this.slots.watch());
+    destroyRef.onDestroy(() => (this.session.streaming = { slot: this.selectedIndex() }));
     // Both only inform the top bar (Start… and the ⋯ menu's count). A failure leaves Start…
     // disabled and the count unknown, as in #170; the usage is fetched again on use.
     this.library.refresh().catch(() => undefined);
@@ -197,11 +208,7 @@ export class StreamingPage {
 
   /** Enter or a click on a row: its actions are in the side panel, so the panel opens. */
   protected openAside(): void {
-    this.asideOpen.set(true);
-  }
-
-  protected toggleAside(): void {
-    this.asideOpen.update((open) => !open);
+    this.asides.setOpen('streaming', true);
   }
 
   /** The ⋯ menu shows the rendition usage, which only changes with a fetch: fetch it as it opens. */

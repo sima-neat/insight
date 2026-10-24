@@ -7,17 +7,6 @@
   align-self: flex-start;
 }
 
-/* The list fills the page's content box under the notice, and scrolls its rows inside. */
-.slots {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-neat-select-list {
-  flex: 1 1 0;
-}
-
 /* The kind is a code (VID, CAM, EXT, URL), set off from the source it qualifies. */
 .kind {
   color: var(--muted-foreground);

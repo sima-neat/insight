@@ -9,6 +9,7 @@ import { MediaLibraryService } from '../../sources/media-library.service';
 import type { Progress } from '../../sources/progress-lines';
 import { SlotsService } from '../../sources/slots.service';
 import { ApiRequestError } from '../../sources/stream-lines';
+import { FakeLocalStorage } from '../../viewer/settings/fake-storage.testing';
 import { MediaPage } from './media.page';
 
 function slot(index: number, overrides: Partial<Slot> = {}): Slot {
@@ -90,7 +91,12 @@ describe('MediaPage', () => {
   let imports: { open: ReturnType<typeof vi.fn<(tab?: string) => Promise<string | null>>> };
   let fixture: ComponentFixture<Shell>;
 
+  let storage: FakeLocalStorage;
+
   beforeEach(() => {
+    // The side panel's open state is remembered in storage: a fresh one for every test.
+    storage = new FakeLocalStorage();
+    vi.stubGlobal('localStorage', storage);
     slots = new FakeSlots();
     library = new FakeLibrary();
     toasts = { error: vi.fn(), status: vi.fn() };
@@ -107,6 +113,10 @@ describe('MediaPage', () => {
         { provide: ImportDialogs, useValue: imports },
       ],
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   const root = (): HTMLElement => fixture.nativeElement;
@@ -189,13 +199,13 @@ describe('MediaPage', () => {
       new Promise<undefined>((resolve) => (answer = () => resolve(undefined))),
     );
     await open();
-    expect(root().querySelector('.library')!.textContent).toContain('Loading media…');
+    expect(root().querySelector('app-slots-column')!.textContent).toContain('Loading media…');
     expect(root().querySelector('neat-file-browser')).toBeNull();
 
     library.tree.set(TREE);
     answer();
     await settle();
-    expect(root().querySelector('.library')!.textContent).not.toContain('Loading media…');
+    expect(root().querySelector('app-slots-column')!.textContent).not.toContain('Loading media…');
     expect(rows().map(nameOf)).toEqual(['people', 'cars.mp4', 'idle.mp4', 'notes.txt']);
   });
 
@@ -209,14 +219,14 @@ describe('MediaPage', () => {
     await new Promise((resolve) => setTimeout(resolve));
     await settle();
     expect(toasts.error).toHaveBeenCalledWith('Media folder unreadable');
-    expect(root().querySelector('.library')!.textContent).not.toContain('Loading media…');
+    expect(root().querySelector('app-slots-column')!.textContent).not.toContain('Loading media…');
     expect(root().querySelector('neat-file-browser')).not.toBeNull();
   });
 
   it('shows a library fetched before at once, while it is fetched again', async () => {
     library.refresh.mockReturnValueOnce(new Promise<undefined>(() => undefined));
     await open();
-    expect(root().querySelector('.library')!.textContent).not.toContain('Loading media…');
+    expect(root().querySelector('app-slots-column')!.textContent).not.toContain('Loading media…');
     expect(rows()).toHaveLength(4);
   });
 
@@ -294,13 +304,32 @@ describe('MediaPage', () => {
     expect(aside()!.textContent!.trim()).toBe('Select a file.');
   });
 
-  it('the top bar’s side-panel toggle hides and shows the panel', async () => {
+  it('the top bar’s side-panel toggle hides and shows the panel, remembered in storage', async () => {
     await open();
     toolbarButton('Side panel').click();
     await settle();
     expect(aside()).toBeNull();
+    expect(storage.values.get('neat-insight:media:aside')).toBe('closed');
     toolbarButton('Side panel').click();
     await settle();
     expect(aside()).not.toBeNull();
+    expect(storage.values.get('neat-insight:media:aside')).toBe('open');
+  });
+
+  it('keeps the folder, the selected file and the ticks across visits', async () => {
+    await open();
+    rowOf('people').click();
+    await settle();
+    rowOf('walk.mp4').click();
+    await settle();
+    await TestBed.inject(Router).navigateByUrl('/elsewhere');
+    await settle();
+
+    await TestBed.inject(Router).navigateByUrl('/media');
+    await settle();
+    expect(root().querySelector('nav[aria-label="Current folder"]')!.textContent).toContain(
+      'people',
+    );
+    expect(aside()!.querySelector('h2')!.textContent!.trim()).toBe('people/walk.mp4');
   });
 });

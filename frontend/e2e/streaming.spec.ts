@@ -414,8 +414,8 @@ test.describe('Streaming with mocked slots', () => {
       await page.goto('/streaming');
       await expect(rows(page)).toHaveCount(48);
 
+      // The page opens on src1, as #170 did.
       await listbox(page).focus();
-      await page.keyboard.press('ArrowDown');
       await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
       // From the list into the panel: the main action, the source switch, then Change….
       await page.keyboard.press('Tab');
@@ -654,8 +654,8 @@ test.describe('Streaming with mocked slots', () => {
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
 
+    // The page opens on src1, as #170 did.
     await listbox(page).focus();
-    await page.keyboard.press('ArrowDown');
     await expect(row(page, 'src1')).toHaveAttribute('aria-selected', 'true');
     await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
     await page.keyboard.press('ArrowDown');

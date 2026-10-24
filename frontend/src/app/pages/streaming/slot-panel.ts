@@ -15,11 +15,16 @@ import {
   viewChild,
 } from '@angular/core';
 import {
+  NeatAsideActions,
+  NeatAsideHeading,
+  NeatAsidePanel,
+  NeatAsideTitle,
   NeatButton,
-  type NeatButtonVariant,
+  NeatCode,
   NeatInlineButton,
   NeatNote,
   NeatTooltip,
+  type NeatButtonVariant,
 } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatDetails } from '@sima/neat-ui/details';
@@ -121,7 +126,11 @@ function formFor(slot: Slot): SourceForm {
   imports: [
     FpsStepper,
     MediaPicker,
+    NeatAsideActions,
+    NeatAsideHeading,
+    NeatAsideTitle,
     NeatButton,
+    NeatCode,
     NeatColumn,
     NeatDetails,
     NeatErrorNote,
@@ -137,6 +146,7 @@ function formFor(slot: Slot): SourceForm {
     NeatTooltip,
     SlotPreview,
   ],
+  hostDirectives: [NeatAsidePanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './slot-panel.html',
   styleUrl: './slot-panel.css',

@@ -1,14 +1,14 @@
 <header class="header">
   <!-- Focusable by script only, as the place focus goes when what had it is gone. -->
-  <h2 #heading id="viewer-inspector-title" class="title" tabindex="-1">{{ title() }}</h2>
+  <h2 #heading id="viewer-inspector-title" neatAsideTitle tabindex="-1">{{ title() }}</h2>
   <button
     neatButton
     type="button"
     variant="text"
     size="small"
     iconOnly
-    aria-label="Close inspector"
-    neatTooltip="Close inspector"
+    aria-label="Close side panel"
+    neatTooltip="Close side panel"
     neatTooltipPosition="left"
     (click)="dismiss.emit()"
   >
@@ -52,10 +52,10 @@
 <neat-tabs label="Settings" [value]="tab()" (valueChange)="selectTab($event)">
   <neat-tab label="Metadata" value="Metadata">
     <ng-template>
-      <div class="panel">
+      <div neatAsidePanel class="panel">
         @for (section of metadataSections; track section.heading) {
-          <section class="section">
-            <h3 class="section-title">{{ section.heading }}</h3>
+          <section neatAsidePanel>
+            <h3 neatAsideHeading>{{ section.heading }}</h3>
             @for (setting of section.settings; track setting.id) {
               <app-setting-row
                 [scope]="scope()"
@@ -73,7 +73,7 @@
   </neat-tab>
   <neat-tab label="ROI" value="ROI">
     <ng-template>
-      <div class="panel">
+      <div neatAsidePanel class="panel">
         <app-roi-tab
           [scope]="scope()"
           [channels]="channels()"
@@ -87,7 +87,7 @@
   </neat-tab>
   <neat-tab label="General" value="General">
     <ng-template>
-      <div class="panel">
+      <div neatAsidePanel class="panel">
         @if (lateDetails(); as details) {
           <app-late-notice [details]="details" (raise)="raise($event)" />
         }

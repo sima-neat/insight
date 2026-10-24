@@ -8,16 +8,17 @@ import {
   signal,
 } from '@angular/core';
 import {
+  NeatAsideToggle,
   NeatButton,
   NeatIcon,
   NeatNote,
   NeatPage,
   NeatPageToolbar,
-  NeatTooltip,
 } from '@sima/neat-ui';
 import { NeatFileBrowser } from '@sima/neat-ui/file-browser';
 import { NeatColumn } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { AsidePrefs } from '../../aside-prefs';
 import { CellText } from '../../cell-text';
 import type { MediaNode, Slot } from '../../sources/api';
 import { ImportDialogs } from '../../sources/import-dialog';
@@ -31,9 +32,10 @@ import {
 } from '../../sources/media-browser';
 import { MediaLibraryService, toFileNodes } from '../../sources/media-library.service';
 import type { Progress } from '../../sources/progress-lines';
-import { SlotsNotice } from '../../sources/slots-notice';
+import { SlotsColumn } from '../../sources/slots-column';
 import { SlotsService } from '../../sources/slots.service';
 import { slotName, slotState } from '../../sources/slot-row';
+import { SourcesSession } from '../sources-session';
 import { MediaPanel } from './media-panel';
 import { messageOf } from '../../sources/stream-lines';
 
@@ -57,6 +59,7 @@ function inUseText(slots: readonly Slot[], encodes: ReadonlyMap<number, Progress
   imports: [
     CellText,
     MediaPanel,
+    NeatAsideToggle,
     NeatButton,
     NeatColumn,
     NeatFileBrowser,
@@ -64,12 +67,10 @@ function inUseText(slots: readonly Slot[], encodes: ReadonlyMap<number, Progress
     NeatNote,
     NeatPage,
     NeatPageToolbar,
-    NeatTooltip,
-    SlotsNotice,
+    SlotsColumn,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './media.page.html',
-  styleUrl: './media.page.css',
 })
 export class MediaPage {
   protected readonly slots = inject(SlotsService);
@@ -81,7 +82,9 @@ export class MediaPage {
   protected readonly countLabel = mediaCountLabel;
   protected readonly labels = MEDIA_BROWSER_LABELS;
   protected readonly nodes = computed(() => toFileNodes(this.library.tree() ?? [], 'manage'));
-  protected readonly folder = signal('');
+  private readonly session = inject(SourcesSession);
+  /** Where the last visit left the browser, with its selection; the root at first. */
+  protected readonly folder = signal(this.session.media.folder);
   /**
    * The selected file, let go when a new tree no longer holds it (deleted from another tab, or a
    * delete that failed because the file had gone), so the panel does not describe a file that is
@@ -90,11 +93,11 @@ export class MediaPage {
   protected readonly selected = linkedSignal<readonly MediaNode[] | null, string | null>({
     source: this.library.tree,
     computation: (tree, previous) => {
-      const path = previous?.value ?? null;
+      const path = previous ? previous.value : this.session.media.selected;
       return path !== null && tree !== null && !hasFile(tree, path) ? null : path;
     },
   });
-  protected readonly checked = signal<readonly string[]>([]);
+  protected readonly checked = signal<readonly string[]>(this.session.media.checked);
   /** This page's fetch of the library has answered, or failed. */
   private readonly fetched = signal(false);
   /**
@@ -103,7 +106,8 @@ export class MediaPage {
    */
   protected readonly loading = computed(() => this.library.tree() === null && !this.fetched());
   protected readonly placeholder = computed(() => mediaFilterPlaceholder(this.folder()));
-  protected readonly asideOpen = signal(true);
+  protected readonly asides = inject(AsidePrefs);
+  protected readonly asideOpen = computed(() => this.asides.open('media'));
 
   /** Each assigned file's "In use" text, once per poll answer rather than per row and check. */
   private readonly inUse = computed(() => {
@@ -118,7 +122,16 @@ export class MediaPage {
   });
 
   constructor() {
-    inject(DestroyRef).onDestroy(this.slots.watch());
+    const destroyRef = inject(DestroyRef);
+    destroyRef.onDestroy(this.slots.watch());
+    destroyRef.onDestroy(
+      () =>
+        (this.session.media = {
+          folder: this.folder(),
+          selected: this.selected(),
+          checked: this.checked(),
+        }),
+    );
     this.library
       .refresh()
       .catch((failure: unknown) => {
@@ -144,9 +157,5 @@ export class MediaPage {
     const target = revealIn(this.library.tree() ?? [], path);
     this.folder.set(target.folder);
     if (target.file) this.selected.set(target.file);
-  }
-
-  protected toggleAside(): void {
-    this.asideOpen.update((open) => !open);
   }
 }

@@ -12,7 +12,14 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { NeatButton, NeatNote } from '@sima/neat-ui';
+import {
+  NeatAsideActions,
+  NeatAsidePanel,
+  NeatAsideTitle,
+  NeatButton,
+  NeatCode,
+  NeatNote,
+} from '@sima/neat-ui';
 import { NeatConfirm, type NeatConfirmOptions } from '@sima/neat-ui/confirm';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatToasts } from '@sima/neat-ui/toast';
@@ -67,7 +74,16 @@ export function deleteQuestion(
  */
 @Component({
   selector: 'app-media-panel',
-  imports: [NeatButton, NeatDetails, NeatNote, PreviewFrame],
+  imports: [
+    NeatAsideActions,
+    NeatAsideTitle,
+    NeatButton,
+    NeatCode,
+    NeatDetails,
+    NeatNote,
+    PreviewFrame,
+  ],
+  hostDirectives: [NeatAsidePanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './media-panel.html',
   styleUrl: './media-panel.css',

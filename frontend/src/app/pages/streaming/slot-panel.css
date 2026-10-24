@@ -1,48 +1,13 @@
-/*
- * One column in the page's side panel, which scrolls it. The sections follow each other with the
- * panel's spacing; a heading sits closer to what it names than to the section before.
- */
-:host {
-  display: flex;
-  flex-direction: column;
-  gap: var(--neat-space-3);
-}
-
 .slot-header {
   display: flex;
   align-items: center;
   gap: var(--neat-space-2);
 }
 
-.slot-header h2 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 500;
-}
-
-h3 {
-  margin: var(--neat-space-3) 0 0;
-  font-size: var(--neat-text-sm);
-  font-weight: 600;
-}
-
 .text {
   margin: 0;
   font-size: var(--neat-text-sm);
   overflow-wrap: anywhere;
-}
-
-/* A URL or a path: monospace runs wide, so a step smaller than the text around it. */
-code {
-  font-size: 0.9em;
-  overflow-wrap: anywhere;
-}
-
-.buttons {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--neat-space-2);
 }
 
 .encode {

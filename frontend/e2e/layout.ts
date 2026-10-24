@@ -29,9 +29,11 @@ export function pageOverflow(page: Page) {
  */
 export function topBarSpill(page: Page, toolbarMayScroll: boolean) {
   return page.evaluate((mayScroll) => {
-    const bar = document.querySelector('header')!.getBoundingClientRect();
-    const tools = document.querySelector('header [role="group"][aria-label="Page tools"]')!;
-    const spilled = [...document.querySelectorAll('header *:not(svg *)')]
+    // The shell's top bar is the first header; a page may have headers of its own (a panel's).
+    const header = document.querySelector('header')!;
+    const bar = header.getBoundingClientRect();
+    const tools = header.querySelector('[role="group"][aria-label="Page tools"]')!;
+    const spilled = [...header.querySelectorAll('*:not(svg *)')]
       .filter((element) => {
         if (mayScroll && tools.contains(element) && element !== tools) return false;
         const box = element.getBoundingClientRect();

@@ -125,21 +125,7 @@
       </span>
     </ng-template>
   </neat-popover>
-  <button
-    #inspectorToggle
-    neatButton
-    type="button"
-    variant="text"
-    size="small"
-    iconOnly
-    aria-label="Inspector"
-    neatTooltip="Inspector"
-    neatTooltipPosition="bottom"
-    [pressed]="prefs.inspector()"
-    (click)="toggleInspector()"
-  >
-    <neat-icon name="info" />
-  </button>
+  <neat-aside-toggle [open]="prefs.inspector()" (openChange)="prefs.setInspector($event)" />
 </ng-container>
 
 <neat-page scroll="none" padding="none" [aside]="prefs.inspector() ? 'open' : 'closed'">

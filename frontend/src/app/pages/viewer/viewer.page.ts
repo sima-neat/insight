@@ -18,6 +18,7 @@ import {
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
 import {
+  NeatAsideToggle,
   NeatButton,
   NeatIcon,
   NeatNote,
@@ -111,6 +112,7 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
 @Component({
   selector: 'app-viewer-page',
   imports: [
+    NeatAsideToggle,
     NeatButton,
     NeatIcon,
     NeatInput,
@@ -327,7 +329,7 @@ export class ViewerPage {
   });
 
   private readonly pageField = viewChild('pageField', { read: NeatNumberField });
-  private readonly inspectorToggle = viewChild<ElementRef<HTMLButtonElement>>('inspectorToggle');
+  private readonly asideToggle = viewChild(NeatAsideToggle);
   private readonly tiles = viewChildren(ViewerTile, { read: ElementRef<HTMLElement> });
   private readonly injector = inject(Injector);
 
@@ -411,13 +413,9 @@ export class ViewerPage {
     if (this.state.jumpToChannel(Number.parseInt(input.value, 10))) this.channelJumpOpen.set(false);
   }
 
-  protected toggleInspector(): void {
-    this.prefs.setInspector(!this.prefs.inspector());
-  }
-
   /**
    * Escape in the inspector or its close button. Focus goes back where the user works: the selected tile, or
-   * with none on screen the toolbar button that opens the inspector again.
+   * with none on screen the toolbar's side panel toggle, which opens it again.
    */
   protected closeInspector(): void {
     this.prefs.setInspector(false);
@@ -425,8 +423,8 @@ export class ViewerPage {
       () => {
         const index = this.state.pageChannels().indexOf(this.state.selected() ?? -1);
         // The tiles render in pageChannels order.
-        const target = index < 0 ? this.inspectorToggle() : this.tiles()[index];
-        target?.nativeElement.focus();
+        if (index < 0) this.asideToggle()?.focus();
+        else this.tiles()[index]?.nativeElement.focus();
       },
       { injector: this.injector },
     );

@@ -485,7 +485,7 @@ describe('ViewerPage', () => {
     await press('ArrowRight', {}, slider());
     expect(shown()).toEqual(range(6));
 
-    await click(button('Inspector'));
+    await click(button('Side panel'));
     await press('ArrowRight', {}, root().querySelector('aside [neatPageAside]')!);
     expect(shown()).toEqual(range(6));
 
@@ -585,7 +585,7 @@ describe('ViewerPage', () => {
       'Next page',
       'Go to channel',
       'View options',
-      'Inspector',
+      'Side panel',
     ]);
     expect(toolbar().querySelector('[role="switch"]')).toBeNull();
     expect(channelField()).toBeNull();
@@ -726,12 +726,12 @@ describe('ViewerPage', () => {
     await press('/', {}, slider());
     await settlePopover();
     expect(dialog('Go to channel')).toBeNull();
-    await click(button('Inspector'));
+    await click(button('Side panel'));
     await press('/', {}, root().querySelector('aside [neatPageAside]')!);
     await settlePopover();
     expect(dialog('Go to channel')).toBeNull();
 
-    await click(button('Inspector'));
+    await click(button('Side panel'));
     const event = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });
     window.dispatchEvent(event);
     await settlePopover();
@@ -808,7 +808,7 @@ describe('ViewerPage', () => {
       sixPerPage();
       await open('/viewer');
       await click(tileElement(4));
-      await click(button('Inspector'));
+      await click(button('Side panel'));
 
       await click(root().querySelector<HTMLElement>('aside')!);
 
@@ -983,7 +983,7 @@ describe('ViewerPage', () => {
     expect(page().selectedChannel()).toBe(3);
     expect(page().inspectorTab()).toBe('General');
     expect(root().querySelector('aside')?.textContent).toContain('Channel 3');
-    expect(button('Inspector').getAttribute('aria-pressed')).toBe('true');
+    expect(button('Side panel').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('has no tile shape control', async () => {
@@ -1041,7 +1041,7 @@ describe('ViewerPage', () => {
     sixPerPage();
     await open('/viewer');
     await jumpTo(10);
-    await click(button('Inspector'));
+    await click(button('Side panel'));
     await click(
       [...root().querySelectorAll<HTMLElement>('aside [role="tab"]')].find(
         (tab) => tab.textContent?.trim() === 'General',

@@ -1,14 +1,14 @@
 @switch (view()) {
   @case ('several') {
-    <h2 #lead tabindex="-1">{{ checked().length }} selected</h2>
+    <h2 #lead neatAsideTitle tabindex="-1">{{ checked().length }} selected</h2>
     <ul class="paths">
       @for (path of checked(); track path) {
         <li>
-          <code>{{ path }}</code>
+          <code neatCode>{{ path }}</code>
         </li>
       }
     </ul>
-    <div class="buttons">
+    <div neatAsideActions>
       <button neatButton type="button" variant="text" size="small" (click)="clearChecked()">
         Clear {{ checked().length }}
       </button>
@@ -25,11 +25,11 @@
     </div>
   }
   @case ('one') {
-    <h2 #lead tabindex="-1" class="path">{{ selected() }}</h2>
+    <h2 #lead neatAsideTitle tabindex="-1" class="path">{{ selected() }}</h2>
     @if (preview(); as preview) {
       <app-preview-frame [file]="preview" />
     }
-    <div class="buttons">
+    <div neatAsideActions>
       <button
         neatButton
         type="button"

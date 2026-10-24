@@ -27,6 +27,7 @@ import type { Progress } from '../../sources/progress-lines';
 import { SlotsService } from '../../sources/slots.service';
 import { ApiRequestError } from '../../sources/stream-lines';
 import type { Camera } from '../../sources/webcam-publishing';
+import { FakeLocalStorage } from '../../viewer/settings/fake-storage.testing';
 import { StreamingPage } from './streaming.page';
 
 function slot(index: number, overrides: Partial<Slot> = {}): Slot {
@@ -213,7 +214,12 @@ describe('StreamingPage', () => {
     });
   });
 
+  let storage: FakeLocalStorage;
+
   beforeEach(() => {
+    // The side panel's open state is remembered in storage: a fresh one for every test.
+    storage = new FakeLocalStorage();
+    vi.stubGlobal('localStorage', storage);
     // jsdom has no ResizeObserver; the slot list watches its width to give up narrow columns.
     vi.stubGlobal(
       'ResizeObserver',
@@ -782,15 +788,15 @@ describe('StreamingPage', () => {
 
   it('arrow keys move the selection and the side panel follows', async () => {
     await open();
-    expect(aside()).not.toBeNull();
-    expect(asideHeading()).toBeUndefined();
-
-    listbox().focus();
-    await press(listbox(), 'ArrowDown');
+    // As #170: the page opens on src1.
     expect(rowOf('src1').getAttribute('aria-selected')).toBe('true');
     expect(asideHeading()).toBe('src1');
 
+    listbox().focus();
     await press(listbox(), 'ArrowDown');
+    expect(rowOf('src2').getAttribute('aria-selected')).toBe('true');
+    expect(asideHeading()).toBe('src2');
+
     await press(listbox(), 'ArrowDown');
     expect(asideHeading()).toBe('src3');
     await press(listbox(), 'End');
@@ -818,8 +824,28 @@ describe('StreamingPage', () => {
     await press(listbox(), 'ArrowDown');
     expect(aside()).toBeNull();
     await press(listbox(), 'Enter');
-    expect(asideHeading()).toBe('src1');
+    expect(asideHeading()).toBe('src2');
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('remembers the closed side panel in storage, and the selected slot across visits', async () => {
+    await open();
+    listbox().focus();
+    await press(listbox(), 'ArrowDown');
+    await click(toolbarButton('Side panel'));
+    expect(storage.values.get('neat-insight:streaming:aside')).toBe('closed');
+
+    await TestBed.inject(Router).navigateByUrl('/elsewhere');
+    await settle();
+    await TestBed.inject(Router).navigateByUrl('/streaming');
+    await settle();
+    expect(aside()).toBeNull();
+    expect(toolbarButton('Side panel').getAttribute('aria-pressed')).toBe('false');
+    expect(rowOf('src2').getAttribute('aria-selected')).toBe('true');
+
+    await click(toolbarButton('Side panel'));
+    expect(asideHeading()).toBe('src2');
+    expect(storage.values.get('neat-insight:streaming:aside')).toBe('open');
   });
 
   it('watches the slots while shown and fetches the library and the rendition usage on opening', async () => {
