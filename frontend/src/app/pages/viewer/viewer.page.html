@@ -154,7 +154,13 @@
       [count]="state.pageChannels().length"
       (layout)="onLayout($event)"
     >
-      @for (channel of state.pageChannels(); track channel) {
+      <!--
+        A page turn replaces every tile, on purpose: a tile is one channel's connection. Keying by
+        the tile's channel says so; tracking the bare numbers by identity would make Angular warn
+        (NG0956) of an accidental re-creation each time.
+      -->
+      @for (tile of pageTiles(); track tile.channel) {
+        @let channel = tile.channel;
         <app-viewer-tile
           tabindex="0"
           [channel]="channel"

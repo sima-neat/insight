@@ -208,6 +208,10 @@ export class ViewerPage {
   );
 
   protected readonly state = new ViewerState(this.channels, this.session.startFor(this.params()));
+  /** The current page's tiles, each keyed by its channel (see the grid in the template). */
+  protected readonly pageTiles = computed(() =>
+    this.state.pageChannels().map((channel) => ({ channel })),
+  );
   /** The channel the inspector shows; null for all channels. */
   readonly selectedChannel = this.state.selected.asReadonly();
   /** The inspector's open tab: the late chip opens General, where the raise actions are. */

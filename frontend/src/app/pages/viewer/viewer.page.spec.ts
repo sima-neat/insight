@@ -251,6 +251,18 @@ describe('ViewerPage', () => {
     expect(fake.held()).toEqual([12, 13, 14, 15]);
   });
 
+  it('turning a page replaces its tiles without Angular warning of an accidental re-creation', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    sixPerPage();
+    await open('/viewer');
+
+    await click(button('Next page'));
+    await click(button('Previous page'));
+
+    expect(shown()).toEqual(range(6));
+    expect(warn.mock.calls.flat().filter((text) => String(text).includes('NG0956'))).toEqual([]);
+  });
+
   it('src=3,1,9 shows channels 3, 1, 9 in that order and max_channels=4 drops 9', async () => {
     await open('/viewer?src=3,1,9');
     expect(shown()).toEqual([3, 1, 9]);
