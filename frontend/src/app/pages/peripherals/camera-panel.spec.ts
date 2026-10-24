@@ -136,7 +136,18 @@ describe('CameraPanel', () => {
   const title = (): string => panel().querySelector('h2')!.textContent!.trim();
   const titleChip = (): string =>
     panel().querySelector('app-panel-title neat-status-chip')!.textContent!.trim();
-  const statusLine = (): string => panel().querySelector('.status')!.textContent!.trim();
+  /** The status line's sentence; '' when there is none. */
+  const statusLine = (): string =>
+    panel().querySelector('.status > p')?.textContent?.trim() ?? '';
+  /** #170's preview status beside the status line, as its words and tone; null when idle. */
+  const statusChip = (): { label: string; tone: string } | null => {
+    const chip = fixture.debugElement
+      .queryAll(By.directive(NeatStatusChip))
+      .find((debug) => panel().querySelector('.status')!.contains(debug.nativeElement));
+    return chip
+      ? { label: chip.nativeElement.textContent.trim(), tone: chip.componentInstance.tone() }
+      : null;
+  };
   const announced = (): string =>
     panel().querySelector('app-announcement')!.textContent!.trim();
   const image = (): HTMLImageElement | null => panel().querySelector('app-preview-frame img');
@@ -191,12 +202,14 @@ describe('CameraPanel', () => {
     expect(parts).toEqual([
       'app-panel-title',
       'app-preview-frame',
-      'p.status',
+      'div.status',
       'div.modes',
       'div.actions',
       'app-device-details',
     ]);
     expect(statusLine()).toBe('Not running');
+    // Idle needs no chip: the sentence says it, and the title's chip names the camera's state.
+    expect(statusChip()).toBeNull();
     expect(image()).toBeNull();
     expect(select('Pixel format').componentInstance.showLabel()).toBe(true);
     expect(selected('Pixel format')).toBe('NV12 (YUV 4:2:0)');
@@ -217,6 +230,7 @@ describe('CameraPanel', () => {
     await settle();
     // A MIPI camera's rate arrives after the start: none is named before it is known.
     expect(statusLine()).toBe('Live preview · 1920×1080 · NV12');
+    expect(statusChip()).toEqual({ label: 'Live', tone: 'success' });
     expect(announced()).toBe('Preview live');
 
     preview.adopt(previewSession({ camera_fps: 66.18 }));
@@ -276,11 +290,13 @@ describe('CameraPanel', () => {
     expect(selected('Resolution')).toBe('1280×720');
   });
 
-  it('In another tab shows Stop and no image', async () => {
+  // Spec, "Camera panel": another tab shows "In another tab" with Stop (final review I-3).
+  it('In another tab shows its status, the sentence, Stop and no image', async () => {
     await settle();
     preview.adopt({ ...previewSession(), viewer: true });
     await settle();
     expect(image()).toBeNull();
+    expect(statusChip()).toEqual({ label: 'In another tab', tone: 'info' });
     expect(statusLine()).toBe('This preview is showing in another tab or window.');
     expect(mainButton().textContent!.trim()).toBe('Stop preview');
 
@@ -318,8 +334,9 @@ describe('CameraPanel', () => {
       'ERROR: from element /GstPipeline:pipeline0/GstLibcameraSrc',
     );
     expect(button('Open board settings')).toBeUndefined();
-    // The Start row stays, as the retry.
-    expect(statusLine()).toBe('Could not start');
+    // The Start row stays, as the retry. The callout says why, so no sentence repeats the chip.
+    expect(statusChip()).toEqual({ label: 'Could not start', tone: 'danger' });
+    expect(statusLine()).toBe('');
     expect(mainButton().textContent!.trim()).toBe('Start preview');
 
     // A connection failure offers the board settings; the backend's hint is the recovery line.
@@ -394,6 +411,7 @@ describe('CameraPanel', () => {
     const start = http.expectOne({ method: 'POST', url: START_URL });
     expect(start.request.body).toEqual({ id: imx477.id, ...sel('NV12', 1920, 1080, 30) });
     expect(statusLine()).toBe('Starting the camera on the board… 0 s');
+    expect(statusChip()).toEqual({ label: 'Starting…', tone: 'info' });
     expect(announced()).toBe('Starting the preview');
     vi.advanceTimersByTime(3000);
     await settle();
@@ -533,6 +551,7 @@ describe('CameraPanel', () => {
     expect(mainButton().textContent!.trim()).toBe('Stopping…');
     expect(mainButton().getAttribute('aria-disabled')).toBe('true');
     expect(statusLine()).toBe('Stopping the preview…');
+    expect(statusChip()).toEqual({ label: 'Stopping…', tone: 'info' });
     expect(announced()).toBe('Stopping the preview');
     http.expectOne({ method: 'POST', url: stopUrl('8f1c') }).flush({ session: null });
     await settle();

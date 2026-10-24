@@ -1,6 +1,18 @@
+/* The preview's status chip, then the sentence, which wraps beside it; the chip on its first line. */
 .status {
-  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--neat-space-2);
   font-size: var(--neat-text-sm);
+}
+
+.status > p {
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.status > neat-status-chip {
+  flex: none;
 }
 
 .modes {

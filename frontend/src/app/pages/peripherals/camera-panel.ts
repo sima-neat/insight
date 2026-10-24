@@ -10,6 +10,7 @@ import { NeatAsideActions, NeatAsidePanel, NeatButton, NeatCode, NeatNote } from
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatSelect } from '@sima/neat-ui/select';
+import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { Announcement } from '../../announcement';
 import { CONNECTION_CODES } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
@@ -62,8 +63,8 @@ let nextId = 0;
 /**
  * The selected camera in Peripherals' side panel (spec, "Camera panel"; #170's `CameraDetail` and
  * `PreviewPane`, copy per Inv-PB §2.3), top to bottom as settled with the mockup: its name and
- * chip (with why it is not Available, when it is not), the preview, its status line, the two mode
- * pickers, Start or Stop preview, then the collapsed Details.
+ * chip (with why it is not Available, when it is not), the preview, its status chip and line, the
+ * two mode pickers, Start or Stop preview, then the collapsed Details.
  *
  * The preview is the page's (`CameraPreview`), one per Insight. This panel shows it only when it
  * is this camera's: another camera's preview, kept after a stop that failed, reads here as not
@@ -86,6 +87,7 @@ let nextId = 0;
     NeatCollapsible,
     NeatNote,
     NeatSelect,
+    NeatStatusChip,
     PanelTitle,
     PreviewFrame,
   ],
@@ -200,9 +202,20 @@ export class CameraPanel {
         return 'Stopping the preview…';
       case 'elsewhere':
         return 'This preview is showing in another tab or window.';
+      case 'error':
+        // The chip says it could not start, and the callout under Start says why.
+        return '';
       default:
         return previewStatus(view).label;
     }
+  });
+  /**
+   * #170's preview status pill, beside the status line (ruling F2): "In another tab" among them,
+   * which the spec asks for with Stop. Idle has none: its sentence says it is not running.
+   */
+  protected readonly statusChip = computed(() => {
+    const view = this.view();
+    return view.status === 'idle' ? null : previewStatus(view);
   });
   /** #170's status lines for screen readers; the status line ticks, so it is not a live region. */
   protected readonly announcement = computed(() => {

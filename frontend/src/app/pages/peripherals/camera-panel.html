@@ -4,7 +4,14 @@
 }
 
 <app-preview-frame [stream]="stream()" (streamError)="streamFailed()" />
-<p class="status">{{ statusLine() }}</p>
+<div class="status">
+  @if (statusChip(); as chip) {
+    <neat-status-chip [tone]="chip.tone">{{ chip.label }}</neat-status-chip>
+  }
+  @if (statusLine()) {
+    <p>{{ statusLine() }}</p>
+  }
+</div>
 <app-announcement>{{ announcement() }}</app-announcement>
 
 <!-- Above the modes: "No usable modes" points up to the message that says why. -->

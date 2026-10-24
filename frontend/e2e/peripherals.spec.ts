@@ -164,6 +164,8 @@ for (const { name, size } of VIEWPORTS) {
     await expect(panelTitle(page)).toHaveText(C270.name);
 
     await panel(page).getByRole('button', { name: 'Start preview' }).click();
+    // Spec, "Camera panel": "In another tab", with the sentence and Stop.
+    await expect(panel(page).locator('.status neat-status-chip')).toHaveText('In another tab');
     await expect(panel(page)).toContainText('This preview is showing in another tab or window.');
     await expect(panel(page).getByRole('img')).toHaveCount(0);
 
@@ -286,6 +288,7 @@ test("a Start refused for another camera's preview selects that camera and shows
     await expect(device(page, C270.name)).toHaveAttribute('aria-selected', 'true');
     await expect(device(page, C270.name)).toContainText('Previewing');
     if (viewing) {
+      await expect(panel(page).locator('.status neat-status-chip')).toHaveText('In another tab');
       await expect(panel(page)).toContainText('This preview is showing in another tab or window.');
     } else {
       await expect(
