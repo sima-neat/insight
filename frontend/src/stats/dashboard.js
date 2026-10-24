@@ -361,7 +361,7 @@ export const COMPARE_SERIES = [
   { id: 'load', label: 'CPU load', key: 'cpu_load_1' },
   { id: 'ram', label: 'RAM used', key: 'linux_mem_used_mb' },
   { id: 'mla', label: 'MLA memory', key: 'mla_mem_allocated_mb' },
-  { id: 'cma', label: 'EV74 CMA', key: 'ev74_cma_used_mb' }
+  { id: 'ev74', label: 'EV74 memory', key: 'ev74_mem_allocated_mb' }
 ]
 
 function percentile(sorted, p) {

@@ -225,7 +225,11 @@ test('compare runs overlays one series per run over elapsed time, baseline first
 
 test('compare runs offers only the series the runs recorded, and derives the thermal maximum', () => {
   assert.deepEqual(compareSeriesAvailable(RAW).map((entry) => entry.label),
-    ['Total power', 'Thermal maximum', 'CPU utilization', 'CPU load', 'RAM used', 'MLA memory', 'EV74 CMA'])
+    ['Total power', 'Thermal maximum', 'CPU utilization', 'CPU load', 'RAM used', 'MLA memory'])
+  // These runs predate Sentinel's EV74 memory; runs that define it offer it, and the CMA pool is never offered.
+  const withEv74 = structuredClone(RAW)
+  for (const run of withEv74.sentinel.runs) run.metrics.push({ key: 'ev74_mem_allocated_mb', label: 'EV74 memory allocated', unit: 'MB', group: 'EV74' })
+  assert.deepEqual(compareSeriesAvailable(withEv74).map((entry) => entry.key).slice(-2), ['mla_mem_allocated_mb', 'ev74_mem_allocated_mb'])
   const thermal = compareOverlay(RAW, 'thermal')
   assert.equal(thermal.unit, 'C')
   const firstSample = RAW.sentinel.runs.find((run) => run.metadata.name === 'tes3').samples[0].values
