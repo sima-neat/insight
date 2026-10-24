@@ -2,10 +2,14 @@
  * The level of the microphone test's playback, read from Web Audio for the panel's meter while
  * the recording plays (`NeatLevelMeter`'s `sample`). It is raw Web Audio, kept here with its own
  * tests and outside change detection (AGENTS.md): the meter reads it once per animation frame.
+ *
+ * The level is the peak of the latest samples, as #170's playback meter read it and as the
+ * backend measures the live level while recording (`mictest.chunk_level`): recording and
+ * playback then read on one scale (ruling Q19).
  */
 
 export interface PlaybackLevel {
-  /** The playback's RMS level now, in dBFS; null for silence, or with no Web Audio to read. */
+  /** The playback's peak level now, in dBFS; null for silence, or with no Web Audio to read. */
   read(): number | null;
   /** Closes the audio context. The element then plays on its own; `read` answers null. */
   close(): void;
@@ -68,10 +72,9 @@ export function createPlaybackLevel(audio: HTMLAudioElement): PlaybackLevel {
     read() {
       if (closed || !analyser) return null;
       analyser.getFloatTimeDomainData(samples);
-      let sum = 0;
-      for (const sample of samples) sum += sample * sample;
-      const rms = Math.sqrt(sum / samples.length);
-      return rms > 0 ? 20 * Math.log10(rms) : null;
+      let peak = 0;
+      for (const sample of samples) peak = Math.max(peak, Math.abs(sample));
+      return peak > 0 ? 20 * Math.log10(peak) : null;
     },
     close() {
       if (closed) return;

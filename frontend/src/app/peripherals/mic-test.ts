@@ -186,6 +186,11 @@ export class MicTest {
    * board generation. A test already shown for exactly this microphone is kept; otherwise the
    * test starts afresh and takes up the backend's test when it is recording, or has a recording
    * to replay, for this microphone. A read that keeps failing leaves it idle.
+   *
+   * An idle or failed test starts afresh even for the same microphone, so a shown error (such as
+   * `microphone_in_use` and its hint) is cleared and the backend read again: right when the panel
+   * opens. Call it on open and when the id, `record` or generation changes, not whenever a new
+   * `MicrophoneItem` object arrives for the same device (a Refresh), or the error would vanish.
    */
   async resume(mic: MicrophoneItem, generation: number): Promise<void> {
     const status = this.stateValue().status;
@@ -247,6 +252,8 @@ export class MicTest {
     this.schedulePoll(test.token, run);
     if (this.stopWanted) {
       this.stopWanted = false;
+      // A failed start that took up this recording reset the test, and `stopping` with it.
+      this.stoppingValue.set(true);
       void this.sendStop(test.token, run);
     }
   }
@@ -355,7 +362,12 @@ export class MicTest {
     }
     const playback = ++this.playback;
     if (this.loadedUrl === url) {
-      audio.currentTime = 0;
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // Some browsers refuse a seek before the file has loaded; an ended playback then starts
+        // over from 0 on play() anyway.
+      }
     } else {
       // A new source starts at 0; a seek before it has loaded is refused by some browsers.
       audio.src = url;

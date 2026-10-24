@@ -1,9 +1,8 @@
-import type { DeviceAvailability, MicrophoneItem, MicTestStatus } from './api';
+import type { MicrophoneItem, MicTestStatus } from './api';
+import { available } from './cameras.testing';
 
 // #170's microphone fixtures (model.test.js), typed: the microphones a real DevKit scan returned,
 // for the device list and the microphone test.
-
-export const available: DeviceAvailability = { state: 'available', users: [], reason: null };
 
 // The Blue Yeti Nano item as the real DevKit scan returned it; the backend sends no USB speed for
 // a microphone (ruling F18), so #170's `speed_mbps: 12` is left out.

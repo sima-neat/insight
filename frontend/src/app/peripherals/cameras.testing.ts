@@ -5,6 +5,7 @@ import type {
   CameraMode,
   CameraModeChoice,
   CameraSize,
+  DeviceAvailability,
   DeviceSupport,
   PreviewSession,
   SupportTier,
@@ -57,7 +58,7 @@ export const sel = (
   fps,
 });
 
-const available = { state: 'available' as const, users: [], reason: null };
+export const available: DeviceAvailability = { state: 'available', users: [], reason: null };
 
 export const imx477: CameraItem = {
   id: 'mipi:/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',

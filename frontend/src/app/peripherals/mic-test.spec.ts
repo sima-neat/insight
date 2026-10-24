@@ -269,6 +269,33 @@ describe('MicTest', () => {
     await nextPoll();
     await answerRead(readyTest({ token: 't9' }));
     expect(status()).toBe('playing');
+    audio.dispatchEvent(new Event('ended'));
+
+    // Stop pressed while a start whose answer is then lost: the recording it began is taken up
+    // and stopped, and reads "Stopping…" until that stop answers.
+    void micTest.start(yeti, 3);
+    void micTest.stop();
+    http.expectOne({ method: 'POST', url: TEST_URL }).error(new ProgressEvent('error'));
+    await settle();
+    await answerRead(micTestStatus({ token: 't10' }));
+    const takenUp = http.expectOne({ method: 'POST', url: STOP_URL });
+    expect(takenUp.request.body).toEqual({ token: 't10' });
+    expect(micTest.stopping()).toBe(true);
+    expect(micTestAction(status(), micTest.stopping())).toEqual({
+      label: 'Stopping…',
+      action: 'stop',
+      disabled: true,
+    });
+    // Pressed again meanwhile, it sends no second stop.
+    void micTest.stop();
+    http.expectNone(STOP_URL);
+    takenUp.error(new ProgressEvent('error'));
+    await settle();
+    expect(micTest.stopping()).toBe(false);
+    expect(micTest.state()).toMatchObject({ status: 'recording', error: { code: 'network' } });
+    await nextPoll();
+    await answerRead(readyTest({ token: 't10' }));
+    expect(status()).toBe('playing');
   });
 
   it('resume takes up a recording or a ready test for this microphone only', async () => {
@@ -360,6 +387,20 @@ describe('MicTest', () => {
     expect(status()).toBe('done');
     http.expectNone(STOP_URL);
 
+    // A seek the browser refuses does not fail the Replay (#170's guard).
+    Object.defineProperty(audio, 'currentTime', {
+      configurable: true,
+      get: () => 4.2,
+      set: () => {
+        throw new DOMException('Not loaded yet', 'InvalidStateError');
+      },
+    });
+    expect(() => micTest.replay()).not.toThrow();
+    expect(status()).toBe('playing');
+    expect(play).toHaveBeenCalledTimes(3);
+    await micTest.stop();
+    expect(status()).toBe('done');
+
     // A play the browser refuses (autoplay rules) ends the playback; Replay stays offered.
     play.mockRejectedValueOnce(new DOMException('Not allowed', 'NotAllowedError'));
     micTest.replay();
@@ -421,16 +462,14 @@ describe('MicTest', () => {
 
     // Refused because the board records already, for another microphone: the refusal stands.
     void micTest.start(onboardMic, 3);
-    http
-      .expectOne({ method: 'POST', url: TEST_URL })
-      .flush(
-        {
-          error: 'A microphone test is already recording.',
-          code: 'test_running',
-          hint: 'Wait for it to finish.',
-        },
-        { status: 409, statusText: 'Conflict' },
-      );
+    http.expectOne({ method: 'POST', url: TEST_URL }).flush(
+      {
+        error: 'A microphone test is already recording.',
+        code: 'test_running',
+        hint: 'Wait for it to finish.',
+      },
+      { status: 409, statusText: 'Conflict' },
+    );
     await settle();
     await answerRead(micTestStatus({ token: 'yeti' }));
     expect(micTest.state()).toMatchObject({
@@ -482,16 +521,14 @@ describe('MicTest', () => {
     // A status error that means the test is gone ends it at once, with no retries.
     await startRecording();
     await nextPoll();
-    http
-      .expectOne(TEST_URL)
-      .flush(
-        {
-          error: 'The board changed.',
-          code: 'stale_snapshot',
-          hint: 'Click Refresh, then test again.',
-        },
-        { status: 409, statusText: 'Conflict' },
-      );
+    http.expectOne(TEST_URL).flush(
+      {
+        error: 'The board changed.',
+        code: 'stale_snapshot',
+        hint: 'Click Refresh, then test again.',
+      },
+      { status: 409, statusText: 'Conflict' },
+    );
     await settle();
     expect(micTest.state()).toMatchObject({ status: 'error', error: { code: 'stale_snapshot' } });
     expect(micTestErrorAction(micTest.state().error)).toBe('Refresh, then test again.');
@@ -600,12 +637,20 @@ describe('MicTest with the kit level meter', () => {
     await drain();
     renders = 0;
 
+    expect(lit()).toBe(25); // -5 dBFS lights 25 of 28
+
+    // Inside the counted window the level changes, so only sampling during it can light the
+    // meter as asserted below. The next poll's answer keeps the clock (still 0 s), so it writes
+    // no signal the page reads.
+    await vi.advanceTimersByTimeAsync(MIC_TEST_POLL_MS);
+    http.expectOne(TEST_URL).flush({ test: micTestStatus({ level_dbfs: -25 }) });
+    await vi.advanceTimersByTimeAsync(0);
     for (let frame = 0; frame < 5; frame++) frames.run();
     // A change detection scheduled by a frame would run on a later timeout or frame.
     await drain();
 
-    // The positive control: the unbound `micTest.level` was sampled (-5 dBFS lights 25 of 28).
-    expect(lit()).toBe(25);
+    // The positive control: the unbound `micTest.level` was sampled (-25 dBFS lights 14 of 28).
+    expect(lit()).toBe(14);
     expect(tick).not.toHaveBeenCalled();
     expect(renders).toBe(0);
 

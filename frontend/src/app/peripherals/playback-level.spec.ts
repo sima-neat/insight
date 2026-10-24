@@ -68,7 +68,7 @@ describe('createPlaybackLevel', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('createPlaybackLevel reads RMS dBFS from the analyser and closes its context', () => {
+  it('createPlaybackLevel reads peak dBFS from the analyser and closes its context', () => {
     const level = createPlaybackLevel(audio);
     const [context] = FakeAudioContext.made;
     // The element plays through an analyser to the speakers.
@@ -84,9 +84,12 @@ describe('createPlaybackLevel', () => {
     expect(level.read()).toBeCloseTo(20 * Math.log10(0.5), 6);
     analyser.signal = (index) => (index % 2 ? 1 : -1);
     expect(level.read()).toBeCloseTo(0, 6);
-    // RMS, not the peak: a full-scale sine reads -3 dBFS.
+    // The peak, not the RMS (ruling Q19): a full-scale sine reads 0 dBFS, not -3.
     analyser.signal = (index) => Math.sin((2 * Math.PI * index) / 64);
-    expect(level.read()).toBeCloseTo(20 * Math.log10(Math.SQRT1_2), 3);
+    expect(level.read()).toBeCloseTo(0, 6);
+    // A negative peak counts as much as a positive one: -0.25 is -12 dBFS.
+    analyser.signal = (index) => (index === 100 ? -0.25 : 0.1);
+    expect(level.read()).toBeCloseTo(20 * Math.log10(0.25), 6);
 
     level.close();
     level.close();

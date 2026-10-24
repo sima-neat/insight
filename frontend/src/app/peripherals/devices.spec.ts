@@ -7,7 +7,7 @@ import type {
   PeripheralSnapshot,
   SupportTier,
 } from './api';
-import { imx477, imx568, inUse, support, usb } from './cameras.testing';
+import { available, imx477, imx568, inUse, support, usb } from './cameras.testing';
 import {
   boardCameraSetup,
   changeSummary,
@@ -21,7 +21,7 @@ import {
   sortIssues,
   tierInfo,
 } from './devices';
-import { available, onboardMic, yeti } from './microphones.testing';
+import { onboardMic, yeti } from './microphones.testing';
 
 // #170's fixtures (model.test.js), typed: the cameras come from `cameras.testing.ts`, the
 // microphones from `microphones.testing.ts`.
