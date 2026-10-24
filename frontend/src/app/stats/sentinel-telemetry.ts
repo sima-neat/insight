@@ -170,6 +170,8 @@ export class SentinelTelemetry {
     view?.addEventListener('focus', onFocus);
     inject(DestroyRef).onDestroy(() => {
       this.destroyed = true;
+      // A poll still out lands on nothing: its answer or failure applies, reloads and reads nothing.
+      this.polled = null;
       this.stopTimer();
       this.document.removeEventListener('visibilitychange', onVisibility);
       view?.removeEventListener('focus', onFocus);
@@ -234,9 +236,15 @@ export class SentinelTelemetry {
     this.failureValue.set(null);
   }
 
-  /** Reads the state unless a read is out, which answers for this one. */
+  /**
+   * Reads the state unless a read is out, which answers for this one, or the tab is hidden: the
+   * state check reads it at once when the tab shows. The document is asked, not `visible`: the
+   * state check's own visibilitychange listener may run before the one that updates `visible`.
+   */
   private checkState(): void {
-    if (this.stateReadsOut() === 0) void this.readState(false);
+    if (this.stateReadsOut() === 0 && this.document.visibilityState === 'visible') {
+      void this.readState(false);
+    }
   }
 
   private async readState(refresh: boolean): Promise<void> {

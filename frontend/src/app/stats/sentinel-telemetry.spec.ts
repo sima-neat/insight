@@ -213,6 +213,18 @@ describe('SentinelTelemetry', () => {
     await answerMetrics(nextSample(3));
     expect(telemetry.failure()).toBeNull();
     expect(telemetry.window()?.timestamps).toHaveLength(4);
+
+    // A halting failure that lands while the tab is hidden leaves the re-read to the tab showing.
+    await advance(2000);
+    const out = metricsPoll();
+    setVisibility('hidden');
+    await flush(out, failed('unreachable', 3), true);
+    expect(telemetry.failure()?.code).toBe('unreachable');
+    noStateRead();
+    setVisibility('visible');
+    noPoll();
+    await answerState();
+    await answerMetrics(metrics(3, 0, { full: false }));
   });
 
   it('a failed poll keeps the window and records the failure; retry clears the halt and polls at once', async () => {
@@ -487,6 +499,16 @@ describe('SentinelTelemetry', () => {
     noStateRead();
     noPoll();
     expect(vi.getTimerCount()).toBe(0);
+
+    // A poll still out when the page goes lands on nothing, even one that names another board.
+    open();
+    await flush(stateRead(), sentinelState({ generation: 4 }));
+    const polled = metricsPoll();
+    close();
+    await flush(polled, metrics(5));
+    expect(board.reload).not.toHaveBeenCalled();
+    noStateRead();
+    noPoll();
   });
 
   it('a successful install for this generation re-reads the state with refresh=1', async () => {
