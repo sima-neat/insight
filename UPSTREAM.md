@@ -41,6 +41,11 @@ each.
   whole window with `full: true`. A non-integer `epoch` is `400 invalid_request`. `BoardCache` keeps the
   epoch and limits the window (`window()`); `metrics.build` and `series` no longer take a history limit.
   Additive: no existing field changes.
+- `GET /api/metrics`: the local `cpu_load` is read without blocking (upstream blocks the request for 0.1 s
+  in `psutil.cpu_percent(interval=0.1)`) through `LocalCpuReader`, which makes every psutil call from one
+  worker thread (psutil keeps its baseline per thread) and does not re-measure within 0.5 s; the remote
+  `cpu_load` is total time, 100 minus the `id` field of `top` (`remote_cpu_percent`), where upstream reports
+  user time. The response gains a typed schema (`HostMetrics`). Additive: no field changes.
 
 ## Port log
 

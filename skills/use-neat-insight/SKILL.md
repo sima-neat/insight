@@ -104,7 +104,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Return service identity, status, UTC timestamp, and the startup-scoped browser ICE address/public origin applied by Insight. |
-| `GET` | `/api/metrics` | Return a point-in-time system metrics payload with CPU, memory, disk, temperature, MLA, remote, and `pipeline_status` compatibility fields. |
+| `GET` | `/api/metrics` | Return a point-in-time system metrics payload with CPU, memory, disk, temperature, MLA, remote, and `pipeline_status` compatibility fields. `cpu_load` is total CPU use (also for the remote DevKit); locally it is measured since the previous read, without blocking. |
 | `GET` | `/api/neat-metrics` | Open a server-sent events stream of JSON metrics events from the local metrics broker. |
 | `GET` | `/api/ingest/stats` | Return active vf UDP/RTP ingest streams and compact transport, media, forwarding, and WebRTC stats. |
 | `GET` | `/api/egress/stats` | Return active vf WebRTC egress peers with RTCP feedback and browser decode/render stats. |

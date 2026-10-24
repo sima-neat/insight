@@ -158,6 +158,40 @@ class ApiDocumentationTests(unittest.TestCase):
 
         self.assertIn("`missing`", description)
 
+    def test_metrics_schema_is_typed(self):
+        operation = self.spec["paths"]["/api/metrics"]["get"]
+        self.assertEqual(
+            operation["responses"]["200"]["content"]["application/json"]["schema"],
+            {"$ref": "#/components/schemas/HostMetrics"},
+        )
+
+        schema = self.spec["components"]["schemas"]["HostMetrics"]
+        properties = schema["properties"]
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(
+            schema["required"], ["cpu_load", "memory", "disk", "pipeline_status", "REMOTE"]
+        )
+        self.assertEqual(set(properties), {
+            "cpu_load", "memory", "disk", "mla_allocated_bytes", "temperature_celsius_avg",
+            "REMOTE", "pipeline_status",
+        })
+        # "" stands for a remote DevKit that is not connected.
+        self.assertEqual(properties["cpu_load"]["type"], ["number", "string", "null"])
+        self.assertEqual(
+            {name: prop["type"] for name, prop in properties["memory"]["properties"].items()},
+            {"total": "integer", "used": "integer", "percent": "number"},
+        )
+        self.assertEqual(properties["disk"]["type"], ["object", "null"])
+        self.assertEqual(
+            {name: prop["type"] for name, prop in properties["disk"]["properties"].items()},
+            {"mount": "string", "total": "integer", "used": "integer", "free": "integer", "percent": "number"},
+        )
+        self.assertEqual(properties["mla_allocated_bytes"]["type"], "integer")
+        self.assertIs(properties["mla_allocated_bytes"]["deprecated"], True)
+        self.assertEqual(properties["temperature_celsius_avg"]["type"], ["number", "null"])
+        self.assertEqual(properties["REMOTE"]["type"], "boolean")
+        self.assertEqual(properties["pipeline_status"]["type"], "object")
+
     def test_board_change_and_preview_operations_document_propagated_errors(self):
         expected = {
             ("/api/board/select", "post"): {"400", "409", "502", "504"},

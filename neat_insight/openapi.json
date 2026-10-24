@@ -132,12 +132,12 @@
       "get": {
         "tags": ["Diagnostics"],
         "summary": "Get a system metrics snapshot",
-        "description": "Returns the latest point-in-time metrics assembled for the Insight dashboard, including CPU, memory, disk, temperature, MLA, remote-platform, and pipeline compatibility fields. The payload is intentionally extensible, so clients should tolerate additional fields.",
+        "description": "Returns the latest point-in-time metrics assembled for the Insight dashboard, including CPU, memory, disk, temperature, MLA, remote-platform, and pipeline compatibility fields. `cpu_load` is the total CPU use in percent, also for a remote DevKit. The local reading covers the time since the previous reading by anyone (the metrics stream included), is taken without blocking, and is not refreshed more often than every 0.5 s. The payload is intentionally extensible, so clients should tolerate additional fields.",
         "operationId": "getMetrics",
         "responses": {
           "200": {
             "description": "CPU, memory, disk, temperature, MLA, remote, and compatibility metrics.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HostMetrics"}}}
           }
         }
       }
@@ -1685,6 +1685,39 @@
           {"$ref": "#/components/schemas/Success"},
           {"$ref": "#/components/schemas/Message"}
         ]
+      },
+      "HostMetrics": {
+        "type": "object",
+        "description": "Point-in-time readings of the machine Insight runs on, or of the remote DevKit when one is configured.",
+        "required": ["cpu_load", "memory", "disk", "pipeline_status", "REMOTE"],
+        "properties": {
+          "cpu_load": {"type": ["number", "string", "null"], "description": "Total CPU use in percent. `\"\"` for a remote DevKit that is not connected; null when the remote DevKit's `top` gave no reading."},
+          "memory": {
+            "type": "object",
+            "description": "Memory use; empty when it could not be read (a remote DevKit that is not connected).",
+            "properties": {
+              "total": {"type": "integer", "description": "Bytes."},
+              "used": {"type": "integer", "description": "Bytes."},
+              "percent": {"type": "number"}
+            }
+          },
+          "disk": {
+            "type": ["object", "null"],
+            "description": "Use of the volume holding Insight's data; empty (remote DevKit) or null when it could not be read.",
+            "properties": {
+              "mount": {"type": "string"},
+              "total": {"type": "integer", "description": "Bytes."},
+              "used": {"type": "integer", "description": "Bytes."},
+              "free": {"type": "integer", "description": "Bytes."},
+              "percent": {"type": "number"}
+            }
+          },
+          "mla_allocated_bytes": {"type": "integer", "deprecated": true, "description": "Always 0; kept for compatibility."},
+          "temperature_celsius_avg": {"type": ["number", "null"], "description": "Average board temperature in degrees Celsius; null when the platform has no reading."},
+          "REMOTE": {"type": "boolean", "description": "True when the readings come from a remote DevKit."},
+          "pipeline_status": {"type": "object", "description": "Always `{}`; kept for compatibility."}
+        },
+        "additionalProperties": true
       },
       "Health": {
         "type": "object",

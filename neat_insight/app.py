@@ -1,6 +1,7 @@
 import argparse
 import atexit
 import base64
+import concurrent.futures
 import errno
 import hashlib
 import http.client
@@ -559,6 +560,45 @@ def _with_metrics_compat(metrics_payload):
     return metrics_payload
 
 
+class LocalCpuReader:
+    """The host's CPU use in percent since the previous reading, without blocking.
+
+    psutil.cpu_percent(interval=None) answers from the CPU times it saw at the previous call, and
+    the first call of a process returns a meaningless 0.0, so the reader makes that call once on
+    creation. Two things would still make the reading wrong:
+
+    - psutil keeps that "previous call" per calling thread, and a thread's first call answers 0.0.
+      Flask answers every request on its own thread, so all calls go through one worker thread of
+      the reader's own and share a single baseline.
+    - The `sys` publisher (every 2 s) and the requests share the reader, so a reading is "since
+      whoever read last". A call within `min_interval_sec` of the previous one repeats its value
+      instead of measuring a window of a few milliseconds, which psutil warns is inaccurate.
+    """
+
+    def __init__(self, min_interval_sec=0.5, clock=time.monotonic):
+        self._min_interval_sec = min_interval_sec
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._worker = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="cpu-reader")
+        self._read_at = None
+        self._value = None
+        self._call_psutil()
+
+    def _call_psutil(self):
+        return self._worker.submit(lambda: psutil.cpu_percent(interval=None)).result()
+
+    def read(self):
+        with self._lock:
+            now = self._clock()
+            if self._read_at is None or now - self._read_at >= self._min_interval_sec:
+                self._value = self._call_psutil()
+                self._read_at = now
+            return self._value
+
+
+_local_cpu = LocalCpuReader()
+
+
 def collect_system_metrics():
     if is_remote_devkit_configured():
         if is_remote_devkit_connected():
@@ -572,7 +612,7 @@ def collect_system_metrics():
             "REMOTE": True,
         })
 
-    cpu_percent_total = psutil.cpu_percent(interval=0.1)
+    cpu_percent_total = _local_cpu.read()
     mem = psutil.virtual_memory()
     memory_usage = {"total": mem.total, "used": mem.used, "percent": mem.percent}
 

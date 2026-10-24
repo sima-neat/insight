@@ -26,6 +26,7 @@ import os
 import re
 import logging
 import socket
+from typing import Optional
 from neat_insight.remotefs import _load_remote_config, RemoteFS, create_ssh_client
 
 def is_remote_devkit_configured():
@@ -117,6 +118,25 @@ def remote_board_type():
     return None
 
 
+# The `id` (idle) field of top's "Cpu(s)" line: "91.2 id" from procps-ng, "91.2%id" from older procps.
+_TOP_IDLE = re.compile(r"([\d.]+)\s*%?\s*id\b")
+
+
+def remote_cpu_percent(top_line: str) -> Optional[float]:
+    """Total CPU use in percent from top's "Cpu(s)" line, or None when it has no idle field.
+
+    Total time (100 minus idle), not the `us` field: that counts user-space time only, so a load in
+    the kernel or waiting on I/O would not show, and the local reading (psutil) is total time too.
+    """
+    match = _TOP_IDLE.search(top_line)
+    if not match:
+        return None
+    try:
+        return round(100 - float(match.group(1)), 1)
+    except ValueError:
+        return None
+
+
 def get_remote_metrics():
     ssh = create_ssh_client()
 
@@ -126,8 +146,7 @@ def get_remote_metrics():
 
     # CPU load
     cpu_raw = run("top -bn1 | grep 'Cpu(s)'")
-    cpu_match = re.search(r"(\d+\.\d+)\s+us", cpu_raw)
-    cpu_percent_total = float(cpu_match.group(1)) if cpu_match else None
+    cpu_percent_total = remote_cpu_percent(cpu_raw)
 
     # Memory
     mem_raw = run("free -b")
