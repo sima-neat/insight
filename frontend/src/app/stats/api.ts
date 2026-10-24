@@ -13,20 +13,7 @@
  * `GET /api/metrics` (this computer, not the board) is typed beside System Info, which reads it.
  */
 
-import type { BoardErrorBody, BoardSource } from '../board/api';
-
-/**
- * The board an answer describes (`board_summary` in `neat_insight/board/manager.py`). The identity
- * is null until a connection read it.
- */
-export interface SentinelBoard {
-  label: string;
-  source: BoardSource;
-  hostname: string | null;
-  machine: string | null;
-  build_version: string | null;
-  fingerprint: string | null;
-}
+import type { BoardErrorBody, BoardSummary } from '../board/api';
 
 /**
  * What the board's service manager says about Sentinel. `missing` is not installed, `stopped` is
@@ -69,7 +56,7 @@ export interface SentinelHealth {
 
 /** `GET /api/sentinel`. */
 export interface SentinelState {
-  board: SentinelBoard;
+  board: BoardSummary;
   generation: number;
   /** Health answered with a schema Insight understands. */
   available: boolean;
@@ -83,7 +70,7 @@ export interface SentinelState {
 
 /** `POST /api/sentinel/install`: the daemon as it is afterwards, and the installer's output. */
 export interface SentinelInstallResult {
-  board: SentinelBoard;
+  board: BoardSummary;
   generation: number;
   daemon: SentinelDaemon;
   log: string;
@@ -127,7 +114,7 @@ export interface MetricsHistory {
 
 /** `GET /api/sentinel/metrics`. */
 export interface SentinelMetrics {
-  board: SentinelBoard;
+  board: BoardSummary;
   generation: number;
   /** The newest sample's timestamp; null before the daemon took one. */
   sampled_at: string | null;

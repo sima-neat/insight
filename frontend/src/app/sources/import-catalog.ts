@@ -28,7 +28,7 @@ import {
   totalBytes,
 } from './catalog';
 import { CatalogFilters } from './catalog-filters';
-import { formatBytes } from './format-bytes';
+import { formatBytes } from '../format-bytes';
 import { ImportRunner } from './import-runner';
 import { ImportSession } from './import-session';
 import { MediaLibraryService } from './media-library.service';

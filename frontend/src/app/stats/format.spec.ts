@@ -2,7 +2,6 @@ import type { MetricStatus, SentinelMetric } from './api';
 import {
   alertLabel,
   fixedValue,
-  formatBytes,
   formatNumber,
   formatValue,
   isTemperatureUnit,
@@ -132,13 +131,6 @@ describe('values and units', () => {
       '',
       'MB/s',
     ]);
-  });
-
-  it('sizes read in binary units up to PB, and a bad size reads as none', () => {
-    expect(
-      [0, 2048, 8 * 1024 ** 3, 1536 * 1024 ** 2, 3 * 1024 ** 5, null, -1].map(formatBytes),
-    ).toEqual(['0 B', '2 kB', '8 GB', '1.5 GB', '3 PB', '', '']);
-    expect(formatBytes(2 * 1024 ** 6)).toBe('2048 PB');
   });
 
   // The `fixedValue` half of #170's "time labels use board timestamps only, in whole words;

@@ -10,21 +10,11 @@
  * `test_running`, `microphone_in_use` and the `peripheral_*` codes of SiMa Sentinel.
  */
 
-import type { BoardErrorBody, BoardSource, CameraSetup } from '../board/api';
+import type { BoardErrorBody, BoardSummary, CameraSetup } from '../board/api';
 
 // ---------------------------------------------------------------------------------------------
 // The scan (`GET /api/peripherals`, `POST /api/peripherals/refresh`)
 // ---------------------------------------------------------------------------------------------
-
-/** The board a snapshot describes. Its identity is null until a scan connected to the board. */
-export interface PeripheralBoard {
-  label: string;
-  source: BoardSource;
-  hostname: string | null;
-  machine: string | null;
-  build_version: string | null;
-  fingerprint: string | null;
-}
 
 /**
  * The last scan of the selected board, or an empty one before any. It counts as scanned when
@@ -32,7 +22,7 @@ export interface PeripheralBoard {
  * set together by a scan.
  */
 export interface PeripheralSnapshot {
-  board: PeripheralBoard;
+  board: BoardSummary;
   /** The board generation the scan was made for (`BoardState.generation`). */
   generation: number;
   /** `<Sentinel revision>:<observed at>`; null before a scan. */

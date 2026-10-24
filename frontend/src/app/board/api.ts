@@ -70,6 +70,20 @@ export interface BoardIdentity {
   fingerprint: string;
 }
 
+/**
+ * The board an answer describes (`board_summary` in `neat_insight/board/manager.py`): the selected
+ * target and, once a connection read it, its identity. Peripherals and Sentinel answers carry it
+ * as their `board`. The identity facts are null until a connection read them.
+ */
+export interface BoardSummary {
+  label: string;
+  source: BoardSource;
+  hostname: string | null;
+  machine: string | null;
+  build_version: string | null;
+  fingerprint: string | null;
+}
+
 /** `GET /api/board`, and the answer of every board action. */
 export interface BoardState {
   target: BoardTarget | null;

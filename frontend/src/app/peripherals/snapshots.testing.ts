@@ -1,9 +1,10 @@
 import { DEVKIT } from '../board/board.testing';
-import type { PeripheralBoard, PeripheralItem, PeripheralSnapshot } from './api';
+import type { BoardSummary } from '../board/api';
+import type { PeripheralItem, PeripheralSnapshot } from './api';
 
 /** What a test changes in a snapshot: any field, and any of the board's fields on their own. */
 export type SnapshotOverrides = Partial<Omit<PeripheralSnapshot, 'board'>> & {
-  board?: Partial<PeripheralBoard>;
+  board?: Partial<BoardSummary>;
 };
 
 /**

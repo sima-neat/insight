@@ -35,7 +35,7 @@ import { AsidePrefs } from '../../aside-prefs';
 import { CellText } from '../../cell-text';
 import type { MediaNode, RenditionsCleared } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
-import { formatBytes } from '../../sources/format-bytes';
+import { formatBytes } from '../../format-bytes';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { SlotsColumn } from '../../sources/slots-column';
 import { SlotsService } from '../../sources/slots.service';

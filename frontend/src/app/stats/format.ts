@@ -58,24 +58,6 @@ export function fixedValue(
   return `${value.toFixed(digits)}${unitAfter(unit)}`;
 }
 
-const BYTE_UNITS = ['B', 'kB', 'MB', 'GB', 'TB', 'PB'];
-
-/**
- * A size in binary units up to PB ("2 kB", "1.5 GB"). '' for anything that is not a size. It is
- * the size of the machine Insight runs on (System Info), and not `sources/format-bytes`, which is
- * the media library's file sizes in KB, MB and GB.
- */
-export function formatBytes(value: number | null | undefined): string {
-  if (!isNumber(value) || value < 0) return '';
-  let size = value;
-  let unit = 0;
-  while (size >= 1024 && unit < BYTE_UNITS.length - 1) {
-    size /= 1024;
-    unit += 1;
-  }
-  return `${formatNumber(size)} ${BYTE_UNITS[unit]}`;
-}
-
 const TEMPERATURE_UNITS = new Set(['c', '°c', 'degc', 'deg c', 'celsius']);
 const POWER_UNITS = new Set(['w', 'mw', 'kw']);
 const TEMPERATURE_NAME = /temp|rtsn|thermal/i;

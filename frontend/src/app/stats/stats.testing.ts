@@ -2,7 +2,8 @@
 // shapes, a window of history over it, and a daemon state. It imports only types and the JSON
 // fixture, with no vitest globals and no Angular, so Playwright can load it too.
 import metricsLive from '../../../../tests/fixtures/sentinel/metrics-live.json';
-import type { MetricStatus, SentinelBoard, SentinelMetrics, SentinelState } from './api';
+import type { BoardSummary } from '../board/api';
+import type { MetricStatus, SentinelMetrics, SentinelState } from './api';
 
 const liveMetrics = metricsLive.groups.flatMap((group) => group.metrics);
 
@@ -12,7 +13,7 @@ const liveMetrics = metricsLive.groups.flatMap((group) => group.metrics);
  * the order is the groups' own; its history is empty, as an answer to `history=0` is.
  */
 export const METRICS_LIVE: SentinelMetrics = {
-  board: metricsLive.board as SentinelBoard,
+  board: metricsLive.board as BoardSummary,
   generation: metricsLive.generation,
   sampled_at: metricsLive.sampled_at,
   version: metricsLive.version,

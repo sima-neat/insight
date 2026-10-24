@@ -1,5 +1,5 @@
 import type { MediaInfo } from '../../sources/api';
-import { formatBytes } from '../../sources/format-bytes';
+import { formatBytes } from '../../format-bytes';
 import { clock } from '../../sources/fps';
 import { codecLabel } from '../../sources/slot-row';
 
