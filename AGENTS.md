@@ -105,8 +105,8 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 700 kB, as in the kit showcase. The initial bundle measured 637 kB raw with kit 0.7.0 (main
-  551 kB, styles 86 kB; 694 kB with kit 0.5.3, before the kit split into per-component entries),
+  at 700 kB, as in the kit showcase. The initial bundle measured 648 kB raw with kit 0.8.0 (main
+  562 kB, styles 86 kB; 694 kB with kit 0.5.3, before the kit split into per-component entries),
   most of it the kit's shell, the toast host (rendered in the app root, so it is in main on purpose)
   and Angular with its router, plus the XHR backend (`withXhr()`, 4 kB: only XHR reports the upload
   progress of imports); the warning leaves little headroom on purpose, and the 1 MB error
