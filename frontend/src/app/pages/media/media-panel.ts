@@ -152,10 +152,7 @@ export class MediaPanel {
     try {
       // Asked with the slots as they are now; a failed fetch asks with the last known ones and
       // says so (ruling Q16).
-      const checked = await this.slots.refresh().then(
-        () => true,
-        () => false,
-      );
+      const checked = await this.slots.recheck();
       confirmed = await this.confirm.ask(deleteQuestion(paths, this.inUseOn(paths), checked));
     } finally {
       this.asking = false;

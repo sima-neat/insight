@@ -44,6 +44,13 @@ class FakeSlots {
   readonly refresh = vi.fn(async () => {
     this.slots.set(this.next);
   });
+  /** As the service's: a refresh, resolved as whether it worked. */
+  recheck(): Promise<boolean> {
+    return this.refresh().then(
+      () => true,
+      () => false,
+    );
+  }
   private readonly byFile = computed(() => {
     const map = new Map<string, Slot[]>();
     for (const s of this.slots() ?? []) {

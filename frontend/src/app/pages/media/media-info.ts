@@ -1,5 +1,6 @@
 import type { MediaInfo } from '../../sources/api';
 import { formatBytes } from '../../sources/format-bytes';
+import { clock } from '../../sources/fps';
 import { codecLabel } from '../../sources/slot-row';
 
 /** One row of the side panel's info table. */
@@ -31,13 +32,7 @@ export function formatFrameRate(rate: string | null): string {
 /** A duration in milliseconds as `2:14`, or `1:02:05` from an hour on, to the nearest second. */
 export function formatDuration(ms: number | null): string {
   if (ms === null || !Number.isFinite(ms)) return NONE;
-  const total = Math.round(ms / 1000);
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = String(total % 60).padStart(2, '0');
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
-    : `${minutes}:${seconds}`;
+  return clock(Math.round(ms / 1000));
 }
 
 const count = (value: number | null) => (value === null ? NONE : String(value));

@@ -39,7 +39,11 @@ export function customRate(slot: Pick<Slot, 'fps' | 'native_fps'>): number | nul
   return slot.fps != null && slot.fps !== slot.native_fps ? slot.fps : null;
 }
 
-function clock(seconds: number): string {
+/**
+ * A time as `m:ss`, or `h:mm:ss` from an hour on, cut to whole seconds: the app's one clock (an
+ * encode's progress, a file's duration).
+ */
+export function clock(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);

@@ -303,12 +303,16 @@ describe('SlotPanel', () => {
     expect(text()).toContain('File: people/walk.mp4 · 30 fps');
 
     await click(sourceKind('Camera'));
+    // The hints name the slot's real URL, with the server's mapped port.
     expect(text()).toContain(
-      'The browser publishes the camera to rtsp://…/src2 while this tab stays open.',
+      'The browser publishes the camera to rtsp://10.0.0.2:8554/src2 while this tab stays open.',
     );
     expect(text()).not.toContain('File: people/walk.mp4');
     await click(sourceKind('Stream URL'));
     expect(field('Stream URL')).toBeDefined();
+    expect(text()).toContain(
+      'Insight pulls the stream and forwards it unchanged to rtsp://10.0.0.2:8554/src2. RTSP and RTSPS only.',
+    );
     await click(sourceKind('File'));
     sentNothing();
 
@@ -355,6 +359,28 @@ describe('SlotPanel', () => {
     // Named from the server's credential-free record, never from what was typed.
     expect(toasts.status).toHaveBeenCalledWith('src2 is pulling from rtsp://10.0.0.7:554/stream1.');
     expect(field('Password').value).toBe('');
+  });
+
+  it('keeps a camera picked and not yet assigned while another slot’s camera changes', async () => {
+    slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+    cameras.cameras.set(CAMERAS);
+    cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+    await open(3);
+    const cameraList = root().querySelector<HTMLElement>('[role="listbox"][aria-label="Cameras"]')!;
+    const options = () => [...cameraList.querySelectorAll<HTMLElement>('[role="option"]')];
+    await click(options()[1]);
+    expect(button('Assign')!.disabled).toBe(false);
+
+    // An assign on src5 finishes meanwhile.
+    cameras.assignments.set(
+      new Map([
+        [3, CAMERAS[0]],
+        [5, CAMERAS[1]],
+      ]),
+    );
+    await settle();
+    expect(options()[1].getAttribute('aria-selected')).toBe('true');
+    expect(button('Assign')!.disabled).toBe(false);
   });
 
   it('opens on the form for what the slot holds, and words the camera access as Media did', async () => {
@@ -617,7 +643,13 @@ describe('SlotPanel', () => {
       (option) => option.textContent?.trim() === 'HTTP',
     )!;
     await click(http);
-    expect(slots.assign).toHaveBeenCalledWith({ index: 2, file: 'cam.mjpeg', transport: 'http' });
+    // Through the cameras, as every file assign from Streaming (Q7), so bulk actions wait for it.
+    expect(cameras.assignFile).toHaveBeenCalledWith({
+      index: 2,
+      file: 'cam.mjpeg',
+      transport: 'http',
+    });
+    expect(slots.assign).not.toHaveBeenCalled();
   });
 
   it('Start and Stop: a file through the server, a webcam through the cameras, a pull with Stop pulling', async () => {

@@ -232,10 +232,6 @@ export interface RenditionsCleared {
   kept: string[];
 }
 
-export interface ServerIp {
-  ip: string;
-}
-
 // ---------------------------------------------------------------------------------------------
 // Media library (`/api/media*`, `/api/delete-media`, `/api/upload/media`)
 // ---------------------------------------------------------------------------------------------

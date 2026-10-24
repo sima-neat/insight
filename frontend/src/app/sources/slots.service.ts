@@ -133,6 +133,18 @@ export class SlotsService {
   }
 
   /**
+   * Fetches the slots again before a destructive question (a delete, a replace), so the question
+   * names the slots as they are now (spec, "In use"). Resolves whether that worked: on a failure
+   * the question goes on with the last known slots and says so (ruling Q16). Never rejects.
+   */
+  recheck(): Promise<boolean> {
+    return this.refresh().then(
+      () => true,
+      () => false,
+    );
+  }
+
+  /**
    * Fetches the slots now, even while a poll is in flight: after a change, the answer must not be
    * one asked for before it. Resolves once answered (or superseded by a newer answer); rejects
    * with the server's message when the request failed, which also sets `unavailable` unless a

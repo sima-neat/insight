@@ -208,6 +208,23 @@ describe('SlotsService', () => {
     });
   });
 
+  describe('recheck', () => {
+    it('fetches the slots again before a question and says whether that worked, never rejecting', async () => {
+      const answered = service.recheck();
+      http.expectOne(SLOTS_URL).flush([slot(3, { file: 'a.mp4' })]);
+      await expect(answered).resolves.toBe(true);
+      expect(service.slots()?.[0].file).toBe('a.mp4');
+
+      const failed = service.recheck();
+      http
+        .expectOne(SLOTS_URL)
+        .flush({ error: 'MediaMTX is down' }, { status: 502, statusText: 'Bad Gateway' });
+      await expect(failed).resolves.toBe(false);
+      // The last known slots stay for the question, which then says they may be out of date.
+      expect(service.slots()?.[0].file).toBe('a.mp4');
+    });
+  });
+
   describe('refresh', () => {
     it('drops an answer older than the newest one', async () => {
       const older = service.refresh();

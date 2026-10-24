@@ -58,8 +58,8 @@
     }
     @case ('camera') {
       <p neatNote>
-        The browser publishes the camera to <code neatCode>rtsp://…/src{{ index() }}</code> while
-        this tab stays open.
+        The browser publishes the camera to <code neatCode>{{ rtspUrl() }}</code> while this tab
+        stays open.
       </p>
       @if (cameras.state() === 'unsupported') {
         <p neatNote>This browser cannot access cameras.</p>
@@ -123,7 +123,7 @@
       <form class="pull" (submit)="$event.preventDefault(); pull()">
         <p neatNote>
           Insight pulls the stream and forwards it unchanged to
-          <code neatCode>rtsp://…/src{{ index() }}</code
+          <code neatCode>{{ rtspUrl() }}</code
           >. RTSP and RTSPS only.
         </p>
         @if (isWebcam()) {

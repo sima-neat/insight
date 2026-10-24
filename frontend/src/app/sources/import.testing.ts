@@ -69,6 +69,13 @@ export class FakeLibrary {
 export class FakeSlots {
   readonly slots = signal<readonly Slot[] | null>([]);
   readonly refresh = vi.fn(async () => undefined);
+  /** As the service's: a refresh, resolved as whether it worked. */
+  recheck(): Promise<boolean> {
+    return this.refresh().then(
+      () => true,
+      () => false,
+    );
+  }
   private readonly all = computed(() => this.slots() ?? []);
   assignedTo(path: string): readonly Slot[] {
     return this.all().filter((slot) => slot.file === path);

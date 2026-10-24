@@ -416,10 +416,7 @@ export class ImportRunner {
    */
   private async ask(conflict: UploadConflict, archive: boolean): Promise<ClashChoice> {
     if (this.toast) return 'skip';
-    const checked = await this.slots.refresh().then(
-      () => true,
-      () => false,
-    );
+    const checked = await this.slots.recheck();
     if (this.toast) return 'skip';
     const using = archive
       ? this.slots.assignedUnder(conflict.existing)

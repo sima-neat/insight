@@ -16,7 +16,7 @@ import type {
   YoutubeValidateRequest,
 } from './api';
 import { SlotsService } from './slots.service';
-import { postStreamedText, withRequestErrors, type StreamEvent } from './stream-lines';
+import { messageOf, postStreamedText, withRequestErrors, type StreamEvent } from './stream-lines';
 
 const TREE_URL = '/api/media-files';
 
@@ -138,10 +138,7 @@ export class MediaLibraryService {
         );
         deleted.push(path);
       } catch (failure) {
-        failed.push({
-          path,
-          message: failure instanceof Error ? failure.message : 'Could not delete the file.',
-        });
+        failed.push({ path, message: messageOf(failure) });
       }
     }
     await Promise.allSettled([this.refresh(), this.slots.settleChange({ renditions: true })]);

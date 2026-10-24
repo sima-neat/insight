@@ -189,9 +189,12 @@ export class SlotPanel {
     computation: () => null,
   });
   private readonly fpsInvalid = linkedSignal({ source: this.index, computation: () => false });
-  protected readonly pickedCamera = linkedSignal<string | null>(
+  /** The camera assigned to this slot, by id: it changes only with this slot's assignment. */
+  private readonly assignedCameraId = computed(
     () => this.cameras.assignments().get(this.index())?.deviceId ?? null,
   );
+  /** The camera picked in the list, back to the assigned one when this slot's assignment changes. */
+  protected readonly pickedCamera = linkedSignal<string | null>(() => this.assignedCameraId());
   protected readonly pulling = signal(false);
   protected readonly pickerBusy = signal(false);
 
@@ -344,6 +347,14 @@ export class SlotPanel {
     );
   });
   protected readonly streamUrl = computed(() => streamUrl(this.slot()));
+  /**
+   * Where a camera or a pulled stream goes out, for the hints: the slot's RTSP URL, with the
+   * server's mapped port. Not `streamUrl`, which names the HTTP stream of an MJPEG file slot. The
+   * path alone until the server has said the URL.
+   */
+  protected readonly rtspUrl = computed(
+    () => this.slot().urls.rtsp ?? `rtsp://…/src${this.index()}`,
+  );
   /** A held slot has a stream to copy whatever its assignment; otherwise it needs a codec. */
   protected readonly canCopy = computed(
     () => this.streamUrl() !== null && (this.held() || this.canStream()),
@@ -552,12 +563,16 @@ export class SlotPanel {
     this.fpsInvalid.set(invalid);
   }
 
+  /**
+   * Through `CamerasService.assignFile`, as every file assign from Streaming (Q7): the change holds
+   * the bulk actions until it lands. (A frame-rate commit is the one exception; see `commitFps`.)
+   */
   protected async setTransport(transport: SlotTransport | null): Promise<void> {
     const slot = this.slot();
     if (transport === null || transport === slot.transport) return;
     await this.act(() =>
       this.control.run(slot.index, () =>
-        this.slots.assign({ index: slot.index, file: slot.file, transport }),
+        this.cameras.assignFile({ index: slot.index, file: slot.file, transport }),
       ),
     );
   }
