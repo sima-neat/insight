@@ -1,0 +1,8 @@
+:host {
+  display: block;
+}
+
+/* Empty, the notice takes no room; with its text it keeps a gap to the list below. */
+p:not(:empty) {
+  padding-block-end: var(--neat-space-2);
+}

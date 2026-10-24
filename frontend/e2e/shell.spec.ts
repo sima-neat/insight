@@ -177,8 +177,13 @@ test('the kit font loads', async ({ page }) => {
 });
 
 test('a page keeps the kit page inset from the content area', async ({ page }) => {
-  await page.goto('/peripherals');
-  const text = page.getByText('Peripherals arrive with plan 4.');
+  // Media, a page that stays: an empty library, and slots that answer, so no notice sits on top.
+  await page.route(
+    (url) => url.pathname === '/api/media-files' || url.pathname === '/api/mediasrc',
+    (route) => route.fulfill({ json: [] }),
+  );
+  await page.goto('/media');
+  const text = page.getByRole('navigation', { name: 'Current folder' });
   await expect(text).toBeVisible();
 
   // neat-page pads by default with --neat-space-6, Tailwind's spacing 6: 1.5rem, 24 px here.

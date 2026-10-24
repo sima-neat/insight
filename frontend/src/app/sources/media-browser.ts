@@ -57,3 +57,10 @@ export function hiddenFilesNote(count: number): string | null {
   if (count === 0) return null;
   return `${plural(count, 'file', 'files')} hidden because Insight cannot stream ${count === 1 ? 'it' : 'them'}.`;
 }
+
+/** Whether `path` is a file in the library's tree, at any depth. */
+export function hasFile(tree: readonly MediaNode[], path: string): boolean {
+  return tree.some((node) =>
+    node.type === 'file' ? node.path === path : hasFile(node.children, path),
+  );
+}

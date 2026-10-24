@@ -1,4 +1,4 @@
-import type { Slot, SlotExternal, SlotPull } from '../../sources/api';
+import type { Slot, SlotExternal, SlotPull } from './api';
 import {
   formatBitrate,
   isInUse,

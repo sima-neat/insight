@@ -53,7 +53,7 @@ import {
   type SlotRow,
   slotOutput,
   streamUrl,
-} from './slot-row';
+} from '../../sources/slot-row';
 import { StatusChip } from './status-chip';
 
 /** Which form the source switch shows. */

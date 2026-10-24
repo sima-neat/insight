@@ -1,5 +1,6 @@
 import type { MediaNode } from './api';
 import {
+  hasFile,
   hiddenFileCount,
   hiddenFilesNote,
   MEDIA_BROWSER_LABELS,
@@ -33,6 +34,14 @@ const TREE: MediaNode[] = [
 ];
 
 describe('media browser', () => {
+  it('finds a file at any depth, and only a file', () => {
+    expect(hasFile(TREE, 'cars.mp4')).toBe(true);
+    expect(hasFile(TREE, 'people/raw/b.png')).toBe(true);
+    expect(hasFile(TREE, 'people')).toBe(false);
+    expect(hasFile(TREE, 'people/gone.mp4')).toBe(false);
+    expect(hasFile([], 'cars.mp4')).toBe(false);
+  });
+
   it('counts the files a folder holds that Insight cannot stream, not those in its subfolders', () => {
     expect(hiddenFileCount(TREE, '')).toBe(0);
     expect(hiddenFileCount(TREE, 'people')).toBe(1);

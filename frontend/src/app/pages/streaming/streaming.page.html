@@ -104,12 +104,7 @@
 
 <neat-page scroll="none" [aside]="asideOpen() ? 'open' : 'closed'">
   <div class="slots">
-    <!-- Always in the DOM, so screen readers hear the text when it appears. -->
-    <p neatNote role="status" class="notice">
-      @if (slots.unavailable()) {
-        Slot status could not be refreshed. Showing the last known state.
-      }
-    </p>
+    <app-slots-notice />
     <!--
       Where the list is narrow (a tablet beside the side panel) the slot, the start of its source
       and its state stay readable: those columns keep a width, and rate and codec give way.
@@ -124,24 +119,24 @@
       (activated)="openAside()"
     >
       <ng-template neatColumn="slot" header="Slot" width="3rem" let-row>
-        <span class="text">{{ row.name }}</span>
+        <app-cell-text>{{ row.name }}</app-cell-text>
       </ng-template>
       <ng-template neatColumn="kind" header="Kind" width="2rem" let-row>
-        <span class="text"
-          ><span class="kind">{{ row.kind }}</span></span
+        <app-cell-text
+          ><span class="kind">{{ row.kind }}</span></app-cell-text
         >
       </ng-template>
       <ng-template neatColumn="source" header="Source" width="minmax(2.75rem, 3fr)" let-row>
-        <span class="text">{{ row.source }}</span>
+        <app-cell-text>{{ row.source }}</app-cell-text>
       </ng-template>
       <ng-template neatColumn="state" header="State" width="minmax(5.25rem, 1fr)" let-row>
         <app-status-chip [tone]="row.state.tone">{{ row.state.label }}</app-status-chip>
       </ng-template>
       <ng-template neatColumn="rate" header="Rate" width="minmax(0, 1.4fr)" let-row>
-        <span class="text gives-way">{{ row.rate }}</span>
+        <app-cell-text class="gives-way">{{ row.rate }}</app-cell-text>
       </ng-template>
       <ng-template neatColumn="codec" header="Codec" width="minmax(0, 0.9fr)" let-row>
-        <span class="text gives-way">
+        <app-cell-text class="gives-way">
           @if (row.codecWarning; as warning) {
             <!-- As #170: the codec in warning colours, the glyph naming the problem. -->
             <app-status-chip tone="warning">
@@ -151,7 +146,7 @@
           } @else {
             {{ row.codec }}
           }
-        </span>
+        </app-cell-text>
       </ng-template>
     </neat-select-list>
   </div>

@@ -1,12 +1,12 @@
-import type { Slot, SlotExternal, SlotPull, SlotPullStatus, SlotReader } from '../../sources/api';
-import type { Progress } from '../../sources/progress-lines';
-import type { Camera } from '../../sources/webcam-publishing';
+import type { Slot, SlotExternal, SlotPull, SlotPullStatus, SlotReader } from './api';
+import type { Progress } from './progress-lines';
+import type { Camera } from './webcam-publishing';
 
 /**
- * What the Streaming page shows of a slot, worked out from the server's answer (Inv-SM §1.2) and
- * what only this browser knows: the camera picked for a webcam slot and an encode in progress.
- * Pure functions, so the list computes its rows once per answer and the slot's panel says the
- * same things in the same words.
+ * What the app shows of a slot, worked out from the server's answer (Inv-SM §1.2) and what only
+ * this browser knows: the camera picked for a webcam slot and an encode in progress. Pure
+ * functions, so Streaming's list computes its rows once per answer, and its slot panel, Media's
+ * "In use" and the import dialog's warnings name slots, states and codecs in the same words.
  */
 
 /** The kind of source in a slot: a file, a camera, an external publisher or a pulled stream. */

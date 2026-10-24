@@ -19,22 +19,6 @@ neat-select-list {
   flex: 1 1 0;
 }
 
-/* Empty, the notice takes no room; it stays in the DOM so its text is announced when it appears. */
-.notice:not(:empty) {
-  padding-block-end: var(--neat-space-2);
-}
-
-/*
- * Cells: one line each, truncated rather than wrapped, so every row keeps the list's row height,
- * and clipped to the cell where a narrow list gives a column less room than its content.
- */
-.text {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /*
  * Where the list is too narrow for every column (a tablet beside the side panel), rate and codec
  * give their room to the slot, its source and its state. What is left of their columns would only

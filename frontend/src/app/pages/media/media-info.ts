@@ -1,6 +1,6 @@
 import type { MediaInfo } from '../../sources/api';
 import { formatBytes } from '../../sources/format-bytes';
-import { codecLabel } from '../streaming/slot-row';
+import { codecLabel } from '../../sources/slot-row';
 
 /** One row of the side panel's info table. */
 export interface InfoRow {
@@ -45,7 +45,8 @@ const count = (value: number | null) => (value === null ? NONE : String(value));
 /**
  * `/api/media-info` as the side panel lists it: #170's rows with readable values (the size in
  * KB/MB/GB, the duration as `2:14` rather than "134.00 sec", the frame rate as `30 fps` rather
- * than `30/1`). The server's normalized codec is left out, since the codec row already reads it.
+ * than `30/1`). #170's "Normalized Codec" row is left out (ruling Q15): for the codecs Insight
+ * streams it reads the same as the codec row, and a file it cannot stream is tagged in the list.
  */
 export function mediaInfoRows(info: MediaInfo): InfoRow[] {
   const rows: InfoRow[] = [

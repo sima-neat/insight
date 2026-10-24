@@ -21,12 +21,7 @@
 
 <neat-page scroll="none" [aside]="asideOpen() ? 'open' : 'closed'">
   <div class="library">
-    <!-- Always in the DOM, so screen readers hear the text when it appears. -->
-    <p neatNote role="status" class="notice">
-      @if (slots.unavailable()) {
-        Slot status could not be refreshed. Showing the last known state.
-      }
-    </p>
+    <app-slots-notice />
     <neat-file-browser
       mode="manage"
       [rootLabel]="rootLabel"
@@ -39,7 +34,7 @@
       [(checked)]="checked"
     >
       <ng-template neatColumn="inUse" header="In use" width="minmax(0, 1fr)" let-file>
-        <span class="text">{{ inUseOf(file.path) }}</span>
+        <app-cell-text>{{ inUseOf(file.path) }}</app-cell-text>
       </ng-template>
     </neat-file-browser>
   </div>

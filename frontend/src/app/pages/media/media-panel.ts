@@ -3,7 +3,8 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
-  type ElementRef,
+  DOCUMENT,
+  ElementRef,
   inject,
   Injector,
   model,
@@ -18,7 +19,7 @@ import type { Slot } from '../../sources/api';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { filePreview, PreviewFrame } from '../../sources/preview-frame';
 import { SlotsService } from '../../sources/slots.service';
-import { slotName } from '../streaming/slot-row';
+import { slotName } from '../../sources/slot-row';
 import { mediaInfoRows } from './media-info';
 
 /**
@@ -58,7 +59,8 @@ export function deleteQuestion(
  *
  * When a delete or Clear removed the button that had the focus, the focus goes to what the panel
  * shows now, its heading or its note, so the keyboard stays in the panel rather than falling to
- * the page's body, and a screen reader says where it is.
+ * the page's body, and a screen reader says where it is. A focus the user has moved elsewhere
+ * meanwhile (a delete takes a request per file) is left where it is.
  */
 @Component({
   selector: 'app-media-panel',
@@ -78,6 +80,8 @@ export class MediaPanel {
   private readonly confirm = inject(NeatConfirm);
   private readonly toasts = inject(NeatToasts);
   private readonly lead = viewChild.required<ElementRef<HTMLElement>>('lead');
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly document = inject(DOCUMENT);
   private readonly injector = inject(Injector);
 
   /** A delete is under way: Delete… waits until it has finished. */
@@ -163,9 +167,26 @@ export class MediaPanel {
     return [...slots.values()].sort((a, b) => a.index - b.index);
   }
 
-  /** Once the panel shows what changed: the button that had the focus may be gone by then. */
+  /**
+   * Once the panel shows what changed: the button that had the focus may be gone by then, which
+   * leaves the focus on the body. Focus still in the panel, or already on the body, moves on.
+   */
   private holdFocus(): void {
-    afterNextRender({ read: () => this.lead().nativeElement.focus() }, { injector: this.injector });
+    afterNextRender(
+      {
+        read: () => {
+          const focused = this.document.activeElement;
+          if (
+            focused === null ||
+            focused === this.document.body ||
+            this.host.nativeElement.contains(focused)
+          ) {
+            this.lead().nativeElement.focus();
+          }
+        },
+      },
+      { injector: this.injector },
+    );
   }
 }
 

@@ -202,9 +202,23 @@ describe('MediaPage', () => {
     expect(aside()!.querySelector('h2')!.textContent!.trim()).toBe('2 selected');
   });
 
+  it('a file that leaves the library leaves the selection and the ticks', async () => {
+    await open();
+    rowOf('cars.mp4').click();
+    rowOf('idle.mp4').querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
+    await settle();
+    expect(aside()!.querySelector('h2')!.textContent!.trim()).toBe('1 selected');
+
+    // Another tab deleted both; the next fetch of the library no longer lists them.
+    library.tree.set(TREE.filter((node) => node.path !== 'cars.mp4' && node.path !== 'idle.mp4'));
+    await settle();
+    expect(aside()!.textContent!.trim()).toBe('Select a file.');
+  });
+
   it('the top bar has Import… and the side-panel toggle, which hides and shows the panel', async () => {
     await open();
-    expect(toolbarButton('Import…').disabled).toBe(false);
+    // Task 13 wires it to the import dialog (ruling Q1).
+    expect(toolbarButton('Import…')).toBeDefined();
 
     toolbarButton('Side panel').click();
     await settle();

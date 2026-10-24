@@ -21,7 +21,7 @@ import { SlotsService } from '../../sources/slots.service';
 import { ApiRequestError, type StreamEvent } from '../../sources/stream-lines';
 import type { Camera } from '../../sources/webcam-publishing';
 import { SlotPanel } from './slot-panel';
-import { slotRow } from './slot-row';
+import { slotRow } from '../../sources/slot-row';
 
 function slot(index: number, overrides: Partial<Slot> = {}): Slot {
   return {

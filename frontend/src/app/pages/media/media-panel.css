@@ -48,10 +48,6 @@ code {
   font-size: var(--neat-text-sm);
 }
 
-.details:empty {
-  display: none;
-}
-
 .details dt {
   color: var(--muted-foreground);
 }

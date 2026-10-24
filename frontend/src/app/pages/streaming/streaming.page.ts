@@ -28,14 +28,16 @@ import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatSlider } from '@sima/neat-ui/slider';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { CellText } from '../../cell-text';
 import type { MediaNode, RenditionsCleared } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
 import { formatBytes } from '../../sources/format-bytes';
 import { MediaLibraryService } from '../../sources/media-library.service';
+import { SlotsNotice } from '../../sources/slots-notice';
 import { SlotsService } from '../../sources/slots.service';
 import { SlotControl } from './slot-control';
 import { SlotPanel } from './slot-panel';
-import { isInUse, type SlotRow, slotRow } from './slot-row';
+import { isInUse, type SlotRow, slotRow } from '../../sources/slot-row';
 import { StatusChip } from './status-chip';
 
 /** The slots Insight has, `src1`–`src48`: hard-coded as in #170 (the spec keeps it so). */
@@ -84,6 +86,7 @@ function messageOf(failure: unknown): string {
 @Component({
   selector: 'app-streaming-page',
   imports: [
+    CellText,
     NeatButton,
     NeatColumn,
     NeatDialogActions,
@@ -100,6 +103,7 @@ function messageOf(failure: unknown): string {
     NeatSlider,
     NeatTooltip,
     SlotPanel,
+    SlotsNotice,
     StatusChip,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,

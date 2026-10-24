@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import type { SlotTone } from './slot-row';
+import type { SlotTone } from '../../sources/slot-row';
 
 /**
  * A short label on one of the theme's status fills: a slot's state (Live, Idle, External, …) in

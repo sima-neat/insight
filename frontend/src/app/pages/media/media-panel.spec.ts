@@ -278,4 +278,54 @@ describe('MediaPanel', () => {
     await settleOverlay();
     expect(text()).toBe('Select a file.');
   });
+
+  it('a second press while it asks does nothing; one question, one fetch of the slots', async () => {
+    let answerSlots!: () => void;
+    slots.refresh.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (answerSlots = resolve)),
+    );
+    await show('a.mp4');
+    button('Delete…').click();
+    button('Delete…').click();
+    answerSlots();
+    await settleOverlay();
+
+    expect(slots.refresh).toHaveBeenCalledTimes(1);
+    expect(document.querySelectorAll('[role="alertdialog"]')).toHaveLength(1);
+    await answer('Cancel');
+    expect(library.delete).not.toHaveBeenCalled();
+  });
+
+  it('asks with the last known slots when they cannot be fetched again', async () => {
+    slots.slots.set([slot(4, { file: 'a.mp4' })]);
+    slots.refresh.mockRejectedValueOnce(
+      new ApiRequestError(500, 'MediaMTX is not answering', null),
+    );
+    await show('a.mp4');
+    button('Delete…').click();
+    await settleOverlay();
+
+    expect(confirmText()).toBe(
+      'Delete File | Delete this media file a.mp4? In use on src4; those slots are cleared.',
+    );
+    await answer('Delete');
+    expect(library.delete).toHaveBeenCalledWith(['a.mp4']);
+  });
+
+  it('leaves the focus where the user moved it while the delete ran', async () => {
+    let finish!: (outcome: DeleteOutcome) => void;
+    library.delete.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    await show('a.mp4');
+    button('Delete…').click();
+    await settleOverlay();
+    await answer('Delete');
+    elsewhere.focus();
+
+    finish({ deleted: ['a.mp4'], failed: [] });
+    await settleOverlay();
+    expect(text()).toBe('Select a file.');
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
 });

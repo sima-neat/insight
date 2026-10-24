@@ -33,7 +33,7 @@ import {
 } from 'rxjs';
 import type { Slot } from '../../sources/api';
 import { EndsStream, filePreview, PreviewFrame } from '../../sources/preview-frame';
-import { isLive, previewSrc } from './slot-row';
+import { isLive, previewSrc } from '../../sources/slot-row';
 
 /** How often the live image is checked for its first frame (#170). */
 const FRAME_CHECK_MS = 100;

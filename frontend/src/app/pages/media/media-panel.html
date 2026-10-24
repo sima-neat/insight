@@ -41,16 +41,18 @@
         Delete…
       </button>
     </div>
-    <dl class="details">
-      @if (infoError(); as error) {
-        <dt>Error</dt>
-        <dd>{{ error }}</dd>
-      }
-      @for (row of infoRows(); track row.label) {
-        <dt>{{ row.label }}</dt>
-        <dd>{{ row.value }}</dd>
-      }
-    </dl>
+    @if (infoError() || infoRows().length > 0) {
+      <dl class="details">
+        @if (infoError(); as error) {
+          <dt>Error</dt>
+          <dd>{{ error }}</dd>
+        }
+        @for (row of infoRows(); track row.label) {
+          <dt>{{ row.label }}</dt>
+          <dd>{{ row.value }}</dd>
+        }
+      </dl>
+    }
   }
   @default {
     <p #lead neatNote tabindex="-1">Select a file.</p>

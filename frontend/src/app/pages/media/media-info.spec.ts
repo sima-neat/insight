@@ -26,6 +26,12 @@ describe('formatDuration', () => {
     expect(formatDuration(0)).toBe('0:00');
   });
 
+  it('reads the server’s duration_ms, which is ffprobe’s seconds times 1000 and rarely whole', () => {
+    // app.py: "duration_ms": duration * 1000, with duration a float of seconds ("134.033333").
+    expect(formatDuration(134.033333 * 1000)).toBe('2:14');
+    expect(formatDuration(3725.5 * 1000)).toBe('1:02:06');
+  });
+
   it('says "-" for a duration that is unknown', () => {
     expect(formatDuration(null)).toBe('-');
     expect(formatDuration(Number.NaN)).toBe('-');
