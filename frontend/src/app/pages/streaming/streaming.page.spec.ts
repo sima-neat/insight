@@ -4,9 +4,9 @@ import { Component, computed, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
-import { NeatShell } from '@sima/neat-ui';
+import { NeatShell, type NeatTone } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
-import { NeatStatusChip, type NeatStatusTone } from '@sima/neat-ui/status-chip';
+import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type {
   AssignRequest,
@@ -279,7 +279,7 @@ describe('StreamingPage', () => {
     });
   const rowOf = (name: string): HTMLElement => rows().find((row) => cells(row)[0] === name)!;
   /** The tone a kit status chip was given, which its fill shows. */
-  const toneOf = (chip: Element): NeatStatusTone =>
+  const toneOf = (chip: Element): NeatTone =>
     fixture.debugElement
       .queryAll(By.directive(NeatStatusChip))
       .find((debug) => debug.nativeElement === chip)!
