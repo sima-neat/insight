@@ -3,7 +3,7 @@ import {
   formatFpsProgress,
   FPS_MIN,
   FPS_STEP,
-  isNativeRate,
+  customRate,
   needsRendition,
   parseFps,
   stepFps,
@@ -35,13 +35,14 @@ describe('fps', () => {
     expect(parseFps('1')).toBe(1);
   });
 
-  it('isNativeRate is true for no override or one equal to the native rate', () => {
-    expect(isNativeRate(null, 30)).toBe(true);
-    expect(isNativeRate(30, 30)).toBe(true);
-    expect(isNativeRate(15, 30)).toBe(false);
-    expect(isNativeRate(null, null)).toBe(true);
-    // Unknown native rate: an override may need a rendition.
-    expect(isNativeRate(15, null)).toBe(false);
+  it('customRate is the override when it differs from the native rate, also an unknown one', () => {
+    expect(customRate({ fps: null, native_fps: 30 })).toBeNull();
+    expect(customRate({ fps: 30, native_fps: 30 })).toBeNull();
+    expect(customRate({ fps: 15, native_fps: 30 })).toBe(15);
+    expect(customRate({ fps: null, native_fps: null })).toBeNull();
+    // Unknown native rate (the server has not probed the file yet): the start encodes it.
+    expect(customRate({ fps: 15, native_fps: null })).toBe(15);
+    expect(customRate({ fps: 15 })).toBe(15);
   });
 
   it('parseFps rejects invalid input', () => {

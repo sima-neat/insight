@@ -477,6 +477,17 @@ describe('SlotPanel', () => {
     expect(cameras.assignFile).toHaveBeenCalledWith({ index: 2, file: 'clip.mp4' });
   });
 
+  it('a rate set while the native rate is unknown is custom: Details say so, and Start encodes it', async () => {
+    slots.slots.set([fileSlot(2, { fps: 15, native_fps: null })]);
+    await open();
+    expect(details()['Output']).toBe('RTSP / H.264 · 15 fps (rendition will be created on start)');
+    expect(button('Native')!.disabled).toBe(false);
+
+    await click(button('Start'));
+    expect(slots.prepare).toHaveBeenCalledWith(2);
+    expect(slots.start).not.toHaveBeenCalled();
+  });
+
   it('a different frame rate prepares a rendition with progress before start, and Cancel encoding stops it', async () => {
     await open();
     expect(text()).toContain('Native 30 fps. A different rate creates a rendition on start.');

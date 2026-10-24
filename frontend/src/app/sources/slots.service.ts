@@ -22,6 +22,7 @@ import type {
   SuccessResponse,
   TakeoverResponse,
 } from './api';
+import { customRate } from './fps';
 import { isProgressFailure, mergePrepareProgress, type Progress } from './progress-lines';
 import {
   ApiRequestError,
@@ -47,7 +48,7 @@ const STARTING = { title: 'Starting stream…', percent: 99 } as const;
 function startedCustomFps(previous: readonly Slot[] | null, next: readonly Slot[]): boolean {
   /** The frame rate a playing slot streams at when it is not the file's own, else null. */
   const customFps = (slot: Slot | undefined): number | null =>
-    slot?.state === 'playing' && slot.fps != null && slot.fps !== slot.native_fps ? slot.fps : null;
+    slot?.state === 'playing' ? customRate(slot) : null;
   return next.some((slot) => {
     const fps = customFps(slot);
     return fps !== null && fps !== customFps(previous?.find((old) => old.index === slot.index));

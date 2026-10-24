@@ -28,9 +28,15 @@ export function parseFps(text: string | null | undefined): number | null {
   return value;
 }
 
-/** True when a slot streams at its source's own rate: no override, or one equal to the native rate. */
-export function isNativeRate(fps: number | null | undefined, nativeFps: number | null | undefined) {
-  return fps == null || (nativeFps != null && fps === nativeFps);
+/**
+ * The rate a slot streams at when it is not the file's own: its override when it differs from the
+ * native rate, else null. The app's one rule for "a custom rate" (the row's "· rendition", the
+ * panel's pending rendition, Start's encode, a rendition just made). A native rate the server has
+ * not probed yet (null) is unknown, so an override then counts as custom: that is what Start does,
+ * since the server re-encodes for it.
+ */
+export function customRate(slot: Pick<Slot, 'fps' | 'native_fps'>): number | null {
+  return slot.fps != null && slot.fps !== slot.native_fps ? slot.fps : null;
 }
 
 function clock(seconds: number): string {
@@ -56,9 +62,9 @@ export function formatFpsProgress({
   return total != null && Number.isFinite(total) && total > 0 ? `${done} / ${clock(total)}` : done;
 }
 
-/** True when starting the slot needs a rendition: an override that differs from the native rate. */
+/** True when starting the slot needs a rendition: it streams at a custom rate. */
 export function needsRendition(slot: Pick<Slot, 'fps' | 'native_fps'> | null | undefined): boolean {
-  return slot != null && slot.fps != null && slot.fps !== slot.native_fps;
+  return slot != null && customRate(slot) !== null;
 }
 
 /** How a frame-rate commit ended: the rate the server took, or a refusal (already reported). */

@@ -108,6 +108,10 @@ describe('slotRow', () => {
     // The file's own rate set explicitly is no rendition, and an unprobed file has no rate yet.
     expect(slotRow(slot(3, { file: 'a.mp4', native_fps: 25, fps: 25 })).rate).toBe('25 fps');
     expect(slotRow(slot(3, { file: 'a.mp4', native_fps: null, fps: null })).rate).toBe('');
+    // A rate set before the file's own is known is a rendition too: the start encodes it.
+    expect(slotRow(slot(3, { file: 'a.mp4', native_fps: null, fps: 15 })).rate).toBe(
+      '15 fps · rendition',
+    );
     expect(slotRow(slot(3, { file: 'a.mp4', codec: 'unknown' })).codec).toBe('Unknown');
     expect(slotRow(slot(3, { file: 'a.mp4', codec: '' })).codec).toBe('-');
   });

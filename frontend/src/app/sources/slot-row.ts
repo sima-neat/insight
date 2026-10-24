@@ -1,5 +1,6 @@
 import type { NeatStatusTone } from '@sima/neat-ui/status-chip';
 import type { Slot, SlotExternal, SlotPull, SlotPullStatus, SlotReader } from './api';
+import { customRate } from './fps';
 import type { Progress } from './progress-lines';
 import type { Camera } from './webcam-publishing';
 
@@ -188,8 +189,7 @@ export function slotRate(slot: Slot, encode?: Progress): string {
   if (slot.type === 'webcam' || !slot.file) return '';
   const fps = slot.fps ?? slot.native_fps;
   if (fps == null) return '';
-  const rendition = slot.fps != null && slot.native_fps != null && slot.fps !== slot.native_fps;
-  return rendition ? `${fps} fps · rendition` : `${fps} fps`;
+  return customRate(slot) !== null ? `${fps} fps · rendition` : `${fps} fps`;
 }
 
 export function codecLabel(codec: string): string {

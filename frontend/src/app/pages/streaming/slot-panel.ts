@@ -40,7 +40,7 @@ import { NeatToasts } from '@sima/neat-ui/toast';
 import type { Slot, SlotTransport } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
-import { isNativeRate } from '../../sources/fps';
+import { customRate } from '../../sources/fps';
 import { SlotsService } from '../../sources/slots.service';
 import type { Camera } from '../../sources/webcam-publishing';
 import { FpsStepper } from './fps-stepper';
@@ -279,9 +279,7 @@ export class SlotPanel {
     if (this.playing()) return 'Stop the source to change its frame rate';
     return null;
   });
-  protected readonly nativeRate = computed(() =>
-    isNativeRate(this.slot().fps, this.slot().native_fps),
-  );
+  protected readonly nativeRate = computed(() => customRate(this.slot()) === null);
   protected readonly nativeLabel = computed(() => {
     const native = this.slot().native_fps;
     return native != null ? `Native (${native} fps)` : 'Native';
@@ -342,9 +340,7 @@ export class SlotPanel {
       !this.streamingRendition() &&
       slot.state !== 'playing' &&
       this.encode() === null &&
-      slot.fps != null &&
-      slot.native_fps != null &&
-      slot.fps !== slot.native_fps
+      customRate(slot) !== null
     );
   });
   protected readonly streamUrl = computed(() => streamUrl(this.slot()));
