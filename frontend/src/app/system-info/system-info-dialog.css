@@ -5,14 +5,10 @@
   /*
    * The term column of every list in the dialog: the lists sit in sections that open and close on
    * their own, so they cannot share one grid, and each would size its column to its own longest
-   * term. Wide enough for the longest key neat reports ("DevKit build version").
+   * term. Wide enough for the longest key neat reports ("DevKit build version"). The kit's list
+   * reads this width for its term column.
    */
-  --terms-width: 10rem;
-}
-
-/* The kit's list is two columns, the terms as wide as the widest; here they are one width. */
-.facts {
-  grid-template-columns: var(--terms-width) 1fr;
+  --neat-details-term-width: 10rem;
 }
 
 .facts > dt {
