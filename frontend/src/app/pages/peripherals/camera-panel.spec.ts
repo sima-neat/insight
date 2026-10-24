@@ -110,6 +110,8 @@ describe('CameraPanel', () => {
   });
 
   afterEach(() => {
+    // Every request a test caused was answered and checked: a stray stop or start fails it.
+    http.verify();
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -227,6 +229,14 @@ describe('CameraPanel', () => {
     preview.adopt(usbLive);
     await settle();
     expect(statusLine()).toBe('Live preview · 1280×720 · MJPG · 30 fps');
+
+    // Only a MIPI camera's rate is a ceiling (#170): a connection the backend names otherwise
+    // reads its rate as it is.
+    const other: CameraItem = { ...imx477, id: 'gmsl:cam0', connection: 'gmsl' };
+    await show(other);
+    preview.adopt(previewSession({ camera_id: other.id, camera_fps: 66.18 }));
+    await settle();
+    expect(statusLine()).toBe('Live preview · 1920×1080 · NV12 · 66 fps');
   });
 
   it('Start is blocked with the reason under it; a mode change while live restarts the preview', async () => {
@@ -329,6 +339,53 @@ describe('CameraPanel', () => {
     expect(dialogs.openBoard).toHaveBeenCalledTimes(1);
   });
 
+  it('a menu that mixes tiers names the tier of each entry that is not Available', async () => {
+    await settle();
+    expect(
+      select('Resolution')
+        .componentInstance.options()
+        .map((option: { label: string }) => option.label),
+    ).toEqual(['1920×1080', '1280×720 · Unsupported']);
+    // One tier only: the entries are named by their size alone.
+    await show(imx477Two);
+    expect(
+      select('Resolution')
+        .componentInstance.options()
+        .map((option: { label: string }) => option.label),
+    ).toEqual(['1920×1080', '1280×720']);
+  });
+
+  it('a mode picked while the board starts the preview is started once the first start answers', async () => {
+    await show(imx477Two);
+    await startPreview();
+    const first = http.expectOne({ method: 'POST', url: START_URL });
+    await pick('Resolution', '1280x720');
+    // No session yet, so nothing to stop: the start in flight is stopped once it answers.
+    http.expectNone({ method: 'POST', url: stopUrl('8f1c') });
+    first.flush({ session: previewSession() });
+    await settle();
+    http.expectOne({ method: 'POST', url: stopUrl('8f1c') }).flush({ session: null });
+    await settle();
+    const restart = http.expectOne({ method: 'POST', url: START_URL });
+    expect(restart.request.body).toEqual({ id: imx477Two.id, ...sel('NV12', 1280, 720, 60) });
+    restart.flush({ session: previewSession({ id: '9a2d', mode: sel('NV12', 1280, 720, 60) }) });
+    await settle();
+    expect(statusLine()).toBe('Live preview · 1280×720 · NV12');
+  });
+
+  it("a mode picked for a camera leaves another camera's preview alone", async () => {
+    await settle();
+    preview.adopt(previewSession());
+    await show(usb);
+    await pick('Pixel format', 'YUYV');
+    expect(TestBed.inject(PeripheralsSession).modes().get(usb.id)).toEqual(
+      sel('YUYV', 640, 480, 30),
+    );
+    // No stop, no start (afterEach verifies): the imx477's preview streams on.
+    expect(preview.state().status).toBe('live');
+    expect(preview.state().session?.camera_id).toBe(imx477.id);
+  });
+
   // #170's PreviewPane.test.js, adapted to the panel (ruling F7).
 
   it('Start preview sends the selected mode', async () => {
@@ -402,6 +459,9 @@ describe('CameraPanel', () => {
     await startPreview();
     const start = http.expectOne({ method: 'POST', url: START_URL });
     expect(start.request.body).toEqual({ id: usb.id, ...usbMjpg });
+    start.flush({ session: usbLive });
+    await settle();
+    expect(statusLine()).toBe('Live preview · 1280×720 · MJPG · 30 fps');
   });
 
   it('Start is disabled for a USB format the backend cannot preview, with the reason', async () => {

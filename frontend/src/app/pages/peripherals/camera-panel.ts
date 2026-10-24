@@ -185,9 +185,9 @@ export class CameraPanel {
         }
         const { mode, camera_fps } = session;
         const rate = rateLabel(camera_fps);
-        // A USB camera's rate is its mode's; a MIPI camera's is the most its sensor delivers in
-        // the mode (SiMa Sentinel's `max_fps`), so it reads "up to".
-        const shownRate = rate && this.camera().connection !== 'usb' ? `up to ${rate}` : rate;
+        // A MIPI camera's rate is the most its sensor delivers in the mode (SiMa Sentinel's
+        // `max_fps`), so it reads "up to"; any other camera's is its mode's (#170's `ceiling`).
+        const shownRate = rate && this.camera().connection === 'mipi' ? `up to ${rate}` : rate;
         return ['Live preview', sizeLabel(mode.width, mode.height), mode.format, shownRate]
           .filter(Boolean)
           .join(' · ');

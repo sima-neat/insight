@@ -529,6 +529,19 @@ describe('PeripheralsPage', () => {
     expect(TestBed.inject(PeripheralsSession).resume).toBeNull();
   });
 
+  it('a preview running at entry opens the side panel it shows in, rather than being stopped', async () => {
+    storage.values.set('neat-insight:peripherals:aside', 'closed');
+    await visit({ preview: live30 });
+    expect(aside()?.querySelector('app-camera-panel app-preview-frame img')?.getAttribute('src')).toBe(
+      live30.stream_url,
+    );
+    expect(storage.values.get('neat-insight:peripherals:aside')).toBe('open');
+    expect(posts(stopUrl(live30.id))).toHaveLength(0);
+    expect(pageInjector().get(CameraPreview).state().status).toBe('live');
+    await leave();
+    answer('POST', stopUrl(live30.id), { session: null });
+  });
+
   // F23: the panel's title carries the row's chip, Previewing included.
   it("the side panel shows the selected camera's panel, titled with its row's chip", async () => {
     await visit({ preview: live30 });

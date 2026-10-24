@@ -354,11 +354,15 @@ export class PeripheralsPage {
     if (board) this.peripherals.scanOnce(board);
   }
 
-  /** Shows a preview running as the page opens: its camera selected, its mode remembered. */
+  /**
+   * Shows a preview running as the page opens: its camera selected, its mode remembered, and the
+   * side panel open, since the preview shows there (with the panel closed it would be stopped).
+   */
   private adopt(session: PreviewSession): void {
     this.preview.adopt(session);
     if (!session.camera_id) return;
     this.selectedId.set(session.camera_id);
+    this.asides.setOpen('peripherals', true);
     this.session.setMode(session.camera_id, session.mode);
   }
 

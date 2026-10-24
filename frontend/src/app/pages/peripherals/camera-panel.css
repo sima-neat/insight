@@ -43,5 +43,5 @@
 }
 
 .output:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: var(--neat-focus-ring-width) solid var(--ring);
 }
