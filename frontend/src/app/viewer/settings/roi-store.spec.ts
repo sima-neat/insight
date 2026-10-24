@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import type { NeatRoiPolygon } from '@sima/neat-ui/video';
-import { FakeLocalStorage } from './fake-storage.testing';
+import { FakeLocalStorage } from '../../fake-storage.testing';
 import { RoiStore } from './roi-store';
 
 type Failures = Partial<Pick<FakeLocalStorage, 'failWrites' | 'unavailable'>>;

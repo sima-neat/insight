@@ -3,7 +3,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { type NeatRoiDrawMode, type NeatRoiPolygon, NeatRoiSwatch } from '@sima/neat-ui/video';
 import { By } from '@angular/platform-browser';
-import { FakeLocalStorage } from '../settings/fake-storage.testing';
+import { FakeLocalStorage } from '../../fake-storage.testing';
 import { RoiStore } from '../settings/roi-store';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
 import { RoiTab } from './roi-tab';

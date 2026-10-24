@@ -7,7 +7,7 @@ import { provideRouter, Router } from '@angular/router';
 import { NeatNumberField } from '@sima/neat-ui/number-field';
 import { type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { FakeConnections } from '../../viewer/fake-connections.testing';
-import { FakeLocalStorage } from '../../viewer/settings/fake-storage.testing';
+import { FakeLocalStorage } from '../../fake-storage.testing';
 import { VfConnections } from '../../viewer/vf/vf-connections';
 import { ViewerTile } from '../../viewer/viewer-tile';
 import { FakeResizeObserver, ViewerShell as Shell } from './viewer-page.testing';

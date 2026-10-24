@@ -9,7 +9,7 @@ import { MediaLibraryService } from '../../sources/media-library.service';
 import type { Progress } from '../../sources/progress-lines';
 import { SlotsService } from '../../sources/slots.service';
 import { ApiRequestError } from '../../sources/stream-lines';
-import { FakeLocalStorage } from '../../viewer/settings/fake-storage.testing';
+import { FakeLocalStorage } from '../../fake-storage.testing';
 import { MediaPage } from './media.page';
 
 function slot(index: number, overrides: Partial<Slot> = {}): Slot {
@@ -331,5 +331,14 @@ describe('MediaPage', () => {
       'people',
     );
     expect(aside()!.querySelector('h2')!.textContent!.trim()).toBe('people/walk.mp4');
+
+    tick('walk.mp4');
+    await settle();
+    await TestBed.inject(Router).navigateByUrl('/elsewhere');
+    await settle();
+    await TestBed.inject(Router).navigateByUrl('/media');
+    await settle();
+    expect(rowOf('walk.mp4').getAttribute('aria-selected')).toBe('true');
+    expect(aside()!.querySelector('h2')!.textContent!.trim()).toBe('1 selected');
   });
 });

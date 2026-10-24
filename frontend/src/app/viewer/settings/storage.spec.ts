@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { FakeLocalStorage, VIEWER_PREFIX } from './fake-storage.testing';
+import { FakeLocalStorage, VIEWER_PREFIX } from '../../fake-storage.testing';
 import { ViewerStorage } from './storage';
 
 describe('ViewerStorage', () => {

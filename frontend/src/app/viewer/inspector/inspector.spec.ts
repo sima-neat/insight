@@ -18,7 +18,7 @@ import {
 import { FakeResizeObserver, ViewerShell } from '../../pages/viewer/viewer-page.testing';
 import { ViewerPage } from '../../pages/viewer/viewer.page';
 import { FakeConnections } from '../fake-connections.testing';
-import { FakeLocalStorage } from '../settings/fake-storage.testing';
+import { FakeLocalStorage } from '../../fake-storage.testing';
 import { LayoutPrefs } from '../settings/layout-prefs';
 import { RoiStore } from '../settings/roi-store';
 import { VfConnections } from '../vf/vf-connections';

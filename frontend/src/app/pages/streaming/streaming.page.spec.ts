@@ -27,7 +27,7 @@ import type { Progress } from '../../sources/progress-lines';
 import { SlotsService } from '../../sources/slots.service';
 import { ApiRequestError } from '../../sources/stream-lines';
 import type { Camera } from '../../sources/webcam-publishing';
-import { FakeLocalStorage } from '../../viewer/settings/fake-storage.testing';
+import { FakeLocalStorage } from '../../fake-storage.testing';
 import { StreamingPage } from './streaming.page';
 
 function slot(index: number, overrides: Partial<Slot> = {}): Slot {

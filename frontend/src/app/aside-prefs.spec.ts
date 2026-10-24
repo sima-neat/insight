@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { AsidePrefs } from './aside-prefs';
-import { FakeLocalStorage } from './viewer/settings/fake-storage.testing';
+import { FakeLocalStorage } from './fake-storage.testing';
 
 describe('AsidePrefs', () => {
   let storage: FakeLocalStorage;

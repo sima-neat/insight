@@ -5,7 +5,7 @@ import {
   NEAT_OVERLAY_STYLE_FALLBACK_COLOR,
   type NeatRoiPolygon,
 } from '@sima/neat-ui/video';
-import { FakeLocalStorage } from './fake-storage.testing';
+import { FakeLocalStorage } from '../../fake-storage.testing';
 import type { ScopeOverrides } from './resolver';
 import { SCALAR_SETTINGS, TYPE_DEFAULTS, type SettingId } from './schema';
 import { RoiStore } from './roi-store';

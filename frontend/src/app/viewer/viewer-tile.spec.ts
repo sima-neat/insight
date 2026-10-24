@@ -6,7 +6,7 @@ import { bufferSettleMs, type NeatFrameStats, NeatVideoTile } from '@sima/neat-u
 import { ChannelLateness } from './channel-lateness';
 import { ChannelPlayback } from './channel-playback';
 import { FakeConnections } from './fake-connections.testing';
-import { FakeLocalStorage } from './settings/fake-storage.testing';
+import { FakeLocalStorage } from '../fake-storage.testing';
 import { RoiStore } from './settings/roi-store';
 import { ViewerSettingsStore } from './settings/viewer-settings.store';
 import { VfConnections } from './vf/vf-connections';
