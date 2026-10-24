@@ -1,18 +1,31 @@
-// Fails when the kit's video code is in the initial bundle, or is missing from the build.
+// Fails when code that belongs to a lazy route is in the initial bundle, or is missing from the
+// build.
 //
-// The video code (`@sima/neat-ui/video`) is meant to load only with the Viewer route, so the
-// other pages and the first paint do not pay for it. The compiler already rejects video symbols
-// imported from the kit's primary entry point, but nothing else notices when an import in the
-// shared code (a page, the shell, `app.config`) drags the video entry point into the main chunk.
-// This script checks the result: `neat-video-tile`, the tile component's selector, is a string
-// that survives minification, so it marks where the video code ended up.
+// The Viewer's video code (`@sima/neat-ui/video`) and the Streaming and Media pages, with the kit
+// entries only they use, are meant to load with their routes, so the first paint does not pay for
+// them. The compiler already rejects video symbols imported from the kit's primary entry point,
+// but nothing else notices when an import in the shared code (a page, the shell, `app.config`)
+// drags one of these into the main chunk. This script checks the result: each marker below is a
+// component selector, a string that survives minification, so it shows where the code ended up.
+//
+// `neat-toast-host` is not a marker on purpose: the app root renders the toast host, so the
+// kit's toast entry is in the initial bundle by design.
 //
 // Usage: node scripts/check-bundle-split.mjs [dist-dir]   (default: dist, after `npm run build`)
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 
-const MARKER = 'neat-video-tile';
+/** What stays out of the initial bundle, as a selector in the code that carries it. */
+const LAZY_CODE = [
+  { marker: 'neat-video-tile', what: 'the video code', route: 'the Viewer route' },
+  { marker: 'app-streaming-page', what: 'the Streaming page', route: 'the Streaming route' },
+  { marker: 'app-media-page', what: 'the Media page', route: 'the Media route' },
+  // The kit entries the two pages use (the file browser, the checked and selection lists, dialogs).
+  { marker: 'neat-file-browser', what: 'the kit’s file browser', route: 'Streaming and Media' },
+  { marker: 'neat-select-list', what: 'the kit’s select list', route: 'Streaming and Media' },
+  { marker: 'neat-dialog', what: 'the kit’s dialog', route: 'Streaming and Media' },
+];
 const dist = process.argv[2] ?? 'dist';
 
 // The initial chunks are what index.html loads on its own: the entry script and the chunks it
@@ -47,24 +60,34 @@ if (initial.size === 0) {
 }
 
 const lazy = readdirSync(dist).filter((file) => file.endsWith('.js') && !initial.has(file));
-const holds = (file) => readFileSync(join(dist, file), 'utf8').includes(MARKER);
+const read = (file) => readFileSync(join(dist, file), 'utf8');
+const initialCode = [...initial].map((file) => [file, read(file)]);
+const lazyCode = lazy.map((file) => [file, read(file)]);
 
-const leaked = [...initial].filter(holds);
-if (leaked.length > 0) {
-  console.error(
-    `The initial bundle holds the video code (found "${MARKER}" in ${leaked.join(', ')}). ` +
-      'Only the Viewer route may import @sima/neat-ui/video.',
-  );
+const problems = [];
+const loads = [];
+for (const { marker, what, route } of LAZY_CODE) {
+  const leaked = initialCode.filter(([, code]) => code.includes(marker)).map(([file]) => file);
+  if (leaked.length > 0) {
+    problems.push(
+      `The initial bundle holds ${what} (found "${marker}" in ${leaked.join(', ')}). ` +
+        `Only ${route} may import it.`,
+    );
+    continue;
+  }
+  const carriers = lazyCode.filter(([, code]) => code.includes(marker)).map(([file]) => file);
+  if (carriers.length === 0) {
+    problems.push(
+      `No lazy chunk holds "${marker}": ${what} is missing from the build, or the marker no ` +
+        'longer identifies it.',
+    );
+    continue;
+  }
+  loads.push(`${what[0].toUpperCase()}${what.slice(1)} loads with ${carriers.join(', ')}.`);
+}
+if (problems.length > 0) {
+  console.error(problems.join('\n'));
   process.exit(1);
 }
-const carriers = lazy.filter(holds);
-if (carriers.length === 0) {
-  console.error(
-    `No lazy chunk holds "${MARKER}": the video code is missing from the build, or the marker ` +
-      'no longer identifies it.',
-  );
-  process.exit(1);
-}
-console.log(
-  `Video code stays out of ${[...initial].join(', ')} and loads with ${carriers.join(', ')}.`,
-);
+console.log(loads.join('\n'));
+console.log(`None of it is in ${[...initial].join(', ')}.`);

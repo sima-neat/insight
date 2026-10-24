@@ -1,5 +1,5 @@
 import { expect, Page, Request, test } from '@playwright/test';
-import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill } from './layout';
+import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
 
 /** The fields of a `GET /api/mediasrc` slot these tests set; the rest take an unassigned slot's values. */
 type SlotAnswer = Record<string, unknown> & { index: number };
@@ -84,6 +84,14 @@ SLOTS[6] = slot(7, {
 SLOTS[7] = slot(8, { state: 'pulled', codec: 'none', pull: pull({ status: 'connecting' }) });
 SLOTS[8] = slot(9, { file: 'idle.mp4', codec: 'h264', transport: 'rtsp', native_fps: 30 });
 
+/** What the server knows of a file once it is assigned: the codec probe's result and its rate. */
+const PROBED = {
+  codec: 'h264',
+  transport: 'rtsp',
+  native_fps: 30,
+  allowed_transports: ['rtsp'],
+};
+
 const TREE = [
   { name: '/people', path: 'people', type: 'folder', streamable_count: 1, children: [] },
   { name: 'cars.mp4', path: 'cars.mp4', type: 'file', streamable: true },
@@ -96,7 +104,7 @@ const PIXEL = Buffer.from(
 );
 
 interface Mocked {
-  /** The bodies of the POSTs to `/api/mediasrc/<action>`, by action. */
+  /** The bodies of the POSTs to `/api/mediasrc/<action>`, by action, bulk or single. */
   readonly posts: Map<string, unknown[]>;
   /** Makes `GET /api/mediasrc` fail from now on. */
   failSlots(): void;
@@ -104,11 +112,15 @@ interface Mocked {
 
 /**
  * Insight's streaming API without a board: the slots above, three renditions, a small library,
- * and a bulk action answering with the server's message. Every API the page calls is answered
- * here, so whatever serves the app cannot change what the tests see.
+ * and a bulk action answering with the server's message. The single-slot actions (assign, start,
+ * stop, take over, pull) change the slots as the server would, so the page shows what it holds
+ * after them. Every API the page calls is answered here, so whatever serves the app cannot change
+ * what the tests see.
  */
 async function withMockedSlots(page: Page): Promise<Mocked> {
   const posts = new Map<string, unknown[]>();
+  // Each test starts from the board above and changes its own copy.
+  const slots = structuredClone(SLOTS);
   let failing = false;
   const record = (action: string, request: Request) =>
     posts.set(action, [...(posts.get(action) ?? []), request.postDataJSON()]);
@@ -128,7 +140,7 @@ async function withMockedSlots(page: Page): Promise<Mocked> {
     (route) =>
       failing
         ? route.fulfill({ status: 500, json: { error: 'MediaMTX is not answering' } })
-        : route.fulfill({ json: SLOTS }),
+        : route.fulfill({ json: slots }),
   );
   await page.route(
     (url) => url.pathname === '/api/mediasrc/renditions',
@@ -193,6 +205,69 @@ async function withMockedSlots(page: Page): Promise<Mocked> {
       },
     );
   }
+
+  // The single-slot actions: `change` updates the slot the request names and answers `answer`.
+  const slotAction = async (
+    action: string,
+    change: (target: SlotAnswer, body: Record<string, unknown>) => void,
+    answer: (target: SlotAnswer) => object,
+  ) =>
+    page.route(
+      (url) => url.pathname === `/api/mediasrc/${action}`,
+      (route) => {
+        record(action, route.request());
+        const body = route.request().postDataJSON() as { index: number };
+        const target = slots[body.index - 1];
+        change(target, body);
+        return route.fulfill({ json: answer(target) });
+      },
+    );
+  const ok = () => ({ success: true });
+  await slotAction(
+    'assign',
+    (target, { file }) => Object.assign(target, file ? { file, ...PROBED } : slot(target.index)),
+    ok,
+  );
+  await slotAction(
+    'start',
+    (target) => Object.assign(target, { state: 'playing', active_file: target['file'] }),
+    ok,
+  );
+  // Stopping releases a pull as well: the slot is idle and holds whatever it was assigned.
+  await slotAction(
+    'stop',
+    (target) =>
+      Object.assign(target, {
+        state: 'stopped',
+        active_file: null,
+        pull: undefined,
+        codec: target['file'] ? target['codec'] : 'unknown',
+      }),
+    ok,
+  );
+  await slotAction(
+    'takeover',
+    (target) => Object.assign(target, { state: 'stopped', external: undefined, codec: 'unknown' }),
+    (target) => ({ success: true, index: target.index }),
+  );
+  await slotAction(
+    'pull',
+    (target) =>
+      Object.assign(target, {
+        state: 'pulled',
+        codec: 'h264',
+        pull: pull({
+          status: 'live',
+          host: '10.0.0.9:554',
+          path: '/cam',
+          width: 1280,
+          height: 720,
+          fps: 25,
+          since: '2026-10-24T08:00:00Z',
+        }),
+      }),
+    (target) => target,
+  );
   return { posts, failSlots: () => (failing = true) };
 }
 
@@ -222,6 +297,13 @@ function cells(page: Page, name: string): Promise<string[]> {
     }),
   );
 }
+
+/**
+ * The cells a row shows at `size`: beside the side panel a tablet's list is too narrow for its
+ * Rate and Codec columns, which then give way (the panel shows both).
+ */
+const shownAt = (size: { width: number }, cells: string[]) =>
+  size === TABLET ? cells.slice(0, 4) : cells;
 
 /** How far the rows reach past the list's width: nothing may be pushed out of view sideways. */
 function listOverflow(page: Page): Promise<number> {
@@ -323,23 +405,138 @@ test.describe('Streaming with mocked slots', () => {
     await expect(panel(page)).not.toContainText('Connecting to src1');
   });
 
-  test('Change… opens the picker on the slot’s file, from the keyboard, and Escape closes it', async ({
-    page,
-  }) => {
-    await withMockedSlots(page);
-    await page.goto('/streaming');
-    await expect(rows(page)).toHaveCount(48);
+  for (const { name, size } of VIEWPORTS) {
+    test(`Change… opens the picker on the slot’s file, from the keyboard, and Escape closes it at ${name}`, async ({
+      page,
+    }) => {
+      await withMockedSlots(page);
+      await page.setViewportSize(size);
+      await page.goto('/streaming');
+      await expect(rows(page)).toHaveCount(48);
 
-    await listbox(page).focus();
-    await page.keyboard.press('ArrowDown');
-    await panel(page).getByRole('button', { name: 'Change…' }).focus();
-    await page.keyboard.press('Enter');
-    const picker = page.getByRole('dialog', { name: 'Source for src1' });
-    await expect(picker).toBeVisible();
-    await expect(picker).toContainText('Selected: people/walk_720p30.mp4');
-    await page.keyboard.press('Escape');
-    await expect(picker).toHaveCount(0);
-  });
+      await listbox(page).focus();
+      await page.keyboard.press('ArrowDown');
+      await panel(page).getByRole('button', { name: 'Change…' }).focus();
+      await page.keyboard.press('Enter');
+      const picker = page.getByRole('dialog', { name: 'Source for src1' });
+      await expect(picker).toBeVisible();
+      await expect(picker).toContainText('Selected: people/walk_720p30.mp4');
+      await page.keyboard.press('Escape');
+      await expect(picker).toHaveCount(0);
+    });
+
+    test(`a file is assigned through the picker and started, then the row and panel follow at ${name}`, async ({
+      page,
+    }) => {
+      const mocked = await withMockedSlots(page);
+      await page.setViewportSize(size);
+      await page.goto('/streaming');
+      await expect(rows(page)).toHaveCount(48);
+
+      await row(page, 'src10').click();
+      await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src10');
+      // Nothing to start before a file: Start says why.
+      await expect(panel(page).getByRole('button', { name: 'Start', exact: true })).toBeDisabled();
+
+      await panel(page).getByRole('button', { name: 'Change…' }).click();
+      const picker = page.getByRole('dialog', { name: 'Source for src10' });
+      await expect(picker).toContainText('Selected: Not assigned');
+      const assign = picker.getByRole('button', { name: 'Assign', exact: true });
+      await expect(assign).toBeDisabled();
+      await picker.getByRole('option').filter({ hasText: 'cars.mp4' }).click();
+      await expect(picker).toContainText('Selected: cars.mp4');
+      await assign.click();
+
+      // The dialog closes once the server has the file, and the slot shows what it knows of it.
+      await expect(picker).toHaveCount(0);
+      expect(mocked.posts.get('assign')).toEqual([
+        expect.objectContaining({ index: 10, file: 'cars.mp4' }),
+      ]);
+      await expect(panel(page)).toContainText('File: cars.mp4 · 30 fps');
+      expect(await cells(page, 'src10')).toEqual(
+        shownAt(size, ['src10', 'VID', 'cars.mp4', 'Idle', '30 fps', 'H.264']),
+      );
+
+      await panel(page).getByRole('button', { name: 'Start', exact: true }).click();
+      await expect(panel(page).getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+      await expect(panel(page)).toContainText('Live');
+      expect(mocked.posts.get('start')).toEqual([{ index: 10 }]);
+      expect((await cells(page, 'src10'))[3]).toBe('Live');
+    });
+
+    test(`a stream is pulled into a slot and stopped at ${name}`, async ({ page }) => {
+      const mocked = await withMockedSlots(page);
+      await page.setViewportSize(size);
+      await page.goto('/streaming');
+      await expect(rows(page)).toHaveCount(48);
+
+      await row(page, 'src11').click();
+      await panel(page).getByRole('radio', { name: 'Stream URL' }).click();
+      const pull = panel(page).getByRole('button', { name: 'Pull', exact: true });
+      // Only RTSP and RTSPS URLs can be pulled.
+      await panel(page).getByLabel('Stream URL', { exact: true }).fill('http://10.0.0.9/cam');
+      await expect(pull).toBeDisabled();
+      await panel(page).getByLabel('Stream URL', { exact: true }).fill('rtsp://10.0.0.9:554/cam');
+      await expect(pull).toBeEnabled();
+      await pull.click();
+
+      await expect(toast(page, 'src11 is pulling from rtsp://10.0.0.9:554/cam.')).toBeVisible();
+      expect(mocked.posts.get('pull')).toEqual([
+        { index: 11, url: 'rtsp://10.0.0.9:554/cam', username: '', password: '' },
+      ]);
+      expect(await cells(page, 'src11')).toEqual(
+        shownAt(size, [
+          'src11',
+          'URL',
+          '⇠ RTSP · 10.0.0.9:554 · 1280×720 · 25 fps',
+          'Pulled',
+          '25 fps',
+          'H.264',
+        ]),
+      );
+
+      // The form goes with the pull, and its main action takes over the focus.
+      const stop = panel(page).getByRole('button', { name: 'Stop pulling' });
+      await expect(stop).toBeFocused();
+      await stop.click();
+      await expect(panel(page).getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+      expect(mocked.posts.get('stop')).toEqual([{ index: 11 }]);
+      expect(await cells(page, 'src11')).toEqual(
+        shownAt(size, ['src11', '', 'Not assigned', 'Idle', '', '-']),
+      );
+    });
+
+    test(`an external publisher is taken over after a confirmation at ${name}`, async ({
+      page,
+    }) => {
+      const mocked = await withMockedSlots(page);
+      await page.setViewportSize(size);
+      await page.goto('/streaming');
+      await expect(rows(page)).toHaveCount(48);
+
+      await row(page, 'src4').click();
+      const takeOver = panel(page).getByRole('button', { name: 'Take over…' });
+      await takeOver.click();
+      await expect(confirmDialog(page)).toContainText('Disconnect external stream on src4?');
+      await expect(confirmDialog(page)).toContainText(
+        'The publisher and all readers will be disconnected.',
+      );
+      // Escape asks nothing of the server, and the focus returns to where it was.
+      await page.keyboard.press('Escape');
+      await expect(confirmDialog(page)).toHaveCount(0);
+      expect(mocked.posts.get('takeover')).toBeUndefined();
+      await expect(takeOver).toBeFocused();
+
+      await takeOver.click();
+      await confirmDialog(page).getByRole('button', { name: 'Disconnect' }).click();
+      await expect(toast(page, 'Disconnected the external stream on src4.')).toBeVisible();
+      expect(mocked.posts.get('takeover')).toEqual([{ index: 4 }]);
+      expect(await cells(page, 'src4')).toEqual(
+        shownAt(size, ['src4', '', 'Not assigned', 'Idle', '', '-']),
+      );
+      await expect(panel(page).getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+    });
+  }
 
   test('rows show kind, source, state, rate and codec for files, a webcam, an external publisher and pulls', async ({
     page,

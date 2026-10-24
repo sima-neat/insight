@@ -105,7 +105,10 @@ merging.
   ceiling stays.
   (`angular.json` cannot hold comments, so the reason lives here.) The kit's video code is imported from
   `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and stays out of the
-  initial bundle; `npm run check:bundle` (after a build, and in CI) fails if it leaks into it.
+  initial bundle. Streaming and Media are lazy routes too, and so are the kit entries only they use
+  (`/file-browser`, `/select-list`, `/dialog`). `npm run check:bundle` (after a build, and in CI)
+  fails if any of that leaks into the initial bundle; the toast host is the kit entry that is
+  there on purpose.
 - **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`; the
   video part is its `@sima/neat-ui/video` entry point) draws and knows nothing of vf:
   `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the matching frames;
@@ -153,7 +156,7 @@ Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 | `npm test`             | Unit tests (`npm test -- --watch=false` runs once and exits)                                        |
 | `npm run lint`         | ESLint (angular-eslint, kit-only imports), Stylelint (no colour literals) and a typecheck of `e2e/` |
 | `npm run build`        | Production build into `frontend/dist`                                                               |
-| `npm run check:bundle` | Checks the built bundle: the kit's video code is in the Viewer's chunk, not the initial one         |
+| `npm run check:bundle` | Checks the built bundle: video code, Streaming and Media stay out of the initial one                |
 | `npm run e2e`          | Playwright end-to-end tests (`frontend/e2e`)                                                        |
 
 The backend's tests run from the repo root with `python -m unittest discover -s tests`. Run lint,

@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill } from './layout';
+import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
 
 /** The fields of a `GET /api/mediasrc` slot these tests set; the rest take an unassigned slot's values. */
 const slot = (index: number, fields: Record<string, unknown> = {}) => ({
@@ -259,50 +259,53 @@ test.describe('Media with mocked APIs', () => {
       ]);
   });
 
-  test('keyboard only: arrows select, Space ticks, Delete… asks with the slots it clears, Escape cancels, Delete deletes in order', async ({
-    page,
-  }) => {
-    const mocked = await withMockedMedia(page);
-    await page.goto('/media');
-    await expect(rows(page)).toHaveCount(3);
+  for (const { name, size } of VIEWPORTS) {
+    test(`keyboard only: arrows select, Space ticks, Delete… asks with the slots it clears, Escape cancels, Delete deletes in order at ${name}`, async ({
+      page,
+    }) => {
+      const mocked = await withMockedMedia(page);
+      await page.setViewportSize(size);
+      await page.goto('/media');
+      await expect(rows(page)).toHaveCount(3);
 
-    await listbox(page).focus();
-    // people, then cars.mp4: the panel follows the selection.
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowDown');
-    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('cars.mp4');
-    await expect.poll(() => infoRows(page)).toContainEqual(['Duration', '1:02:05']);
-    await page.keyboard.press('Space');
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.press('Enter');
-    // In people: run.mp4, walk.mp4.
-    await expect(row(page, 'run.mp4')).toHaveCount(1);
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('Space');
-    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('2 selected');
+      await listbox(page).focus();
+      // people, then cars.mp4: the panel follows the selection.
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('cars.mp4');
+      await expect.poll(() => infoRows(page)).toContainEqual(['Duration', '1:02:05']);
+      await page.keyboard.press('Space');
+      await page.keyboard.press('ArrowUp');
+      await page.keyboard.press('Enter');
+      // In people: run.mp4, walk.mp4.
+      await expect(row(page, 'run.mp4')).toHaveCount(1);
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Space');
+      await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('2 selected');
 
-    const deleteButton = panel(page).getByRole('button', { name: 'Delete…' });
-    await deleteButton.focus();
-    await page.keyboard.press('Enter');
-    await expect(confirmDialog(page)).toContainText('Delete Files');
-    await expect(confirmDialog(page)).toContainText(
-      'Delete 2 media files: cars.mp4, people/walk.mp4? In use on src3, src5, src9; those slots are cleared.',
-    );
-    await page.keyboard.press('Escape');
-    await expect(confirmDialog(page)).toHaveCount(0);
-    expect(mocked.deleted).toEqual([]);
-    await expect(deleteButton).toBeFocused();
+      const deleteButton = panel(page).getByRole('button', { name: 'Delete…' });
+      await deleteButton.focus();
+      await page.keyboard.press('Enter');
+      await expect(confirmDialog(page)).toContainText('Delete Files');
+      await expect(confirmDialog(page)).toContainText(
+        'Delete 2 media files: cars.mp4, people/walk.mp4? In use on src3, src5, src9; those slots are cleared.',
+      );
+      await page.keyboard.press('Escape');
+      await expect(confirmDialog(page)).toHaveCount(0);
+      expect(mocked.deleted).toEqual([]);
+      await expect(deleteButton).toBeFocused();
 
-    await page.keyboard.press('Enter');
-    await confirmDialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
-    await expect(toast(page, 'Removed 2 media file(s).')).toBeVisible();
-    expect(mocked.deleted).toEqual(['cars.mp4', 'people/walk.mp4']);
-    // The library and the slots are fetched again: the file is gone, and its slots with it.
-    await expect(row(page, 'walk.mp4')).toHaveCount(0);
-    await expect(row(page, 'run.mp4')).toHaveCount(1);
-    await expect(panel(page).getByText('Select a file.')).toBeFocused();
-  });
+      await page.keyboard.press('Enter');
+      await confirmDialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
+      await expect(toast(page, 'Removed 2 media file(s).')).toBeVisible();
+      expect(mocked.deleted).toEqual(['cars.mp4', 'people/walk.mp4']);
+      // The library and the slots are fetched again: the file is gone, and its slots with it.
+      await expect(row(page, 'walk.mp4')).toHaveCount(0);
+      await expect(row(page, 'run.mp4')).toHaveCount(1);
+      await expect(panel(page).getByText('Select a file.')).toBeFocused();
+    });
+  }
 
   test('a failing slot poll says so', async ({ page }) => {
     const mocked = await withMockedMedia(page);
@@ -382,49 +385,52 @@ test.describe('Import with mocked APIs', () => {
     );
   });
 
-  test('an upload whose name exists asks, sends again with Keep both, and shows the saved file', async ({
-    page,
-  }) => {
-    const mocked = await withMockedMedia(page);
-    const sent: (string | null)[] = [];
-    await page.route(
-      (url) => url.pathname === '/api/upload/media',
-      async (route) => {
-        const body = route.request().postData() ?? '';
-        const choice = /name="on_conflict"\r\n\r\n(\w+)/.exec(body)?.[1] ?? null;
-        sent.push(choice);
-        if (choice === null) {
+  for (const { name, size } of VIEWPORTS) {
+    test(`an upload whose name exists asks, sends again with Keep both, and shows the saved file at ${name}`, async ({
+      page,
+    }) => {
+      const mocked = await withMockedMedia(page);
+      await page.setViewportSize(size);
+      const sent: (string | null)[] = [];
+      await page.route(
+        (url) => url.pathname === '/api/upload/media',
+        async (route) => {
+          const body = route.request().postData() ?? '';
+          const choice = /name="on_conflict"\r\n\r\n(\w+)/.exec(body)?.[1] ?? null;
+          sent.push(choice);
+          if (choice === null) {
+            return route.fulfill({
+              status: 409,
+              json: {
+                error: 'A file with this name exists.',
+                conflict: { existing: 'cars.mp4', suggested: 'cars_2.mp4' },
+              },
+            });
+          }
+          mocked.add('cars_2.mp4');
           return route.fulfill({
-            status: 409,
-            json: {
-              error: 'A file with this name exists.',
-              conflict: { existing: 'cars.mp4', suggested: 'cars_2.mp4' },
-            },
+            contentType: 'text/plain',
+            body: 'Uploaded to /data/media/cars_2.mp4\nOptimized cars_2.mp4: H.264\nUpload complete.\n',
           });
-        }
-        mocked.add('cars_2.mp4');
-        return route.fulfill({
-          contentType: 'text/plain',
-          body: 'Uploaded to /data/media/cars_2.mp4\nOptimized cars_2.mp4: H.264\nUpload complete.\n',
-        });
-      },
-    );
-    await page.goto('/media');
-    await tool(page, 'Import…').click();
-    await expect(importDialog(page)).toBeVisible();
+        },
+      );
+      await page.goto('/media');
+      await tool(page, 'Import…').click();
+      await expect(importDialog(page)).toBeVisible();
 
-    await choose(page, 'cars.mp4');
-    await expect(importDialog(page)).toContainText('cars.mp4 already exists.');
-    await expect(importDialog(page)).toContainText('In use on src5');
-    // The safe answer has the focus: Enter keeps both.
-    await expect(dialogButton(page, 'Keep both')).toBeFocused();
-    await page.keyboard.press('Enter');
+      await choose(page, 'cars.mp4');
+      await expect(importDialog(page)).toContainText('cars.mp4 already exists.');
+      await expect(importDialog(page)).toContainText('In use on src5');
+      // The safe answer has the focus: Enter keeps both.
+      await expect(dialogButton(page, 'Keep both')).toBeFocused();
+      await page.keyboard.press('Enter');
 
-    await expect(importDialog(page)).toHaveCount(0);
-    expect(sent).toEqual([null, 'keep_both']);
-    await expect(toast(page, 'Uploaded and prepared 1 file(s).')).toBeVisible();
-    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('cars_2.mp4');
-  });
+      await expect(importDialog(page)).toHaveCount(0);
+      expect(sent).toEqual([null, 'keep_both']);
+      await expect(toast(page, 'Uploaded and prepared 1 file(s).')).toBeVisible();
+      await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('cars_2.mp4');
+    });
+  }
 
   test('a failure line keeps the dialog open and says what failed', async ({ page }) => {
     await withMockedMedia(page);

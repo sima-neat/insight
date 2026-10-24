@@ -5,6 +5,13 @@ export const LAPTOP = { width: 1366, height: 768 };
 export const DESKTOP = { width: 1920, height: 1080 };
 export const TABLET = { width: 768, height: 1024 };
 
+/** The three viewports by name, for tests that run a flow at each of them. */
+export const VIEWPORTS = [
+  { name: '1366×768', size: LAPTOP },
+  { name: '1920×1080', size: DESKTOP },
+  { name: '768×1024', size: TABLET },
+];
+
 /** How far the document and the shell's content area reach past their boxes. */
 export function pageOverflow(page: Page) {
   return page.evaluate(() =>

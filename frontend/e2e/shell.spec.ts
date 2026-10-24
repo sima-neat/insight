@@ -213,6 +213,9 @@ for (const viewport of [LAPTOP, TABLET, DESKTOP]) {
     await page.setViewportSize(viewport);
     await page.goto('/streaming');
     await expect(page.getByRole('banner')).toBeVisible();
+    // The page is a lazy route: its tools join the top bar once it has loaded, which can be after
+    // the bar itself is there.
+    await expect(page.getByRole('group', { name: 'Page tools' })).toBeVisible();
 
     const overflow = await page.evaluate(() => {
       const root = document.documentElement;
