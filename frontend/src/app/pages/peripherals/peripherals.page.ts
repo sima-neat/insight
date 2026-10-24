@@ -288,9 +288,9 @@ export class PeripheralsPage {
     // runs on what is shown and whose preview it is, not on the preview's state, so that a stop
     // that fails, keeping the preview and its camera, is not sent again by itself. One case sends
     // it once more: a start left while still starting has no camera until its answer comes and
-    // is stopped; when that stop fails before this effect runs, the effect first sees the camera
-    // with the preview kept live, and leaves it again. That is one more stop of a preview nobody
-    // shows, and its failure keeps the camera, so nothing repeats.
+    // is stopped; when that stop fails, the preview is live again on its camera, and the effect
+    // leaves it once more. That is one more stop of a preview nobody shows, and its failure keeps
+    // the camera, so nothing repeats.
     effect(() => {
       const shown = this.panelCamera();
       const previewed = this.preview.camera();
