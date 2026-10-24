@@ -311,6 +311,8 @@ describe('StatsPage', () => {
       expect(chart.label()).toBe(cardText(card).heading);
       expect(chart.headless()).toBe(true);
       expect(chart.size()).toBe('medium');
+      // A card's plot is small: its lines and time axis without the values that would crowd it.
+      expect(chart.valueLabels()).toBe(false);
       expect(chart.times()).toEqual(window.times);
     }
     const thermal = chartOf(cardNamed('Thermal max'))!;
@@ -417,7 +419,7 @@ describe('StatsPage', () => {
     expect(asideTitle()).toBe('Power');
     expect(marked()).toEqual(['Board power']);
 
-    // Closed, the panel marks no card; a click anywhere on a card opens it on that card's area.
+    // Closed, the panel marks no card; a click on the card itself opens it on that card's area.
     await click(toolbarButton('Side panel')!);
     expect(aside()).toBeNull();
     expect(marked()).toEqual([]);
@@ -425,6 +427,24 @@ describe('StatsPage', () => {
     expect(asideTitle()).toBe('System');
     expect(marked()).toEqual(['CPU usage']);
     expect(localStorage.getItem('neat-insight:stats:aside')).toBe('open');
+  });
+
+  it('a click on a card’s chart opens its area, and the side panel keeps its charts’ value labels', async () => {
+    await visit();
+    const plot = cardNamed('Network').querySelector<HTMLElement>('neat-time-chart .plot')!;
+    expect(plot.getAttribute('tabindex')).toBe('0');
+
+    await click(plot);
+    expect(asideTitle()).toBe('Storage & Network');
+    expect(
+      cardNamed('Network').querySelector('button.activator')!.getAttribute('aria-current'),
+    ).toBe('true');
+    const panelCharts = fixture.debugElement
+      .queryAll(By.directive(NeatTimeChart))
+      .filter((debug) => aside()!.contains(debug.nativeElement))
+      .map((debug) => debug.componentInstance as NeatTimeChart);
+    expect(panelCharts.length).toBeGreaterThan(0);
+    expect(panelCharts.every((chart) => chart.valueLabels())).toBe(true);
   });
 
   it('without a board, Choose a board opens the board dialog', async () => {

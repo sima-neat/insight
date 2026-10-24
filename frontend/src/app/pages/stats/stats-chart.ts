@@ -36,6 +36,7 @@ export type StatsChartInputs = ChartInputs & { readonly reference?: NeatReferenc
         [tone]="inputs.tone"
         [size]="size()"
         [headless]="headless()"
+        [valueLabels]="valueLabels()"
         [format]="format()"
       />
     }
@@ -50,6 +51,8 @@ export class StatsChart {
   readonly size = input<'compact' | 'medium' | 'large'>('medium');
   /** Leaves out the title row, for a chart under a heading of its own. */
   readonly headless = input(false, { transform: booleanAttribute });
+  /** Whether the grid and the levels carry their values; a card's small plot leaves them out. */
+  readonly valueLabels = input(true, { transform: booleanAttribute });
 
   private readonly unit = computed(() => this.chart()?.unit ?? null);
   /** One function per unit, so the chart does not re-word its values on every poll. */

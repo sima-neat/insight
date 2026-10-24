@@ -32,18 +32,21 @@ describe('StatsChart', () => {
     expect(chart()!.reference()).toBeNull();
     expect(chart()!.size()).toBe('medium');
     expect(chart()!.headless()).toBe(false);
+    expect(chart()!.valueLabels()).toBe(true);
     expect(chart()!.format()(1234.5)).toBe('1235 MB');
   });
 
-  it('takes the size and headlessness it is asked for, and the reference line a chart carries', async () => {
+  it('takes the size, headlessness and value labels it is asked for, and the reference line a chart carries', async () => {
     await show({
       chart: boardPowerChart(window),
       label: 'Board power',
       size: 'large',
       headless: '',
+      valueLabels: false,
     });
     expect(chart()!.size()).toBe('large');
     expect(chart()!.headless()).toBe(true);
+    expect(chart()!.valueLabels()).toBe(false);
     expect(chart()!.reference()?.label).toBe('Session average 11.2 W');
   });
 
