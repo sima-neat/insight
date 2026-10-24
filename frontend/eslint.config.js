@@ -60,7 +60,7 @@ module.exports = defineConfig([
           ],
           patterns: [
             {
-              group: ['@spartan-ng/*', '@lucide/*', 'primeng/*', '@primeuix/*'],
+              group: ['@spartan-ng/*', '@lucide/*', 'primeng/*', '@primeuix/*', 'd3', 'd3-*'],
               message: KIT_ONLY_MESSAGE,
             },
             {
