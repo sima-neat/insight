@@ -1,0 +1,46 @@
+<div class="frame">
+  @for (src of liveSources(); track src) {
+    <img
+      #live
+      [src]="src"
+      [alt]="'Live preview of src' + slot().index"
+      [class.waiting]="connecting()"
+      (error)="failed(src)"
+    />
+  } @empty {
+    @if (failure(); as failure) {
+      @if (failure !== 'checking') {
+        <p class="message">
+          {{
+            failure === 'busy'
+              ? 'Preview unavailable: too many previews open'
+              : 'Preview unavailable.'
+          }}
+          <button neatButton type="button" variant="text" size="small" (click)="retry()">
+            Retry
+          </button>
+        </p>
+      }
+    } @else if (camera()) {
+      <video #camera autoplay muted playsinline [muted]="true"></video>
+    } @else if (file(); as file) {
+      @if (file.kind === 'video') {
+        <video [src]="file.src" controls autoplay muted loop playsinline [muted]="true"></video>
+      } @else {
+        <img [src]="file.src" [alt]="slot().file" />
+      }
+    } @else if (idleText()) {
+      <p class="message">{{ idleText() }}</p>
+    }
+  }
+  <!-- Announced when it appears; the bar itself is silent, as a progressbar is. -->
+  <div class="connecting" role="status">
+    @if (connecting()) {
+      <neat-progress [value]="null" [label]="'Connecting to src' + slot().index + '…'" />
+      <span>Connecting to src{{ slot().index }}…</span>
+    }
+  </div>
+</div>
+@if (file()) {
+  <p class="caption">File preview</p>
+}

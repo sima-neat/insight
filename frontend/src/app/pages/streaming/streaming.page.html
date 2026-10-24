@@ -157,13 +157,14 @@
   </div>
 
   @if (asideOpen()) {
-    <section neatPageAside class="slot-panel" aria-label="Selected slot">
-      @if (selectedRow(); as row) {
-        <header class="slot-header">
-          <h2>{{ row.name }}</h2>
-          <app-status-chip [tone]="row.state.tone">{{ row.state.label }}</app-status-chip>
-        </header>
-      } @else {
+    <section neatPageAside aria-label="Selected slot">
+      <!--
+        One panel per slot: choosing another slot builds the panel afresh, so nothing typed for
+        one slot (a stream URL, a password, a frame rate) carries over to the next.
+      -->
+      @for (row of selectedRows(); track row.slot.index) {
+        <app-slot-panel [row]="row" />
+      } @empty {
         <p neatNote>No slot selected.</p>
       }
     </section>

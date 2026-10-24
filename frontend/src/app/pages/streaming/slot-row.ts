@@ -1,4 +1,4 @@
-import type { Slot, SlotExternal, SlotPull, SlotPullStatus } from '../../sources/api';
+import type { Slot, SlotExternal, SlotPull, SlotPullStatus, SlotReader } from '../../sources/api';
 import type { Progress } from '../../sources/progress-lines';
 import type { Camera } from '../../sources/webcam-publishing';
 
@@ -210,6 +210,84 @@ export function codecWarning(slot: Slot): string | null {
   return stream?.codec_supported === false
     ? `${codecLabel(slot.codec)} cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.`
     : null;
+}
+
+/** The pull status's label, as the state chip shows it. */
+export function pullStatusLabel(pull: SlotPull): string {
+  return PULL_STATES[pull.status].label;
+}
+
+/**
+ * Whether the slot has a stream to watch: Insight streams it, a publisher holds it, or a pull
+ * receives video. The server's preview route serves exactly these.
+ */
+export function isLive(slot: Slot): boolean {
+  return (
+    slot.state === 'playing' ||
+    slot.state === 'external' ||
+    (slot.state === 'pulled' && slot.pull?.status === 'live')
+  );
+}
+
+/**
+ * The URL a reader opens the slot at (#170's Copy URL): the RTSP URL the server reports, with the
+ * SDK's mapped port, or the HTTP MJPEG one for a slot on that transport. Null when the server
+ * reports none.
+ */
+export function streamUrl(slot: Slot): string | null {
+  if (slot.transport === 'http')
+    return slot.urls.http_mjpeg ?? `/stream/http/src${slot.index}.mjpg`;
+  return slot.urls.rtsp ?? null;
+}
+
+/**
+ * What a file or webcam slot puts out (#170's "Output" line): `RTSP / H.264 · 25 fps`, the rate
+ * being the one set, else the file's own. A webcam always goes out at the normalizer's rate, which
+ * the server does not report.
+ */
+export function slotOutput(slot: Slot): string {
+  const base = `${slot.transport ? slot.transport.toUpperCase() : NONE} / ${codecLabel(slot.codec)}`;
+  const fps = slot.type === 'file' ? (slot.fps ?? slot.native_fps) : null;
+  return fps == null ? base : `${base} · ${fps} fps`;
+}
+
+/**
+ * The rest are #170's (`externalSource.js`) as well. The preview of a live slot: `token` makes a
+ * new request (another slot, a retry), and `since` changes with the publisher's session, so a
+ * publisher that reconnected between two polls gets a new image rather than the ended one.
+ */
+export function previewSrc(index: number, token: number, since?: string | null): string {
+  return `/stream/preview/src${index}.mjpg?t=${token}${since ? `&s=${encodeURIComponent(since)}` : ''}`;
+}
+
+/** How long a stream has been live, `12m 04s` or `1h 02m`; "-" while unknown. */
+export function liveFor(sinceIso: string | null | undefined, nowMs: number): string {
+  const since = sinceIso ? Date.parse(sinceIso) : NaN;
+  if (!Number.isFinite(since)) return NONE;
+  const total = Math.max(0, Math.floor((nowMs - since) / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+export function formatBitrate(bps: number | null | undefined): string {
+  if (bps == null || !Number.isFinite(bps) || bps <= 0) return NONE;
+  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mbit/s`;
+  return `${Math.round(bps / 1000)} kbit/s`;
+}
+
+/** `2 · 10.42.0.79, insight preview`: the count, then each reader by label, address or protocol. */
+export function readersText(readers: readonly SlotReader[] | undefined): string {
+  const list = readers ?? [];
+  if (list.length === 0) return '0';
+  return `${list.length} · ${list.map((r) => r.label || r.address || r.protocol).join(', ')}`;
+}
+
+/** Where a pull reads from, built from the server's record, which never carries credentials. */
+export function pullSourceText(pull: Pick<SlotPull, 'scheme' | 'host' | 'path'>): string {
+  return `${pull.scheme || 'rtsp'}://${pull.host || ''}${pull.path || ''}`;
 }
 
 export function slotRow(slot: Slot, local: SlotLocal = {}): SlotRow {

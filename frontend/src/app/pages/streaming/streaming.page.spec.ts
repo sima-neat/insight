@@ -1,10 +1,13 @@
-import { Component, signal } from '@angular/core';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { Component, computed, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { NeatShell } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type {
+  AssignRequest,
   AutoAssignResult,
   BulkStartResult,
   MediaNode,
@@ -14,6 +17,7 @@ import type {
   ResetResult,
   Slot,
   StopAllResult,
+  SuccessResponse,
 } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
 import { MediaLibraryService } from '../../sources/media-library.service';
@@ -130,11 +134,21 @@ class FakeSlots {
   readonly reset = vi.fn<(released: readonly ReleasedWebcam[]) => Promise<ResetResult>>();
   readonly autoAssign = vi.fn<(released: readonly ReleasedWebcam[]) => Promise<AutoAssignResult>>();
   readonly clearRenditions = vi.fn<() => Promise<RenditionsCleared>>();
+  /** What the side panel commits a frame rate with. */
+  readonly assign = vi.fn<(request: AssignRequest) => Promise<SuccessResponse>>(async () => ({
+    success: true,
+  }));
 }
 
 class FakeCameras {
   readonly assignments = signal<ReadonlyMap<number, Camera>>(new Map());
   readonly anyChanging = signal(false);
+  // What the side panel reads.
+  readonly cameras = signal<readonly Camera[]>([]);
+  readonly state = signal('unknown');
+  readonly error = signal<string | null>(null);
+  readonly localStreams = signal<ReadonlyMap<number, MediaStream>>(new Map());
+  readonly changingSlots = computed<ReadonlySet<number>>(() => new Set());
   readonly releaseAll = vi.fn((options?: { clearAssignments?: boolean }) => {
     void options;
     return RELEASED;
@@ -183,6 +197,8 @@ describe('StreamingPage', () => {
     toasts = { error: vi.fn(), status: vi.fn() };
     TestBed.configureTestingModule({
       providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
         provideRouter([
           { path: 'streaming', component: StreamingPage },
           { path: 'elsewhere', component: Elsewhere },
@@ -409,6 +425,88 @@ describe('StreamingPage', () => {
     await click(toolbarButton('Start…'));
     expect(bulkDialog()!.querySelector('[role="slider"]')!.getAttribute('aria-valuenow')).toBe('2');
     await answer(bulkDialog()!, 'Cancel');
+  });
+
+  it('Start… waits for the frame rates the side panel is committing, and starts nothing when one was refused (M6)', async () => {
+    await open();
+    slots.startBulk.mockResolvedValue({
+      success: true,
+      requested: 1,
+      targeted: 1,
+      started: [7],
+      already_running: [],
+      errors: [],
+      skipped_external: [],
+      skipped_pulled: [],
+      message: 'Started 1 source(s), 0 already running, 0 failed.',
+      started_or_running: 1,
+    });
+    let landed!: () => void;
+    slots.assign.mockReturnValueOnce(
+      new Promise((resolve) => (landed = () => resolve({ success: true }))),
+    );
+    await click(rowOf('src7'));
+    const rate = aside()!.querySelector<HTMLInputElement>('input[aria-label="Frames per second"]')!;
+    rate.value = '15';
+    rate.dispatchEvent(new Event('input'));
+    rate.dispatchEvent(new Event('blur'));
+    await settle();
+    expect(slots.assign).toHaveBeenCalledWith({
+      index: 7,
+      file: 'idle.mp4',
+      transport: 'rtsp',
+      fps: 15,
+    });
+
+    await click(toolbarButton('Start…'));
+    await answer(bulkDialog()!, 'Start');
+    // The server must start the rate just committed, not the one before it.
+    expect(slots.startBulk).not.toHaveBeenCalled();
+    landed();
+    await settleOverlay();
+    expect(slots.startBulk).toHaveBeenCalledExactlyOnceWith(1);
+    expect(bulkDialog()).toBeNull();
+
+    // A commit still on its way when Start is pressed, then refused: it is reported once, and the
+    // bulk start sends nothing and stays open.
+    let refuse!: () => void;
+    slots.assign.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        refuse = () => reject(new ApiRequestError(400, 'No codec level covers 900 fps.', null));
+      }),
+    );
+    rate.value = '900';
+    rate.dispatchEvent(new Event('input'));
+    rate.dispatchEvent(new Event('blur'));
+    await click(toolbarButton('Start…'));
+    await answer(bulkDialog()!, 'Start');
+    refuse();
+    await settleOverlay();
+    expect(toasts.error).toHaveBeenCalledExactlyOnceWith('No codec level covers 900 fps.');
+    expect(slots.startBulk).toHaveBeenCalledOnce();
+    expect(bulkDialog()).not.toBeNull();
+    await answer(bulkDialog()!, 'Cancel');
+  });
+
+  it('the side panel is the selected slot’s own: choosing another slot starts it afresh', async () => {
+    await open();
+    await click(rowOf('src7'));
+    const kind = (label: string) =>
+      [...aside()!.querySelectorAll<HTMLElement>('[role="radio"]')].find(
+        (radio) => radio.textContent?.trim() === label,
+      )!;
+    await click(kind('Stream URL'));
+    const password = aside()!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    password.value = 'secret';
+    password.dispatchEvent(new Event('input'));
+    await settle();
+
+    await click(rowOf('src9'));
+    expect(asideHeading()).toBe('src9');
+    await click(rowOf('src7'));
+    expect(kind('File').getAttribute('aria-checked')).toBe('true');
+    await click(kind('Stream URL'));
+    expect(aside()!.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe('');
   });
 
   it('Start… cancelled starts nothing', async () => {

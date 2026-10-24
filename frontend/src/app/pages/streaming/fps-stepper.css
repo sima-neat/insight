@@ -1,0 +1,23 @@
+:host {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+/* Room for a four-digit rate; the unit reads after the number, as #170's did. */
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+.field input {
+  width: 4.5rem;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.unit {
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-sm);
+}

@@ -1,0 +1,38 @@
+/* The dialog lays out its body and actions itself (see the component). */
+:host {
+  display: contents;
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+/* The browser needs a height to fill, and scrolls its rows inside it. */
+neat-file-browser {
+  display: flex;
+  block-size: min(24rem, 55vh);
+}
+
+.picked {
+  margin: 0;
+  font-size: var(--neat-text-sm);
+}
+
+.path {
+  overflow-wrap: anywhere;
+}
+
+/* The hidden-files note on the left, Import… at the end of the same line. */
+.note {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--neat-space-2);
+  min-block-size: 1.5rem;
+}
+
+.note button {
+  margin-inline-start: auto;
+}

@@ -1,0 +1,59 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+}
+
+/* The picture's box: 16:9 like most streams, the picture letterboxed inside it. */
+.frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
+.frame img,
+.frame video {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Until its first frame the live image has nothing to show; the connecting status covers it. */
+.frame img.waiting {
+  visibility: hidden;
+}
+
+.message {
+  grid-area: 1 / 1;
+  margin: 0;
+  padding: var(--neat-space-3);
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-sm);
+  text-align: center;
+}
+
+.connecting {
+  position: absolute;
+  inset-inline: var(--neat-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-sm);
+  text-align: center;
+}
+
+.connecting:empty {
+  display: none;
+}
+
+.caption {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+}

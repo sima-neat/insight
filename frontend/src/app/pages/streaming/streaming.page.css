@@ -55,19 +55,6 @@ neat-select-list {
   letter-spacing: 0.04em;
 }
 
-/* Side panel. */
-.slot-header {
-  display: flex;
-  align-items: center;
-  gap: var(--neat-space-2);
-}
-
-.slot-header h2 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 500;
-}
-
 /* Start… dialog: the slider takes the row, the readout its number's width. */
 .question {
   margin: 0 0 var(--neat-space-3);

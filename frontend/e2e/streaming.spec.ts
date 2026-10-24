@@ -89,6 +89,12 @@ const TREE = [
   { name: 'cars.mp4', path: 'cars.mp4', type: 'file', streamable: true },
 ];
 
+/** A 1×1 PNG. */
+const PIXEL = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
 interface Mocked {
   /** The bodies of the POSTs to `/api/mediasrc/<action>`, by action. */
   readonly posts: Map<string, unknown[]>;
@@ -131,6 +137,11 @@ async function withMockedSlots(page: Page): Promise<Mocked> {
   await page.route(
     (url) => url.pathname === '/api/media-files',
     (route) => route.fulfill({ json: TREE }),
+  );
+  // The side panel's previews: a live slot's stream and a file. A still image stands in for both.
+  await page.route(
+    (url) => url.pathname.startsWith('/stream/preview/') || url.pathname.startsWith('/media/'),
+    (route) => route.fulfill({ contentType: 'image/png', body: PIXEL }),
   );
   const answers: Record<string, object> = {
     'start-bulk': {
@@ -258,6 +269,67 @@ test.describe('Streaming with mocked slots', () => {
     await expect(row(page, 'src48')).toBeInViewport();
   });
 
+  test('the side panel of each kind of slot fits its column at 1366×768, 1920×1080 and 768×1024', async ({
+    page,
+  }) => {
+    await withMockedSlots(page);
+    await page.setViewportSize(LAPTOP);
+    await page.goto('/streaming');
+    await expect(rows(page)).toHaveCount(48);
+
+    /** How far the panel's content reaches past its width: it scrolls down, never sideways. */
+    const panelOverflow = () =>
+      panel(page).evaluate((aside) =>
+        Math.max(
+          0,
+          ...[aside, ...aside.querySelectorAll('*')].map((box) =>
+            box.getBoundingClientRect().right > aside.getBoundingClientRect().right + 0.5
+              ? box.getBoundingClientRect().right - aside.getBoundingClientRect().right
+              : 0,
+          ),
+        ),
+      );
+
+    for (const viewport of [LAPTOP, DESKTOP, TABLET]) {
+      await page.setViewportSize(viewport);
+      // A playing file, a file at its own rate, an external publisher and a pull.
+      for (const name of ['src1', 'src2', 'src4', 'src5']) {
+        await row(page, name).click();
+        await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText(name);
+        await expect.poll(panelOverflow).toBe(0);
+        await expect
+          .poll(() => pageOverflow(page))
+          .toEqual([
+            { horizontal: 0, vertical: 0 },
+            { horizontal: 0, vertical: 0 },
+          ]);
+      }
+    }
+
+    // The live preview connects and shows its first frame.
+    await row(page, 'src1').click();
+    await expect(panel(page).getByRole('img', { name: 'Live preview of src1' })).toBeVisible();
+    await expect(panel(page)).not.toContainText('Connecting to src1');
+  });
+
+  test('Change… opens the picker on the slot’s file, from the keyboard, and Escape closes it', async ({
+    page,
+  }) => {
+    await withMockedSlots(page);
+    await page.goto('/streaming');
+    await expect(rows(page)).toHaveCount(48);
+
+    await listbox(page).focus();
+    await page.keyboard.press('ArrowDown');
+    await panel(page).getByRole('button', { name: 'Change…' }).focus();
+    await page.keyboard.press('Enter');
+    const picker = page.getByRole('dialog', { name: 'Source for src1' });
+    await expect(picker).toBeVisible();
+    await expect(picker).toContainText('Selected: people/walk_720p30.mp4');
+    await page.keyboard.press('Escape');
+    await expect(picker).toHaveCount(0);
+  });
+
   test('rows show kind, source, state, rate and codec for files, a webcam, an external publisher and pulls', async ({
     page,
   }) => {
@@ -364,11 +436,11 @@ test.describe('Streaming with mocked slots', () => {
     await listbox(page).focus();
     await page.keyboard.press('ArrowDown');
     await expect(row(page, 'src1')).toHaveAttribute('aria-selected', 'true');
-    await expect(panel(page).getByRole('heading')).toHaveText('src1');
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
-    await expect(panel(page).getByRole('heading')).toHaveText('src4');
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src4');
     await expect(panel(page)).toContainText('External');
 
     await tool(page, 'Side panel').focus();
@@ -378,7 +450,7 @@ test.describe('Streaming with mocked slots', () => {
     await listbox(page).focus();
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
-    await expect(panel(page).getByRole('heading')).toHaveText('src5');
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src5');
   });
 
   test('Start… starts the chosen count and reports the server message', async ({ page }) => {
@@ -442,7 +514,7 @@ test.describe('Streaming with mocked slots', () => {
       toast(page, 'Reset all source assignments. External stream(s) left running: src4.'),
     ).toBeVisible();
     // Every slot is unassigned now, and the side panel shows the first, as #170 did.
-    await expect(panel(page).getByRole('heading')).toHaveText('src1');
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
     await expect(morePanel(page)).toHaveCount(0);
     // No webcam was published from this browser, so none is named as released.
     expect(mocked.posts.get('reset')).toEqual([{ released_webcams: [] }]);

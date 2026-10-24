@@ -1,5 +1,16 @@
 import type { Slot, SlotExternal, SlotPull } from '../../sources/api';
-import { isInUse, slotRow } from './slot-row';
+import {
+  formatBitrate,
+  isInUse,
+  isLive,
+  liveFor,
+  previewSrc,
+  pullSourceText,
+  readersText,
+  slotOutput,
+  slotRow,
+  streamUrl,
+} from './slot-row';
 
 function slot(index: number, overrides: Partial<Slot> = {}): Slot {
   return {
@@ -256,5 +267,88 @@ describe('isInUse', () => {
     expect(isInUse(slot(1, { type: 'webcam' }))).toBe(true);
     expect(isInUse(slot(1, { state: 'external', external: external() }))).toBe(true);
     expect(isInUse(slot(1, { state: 'pulled', pull: pull() }))).toBe(true);
+  });
+});
+
+// #170's `externalSource.test.js` cases for these helpers, with their assertions unchanged except
+// that the preview has no on/off switch any more (so no `enabled` argument).
+describe('preview, live-for, bitrate, readers and pull source', () => {
+  it('preview src carries a remount token', () => {
+    expect(previewSrc(2, 1737000000000)).toBe('/stream/preview/src2.mjpg?t=1737000000000');
+  });
+
+  it('preview src changes with the publisher session so a reconnect remounts the image', () => {
+    const first = previewSrc(2, 1, '2026-09-16T13:10:00.000000000Z');
+    const second = previewSrc(2, 1, '2026-09-16T13:10:07.000000000Z');
+    expect(first).toBe('/stream/preview/src2.mjpg?t=1&s=2026-09-16T13%3A10%3A00.000000000Z');
+    expect(first).not.toBe(second);
+  });
+
+  it('live-for, bitrate and readers formatting', () => {
+    const t0 = Date.parse('2026-09-16T13:09:59Z');
+    expect(liveFor('2026-09-16T13:09:59Z', t0 + 724000)).toBe('12m 04s');
+    expect(liveFor('2026-09-16T13:09:59Z', t0 + 3720000)).toBe('1h 02m');
+    expect(liveFor(null, t0)).toBe('-');
+    expect(formatBitrate(1800000)).toBe('1.8 Mbit/s');
+    expect(formatBitrate(850000)).toBe('850 kbit/s');
+    expect(formatBitrate(null)).toBe('-');
+    expect(
+      readersText([
+        { protocol: 'rtsp', address: '10.42.0.79' },
+        { protocol: 'rtsp', address: '127.0.0.1', label: 'insight preview' },
+      ]),
+    ).toBe('2 · 10.42.0.79, insight preview');
+    expect(readersText([])).toBe('0');
+    expect(readersText(undefined)).toBe('0');
+  });
+
+  it('pull source text never includes credentials', () => {
+    expect(pullSourceText(pull({ host: '172.18.51.40:554', path: '/h264Preview_01_main' }))).toBe(
+      'rtsp://172.18.51.40:554/h264Preview_01_main',
+    );
+    expect(pullSourceText(pull({ scheme: 'rtsps', host: 'cam:322', path: '' }))).toBe(
+      'rtsps://cam:322',
+    );
+  });
+});
+
+describe('isLive', () => {
+  it('is true for a playing slot, an external publisher and a pull that is live', () => {
+    expect(isLive(slot(1, { file: 'a.mp4', state: 'playing' }))).toBe(true);
+    expect(isLive(slot(1, { type: 'webcam', state: 'playing' }))).toBe(true);
+    expect(isLive(slot(1, { state: 'external', external: external() }))).toBe(true);
+    expect(isLive(slot(1, { state: 'pulled', pull: pull({ status: 'live' }) }))).toBe(true);
+    expect(isLive(slot(1, { file: 'a.mp4' }))).toBe(false);
+    expect(isLive(slot(1, { state: 'pulled', pull: pull({ status: 'unreachable' }) }))).toBe(false);
+  });
+});
+
+describe('streamUrl', () => {
+  it('is the RTSP URL the server reports, or the HTTP MJPEG one for an HTTP slot (#170)', () => {
+    const urls = { rtsp: 'rtsp://10.0.0.2:8554/src3', http_mjpeg: 'http://10.0.0.2/s/src3.mjpg' };
+    expect(streamUrl(slot(3, { transport: 'rtsp', urls }))).toBe('rtsp://10.0.0.2:8554/src3');
+    expect(streamUrl(slot(3, { transport: 'http', urls }))).toBe('http://10.0.0.2/s/src3.mjpg');
+    expect(streamUrl(slot(3, { transport: 'http', urls: {} }))).toBe('/stream/http/src3.mjpg');
+    expect(streamUrl(slot(3, { urls: {} }))).toBeNull();
+  });
+});
+
+describe('slotOutput', () => {
+  it("names the transport, the codec and the rate a file slot streams at (#170's Output line)", () => {
+    expect(
+      slotOutput(slot(1, { file: 'a.mp4', transport: 'rtsp', codec: 'h264', native_fps: 25 })),
+    ).toBe('RTSP / H.264 · 25 fps');
+    expect(
+      slotOutput(
+        slot(1, { file: 'a.mp4', transport: 'rtsp', codec: 'h264', native_fps: 25, fps: 15 }),
+      ),
+    ).toBe('RTSP / H.264 · 15 fps');
+    expect(slotOutput(slot(1, { file: 'a.mjpeg', transport: 'http', codec: 'mjpeg' }))).toBe(
+      'HTTP / MJPEG',
+    );
+    expect(slotOutput(slot(1, { file: 'a.bin', codec: 'unknown' }))).toBe('- / Unknown');
+    expect(slotOutput(slot(1, { type: 'webcam', transport: 'rtsp', codec: 'h264' }))).toBe(
+      'RTSP / H.264',
+    );
   });
 });

@@ -564,6 +564,60 @@ describe('SlotsService', () => {
     });
   });
 
+  describe('startAfterPrepare', () => {
+    const encoding = 'Encoding a.mp4 at 15 fps (libx264)...\nprogress 9/10\n';
+
+    it('shows the slot as starting from the encode until the answer to the start was fetched, so it never shows idle in between (#170)', async () => {
+      service.prepare(2).subscribe();
+      http.expectOne('/api/mediasrc/prepare').flush(encoding);
+      // The prepare's own refetch is still out when the start begins: the encode entry holds.
+      const prepareSlots = http.expectOne(SLOTS_URL);
+      const prepareUsage = http.expectOne(RENDITIONS_URL);
+
+      const started = service.startAfterPrepare(2);
+      expect(service.encodes().get(2)).toEqual({
+        title: 'Starting stream…',
+        detail: 'libx264',
+        percent: 99,
+      });
+      const start = http.expectOne('/api/mediasrc/start');
+      expect(start.request.body).toEqual({ index: 2 });
+
+      // The prepare's refetch answers first: it shows the slot still stopped, which is not the
+      // start's answer, so the slot keeps showing the start.
+      prepareSlots.flush([slot(2, { file: 'a.mp4', fps: 15 })]);
+      prepareUsage.flush({ count: 1, bytes: 1 });
+      await tick();
+      expect(service.encodes().get(2)?.title).toBe('Starting stream…');
+
+      start.flush({ success: true });
+      await tick();
+      expect(service.encodes().get(2)?.title).toBe('Starting stream…');
+      http.expectOne(SLOTS_URL).flush([slot(2, { file: 'a.mp4', state: 'playing' })]);
+      http.expectOne(RENDITIONS_URL).flush({ count: 1, bytes: 1 });
+      await expect(started).resolves.toEqual({ success: true });
+      expect(service.encodes().has(2)).toBe(false);
+    });
+
+    it('stops showing the start once a refused start has been fetched again, and rethrows', async () => {
+      const started = service.startAfterPrepare(2);
+      expect(service.encodes().get(2)).toEqual({
+        title: 'Starting stream…',
+        detail: '',
+        percent: 99,
+      });
+      http
+        .expectOne('/api/mediasrc/start')
+        .flush({ error: 'src2 is in use by an external publisher.' }, conflict);
+      await tick();
+      expect(service.encodes().has(2)).toBe(true);
+      http.expectOne(SLOTS_URL).flush([slot(2)]);
+      http.expectOne(RENDITIONS_URL).flush({ count: 0, bytes: 0 });
+      await expect(started).rejects.toThrow('src2 is in use by an external publisher.');
+      expect(service.encodes().has(2)).toBe(false);
+    });
+  });
+
   describe('assignedTo', () => {
     it('lists the slots assigned to a file in any state', async () => {
       const refreshed = service.refresh();

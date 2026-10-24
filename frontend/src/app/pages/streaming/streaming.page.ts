@@ -33,6 +33,8 @@ import { CamerasService } from '../../sources/cameras.service';
 import { formatBytes } from '../../sources/format-bytes';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { SlotsService } from '../../sources/slots.service';
+import { SlotControl } from './slot-control';
+import { SlotPanel } from './slot-panel';
 import { isInUse, type SlotRow, slotRow } from './slot-row';
 import { StatusChip } from './status-chip';
 
@@ -97,6 +99,7 @@ function messageOf(failure: unknown): string {
     NeatSelectList,
     NeatSlider,
     NeatTooltip,
+    SlotPanel,
     StatusChip,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -110,6 +113,7 @@ export class StreamingPage {
   private readonly toasts = inject(NeatToasts);
   private readonly confirm = inject(NeatConfirm);
   private readonly dialogs = inject(NeatDialog);
+  private readonly control = inject(SlotControl);
 
   protected readonly slotCount = SLOT_COUNT;
   protected readonly filter = signal<SlotFilter>('all');
@@ -147,6 +151,11 @@ export class StreamingPage {
   protected readonly selectedRow = computed(
     () => this.allRows().find((row) => row.slot.index === this.selectedIndex()) ?? null,
   );
+  /** The side panel's slot, as a list of one (or none) that the panel is keyed on. */
+  protected readonly selectedRows = computed(() => {
+    const row = this.selectedRow();
+    return row ? [row] : [];
+  });
 
   /** A slot is changing or a bulk action is running: another bulk action now would race it. */
   protected readonly bulkLocked = computed(() => this.cameras.anyChanging() || this.bulkRunning());
@@ -222,15 +231,21 @@ export class StreamingPage {
   /**
    * The dialog's Start. As in #170 the dialog closes once the server has answered, and stays open
    * when the request was refused, or when a slot began changing meanwhile, so it can be tried again.
+   *
+   * Like a slot's own Start it first waits for the frame rates the side panel is committing (the
+   * stepper commits as it loses focus, which opening the dialog makes it do), so the server starts
+   * the rates just chosen; when one was refused (and reported) it starts nothing (#170).
    */
   protected async startBulk(dialog: NeatDialogRef): Promise<void> {
     const count = this.bulkCount();
     const started = await this.runBulk('starting', async () => {
+      if (!(await this.control.commitsSettled())) return false;
       const result = await this.slots.startBulk(count);
       this.toasts.status(result.message);
       if (result.errors.length > 0) {
         this.toasts.error(`Failed: ${result.errors.map(({ index }) => `src${index}`).join(', ')}`);
       }
+      return true;
     });
     if (started) dialog.close();
   }
@@ -281,11 +296,11 @@ export class StreamingPage {
    * Runs a bulk action with the bulk actions locked, and shows a refusal as the server words it.
    * Their buttons are disabled while a slot is changing; one that began changing after the action's
    * dialog or menu opened is reported, as #170 did for Start, and the slots are left alone.
-   * Resolves whether the action went through.
+   * Resolves whether the action went through; an action resolving `false` did nothing.
    */
   private async runBulk(
     doing: Parameters<typeof changingMessage>[0],
-    action: () => Promise<void>,
+    action: () => Promise<boolean | void>,
   ): Promise<boolean> {
     if (this.cameras.anyChanging()) {
       this.toasts.error(changingMessage(doing));
@@ -296,8 +311,7 @@ export class StreamingPage {
     if (this.bulkRunning()) return false;
     this.bulkRunning.set(true);
     try {
-      await action();
-      return true;
+      return (await action()) !== false;
     } catch (failure) {
       this.toasts.error(messageOf(failure));
       return false;

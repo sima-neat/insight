@@ -37,6 +37,8 @@ const POLL_INTERVAL_MS = 2000;
 const FETCH_TIMEOUT_MS = 10_000;
 /** What an encode shows before the server's first line (#170's label). */
 const PREPARING: Progress = { title: 'Preparing rendition…', detail: '', percent: null };
+/** What a slot shows between its encode and its start's answer (#170's label and its 99 %). */
+const STARTING = { title: 'Starting stream…', percent: 99 } as const;
 
 /**
  * Whether `next` shows a slot streaming at a frame rate other than the file's, that did not
@@ -230,6 +232,23 @@ export class SlotsService {
     return this.act(this.http.post<SuccessResponse>(`${SLOTS_URL}/start`, request), {
       renditions: true,
     });
+  }
+
+  /**
+   * Starts a slot whose rendition `prepare` has just encoded. The slot shows "Starting stream…"
+   * under `encodes` until the answer to the start has been fetched, as #170 did, so it goes from
+   * Encoding to Live (or back to Idle after a refusal) without showing Idle in between: call it
+   * as the encode ends, while its entry still shows, and this one takes the entry over.
+   */
+  async startAfterPrepare(index: number): Promise<SuccessResponse> {
+    const starting: Progress = { detail: this.encodes().get(index)?.detail ?? '', ...STARTING };
+    this.setEncode(index, starting);
+    try {
+      return await this.start({ index });
+    } finally {
+      // A newer encode on the slot has taken its entry over.
+      if (this.encodes().get(index) === starting) this.setEncode(index, null);
+    }
   }
 
   /**

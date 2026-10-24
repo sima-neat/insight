@@ -1,0 +1,40 @@
+<neat-dialog-body>
+  <div class="picker">
+    <p class="picked">
+      Selected: <span class="path">{{ picked() || 'Not assigned' }}</span>
+    </p>
+    <neat-file-browser
+      mode="pick"
+      [rootLabel]="rootLabel"
+      [root]="nodes()"
+      [countLabel]="countLabel"
+      [labels]="labels"
+      [filterPlaceholder]="placeholder()"
+      [(folder)]="folder"
+      [(selected)]="picked"
+      [(filter)]="filter"
+    />
+    <p neatNote class="note">
+      @if (hiddenNote(); as note) {
+        <span>{{ note }}</span>
+      }
+      <button neatInlineButton type="button" [disabled]="busy()" (click)="importRequested.emit()">
+        Import…
+      </button>
+    </p>
+  </div>
+</neat-dialog-body>
+<neat-dialog-actions>
+  <button
+    neatButton
+    type="button"
+    variant="outlined"
+    [disabled]="busy()"
+    (click)="cancelled.emit()"
+  >
+    Cancel
+  </button>
+  <button neatButton type="button" [disabled]="!canAssign()" (click)="assignPicked()">
+    Assign
+  </button>
+</neat-dialog-actions>

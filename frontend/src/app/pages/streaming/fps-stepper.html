@@ -1,0 +1,42 @@
+<button
+  neatButton
+  type="button"
+  variant="outlined"
+  size="small"
+  iconOnly
+  aria-label="Decrease FPS by 5"
+  [disabled]="inert() || effective() === null"
+  (click)="step(-1)"
+>
+  −
+</button>
+<span class="field">
+  <input
+    #field
+    neatInput
+    size="small"
+    inputmode="numeric"
+    autocomplete="off"
+    aria-label="Frames per second"
+    placeholder="—"
+    [attr.aria-invalid]="invalid() || null"
+    [value]="draft()"
+    [disabled]="inert()"
+    (input)="edit(field.value)"
+    (blur)="commitDraft()"
+    (keydown.enter)="$event.preventDefault(); field.blur()"
+  />
+  <span class="unit" aria-hidden="true">fps</span>
+</span>
+<button
+  neatButton
+  type="button"
+  variant="outlined"
+  size="small"
+  iconOnly
+  aria-label="Increase FPS by 5"
+  [disabled]="inert() || effective() === null"
+  (click)="step(1)"
+>
+  +
+</button>
