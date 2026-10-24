@@ -1,18 +1,12 @@
-/* A warning in the flow of the General tab, in the warning colours the tile's chip uses. */
+/* The callout is the notice's box; this lays out what goes in it. */
 :host {
+  display: block;
+}
+
+.body {
   display: flex;
   flex-direction: column;
   gap: var(--neat-space-2);
-  padding: var(--neat-space-3);
-  border: 1px solid var(--warning);
-  border-radius: var(--radius);
-  font-size: var(--neat-text-sm);
-}
-
-.title {
-  margin: 0;
-  font-size: var(--neat-text-sm);
-  font-weight: 600;
 }
 
 .text {

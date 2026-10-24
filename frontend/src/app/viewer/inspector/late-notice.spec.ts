@@ -54,13 +54,23 @@ describe('LateNotice', () => {
   }
 
   it('says what is wrong and shows the measured values', () => {
-    expect(root().querySelector('h3')?.textContent?.trim()).toBe('Overlays are being dropped');
+    expect(root().querySelector('[role="heading"][aria-level="3"]')?.textContent?.trim()).toBe(
+      'Overlays are being dropped',
+    );
     expect(text()).toContain('Metadata arrives after its video frame was already shown.');
     expect(values()).toEqual([
       ['Arrives after its frame', '~120 ms'],
       ['Video sync buffer', '300 ms'],
       ['Late messages', '64 %'],
     ]);
+  });
+
+  it('is a region named by its heading, so it can be jumped to', () => {
+    const region = root().querySelector('[role="region"]')!;
+    const heading = root().querySelector('[role="heading"]')!;
+
+    expect(region.getAttribute('aria-labelledby')).toBe(heading.id);
+    expect(flat(heading)).toBe('Overlays are being dropped');
   });
 
   it('shows unmeasured values as such', async () => {
