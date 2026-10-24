@@ -29,8 +29,11 @@ import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented
 import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { ErrorNote } from '../../error-note';
+import { FieldLabel } from '../../field-label';
 import type { Slot, SlotTransport } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
+import { ImportDialogs } from '../../sources/import-dialog';
 import { isNativeRate } from '../../sources/fps';
 import { SlotsService } from '../../sources/slots.service';
 import type { Camera } from '../../sources/webcam-publishing';
@@ -119,6 +122,8 @@ function messageOf(failure: unknown): string {
 @Component({
   selector: 'app-slot-panel',
   imports: [
+    ErrorNote,
+    FieldLabel,
     FpsStepper,
     MediaPicker,
     NeatButton,
@@ -145,6 +150,7 @@ export class SlotPanel {
   protected readonly cameras = inject(CamerasService);
   private readonly control = inject(SlotControl);
   private readonly dialogs = inject(NeatDialog);
+  private readonly imports = inject(ImportDialogs);
   private readonly confirm = inject(NeatConfirm);
   private readonly toasts = inject(NeatToasts);
   private readonly clipboard = inject(DOCUMENT).defaultView?.navigator.clipboard;
@@ -439,6 +445,20 @@ export class SlotPanel {
       title: `Source for src${this.index()}`,
       size: 'large',
     });
+  }
+
+  /**
+   * The picker's Import…: the import dialog opens over the picker, and what it saved is shown in
+   * the picker, picked, ready to assign (ruling Q1).
+   */
+  protected async importInto(picker: MediaPicker): Promise<void> {
+    const path = await this.imports.open();
+    if (path === null) return;
+    try {
+      await picker.reveal(path);
+    } catch (failure) {
+      this.toasts.error(messageOf(failure));
+    }
   }
 
   /** The picker's Assign: the dialog closes once the file is assigned, and stays for a retry if not. */

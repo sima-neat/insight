@@ -1,5 +1,6 @@
 import type { Slot, SlotExternal, SlotPull } from './api';
 import {
+  codecLabel,
   formatBitrate,
   isInUse,
   isLive,
@@ -350,5 +351,18 @@ describe('slotOutput', () => {
     expect(slotOutput(slot(1, { type: 'webcam', transport: 'rtsp', codec: 'h264' }))).toBe(
       'RTSP / H.264',
     );
+  });
+});
+
+describe('codecLabel', () => {
+  it("names the codecs Insight streams, the catalog's hevc as H.265, and others in capitals", () => {
+    expect(['h264', 'h265', 'hevc', 'mjpeg', 'av1', ''].map(codecLabel)).toEqual([
+      'H.264',
+      'H.265',
+      'H.265',
+      'MJPEG',
+      'AV1',
+      '-',
+    ]);
   });
 });

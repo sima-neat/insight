@@ -15,6 +15,7 @@ import type {
   TakeoverResponse,
 } from '../../sources/api';
 import { CamerasService, type CameraAccessState } from '../../sources/cameras.service';
+import { ImportDialogs } from '../../sources/import-dialog';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import type { Progress } from '../../sources/progress-lines';
 import { SlotsService } from '../../sources/slots.service';
@@ -161,6 +162,7 @@ describe('SlotPanel', () => {
   let cameras: FakeCameras;
   let library: FakeLibrary;
   let toasts: { error: ReturnType<typeof vi.fn>; status: ReturnType<typeof vi.fn> };
+  let imports: { open: ReturnType<typeof vi.fn<() => Promise<string | null>>> };
   let fixture: ComponentFixture<Host>;
   let writeText: ReturnType<typeof vi.fn>;
   const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
@@ -170,6 +172,7 @@ describe('SlotPanel', () => {
     cameras = new FakeCameras();
     library = new FakeLibrary();
     toasts = { error: vi.fn(), status: vi.fn() };
+    imports = { open: vi.fn<() => Promise<string | null>>() };
     writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     TestBed.configureTestingModule({
@@ -180,6 +183,7 @@ describe('SlotPanel', () => {
         { provide: CamerasService, useValue: cameras },
         { provide: MediaLibraryService, useValue: library },
         { provide: NeatToasts, useValue: toasts },
+        { provide: ImportDialogs, useValue: imports },
       ],
     });
   });
@@ -420,6 +424,33 @@ describe('SlotPanel', () => {
     await click(buttonIn(dialog()!, 'Assign'));
     expect(cameras.assignFile).toHaveBeenCalledTimes(2);
     expect(dialog()).toBeNull();
+  });
+
+  it("the picker's Import… opens the import dialog, then shows the imported file picked (Q1)", async () => {
+    await open();
+    await click(button('Change…'));
+    let finish!: (path: string | null) => void;
+    imports.open.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    await click(buttonIn(dialog()!, 'Import…'));
+    expect(imports.open).toHaveBeenCalledOnce();
+
+    // The import saved a file the tree did not hold yet; the picker fetches the library again.
+    library.refresh.mockImplementationOnce(async () => {
+      library.tree.update((tree) => [
+        ...(tree ?? []),
+        { name: 'clip.mp4', path: 'clip.mp4', type: 'file', streamable: true },
+      ]);
+    });
+    finish('clip.mp4');
+    await settle();
+    expect(text(dialog()!)).toContain('Selected: clip.mp4');
+    const clip = [...dialog()!.querySelectorAll<HTMLElement>('[role="option"]')].find((row) =>
+      row.textContent?.includes('clip.mp4'),
+    )!;
+    expect(clip.getAttribute('aria-selected')).toBe('true');
+
+    await click(buttonIn(dialog()!, 'Assign'));
+    expect(cameras.assignFile).toHaveBeenCalledWith({ index: 2, file: 'clip.mp4' });
   });
 
   it('a different frame rate prepares a rendition with progress before start, and Cancel encoding stops it', async () => {

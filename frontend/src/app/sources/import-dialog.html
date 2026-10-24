@@ -1,0 +1,71 @@
+<neat-dialog-body>
+  <div class="import">
+    <p neatNote>Upload local files, import catalog assets, or bring in a YouTube video.</p>
+    <neat-tabs label="Import source" [(value)]="tab">
+      <neat-tab label="Local files" value="local">
+        <ng-template><app-import-local /></ng-template>
+      </neat-tab>
+      <neat-tab label="Catalog" value="catalog">
+        <ng-template><app-import-catalog /></ng-template>
+      </neat-tab>
+      <neat-tab label="YouTube" value="youtube">
+        <ng-template><app-import-youtube /></ng-template>
+      </neat-tab>
+    </neat-tabs>
+
+    <div #work class="work" tabindex="-1">
+      @if (runner.clash(); as clash) {
+        <div class="clash" role="group" [attr.aria-label]="clash.question">
+          <p>{{ clash.question }}</p>
+          @if (clash.inUse; as inUse) {
+            <p neatNote>{{ inUse }}</p>
+          }
+          <div class="answers">
+            <button
+              neatButton
+              type="button"
+              variant="outlined"
+              size="small"
+              (click)="runner.answer('replace')"
+            >
+              Replace
+            </button>
+            <button
+              #keepBoth
+              neatButton
+              type="button"
+              size="small"
+              (click)="runner.answer('keep_both')"
+            >
+              Keep both
+            </button>
+            <button
+              neatButton
+              type="button"
+              variant="text"
+              size="small"
+              (click)="runner.answer('skip')"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      }
+      @if (runner.progress(); as progress) {
+        <div class="progress">
+          <p class="title">
+            <span>{{ progress.title }}</span>
+            @if (progress.percent !== null) {
+              <span>{{ progress.percent }}%</span>
+            }
+          </p>
+          <p class="detail">{{ progress.detail }}</p>
+          <neat-progress [label]="progress.title" [value]="progress.percent" />
+        </div>
+      }
+      @if (runner.failure(); as failure) {
+        <app-error-note role="alert">{{ failure }}</app-error-note>
+      }
+    </div>
+  </div>
+</neat-dialog-body>

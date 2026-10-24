@@ -1,0 +1,62 @@
+/* The dialog lays out its body itself (see NeatDialog). */
+:host {
+  display: contents;
+}
+
+.import {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-4);
+}
+
+/* Focused only from code, when the control that had the focus went (see the component). */
+.work {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+  outline: none;
+}
+
+.clash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+  font-size: var(--neat-text-sm);
+}
+
+.clash p {
+  margin: 0;
+}
+
+.answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--neat-space-2);
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+  font-size: var(--neat-text-sm);
+}
+
+.progress p {
+  margin: 0;
+}
+
+/* The title, and the percent at the end of its line. */
+.title {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--neat-space-3);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

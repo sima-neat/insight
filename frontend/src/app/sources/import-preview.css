@@ -1,0 +1,7 @@
+/* The box and its summary side by side, as #170 showed them. */
+:host {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--neat-space-3);
+}

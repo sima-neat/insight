@@ -7,6 +7,7 @@ import {
   mediaCountLabel,
   mediaFilterPlaceholder,
   parentFolder,
+  revealIn,
 } from './media-browser';
 
 const TREE: MediaNode[] = [
@@ -73,5 +74,14 @@ describe('media browser', () => {
     expect(parentFolder('people/raw/a.png')).toBe('people/raw');
     expect(parentFolder('cars.mp4')).toBe('');
     expect(parentFolder('')).toBe('');
+  });
+
+  it('reveals a file in its folder, selected, and opens a folder (an archive’s)', () => {
+    expect(revealIn(TREE, 'people/walk.mp4')).toEqual({
+      folder: 'people',
+      file: 'people/walk.mp4',
+    });
+    expect(revealIn(TREE, 'cars.mp4')).toEqual({ folder: '', file: 'cars.mp4' });
+    expect(revealIn(TREE, 'people/raw')).toEqual({ folder: 'people/raw', file: null });
   });
 });

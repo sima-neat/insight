@@ -179,4 +179,13 @@ describe('MediaPicker', () => {
     expect(text()).toContain('Selected: youtube/clip.mp4');
     expect(button('Assign').disabled).toBe(false);
   });
+
+  it('reveal opens the folder an archive was extracted into, with nothing picked yet', async () => {
+    await open('cars.mp4');
+    await host.picker().reveal('people');
+    await fixture.whenStable();
+    expect(crumbs().join(' ')).toContain('people');
+    expect(option('walk.mp4').getAttribute('aria-selected')).toBe('false');
+    expect(button('Assign').disabled).toBe(true);
+  });
 });

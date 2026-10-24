@@ -650,4 +650,25 @@ describe('SlotsService', () => {
       expect(service.assignedTo('')).toEqual([]);
     });
   });
+
+  describe('assignedUnder', () => {
+    it('lists the slots assigned to a file anywhere in a folder, in index order', async () => {
+      const refreshed = service.refresh();
+      http
+        .expectOne(SLOTS_URL)
+        .flush([
+          slot(1, { file: 'clips/a.mp4', state: 'playing' }),
+          slot(2, { file: 'clips/deep/b.mp4' }),
+          slot(3, { file: 'clips.mp4' }),
+          slot(4, { file: 'clips2/c.mp4' }),
+          slot(5, { file: 'other/clips/d.mp4' }),
+          slot(6),
+        ]);
+      await refreshed;
+
+      expect(service.assignedUnder('clips').map((s) => s.index)).toEqual([1, 2]);
+      expect(service.assignedUnder('clips/deep').map((s) => s.index)).toEqual([2]);
+      expect(service.assignedUnder('none')).toEqual([]);
+    });
+  });
 });

@@ -20,6 +20,7 @@ import {
   mediaCountLabel,
   mediaFilterPlaceholder,
   parentFolder,
+  revealIn,
 } from '../../sources/media-browser';
 import { MediaLibraryService, toFileNodes } from '../../sources/media-library.service';
 
@@ -32,7 +33,7 @@ import { MediaLibraryService, toFileNodes } from '../../sources/media-library.se
  * The library is fetched as the picker opens: files may have arrived since (another tab, the API).
  *
  * "Import…" asks for the import dialog (`importRequested`); once an import has saved a file,
- * `reveal` shows it here, picked (ruling Q1: the panel wires the two in Task 13).
+ * `reveal` shows it here, picked (ruling Q1: the slot panel wires the two).
  *
  * Its host takes no box of its own: the dialog's body and actions must be the dialog panel's own
  * items, so the body scrolls and the actions stay in view.
@@ -93,13 +94,14 @@ export class MediaPicker {
   }
 
   /**
-   * Fetches the library and shows `path` in its folder, picked: for a file that was just imported,
-   * which the tree may not hold yet.
+   * Fetches the library and shows what an import just saved, which the tree may not hold yet: a
+   * file in its folder, picked; an archive's folder opened, for a file in it to be picked.
    */
   async reveal(path: string): Promise<void> {
     await this.library.refresh();
-    this.folder.set(parentFolder(path));
-    this.picked.set(path);
+    const target = revealIn(this.library.tree() ?? [], path);
+    this.folder.set(target.folder);
+    if (target.file) this.picked.set(target.file);
   }
 
   protected assignPicked(): void {

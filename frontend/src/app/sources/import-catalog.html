@@ -1,0 +1,138 @@
+<div class="toolbar">
+  <input
+    #search
+    neatInput
+    size="small"
+    type="search"
+    placeholder="Search catalog..."
+    aria-label="Search catalog"
+    [value]="state.search()"
+    (input)="setSearch(search.value)"
+  />
+  <button
+    neatButton
+    type="button"
+    variant="outlined"
+    size="small"
+    [disabled]="state.loading()"
+    (click)="load()"
+  >
+    {{ state.loading() ? 'Loading...' : 'Refresh' }}
+  </button>
+</div>
+
+@if (state.error(); as error) {
+  <app-error-note role="alert">{{ error }}</app-error-note>
+}
+@if (state.loading() && !state.index()) {
+  <p neatNote>Loading catalog...</p>
+}
+
+@if (state.index()) {
+  <neat-tabs label="Catalog browsing mode" [(value)]="state.mode">
+    <neat-tab label="Catalog by asset type" value="type">
+      <ng-template>
+        <div class="mode">
+          <app-catalog-filters [assets]="assets()" [(filter)]="state.filter" />
+          <p neatNote>
+            {{ typeRows().length }} matching assets / {{ typeSelection().length }} selected
+          </p>
+          <neat-select-list
+            label="Catalog assets"
+            emptyLabel="No catalog assets match the selected type filters."
+            [items]="typeRows()"
+            [trackBy]="byAssetPath"
+            [selected]="typeSelection()[0] ?? null"
+            (selectedChange)="pickType($event)"
+          >
+            <ng-template neatColumn="source" width="minmax(0, 1fr)" let-row>
+              <app-cell-text>{{ row.source }}</app-cell-text>
+            </ng-template>
+            <ng-template neatColumn="variant" width="minmax(0, 2fr)" let-row>
+              <app-cell-text>{{ row.label }} / {{ row.size }}</app-cell-text>
+            </ng-template>
+          </neat-select-list>
+          <app-import-summary
+            [heading]="typeSelection().length + ' asset(s) selected'"
+            [notes]="[filterSummary(), 'Total selected: ' + typeBytes()]"
+          >
+            <button
+              neatButton
+              type="button"
+              [disabled]="typeSelection().length === 0 || runner.busy()"
+              (click)="importRows(typeSelection())"
+            >
+              {{ importing() ? 'Importing...' : 'Import' }}
+            </button>
+          </app-import-summary>
+        </div>
+      </ng-template>
+    </neat-tab>
+
+    <neat-tab label="Catalog by asset name" value="name">
+      <ng-template>
+        <div class="by-name">
+          <neat-select-list
+            class="sources"
+            label="Catalog sources"
+            emptyLabel="No catalog sources match the filter."
+            [items]="sourceRows()"
+            [trackBy]="bySourceId"
+            [selected]="selectedSourceRow()"
+            (selectedChange)="pickSource($event)"
+          >
+            <ng-template neatColumn="title" width="minmax(0, 1fr)" let-row>
+              <app-cell-text>{{ row.title }}</app-cell-text>
+            </ng-template>
+            <ng-template neatColumn="variants" width="auto" let-row>
+              {{ row.variants }} variants
+            </ng-template>
+          </neat-select-list>
+
+          <div class="mode detail">
+            @if (selectedSource(); as source) {
+              <app-import-preview
+                [file]="previewFile()"
+                [heading]="source.title || source.id"
+                [notes]="sourceNotes()"
+              >
+                @if (!previewFile()) {
+                  <p neatNote>No preview available</p>
+                }
+              </app-import-preview>
+              <app-catalog-filters [assets]="sourceAssets()" [(filter)]="state.filter" />
+              <neat-select-list
+                label="Catalog variants"
+                emptyLabel="No variants match the selected filters."
+                [items]="variantRows()"
+                [trackBy]="byAssetPath"
+                [selected]="selectedVariant()"
+                (selectedChange)="pickVariant($event)"
+              >
+                <ng-template neatColumn="label" width="minmax(0, 1fr)" let-row>
+                  <app-cell-text>{{ row.label }}</app-cell-text>
+                </ng-template>
+                <ng-template neatColumn="size" width="auto" let-row>{{ row.size }}</ng-template>
+              </neat-select-list>
+              <app-import-summary
+                [heading]="selectedVariant()?.label ?? 'No variant selected'"
+                [notes]="variantNotes()"
+              >
+                <button
+                  neatButton
+                  type="button"
+                  [disabled]="!selectedVariant() || runner.busy()"
+                  (click)="importVariant()"
+                >
+                  {{ importing() ? 'Importing...' : 'Import' }}
+                </button>
+              </app-import-summary>
+            } @else {
+              <p neatNote>Select a catalog source.</p>
+            }
+          </div>
+        </div>
+      </ng-template>
+    </neat-tab>
+  </neat-tabs>
+}

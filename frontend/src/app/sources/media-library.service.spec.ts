@@ -1,7 +1,14 @@
 import { HttpEventType, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import type { MediaFile, MediaFolder, MediaInfo, MediaNode } from './api';
+import type {
+  CatalogIndex,
+  MediaFile,
+  MediaFolder,
+  MediaInfo,
+  MediaNode,
+  YoutubePreview,
+} from './api';
 import { MediaLibraryService, toFileNodes } from './media-library.service';
 import { SlotsService } from './slots.service';
 import type { StreamEvent } from './stream-lines';
@@ -335,6 +342,58 @@ describe('MediaLibraryService', () => {
           .flush({ error: 'down' }, { status: 502, statusText: 'Bad Gateway' });
       });
       await expect(done).resolves.toMatchObject({ deleted: [] });
+    });
+  });
+
+  describe('catalog and YouTube validation', () => {
+    it('catalog fetches the index, and rejects with the server message', async () => {
+      const index: CatalogIndex = {
+        schema: '1',
+        generated_at: null,
+        index_url: 'https://artifacts.neat.sima.ai/media-assets/index.json',
+        base_url: 'https://artifacts.neat.sima.ai/media-assets/',
+        sources: [],
+        assets: [],
+      };
+      const loaded = library.catalog();
+      http.expectOne('/api/media-catalog').flush(index);
+      await expect(loaded).resolves.toEqual(index);
+
+      const failed = library.catalog();
+      http
+        .expectOne('/api/media-catalog')
+        .flush(
+          { error: 'Failed to load media catalog: timed out' },
+          { status: 502, statusText: 'Bad Gateway' },
+        );
+      await expect(failed).rejects.toMatchObject({
+        status: 502,
+        message: 'Failed to load media catalog: timed out',
+      });
+    });
+
+    it('validateYoutube posts the link and gives the preview, or the refusal', async () => {
+      const preview: YoutubePreview = {
+        video_id: 'abc',
+        normalized_url: 'https://www.youtube.com/watch?v=abc',
+        embed_url: 'https://www.youtube.com/embed/abc',
+        thumbnail_url: '',
+        title: 'Street',
+        duration: 120,
+        is_live: false,
+        live_status: 'not_live',
+      };
+      const validated = library.validateYoutube('https://youtu.be/abc');
+      const request = http.expectOne('/api/import/youtube/validate');
+      expect(request.request.body).toEqual({ url: 'https://youtu.be/abc' });
+      request.flush(preview);
+      await expect(validated).resolves.toEqual(preview);
+
+      const refused = library.validateYoutube('https://example.com');
+      http
+        .expectOne('/api/import/youtube/validate')
+        .flush({ error: 'Not a YouTube URL.' }, { status: 400, statusText: 'Bad Request' });
+      await expect(refused).rejects.toMatchObject({ message: 'Not a YouTube URL.' });
     });
   });
 

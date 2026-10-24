@@ -68,23 +68,10 @@ code {
   block-size: 7.5rem;
 }
 
-.error {
-  margin: 0;
-  color: var(--destructive);
-  font-size: var(--neat-text-sm);
-}
-
 .pull {
   display: flex;
   flex-direction: column;
   gap: var(--neat-space-3);
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--neat-space-2);
-  font-size: var(--neat-text-sm);
 }
 
 .credentials {

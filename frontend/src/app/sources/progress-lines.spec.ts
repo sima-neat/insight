@@ -4,6 +4,8 @@ import {
   isProgressFailure,
   mergePrepareProgress,
   prepareProgress,
+  restartWarning,
+  savedPath,
   uploadProgress,
   youtubeProgress,
   type Progress,
@@ -283,7 +285,8 @@ describe('failure lines', () => {
   // The server answers 200 and prints these in the body, so the parsers are the only way to
   // tell a failed stream from a finished one. #170 recognised only the two FFmpeg lines.
   const upload = [
-    'No file provided.',
+    'Failed to save upload: a file with this name was added meanwhile.',
+    'Failed to save upload: [Errno 28] No space left on device',
     'Failed to extract archive: File is not a zip file',
     'FFmpeg conversion failed for clip.mp4: Invalid data found when processing input',
     'FFmpeg is not installed; keeping original clip.mp4.',
@@ -442,9 +445,67 @@ describe('failureText', () => {
     expect(failureText(['Error:'])).toBe('The server reported an error.');
   });
 
+  it('stops at the restart lines a replace prints, which are no failure of the upload (Q6)', () => {
+    expect(
+      failureText([
+        'FFmpeg conversion failed for a.mp4: moov atom not found',
+        'Invalid data found when processing input',
+        'Restarted src3.',
+        'Could not restart src4: MediaMTX is not answering',
+      ]),
+    ).toBe(
+      'FFmpeg conversion failed for a.mp4: moov atom not found\nInvalid data found when processing input',
+    );
+    expect(
+      failureText([
+        'Uploaded to /data/media/a.mp4',
+        'Could not restart src3: MediaMTX is not answering',
+        'Upload complete.',
+      ]),
+    ).toBeNull();
+  });
+
   it('ignores blank lines and surrounding whitespace', () => {
     expect(failureText(['', '  Catalog import failed: boom \r', ''])).toBe(
       'Catalog import failed: boom',
     );
+  });
+});
+
+describe('restartWarning', () => {
+  it('gives the line of a slot a replace could not restart, which names the slot (Q6)', () => {
+    expect(restartWarning(' Could not restart src4: MediaMTX is not answering ')).toBe(
+      'Could not restart src4: MediaMTX is not answering',
+    );
+  });
+
+  it('is null for a slot that restarted and for any other line', () => {
+    expect(restartWarning('Restarted src3.')).toBeNull();
+    expect(restartWarning('Upload complete.')).toBeNull();
+    expect(restartWarning('Error: Could not restart src3')).toBeNull();
+  });
+});
+
+describe('savedPath', () => {
+  it('gives the library path of an upload, which the server names absolutely: uploads land at the root', () => {
+    expect(savedPath('Uploaded to /data/media/clip_2.mp4')).toBe('clip_2.mp4');
+  });
+
+  it("gives an archive's folder, into which it extracts", () => {
+    expect(savedPath('Saved archive; extracting into /data/media/clips')).toBe('clips');
+  });
+
+  it('gives the relative paths catalog and YouTube imports print as they are', () => {
+    expect(savedPath('Saved catalog asset to catalog/street/street_720p30_30fps_h264.mp4')).toBe(
+      'catalog/street/street_720p30_30fps_h264.mp4',
+    );
+    expect(savedPath('Saved YouTube media to youtube/youtube_abc_720p30_s0_d60_h264.mp4')).toBe(
+      'youtube/youtube_abc_720p30_s0_d60_h264.mp4',
+    );
+  });
+
+  it('is null for any other line', () => {
+    expect(savedPath('Upload complete.')).toBeNull();
+    expect(savedPath('Optimized clip.mp4: H.264')).toBeNull();
   });
 });

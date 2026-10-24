@@ -64,3 +64,16 @@ export function hasFile(tree: readonly MediaNode[], path: string): boolean {
     node.type === 'file' ? node.path === path : hasFile(node.children, path),
   );
 }
+
+/**
+ * Where to show a path an import just saved: a file in its folder, selected; anything else (an
+ * archive's folder) opened. A browser falls back to the nearest folder that exists.
+ */
+export function revealIn(
+  tree: readonly MediaNode[],
+  path: string,
+): { folder: string; file: string | null } {
+  return hasFile(tree, path)
+    ? { folder: parentFolder(path), file: path }
+    : { folder: path, file: null };
+}

@@ -1,0 +1,40 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--neat-space-2);
+}
+
+.mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+/* A list fills the height it is given and scrolls its rows inside it. */
+neat-select-list {
+  display: flex;
+  block-size: 12rem;
+}
+
+/* The sources beside the selected one's detail; stacked where the dialog is narrow. */
+.by-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--neat-space-4);
+}
+
+.sources {
+  flex: 1 1 12rem;
+  block-size: auto;
+  min-block-size: 12rem;
+}
+
+.detail {
+  flex: 2 1 20rem;
+  min-width: 0;
+}

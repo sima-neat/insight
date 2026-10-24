@@ -184,6 +184,15 @@ export class SlotsService {
     return this.slotsByFile().get(path) ?? [];
   }
 
+  /**
+   * The slots assigned to a file anywhere below `folder`, in index order: what replacing a folder
+   * (an archive upload that clashes on its folder) touches.
+   */
+  assignedUnder(folder: string): readonly Slot[] {
+    const prefix = `${folder}/`;
+    return (this.slots() ?? []).filter((slot) => slot.file.startsWith(prefix));
+  }
+
   /** `file: ''` clears the slot. */
   assign(request: AssignRequest): Promise<SuccessResponse> {
     return this.act(this.http.post<SuccessResponse>(`${SLOTS_URL}/assign`, request));

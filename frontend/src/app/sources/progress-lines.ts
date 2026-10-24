@@ -19,6 +19,9 @@
  * - **A failed upload may still have saved the file.** The FFmpeg and FFprobe "not installed;
  *   keeping original" lines fail the upload (the file is saved but not prepared for streaming).
  *   Refresh the media library after every upload, whatever its outcome.
+ * - **A Replace restarts the slots it stopped**, and prints `Restarted srcN.` or `Could not
+ *   restart srcN: <reason>` per slot. The second is a warning to show (`restartWarning`), not a
+ *   failure: the upload itself is in place.
  * - **Titles carry no scope or subject** ("1/3", the file's name): the caller knows both, and the
  *   server's own lines carry what it knows. Prepare lines are the exception that needs state:
  *   merge them with `mergePrepareProgress`.
@@ -70,9 +73,10 @@ function parseLine(
 
 // Lines the upload route (and the optimiser it runs) prints when a file or archive is unusable.
 // The FFmpeg and FFprobe "not installed" lines say "keeping original": the upload is saved but
-// was not prepared, which #170 already treated as failed for FFmpeg.
+// was not prepared, which #170 already treated as failed for FFmpeg. A missing file is a 400
+// before the stream starts, not a line.
 const UPLOAD_FAILURE =
-  /^(?:No file provided\.|Failed to extract archive:|FFmpeg conversion failed|FFmpeg is not installed|FFprobe is not installed)/;
+  /^(?:Failed to save upload:|Failed to extract archive:|FFmpeg conversion failed|FFmpeg is not installed|FFprobe is not installed)/;
 
 const OPTIMIZING_PERCENT = /^Optimizing .*?:\s+(\d+)%\s+\(([^)]+)\)/;
 const OPTIMIZING_ELAPSED = /^Optimizing .*?:\s+(.+ processed)$/;
@@ -268,7 +272,7 @@ export function mergePrepareProgress(
 
 // Lines the server prints that are not the diagnostics of a failure before them.
 const SERVER_LINE =
-  /^(?:Preparing file |Optimizing |Optimized |Keeping |Uploaded to |Saved |Archive extracted\.|Upload complete\.|No MP4 files found|Downloading |Capturing |Preparing YouTube |Validating YouTube |YouTube import complete\.|Catalog import complete\.|Encoding |progress |Reusing rendition|Rendition ready|Waiting for another rendition|Source frame rate matches)/;
+  /^(?:Preparing file |Optimizing |Optimized |Keeping |Uploaded to |Saved |Archive extracted\.|Upload complete\.|No MP4 files found|Restarted |Could not restart |Downloading |Capturing |Preparing YouTube |Validating YouTube |YouTube import complete\.|Catalog import complete\.|Encoding |progress |Reusing rendition|Rendition ready|Waiting for another rendition|Source frame rate matches)/;
 
 const isFailureLine = (text: string): boolean =>
   UPLOAD_FAILURE.test(text) ||
@@ -293,4 +297,34 @@ export function failureText(lines: readonly string[]): string | null {
     message.push(text);
   }
   return message.join('\n');
+}
+
+const RESTART_FAILED = 'Could not restart ';
+
+/**
+ * The line of a slot that an upload's Replace stopped and could not start again ("Could not
+ * restart src4: <reason>"), or null for any other line. It is a warning, not a failure: the upload
+ * is in place, but the slot it names is left stopped (ruling Q6).
+ */
+export function restartWarning(line: string): string | null {
+  const text = line.trim();
+  return text.startsWith(RESTART_FAILED) ? text : null;
+}
+
+// Where the server says it saved what a request brought in. An upload names the absolute path on
+// the device, but uploads always land at the library's root (a file, or an archive's folder), so
+// the last segment is the library path; the imports print the library path itself.
+const SAVED_ABSOLUTE = ['Uploaded to ', 'Saved archive; extracting into '];
+const SAVED_RELATIVE = ['Saved catalog asset to ', 'Saved YouTube media to '];
+
+/** The library path a line says was saved, or null for any other line. */
+export function savedPath(line: string): string | null {
+  const text = line.trim();
+  for (const prefix of SAVED_ABSOLUTE) {
+    if (text.startsWith(prefix)) return after(text, prefix).split('/').pop() || null;
+  }
+  for (const prefix of SAVED_RELATIVE) {
+    if (text.startsWith(prefix)) return after(text, prefix) || null;
+  }
+  return null;
 }

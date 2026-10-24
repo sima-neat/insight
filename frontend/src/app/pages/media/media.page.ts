@@ -13,12 +13,14 @@ import { NeatColumn } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { CellText } from '../../cell-text';
 import type { MediaNode, Slot } from '../../sources/api';
+import { ImportDialogs } from '../../sources/import-dialog';
 import {
   hasFile,
   MEDIA_BROWSER_LABELS,
   MEDIA_ROOT_LABEL,
   mediaCountLabel,
   mediaFilterPlaceholder,
+  revealIn,
 } from '../../sources/media-browser';
 import { MediaLibraryService, toFileNodes } from '../../sources/media-library.service';
 import type { Progress } from '../../sources/progress-lines';
@@ -64,6 +66,7 @@ export class MediaPage {
   protected readonly slots = inject(SlotsService);
   private readonly library = inject(MediaLibraryService);
   private readonly toasts = inject(NeatToasts);
+  private readonly imports = inject(ImportDialogs);
 
   protected readonly rootLabel = MEDIA_ROOT_LABEL;
   protected readonly countLabel = mediaCountLabel;
@@ -109,9 +112,19 @@ export class MediaPage {
     return this.inUse().get(path) ?? '';
   }
 
-  /** Opens the import dialog, which Task 13 adds and wires here (ruling Q1). */
-  protected openImport(): void {
-    // Task 13: open the import dialog.
+  /**
+   * Opens the import dialog on Local files, then shows what it saved: a file in its folder,
+   * selected, or an archive's folder. Nothing changes when the dialog closed without an import.
+   */
+  protected async openImport(): Promise<void> {
+    const path = await this.imports.open('local');
+    if (path === null) return;
+    // The import refreshed the library already, but without waiting for it; the file must be in
+    // the tree before it can be selected. A failure leaves the tree there was.
+    await this.library.refresh().catch(() => undefined);
+    const target = revealIn(this.library.tree() ?? [], path);
+    this.folder.set(target.folder);
+    if (target.file) this.selected.set(target.file);
   }
 
   protected toggleAside(): void {

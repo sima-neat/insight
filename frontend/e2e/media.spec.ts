@@ -79,6 +79,8 @@ interface Mocked {
   readonly deleted: string[];
   /** Makes `GET /api/mediasrc` fail from now on. */
   failSlots(): void;
+  /** Puts a file into the library, as an upload or import does. */
+  add(path: string): void;
 }
 
 /**
@@ -88,12 +90,26 @@ interface Mocked {
  */
 async function withMockedMedia(page: Page): Promise<Mocked> {
   const deleted: string[] = [];
+  const added: string[] = [];
   let failing = false;
   const remains = (node: { path: string }) => !deleted.includes(node.path);
-  const tree = () =>
-    TREE.filter(remains).map((node) =>
+  const tree = () => [
+    ...TREE.filter(remains).map((node) =>
       'children' in node ? { ...node, children: node.children.filter(remains) } : node,
-    );
+    ),
+    // An imported file shows in a folder of its own, as catalog and YouTube imports save them.
+    ...added.map((path) =>
+      path.includes('/')
+        ? {
+            name: `/${path.split('/')[0]}`,
+            path: path.split('/')[0],
+            type: 'folder',
+            streamable_count: 1,
+            children: [file(path)],
+          }
+        : file(path),
+    ),
+  ];
 
   await page.route(
     (url) => url.pathname === '/api/media-files',
@@ -133,7 +149,7 @@ async function withMockedMedia(page: Page): Promise<Mocked> {
     (url) => url.pathname.startsWith('/media/') || url.pathname.startsWith('/api/media-preview/'),
     (route) => route.fulfill({ contentType: 'image/png', body: PIXEL }),
   );
-  return { deleted, failSlots: () => (failing = true) };
+  return { deleted, failSlots: () => (failing = true), add: (path) => added.push(path) };
 }
 
 const listbox = (page: Page) => page.getByRole('listbox', { name: 'Files' });
@@ -286,5 +302,214 @@ test.describe('Media with mocked APIs', () => {
       page.getByText('Slot status could not be refreshed. Showing the last known state.'),
     ).toBeVisible();
     await expect(row(page, 'cars.mp4')).toContainText('src5 · Idle');
+  });
+});
+
+const CATALOG = {
+  schema: '1',
+  generated_at: null,
+  index_url: 'https://artifacts.neat.sima.ai/media-assets/index.json',
+  base_url: 'https://artifacts.neat.sima.ai/media-assets/',
+  sources: [
+    { id: 'street', title: 'Street', description: 'Cars at a crossing', file: '', url: '' },
+  ],
+  assets: [
+    {
+      source_id: 'street',
+      source_title: 'Street',
+      profile: '720p30',
+      preview: false,
+      codec: 'h264',
+      container: 'mp4',
+      fps: 30,
+      target_height: 720,
+      path: 'street/street_720p30_30fps_h264.mp4',
+      bytes: 3_145_728,
+      sha256: '',
+      width: 1280,
+      height: 720,
+      url: 'https://artifacts.neat.sima.ai/media-assets/street/street_720p30_30fps_h264.mp4',
+    },
+  ],
+};
+
+const YOUTUBE_PREVIEW = {
+  video_id: 'abc',
+  normalized_url: 'https://www.youtube.com/watch?v=abc',
+  embed_url: 'https://www.youtube.com/embed/abc',
+  thumbnail_url: '',
+  title: 'Street walk',
+  duration: 600,
+  is_live: false,
+  live_status: 'not_live',
+};
+
+const importDialog = (page: Page) => page.getByRole('dialog', { name: 'Import media' });
+const dialogButton = (page: Page, name: string) =>
+  importDialog(page).getByRole('button', { name, exact: true });
+
+/** Chooses files in the Local files tab's drop zone, as the system's file chooser would. */
+const choose = (page: Page, ...names: string[]) =>
+  importDialog(page)
+    .locator('neat-drop-zone input[type="file"]')
+    .setInputFiles(
+      names.map((name) => ({ name, mimeType: 'video/mp4', buffer: Buffer.from('x') })),
+    );
+
+test.describe('Import with mocked APIs', () => {
+  test.beforeEach(async ({ page }) => {
+    // Nothing leaves the machine: the catalog's previews and YouTube's player are stubbed.
+    await page.route(
+      (url) => url.hostname === 'artifacts.neat.sima.ai',
+      (route) => route.abort(),
+    );
+    await page.route(
+      (url) => url.hostname.endsWith('youtube.com'),
+      (route) =>
+        route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Player</title>' }),
+    );
+  });
+
+  test('an upload whose name exists asks, sends again with Keep both, and shows the saved file', async ({
+    page,
+  }) => {
+    const mocked = await withMockedMedia(page);
+    const sent: (string | null)[] = [];
+    await page.route(
+      (url) => url.pathname === '/api/upload/media',
+      async (route) => {
+        const body = route.request().postData() ?? '';
+        const choice = /name="on_conflict"\r\n\r\n(\w+)/.exec(body)?.[1] ?? null;
+        sent.push(choice);
+        if (choice === null) {
+          return route.fulfill({
+            status: 409,
+            json: {
+              error: 'A file with this name exists.',
+              conflict: { existing: 'cars.mp4', suggested: 'cars_2.mp4' },
+            },
+          });
+        }
+        mocked.add('cars_2.mp4');
+        return route.fulfill({
+          contentType: 'text/plain',
+          body: 'Uploaded to /data/media/cars_2.mp4\nOptimized cars_2.mp4: H.264\nUpload complete.\n',
+        });
+      },
+    );
+    await page.goto('/media');
+    await tool(page, 'Import…').click();
+    await expect(importDialog(page)).toBeVisible();
+
+    await choose(page, 'cars.mp4');
+    await expect(importDialog(page)).toContainText('cars.mp4 already exists.');
+    await expect(importDialog(page)).toContainText('In use on src5');
+    // The safe answer has the focus: Enter keeps both.
+    await expect(dialogButton(page, 'Keep both')).toBeFocused();
+    await page.keyboard.press('Enter');
+
+    await expect(importDialog(page)).toHaveCount(0);
+    expect(sent).toEqual([null, 'keep_both']);
+    await expect(toast(page, 'Uploaded and prepared 1 file(s).')).toBeVisible();
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('cars_2.mp4');
+  });
+
+  test('a failure line keeps the dialog open and says what failed', async ({ page }) => {
+    await withMockedMedia(page);
+    await page.route(
+      (url) => url.pathname === '/api/upload/media',
+      (route) =>
+        route.fulfill({
+          contentType: 'text/plain',
+          body: 'Uploaded to /data/media/bad.mp4\nFFmpeg conversion failed for bad.mp4: moov atom not found\nUpload complete.\n',
+        }),
+    );
+    await page.goto('/media');
+    await tool(page, 'Import…').click();
+    await choose(page, 'bad.mp4');
+
+    const alert = importDialog(page).getByRole('alert');
+    await expect(alert).toContainText('Uploaded and prepared 0/1 file(s).');
+    await expect(alert).toContainText(
+      'bad.mp4: FFmpeg conversion failed for bad.mp4: moov atom not found',
+    );
+    await expect(importDialog(page)).toBeVisible();
+    // No longer busy: Escape closes it.
+    await page.keyboard.press('Escape');
+    await expect(importDialog(page)).toHaveCount(0);
+  });
+
+  test('a catalog asset imports and is shown in the library', async ({ page }) => {
+    const mocked = await withMockedMedia(page);
+    await page.route(
+      (url) => url.pathname === '/api/media-catalog',
+      (route) => route.fulfill({ json: CATALOG }),
+    );
+    const imported: string[] = [];
+    await page.route(
+      (url) => url.pathname === '/api/import/media-catalog',
+      (route) => {
+        imported.push((route.request().postDataJSON() as { path: string }).path);
+        mocked.add('catalog/street_720p30_30fps_h264.mp4');
+        return route.fulfill({
+          contentType: 'text/plain',
+          body: 'Downloading catalog asset: 100% (3145728 / 3145728 bytes)\nSaved catalog asset to catalog/street_720p30_30fps_h264.mp4\nCatalog import complete.\n',
+        });
+      },
+    );
+    await page.goto('/media');
+    await tool(page, 'Import…').click();
+    await importDialog(page).getByRole('tab', { name: 'Catalog', exact: true }).click();
+
+    const assets = importDialog(page).getByRole('listbox', { name: 'Catalog assets' });
+    await assets.getByRole('option').filter({ hasText: 'Street' }).click();
+    await expect(importDialog(page)).toContainText('1 asset(s) selected');
+    await dialogButton(page, 'Import').click();
+
+    await expect(importDialog(page)).toHaveCount(0);
+    expect(imported).toEqual(['street/street_720p30_30fps_h264.mp4']);
+    await expect(toast(page, 'Imported 1 catalog asset(s).')).toBeVisible();
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText(
+      'catalog/street_720p30_30fps_h264.mp4',
+    );
+  });
+
+  test('a YouTube link is validated before import, and Cancel Import aborts the import', async ({
+    page,
+  }) => {
+    await withMockedMedia(page);
+    await page.route(
+      (url) => url.pathname === '/api/import/youtube/validate',
+      (route) => route.fulfill({ json: YOUTUBE_PREVIEW }),
+    );
+    // The import never answers: it runs until cancelled.
+    await page.route(
+      (url) => url.pathname === '/api/import/youtube',
+      () => undefined,
+    );
+    await page.goto('/media');
+    await tool(page, 'Import…').click();
+    await importDialog(page).getByRole('tab', { name: 'YouTube' }).click();
+    await expect(dialogButton(page, 'Import')).toBeDisabled();
+
+    await importDialog(page).getByLabel('YouTube URL').fill('https://youtu.be/abc');
+    await dialogButton(page, 'Validate').click();
+    await expect(importDialog(page).getByLabel('YouTube URL')).toHaveValue(
+      'https://www.youtube.com/watch?v=abc',
+    );
+    await expect(importDialog(page)).toContainText('Ready to import YouTube video');
+
+    const aborted = page.waitForEvent(
+      'requestfailed',
+      (request) => new URL(request.url()).pathname === '/api/import/youtube',
+    );
+    await dialogButton(page, 'Import').click();
+    await expect(importDialog(page)).toContainText('Importing YouTube video');
+    await dialogButton(page, 'Cancel Import').click();
+
+    await aborted;
+    await expect(toast(page, 'YouTube import canceled.')).toBeVisible();
+    await expect(importDialog(page)).toBeVisible();
+    await expect(dialogButton(page, 'Cancel Import')).toHaveCount(0);
   });
 });

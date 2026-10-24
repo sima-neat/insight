@@ -81,7 +81,7 @@
           </p>
         }
         @if (cameras.error(); as error) {
-          <p class="error" role="alert">{{ error }}</p>
+          <app-error-note role="alert">{{ error }}</app-error-note>
         }
       }
       <div class="buttons">
@@ -132,8 +132,7 @@
             it.
           </p>
         }
-        <label class="field"
-          ><span>Stream URL</span
+        <app-field label="Stream URL"
           ><input
             #urlField
             neatInput
@@ -142,10 +141,9 @@
             placeholder="rtsp://192.168.1.10:554/stream1"
             [value]="url()"
             (input)="url.set(urlField.value)"
-        /></label>
+        /></app-field>
         <div class="credentials">
-          <label class="field"
-            ><span>Username</span
+          <app-field label="Username"
             ><input
               #userField
               neatInput
@@ -154,9 +152,8 @@
               autocomplete="off"
               [value]="username()"
               (input)="username.set(userField.value)"
-          /></label>
-          <label class="field"
-            ><span>Password</span
+          /></app-field>
+          <app-field label="Password"
             ><input
               #passwordField
               neatInput
@@ -165,14 +162,14 @@
               autocomplete="new-password"
               [value]="password()"
               (input)="password.set(passwordField.value)"
-          /></label>
+          /></app-field>
         </div>
         <p neatNote>
           Most IP cameras need a username and password. Credentials typed into the URL work too and
           are never shown again.
         </p>
         @if (pullError(); as error) {
-          <p class="error" role="alert">{{ error }}</p>
+          <app-error-note role="alert">{{ error }}</app-error-note>
         }
         <div class="buttons">
           <button neatButton type="submit" size="small" [disabled]="!canPull()">
@@ -310,9 +307,11 @@
 
 <ng-template #picker let-dialog>
   <app-media-picker
+    #mediaPicker
     [current]="slot().file"
     [busy]="pickerBusy()"
     (assign)="assignPicked(dialog, $event)"
     (cancelled)="dialog.close()"
+    (importRequested)="importInto(mediaPicker)"
   />
 </ng-template>

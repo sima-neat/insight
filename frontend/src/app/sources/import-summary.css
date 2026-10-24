@@ -1,0 +1,33 @@
+:host {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--neat-space-3);
+  font-size: var(--neat-text-sm);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+  min-width: 0;
+}
+
+strong {
+  font-weight: 500;
+}
+
+/* A path or a link has no spaces to break at. */
+p {
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  gap: var(--neat-space-2);
+}
+
+.actions:empty {
+  display: none;
+}

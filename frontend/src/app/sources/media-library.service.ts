@@ -5,12 +5,15 @@ import { finalize, firstValueFrom, Observable } from 'rxjs';
 import { LatestOnly } from '../polling';
 import type {
   CatalogImportRequest,
+  CatalogIndex,
   MediaDeleteResponse,
   MediaInfo,
   MediaNode,
   MediaPathRequest,
   UploadOnConflict,
   YoutubeImportRequest,
+  YoutubePreview,
+  YoutubeValidateRequest,
 } from './api';
 import { SlotsService } from './slots.service';
 import { postStreamedText, withRequestErrors, type StreamEvent } from './stream-lines';
@@ -159,6 +162,23 @@ export class MediaLibraryService {
     body.append('file', file);
     if (onConflict) body.append('on_conflict', onConflict);
     return this.streamed('/api/upload/media', body);
+  }
+
+  /** The published media catalog, which the server fetches from its index on every call. */
+  catalog(): Promise<CatalogIndex> {
+    return firstValueFrom(
+      this.http.get<CatalogIndex>('/api/media-catalog').pipe(withRequestErrors()),
+    );
+  }
+
+  /** What a YouTube link would import; rejects with the server's reason when it cannot. */
+  validateYoutube(url: string): Promise<YoutubePreview> {
+    const body: YoutubeValidateRequest = { url };
+    return firstValueFrom(
+      this.http
+        .post<YoutubePreview>('/api/import/youtube/validate', body)
+        .pipe(withRequestErrors()),
+    );
   }
 
   /** Reads its lines with `catalogProgress`. */

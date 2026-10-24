@@ -57,6 +57,8 @@ const PULL_STATES: Record<SlotPullStatus, SlotStateView> = {
 const CODEC_LABELS: Readonly<Record<string, string>> = {
   h264: 'H.264',
   h265: 'H.265',
+  // The media catalog's name for H.265.
+  hevc: 'H.265',
   mjpeg: 'MJPEG',
   unknown: 'Unknown',
 };

@@ -4,6 +4,7 @@ import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { NeatShell } from '@sima/neat-ui';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { MediaInfo, MediaNode, Slot } from '../../sources/api';
+import { ImportDialogs } from '../../sources/import-dialog';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import type { Progress } from '../../sources/progress-lines';
 import { SlotsService } from '../../sources/slots.service';
@@ -86,12 +87,14 @@ describe('MediaPage', () => {
   let slots: FakeSlots;
   let library: FakeLibrary;
   let toasts: { error: ReturnType<typeof vi.fn>; status: ReturnType<typeof vi.fn> };
+  let imports: { open: ReturnType<typeof vi.fn<(tab?: string) => Promise<string | null>>> };
   let fixture: ComponentFixture<Shell>;
 
   beforeEach(() => {
     slots = new FakeSlots();
     library = new FakeLibrary();
     toasts = { error: vi.fn(), status: vi.fn() };
+    imports = { open: vi.fn<(tab?: string) => Promise<string | null>>() };
     TestBed.configureTestingModule({
       providers: [
         provideRouter([
@@ -101,6 +104,7 @@ describe('MediaPage', () => {
         { provide: SlotsService, useValue: slots },
         { provide: MediaLibraryService, useValue: library },
         { provide: NeatToasts, useValue: toasts },
+        { provide: ImportDialogs, useValue: imports },
       ],
     });
   });
@@ -215,11 +219,38 @@ describe('MediaPage', () => {
     expect(aside()!.textContent!.trim()).toBe('Select a file.');
   });
 
-  it('the top bar has Import… and the side-panel toggle, which hides and shows the panel', async () => {
+  it('Import… opens the import dialog on Local files, then shows what it imported, selected', async () => {
     await open();
-    // Task 13 wires it to the import dialog (ruling Q1).
-    expect(toolbarButton('Import…')).toBeDefined();
+    imports.open.mockResolvedValueOnce('people/walk.mp4');
+    toolbarButton('Import…').click();
+    await settle();
 
+    expect(imports.open).toHaveBeenCalledExactlyOnceWith('local');
+    // Fetched again, so the tree holds the new file.
+    expect(library.refresh).toHaveBeenCalledTimes(2);
+    expect(root().querySelector('nav[aria-label="Current folder"]')!.textContent).toContain(
+      'people',
+    );
+    expect(aside()!.querySelector('h2')!.textContent!.trim()).toBe('people/walk.mp4');
+  });
+
+  it('an archive’s import opens its folder; a dialog closed without an import changes nothing', async () => {
+    await open();
+    imports.open.mockResolvedValueOnce(null);
+    toolbarButton('Import…').click();
+    await settle();
+    expect(library.refresh).toHaveBeenCalledTimes(1);
+    expect(rows().map(nameOf)).toEqual(['people', 'cars.mp4', 'idle.mp4', 'notes.txt']);
+
+    imports.open.mockResolvedValueOnce('people');
+    toolbarButton('Import…').click();
+    await settle();
+    expect(rows().map(nameOf)).toEqual(['walk.mp4']);
+    expect(aside()!.textContent!.trim()).toBe('Select a file.');
+  });
+
+  it('the top bar’s side-panel toggle hides and shows the panel', async () => {
+    await open();
     toolbarButton('Side panel').click();
     await settle();
     expect(aside()).toBeNull();
