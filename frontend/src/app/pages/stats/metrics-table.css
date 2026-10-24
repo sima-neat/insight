@@ -18,14 +18,13 @@ td {
   vertical-align: middle;
 }
 
-thead th {
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
+th {
   font-weight: 500;
 }
 
-tbody th {
-  font-weight: 500;
+thead th {
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
 }
 
 .group {
@@ -37,13 +36,27 @@ tbody th {
   font-variant-numeric: tabular-nums;
 }
 
-/* The trend takes what the other columns leave, but never so little that the line is a stub. */
+/*
+ * The trend takes the width the other columns leave. A fixed width on a table cell is that
+ * column's least width too, which is what pushed the table past the side panel, so it has none;
+ * the line keeps a least width of its own, so that it never shrinks to a stub.
+ */
 .trend {
-  inline-size: 8rem;
-  min-inline-size: 5rem;
+  inline-size: 100%;
 }
 
+neat-sparkline {
+  display: block;
+  min-inline-size: 3rem;
+}
+
+/* Narrow, the cells give up some of their padding so that the five columns fit a side panel. */
 @container (width < 40rem) {
+  th,
+  td {
+    padding-inline: var(--neat-space-2);
+  }
+
   .group {
     display: none;
   }
