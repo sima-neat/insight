@@ -20,7 +20,7 @@ import type {
   PreviewSession,
   SupportTier,
 } from './api';
-import { tierInfo } from './devices';
+import { countLabel, tierInfo } from './devices';
 
 /** An entry of a mode menu, with the tier its label names when the menu mixes tiers. */
 export interface ModeOption extends NeatSelectOption<string> {
@@ -48,7 +48,8 @@ export interface PreviewBlock {
 
 /**
  * The USB formats the backend previews: MJPG, and the raw FourCCs of
- * `neat_insight/preview/gst.py`'s `RAW_FORMATS`, which it converts.
+ * `neat_insight/preview/gst.py`'s `RAW_FORMATS`, which it converts. `tests/test_preview.py` keeps
+ * the two lists equal.
  */
 export const USB_PREVIEW_FORMATS: readonly string[] = Object.freeze([
   'MJPG',
@@ -160,8 +161,7 @@ export function blockedFormatSummary(
 ): string {
   const blocked = options.filter((option) => option.disabled);
   if (!blocked.length) return '';
-  const count = `${blocked.length} format${blocked.length === 1 ? '' : 's'}`;
-  return `${count} cannot be used (${blocked.map((option) => option.value).join(', ')})`;
+  return `${countLabel(blocked.length, 'format')} cannot be used (${blocked.map((option) => option.value).join(', ')})`;
 }
 
 /** The tier the board reported for the selected mode; '' when the camera does not list it. */

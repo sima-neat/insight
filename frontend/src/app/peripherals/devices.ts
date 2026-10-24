@@ -108,6 +108,11 @@ export function isMicrophone(item: PeripheralItem): item is MicrophoneItem {
   return item.kind === 'microphone';
 }
 
+/** "1 camera", "2 cameras": a count with its noun, plural unless one. */
+export function countLabel(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
 /** A tier's label and tone; anything but the three tiers reads as Unsupported. */
 export function tierInfo(tier: SupportTier): DeviceChip {
   return TIERS[tier] ?? TIERS.unsupported;

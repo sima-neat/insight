@@ -136,6 +136,14 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(arguments[6:12], ["!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=480,framerate=5/1"])
         self.assertEqual(gst.RAW_FORMATS["YU12"], "I420")
 
+    def test_the_frontend_offers_preview_for_the_usb_formats_the_backend_previews(self):
+        # The app enables Start for a USB camera by its own copy of this list (camera-modes.ts); a
+        # drift would offer a format the start refuses, or block one it accepts.
+        source = Path(__file__).parents[1] / "frontend" / "src" / "app" / "peripherals" / "camera-modes.ts"
+        listed = re.search(r"USB_PREVIEW_FORMATS\b[^=]*=\s*Object\.freeze\(\[([^\]]*)\]\)", source.read_text(encoding="utf-8"))
+        self.assertIsNotNone(listed)
+        self.assertEqual(re.findall(r"'([A-Z0-9]+)'", listed[1]), ["MJPG", *gst.RAW_FORMATS])
+
     def test_fractional_rates_are_exact_fractions(self):
         arguments = gst.pipeline("usb", gst.quoted("/dev/video97"), "MJPG", 640, 480, Fraction(30000, 1001))
         self.assertIn("image/jpeg,width=640,height=480,framerate=30000/1001", arguments)

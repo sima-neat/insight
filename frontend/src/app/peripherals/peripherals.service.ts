@@ -8,7 +8,7 @@ import { BoardService } from '../board/board.service';
 import { LatestOnly } from '../polling';
 import { withRequestErrors } from '../sources/stream-lines';
 import type { PeripheralSnapshot } from './api';
-import { isScanned } from './devices';
+import { countLabel, isScanned } from './devices';
 
 const SNAPSHOT_URL = '/api/peripherals';
 const REFRESH_URL = '/api/peripherals/refresh';
@@ -179,8 +179,4 @@ function scanCompleteMessage(snapshot: PeripheralSnapshot): string {
   const count = (kind: string) => snapshot.items.filter((item) => item.kind === kind).length;
   const found = `${countLabel(count('camera'), 'camera')}, ${countLabel(count('microphone'), 'microphone')}`;
   return `Scan complete: ${found} on ${snapshot.board.label || 'the board'}.`;
-}
-
-function countLabel(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }

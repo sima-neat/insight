@@ -119,7 +119,9 @@ export class CameraPreview {
    * while the board starts it (another camera, board or mode) is stopped once it answers, and the
    * mode shown then is started; one refused because another tab started a preview adopts that
    * preview. Resolves when the start and any restart it led to have settled; never rejects, since
-   * a failure is shown in `state`.
+   * a failure is shown in `state`. The caller blocks a start for a snapshot of another board
+   * generation (`previewBlock`'s `stale`): such a start is superseded from the outset, so its
+   * refusal would not be shown.
    */
   async start(camera: CameraItem, mode: CameraModeChoice, generation: number): Promise<void> {
     const selection: CameraSelection = { ...mode, id: camera.id };
@@ -135,6 +137,7 @@ export class CameraPreview {
         dispatch: (event) => this.dispatch(event),
         view: () => this.view(),
         normalize: problemOf,
+        reloadBoard: () => void this.board.reload(),
       },
     );
   }
@@ -149,6 +152,20 @@ export class CameraPreview {
     if (status === 'stopping') return;
     if (session) await this.stopSession(session.id);
     else if (status === 'starting') this.dispatch({ type: 'stopping' });
+  }
+
+  /**
+   * The page leaves the camera this preview shows (another camera is selected, or the page goes):
+   * this page's preview stops, and one still starting is stopped once it answers. One another tab
+   * shows is that tab's to stop, so it is only let go of here (#170's `leavePreview`).
+   */
+  async leave(): Promise<void> {
+    if (this.stateValue().status === 'elsewhere') {
+      this.shown = NOTHING_SHOWN;
+      this.dispatch({ type: 'reset' });
+    } else {
+      await this.stop();
+    }
   }
 
   /**
@@ -199,12 +216,7 @@ export class CameraPreview {
    */
   release(): void {
     this.released = true;
-    this.shown = NOTHING_SHOWN;
-    const { status, session } = this.stateValue();
-    // Either way the preview leaves `live` and `elsewhere`, which ends the watch.
-    if (status === 'elsewhere') this.dispatch({ type: 'reset' });
-    else if (status === 'live' && session) void this.stopSession(session.id);
-    // A start still out reads `view()` when it answers, finds nothing shown and stops its session.
+    void this.leave();
   }
 
   private async post(camera: CameraItem, mode: CameraSelection): Promise<PreviewSession> {
@@ -225,20 +237,21 @@ export class CameraPreview {
   /**
    * Stops a session; resolves whether it stopped. `known` is a session this page does not hold
    * yet (a start that answered too late), shown while it stops. A failed stop keeps the preview
-   * with its failure, so Stop can be retried: it must not look successful while the board may
-   * still be streaming.
+   * as it was (live, or shown in another tab) with its failure, so Stop can be retried: it must
+   * not look successful while the board may still be streaming.
    */
   private async stopSession(
     sessionId: string,
     known: PreviewSession | null = null,
   ): Promise<boolean> {
+    const from = this.stateValue().status === 'elsewhere' ? 'elsewhere' : 'live';
     this.dispatch({ type: 'stopping', for: sessionId, session: known });
     try {
       await firstValueFrom(
         this.http.post<PreviewResponse>(stopUrl(sessionId), {}).pipe(withRequestErrors()),
       );
     } catch (failure) {
-      this.dispatch({ type: 'stop-failed', for: sessionId, error: problemOf(failure) });
+      this.dispatch({ type: 'stop-failed', for: sessionId, from, error: problemOf(failure) });
       return false;
     }
     this.dispatch({ type: 'stopped', for: sessionId });

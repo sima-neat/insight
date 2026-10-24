@@ -39,7 +39,8 @@ export type PreviewEvent =
   /** Untagged while a start is still out: there is no session id to stop yet. */
   | { type: 'stopping'; for?: string; session?: PreviewSession | null }
   | { type: 'stopped'; for: string }
-  | { type: 'stop-failed'; for: string; error: BoardProblem }
+  /** `from`: what the preview was before the stop, which it returns to. */
+  | { type: 'stop-failed'; for: string; from: 'live' | 'elsewhere'; error: BoardProblem }
   | { type: 'camera-fps'; for: string; fps: number }
   /** This page's stream was refused because another page shows it. */
   | { type: 'elsewhere'; for: string; session: PreviewSession }
@@ -73,6 +74,7 @@ export interface PreviewRequested {
 /**
  * The requests and the page a start works with (`runPreviewStart`). `lookup` answers the running
  * session, null when none runs or the read failed. `stop` resolves whether the session stopped.
+ * `reloadBoard` re-reads the board when an answer names a generation the page does not know.
  */
 export interface PreviewStartDeps {
   post(mode: CameraSelection): Promise<PreviewSession>;
@@ -83,6 +85,7 @@ export interface PreviewStartDeps {
   dispatch(event: PreviewEvent): void;
   view(): PreviewView;
   normalize(failure: unknown): BoardProblem;
+  reloadBoard(): void;
 }
 
 /** A read of the backend's running session (`CameraPreview.current()`); rejects when it failed. */
@@ -186,8 +189,9 @@ export function nextPreviewState(current: PreviewState, event: PreviewEvent): Pr
       return PREVIEW_IDLE;
     case 'stop-failed':
       if (outOfDate(current, event)) return current;
-      // The board may still be streaming: keep the preview and its Stop, with the failure.
-      return { status: 'live', session: current.session, error: event.error };
+      // The board may still be streaming: keep the preview and its Stop, with the failure, as it
+      // was. One another tab shows stays that tab's: it must not become this page's live preview.
+      return { status: event.from, session: current.session, error: event.error };
     case 'camera-fps':
       // The rate the camera runs at, for the running session only; unchanged, the state is kept as is.
       if (
@@ -269,10 +273,17 @@ export async function runPreviewStart(
   if (sessionMatches(session, latest.cameraId, latest.generation, latest.selection)) {
     return deps.dispatch({ type: 'session', session });
   }
+  // A session of another board generation than the one shown is never restarted: while the page
+  // still shows the generation the start was sent for, the board moved without the page knowing
+  // (Insight restarted, or a client changed the board while this window kept the focus), and a
+  // restart would get the same answer again, starting and killing the camera each time. The
+  // board is re-read instead, so the page learns of the change.
+  const otherBoard = otherGeneration(session.generation, latest.generation);
+  if (otherBoard && !otherGeneration(requested.generation, latest.generation)) deps.reloadBoard();
   if (!(await deps.stop(session))) return;
   // The mode may have changed again while the stop ran: start the one selected now, or nothing
   // when the camera or board changed.
-  const next = restartSelection(requested, deps.view());
+  const next = otherBoard ? null : restartSelection(requested, deps.view());
   if (next) await deps.start(next);
   else deps.dispatch({ type: 'reset' });
 }

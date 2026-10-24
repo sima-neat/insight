@@ -1,16 +1,13 @@
 import type { CameraSetup } from '../board/api';
 import type {
-  CameraFormat,
   CameraItem,
-  CameraMode,
-  CameraSize,
-  DeviceSupport,
   MicrophoneItem,
   OtherItem,
   PeripheralItem,
   PeripheralSnapshot,
   SupportTier,
 } from './api';
+import { imx477, imx568, inUse, support, usb } from './cameras.testing';
 import {
   boardCameraSetup,
   changeSummary,
@@ -25,126 +22,11 @@ import {
   tierInfo,
 } from './devices';
 
-// #170's fixtures (model.test.js), typed: the cameras and microphones a real DevKit scan returned.
+// #170's fixtures (model.test.js), typed: the cameras come from `cameras.testing.ts`, the
+// microphones a real DevKit scan returned are here.
 
-const NOT_IN_OVERLAYS = "IMX568 is not in this board's camera overlays.";
-const USB_REASON = 'USB cameras have no camera overlay on this board.';
-const support = (tier: SupportTier, reason = ''): DeviceSupport => ({ tier, reason });
-const rates = (...pairs: [number, SupportTier][]): CameraMode[] =>
-  pairs.map(([value, tier]) => ({ value, framerate_num: value, framerate_den: 1, tier }));
-const size = (width: number, height: number, ...pairs: [number, SupportTier][]): CameraSize => ({
-  width,
-  height,
-  fps: rates(...pairs),
-});
-const format = (
-  name: string,
-  label: string,
-  exportable: boolean,
-  formatSupport: DeviceSupport,
-  sizes: CameraSize[],
-): CameraFormat => ({
-  format: name,
-  label,
-  exportable,
-  support: formatSupport,
-  range: null,
-  sizes,
-});
 const available = { state: 'available' as const, users: [], reason: null };
 const idle: DeviceActivity = { previewing: null, testing: null };
-
-const imx477: CameraItem = {
-  id: 'mipi:/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
-  kind: 'camera',
-  connection: 'mipi',
-  name: '/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
-  model: 'imx477',
-  device: {
-    camera_name: '/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
-    camera_name_source: 'libcamera',
-    media_device: '/dev/media0',
-    bus_info: 'platform:csi2video@1',
-    csi: 'csidev-40c3000.csi',
-    video_node: '/dev/video3',
-  },
-  availability: available,
-  support: support('available'),
-  modes_source: 'live',
-  formats: [
-    format('NV12', 'NV12 (YUV 4:2:0)', true, support('available'), [
-      size(1920, 1080, [30, 'available'], [60, 'available']),
-      size(1280, 720, [60, 'unsupported']),
-    ]),
-  ],
-  default_selection: { format: 'NV12', width: 1920, height: 1080, fps: 30 },
-  notes: [],
-  errors: [],
-};
-
-const imx568: CameraItem = {
-  id: 'mipi:econ-imx568-fpga 5-0042',
-  kind: 'camera',
-  connection: 'mipi',
-  name: 'econ-imx568-fpga 5-0042',
-  model: 'imx568',
-  device: {
-    camera_name: 'econ-imx568-fpga 5-0042',
-    camera_name_source: 'media-graph',
-    media_device: '/dev/media0',
-  },
-  availability: { state: 'unknown', users: [], reason: 'fuser is not installed on the board.' },
-  support: support('unsupported', NOT_IN_OVERLAYS),
-  modes_source: 'live',
-  formats: [
-    format('NV12', 'NV12 (YUV 4:2:0)', false, support('unsupported', NOT_IN_OVERLAYS), [
-      size(2432, 2048, [30, 'unsupported']),
-    ]),
-  ],
-  default_selection: null,
-  notes: ['Sensor crop rectangle could not be read; defaults were used.'],
-  errors: [],
-};
-
-const inUse: CameraItem = {
-  ...imx477,
-  id: 'mipi:/base/axi/i2c@88000/imx477@1a',
-  name: '/base/axi/i2c@88000/imx477@1a',
-  device: { camera_name: '/base/axi/i2c@88000/imx477@1a', camera_name_source: 'libcamera' },
-  availability: { state: 'in_use', users: [{ pid: 812, command: 'gst-launch-1.0' }], reason: null },
-  modes_source: 'previous-scan',
-};
-
-const usb: CameraItem = {
-  id: 'usb:046d:0825:1-1.2',
-  kind: 'camera',
-  connection: 'usb',
-  name: 'HD Webcam C270',
-  model: 'HD Webcam C270',
-  device: {
-    video_node: '/dev/video0',
-    by_id: '/dev/v4l/by-id/usb-046d_0825_2F6D4A10-video-index0',
-    usb: {
-      vendor_id: '046d',
-      product_id: '0825',
-      manufacturer: 'Logitech',
-      product: 'HD Webcam C270',
-      bus_path: '1-1.2',
-      speed_mbps: 480,
-    },
-  },
-  availability: available,
-  support: support('unsupported', USB_REASON),
-  modes_source: 'live',
-  formats: [
-    format('MJPG', 'Motion-JPEG', false, support('unsupported', USB_REASON), [
-      size(1280, 720, [30, 'unsupported']),
-    ]),
-  ],
-  default_selection: null,
-  notes: [],
-  errors: [],
-};
 
 // The Blue Yeti Nano item as the real DevKit scan returned it; the backend sends no USB speed for
 // a microphone (ruling F18), so #170's `speed_mbps: 12` is left out.

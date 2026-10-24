@@ -228,6 +228,74 @@ describe('CameraPreview', () => {
     expect(preview.state()).toEqual({ status: 'idle', session: null, error: null });
   });
 
+  it('a start answered for a board generation the page does not know is stopped once and the board re-read', async () => {
+    // The page shows generation 3; the backend already runs 4 (Insight restarted, or a client
+    // changed the board while this window kept the focus, so no focus re-read came).
+    const started = preview.start(imx477, mode30, 3);
+    await answerStart(previewSession({ generation: 4 }));
+    expect(board.reload).toHaveBeenCalledTimes(1);
+    await answerStop(live30.id);
+    await started;
+    expect(preview.state()).toEqual({ status: 'idle', session: null, error: null });
+    http.expectNone({ method: 'POST', url: START_URL });
+  });
+
+  it('a board change while the board starts the preview stops the late session and starts nothing', async () => {
+    const started = preview.start(imx477, mode30, 3);
+    board.state.set(boardState({ target: DEVKIT, generation: 4 }));
+    TestBed.tick();
+    await answerStart(live30);
+    await answerStop(live30.id);
+    await started;
+    expect(preview.state()).toEqual({ status: 'idle', session: null, error: null });
+    http.expectNone({ method: 'POST', url: START_URL });
+    // The page already knows of the change, so there is nothing to re-read.
+    expect(board.reload).not.toHaveBeenCalled();
+  });
+
+  it('a failed Stop of a preview shown in another tab keeps it there with the failure', async () => {
+    const shown = { ...live30, viewer: true };
+    await adoptLive(shown);
+    const stopping = preview.stop();
+    http
+      .expectOne({ method: 'POST', url: stopUrl(shown.id) })
+      .flush({ error: 'SSH failed', code: 'unreachable' }, badGateway);
+    await stopping;
+    expect(preview.state().status).toBe('elsewhere');
+    expect(preview.state().error?.message).toBe('SSH failed');
+    await answerRead(shown);
+
+    // Still the other tab's: leaving only lets it go, and a mode change does not restart it.
+    await preview.changeMode(imx477, mode60);
+    http.expectNone(() => true);
+    preview.release();
+    expect(preview.state().status).toBe('idle');
+    http.expectNone(() => true);
+  });
+
+  it("leaving the camera stops this page's preview and a start once it answers, and only forgets one in another tab", async () => {
+    await adoptLive();
+    const left = preview.leave();
+    expect(preview.state().status).toBe('stopping');
+    await answerStop(live30.id);
+    await left;
+    expect(preview.state().status).toBe('idle');
+
+    const started = preview.start(imx477, mode30, 3);
+    await preview.leave();
+    expect(preview.state().status).toBe('stopping');
+    await answerStart(live30);
+    await answerStop(live30.id);
+    await started;
+    expect(preview.state().status).toBe('idle');
+    http.expectNone({ method: 'POST', url: START_URL });
+
+    await adoptLive({ ...live30, viewer: true });
+    await preview.leave();
+    expect(preview.state()).toEqual({ status: 'idle', session: null, error: null });
+    http.expectNone(() => true);
+  });
+
   it('release stops a live preview and a start still in flight once its session id arrives', async () => {
     await adoptLive();
     preview.release();

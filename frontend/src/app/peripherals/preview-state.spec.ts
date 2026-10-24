@@ -228,6 +228,7 @@ describe('preview state', () => {
         },
         view: () => ({ ...current }),
         normalize: problemOf,
+        reloadBoard: () => log.push(['reload', 'board']),
       };
       return { log, current, deps };
     }
@@ -308,6 +309,54 @@ describe('preview state', () => {
       ['dispatch', 'start'],
       ['dispatch', 'session'],
     ]);
+  });
+
+  it('a start whose session names a board generation the page does not know is stopped, not restarted, and the board re-read', async () => {
+    // Insight restarted (its counter starts over) or a client changed the board while this window
+    // kept the focus: the page still shows generation 3, the backend answers for 4. Restarting
+    // would get the same answer again, starting and killing the camera on the board each time.
+    const mode: CameraSelection = { id: imx477.id, ...sel('NV12', 1920, 1080, 30) };
+    const log: [string, string | number][] = [];
+    await runPreviewStart(
+      { cameraId: imx477.id, generation: 3, mode },
+      {
+        post: async () => previewSession({ id: 's4', generation: 4 }),
+        lookup: async () => null,
+        stop: async (session) => {
+          log.push(['stop', session.id]);
+          return true;
+        },
+        start: (next) => log.push(['start', next.width]),
+        adopt: (session) => log.push(['adopt', session.id]),
+        dispatch: (event) => log.push(['dispatch', event.type]),
+        view: () => ({ cameraId: imx477.id, generation: 3, selection: mode }),
+        normalize: problemOf,
+        reloadBoard: () => log.push(['reload', 'board']),
+      },
+    );
+    expect(log).toEqual([
+      ['dispatch', 'start'],
+      ['reload', 'board'],
+      ['stop', 's4'],
+      ['dispatch', 'reset'],
+    ]);
+  });
+
+  it('a failed Stop of a preview shown in another tab keeps it there, with the failure', () => {
+    const elsewhere = nextPreviewState(PREVIEW_IDLE, {
+      type: 'adopt',
+      session: { ...liveSession, viewer: true },
+    });
+    const stopping = nextPreviewState(elsewhere, { type: 'stopping', for: liveSession.id });
+    const failed = nextPreviewState(stopping, {
+      type: 'stop-failed',
+      for: liveSession.id,
+      from: 'elsewhere',
+      error: problem('SSH failed'),
+    });
+    expect(failed.status).toBe('elsewhere');
+    expect(failed.session?.id).toBe(liveSession.id);
+    expect(failed.error?.message).toBe('SSH failed');
   });
 
   it('a start is superseded once the camera, board, or mode it was sent for is no longer the one shown', () => {
@@ -516,6 +565,7 @@ describe('preview state', () => {
     const stopFailed = nextPreviewState(stopping, {
       type: 'stop-failed',
       for: liveSession.id,
+      from: 'live',
       error: problem('SSH failed'),
     });
     expect(stopFailed.status).toBe('live');
