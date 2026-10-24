@@ -21,75 +21,12 @@ import {
   sortIssues,
   tierInfo,
 } from './devices';
+import { available, onboardMic, yeti } from './microphones.testing';
 
 // #170's fixtures (model.test.js), typed: the cameras come from `cameras.testing.ts`, the
-// microphones a real DevKit scan returned are here.
+// microphones from `microphones.testing.ts`.
 
-const available = { state: 'available' as const, users: [], reason: null };
 const idle: DeviceActivity = { previewing: null, testing: null };
-
-// The Blue Yeti Nano item as the real DevKit scan returned it; the backend sends no USB speed for
-// a microphone (ruling F18), so #170's `speed_mbps: 12` is left out.
-const yeti: MicrophoneItem = {
-  id: 'microphone:alsa:3ff3d77bf791d455',
-  kind: 'microphone',
-  connection: 'usb',
-  name: 'Yeti Nano',
-  device: {
-    card_index: 0,
-    card_id: 'Nano',
-    card_name: 'Yeti Nano',
-    card_driver: 'USB-Audio',
-    pcm_device: 0,
-    pcm_node: '/dev/snd/pcmC0D0c',
-    alsa_name: 'hw:CARD=Nano,DEV=0',
-    by_path: '/dev/snd/by-path/platform-7ff0000000.pci-pci-0003:01:00.0-usb-0:3.1:1.0',
-    by_id: '/dev/snd/by-id/usb-Blue_Microphones_Yeti_Nano_2127SG00CBA8_888-000441040606-00',
-    usb: {
-      vendor_id: 'b58e',
-      product_id: '0005',
-      manufacturer: 'Blue Microphones',
-      product: 'Yeti Nano',
-      serial: '2127SG00CBA8_888-000441040606',
-      bus_path: '1-3.1',
-    },
-  },
-  availability: available,
-  capture: [
-    {
-      format: 'S24_3LE',
-      channels: 2,
-      bits: 24,
-      rates: [32000, 44100, 48000],
-      rate_range: null,
-      channel_map: ['FL', 'FR'],
-    },
-  ],
-  record: '1f0c6e2a9b3d4c5e',
-  notes: [],
-  errors: [],
-};
-
-const onboardMic: MicrophoneItem = {
-  id: 'microphone:alsa:0a1b2c3d4e5f6071',
-  kind: 'microphone',
-  connection: 'onboard',
-  name: 'sima-audio',
-  device: {
-    card_index: 1,
-    card_id: 'simaaudio',
-    card_name: 'sima-audio',
-    card_driver: 'simple-card',
-    pcm_device: 0,
-    pcm_node: '/dev/snd/pcmC1D0c',
-    alsa_name: 'hw:CARD=simaaudio,DEV=0',
-  },
-  availability: available,
-  capture: null,
-  record: '9a8b7c6d5e4f3a2b',
-  notes: ['Capture formats cannot be read without opening the device.'],
-  errors: [],
-};
 
 /** A device of a kind Insight has no view for, as a later backend might report it. */
 function other(kind: string, id: string, connection = 'i2c'): OtherItem {
