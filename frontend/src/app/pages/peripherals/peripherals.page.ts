@@ -57,6 +57,7 @@ import { formatRelativeTime } from '../../relative-time';
 import { TopBarDialogs } from '../../top-bar-dialogs';
 import { CameraPanel } from './camera-panel';
 import { DeviceDetails } from './device-details';
+import { MicrophonePanel } from './microphone-panel';
 import { PeripheralsBanners } from './peripherals-banners';
 
 /** What stands in the page's main column: the device list, or why there is none (Inv-PB §1.1). */
@@ -103,6 +104,7 @@ interface ShownDevice {
     CellText,
     DeviceDetails,
     ListColumn,
+    MicrophonePanel,
     NeatAsidePanel,
     NeatAsideToggle,
     NeatButton,

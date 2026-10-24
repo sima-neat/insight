@@ -675,6 +675,11 @@ describe('PeripheralsPage', () => {
     rowOf('Yeti Nano').click();
     await settle();
     expect(selectedRow()).toBe(rowOf('Yeti Nano'));
+    // Its panel is the microphone's, which reads the board's test as it opens.
+    expect(aside()!.querySelector('app-microphone-panel h2')?.textContent?.trim()).toBe(
+      'Yeti Nano',
+    );
+    expect(answer('GET', MIC_TEST_URL, { test: null })).toBe(1);
 
     // A rescan still listing it keeps it.
     refreshButton().click();

@@ -115,7 +115,7 @@
             @if (isCamera(row.item)) {
               <app-camera-panel [camera]="row.item" [chip]="row.chip" />
             } @else if (isMicrophone(row.item)) {
-              <app-panel-title [chip]="row.chip">{{ row.name }}</app-panel-title>
+              <app-microphone-panel [microphone]="row.item" [chip]="row.chip" />
             } @else {
               <app-panel-title [chip]="row.chip">{{ row.name }}</app-panel-title>
               <p neatNote>Insight does not read this device kind yet.</p>

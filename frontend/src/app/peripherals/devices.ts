@@ -319,8 +319,11 @@ function cameraSubtitle(camera: CameraItem): string {
   return [model, deviceId !== camera.name ? deviceId : ''].filter(Boolean).join(' · ');
 }
 
-/** Ties a webcam's or headset's microphone to the camera item the same USB device produced. */
-function microphoneSubtitle(mic: MicrophoneItem): string {
+/**
+ * Ties a webcam's or headset's microphone to the camera item the same USB device produced: its
+ * row's subtitle, and the note under its panel's title.
+ */
+export function microphoneSubtitle(mic: MicrophoneItem): string {
   const name = mic.device.part_of?.name;
   return name ? `Part of ${name}` : '';
 }
