@@ -410,6 +410,24 @@ class ReplaceRestartsSlotsTests(UploadFixture):
         self.start_stream.assert_called_once()
         self.assertEqual(self.slot(3)["state"], "playing")
 
+    def test_slots_already_stopped_restart_when_stopping_another_raises(self):
+        playing = {"type": "file", "file": "clip.mp4", "state": "playing", "transport": "rtsp", "codec": "h264"}
+        self.write_slots({"index": 3, **playing}, {"index": 7, **playing})
+        stops = []
+
+        def stop(index):
+            stops.append(index)
+            if index == 7:
+                raise RuntimeError("mediamtx went away")
+
+        self.stop_stream.side_effect = stop
+        with self.assertRaises(RuntimeError):
+            self.upload("clip.mp4", b"new", on_conflict="replace")
+        self.assertEqual(stops, [3, 7])
+        self.start_stream.assert_called_once()
+        self.assertEqual(self.start_stream.call_args.args[0], 3)
+        self.assertEqual(self.slot(3)["state"], "playing")
+
     def test_slots_restart_when_optimising_raises(self):
         self.seed_slots()
         self.optimize.side_effect = RuntimeError("ffprobe crashed")

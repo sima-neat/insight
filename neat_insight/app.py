@@ -2184,16 +2184,16 @@ def _media_files_under(folder: Path) -> set[str]:
     }
 
 
-def _stop_slots_streaming(file_names: set[str]) -> dict[int, int]:
+def _stop_slots_streaming(file_names: set[str], stopped: dict[int, int]) -> None:
     """Stop the file slots that are streaming one of `file_names`, as /api/mediasrc/stop would.
 
-    Returns {slot index: the slot's generation right after the stop}, which
-    _restart_file_slots uses to tell a slot nobody touched since from one that was stopped,
-    cleared or reassigned meanwhile. Webcam, externally held and pulled slots are not ours to
-    stop, and a slot that is only assigned the file (not playing) streams nothing, so none of
-    them is touched.
+    Records {slot index: the slot's generation right after the stop} in `stopped` as each slot
+    stops, which _restart_file_slots uses to tell a slot nobody touched since from one that was
+    stopped, cleared or reassigned meanwhile. Recording as it goes means a stop that raises still
+    leaves the slots stopped before it in the caller's dict, for its `finally` to restart.
+    Webcam, externally held and pulled slots are not ours to stop, and a slot that is only
+    assigned the file (not playing) streams nothing, so none of them is touched.
     """
-    stopped: dict[int, int] = {}
     for src in load_sources():
         index = src["index"]
         if src.get("type") != SOURCE_TYPE_FILE or src.get("state") != "playing" or (src.get("file") or "") not in file_names:
@@ -2210,7 +2210,6 @@ def _stop_slots_streaming(file_names: set[str]) -> dict[int, int]:
             stopped[index] = _slot_generation(index)  # after the bump, under the same lock
 
         _update_source_slot(index, lambda slot: (slot.get("type"), slot.get("file")) == identity, stop_and_note)
-    return stopped
 
 
 def _restart_file_slots(pending: dict[int, int]):
@@ -2289,8 +2288,10 @@ def _move_into_place(staged: Path, target: Path, replacing: bool) -> None:
 
 def _stream_file_upload(staged: Path, target: Path, replacing: bool):
     replaced = {target.relative_to(MEDIA_DIR).as_posix()} if replacing else set()
-    pending = _stop_slots_streaming(replaced)
+    pending: dict[int, int] = {}
     try:
+        # Inside the try: a stop that raises still has the slots stopped before it restarted.
+        _stop_slots_streaming(replaced, pending)
         try:
             _move_into_place(staged, target, replacing)
         except FileExistsError:
@@ -2327,7 +2328,7 @@ def _stream_archive_upload(archive_path: Path, target: Path, replacing: bool):
             _extract_archive(archive_path, extracted)
             if replacing:
                 replaced = _media_files_under(target)
-                pending.update(_stop_slots_streaming(replaced))
+                _stop_slots_streaming(replaced, pending)
                 previous = stage / "previous"  # deleted with the stage
                 target.rename(previous)
                 try:

@@ -10,6 +10,27 @@
 Upstream backend changes are ported by hand. Each port appends a line to the log below, as
 `upstream commit -> local commit`.
 
+## Local backend changes
+
+Routes this copy changed on its own, so a later port of upstream's version of them knows to
+merge rather than copy. Tests and the API docs (`neat_insight/openapi.json`, the skill) go with
+each.
+
+- `POST /api/upload/media` (1e2a185, fe282c6, eb3fa57, and the stop fix after the final review):
+  - takes an optional `on_conflict` (`ask` by default, `keep_both`, `replace`); a taken name that
+    was not asked about answers 409 with `{error, conflict: {existing, suggested}}`, and every
+    refusal (400, 409) is decided before the stream starts;
+  - stages the upload in a `.upload-*` folder on the media filesystem and moves it into place
+    without overwriting (a hard link, or an exclusive reservation where hard links are not
+    supported); stale staging folders are swept;
+  - on `replace`, stops the file slots streaming the replaced files, restarts them once the new
+    content is in place (`Restarted srcN.` / `Could not restart srcN: …`, a warning, not a
+    failure), restarts them on every other exit too, and unassigns slots whose file a replaced
+    archive no longer has.
+- `POST /api/vf/offer` and the viewer URL (7c71a11, 1cc8e23, 55547e8): vf offers are proxied
+  through Flask (JSON only, a bounded channel, vf errors as text), and the viewer URL points at
+  `/viewer`.
+
 ## Port log
 
 <!-- upstream commit -> local commit -->
