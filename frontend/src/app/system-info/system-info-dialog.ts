@@ -17,6 +17,7 @@ import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatDialog, NeatDialogActions, NeatDialogBody, NeatDialogRef } from '@sima/neat-ui/dialog';
 import { NeatErrorNote } from '@sima/neat-ui/field';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
+import { Announcement } from '../announcement';
 import { messageOf, withRequestErrors } from '../sources/stream-lines';
 import type { SystemInfo } from './api';
 import {
@@ -69,6 +70,7 @@ function entriesOf(section: Record<string, unknown> | undefined): Entry[] {
 @Component({
   selector: 'app-system-info-dialog',
   imports: [
+    Announcement,
     NeatButton,
     NeatCallout,
     NeatCode,

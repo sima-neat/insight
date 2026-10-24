@@ -396,4 +396,28 @@ describe('CameraPreview', () => {
     expect(preview.resumable()).toBeNull();
     preview.release();
   });
+
+  it('Stop while a stop is out settles with that stop, and so does release after it', async () => {
+    await adoptLive();
+    const first = preview.stop();
+    let second = false;
+    void preview.stop().then(() => (second = true));
+    await settle();
+    expect(second).toBe(false);
+    await answerStop(live30.id);
+    await first;
+    expect(second).toBe(true);
+
+    // Stop pressed, then the page left while the stop is out: the next visit waits for it.
+    const leaving = TestBed.runInInjectionContext(() => new CameraPreview());
+    leaving.adopt(live30);
+    await answerRead(live30);
+    void leaving.stop();
+    let released = false;
+    void leaving.release().then(() => (released = true));
+    await settle();
+    expect(released).toBe(false);
+    await answerStop(live30.id);
+    expect(released).toBe(true);
+  });
 });

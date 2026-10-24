@@ -72,6 +72,8 @@ export class CameraPreview {
   private startedOn: number | null = null;
   /** The starts asked for by the page that have not settled yet, restarts within them included. */
   private readonly starts = new Set<Promise<void>>();
+  /** The stop request out, if one is. */
+  private stopping: Promise<boolean> | null = null;
   /** Set by `release()`: the page is gone, so nothing is watched any more. */
   private released = false;
 
@@ -161,12 +163,17 @@ export class CameraPreview {
 
   /**
    * Stops the preview, also one another tab shows (its Stop). A start still out has no session to
-   * stop yet: it is stopped once it answers, and the preview reads as stopping meanwhile.
+   * stop yet: it is stopped once it answers, and the preview reads as stopping meanwhile. Called
+   * while a stop is already under way, it sends nothing and settles with that stop (and with a
+   * start still out, which makes the stop once it answers).
    */
   async stop(): Promise<void> {
     this.shown = NOTHING_SHOWN;
     const { status, session } = this.stateValue();
-    if (status === 'stopping') return;
+    if (status === 'stopping') {
+      await Promise.all([this.stopping, ...this.starts]);
+      return;
+    }
     if (session) await this.stopSession(session.id);
     else if (status === 'starting') this.dispatch({ type: 'stopping' });
   }
@@ -288,12 +295,18 @@ export class CameraPreview {
    * as it was (live, or shown in another tab) with its failure, so Stop can be retried: it must
    * not look successful while the board may still be streaming.
    */
-  private async stopSession(
-    sessionId: string,
-    known: PreviewSession | null = null,
-  ): Promise<boolean> {
+  private stopSession(sessionId: string, known: PreviewSession | null = null): Promise<boolean> {
     const from = this.stateValue().status === 'elsewhere' ? 'elsewhere' : 'live';
     this.dispatch({ type: 'stopping', for: sessionId, session: known });
+    const stopped = this.postStop(sessionId, from);
+    this.stopping = stopped;
+    void stopped.finally(() => {
+      if (this.stopping === stopped) this.stopping = null;
+    });
+    return stopped;
+  }
+
+  private async postStop(sessionId: string, from: 'live' | 'elsewhere'): Promise<boolean> {
     try {
       await firstValueFrom(
         this.http.post<PreviewResponse>(stopUrl(sessionId), {}).pipe(withRequestErrors()),

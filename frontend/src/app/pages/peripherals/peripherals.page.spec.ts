@@ -199,7 +199,7 @@ describe('PeripheralsPage', () => {
     [...root().querySelectorAll('neat-callout [role="heading"]')].map((heading) =>
       heading.textContent!.trim(),
     );
-  const status = (): string => root().querySelector('.scan-status')?.textContent?.trim() ?? '';
+  const status = (): string => root().querySelector('app-announcement')?.textContent?.trim() ?? '';
   /** The tooltip, which the kit shows on focus (with a zero delay). */
   async function tooltip(button: HTMLElement): Promise<string | undefined> {
     // jsdom lays nothing out: give the overlay a viewport and the button a box inside it.
@@ -321,14 +321,22 @@ describe('PeripheralsPage', () => {
     expect(refreshButton().textContent!.trim()).toBe('Refresh');
     refreshButton().click();
     await settle();
-    // The preview stops before the scan: the backend would stop it anyway, and say nothing.
-    expect(posts(REFRESH_URL)).toHaveLength(0);
-    answer('POST', stopUrl(live30.id), { session: null });
+    // The preview stops before the scan: the backend would stop it anyway, and say nothing. A
+    // second press while it stops waits with the first rather than scanning past the stop.
+    refreshButton().click();
     await settle();
-    const [scan] = posts(REFRESH_URL);
-    expect(scan).toBeDefined();
+    expect(posts(REFRESH_URL)).toHaveLength(0);
+    const stops = posts(stopUrl(live30.id));
+    expect(stops).toHaveLength(1);
+    stops[0].flush({ session: null });
+    await settle();
+    const scans = posts(REFRESH_URL);
+    expect(scans).toHaveLength(1);
+    const [scan] = scans;
     expect(refreshButton().textContent!.trim()).toBe('Scanning… 0 s');
     expect(refreshButton().getAttribute('aria-disabled')).toBe('true');
+    // #170's busy section: the list is being replaced.
+    expect(root().querySelector('app-list-column')!.getAttribute('aria-busy')).toBe('true');
 
     vi.advanceTimersByTime(3000);
     await settle();
@@ -347,6 +355,7 @@ describe('PeripheralsPage', () => {
     );
     expect(refreshButton().textContent!.trim()).toBe('Refresh');
     expect(refreshButton().hasAttribute('aria-disabled')).toBe(false);
+    expect(root().querySelector('app-list-column')!.hasAttribute('aria-busy')).toBe(false);
     expect(toolbar().textContent).toContain('Scanned just now');
   });
 
@@ -522,6 +531,8 @@ describe('PeripheralsPage', () => {
     // Nothing to scan, and no Refresh until a board is chosen.
     expect(posts(REFRESH_URL)).toHaveLength(0);
     expect(refreshButton().disabled).toBe(true);
+    // A disabled button takes no keyboard focus: the focus event stands in for the pointer's
+    // hover, which jsdom cannot give (the kit opens the tooltip on both).
     expect(await tooltip(refreshButton())).toBe('Select a board first');
 
     // A board read that fails with no state to fall back on says why, with the board settings.
@@ -532,6 +543,14 @@ describe('PeripheralsPage', () => {
     await settle();
     // A last good state is kept: the list stays, and the pill shows the error.
     expect(listbox()).not.toBeNull();
+    expect(aside()?.querySelector('h2')?.textContent?.trim()).toBe(imx477.name);
+
+    // The board loses its target: no device of the old scan stays in the side panel.
+    window.dispatchEvent(new Event('focus'));
+    answer('GET', BOARD_URL, boardState({ generation: 4 }));
+    await settle();
+    expect(calloutHeadings()).toContain('No board selected');
+    expect(aside()?.querySelector('h2')).toBeNull();
   });
 
   it('a board that cannot be read at all says why, with the board settings', async () => {
@@ -564,6 +583,16 @@ describe('PeripheralsPage', () => {
       'Microphones · not scanned yet',
       'LiDAR · not scanned yet',
     ]);
+
+    // A scan that answers says the peripherals were read after all: the failure goes (#170).
+    refreshButton().click();
+    await settle();
+    posts(REFRESH_URL)[0].flush(peripheralSnapshot([imx477]));
+    await settle();
+    answer('GET', BOARD_URL, devkit);
+    await settle();
+    expect(calloutHeadings()).toEqual([]);
+    expect(groups()[0].heading).toBe('Cameras · 1');
   });
 
   it('keeps the selection across rescans, a removed device included, and across visits', async () => {

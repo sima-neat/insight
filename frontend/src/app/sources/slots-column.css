@@ -1,9 +1,4 @@
-/*
- * The notice takes the height it needs (none while empty) and the list the rest. A grid row with
- * no minimum lets the list be shorter than its rows, so it scrolls them instead of growing.
- */
+/* The column is `app-list-column`'s; this element only names it for the slot pages. */
 :host {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: 100%;
+  display: contents;
 }

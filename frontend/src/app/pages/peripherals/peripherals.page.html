@@ -21,8 +21,8 @@
 </ng-container>
 
 <neat-page scroll="none" [aside]="asideOpen() ? 'open' : 'closed'">
-  <div class="column">
-    <p class="scan-status" role="status">{{ scanStatus() }}</p>
+  <app-list-column [attr.aria-busy]="scanning() || null">
+    <app-announcement>{{ scanStatus() }}</app-announcement>
     <app-peripherals-banners [loadError]="loadError()" (refresh)="refresh()" />
 
     @switch (body()) {
@@ -100,7 +100,7 @@
         </neat-select-list>
       }
     }
-  </div>
+  </app-list-column>
 
   @if (asideOpen()) {
     <section neatPageAside neatAsidePanel aria-label="Selected device">
@@ -108,10 +108,11 @@
         One panel per device: choosing another device builds the panel afresh, so nothing picked
         for one device carries over to the next.
       -->
-      @for (device of selectedDevices(); track device.id) {
-        <h2 neatAsideTitle>{{ device.name }}</h2>
-      } @empty {
-        @if (body() === 'list') {
+      <!-- Only beside the list: a body state in its place says why there is nothing to show. -->
+      @if (body() === 'list') {
+        @for (device of selectedDevices(); track device.id) {
+          <h2 neatAsideTitle>{{ device.name }}</h2>
+        } @empty {
           <!-- #170's guidance where there is no device to show (ruling F28). -->
           @if (!scanned()) {
             @if (scanning()) {

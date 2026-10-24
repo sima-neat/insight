@@ -22,13 +22,3 @@
   align-items: center;
   gap: var(--neat-space-2);
 }
-
-/* Said to a screen reader, never shown. */
-.announcement {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}

@@ -1,15 +1,7 @@
 /*
- * The banners take the height they need (none while there are none) and the list the rest. A grid
- * row with no minimum lets the list be shorter than its rows, so it scrolls them instead of
- * growing. A body state in the list's place (loading, a failed read, no board) keeps its own
- * height at the top rather than being stretched over the row.
+ * A body state in the list's place (loading, a failed read, no board) keeps its own height at the
+ * top of the list column rather than being stretched over the row.
  */
-.column {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: 100%;
-}
-
 .state {
   align-self: start;
 }
@@ -17,19 +9,4 @@
 /* A device's model or the camera it is part of, after its name. */
 .subtitle {
   color: var(--muted-foreground);
-}
-
-/*
- * Said to screen readers only, as #170's status line was: out of the grid's flow, taking no room,
- * and still read.
- */
-.scan-status {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
 }

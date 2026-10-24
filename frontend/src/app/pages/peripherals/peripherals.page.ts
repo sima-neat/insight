@@ -21,6 +21,7 @@ import {
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
+import { Announcement } from '../../announcement';
 import { AsidePrefs } from '../../aside-prefs';
 import { problemOf, type BoardProblem } from '../../board/board-error';
 import { BoardProblemNotice } from '../../board/board-problem-notice';
@@ -48,6 +49,7 @@ import {
 import { MicTest } from '../../peripherals/mic-test';
 import { PeripheralsSession, type PreviewResume } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
+import { ListColumn } from '../../list-column';
 import { formatRelativeTime } from '../../relative-time';
 import { TopBarDialogs } from '../../top-bar-dialogs';
 import { PeripheralsBanners } from './peripherals-banners';
@@ -86,8 +88,10 @@ interface ShownDevice {
 @Component({
   selector: 'app-peripherals-page',
   imports: [
+    Announcement,
     BoardProblemNotice,
     CellText,
+    ListColumn,
     NeatAsidePanel,
     NeatAsideTitle,
     NeatAsideToggle,
@@ -120,8 +124,17 @@ export class PeripheralsPage {
 
   /** This visit's read of the snapshot has answered, or failed. */
   private readonly loaded = signal(false);
-  /** Why this visit's read of the snapshot failed (ruling Q9); null while it did not. */
-  protected readonly loadError = signal<BoardProblem | null>(null);
+  /**
+   * Why this visit's read of the snapshot failed (ruling Q9); null while it did not. A snapshot
+   * applied after it (a scan that answered) says the peripherals were read after all, so it
+   * clears the failure, as #170's Refresh did.
+   */
+  protected readonly loadError = linkedSignal<PeripheralSnapshot | null, BoardProblem | null>({
+    source: this.peripherals.snapshot,
+    computation: () => null,
+  });
+  /** The Refresh running, from the preview's stop to the scan's end; null while none runs. */
+  private refreshing: Promise<void> | null = null;
   /** The preview of the last visit to start again, until this visit has decided on it. */
   private pendingResume: PreviewResume | null = null;
   private destroyed = false;
@@ -263,14 +276,24 @@ export class PeripheralsPage {
    * Scans the board. This page's preview is stopped first: the backend stops it for the scan
    * anyway, and the page would otherwise show a preview that ended without a word.
    */
-  protected async refresh(): Promise<void> {
-    if (this.scanning() || !this.target()) return;
-    await this.preview.leave();
-    await this.peripherals.refresh();
+  protected refresh(): Promise<void> {
+    if (this.scanning() || !this.target()) return Promise.resolve();
+    // A press while the preview stops waits with the first one, rather than scanning before the
+    // stop has answered.
+    this.refreshing ??= (async () => {
+      try {
+        await this.preview.leave();
+        await this.peripherals.refresh();
+      } finally {
+        this.refreshing = null;
+      }
+    })();
+    return this.refreshing;
   }
 
   private async enter(): Promise<void> {
     const leaving = this.session.leaving;
+    const shownBefore = this.peripherals.snapshot();
     this.pendingResume = this.session.resume;
     this.session.resume = null;
     // The board is read too, as #170 did: the automatic scan and the resume are decided on the
@@ -285,7 +308,8 @@ export class PeripheralsPage {
       this.board.reload(),
     ]);
     this.loaded.set(true);
-    this.loadError.set(loadError);
+    // A snapshot applied meanwhile (a scan of an earlier visit that answered) supersedes the failure.
+    if (this.peripherals.snapshot() === shownBefore) this.loadError.set(loadError);
     if (this.destroyed) return;
     const resume = this.pendingResume;
     this.pendingResume = null;

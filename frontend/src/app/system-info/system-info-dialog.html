@@ -17,7 +17,7 @@
 <neat-dialog-body>
   <div class="info">
     <!-- Always there, so that it is a live region before it has something to say. -->
-    <div class="announcement" role="status">{{ announcement() }}</div>
+    <app-announcement>{{ announcement() }}</app-announcement>
     @if (info()) {
       <p neatNote>{{ identity() }}</p>
       @if (failure(); as failure) {
