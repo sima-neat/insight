@@ -112,13 +112,15 @@ export class PeripheralsService {
   private scanFor(generation: number | null): Promise<void> {
     const running = this.running;
     if (running && running.generation === generation) return running.done;
+    // With nothing running, the request goes out now, so `scanning` is set when this returns. A
+    // queued scan whose board was left again while it waited is skipped: the scan queued after it
+    // is for the board now selected.
+    const started = running
+      ? running.done.then(() => (this.isPast(generation) ? undefined : this.scan(generation)))
+      : this.scan(generation);
     const entry: { generation: number | null; done: Promise<void> } = {
       generation,
-      // With nothing running, the request goes out now, so `scanning` is set when this returns.
-      done: (running
-        ? running.done.then(() => this.scan(generation))
-        : this.scan(generation)
-      ).finally(() => {
+      done: started.finally(() => {
         if (this.running === entry) this.running = null;
       }),
     };
@@ -141,7 +143,7 @@ export class PeripheralsService {
       }
     } catch (failure) {
       // A scan of a board the user has left failed for that board, typically because it changed.
-      if (generation === null || !this.isPast(generation)) {
+      if (!this.isPast(generation)) {
         this.scanErrorValue.set(problemOf(failure));
         this.scanErrorGeneration = generation;
       }
@@ -152,12 +154,17 @@ export class PeripheralsService {
   }
 
   /**
-   * An answer for this generation describes a board the user has left: generations only go up,
-   * and a newer one is shown or selected (Review Focus 1, never apply a previous generation).
+   * An answer for this generation describes a board the user has left (Review Focus 1, never
+   * apply a previous generation): it is older than the selected board's. Only the board's
+   * generation decides, never the shown snapshot's: the counter starts over when Insight
+   * restarts, and the board's re-read is what moves it, so a snapshot from before a restart must
+   * not block every answer after it. A generation newer than the board's is applied: the board
+   * service has not read the change yet (the scan reloads it right after). Unknown either way
+   * (`null`) is not past.
    */
-  private isPast(generation: number): boolean {
-    const shown = this.snapshotValue()?.generation ?? -Infinity;
-    return generation < Math.max(shown, this.board.generation() ?? -Infinity);
+  private isPast(generation: number | null): boolean {
+    const selected = this.board.generation();
+    return generation !== null && selected !== null && generation < selected;
   }
 
   private apply(snapshot: PeripheralSnapshot): void {

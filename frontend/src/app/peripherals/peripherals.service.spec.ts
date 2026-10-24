@@ -328,4 +328,64 @@ describe('PeripheralsService', () => {
     await other;
     expect(service.scanError()).toBeNull();
   });
+
+  // The board generation is a counter in Insight's memory: it starts over when Insight restarts,
+  // while this app keeps running.
+  it('after an Insight restart, answers for the restarted board apply although its generation is lower', async () => {
+    boardGeneration.set(7);
+    const before = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(7, [item('camera', 'c1')]));
+    await before;
+
+    // The board is re-read (on focus) from the restarted Insight.
+    boardGeneration.set(1);
+    const after = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(1, null));
+    await after;
+    expect(service.snapshot()?.generation).toBe(1);
+    expect(service.snapshot()?.scan_id).toBeNull();
+
+    service.scanOnce(board(1));
+    refreshes()[0].flush(snapshot(1, [item('microphone', 'm1')]));
+    await tick();
+    expect(service.snapshot()?.scan_id).toBe('7:1');
+    expect(toasts.status).toHaveBeenCalledExactlyOnceWith(
+      'Scan complete: 0 cameras, 1 microphone on sima@192.168.2.2.',
+    );
+  });
+
+  it('a scan queued for a board the user has left again is skipped: two switches scan the last board once', async () => {
+    boardGeneration.set(3);
+    const first = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(3, null));
+    await first;
+    service.scanOnce(board(3));
+    const [old] = refreshes();
+
+    for (const generation of [4, 5]) {
+      boardGeneration.set(generation);
+      const entered = service.load();
+      http.expectOne(LOAD_URL).flush(snapshot(generation, null));
+      await entered;
+      service.scanOnce(board(generation));
+    }
+    expect(refreshes()).toHaveLength(0);
+
+    old.flush(
+      {
+        error: 'The selected board changed while this request was running.',
+        code: 'stale_snapshot',
+      },
+      { status: 409, statusText: 'Conflict' },
+    );
+    await tick();
+    const [scan] = refreshes();
+    expect(scan).toBeDefined();
+    scan.flush(snapshot(5, [item('camera', 'c1')]));
+    await tick();
+    expect(refreshes()).toHaveLength(0);
+    expect(service.snapshot()?.scan_id).toBe('7:5');
+    expect(service.scanError()).toBeNull();
+    expect(toasts.status).toHaveBeenCalledTimes(1);
+  });
 });
