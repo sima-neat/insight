@@ -133,6 +133,9 @@ describe('MediaPage', () => {
   const tagOf = (row: HTMLElement) =>
     row.querySelector('[data-slot="file-tag"]')?.textContent?.trim() ?? '';
   const rowOf = (name: string): HTMLElement => rows().find((row) => nameOf(row) === name)!;
+  /** Ticks a file's box, as a click on the box (and nothing else on the row) does. */
+  const tick = (name: string) =>
+    rowOf(name).querySelector<HTMLElement>('[data-slot="select-list-check"]')!.click();
   const header = (): string[] =>
     [...root().querySelectorAll('[data-slot="select-list-header"] span')].map((cell) =>
       cell.textContent!.trim(),
@@ -152,17 +155,21 @@ describe('MediaPage', () => {
     slots.encodes.set(new Map([[1, { title: 'Encoding', detail: '', percent: 10 }]]));
     await open();
 
-    expect(header()).toEqual(['Name', 'In use']);
+    // The first column holds the tick boxes and has no heading.
+    expect(header()).toEqual(['', 'Name', 'In use']);
     // The name, the tag a file Insight cannot stream carries (greyed, still listed), In use.
-    expect(rows().map((row) => [nameOf(row), tagOf(row), cells(row)[1]])).toEqual([
+    expect(rows().map((row) => [nameOf(row), tagOf(row), cells(row)[2]])).toEqual([
       ['people', '', ''],
       ['cars.mp4', '', 'src3 · Live, src9 · Idle'],
       ['idle.mp4', '', 'src1 · Encoding, src5 · Live, src10 · External'],
       ['notes.txt', 'NOT STREAMABLE', ''],
     ]);
-    expect(
-      rowOf('cars.mp4').querySelector('input[type="checkbox"]')!.getAttribute('aria-label'),
-    ).toBe('Select cars.mp4 for deletion');
+    // Files are ticked for deletion: the listbox is multi-selectable and a ticked file is selected.
+    expect(root().querySelector('[role="listbox"]')!.getAttribute('aria-multiselectable')).toBe(
+      'true',
+    );
+    expect(rowOf('cars.mp4').getAttribute('aria-selected')).toBe('false');
+    expect(rowOf('people').hasAttribute('aria-selected')).toBe(false);
   });
 
   it('fetches the library as it opens and polls the slots while it is shown', async () => {
@@ -200,8 +207,8 @@ describe('MediaPage', () => {
     expect(aside()!.querySelector('h2')!.textContent!.trim()).toBe('cars.mp4');
     expect(library.info).toHaveBeenCalledWith('cars.mp4');
 
-    rowOf('cars.mp4').querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
-    rowOf('idle.mp4').querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
+    tick('cars.mp4');
+    tick('idle.mp4');
     await settle();
     expect(aside()!.querySelector('h2')!.textContent!.trim()).toBe('2 selected');
   });
@@ -209,7 +216,7 @@ describe('MediaPage', () => {
   it('a file that leaves the library leaves the selection and the ticks', async () => {
     await open();
     rowOf('cars.mp4').click();
-    rowOf('idle.mp4').querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
+    tick('idle.mp4');
     await settle();
     expect(aside()!.querySelector('h2')!.textContent!.trim()).toBe('1 selected');
 

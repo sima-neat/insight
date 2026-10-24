@@ -20,8 +20,6 @@ export const MEDIA_BROWSER_LABELS: Partial<NeatFileBrowserLabels> & {
 } = {
   folderCount: (folder, count) =>
     `${plural(count, 'streamable video', 'streamable videos')} in ${folder} and its subfolders`,
-  // Media's checkboxes pick files to delete; the picker has none.
-  selectFile: (path) => `Select ${path} for deletion`,
 };
 
 /** The filter field's placeholder, naming the folder it searches. */
