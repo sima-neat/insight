@@ -1,0 +1,71 @@
+<neat-collapsible label="Change board" [summary]="summary()" [(open)]="open">
+  <form class="form" aria-label="Board connection" (submit)="$event.preventDefault(); save()">
+    <div class="fields">
+      <neat-field label="Host or IP address"
+        ><input
+          #host
+          neatInput
+          size="small"
+          type="text"
+          placeholder="192.168.2.2"
+          autocomplete="off"
+          spellcheck="false"
+          [value]="values().host"
+          (input)="set('host', host.value)"
+      /></neat-field>
+      <neat-field label="SSH port"
+        ><input
+          #port
+          neatInput
+          size="small"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          [value]="values().port"
+          (input)="set('port', port.value)"
+      /></neat-field>
+      <neat-field label="User"
+        ><input
+          #user
+          neatInput
+          size="small"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          [value]="values().user"
+          (input)="set('user', user.value)"
+      /></neat-field>
+    </div>
+    <p neatNote>Default: {{ defaultText() }}.</p>
+    @if (error()) {
+      <neat-error-note>{{ error() }}</neat-error-note>
+    }
+    <div class="buttons">
+      <button
+        neatButton
+        type="submit"
+        size="small"
+        [attr.aria-disabled]="busy() !== null ? true : null"
+      >
+        {{ busy() === 'select' ? 'Saving…' : 'Save' }}
+      </button>
+      @if (saved()) {
+        <button
+          neatButton
+          type="button"
+          size="small"
+          variant="outlined"
+          [attr.aria-disabled]="busy() !== null ? true : null"
+          (click)="useDefault()"
+        >
+          Use default
+        </button>
+      }
+      @if (hasTarget()) {
+        <button neatButton type="button" size="small" variant="text" (click)="cancel()">
+          Cancel
+        </button>
+      }
+    </div>
+  </form>
+</neat-collapsible>

@@ -33,6 +33,7 @@
               </button>
             } @else {
               <button
+                #checkButton
                 neatButton
                 type="button"
                 size="small"
@@ -50,12 +51,16 @@
       <p neatNote role="status">Loading board…</p>
     }
 
-    @if (board.error(); as problem) {
-      <neat-callout tone="danger">
-        <p>{{ problem.message }}</p>
-        @if (problem.hint) {
-          <p neatNote>{{ problem.hint }}</p>
-        }
+    @if (problem(); as problem) {
+      <app-board-problem-notice
+        [problem]="problem"
+        [busy]="busy() !== null"
+        (trust)="trust($event)"
+      />
+    }
+
+    @if (board.error(); as readFailure) {
+      <app-board-problem-notice [problem]="readFailure">
         <button
           neatButton
           neatCalloutActions
@@ -66,7 +71,7 @@
         >
           Retry
         </button>
-      </neat-callout>
+      </app-board-problem-notice>
     }
 
     @if (facts().length) {
@@ -94,6 +99,10 @@
           </li>
         </ol>
       </neat-callout>
+    }
+
+    @if (board.state()) {
+      <app-board-form [(busy)]="busy" (selected)="actionError.set(null)" />
     }
   </div>
 </neat-dialog-body>

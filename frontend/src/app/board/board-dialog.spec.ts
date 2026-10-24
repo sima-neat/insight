@@ -1,6 +1,7 @@
 import { Component, getDebugNode, Injector } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatButton } from '@sima/neat-ui';
+import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { PeripheralSnapshot } from '../peripherals/api';
 import { PeripheralsService } from '../peripherals/peripherals.service';
@@ -67,17 +68,20 @@ describe('BoardDialog', () => {
   let board: FakeBoard;
   let peripherals: FakePeripherals;
   let toasts: { status: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  let confirm: { ask: ReturnType<typeof vi.fn> };
   let fixture: ComponentFixture<Host>;
 
   beforeEach(() => {
     board = new FakeBoard();
     peripherals = new FakePeripherals();
     toasts = { status: vi.fn(), error: vi.fn() };
+    confirm = { ask: vi.fn(async () => true) };
     TestBed.configureTestingModule({
       providers: [
         { provide: BoardService, useValue: board },
         { provide: PeripheralsService, useValue: peripherals },
         { provide: NeatToasts, useValue: toasts },
+        { provide: NeatConfirm, useValue: confirm },
       ],
     });
     fixture = TestBed.createComponent(Host);
@@ -120,6 +124,12 @@ describe('BoardDialog', () => {
     [...dialog().querySelectorAll<HTMLButtonElement>('.actions button')].map(text);
   const button = (name: string) =>
     [...dialog().querySelectorAll<HTMLButtonElement>('button')].find((one) => text(one) === name)!;
+  /** The collapsible section whose trigger starts with `label`. */
+  const section = (label: string) =>
+    [...dialog().querySelectorAll('neat-collapsible')].find((one) =>
+      text(one.querySelector('button')).startsWith(label),
+    ) ?? null;
+  const notice = () => dialog().querySelector('app-board-problem-notice');
   const variant = (element: HTMLElement) =>
     getDebugNode(element)!.injector.get(NeatButton).variant();
 
@@ -304,21 +314,126 @@ describe('BoardDialog', () => {
     expect(toasts.status).toHaveBeenLastCalledWith('Connected to sima@192.168.1.20.');
   });
 
-  it('a failed Check again shows the reloaded status and nothing else (F21)', async () => {
+  it('a failed Check again shows its own problem in the notice; the next success clears it (F21)', async () => {
     board.state.set(connected());
     board.test.mockImplementation(async () => {
-      // The service reloads the state before it rejects; the reload recorded the failure.
-      board.state.set(failed());
+      // The service reloads the state before it rejects; the reload recorded an older failure.
+      board.state.set(
+        failed({
+          status: {
+            state: 'error',
+            checked_at: '2026-10-25T10:00:00Z',
+            error: { error: 'The board did not answer.', code: 'unreachable', hint: null },
+          },
+        }),
+      );
       throw new BoardProblem('SSH key authentication failed.', 'auth_failed', '', {});
     });
     await open();
+    expect(notice()).toBeNull();
 
     button('Check again').click();
     await settle();
     expect(statusLine()).toMatch(/^Connection failed /);
+    // The action's own problem wins over the one the state repeats.
+    expect(text(notice())).toBe('SSH key authentication failed.');
     expect(toasts.status).not.toHaveBeenCalled();
     expect(toasts.error).not.toHaveBeenCalled();
     expect(button('Check again').getAttribute('aria-disabled')).toBeNull();
+
+    board.test.mockImplementation(async () => {
+      board.state.set(connected());
+      return connected();
+    });
+    button('Check again').click();
+    await settle();
+    expect(notice()).toBeNull();
+  });
+
+  it('shows the connection error the board state repeats, while a target exists', async () => {
+    board.state.set(failed());
+    await open();
+    expect(text(notice())).toBe('SSH key authentication failed.');
+
+    board.state.set(boardState());
+    await settle();
+    expect(notice()).toBeNull();
+  });
+
+  it('Trust new key trusts the presented key and toasts; a refused trust shows why', async () => {
+    const changed = failed({
+      status: {
+        state: 'error',
+        checked_at: '2026-10-25T10:00:00Z',
+        error: {
+          error: '192.168.1.20 presented a different SSH host key than the one Insight trusted.',
+          code: 'host_key_changed',
+          hint: null,
+          host: '192.168.1.20',
+          expected_fingerprint: 'SHA256:old',
+          presented_fingerprint: 'SHA256:new',
+        },
+      },
+    });
+    board.state.set(changed);
+    await open();
+    const trust = () => button('Trust new key…');
+
+    const trusted = boardState({ target: DEVKIT, generation: 2 });
+    board.trustHostKey.mockImplementation(async () => {
+      board.state.set(trusted);
+      return trusted;
+    });
+    trust().click();
+    await settle();
+    expect(board.trustHostKey).toHaveBeenCalledWith('SHA256:new');
+    expect(toasts.status).toHaveBeenCalledWith('Host key updated. Check again to connect.');
+    expect(notice()).toBeNull();
+    // The Trust button went with the notice; the focus goes on to the next step.
+    expect(document.activeElement).toBe(button('Check again'));
+
+    // The board presents a new key again, and this time the server refuses the trust: its words
+    // replace the notice (its hint says to check again, which reads the key afresh).
+    board.state.set({ ...changed, generation: 3 });
+    await settle();
+    board.trustHostKey.mockRejectedValueOnce(
+      new BoardProblem(
+        'That host key is not the one the board presented.',
+        'bad_fingerprint',
+        'Test the connection again and confirm the fingerprint it reports.',
+        {},
+      ),
+    );
+    trust().click();
+    await settle();
+    expect(words(notice())).toBe(
+      'That host key is not the one the board presented. Test the connection again and confirm the fingerprint it reports.',
+    );
+    expect(toasts.status).toHaveBeenCalledTimes(1);
+  });
+
+  it('Change board sits under Details; without a board it is open under the guide', async () => {
+    board.state.set(
+      connected({
+        board: { hostname: 'devkit', machine: null, build_version: null, fingerprint: 'f' },
+      }),
+    );
+    await open();
+    const sections = () =>
+      [...dialog().querySelectorAll('neat-collapsible')].map(
+        (one) => words(one.querySelector('button')).split(' ')[0],
+      );
+    expect(sections()).toEqual(['Details', 'Change']);
+    expect(section('Change board')!.querySelector('button')!.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+
+    board.state.set(boardState());
+    await settle();
+    const guide = dialog().querySelector('neat-callout')!;
+    const form = section('Change board')!;
+    expect(guide.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(form.querySelector('button')!.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('Checked ticks; Details lists only reported facts and the camera setup of the current generation', async () => {
@@ -343,7 +458,7 @@ describe('BoardDialog', () => {
     await settle();
     expect(checked()).toBe('Checked 1 min ago');
 
-    const details = dialog().querySelector('neat-collapsible')!;
+    const details = section('Details')!;
     const trigger = details.querySelector('button')!;
     // The hint names what the section holds: here no Machine, which the board did not report.
     expect(words(trigger)).toBe('Details Hostname, Build, Model, Camera setup');
@@ -375,7 +490,7 @@ describe('BoardDialog', () => {
     await open();
     expect(statusLine()).toBe('Not checked sima@192.168.1.20 · SDK DevKit');
     expect(dialog().querySelector('.checked')).toBeNull();
-    expect(dialog().querySelector('neat-collapsible')).toBeNull();
+    expect(section('Details')).toBeNull();
   });
 
   it('ignores a failed peripherals read', async () => {
@@ -398,6 +513,8 @@ describe('BoardDialog', () => {
     const callout = dialog().querySelector('neat-callout')!;
     expect(text(callout)).toContain('Could not reach the Insight server.');
     expect(text(callout)).toContain('Check that Insight is still running, then retry.');
+    // Retry is the callout's own action, in its action row.
+    expect(text(callout.querySelector('[data-slot="callout-actions"] button'))).toBe('Retry');
     expect(dialog().querySelector('.status-line')).toBeNull();
 
     button('Retry').click();

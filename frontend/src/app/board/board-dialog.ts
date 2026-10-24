@@ -1,13 +1,16 @@
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
   DOCUMENT,
   effect,
+  type ElementRef,
   inject,
-  type Injector,
+  Injector,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { NeatButton, NeatCode, NeatNote, NeatTooltip, type NeatButtonVariant } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
@@ -25,6 +28,8 @@ import { messageOf } from '../sources/stream-lines';
 import type { ShellInfo } from './api';
 import { problemOf, type BoardProblem } from './board-error';
 import { BoardService } from './board.service';
+import { type BoardAction, BoardForm } from './board-form';
+import { BoardProblemNotice } from './board-problem-notice';
 import { boardFacts, boardStateChip, boardSummary } from './board-view';
 
 /**
@@ -40,12 +45,12 @@ const NO_WEBSSH = 'webssh is not installed in this Insight environment';
 /** #170's error for a started shell without an address (Inv-PB §2.1). */
 const NO_LAUNCH_URL = 'DevKit shell launch URL is unavailable.';
 
-type BoardAction = 'shell' | 'check';
-
 /**
  * The board dialog (spec, "Board connection"), opened by the top bar's pill from any page: the
- * board's state and when it was checked, the one action that fits it in front, and the board's
- * facts under a collapsed Details. Without a board it says how to get one.
+ * board's state and when it was checked, the one action that fits it in front, why the board
+ * cannot be used with the way out (`BoardProblemNotice`: the key command, the host-key trust),
+ * the board's facts under a collapsed Details, and Change board (`BoardForm`). Without a board it
+ * says how to get one, and Change board is open under that. Its actions run one at a time.
  *
  * **Open shell** (webssh) shows whenever the shell can sign in by itself, whatever the connection
  * state: webssh logs in with a password, so it helps exactly when Insight's key is refused. It
@@ -57,6 +62,8 @@ type BoardAction = 'shell' | 'check';
 @Component({
   selector: 'app-board-dialog',
   imports: [
+    BoardForm,
+    BoardProblemNotice,
     NeatButton,
     NeatCallout,
     NeatCode,
@@ -92,11 +99,21 @@ export class BoardDialog {
   protected readonly busy = signal<BoardAction | null>(null);
 
   /**
-   * Why the last action failed, for the problem notice (F21): set by a failed action, cleared by
-   * the next one that succeeds and when the board changes. Until the notice shows it, a failed
-   * Check again shows as the reloaded state ("Connection failed").
+   * Why the last action failed, for the problem notice (F21): set by a failed Check again or
+   * trust, cleared by the next action that succeeds and when the board changes. A refused
+   * selection stays under the form instead, where it was typed.
    */
   protected readonly actionError = signal<BoardProblem | null>(null);
+  /** What the notice shows while a board is in use: the action's own problem, else the state's. */
+  protected readonly problem = computed(() => {
+    const state = this.board.state();
+    if (!state?.target) return null;
+    const recorded = state.status.error;
+    return this.actionError() ?? (recorded ? problemOf(recorded) : null);
+  });
+
+  private readonly injector = inject(Injector);
+  private readonly checkButton = viewChild<ElementRef<HTMLButtonElement>>('checkButton');
 
   private readonly now = ticking(1000);
 
@@ -191,6 +208,25 @@ export class BoardDialog {
     } catch (failure) {
       opened?.close();
       this.toasts.error(messageOf(failure));
+    } finally {
+      this.busy.set(null);
+    }
+  }
+
+  /** Trusts the presented host key the notice's user confirmed. */
+  protected async trust(fingerprint: string): Promise<void> {
+    if (this.busy()) return;
+    this.busy.set('trust');
+    try {
+      await this.board.trustHostKey(fingerprint);
+      this.actionError.set(null);
+      this.toasts.status('Host key updated. Check again to connect.');
+      // Trust new key… went with the notice: the next step is Check again.
+      afterNextRender(() => this.checkButton()?.nativeElement.focus(), {
+        injector: this.injector,
+      });
+    } catch (failure) {
+      this.actionError.set(problemOf(failure));
     } finally {
       this.busy.set(null);
     }

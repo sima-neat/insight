@@ -3,7 +3,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
-  DOCUMENT,
   type ElementRef,
   inject,
   Injector,
@@ -37,6 +36,7 @@ import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { copyText } from '../../clipboard';
 import type { Slot, SlotTransport } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
@@ -161,7 +161,6 @@ export class SlotPanel {
   private readonly imports = inject(ImportDialogs);
   private readonly confirm = inject(NeatConfirm);
   private readonly toasts = inject(NeatToasts);
-  private readonly clipboard = inject(DOCUMENT).defaultView?.navigator.clipboard;
   private readonly injector = inject(Injector);
 
   private readonly pickerTemplate = viewChild.required<TemplateRef<unknown>>('picker');
@@ -581,9 +580,7 @@ export class SlotPanel {
     const url = this.streamUrl();
     if (url === null) return;
     try {
-      // Absent outside a secure context; refused when the browser denies the permission.
-      if (!this.clipboard) throw new Error(COPY_REFUSED);
-      await this.clipboard.writeText(url);
+      await copyText(url);
       this.toasts.status(`Copied: ${url}`);
     } catch {
       this.toasts.error(COPY_REFUSED);
