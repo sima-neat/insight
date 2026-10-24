@@ -155,9 +155,10 @@
       (layout)="onLayout($event)"
     >
       <!--
-        A page turn replaces every tile, on purpose: a tile is one channel's connection. Keying by
-        the tile's channel says so; tracking the bare numbers by identity would make Angular warn
-        (NG0956) of an accidental re-creation each time.
+        A page turn replaces every tile on purpose: a tile is one channel's connection. The key is
+        the channel either way; the wrapper only keeps Angular's dev-mode check, which flags every
+        full replacement under track-by-identity, from warning (NG0956) about an intended one.
+        Keep it, or the warning comes back on each page turn.
       -->
       @for (tile of pageTiles(); track tile.channel) {
         @let channel = tile.channel;

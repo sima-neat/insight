@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { closeSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, Locator, Page, test } from '@playwright/test';
-import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill } from './layout';
+import { LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
 
 const deployed = !!process.env['INSIGHT_BASE_URL'];
 
@@ -123,8 +123,8 @@ test.describe('the Viewer without vf', () => {
     await page.goto('/viewer');
 
     // One page, resized between the sizes: the grid repacks itself each time.
-    for (const viewport of [LAPTOP, DESKTOP, TABLET]) {
-      await page.setViewportSize(viewport);
+    for (const { size } of VIEWPORTS) {
+      await page.setViewportSize(size);
       // Until a choice is made with the slider, all channels fit on one page.
       await expect(tiles(page)).toHaveCount(SLOTS);
       await expect(tile(page, SLOTS - 1)).toBeVisible();
@@ -137,7 +137,7 @@ test.describe('the Viewer without vf', () => {
         ]);
       // R14: the toolbar fits beside the title on a laptop and a desktop; a tablet scrolls it.
       await expect
-        .poll(() => topBarSpill(page, viewport === TABLET))
+        .poll(() => topBarSpill(page, size === TABLET))
         .toEqual({
           spilled: [],
           toolsOverflow: 0,

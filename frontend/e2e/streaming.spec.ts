@@ -1,5 +1,5 @@
 import { expect, Page, Request, test } from '@playwright/test';
-import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
 
 /** The fields of a `GET /api/mediasrc` slot these tests set; the rest take an unassigned slot's values. */
 type SlotAnswer = Record<string, unknown> & { index: number };
@@ -326,8 +326,8 @@ test.describe('Streaming with mocked slots', () => {
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
 
-    for (const viewport of [LAPTOP, DESKTOP, TABLET]) {
-      await page.setViewportSize(viewport);
+    for (const { size } of VIEWPORTS) {
+      await page.setViewportSize(size);
       for (const sidePanel of [true, false]) {
         await expect(panel(page)).toHaveCount(sidePanel ? 1 : 0);
         await expect.poll(() => listOverflow(page)).toBe(0);
@@ -339,7 +339,7 @@ test.describe('Streaming with mocked slots', () => {
           ]);
         // R14: the toolbar fits beside the title on a laptop and a desktop; a tablet scrolls it.
         await expect
-          .poll(() => topBarSpill(page, viewport === TABLET))
+          .poll(() => topBarSpill(page, size === TABLET))
           .toEqual({ spilled: [], toolsOverflow: 0 });
         await tool(page, 'Side panel').click();
       }
@@ -382,8 +382,8 @@ test.describe('Streaming with mocked slots', () => {
           return copy.left >= url.right && copy.top < url.bottom && copy.bottom > url.top;
         });
 
-    for (const viewport of [LAPTOP, DESKTOP, TABLET]) {
-      await page.setViewportSize(viewport);
+    for (const { size } of VIEWPORTS) {
+      await page.setViewportSize(size);
       // A playing file, a file at its own rate, an external publisher and a pull.
       for (const name of ['src1', 'src2', 'src4', 'src5']) {
         await row(page, name).click();
@@ -406,7 +406,7 @@ test.describe('Streaming with mocked slots', () => {
   });
 
   for (const { name, size } of VIEWPORTS) {
-    test(`Change… opens the picker on the slot’s file, from the keyboard, and Escape closes it at ${name}`, async ({
+    test(`Tab reaches Change… from the list, and it opens the picker on the slot’s file and Escape closes it at ${name}`, async ({
       page,
     }) => {
       await withMockedSlots(page);
@@ -416,7 +416,14 @@ test.describe('Streaming with mocked slots', () => {
 
       await listbox(page).focus();
       await page.keyboard.press('ArrowDown');
-      await panel(page).getByRole('button', { name: 'Change…' }).focus();
+      await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
+      // From the list into the panel: the main action, the source switch, then Change….
+      await page.keyboard.press('Tab');
+      await expect(panel(page).getByRole('button', { name: 'Stop', exact: true })).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(panel(page).getByRole('radio', { name: 'File' })).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(panel(page).getByRole('button', { name: 'Change…' })).toBeFocused();
       await page.keyboard.press('Enter');
       const picker = page.getByRole('dialog', { name: 'Source for src1' });
       await expect(picker).toBeVisible();
@@ -477,12 +484,15 @@ test.describe('Streaming with mocked slots', () => {
       await panel(page).getByLabel('Stream URL', { exact: true }).fill('http://10.0.0.9/cam');
       await expect(pull).toBeDisabled();
       await panel(page).getByLabel('Stream URL', { exact: true }).fill('rtsp://10.0.0.9:554/cam');
+      await panel(page).getByLabel('Username').fill('operator');
+      const password = panel(page).getByLabel('Password');
+      await password.fill('s3cret');
       await expect(pull).toBeEnabled();
       await pull.click();
 
       await expect(toast(page, 'src11 is pulling from rtsp://10.0.0.9:554/cam.')).toBeVisible();
       expect(mocked.posts.get('pull')).toEqual([
-        { index: 11, url: 'rtsp://10.0.0.9:554/cam', username: '', password: '' },
+        { index: 11, url: 'rtsp://10.0.0.9:554/cam', username: 'operator', password: 's3cret' },
       ]);
       expect(await cells(page, 'src11')).toEqual(
         shownAt(size, [
@@ -501,6 +511,9 @@ test.describe('Streaming with mocked slots', () => {
       await stop.click();
       await expect(panel(page).getByRole('button', { name: 'Start', exact: true })).toBeVisible();
       expect(mocked.posts.get('stop')).toEqual([{ index: 11 }]);
+      // The form comes back as it was, except that the password was not kept past the pull.
+      await expect(panel(page).getByLabel('Username')).toHaveValue('operator');
+      await expect(password).toHaveValue('');
       expect(await cells(page, 'src11')).toEqual(
         shownAt(size, ['src11', '', 'Not assigned', 'Idle', '', '-']),
       );

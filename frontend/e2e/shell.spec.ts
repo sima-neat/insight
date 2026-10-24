@@ -1,5 +1,5 @@
 import { expect, Locator, Page, test } from '@playwright/test';
-import { DESKTOP, LAPTOP, TABLET, topBarSpill } from './layout';
+import { TABLET, topBarSpill, VIEWPORTS } from './layout';
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const railItem = (page: Page, label: string) =>
@@ -208,14 +208,33 @@ test('collapsed rail items are at least 40 px wide and tall', async ({ page }) =
   }
 });
 
-for (const viewport of [LAPTOP, TABLET, DESKTOP]) {
-  test(`no page-level scrolling at ${viewport.width}×${viewport.height}`, async ({ page }) => {
-    await page.setViewportSize(viewport);
+for (const { name, size } of VIEWPORTS) {
+  test(`no page-level scrolling at ${name}`, async ({ page }) => {
+    // All 48 slot rows are there to be measured: the page is a lazy route, and without an answer
+    // for its slots it would show an empty list that cannot overflow.
+    await page.route(
+      (url) => url.pathname === '/api/mediasrc',
+      (route) =>
+        route.fulfill({
+          json: Array.from({ length: 48 }, (_, i) => ({
+            index: i + 1,
+            file: '',
+            state: 'stopped',
+            transport: '',
+            codec: 'unknown',
+            type: 'file',
+            allowed_transports: [],
+            urls: {},
+            readers: [],
+          })),
+        }),
+    );
+    await page.setViewportSize(size);
     await page.goto('/streaming');
     await expect(page.getByRole('banner')).toBeVisible();
-    // The page is a lazy route: its tools join the top bar once it has loaded, which can be after
-    // the bar itself is there.
-    await expect(page.getByRole('group', { name: 'Page tools' })).toBeVisible();
+    await expect(
+      page.getByRole('listbox', { name: 'Streaming slots' }).getByRole('option'),
+    ).toHaveCount(48);
 
     const overflow = await page.evaluate(() => {
       const root = document.documentElement;
@@ -229,6 +248,6 @@ for (const viewport of [LAPTOP, TABLET, DESKTOP]) {
 
     // The top bar's own items (not the paths inside icons) must not spill out of it. Streaming's
     // page tools do not fit beside the title on a tablet, where they scroll sideways (R14).
-    expect(await topBarSpill(page, viewport === TABLET)).toEqual({ spilled: [], toolsOverflow: 0 });
+    expect(await topBarSpill(page, size === TABLET)).toEqual({ spilled: [], toolsOverflow: 0 });
   });
 }

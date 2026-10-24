@@ -211,8 +211,8 @@ test.describe('Media with mocked APIs', () => {
         return Math.max(0, ...sideways.map((value) => Math.round(value)));
       });
 
-    for (const viewport of [LAPTOP, DESKTOP, TABLET]) {
-      await page.setViewportSize(viewport);
+    for (const { size } of VIEWPORTS) {
+      await page.setViewportSize(size);
       for (const sidePanel of [true, false]) {
         await expect(panel(page)).toHaveCount(sidePanel ? 1 : 0);
         await expect.poll(overflow).toBe(0);
@@ -223,7 +223,7 @@ test.describe('Media with mocked APIs', () => {
             { horizontal: 0, vertical: 0 },
           ]);
         await expect
-          .poll(() => topBarSpill(page, viewport === TABLET))
+          .poll(() => topBarSpill(page, size === TABLET))
           .toEqual({ spilled: [], toolsOverflow: 0 });
         await tool(page, 'Side panel').click();
       }
