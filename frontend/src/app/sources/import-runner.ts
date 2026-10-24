@@ -1,6 +1,6 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { NeatToasts, type NeatProgressToast } from '@sima/neat-ui/toast';
-import type { Observable } from 'rxjs';
+import { type Observable, Subscription } from 'rxjs';
 import type { CatalogAsset, UploadOnConflict, YoutubeImportRequest } from './api';
 import { catalogAssetLabel } from './catalog';
 import { MediaLibraryService } from './media-library.service';
@@ -380,23 +380,29 @@ export class ImportRunner {
   ): Promise<string[] | null> {
     return new Promise((resolve, reject) => {
       const lines: string[] = [];
-      const subscription = stream.subscribe({
-        next: (event) => {
-          try {
-            if (event.kind === 'upload') onUpload?.(event.loaded, event.total);
-            else if (event.kind === 'line') {
-              lines.push(event.text);
-              onLine(event.text);
-            } else resolve(lines);
-          } catch (failure) {
-            // A failure of ours, not the server's: RxJS would only log it, and the request would
-            // read on with nothing to show it. It fails the request instead.
-            subscription.unsubscribe();
-            reject(failure);
-          }
-        },
-        error: reject,
-      });
+      // Made first and the request added to it: a source that emits while `subscribe` runs can
+      // fail a handler before `subscribe` returns, and the request added to a subscription that is
+      // already closed is ended at once.
+      const subscription = new Subscription();
+      subscription.add(
+        stream.subscribe({
+          next: (event) => {
+            try {
+              if (event.kind === 'upload') onUpload?.(event.loaded, event.total);
+              else if (event.kind === 'line') {
+                lines.push(event.text);
+                onLine(event.text);
+              } else resolve(lines);
+            } catch (failure) {
+              // A failure of ours, not the server's: RxJS would only log it, and the request would
+              // read on with nothing to show it. It fails the request instead.
+              subscription.unsubscribe();
+              reject(failure);
+            }
+          },
+          error: reject,
+        }),
+      );
       this.abortRequest = () => {
         subscription.unsubscribe();
         resolve(null);

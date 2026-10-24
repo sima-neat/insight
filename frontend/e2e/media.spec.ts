@@ -505,9 +505,17 @@ test.describe('Import with mocked APIs', () => {
       await page.goto('/media');
       await tool(page, 'Import…').click();
       await expect(tab('Local files')).toHaveAttribute('aria-selected', 'true');
-      // Measured once the opening animation, which scales the dialog, is over.
-      await expect.poll(height).toBeGreaterThan(0);
-      await page.waitForTimeout(300);
+      // Measured once the opening animation, which scales the dialog, is over: two readings in a
+      // row agree.
+      let previous = -1;
+      await expect
+        .poll(async () => {
+          const now = await height();
+          const settled = now > 0 && now === previous;
+          previous = now;
+          return settled;
+        })
+        .toBe(true);
       const local = await height();
 
       await tab('Catalog').click();

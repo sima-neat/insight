@@ -150,7 +150,12 @@ export class ImportYoutube {
     } catch (failure) {
       if (this.state.url().trim() !== url) return;
       this.state.preview.set(null);
-      this.state.error.set(messageOf(failure) || 'Could not validate YouTube URL.');
+      // A failure without a message of its own says what did not work, as #170 did.
+      this.state.error.set(
+        failure instanceof Error && failure.message
+          ? messageOf(failure)
+          : 'Could not validate YouTube URL.',
+      );
     } finally {
       this.state.validating.set(false);
     }

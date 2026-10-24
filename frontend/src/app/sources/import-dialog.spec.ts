@@ -522,6 +522,19 @@ describe('ImportDialog', () => {
       'Live stream import is clipped to the selected duration.',
       'Insight will import up to 5 minute(s) from 30 as 1080p30 H.264 with B-frames disabled.',
     ]);
+    // The summary beside the preview has no actions, so no box for them; the footer has.
+    expect(dialog()!.querySelector('app-import-preview .actions')).toBeNull();
+    expect(
+      dialog()!.querySelector('app-import-preview ~ app-import-summary .actions'),
+    ).not.toBeNull();
+  });
+
+  it('a validation that fails without a message says it could not validate the link', async () => {
+    library.validateYoutube.mockRejectedValue(undefined);
+    await open('youtube');
+    await type(field('YouTube URL'), 'https://youtu.be/abc');
+    await click(button('Validate'));
+    expect(alert()).toBe('Could not validate YouTube URL.');
   });
 
   it('a failed YouTube import keeps the dialog open and shows the whole failure', async () => {

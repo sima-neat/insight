@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { of } from 'rxjs';
 import type { CatalogAsset } from './api';
 import { ImportRunner } from './import-runner';
 import {
@@ -14,7 +15,7 @@ import {
 } from './import.testing';
 import { MediaLibraryService } from './media-library.service';
 import { SlotsService } from './slots.service';
-import { ApiRequestError } from './stream-lines';
+import { ApiRequestError, type StreamEvent } from './stream-lines';
 
 const asset = (path: string): CatalogAsset => ({
   source_id: 'street',
@@ -226,6 +227,21 @@ describe('ImportRunner', () => {
     await expect(outcome).resolves.toEqual({ ok: false, path: null });
     expect(runner.busy()).toBe(false);
     expect(runner.failure()).toBe('Uploaded and prepared 0/1 file(s). a.mp4: toast host gone');
+  });
+
+  it('also when the request answers while it is being sent', async () => {
+    toasts.error.mockImplementationOnce(() => {
+      throw new Error('toast host gone');
+    });
+    vi.spyOn(library, 'upload').mockReturnValueOnce(
+      of<StreamEvent>({ kind: 'line', text: 'Could not restart src4: MediaMTX is down' }),
+    );
+
+    await expect(runner.upload([new File(['x'], 'a.mp4')])).resolves.toEqual({
+      ok: false,
+      path: null,
+    });
+    expect(runner.busy()).toBe(false);
   });
 
   it('refuses to start while work runs', async () => {
