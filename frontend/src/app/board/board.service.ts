@@ -16,13 +16,14 @@ const SHELL_URL = '/api/devkit-shell';
  *
  * **Reads.** `GET /api/board` never connects to the board, so it is cheap. It is read once when
  * the service is created, whenever the window regains focus (another tab or a terminal may have
- * changed the board meanwhile), and when a caller asks; never on a timer (spec, "Board refresh").
+ * changed the board meanwhile) unless a read is already out, and when a caller asks; never on a
+ * timer (spec, "Board refresh").
  * Answers can arrive out of order, so a read's answer is dropped once a newer read was answered or
  * an action applied its state since the read was sent: it describes a moment that is past.
  *
  * **Actions.** Select, Check again and Trust each answer with the fresh board state, which wins
  * over every read still out. A failed action reloads the state (it may have recorded the failure)
- * and then rejects with its `BoardProblem`.
+ * and then rejects with its `BoardProblem`, an `Error` whose message `messageOf` gives.
  */
 @Injectable({ providedIn: 'root' })
 export class BoardService {
@@ -44,12 +45,18 @@ export class BoardService {
   readonly generation = computed(() => this.state()?.generation ?? null);
 
   private readonly latest = new LatestOnly();
+  /** Reads sent and not settled yet. */
+  private readsOut = 0;
 
   constructor() {
     void this.reload();
     const window = inject(DOCUMENT).defaultView;
     if (window) {
-      const onFocus = () => void this.reload();
+      // A read still out answers for this focus too: alt-tabbing, or the focus some browsers
+      // fire right after load, would otherwise stack reads that the newest one supersedes.
+      const onFocus = () => {
+        if (this.readsOut === 0) void this.reload();
+      };
       window.addEventListener('focus', onFocus);
       inject(DestroyRef).onDestroy(() => window.removeEventListener('focus', onFocus));
     }
@@ -62,6 +69,7 @@ export class BoardService {
    */
   async reload(): Promise<void> {
     const request = this.latest.next();
+    this.readsOut++;
     try {
       const state = await firstValueFrom(
         this.http.get<BoardState>(BOARD_URL).pipe(withRequestErrors()),
@@ -71,6 +79,8 @@ export class BoardService {
       if (this.latest.isNewest(request) && this.latest.accept(request)) {
         this.errorValue.set(problemOf(failure));
       }
+    } finally {
+      this.readsOut--;
     }
   }
 

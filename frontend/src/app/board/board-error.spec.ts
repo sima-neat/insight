@@ -1,5 +1,11 @@
-import { ApiRequestError } from '../sources/stream-lines';
-import { CONNECTION_CODES, problemOf } from './board-error';
+import { ApiRequestError, messageOf } from '../sources/stream-lines';
+import { BoardProblem, CONNECTION_CODES, problemOf } from './board-error';
+
+/** A problem's four fields, for comparing it with a plain object. */
+function fields(problem: BoardProblem) {
+  const { message, code, hint, details } = problem;
+  return { message, code, hint, details };
+}
 
 describe('problemOf', () => {
   // #170's "API errors keep code, hint, and extra fields": its apiError is the app's
@@ -20,19 +26,48 @@ describe('problemOf', () => {
     expect(normalized.hint).toBe('Confirm the board was reflashed.');
     expect(normalized.details['presented_fingerprint']).toBe('SHA256:new');
     // The same error read from a board state's `status.error`.
-    expect(problemOf(body)).toEqual(normalized);
-    expect(problemOf(new ApiRequestError(502, 'Request failed: 502', null))).toEqual({
+    expect(fields(problemOf(body))).toEqual(fields(normalized));
+    expect(fields(problemOf(new ApiRequestError(502, 'Request failed: 502', null)))).toEqual({
       message: 'Request failed: 502',
       code: '',
       hint: '',
       details: {},
     });
-    expect(problemOf('boom')).toEqual({ message: 'boom', code: '', hint: '', details: {} });
+    expect(fields(problemOf('boom'))).toEqual({ message: 'boom', code: '', hint: '', details: {} });
   });
 
-  it('a request that never reached Insight has the code network and the hint to check Insight', () => {
-    expect(problemOf(new ApiRequestError(0, 'Could not reach the server.', null))).toEqual({
-      message: 'Could not reach the server.',
+  it('a problem is an Error, so the app’s messageOf words it like any other failure', () => {
+    const problem = problemOf(
+      new ApiRequestError(502, 'SSH key authentication as sima on 10.0.0.4 failed.', {
+        error: 'SSH key authentication as sima on 10.0.0.4 failed.',
+        code: 'auth_failed',
+        hint: 'Authorize a key on the board, then retry.',
+        command: 'ssh-copy-id -p 22 sima@10.0.0.4',
+      }),
+    );
+    expect(problem).toBeInstanceOf(BoardProblem);
+    expect(problem).toBeInstanceOf(Error);
+    expect(problem.name).toBe('BoardProblem');
+    expect(messageOf(problem)).toBe('SSH key authentication as sima on 10.0.0.4 failed.');
+    for (const failure of [{ error: 'x', code: 'timeout' }, new Error('y'), 'z']) {
+      expect(problemOf(failure)).toBeInstanceOf(BoardProblem);
+    }
+  });
+
+  it('a problem read again is the same problem, with its extras', () => {
+    const problem = problemOf({
+      error: 'Host key changed',
+      code: 'host_key_changed',
+      hint: 'Trust the new key if you reflashed the board.',
+      presented_fingerprint: 'SHA256:new',
+    });
+    expect(problemOf(problem)).toBe(problem);
+    expect(problemOf(problem).details['presented_fingerprint']).toBe('SHA256:new');
+  });
+
+  it('a request that never reached Insight says so in #170’s words, with the code network', () => {
+    expect(fields(problemOf(new ApiRequestError(0, 'Could not reach the server.', null)))).toEqual({
+      message: 'Could not reach the Insight server.',
       code: 'network',
       hint: 'Check that Insight is still running, then retry.',
       details: {},
@@ -41,13 +76,13 @@ describe('problemOf', () => {
 
   it('a null hint reads as none, and an error from outside the API keeps only its message', () => {
     const body = { error: 'Board busy', code: 'timeout', hint: null };
-    expect(problemOf(new ApiRequestError(504, 'Board busy', body))).toEqual({
+    expect(fields(problemOf(new ApiRequestError(504, 'Board busy', body)))).toEqual({
       message: 'Board busy',
       code: 'timeout',
       hint: '',
       details: body,
     });
-    expect(problemOf(new Error('interceptor'))).toEqual({
+    expect(fields(problemOf(new Error('interceptor')))).toEqual({
       message: 'interceptor',
       code: '',
       hint: '',

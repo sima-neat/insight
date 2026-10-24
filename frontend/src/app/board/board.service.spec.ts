@@ -2,6 +2,8 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import type { BoardState, ShellInfo } from './api';
+import { messageOf } from '../sources/stream-lines';
+import { BoardProblem } from './board-error';
 import { BoardService } from './board.service';
 
 const BOARD_URL = '/api/board';
@@ -49,7 +51,7 @@ describe('BoardService', () => {
     return service;
   }
 
-  /** The board reads now pending, oldest first. */
+  /** The board reads now pending, oldest first; they are taken, so a second call returns only newer ones. */
   function reads() {
     return http.match((request) => request.method === 'GET' && request.url === BOARD_URL);
   }
@@ -77,6 +79,33 @@ describe('BoardService', () => {
     expect(service.generation()).toBe(2);
   });
 
+  it('a focus while a read is out sends no second read; an explicit reload always does', async () => {
+    const service = TestBed.inject(BoardService);
+    // Browsers may fire focus right after load, while the construction read is still out.
+    window.dispatchEvent(new Event('focus'));
+    const pending = reads();
+    expect(pending).toHaveLength(1);
+    const [first] = pending;
+
+    const asked = service.reload();
+    const [second] = reads();
+    expect(second).toBeDefined();
+    second.flush(boardB);
+    await asked;
+    first.flush(boardA);
+    await tick();
+    expect(service.state()).toEqual(boardB);
+
+    // A failed read is no longer out either.
+    window.dispatchEvent(new Event('focus'));
+    http.expectOne(BOARD_URL).error(new ProgressEvent('error'));
+    await tick();
+    window.dispatchEvent(new Event('focus'));
+    http.expectOne(BOARD_URL).flush(boardA);
+    await tick();
+    expect(service.state()).toEqual(boardA);
+  });
+
   it('keeps the last good state when a read fails, and clears the error with the next good answer', async () => {
     const service = await started(boardA);
 
@@ -89,11 +118,15 @@ describe('BoardService', () => {
       );
     await failed;
     expect(service.state()).toEqual(boardA);
-    expect(service.error()).toEqual({
-      message: 'The board is busy.',
+    const error = service.error();
+    expect(error).toBeInstanceOf(BoardProblem);
+    expect(error?.message).toBe('The board is busy.');
+    expect(error?.code).toBe('timeout');
+    expect(error?.hint).toBe('Retry the action.');
+    expect(error?.details).toEqual({
+      error: 'The board is busy.',
       code: 'timeout',
       hint: 'Retry the action.',
-      details: { error: 'The board is busy.', code: 'timeout', hint: 'Retry the action.' },
     });
 
     const next = service.reload();
@@ -125,7 +158,6 @@ describe('BoardService', () => {
       reads()[0].flush(boardA);
       await load;
       expect(service.state()).toEqual(boardB);
-      expect(service.state() ?? service.error()).not.toBeNull();
     });
 
     it('a failed board read that was superseded does not raise an error', async () => {
@@ -149,7 +181,6 @@ describe('BoardService', () => {
       older.flush(boardA);
       await Promise.all([first, second]);
       expect(service.state()).toEqual(boardB);
-      expect(service.state() ?? service.error()).not.toBeNull();
     });
 
     it('a board read sent after a change applies normally', async () => {
@@ -222,8 +253,10 @@ describe('BoardService', () => {
     );
     await tick();
     http.expectOne(BOARD_URL).flush(failedState);
-    expect(await outcome).toEqual({
-      message: unreachable.error,
+    const problem = await outcome;
+    expect(problem).toBeInstanceOf(BoardProblem);
+    expect(messageOf(problem)).toBe(unreachable.error);
+    expect(problem).toMatchObject({
       code: 'unreachable',
       hint: unreachable.hint,
       details: unreachable,

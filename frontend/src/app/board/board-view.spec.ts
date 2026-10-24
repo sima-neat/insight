@@ -1,4 +1,5 @@
 import type { BoardState, BoardTarget } from './api';
+import { BoardProblem } from './board-error';
 import {
   boardIndicator,
   cameraSetupRows,
@@ -110,16 +111,16 @@ describe('boardIndicator', () => {
   });
 
   it('boardIndicator shows Error with the reason when the board could not be read, not Loading…', () => {
-    const unreachable = {
-      message: 'Could not reach the server.',
-      code: 'network',
-      hint: 'Check that Insight is still running, then retry.',
-      details: {},
-    };
+    const unreachable = new BoardProblem(
+      'Could not reach the Insight server.',
+      'network',
+      'Check that Insight is still running, then retry.',
+      {},
+    );
     expect(boardIndicator(null, unreachable)).toEqual({
       label: 'Board',
       chip: { label: 'Error', tone: 'danger' },
-      tooltip: 'Could not read the board: Could not reach the server.',
+      tooltip: 'Could not read the board: Could not reach the Insight server.',
     });
     // With a last good state the pill still names the board, and says the read failed (F35).
     const connected = board({
@@ -129,7 +130,13 @@ describe('boardIndicator', () => {
     expect(boardIndicator(connected, unreachable)).toEqual({
       label: 'Board: 10.0.0.4',
       chip: { label: 'Error', tone: 'danger' },
-      tooltip: 'Could not read the board: Could not reach the server.',
+      tooltip: 'Could not read the board: Could not reach the Insight server.',
+    });
+    // A last state with no board selected keeps saying so (ruling Q4).
+    expect(boardIndicator(board({ target: null }), unreachable)).toEqual({
+      label: 'No board',
+      chip: { label: 'Error', tone: 'danger' },
+      tooltip: 'Could not read the board: Could not reach the Insight server.',
     });
   });
 });
