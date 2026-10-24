@@ -17,23 +17,8 @@ const LONG_BOARD = {
   saved: { host: LONG_HOST, port: 22, user: 'sima' },
 };
 
-/** System Info's ⓘ, which Task 11 puts after the pill: a 40 px button and the end slot's 8 px gap. */
-const SYSTEM_INFO_ROOM = 48;
-
-/**
- * The space the page tools leave free in the top bar: between the page title and the tools, less
- * the bar's own gap. The tools sit at the end (`margin-inline-start: auto`), so what is left is
- * what a new end item can take before they have to shrink and scroll.
- */
-function freeRoom(page: Page) {
-  return page.evaluate(() => {
-    const header = document.querySelector('header')!;
-    const title = header.querySelector('h1')!.getBoundingClientRect();
-    const tools = header.querySelector('[role="group"][aria-label="Page tools"]')!;
-    const gap = parseFloat(getComputedStyle(header).columnGap);
-    return tools.getBoundingClientRect().left - title.right - gap;
-  });
-}
+/** The top bar's System Info button, ⓘ, after the pill. */
+const systemInfo = (page: Page) => page.getByRole('button', { name: 'System information' });
 
 const pill = (page: Page) => page.locator('app-board-pill button');
 
@@ -91,7 +76,7 @@ const PAGES = [
 ];
 
 for (const { path, answer } of PAGES) {
-  test(`on ${path} at 1366×768, a board name at the pill's cap is cut and leaves room for System Info`, async ({
+  test(`on ${path} at 1366×768, a board name at the pill's cap is cut and the top bar holds System Info`, async ({
     page,
   }) => {
     await answerTopBar(page);
@@ -115,7 +100,50 @@ for (const { path, answer } of PAGES) {
       `sima@${LONG_HOST} — Not checked. Open board settings.`,
     );
 
-    expect(await freeRoom(page)).toBeGreaterThanOrEqual(SYSTEM_INFO_ROOM);
+    // System Info's button sits whole in the bar, after the pill, and the page tools keep their
+    // room (nothing spills, nothing scrolls).
+    await expect(systemInfo(page)).toBeVisible();
+    const [pillBox, infoBox] = await Promise.all([
+      pill(page).boundingBox(),
+      systemInfo(page).boundingBox(),
+    ]);
+    expect(infoBox!.x).toBeGreaterThanOrEqual(pillBox!.x + pillBox!.width);
     expect(await topBarSpill(page, false)).toEqual({ spilled: [], toolsOverflow: 0 });
   });
 }
+
+test('System information opens from the top bar, tells what it can without neat, and Escape gives the focus back', async ({
+  page,
+}) => {
+  await answerTopBar(page);
+  await page.setViewportSize(LAPTOP);
+  await page.goto('/stats');
+  const button = systemInfo(page);
+  await expect(button).toBeVisible();
+
+  await button.focus();
+  await button.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'System information' });
+  await expect(dialog).toBeVisible();
+  // The shared answer is Insight's own, without the neat command: its note instead of the
+  // sections only neat can fill, and what Insight knows by itself.
+  await expect(dialog.getByText('The neat command is not installed here')).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Insight' })).toBeVisible();
+  await expect(dialog.getByText('https://127.0.0.1:9900').first()).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Environment' })).toHaveCount(0);
+  await expect(dialog.getByRole('heading', { name: 'Components' })).toHaveCount(0);
+  // Exposed ports start closed.
+  const ports = dialog.getByRole('button', { name: 'Exposed ports' });
+  await expect(ports).toHaveAttribute('aria-expanded', 'false');
+  await ports.click();
+  await expect(dialog.getByText('TCP 9900')).toBeVisible();
+
+  // The dialog fits the screen.
+  const box = (await dialog.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(LAPTOP.height);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(button).toBeFocused();
+});

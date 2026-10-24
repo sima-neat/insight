@@ -8,6 +8,7 @@ type OpenDialog = (injector: Injector) => NeatDialogRef<unknown>;
 /** Each top-bar dialog's module, loaded by a dynamic import. */
 export interface TopBarDialogModules {
   board(): Promise<{ openBoardDialog: OpenDialog }>;
+  systemInfo(): Promise<{ openSystemInfoDialog: OpenDialog }>;
 }
 
 /**
@@ -20,7 +21,10 @@ export const TOP_BAR_DIALOG_MODULES = new InjectionToken<TopBarDialogModules>(
   'TOP_BAR_DIALOG_MODULES',
   {
     providedIn: 'root',
-    factory: () => ({ board: () => import('./board/board-dialog') }),
+    factory: () => ({
+      board: () => import('./board/board-dialog'),
+      systemInfo: () => import('./system-info/system-info-dialog'),
+    }),
   },
 );
 
@@ -29,6 +33,7 @@ type DialogName = keyof TopBarDialogModules;
 /** What the toast says when a dialog's module could not be loaded (ruling Q11). */
 const LOAD_FAILED: Record<DialogName, string> = {
   board: 'Could not open the board dialog. Reload the page to try again.',
+  systemInfo: 'Could not open the System information dialog. Reload the page to try again.',
 };
 
 /**
@@ -52,6 +57,14 @@ export class TopBarDialogs {
   /** The board dialog. Settles once it has closed, or could not be opened. */
   openBoard(): Promise<void> {
     return this.show('board', async () => (await this.modules.board()).openBoardDialog);
+  }
+
+  /** The System Info dialog. Settles once it has closed, or could not be opened. */
+  openSystemInfo(): Promise<void> {
+    return this.show(
+      'systemInfo',
+      async () => (await this.modules.systemInfo()).openSystemInfoDialog,
+    );
   }
 
   private show(name: DialogName, load: () => Promise<OpenDialog>): Promise<void> {

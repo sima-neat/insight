@@ -134,4 +134,43 @@ describe('App', () => {
     await vi.waitFor(() => expect(document.querySelector('app-board-dialog')).toBeNull());
     expect(document.activeElement).toBe(pill);
   });
+
+  it('puts System information after the pill, and loads it only when it is opened', async () => {
+    const fixture = TestBed.createComponent(App);
+    http.expectOne('/api/board').flush(boardState({ target: DEVKIT }));
+    await settle(fixture);
+    // The command behind it runs for up to 15 s: never at app start.
+    http.expectNone('/api/sysinfo');
+
+    const pill = fixture.nativeElement.querySelector('header .topbar-end app-board-pill');
+    const info = pill.nextElementSibling;
+    expect(info.getAttribute('aria-label')).toBe('System information');
+    expect(info.tagName).toBe('BUTTON');
+  });
+
+  it('the ⓘ button opens the dialog; Escape closes it and focus returns to the button', async () => {
+    const fixture = TestBed.createComponent(App);
+    http.expectOne('/api/board').flush(boardState({ target: DEVKIT }));
+    await settle(fixture);
+    const info: HTMLButtonElement = fixture.nativeElement.querySelector(
+      'header button[aria-label="System information"]',
+    );
+
+    info.focus();
+    info.click();
+    // The dialog's module loads on this first open.
+    await vi.waitFor(() => expect(document.querySelector('app-system-info-dialog')).not.toBeNull());
+    http.expectOne('/api/sysinfo').flush({ insight: { webUiUrl: 'https://127.0.0.1:9900' } });
+    await settle(fixture);
+    expect(document.querySelector('[role="dialog"] h2')?.textContent).toContain(
+      'System information',
+    );
+    expect(document.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true);
+
+    document
+      .querySelector('[role="dialog"]')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector('app-system-info-dialog')).toBeNull());
+    expect(document.activeElement).toBe(info);
+  });
 });

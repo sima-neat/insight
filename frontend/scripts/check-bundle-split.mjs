@@ -2,8 +2,8 @@
 // build.
 //
 // The Viewer's video code (`@sima/neat-ui/video`) and the Streaming and Media pages, with the kit
-// entries only they use, are meant to load with their routes, and the top bar's board dialog on
-// its first open, so the first paint does not pay for them. The compiler already rejects video
+// entries only they use, are meant to load with their routes, and the top bar's board and System Info
+// dialogs on their first open, so the first paint does not pay for them. The compiler already rejects video
 // symbols imported from the kit's primary entry point, but nothing else notices when an import in
 // the shared code (a page, the shell, `app.config`) drags one of these into the main chunk. This
 // script checks the result: each marker below is a component selector, a string that survives
@@ -29,13 +29,26 @@ const LAZY_CODE = [
   {
     marker: 'neat-dialog',
     what: 'the kit’s dialog',
-    route: 'Streaming, Media and the board dialog',
+    route: 'Streaming, Media and the top bar’s dialogs',
   },
-  // The board dialog is imported when the pill first opens it (`TopBarDialogs`), with the kit
-  // entries it brings beside the dialog.
+  // The top bar's dialogs are imported on their first open (`TopBarDialogs`), with the kit
+  // entries they bring beside them.
   { marker: 'app-board-dialog', what: 'the board dialog', route: 'the board dialog’s first open' },
-  { marker: 'neat-collapsible', what: 'the kit’s collapsible', route: 'the board dialog' },
-  { marker: 'neat-callout', what: 'the kit’s callout', route: 'the board dialog and the Viewer' },
+  {
+    marker: 'app-system-info-dialog',
+    what: 'the System Info dialog',
+    route: 'the System Info dialog’s first open',
+  },
+  {
+    marker: 'neat-collapsible',
+    what: 'the kit’s collapsible',
+    route: 'the board and System Info dialogs',
+  },
+  {
+    marker: 'neat-callout',
+    what: 'the kit’s callout',
+    route: 'the board and System Info dialogs and the Viewer',
+  },
 ];
 const dist = process.argv[2] ?? 'dist';
 

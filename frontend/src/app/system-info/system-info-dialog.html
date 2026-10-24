@@ -1,0 +1,99 @@
+<!-- Environment, Insight and Update check read alike: a list of what neat reported, or why there is none. -->
+<ng-template #facts let-label="label" let-entries="entries">
+  <neat-collapsible [label]="label" [open]="true" [headingLevel]="3">
+    @if (entries.length) {
+      <dl neatDetails>
+        @for (entry of entries; track entry[0]) {
+          <dt>{{ entry[0] }}</dt>
+          <dd>{{ entry[1] }}</dd>
+        }
+      </dl>
+    } @else {
+      <p neatNote>No details reported.</p>
+    }
+  </neat-collapsible>
+</ng-template>
+
+<neat-dialog-body>
+  <div class="info">
+    @if (info()) {
+      <p neatNote>{{ identity() }}</p>
+      @if (failure(); as failure) {
+        <neat-error-note>Could not refresh: {{ failure }}</neat-error-note>
+      }
+
+      @if (neatMissing()) {
+        <neat-callout tone="info">
+          The <code neatCode>neat</code> command is not installed here, so the environment,
+          component versions and update check are unknown.
+        </neat-callout>
+      } @else {
+        <ng-container
+          *ngTemplateOutlet="facts; context: { label: 'Environment', entries: environment() }"
+        />
+      }
+
+      <ng-container *ngTemplateOutlet="facts; context: { label: 'Insight', entries: insight() }" />
+
+      @if (!neatMissing()) {
+        <neat-collapsible label="Components" [headingLevel]="3">
+          @if (components().length) {
+            <dl neatDetails>
+              @for (component of components(); track component.key) {
+                <dt>{{ component.name }}</dt>
+                <dd>
+                  <div class="component">
+                    <span>{{ component.version }}</span>
+                    @if (component.status; as status) {
+                      <neat-status-chip [tone]="status.tone">{{ status.label }}</neat-status-chip>
+                    }
+                  </div>
+                  @if (component.note) {
+                    <p neatNote>{{ component.note }}</p>
+                  }
+                </dd>
+              }
+            </dl>
+          } @else {
+            <p neatNote>No details reported.</p>
+          }
+        </neat-collapsible>
+      }
+
+      <neat-collapsible label="Exposed ports" [headingLevel]="3">
+        @if (ports().length) {
+          <dl neatDetails>
+            @for (port of ports(); track $index) {
+              <dt>{{ port.name }}</dt>
+              <dd>{{ port.summary }}</dd>
+            }
+          </dl>
+        } @else {
+          <p neatNote>No details reported.</p>
+        }
+      </neat-collapsible>
+
+      @if (!neatMissing()) {
+        <ng-container
+          *ngTemplateOutlet="facts; context: { label: 'Update check', entries: updateCheck() }"
+        />
+      }
+    } @else if (failure(); as failure) {
+      <neat-error-note>{{ failure }}</neat-error-note>
+    } @else {
+      <p neatNote role="status">Loading system information…</p>
+    }
+  </div>
+</neat-dialog-body>
+<neat-dialog-actions>
+  <button
+    neatButton
+    type="button"
+    variant="outlined"
+    [attr.aria-disabled]="loading() ? true : null"
+    (click)="refresh()"
+  >
+    {{ loading() ? 'Refreshing…' : 'Refresh' }}
+  </button>
+  <button neatButton type="button" (click)="dialog.close()">Close</button>
+</neat-dialog-actions>
