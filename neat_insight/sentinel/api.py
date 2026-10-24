@@ -1,6 +1,7 @@
 """HTTP API for Sentinel telemetry on the selected board."""
 from contextlib import contextmanager
 from threading import Lock
+from typing import Optional
 
 from flask import Blueprint, g, jsonify, request
 
@@ -159,6 +160,15 @@ def _history_limit(raw) -> int:
     return min(limit, HISTORY_LIMIT)
 
 
+def _epoch(raw) -> Optional[int]:
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise _invalid("`epoch` must be a whole number.", "Send the `epoch` of the history you hold, or omit it.") from None
+
+
 def _compare_runs(raw) -> list:
     runs = [run.strip() for run in (raw or "").split(",") if run.strip()]
     if len(runs) < 2:
@@ -267,14 +277,17 @@ def install_sentinel():
 # API: read the board's current telemetry.
 @sentinel_bp.get("/api/sentinel/metrics")
 def get_metrics():
-    """Return Sentinel's metric definitions joined with the latest sample, and optional recent history."""
+    """Return Sentinel's metric definitions joined with the latest sample, and optional recent history.
+
+    A caller that holds the history up to the sample stamped `after`, of `epoch`, gets only the newer ones."""
     limit = _history_limit(request.args.get("history"))
+    after, epoch = request.args.get("after"), _epoch(request.args.get("epoch"))
     context = _Context()
     with _metrics_lock(context.key):
-        return _get_metrics(context, limit)
+        return _get_metrics(context, limit, after, epoch)
 
 
-def _get_metrics(context, limit):
+def _get_metrics(context, limit, after, epoch):
     """Read and cache one telemetry response from one run of the daemon.
 
     The full status is read once per poll; a restart since the previous poll (another systemd
@@ -288,14 +301,15 @@ def _get_metrics(context, limit):
         cache.observe_daemon(context.key, instance)
         latest = context.client.latest()
         definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
-        history = cache.add_sample(context.key, latest.get("sample"))
+        cache.add_sample(context.key, latest.get("sample"))
         seed = cache_history.read(context.client) if cache.needs_seed(context.key) else None
-        after = install.invocation_id(context.session)
-        if after == instance:
+        invocation = install.invocation_id(context.session)
+        if invocation == instance:
             if seed is not None:
-                history = cache.seed(context.key, seed)
-            return context.payload(**metric_view.build(definitions, latest, history, limit))
-        instance = after
+                cache.seed(context.key, seed)
+            samples, full, current = cache.window(context.key, limit, after, epoch)
+            return context.payload(**metric_view.build(definitions, latest, samples, full=full, epoch=current))
+        instance = invocation
     raise SentinelError(
         "sentinel_failed",
         "Sentinel telemetry changed repeatedly while it was being read.",

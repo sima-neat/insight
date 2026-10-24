@@ -1242,10 +1242,12 @@
       "get": {
         "tags": ["Sentinel"],
         "summary": "Get the board's current telemetry",
-        "description": "Joins Sentinel's metric definitions with its latest sample so every value carries its label, unit, group and thresholds, and ranks each value as `ok`, `warn`, `critical` or `unavailable`. A metric the board cannot measure has `value: null` and status `unavailable`; it is never reported as zero. Definitions are cached per board for a minute, while the sample is read on every call. Samples are also appended to a bounded per-board history: pass `history=<n>` to get the last `n` samples as aligned per-metric series for sparklines. The history holds one run of polling: a sample more than a minute after the last one starts it again, since the series are drawn with their points evenly spaced and nothing polls this endpoint while the Stats page is closed, and so does a restart of the daemon, which every call checks. Cached samples, definitions and history are keyed by the board's generation and fingerprint, so selecting another board starts empty.",
+        "description": "Joins Sentinel's metric definitions with its latest sample so every value carries its label, unit, group and thresholds, and ranks each value as `ok`, `warn`, `critical` or `unavailable`. A metric the board cannot measure has `value: null` and status `unavailable`; it is never reported as zero. Definitions are cached per board for a minute, while the sample is read on every call. Samples are also appended to a bounded per-board history: pass `history=<n>` to get the last `n` samples as aligned per-metric series. The history holds one run of polling: a sample more than a minute after the last one starts it again, since nothing polls this endpoint while the Stats page is closed, and so does a restart of the daemon, which every call checks. To poll incrementally, send the newest `history.timestamps` entry you hold as `after` and the `history.epoch` it came with as `epoch`: the answer then holds only the samples after it, with `history.full: false`, and you append them. A reset, gap, restart or reseed of the history (a new `epoch`), an `after` the history no longer holds, or more new samples than `history` asks for answer the whole window with `history.full: true`, which replaces what you hold. Cached samples, definitions and history are keyed by the board's generation and fingerprint, so selecting another board starts empty.",
         "operationId": "getSentinelMetrics",
         "parameters": [
-          {"name": "history", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "maximum": 240, "default": 0}, "description": "Number of recent samples to return as series; `0` (the default) returns none."}
+          {"name": "history", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "default": 0}, "description": "Number of recent samples to return as series; `0` (the default) returns none. A value above 240, the most the history holds, is treated as 240."},
+          {"name": "after", "in": "query", "required": false, "schema": {"type": "string"}, "description": "The timestamp of the newest sample you hold, from `history.timestamps`. With the `epoch` of that history, the answer holds only the samples after it; without either, or if it is not in the history, the answer is the whole window."},
+          {"name": "epoch", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The `history.epoch` of the history you hold. A different epoch means the history started again or gained older samples, so the answer is the whole window with `full: true`. Not a whole number returns `400 invalid_request`."}
         ],
         "responses": {
           "200": {"description": "Current metric values for the selected board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelMetrics"}}}},
@@ -2247,11 +2249,13 @@
           "order": {"type": "array", "items": {"type": "string"}, "description": "Every metric key in Sentinel's own order, the order its ops view lists them in. A group's sensors are not always adjacent, so this is not the order of `groups`."},
           "history": {
             "type": "object",
-            "description": "The last `history` samples of this board, aligned; empty unless `history` was requested. On the first read of a board, and again after a gap in polling of more than a minute, the history is seeded from Sentinel's own sample cache (its newest 240 samples, read once from `GET /v1/cache`), so it opens full rather than filling from polling.",
-            "required": ["timestamps", "series"],
+            "description": "The samples of this board to add to the caller's window, aligned; empty unless `history` was requested. With `full: true` they are the last `history` samples and replace the window the caller holds, which is what a reset, gap, restart or reseed answers; with `full: false` they are the samples after `after`, to append. On the first read of a board, and again after a gap in polling of more than a minute, the history is seeded from Sentinel's own sample cache (its newest 240 samples, read once from `GET /v1/cache`), so it opens full rather than filling from polling.",
+            "required": ["timestamps", "series", "full", "epoch"],
             "properties": {
               "timestamps": {"type": "array", "items": {"type": ["string", "null"]}},
-              "series": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": ["number", "null"]}}}
+              "series": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": ["number", "null"]}}},
+              "full": {"type": "boolean", "description": "`true` when the samples replace what the caller holds (always so without `after` and `epoch`, or with `history=0`); `false` when they only follow the sample at `after`."},
+              "epoch": {"type": "integer", "description": "Which history this is. It changes whenever the history starts again (another board, a daemon restart, a gap in polling, a clock step) or gains samples before the oldest, and never repeats; send it back as `epoch`."}
             }
           }
         }

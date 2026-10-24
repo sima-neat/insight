@@ -742,7 +742,7 @@ class InstallScriptTests(unittest.TestCase):
 
 class MetricViewTests(unittest.TestCase):
     def test_values_are_labelled_grouped_ranked_and_ordered_and_history_is_aligned_per_metric(self):
-        built = metrics.build(DEFINITIONS, SAMPLE, [], 0)
+        built = metrics.build(DEFINITIONS, SAMPLE, [])
         by_key = {m["key"]: m for group in built["groups"] for m in group["metrics"]}
         self.assertEqual((by_key["rtsn_0"]["label"], by_key["rtsn_0"]["unit"], by_key["rtsn_0"]["status"]), ("MLA RTSN-0", "C", "warn"))
         self.assertEqual(by_key["linux_mem_used_pct"]["status"], "critical")
@@ -756,11 +756,17 @@ class MetricViewTests(unittest.TestCase):
         self.assertEqual((extra["group"], extra["label"], extra["unit"]), ("Other", "Cvu clock mhz", None))
         # Highlights lead with headline metrics and the hottest sensor.
         self.assertEqual(built["highlights"], ["power_current_watts", "linux_mem_used_pct", "rtsn_0"])
-        # History is off unless asked for, and aligned per metric.
+        # The history is exactly the window it is given, aligned per metric; BoardCache.window limits it.
         history = [sample("t1", rtsn_0=60.0)["sample"], sample("t2", rtsn_0=61.0)["sample"]]
-        self.assertEqual(metrics.build(DEFINITIONS, SAMPLE, history, 0)["history"]["timestamps"], [])
-        series = metrics.build(DEFINITIONS, SAMPLE, history, 1)["history"]
+        self.assertEqual(metrics.build(DEFINITIONS, SAMPLE, [])["history"]["timestamps"], [])
+        series = metrics.build(DEFINITIONS, SAMPLE, history[-1:])["history"]
         self.assertEqual((series["timestamps"], series["series"]["rtsn_0"], series["series"]["power_current_watts"]), (["t2"], [61.0], [None]))
+        self.assertEqual(metrics.build(DEFINITIONS, SAMPLE, history)["history"]["timestamps"], ["t1", "t2"])
+
+    def test_the_history_says_whether_it_replaces_what_the_caller_holds_and_which_epoch_it_belongs_to(self):
+        self.assertEqual((metrics.build(DEFINITIONS, SAMPLE, [])["history"]["full"], metrics.build(DEFINITIONS, SAMPLE, [])["history"]["epoch"]), (True, 0))
+        history = metrics.build(DEFINITIONS, SAMPLE, [], full=False, epoch=7)["history"]
+        self.assertEqual((history["full"], history["epoch"]), (False, 7))
 
 
 class BoardCacheTests(unittest.TestCase):
@@ -785,6 +791,85 @@ class BoardCacheTests(unittest.TestCase):
         self.assertIsNone(self.cache.get(self.KEY, "definitions"))
         after = self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T17:54:22Z", "values": {"load": 2}})
         self.assertEqual(after, [{"timestamp": "2026-09-23T17:54:22Z", "values": {"load": 2}}])
+
+    def epoch(self, cache=None):
+        return (cache or self.cache).window(self.KEY, 3, None, None)[2]
+
+    def test_epoch_changes_whenever_the_history_restarts_or_gains_older_samples(self):
+        def stamp(text):
+            return {"timestamp": "2026-09-23T" + text + "Z", "values": {}}
+
+        def changes(action):
+            before = self.epoch()
+            action()
+            return self.epoch() != before
+
+        # A new board, which never repeats an earlier board's epoch.
+        self.cache.add_sample(self.KEY, stamp("19:40:00"))
+        first = self.epoch()
+        self.assertTrue(changes(lambda: self.cache.add_sample((1, "fp-2"), stamp("19:40:00"))))
+        self.assertTrue(changes(lambda: self.cache.add_sample(self.KEY, stamp("19:40:00"))))
+        self.assertNotEqual(self.epoch(), first)
+        # Polling on, and the same daemon run again, keep the window valid.
+        self.assertFalse(changes(lambda: self.cache.add_sample(self.KEY, stamp("19:40:02"))))
+        self.assertTrue(changes(lambda: self.cache.observe_daemon(self.KEY, "inv-1")))
+        self.assertFalse(changes(lambda: self.cache.observe_daemon(self.KEY, "inv-1")))
+        self.assertTrue(changes(lambda: self.cache.observe_daemon(self.KEY, "inv-2")))
+        # The daemon's own samples going before the polled ones change what a held window starts with.
+        self.cache.add_sample(self.KEY, stamp("19:40:10"))
+        self.assertTrue(changes(lambda: self.cache.seed(self.KEY, [stamp("19:40:08")])))
+        # A gap in polling, and a clock step back.
+        self.assertTrue(changes(lambda: self.cache.add_sample(self.KEY, stamp("19:41:30"))))
+        self.cache.add_sample(self.KEY, stamp("19:41:32"))
+        self.assertTrue(changes(lambda: self.cache.add_sample(self.KEY, stamp("19:41:00"))))
+
+    def test_a_seed_that_adds_nothing_keeps_the_epoch(self):
+        self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T19:40:10Z", "values": {}})
+        before = self.epoch()
+        self.cache.seed(self.KEY, [])
+        self.assertEqual(self.epoch(), before)
+        # Nothing earlier than the oldest polled sample, and an earlier one too far away to be one trend.
+        for stamp in ("2026-09-23T19:40:10Z", "2026-09-23T19:40:12Z", "2026-09-23T19:30:00Z"):
+            with self.subTest(stamp=stamp):
+                cache = state.BoardCache(history_limit=3, history_gap_sec=60)
+                cache.add_sample(self.KEY, {"timestamp": "2026-09-23T19:40:10Z", "values": {}})
+                before = self.epoch(cache)
+                cache.seed(self.KEY, [{"timestamp": stamp, "values": {}}])
+                self.assertEqual(self.epoch(cache), before)
+
+    def test_window_answers_only_samples_after_the_callers_newest_one(self):
+        cache = state.BoardCache(history_limit=5)
+        for stamp in ("t0", "t1", "t2", "t3"):
+            cache.add_sample(self.KEY, {"timestamp": stamp, "values": {}})
+        epoch = cache.window(self.KEY, 5, None, None)[2]
+
+        def window(limit, after):
+            samples, full, current = cache.window(self.KEY, limit, after, epoch)
+            self.assertEqual(current, epoch)
+            return self.stamps(samples), full
+
+        self.assertEqual(window(5, "t1"), (["t2", "t3"], False))
+        self.assertEqual(window(5, "t3"), ([], False), "the caller is up to date")
+        self.assertEqual(window(2, "t1"), (["t2", "t3"], False), "as many new samples as the caller's window holds")
+
+    def test_window_answers_the_full_window_for_another_epoch_an_unknown_timestamp_or_too_many_new_samples(self):
+        cache = state.BoardCache(history_limit=5)
+        for stamp in ("t0", "t1", "t2", "t3"):
+            cache.add_sample(self.KEY, {"timestamp": stamp, "values": {}})
+        epoch = cache.window(self.KEY, 5, None, None)[2]
+
+        def window(limit, after, held, key=self.KEY):
+            samples, full, current = cache.window(key, limit, after, held)
+            self.assertEqual(current, epoch)
+            return self.stamps(samples), full
+
+        self.assertEqual(window(3, None, None), (["t1", "t2", "t3"], True), "a caller holding nothing")
+        self.assertEqual(window(3, "t2", None), (["t1", "t2", "t3"], True), "a caller that sent no epoch")
+        self.assertEqual(window(3, "t2", epoch + 1), (["t1", "t2", "t3"], True), "another epoch")
+        self.assertEqual(window(3, "gone", epoch), (["t1", "t2", "t3"], True), "a timestamp the history no longer holds")
+        self.assertEqual(window(2, "t0", epoch), (["t2", "t3"], True), "more new samples than the caller's whole window")
+        self.assertEqual(window(0, "t2", epoch), ([], True), "no history asked for")
+        self.assertEqual(window(3, "t2", epoch, key=(2, "fp-1")), ([], True), "another board's history is never answered")
 
     def test_values_and_history_are_keyed_by_generation_and_fingerprint_and_expire(self):
         second = (1, "fp-2")
@@ -1028,6 +1113,49 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(self.transport.api_paths.count(("GET", "/v1/metrics")), 1)
         self.assertEqual(body["history"]["timestamps"], ["2026-09-22T20:55:47Z", "2026-09-22T20:55:49Z"])
         self.assertEqual(body["history"]["series"]["rtsn_0"], [72.0, 72.0])
+
+    def test_metrics_answer_only_newer_samples_for_the_callers_after_and_epoch(self):
+        held = self.get("/api/sentinel/metrics?history=5").get_json()["history"]
+        self.assertEqual((held["timestamps"], held["full"]), (["2026-09-22T20:55:47Z"], True))
+        self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T20:55:49Z", rtsn_0=73.0))
+        query = "/api/sentinel/metrics?history=5&after={}&epoch={}".format(held["timestamps"][-1], held["epoch"])
+        history = self.get(query).get_json()["history"]
+        self.assertEqual((history["timestamps"], history["full"], history["epoch"]), (["2026-09-22T20:55:49Z"], False, held["epoch"]))
+        self.assertEqual(history["series"]["rtsn_0"], [73.0])
+        # Polled again with nothing new: an empty increment, still the same epoch.
+        up_to_date = self.get(query.replace("47Z", "49Z")).get_json()["history"]
+        self.assertEqual((up_to_date["timestamps"], up_to_date["full"], up_to_date["epoch"]), ([], False, held["epoch"]))
+        # An `after` the history no longer holds is answered with the whole window.
+        unknown = self.get("/api/sentinel/metrics?history=5&after=2026-09-22T20:00:00Z&epoch={}".format(held["epoch"])).get_json()["history"]
+        self.assertEqual((unknown["timestamps"], unknown["full"]), (["2026-09-22T20:55:47Z", "2026-09-22T20:55:49Z"], True))
+
+    def test_a_daemon_restart_answers_the_full_window_flagged_full(self):
+        self.transport.status_fields = ["active", "yes", "yes", "/usr/bin/sima-cli", "inv-1", "60"]
+        held = self.get("/api/sentinel/metrics?history=5").get_json()["history"]
+        self.transport.status_fields = ["active", "yes", "yes", "/usr/bin/sima-cli", "inv-2", "1"]
+        self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T20:55:49Z"))
+        query = "/api/sentinel/metrics?history=5&after={}&epoch={}".format(held["timestamps"][-1], held["epoch"])
+        history = self.get(query).get_json()["history"]
+        self.assertEqual((history["timestamps"], history["full"]), (["2026-09-22T20:55:49Z"], True))
+        self.assertNotEqual(history["epoch"], held["epoch"])
+
+    def test_every_history_answer_carries_full_and_epoch(self):
+        for query in ("", "?history=0", "?history=5", "?history=5&after=2026-09-22T20:55:47Z&epoch=1"):
+            with self.subTest(query=query):
+                history = self.get("/api/sentinel/metrics" + query).get_json()["history"]
+                self.assertIsInstance(history["full"], bool)
+                self.assertIsInstance(history["epoch"], int)
+        none_asked = self.get("/api/sentinel/metrics?history=0").get_json()["history"]
+        self.assertEqual((none_asked["timestamps"], none_asked["full"]), ([], True))
+
+    def test_epoch_must_be_a_whole_number(self):
+        for epoch in ("abc", "1.5", "1e3"):
+            with self.subTest(epoch=epoch):
+                body = self.refused(self.get("/api/sentinel/metrics?history=5&epoch=" + epoch), 400, "invalid_request")
+                self.assertEqual(body["error"], "`epoch` must be a whole number.")
+                self.assertEqual(body["hint"], "Send the `epoch` of the history you hold, or omit it.")
+        self.assertEqual(self.transport.calls, [], "refused before anything reached the board")
+        self.assertEqual(self.get("/api/sentinel/metrics?history=5&epoch=").status_code, 200)
 
     def test_the_first_metrics_read_seeds_history_from_the_daemons_cache(self):
         seed = [sample(f"2026-09-22T20:55:{second}Z", rtsn_0=60.0 + i)["sample"] for i, second in enumerate(("41", "43", "45"))]

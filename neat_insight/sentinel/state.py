@@ -10,16 +10,16 @@ import threading
 import time
 from collections import deque
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional, Tuple
 
 # ~8 minutes of history at Sentinel's two-second cadence.
 HISTORY_LIMIT = 240
 # The history is bounded by sample count, not by time, and nothing polls it while the
 # Stats page is closed. Sentinel samples every two seconds and Insight's slowest backed-off
 # poll is 30 seconds, so a longer gap than this means nobody was watching, not that the
-# board went quiet. The samples either side of such a gap are not one trend: the sparklines
-# draw their points evenly spaced, so splicing them would show an hours-old value and the
-# current one as two neighbouring moments. A gap starts the history again instead.
+# board went quiet. The samples either side of such a gap are not one trend: spliced, they
+# would show an hours-old value and the current one as two neighbouring moments. A gap starts
+# the history again instead.
 HISTORY_GAP_SEC = 60.0
 IDENTITY_TTL_SEC = 30.0
 DEFINITIONS_TTL_SEC = 60.0
@@ -54,6 +54,10 @@ class BoardCache:
         self._key = None
         self._values = {}
         self._history = deque(maxlen=history_limit)
+        # Counts every change that makes a window a caller holds invalid: the history started
+        # again, or gained samples before the oldest. It never resets, so a new board does not
+        # repeat an epoch an earlier one had.
+        self._epoch = 0
         self._seeded = False
         self._seed_quarantined = False
         self._daemon_instance = None
@@ -97,7 +101,7 @@ class BoardCache:
             if not self._reset_unlocked(key):
                 return
             if instance_id != self._daemon_instance:
-                self._history = deque(maxlen=self.history_limit)
+                self._restart_history_unlocked()
                 self._seeded = False
                 self._seed_quarantined = False
                 self._daemon_instance = instance_id
@@ -120,14 +124,14 @@ class BoardCache:
                 previous, current = moment(previous_timestamp), moment(timestamp)
                 if previous is not None and current is not None:
                     if current < previous:
-                        self._history.clear()
+                        self._restart_history_unlocked()
                         # Sentinel's ring still contains samples from before the clock step.
                         self._seeded = True
                         self._seed_quarantined = True
                     if current == previous:
                         return list(self._history)
             if self._interrupted_unlocked(timestamp):
-                self._history.clear()
+                self._restart_history_unlocked()
                 # The seed path trims a clock-corrected ring to its current epoch.
                 self._seeded = False
             self._history.append(sample)
@@ -173,6 +177,9 @@ class BoardCache:
                 earlier = []
             merged = [sample for _, sample in earlier] + list(self._history)
             self._history = deque(merged[-self.history_limit:], maxlen=self.history_limit)
+            if earlier:
+                # A caller's window now misses what came before it.
+                self._epoch += 1
             return list(self._history)
 
     def _interrupted_unlocked(self, timestamp: str) -> bool:
@@ -189,6 +196,32 @@ class BoardCache:
         with self._lock:
             return list(self._history) if key == self._key else []
 
+    def window(self, key, limit: int, after: Optional[str], epoch: Optional[int]) -> Tuple[List[dict], bool, int]:
+        """The samples to send a caller of this board, whether they replace its window, and the epoch.
+
+        A caller that holds the history up to the sample stamped `after`, of this `epoch`, gets only
+        the samples newer than that. It gets the newest `limit` samples, flagged full, when it holds
+        nothing, another epoch, a sample the history no longer has, or fewer than the samples it
+        missed. Appending to a window of another epoch would splice two runs into one trend.
+        """
+        with self._lock:
+            history = list(self._history) if key == self._key else []
+            stamps = [sample.get("timestamp") for sample in history]
+            if limit <= 0:
+                return [], True, self._epoch
+            if after is None or epoch != self._epoch or after not in stamps:
+                return history[-limit:], True, self._epoch
+            newer = history[stamps.index(after) + 1:]
+            # The caller's whole window is gone: what it holds would end before the newer samples begin.
+            if len(newer) > limit:
+                return history[-limit:], True, self._epoch
+            return newer, False, self._epoch
+
+    def _restart_history_unlocked(self) -> None:
+        """Start the history empty. The one place the history restarts, and the epoch is bumped."""
+        self._history = deque(maxlen=self.history_limit)
+        self._epoch += 1
+
     def _reset_unlocked(self, key) -> bool:
         """Make `key` the cached board, unless it is from an older board selection; return whether it is.
 
@@ -200,7 +233,7 @@ class BoardCache:
         if key != self._key:
             self._key = key
             self._values = {}
-            self._history = deque(maxlen=self.history_limit)
+            self._restart_history_unlocked()
             self._seeded = False
             self._seed_quarantined = False
             self._daemon_instance = None

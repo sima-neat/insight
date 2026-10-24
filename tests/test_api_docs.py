@@ -119,6 +119,22 @@ class ApiDocumentationTests(unittest.TestCase):
                 self.assertTrue(ref.startswith("#/"))
                 self.assertIsNotNone(_follow_json_pointer(self.spec, ref))
 
+    def test_sentinel_metrics_documents_after_epoch_and_the_full_window(self):
+        operation = self.spec["paths"]["/api/sentinel/metrics"]["get"]
+        parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
+        self.assertEqual(set(parameters), {"history", "after", "epoch"})
+        self.assertEqual(parameters["epoch"]["schema"]["type"], "integer")
+        self.assertEqual(parameters["after"]["schema"]["type"], "string")
+        # Larger values are clamped, not refused, so the schema must not promise a 400.
+        self.assertNotIn("maximum", parameters["history"]["schema"])
+        self.assertIn("240", parameters["history"]["description"])
+        self.assertIn("`history.full: true`", operation["description"])
+        self.assertNotIn("evenly spaced", operation["description"])
+        history = self.spec["components"]["schemas"]["SentinelMetrics"]["properties"]["history"]
+        self.assertTrue({"full", "epoch"} <= set(history["required"]))
+        self.assertEqual(history["properties"]["full"]["type"], "boolean")
+        self.assertEqual(history["properties"]["epoch"]["type"], "integer")
+
     def test_board_error_schema_includes_sentinel_runtime_codes(self):
         codes = set(self.spec["components"]["schemas"]["BoardError"]["properties"]["code"]["enum"])
         self.assertTrue({

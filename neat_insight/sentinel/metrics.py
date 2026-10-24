@@ -64,17 +64,20 @@ def _hottest(metrics: List[dict]) -> Optional[str]:
     return max(temperatures, key=lambda m: m["value"])["key"] if temperatures else None
 
 
-def series(history: List[dict], keys: List[str], limit: int) -> dict:
-    """Bounded per-metric series for sparklines: aligned timestamps, `null` where missing."""
-    window = history[-limit:] if limit > 0 else []
+def series(history: List[dict], keys: List[str]) -> dict:
+    """Per-metric series of the samples given: aligned timestamps, `null` where missing."""
     return {
-        "timestamps": [sample.get("timestamp") for sample in window],
-        "series": {key: [_number((sample.get("values") or {}).get(key)) for sample in window] for key in keys},
+        "timestamps": [sample.get("timestamp") for sample in history],
+        "series": {key: [_number((sample.get("values") or {}).get(key)) for sample in history] for key in keys},
     }
 
 
-def build(definitions: dict, latest: dict, history: List[dict], history_limit: int = 0) -> dict:
-    """Join `/v1/metrics` and `/v1/samples/latest` into grouped, labelled, ranked metrics."""
+def build(definitions: dict, latest: dict, history: List[dict], *, full: bool = True, epoch: int = 0) -> dict:
+    """Join `/v1/metrics` and `/v1/samples/latest` into grouped, labelled, ranked metrics.
+
+    `history` is the window to send, already limited (`BoardCache.window`); `full` says it
+    replaces the caller's window rather than extending it, and `epoch` which history it is of.
+    """
     sample = latest.get("sample") or {}
     values = sample.get("values") or {}
     defined = [d for d in definitions.get("metrics") or [] if isinstance(d, dict) and d.get("key")]
@@ -105,5 +108,5 @@ def build(definitions: dict, latest: dict, history: List[dict], history_limit: i
         "groups": [{"name": name, "metrics": groups[name]} for name in sorted(groups)],
         # Sentinel's own order, which its ops view lists in: sensors of one group are not adjacent.
         "order": [metric["key"] for metric in metrics],
-        "history": series(history, [metric["key"] for metric in metrics], history_limit),
+        "history": dict(series(history, [metric["key"] for metric in metrics]), full=full, epoch=epoch),
     }

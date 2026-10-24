@@ -34,6 +34,13 @@ each.
   fields null or empty and a `missing: ["neat"]` list (ports and the web UI address still filled in),
   where upstream returns invented sample data (`_fake_sysinfo_payload`, removed here). A `neat`
   answer passes through unchanged.
+- `GET /api/sentinel/metrics`: takes optional `after` (the newest sample timestamp the caller holds) and
+  `epoch` (the caller's `history.epoch`), and `history` in the answer gains `full` and `epoch`. With both
+  parameters the answer holds only the samples after `after` (`full: false`); a reset, gap, restart or
+  reseed of the history, an unknown `after`, or more new samples than `history` asks for answers the
+  whole window with `full: true`. A non-integer `epoch` is `400 invalid_request`. `BoardCache` keeps the
+  epoch and limits the window (`window()`); `metrics.build` and `series` no longer take a history limit.
+  Additive: no existing field changes.
 
 ## Port log
 
