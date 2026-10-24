@@ -779,6 +779,14 @@ describe('StreamingPage', () => {
     );
   });
 
+  it('the ⋯ menu’s items hug their text at the panel’s start (the kit’s neatPopoverItem)', async () => {
+    await open();
+    await openMore();
+    for (const label of ['Reset', 'Clear renditions']) {
+      expect(menuItem(label).classList, label).toContain('self-start');
+    }
+  });
+
   it('Clear renditions asks with the usage fetched as it opens and as it is clicked', async () => {
     slots.renditions.set({ count: 0, bytes: 0 });
     await open();

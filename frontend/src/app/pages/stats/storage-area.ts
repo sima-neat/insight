@@ -1,6 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { NeatAsideHeading } from '@sima/neat-ui';
-import { areaMetrics, metricChart, pairChart, type TelemetryWindow } from '../../stats/telemetry';
+import {
+  areaMetrics,
+  metricChart,
+  networkChart,
+  pairChart,
+  type TelemetryWindow,
+} from '../../stats/telemetry';
 import { MetricsTable } from './metrics-table';
 import { StatsChart } from './stats-chart';
 
@@ -46,9 +52,7 @@ export class StorageArea {
     pairChart(this.window(), ['disk_emmc_read_mbps', 'disk_emmc_write_mbps'], ['Read', 'Write']),
   );
 
-  protected readonly network = computed(() =>
-    pairChart(this.window(), ['net_rx_mbps', 'net_tx_mbps'], ['Receive', 'Transmit']),
-  );
+  protected readonly network = computed(() => networkChart(this.window()));
 
   protected readonly metrics = computed(() => areaMetrics(this.window(), 'storage'));
 }

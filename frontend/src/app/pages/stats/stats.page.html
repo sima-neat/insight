@@ -1,0 +1,260 @@
+<ng-container *neatPageToolbar>
+  @if (body() === 'telemetry') {
+    <neat-status-chip [tone]="updateChip().tone">{{ updateChip().label }}</neat-status-chip>
+    @switch (updateAction()) {
+      @case ('resume') {
+        <button neatButton type="button" variant="text" size="small" (click)="telemetry.resume()">
+          <neat-icon name="play" />
+          Resume
+        </button>
+      }
+      @case ('retry') {
+        <button neatButton type="button" variant="text" size="small" (click)="telemetry.retry()">
+          <neat-icon name="refresh" />
+          Retry
+        </button>
+      }
+      @default {
+        <button neatButton type="button" variant="text" size="small" (click)="telemetry.pause()">
+          <neat-icon name="pause" />
+          Pause
+        </button>
+      }
+    }
+  }
+
+  <neat-popover label="More actions" align="end" [(open)]="moreOpen">
+    <button
+      neatButton
+      neatPopoverTrigger
+      type="button"
+      variant="text"
+      size="small"
+      iconOnly
+      aria-label="More actions"
+      neatTooltip="More actions"
+      neatTooltipPosition="bottom"
+    >
+      <neat-icon name="more" />
+    </button>
+    <ng-template neatPopoverContent>
+      <!-- The Sentinel facts head the menu, each only once it is known (spec, "Sentinel facts"). -->
+      @if (version(); as version) {
+        <p neatNote>Sentinel {{ version }}</p>
+      }
+      @if (sessionStarted(); as started) {
+        <p neatNote>{{ started }}</p>
+      }
+      <!-- The item's tooltip opens to the left, where it covers no other item. -->
+      <button
+        neatButton
+        neatPopoverItem
+        type="button"
+        variant="text"
+        size="small"
+        [neatTooltip]="exportTooltip()"
+        neatTooltipPosition="left"
+        [disabled]="!canExport()"
+        (click)="exportCsv()"
+      >
+        Export CSV
+      </button>
+    </ng-template>
+  </neat-popover>
+  <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('stats', $event)" />
+</ng-container>
+
+<neat-page [aside]="asideShown() ? 'open' : 'closed'">
+  <app-announcement>{{ announcement() }}</app-announcement>
+
+  @switch (body()) {
+    @case ('read-failed') {
+      <app-board-problem-notice [problem]="board.error()!">
+        <app-board-settings-action neatCalloutActions />
+      </app-board-problem-notice>
+    }
+    @case ('no-target') {
+      <div class="empty">
+        <neat-callout tone="info" heading="Select a board to see its telemetry" [headingLevel]="2">
+          <p>Stats shows the live telemetry SiMa Sentinel reads on the selected board.</p>
+          <button
+            neatButton
+            neatCalloutActions
+            type="button"
+            size="small"
+            variant="outlined"
+            (click)="openBoard()"
+          >
+            Choose a board
+          </button>
+        </neat-callout>
+      </div>
+    }
+    @case ('checking') {
+      <p neatNote role="status">Checking Sentinel on the board…</p>
+    }
+    @case ('telemetry') {
+      <div class="telemetry">
+        @if (boardFailure(); as failure) {
+          <app-board-problem-notice [problem]="failure.problem">
+            @if (telemetry.failure()?.retryable) {
+              <button
+                neatButton
+                neatCalloutActions
+                type="button"
+                size="small"
+                variant="outlined"
+                (click)="telemetry.retry()"
+              >
+                Retry
+              </button>
+            }
+            <app-board-settings-action neatCalloutActions />
+          </app-board-problem-notice>
+        } @else if (telemetry.failure(); as failure) {
+          <neat-callout tone="danger" [heading]="failure.title" [headingLevel]="2">
+            <p>{{ failure.problem.message }}</p>
+            @if (failure.hint) {
+              <p neatNote>{{ failure.hint }}</p>
+            }
+            @if (failure.retryable) {
+              <button
+                neatButton
+                neatCalloutActions
+                type="button"
+                size="small"
+                variant="outlined"
+                (click)="telemetry.retry()"
+              >
+                Retry
+              </button>
+            }
+          </neat-callout>
+        }
+
+        @if (collectorErrors().length) {
+          <neat-callout
+            tone="warning"
+            heading="Sentinel reported collector errors"
+            [headingLevel]="2"
+          >
+            <ul class="errors">
+              @for (error of collectorErrors(); track $index) {
+                <li>{{ error }}</li>
+              }
+            </ul>
+          </neat-callout>
+        }
+
+        @if (telemetry.window(); as window) {
+          <div class="cards">
+            @for (view of cards(); track view.card.id) {
+              <neat-chart-card
+                selectable
+                [heading]="view.card.heading"
+                [value]="view.value"
+                [unit]="view.unit"
+                [caption]="view.caption"
+                [selected]="selectedCard() === view.card.id"
+                (activate)="openCard(view.card.id)"
+              >
+                @if (view.chip; as chip) {
+                  <neat-status-chip neatChartCardChip [tone]="chip.tone">
+                    {{ chip.label }}
+                  </neat-status-chip>
+                }
+                <app-stats-chart
+                  headless
+                  [label]="view.card.heading"
+                  [chart]="view.chart"
+                  [times]="window.times"
+                />
+              </neat-chart-card>
+            }
+          </div>
+
+          <neat-collapsible
+            label="All metrics"
+            [summary]="
+              window.metrics.length + (window.metrics.length === 1 ? ' metric' : ' metrics')
+            "
+            [(open)]="allMetricsOpen"
+          >
+            <!-- Every metric's sparkline redrawn on each poll: only while someone looks. -->
+            @if (allMetricsOpen()) {
+              <app-metrics-table [metrics]="window.metrics" [window]="window" label="All metrics" />
+            }
+          </neat-collapsible>
+        } @else {
+          <p neatNote>Waiting for the first reading from Sentinel…</p>
+        }
+      </div>
+    }
+    @case ('not-ready') {
+      @if (notReadyBoardFailure(); as failure) {
+        <app-board-problem-notice [problem]="failure.problem">
+          <ng-container ngProjectAs="[neatCalloutActions]" [ngTemplateOutlet]="checkAgain" />
+          <app-board-settings-action neatCalloutActions />
+        </app-board-problem-notice>
+      } @else {
+        <div class="empty" [attr.aria-busy]="installing()?.here || rechecking() || null">
+          <neat-callout [tone]="notReady().tone" [heading]="notReady().heading" [headingLevel]="2">
+            @if (notReady().body; as body) {
+              <p>{{ body }}</p>
+            }
+            @if (canInstall()) {
+              <!--
+                While an install runs it waits with aria-disabled rather than disabled, so that a
+                keyboard still reaches the tooltip that names the board it runs on.
+              -->
+              <button
+                neatButton
+                neatCalloutActions
+                type="button"
+                size="small"
+                [neatTooltip]="installTooltip()"
+                neatTooltipPosition="bottom"
+                [attr.aria-disabled]="installing() ? true : null"
+                (click)="installSentinel()"
+              >
+                {{ installing()?.here ? 'Installing…' : 'Install Sentinel' }}
+              </button>
+            } @else {
+              <ng-container ngProjectAs="[neatCalloutActions]" [ngTemplateOutlet]="checkAgain" />
+            }
+          </neat-callout>
+          @if (installerOutput(); as output) {
+            <neat-collapsible label="Installer output">
+              <pre>{{ output }}</pre>
+            </neat-collapsible>
+          }
+        </div>
+      }
+    }
+  }
+
+  @if (asideShown()) {
+    <section neatPageAside neatAsidePanel aria-label="Stats area">
+      @if (telemetry.window(); as window) {
+        <app-stats-area-panel [area]="area()" [window]="window" />
+      } @else {
+        <p neatNote>Waiting for the first reading from Sentinel…</p>
+      }
+    </section>
+  }
+</neat-page>
+
+<!-- Check again asks the board's service manager again (`refresh=1`), and says so while it does. -->
+<ng-template #checkAgain>
+  <button
+    neatButton
+    neatCalloutActions
+    type="button"
+    size="small"
+    variant="outlined"
+    [attr.aria-disabled]="rechecking() || null"
+    (click)="recheck()"
+  >
+    {{ rechecking() ? 'Checking…' : 'Check again' }}
+  </button>
+</ng-template>

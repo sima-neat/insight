@@ -25,7 +25,12 @@ import {
   NeatDialogBody,
   type NeatDialogRef,
 } from '@sima/neat-ui/dialog';
-import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-ui/popover';
+import {
+  NeatPopover,
+  NeatPopoverContent,
+  NeatPopoverItem,
+  NeatPopoverTrigger,
+} from '@sima/neat-ui/popover';
 import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatSlider } from '@sima/neat-ui/slider';
@@ -99,6 +104,7 @@ function clearedMessage({ removed, freed_bytes, kept }: RenditionsCleared): stri
     NeatPageToolbar,
     NeatPopover,
     NeatPopoverContent,
+    NeatPopoverItem,
     NeatPopoverTrigger,
     NeatSegmented,
     NeatSelectList,

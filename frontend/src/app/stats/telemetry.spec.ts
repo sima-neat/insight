@@ -17,6 +17,7 @@ import {
   metricChart,
   metricsMatching,
   metricsQuery,
+  networkChart,
   pairChart,
   powerRailsChart,
   sessionCsv,
@@ -531,6 +532,18 @@ describe('the chart inputs', () => {
     expect(network?.series.map((s) => s.label)).toEqual(['Transmit']);
     expect(network?.headline).toBe('—');
     expect(pairChart(window, ['net_rx_mbps', 'nothing'], ['Receive', 'Other'])).toBeNull();
+  });
+
+  it('networkChart is the pair chart of receive and transmit that the Network card and its area share', () => {
+    const window = live(5);
+    expect(networkChart(window)).toEqual(
+      pairChart(window, ['net_rx_mbps', 'net_tx_mbps'], ['Receive', 'Transmit']),
+    );
+    expect(OVERVIEW_CARDS.find((card) => card.id === 'network')?.keys).toEqual([
+      'net_rx_mbps',
+      'net_tx_mbps',
+    ]);
+    expect(networkChart(without(window, (m) => m.key.startsWith('net_')))).toBeNull();
   });
 
   it('thermalMaxChart draws the hottest reading per sample with the shared thresholds and the hottest sensor’s tone', () => {

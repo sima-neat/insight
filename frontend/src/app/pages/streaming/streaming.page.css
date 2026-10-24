@@ -1,12 +1,3 @@
-/*
- * Toolbar. The shell's toolbar row (or kiosk mode's floating bar) lays the controls out, and on a
- * tablet scrolls it sideways. The ⋯ menu's panel stacks its items; they keep their own width, and
- * their tooltips open to the left, where they cover no other item.
- */
-.menu-item {
-  align-self: flex-start;
-}
-
 /* The kind is a code (VID, CAM, EXT, URL), set off from the source it qualifies. */
 .kind {
   color: var(--muted-foreground);

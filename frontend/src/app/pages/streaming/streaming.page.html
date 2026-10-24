@@ -58,12 +58,13 @@
       <neat-icon name="more" />
     </button>
     <ng-template neatPopoverContent>
+      <!-- The items' tooltips open to the left, where they cover no other item. -->
       <button
         neatButton
         type="button"
         variant="text"
         size="small"
-        class="menu-item"
+        neatPopoverItem
         [neatTooltip]="bulkTooltip()"
         neatTooltipPosition="left"
         [disabled]="bulkLocked()"
@@ -76,7 +77,7 @@
         type="button"
         variant="text"
         size="small"
-        class="menu-item"
+        neatPopoverItem
         neatTooltip="Delete cached FPS renditions; they are re-created on the next start"
         neatTooltipPosition="left"
         [disabled]="!hasRenditions()"

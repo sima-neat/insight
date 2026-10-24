@@ -1,0 +1,44 @@
+/* The telemetry, top to bottom: what is wrong, the cards, then All metrics. */
+.telemetry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-4);
+}
+
+/*
+ * As many 18rem columns as fit, sharing the rest; on a phone narrower than one column the card
+ * takes the width it has rather than pushing the page sideways.
+ */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(18rem, 100%), 1fr));
+  gap: var(--neat-space-4);
+}
+
+.errors {
+  margin: 0;
+  padding-inline-start: var(--neat-space-4);
+}
+
+/*
+ * An empty state (no board, Sentinel not ready) stands in the middle of the page at a reading
+ * width, as the one thing there is to do.
+ */
+.empty {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--neat-space-4);
+  box-sizing: border-box;
+  min-block-size: 100%;
+  max-inline-size: 40rem;
+  margin-inline: auto;
+}
+
+/* The installer's output keeps its lines; a long one wraps rather than widening the page. */
+pre {
+  margin: 0;
+  font-size: var(--neat-text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

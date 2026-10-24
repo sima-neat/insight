@@ -293,6 +293,9 @@ export interface OverviewCard {
   readonly keys: readonly string[];
 }
 
+/** Network in and out, which the Network card and the Storage & Network area chart together. */
+const NETWORK_KEYS = ['net_rx_mbps', 'net_tx_mbps'] as const;
+
 /** The cards in #170's order (Inv-S §2.5). */
 export const OVERVIEW_CARDS: readonly OverviewCard[] = [
   { id: 'thermal-max', heading: 'Thermal max', area: 'thermal', keys: [] },
@@ -300,7 +303,7 @@ export const OVERVIEW_CARDS: readonly OverviewCard[] = [
   { id: 'cpu', heading: 'CPU usage', area: 'system', keys: ['cpu_usage_pct'] },
   { id: 'linux-memory', heading: 'Linux memory', area: 'system', keys: ['linux_mem_used_pct'] },
   { id: 'mla-memory', heading: 'MLA memory', area: 'system', keys: ['mla_mem_allocated_mb'] },
-  { id: 'network', heading: 'Network', area: 'storage', keys: ['net_rx_mbps', 'net_tx_mbps'] },
+  { id: 'network', heading: 'Network', area: 'storage', keys: NETWORK_KEYS },
 ];
 
 /** A card is shown while the board reports anything in its area. */
@@ -380,6 +383,11 @@ export function pairChart(
     tone: 'default',
     headline: formatValue(currentTotal(requested.map(({ metric }) => metric?.value ?? null)), unit),
   };
+}
+
+/** Network in and out on one chart, headed by their current total: the Network card's and its area's. */
+export function networkChart(window: TelemetryWindow): ChartInputs | null {
+  return pairChart(window, NETWORK_KEYS, ['Receive', 'Transmit']);
 }
 
 /**
