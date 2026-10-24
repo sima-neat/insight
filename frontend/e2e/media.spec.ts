@@ -494,6 +494,57 @@ test.describe('Import with mocked APIs', () => {
     await expect(page.getByRole('navigation', { name: 'Current folder' })).toContainText('street');
   });
 
+  test('the catalog Size heading ends where its cells end', async ({ page }) => {
+    await withMockedMedia(page);
+    // Two sizes of different widths, so the column is as wide as the longer one and the shorter
+    // one has to sit at the column's end to line up.
+    const [street] = CATALOG.assets;
+    await page.route(
+      (url) => url.pathname === '/api/media-catalog',
+      (route) =>
+        route.fulfill({
+          json: {
+            ...CATALOG,
+            assets: [
+              street,
+              {
+                ...street,
+                profile: '1080p30',
+                path: 'street/street_1080p30_30fps_h264.mp4',
+                bytes: 1_610_612_736,
+              },
+            ],
+          },
+        }),
+    );
+    await page.setViewportSize(DESKTOP);
+    await page.goto('/media');
+    await tool(page, 'Import…').click();
+    await importDialog(page).getByRole('tab', { name: 'Catalog', exact: true }).click();
+    const list = importDialog(page).locator('neat-select-list', {
+      has: page.getByRole('listbox', { name: 'Catalog assets' }),
+    });
+    await expect(list.getByRole('option')).toHaveCount(2);
+
+    // The right edge of the text itself: a heading's or a cell's box fills its column whichever
+    // way the text sits in it.
+    const textEdges = (selector: string) =>
+      list.locator(selector).evaluateAll((elements) =>
+        elements.map((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return range.getBoundingClientRect().right;
+        }),
+      );
+    const [heading] = await textEdges('[data-slot="select-list-header"] span:text-is("Size")');
+    const cells = await textEdges('[role="option"] .size');
+
+    expect(cells).toHaveLength(2);
+    for (const edge of cells) {
+      expect(Math.abs(edge - heading), `heading ${heading}, cells ${cells}`).toBeLessThanOrEqual(1);
+    }
+  });
+
   test('the dialog keeps its height whichever tab is open, at 1366×768 and 1920×1080', async ({
     page,
   }) => {

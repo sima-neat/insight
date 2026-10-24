@@ -69,11 +69,7 @@
             [(checked)]="state.typePaths"
             (activated)="toggleType($event)"
           >
-            <!--
-              A narrower dialog gives up Dimensions first, then Codec. No column sizes to its
-              content: the heading row is a grid of its own, so an auto width would differ from
-              the rows' and push the headings off their columns.
-            -->
+            <!-- A narrower dialog gives up Dimensions first, then Codec. -->
             <ng-template neatColumn="source" header="Name" width="minmax(0, 1.4fr)" let-row>
               <app-cell-text>{{ row.source }}</app-cell-text>
             </ng-template>
@@ -103,7 +99,7 @@
             >
               <app-cell-text>{{ row.dimensions }}</app-cell-text>
             </ng-template>
-            <ng-template neatColumn="size" header="Size" width="5rem" let-row>
+            <ng-template neatColumn="size" header="Size" width="max-content" align="end" let-row>
               <app-cell-text class="size">{{ row.size }}</app-cell-text>
             </ng-template>
           </neat-select-list>
@@ -165,11 +161,7 @@
                 [selected]="selectedVariant()"
                 (selectedChange)="pickVariant($event)"
               >
-                <!--
-                  Beside the sources the list is narrower: it gives up Dimensions, then Codec. Fixed
-                  widths for the same reason as the by-type list's (its heading row is a grid of
-                  its own).
-                -->
+                <!-- Beside the sources the list is narrower: it gives up Dimensions, then Codec. -->
                 <ng-template
                   neatColumn="profile"
                   header="Resolution & FPS"
@@ -196,7 +188,13 @@
                 >
                   <app-cell-text>{{ row.dimensions }}</app-cell-text>
                 </ng-template>
-                <ng-template neatColumn="size" header="Size" width="5rem" let-row>
+                <ng-template
+                  neatColumn="size"
+                  header="Size"
+                  width="max-content"
+                  align="end"
+                  let-row
+                >
                   <app-cell-text class="size">{{ row.size }}</app-cell-text>
                 </ng-template>
               </neat-select-list>

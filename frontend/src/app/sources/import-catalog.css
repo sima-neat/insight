@@ -52,8 +52,7 @@
   min-width: 0;
 }
 
-/* A size reads against the others in its column: at the end, in figures of one width. */
+/* A size reads against the others in its column, in figures of one width. */
 .size {
   font-variant-numeric: tabular-nums;
-  text-align: end;
 }
