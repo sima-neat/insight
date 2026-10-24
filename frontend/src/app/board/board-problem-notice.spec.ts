@@ -25,6 +25,19 @@ class Host {
   readonly trusted: string[] = [];
 }
 
+/** A caller with an action of its own, as Peripherals passes Open board settings. */
+@Component({
+  imports: [BoardProblemNotice],
+  template: `
+    <app-board-problem-notice [problem]="problem()">
+      <button neatCalloutActions type="button">Open board settings</button>
+    </app-board-problem-notice>
+  `,
+})
+class HostWithAction {
+  readonly problem = signal<BoardProblem>(new BoardProblem('', '', '', {}));
+}
+
 const COMMAND = 'ssh-copy-id -p 22 sima@192.168.1.20';
 const authFailed = new BoardProblem(
   'SSH key authentication as sima on 192.168.1.20 failed.',
@@ -200,6 +213,26 @@ describe('BoardProblemNotice', () => {
     fixture.componentInstance.announce.set(true);
     await settle();
     expect(fixture.nativeElement.querySelector('neat-callout').getAttribute('role')).toBe('alert');
+  });
+
+  // Final review M-2: the caller's actions are kept with a changed host key too.
+  it("shows the caller's own actions with every problem, beside its own", async () => {
+    const withAction = TestBed.createComponent(HostWithAction);
+    const actions = async (problem: BoardProblem) => {
+      withAction.componentInstance.problem.set(problem);
+      await new Promise((resolve) => setTimeout(resolve));
+      await withAction.whenStable();
+      const callout: HTMLElement = withAction.nativeElement.querySelector('neat-callout');
+      return [...callout.querySelectorAll('[data-slot="callout-actions"] button')].map(text);
+    };
+    expect(await actions(keyChanged({ presented_fingerprint: PRESENTED }))).toEqual([
+      'Trust new key…',
+      'Open board settings',
+    ]);
+    expect(await actions(authFailed)).toEqual(['Copy command', 'Open board settings']);
+    expect(await actions(new BoardProblem('Timed out.', 'timeout', '', {}))).toEqual([
+      'Open board settings',
+    ]);
   });
 
   it('other problems are a danger callout with the message and hint', async () => {

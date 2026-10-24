@@ -23,8 +23,8 @@ const COPY_REFUSED =
  * Why the board cannot be used, and the way out where there is one (Inv-PB §1.4, problem notice):
  * a refused key gets the `ssh-copy-id` command that authorizes Insight's key, with Copy; a changed
  * host key gets both fingerprints and Trust new key…, which asks first. Any other problem is its
- * message and hint, with the actions the caller projects (`neatCalloutActions`): the dialog's
- * failed board read is one too, with its Retry. The dialog decides which problem shows (an
+ * message and hint. Every problem carries the actions the caller projects (`neatCalloutActions`)
+ * after its own: the dialog's failed board read is one, with its Retry. The dialog decides which problem shows (an
  * action's own, else the one the board state repeats) and runs the trust itself, so that it waits
  * for any other board action.
  */
@@ -32,22 +32,31 @@ const COPY_REFUSED =
   selector: 'app-board-problem-notice',
   imports: [NeatButton, NeatCallout, NeatCode, NeatDetails, NeatNote],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // One callout for every problem, so that the caller's actions have one place to project into
+  // (a second `ng-content` with the same selector would never receive them).
   template: `
     @let shown = problem();
-    @if (shown.code === 'host_key_changed') {
-      <neat-callout tone="warning" [announce]="announce() ? 'alert' : null">
-        <div class="body">
-          <p>{{ shown.message }}</p>
-          @if (shown.hint) {
-            <p neatNote>{{ shown.hint }}</p>
-          }
+    <neat-callout
+      [tone]="keyChanged() ? 'warning' : 'danger'"
+      [announce]="announce() ? 'alert' : null"
+    >
+      <div class="body">
+        <p>{{ shown.message }}</p>
+        @if (shown.hint) {
+          <p neatNote>{{ shown.hint }}</p>
+        }
+        @if (keyChanged()) {
           <dl neatDetails>
             <dt>Expected</dt>
             <dd>{{ expected() || 'unknown' }}</dd>
             <dt>Presented</dt>
             <dd>{{ presented() || 'unknown' }}</dd>
           </dl>
-        </div>
+        } @else if (command(); as command) {
+          <code neatCode class="command">{{ command }}</code>
+        }
+      </div>
+      @if (keyChanged()) {
         <button
           neatButton
           neatCalloutActions
@@ -60,33 +69,20 @@ const COPY_REFUSED =
         >
           Trust new key…
         </button>
-      </neat-callout>
-    } @else {
-      <neat-callout tone="danger" [announce]="announce() ? 'alert' : null">
-        <div class="body">
-          <p>{{ shown.message }}</p>
-          @if (shown.hint) {
-            <p neatNote>{{ shown.hint }}</p>
-          }
-          @if (command(); as command) {
-            <code neatCode class="command">{{ command }}</code>
-          }
-        </div>
-        @if (command(); as command) {
-          <button
-            neatButton
-            neatCalloutActions
-            type="button"
-            size="small"
-            variant="outlined"
-            (click)="copy(command)"
-          >
-            Copy command
-          </button>
-        }
-        <ng-content select="[neatCalloutActions]" ngProjectAs="[neatCalloutActions]" />
-      </neat-callout>
-    }
+      } @else if (command(); as command) {
+        <button
+          neatButton
+          neatCalloutActions
+          type="button"
+          size="small"
+          variant="outlined"
+          (click)="copy(command)"
+        >
+          Copy command
+        </button>
+      }
+      <ng-content select="[neatCalloutActions]" ngProjectAs="[neatCalloutActions]" />
+    </neat-callout>
   `,
   styleUrl: './board-problem-notice.css',
 })
@@ -105,6 +101,7 @@ export class BoardProblemNotice {
   private readonly confirm = inject(NeatConfirm);
   private readonly toasts = inject(NeatToasts);
 
+  protected readonly keyChanged = computed(() => this.problem().code === 'host_key_changed');
   /** `auth_failed`'s command that authorizes Insight's key on the board (`ssh-copy-id …`). */
   protected readonly command = computed(() =>
     this.problem().code === 'auth_failed' ? detail(this.problem(), 'command') : '',
