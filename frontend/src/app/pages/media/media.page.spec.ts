@@ -131,7 +131,7 @@ describe('MediaPage', () => {
   const nameOf = (row: HTMLElement) =>
     row.querySelector('[data-slot="file-name"] .truncate')!.textContent!.trim();
   const tagOf = (row: HTMLElement) =>
-    row.querySelector('[data-slot="file-tag"]')?.textContent?.trim() ?? '';
+    row.querySelector('neat-status-chip')?.textContent?.trim() ?? '';
   const rowOf = (name: string): HTMLElement => rows().find((row) => nameOf(row) === name)!;
   /** Ticks a file's box, as a click on the box (and nothing else on the row) does. */
   const tick = (name: string) =>

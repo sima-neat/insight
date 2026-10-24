@@ -47,20 +47,20 @@ export function toFileNodes(
           name: node.name,
           path: node.path,
           type: 'file',
-          disabled: true,
+          unavailable: true,
           tag: NOT_STREAMABLE,
         });
       }
       continue;
     }
     const children = toFileNodes(node.children, mode);
-    const nothingToPick = !children.some((child) => child.type === 'file' || !child.disabled);
+    const nothingToPick = !children.some((child) => child.type === 'file' || !child.unavailable);
     nodes.push({
       name: node.name.replace(/^\//, ''),
       path: node.path,
       type: 'folder',
       children,
-      ...(mode === 'pick' && nothingToPick ? { disabled: true } : {}),
+      ...(mode === 'pick' && nothingToPick ? { unavailable: true } : {}),
     });
   }
   return nodes;

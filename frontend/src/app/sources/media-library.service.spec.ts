@@ -73,7 +73,7 @@ describe('toFileNodes', () => {
                 name: 'notes.txt',
                 path: 'catalog/street/notes.txt',
                 type: 'file',
-                disabled: true,
+                unavailable: true,
                 tag: 'NOT STREAMABLE',
               },
             ],
@@ -87,7 +87,7 @@ describe('toFileNodes', () => {
                 name: 'readme.txt',
                 path: 'catalog/docs/readme.txt',
                 type: 'file',
-                disabled: true,
+                unavailable: true,
                 tag: 'NOT STREAMABLE',
               },
             ],
@@ -99,7 +99,7 @@ describe('toFileNodes', () => {
         name: 'readme.txt',
         path: 'readme.txt',
         type: 'file',
-        disabled: true,
+        unavailable: true,
         tag: 'NOT STREAMABLE',
       },
     ]);
@@ -118,7 +118,7 @@ describe('toFileNodes', () => {
             type: 'folder',
             children: [{ name: 'day.mp4', path: 'catalog/street/day.mp4', type: 'file' }],
           },
-          { name: 'docs', path: 'catalog/docs', type: 'folder', children: [], disabled: true },
+          { name: 'docs', path: 'catalog/docs', type: 'folder', children: [], unavailable: true },
         ],
       },
       { name: 'clip.mp4', path: 'clip.mp4', type: 'file' },
@@ -131,17 +131,17 @@ describe('toFileNodes', () => {
       folder('c', [folder('c/d', [file('c/d/y.mp4')])]),
     ];
     const [a, c] = toFileNodes(nested, 'pick');
-    expect(a.disabled).toBe(true);
-    expect(a.children?.[0].disabled).toBe(true);
-    expect(c.disabled).toBeUndefined();
+    expect(a.unavailable).toBe(true);
+    expect(a.children?.[0].unavailable).toBe(true);
+    expect(c.unavailable).toBeUndefined();
   });
 
   it('maps an empty library to an empty tree, and an empty folder is greyed only in pick mode', () => {
     expect(toFileNodes([], 'pick')).toEqual([]);
 
     const empty = [folder('empty', [])];
-    expect(toFileNodes(empty, 'manage')[0].disabled).toBeUndefined();
-    expect(toFileNodes(empty, 'pick')[0].disabled).toBe(true);
+    expect(toFileNodes(empty, 'manage')[0].unavailable).toBeUndefined();
+    expect(toFileNodes(empty, 'pick')[0].unavailable).toBe(true);
   });
 });
 
