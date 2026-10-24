@@ -669,14 +669,18 @@ describe('PeripheralsPage', () => {
     expect(posts(stopUrl(unlisted.id))).toHaveLength(0);
   });
 
-  // F23: the panel's title carries the row's chip, Previewing included.
-  it("the side panel shows the selected camera's panel, titled with its row's chip", async () => {
+  // Ruling F4: the row says Previewing (F23); the panel's title names the camera's own state and
+  // the status chip the preview's, so the panel never shows Previewing beside Live.
+  it("the side panel shows the selected camera's panel, titled with the camera's own chip", async () => {
     await visit({ preview: live30 });
+    expect(chipOf(imx477.name)).toBe('Previewing');
     const panel = aside()!.querySelector('app-camera-panel')!;
     expect(panel.querySelector('h2')?.textContent?.trim()).toBe(imx477.name);
     expect(panel.querySelector('app-panel-title neat-status-chip')?.textContent?.trim()).toBe(
-      'Previewing',
+      'Available',
     );
+    expect(panel.querySelector('.status neat-status-chip')?.textContent?.trim()).toBe('Live');
+    expect(panel.textContent).not.toContain('Previewing');
     expect(panel.querySelector('app-preview-frame img')?.getAttribute('src')).toBe(
       live30.stream_url,
     );

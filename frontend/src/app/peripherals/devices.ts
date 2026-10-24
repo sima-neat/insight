@@ -357,10 +357,19 @@ function usbOf(item: PeripheralItem): UsbFacts | undefined {
   return isCamera(item) || isMicrophone(item) ? item.device.usb : undefined;
 }
 
-/** The first that applies: this page's activity, a camera kept from an earlier scan, the tier. */
+/** The first that applies: this page's activity, then the device's own chip (`deviceChip`). */
 function rowChip(item: PeripheralItem, activity: DeviceActivity): DeviceChip {
   if (item.id === activity.previewing) return PREVIEWING;
   if (item.id === activity.testing) return TESTING;
+  return deviceChip(item);
+}
+
+/**
+ * A device's own state, without what the page does with it: a camera kept from an earlier scan,
+ * else its tier. The camera panel's title shows it (ruling F4), since the panel's status chip
+ * shows the preview's state.
+ */
+export function deviceChip(item: PeripheralItem): DeviceChip {
   if (isCamera(item)) {
     // The camera may have been unplugged since that scan, so it says where it comes from.
     return item.modes_source === 'previous-scan' ? LAST_SCAN : tierInfo(item.support.tier);

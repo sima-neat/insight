@@ -32,7 +32,7 @@ import {
   sizeOptions,
 } from '../../peripherals/camera-modes';
 import { CameraPreview } from '../../peripherals/camera-preview';
-import { type DeviceChip, isSnapshotStale } from '../../peripherals/devices';
+import { deviceChip, isSnapshotStale } from '../../peripherals/devices';
 import { PeripheralsSession } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import {
@@ -102,8 +102,6 @@ let nextId = 0;
 })
 export class CameraPanel {
   readonly camera = input.required<CameraItem>();
-  /** The camera's row chip in the device list, which the title repeats. */
-  readonly chip = input.required<DeviceChip>();
 
   private readonly board = inject(BoardService);
   private readonly peripherals = inject(PeripheralsService);
@@ -114,6 +112,12 @@ export class CameraPanel {
 
   protected readonly reasonId = `camera-panel-reason-${nextId++}`;
 
+  /**
+   * The title's chip: the camera's own state (its tier, or Last scan), not the row's Previewing
+   * (ruling F4): the status chip under the preview says what the preview does, so the panel never
+   * shows Previewing beside Live.
+   */
+  protected readonly titleChip = computed(() => deviceChip(this.camera()));
   /** Why the camera is not Available: one line, or none (`cameraSummaryLine`). */
   protected readonly summary = computed(() => cameraSummaryLine(this.camera()));
 

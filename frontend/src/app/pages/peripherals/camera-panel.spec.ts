@@ -20,7 +20,6 @@ import {
   support,
   usb,
 } from '../../peripherals/cameras.testing';
-import type { DeviceChip } from '../../peripherals/devices';
 import { PeripheralsSession } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import { peripheralSnapshot } from '../../peripherals/snapshots.testing';
@@ -32,7 +31,6 @@ const START_URL = '/api/peripherals/cameras/preview';
 const stopUrl = (id: string) => `${START_URL}/${id}/stop`;
 const badGateway = { status: 502, statusText: 'Bad Gateway' };
 
-const AVAILABLE: DeviceChip = { label: 'Available', tone: 'success' };
 /** The imx477 with two Available sizes, so a size can be changed while it streams. */
 const imx477Two: CameraItem = {
   ...imx477,
@@ -55,11 +53,10 @@ const usbLive = previewSession({
 @Component({
   imports: [CameraPanel],
   providers: [CameraPreview],
-  template: `<app-camera-panel [camera]="camera()" [chip]="chip()" />`,
+  template: `<app-camera-panel [camera]="camera()" />`,
 })
 class Host {
   readonly camera = signal<CameraItem>(imx477);
-  readonly chip = signal<DeviceChip>(AVAILABLE);
 }
 
 describe('CameraPanel', () => {
@@ -226,6 +223,21 @@ describe('CameraPanel', () => {
         .querySelector('app-device-details button[aria-expanded]')
         ?.getAttribute('aria-expanded'),
     ).toBe('false');
+  });
+
+  // Ruling F4: the title names the camera's own state, never the preview's: the status chip does.
+  it("the title's chip is the camera's own (its tier, or Last scan), whatever the preview does", async () => {
+    await settle();
+    preview.adopt(previewSession());
+    await settle();
+    expect(titleChip()).toBe('Available');
+    expect(statusChip()).toEqual({ label: 'Live', tone: 'success' });
+    expect(panel().textContent).not.toContain('Previewing');
+
+    await show(usb);
+    expect(titleChip()).toBe('Unsupported');
+    await show({ ...imx477, modes_source: 'previous-scan' });
+    expect(titleChip()).toBe('Last scan');
   });
 
   it('the status line names size, format and up to N fps once live', async () => {

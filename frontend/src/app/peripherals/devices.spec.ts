@@ -12,6 +12,7 @@ import {
   boardCameraSetup,
   changeSummary,
   type DeviceActivity,
+  deviceChip,
   deviceFacts,
   deviceGroups,
   deviceRow,
@@ -260,6 +261,15 @@ describe('the device model', () => {
     expect(chip(imx568)).toEqual({ label: 'Unsupported', tone: 'neutral' });
     expect(chip(onboardMic)).toEqual({ label: 'Available', tone: 'success' });
     expect(chip(other('radar', 'r1'))).toEqual({ label: 'Not supported yet', tone: 'neutral' });
+  });
+
+  // Ruling F4: a camera panel's title names the device's own state; the preview has its own chip.
+  it("a device's own chip is its row's without the page's preview or test", () => {
+    for (const item of [imx477, inUse, usb, imx568, yeti, onboardMic, other('radar', 'r1')]) {
+      expect(deviceChip(item)).toEqual(deviceRow(item, idle).chip);
+    }
+    expect(deviceChip(imx477)).toEqual({ label: 'Available', tone: 'success' });
+    expect(deviceChip(inUse)).toEqual({ label: 'Last scan', tone: 'neutral' });
   });
 
   // The tier half of #170's "labels for tiers, sources, and defaults" (ruling Q5; Task 7 did the rest).

@@ -107,7 +107,7 @@
         @for (device of selectedDevices(); track device.id) {
           @if (device.row; as row) {
             @if (isCamera(row.item)) {
-              <app-camera-panel [camera]="row.item" [chip]="row.chip" />
+              <app-camera-panel [camera]="row.item" />
             } @else if (isMicrophone(row.item)) {
               <app-microphone-panel [microphone]="row.item" [chip]="row.chip" />
             } @else {
