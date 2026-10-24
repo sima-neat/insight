@@ -461,6 +461,48 @@ describe('PeripheralsService', () => {
     expect(refreshes()).toHaveLength(1);
   });
 
+  it('scanOnce refreshes a scanned board once after rescanOnNextVisit for its generation, and not for another', async () => {
+    const entered = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(1, [item('camera', 'cam-1')]));
+    await entered;
+    service.scanOnce(board(1));
+    expect(refreshes()).toHaveLength(0);
+
+    // Another board's mark waits for that board.
+    service.rescanOnNextVisit(2);
+    service.scanOnce(board(1));
+    expect(refreshes()).toHaveLength(0);
+
+    service.rescanOnNextVisit(1);
+    service.scanOnce(board(1));
+    const [rescan] = refreshes();
+    rescan.flush(snapshot(1, [item('camera', 'cam-1'), item('microphone', 'mic-1')]));
+    await tick();
+    expect(service.snapshot()?.items).toHaveLength(2);
+
+    // The mark is spent: the next visit finds the board scanned again.
+    service.scanOnce(board(1));
+    expect(refreshes()).toHaveLength(0);
+  });
+
+  it('rescanOnNextVisit scans a generation that was already auto-scanned, and waits for its snapshot', async () => {
+    const entered = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(1, null));
+    await entered;
+    service.scanOnce(board(1));
+    refreshes()[0].flush(unreachable, badGateway);
+    await tick();
+    service.scanOnce(board(1));
+    expect(refreshes()).toHaveLength(0);
+
+    service.rescanOnNextVisit(1);
+    // The snapshot on show is another board's: the mark is kept for the visit that loaded this one.
+    service.scanOnce(board(2));
+    expect(refreshes()).toHaveLength(0);
+    service.scanOnce(board(1));
+    expect(refreshes()).toHaveLength(1);
+  });
+
   /** Holds the board re-read that ends every scan until the test resolves it. */
   function deferredReload(): { resolve(): void } {
     let resolve!: () => void;

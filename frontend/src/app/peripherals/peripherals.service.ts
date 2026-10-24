@@ -66,6 +66,8 @@ export class PeripheralsService {
    * on every mount, Inv-PB §6.9); Refresh is the way to try again.
    */
   private readonly autoScanned = new Set<number>();
+  /** The board generations whose next `scanOnce` scans whatever the snapshot says (`rescanOnNextVisit`). */
+  private readonly rescanNext = new Set<number>();
   /** The board generation last seen, to notice when it goes down. */
   private lastGeneration: number | null = null;
 
@@ -108,16 +110,28 @@ export class PeripheralsService {
   /**
    * The automatic first scan of a board, once per board generation in this app session: it scans
    * when the board has a target and the loaded snapshot is that generation's and unscanned. Call
-   * it after `load()`.
+   * it after `load()`. A board marked by `rescanOnNextVisit` scans once regardless.
    */
   scanOnce(board: BoardState): void {
     this.noteGeneration(board.generation);
     const snapshot = this.snapshotValue();
     if (!board.target || snapshot === null) return;
-    if (snapshot.generation !== board.generation || isScanned(snapshot)) return;
-    if (this.autoScanned.has(board.generation)) return;
+    if (snapshot.generation !== board.generation) return;
+    // A rescan asked for is owed whether or not the board was scanned or auto-scanned before.
+    const owed = this.rescanNext.delete(board.generation);
+    if (!owed && (isScanned(snapshot) || this.autoScanned.has(board.generation))) return;
     this.autoScanned.add(board.generation);
     void this.scanFor(board.generation);
+  }
+
+  /**
+   * Makes the next `scanOnce` for board `generation` scan once more, though its snapshot is
+   * scanned and the generation already auto-scanned: something changed on the board that the old
+   * scan could not have seen (Sentinel was installed, and Peripherals scans through it). The scan
+   * waits for the next visit instead of running now, since nobody is looking at Peripherals.
+   */
+  rescanOnNextVisit(generation: number): void {
+    this.rescanNext.add(generation);
   }
 
   /**
@@ -196,7 +210,10 @@ export class PeripheralsService {
    */
   private noteGeneration(generation: number | null): void {
     if (generation === null) return;
-    if (this.lastGeneration !== null && generation < this.lastGeneration) this.autoScanned.clear();
+    if (this.lastGeneration !== null && generation < this.lastGeneration) {
+      this.autoScanned.clear();
+      this.rescanNext.clear();
+    }
     this.lastGeneration = generation;
     if (this.scanErrorGeneration !== generation) this.scanErrorValue.set(null);
   }

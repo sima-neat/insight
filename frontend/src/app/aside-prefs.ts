@@ -2,15 +2,15 @@ import { Injectable, signal, type WritableSignal } from '@angular/core';
 import { PrefixedStorage } from './prefixed-storage';
 
 /** The pages whose side panel is remembered here; the Viewer keeps its own in its layout. */
-export type AsidePage = 'streaming' | 'media' | 'peripherals';
+export type AsidePage = 'streaming' | 'media' | 'peripherals' | 'stats';
 
 const OPEN = 'open';
 const CLOSED = 'closed';
 
 /**
- * Whether Streaming's, Media's and Peripherals' side panels are open: remembered per page, across
- * visits and reloads, as the Viewer remembers its own (`LayoutPrefs.inspector`). One rule for all
- * four pages.
+ * Whether Streaming's, Media's, Peripherals' and Stats' side panels are open: remembered per page,
+ * across visits and reloads, as the Viewer remembers its own (`LayoutPrefs.inspector`). One rule
+ * for all five pages.
  * Stored as `neat-insight:<page>:aside`; a panel is open until the user closes it, as it was before
  * anything was remembered.
  */
@@ -21,6 +21,7 @@ export class AsidePrefs {
     streaming: signal(this.read('streaming')),
     media: signal(this.read('media')),
     peripherals: signal(this.read('peripherals')),
+    stats: signal(this.read('stats')),
   };
 
   /** Whether `page`'s side panel is open. */

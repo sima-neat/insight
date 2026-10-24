@@ -32,6 +32,18 @@ describe('AsidePrefs', () => {
     expect(storage.values.get('neat-insight:peripherals:aside')).toBe('closed');
   });
 
+  it('remembers the Stats panel as neat-insight:stats:aside', () => {
+    const prefs = TestBed.inject(AsidePrefs);
+    expect(prefs.open('stats')).toBe(true);
+    prefs.setOpen('stats', false);
+    expect(prefs.open('stats')).toBe(false);
+    expect(prefs.open('peripherals')).toBe(true);
+    expect(storage.values.get('neat-insight:stats:aside')).toBe('closed');
+
+    prefs.setOpen('stats', true);
+    expect(storage.values.get('neat-insight:stats:aside')).toBe('open');
+  });
+
   it('reads what an earlier session stored, as after a reload', () => {
     storage.values.set('neat-insight:streaming:aside', 'closed');
     expect(TestBed.inject(AsidePrefs).open('streaming')).toBe(false);

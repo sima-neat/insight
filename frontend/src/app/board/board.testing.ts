@@ -57,10 +57,14 @@ export class FakeBoard {
   readonly startShell = vi.fn<() => Promise<ShellInfo>>();
 }
 
-/** `PeripheralsService` as the board dialog uses it: the snapshot, and the read it asks for. */
+/**
+ * `PeripheralsService` as the board dialog and the Sentinel install use it: the snapshot, the read
+ * it asks for, and the rescan it owes the next visit.
+ */
 export class FakePeripherals {
   readonly snapshot = signal<PeripheralSnapshot | null>(null);
   readonly load = vi.fn(async () => undefined);
+  readonly rescanOnNextVisit = vi.fn<(generation: number) => void>();
 }
 
 /** A promise the test settles itself, for answers that arrive out of order. */
