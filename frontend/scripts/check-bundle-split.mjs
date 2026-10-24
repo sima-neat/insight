@@ -1,13 +1,13 @@
 // Fails when code that belongs to a lazy route is in the initial bundle, or is missing from the
 // build.
 //
-// The Viewer's video code (`@sima/neat-ui/video`) and the Streaming, Media and Peripherals pages,
-// with the kit entries only they use, are meant to load with their routes, and the top bar's board
-// and System Info dialogs on their first open, so the first paint does not pay for them. The
-// compiler already rejects video symbols imported from the kit's primary entry point, but nothing
-// else notices when an import in the shared code (a page, the shell, `app.config`) drags one of
-// these into the main chunk. This script checks the result: each marker below is a component
-// selector, a string that survives minification, so it shows where the code ended up.
+// The Viewer's video code (`@sima/neat-ui/video`) and the Streaming, Media, Peripherals and Stats
+// pages, with the kit entries only they use, are meant to load with their routes, and the top
+// bar's board and System Info dialogs on their first open, so the first paint does not pay for
+// them. The compiler already rejects video symbols imported from the kit's primary entry point,
+// but nothing else notices when an import in the shared code (a page, the shell, `app.config`)
+// drags one of these into the main chunk. This script checks the result: each marker below is a
+// component selector, a string that survives minification, so it shows where the code ended up.
 //
 // `neat-toast-host` and `neat-status-chip` are not markers on purpose: the app root renders the
 // toast host, and the top bar's board pill, on every page, shows the board's state in a status
@@ -48,15 +48,23 @@ const LAZY_CODE = [
   {
     marker: 'neat-collapsible',
     what: 'the kit’s collapsible',
-    route: 'Peripherals and the board and System Info dialogs',
+    route: 'Stats, Peripherals and the board and System Info dialogs',
   },
   {
     marker: 'neat-callout',
     what: 'the kit’s callout',
-    route: 'Peripherals, the Viewer and the board and System Info dialogs',
+    route: 'Stats, Peripherals, the Viewer and the board and System Info dialogs',
   },
   // The microphone test's meter, on the Peripherals route only.
   { marker: 'neat-level-meter', what: 'the kit’s level meter', route: 'the Peripherals route' },
+  { marker: 'app-stats-page', what: 'the Stats page', route: 'the Stats route' },
+  // The kit's charts entry (`@sima/neat-ui/charts`, with d3's scale and shape modules behind it):
+  // only Stats draws charts, so these load with its route.
+  { marker: 'neat-time-chart', what: 'the kit’s time chart', route: 'the Stats route' },
+  { marker: 'neat-stacked-chart', what: 'the kit’s stacked chart', route: 'the Stats route' },
+  { marker: 'neat-heatmap', what: 'the kit’s heatmap', route: 'the Stats route' },
+  { marker: 'neat-sparkline', what: 'the kit’s sparkline', route: 'the Stats route' },
+  { marker: 'neat-chart-card', what: 'the kit’s chart card', route: 'the Stats route' },
 ];
 const dist = process.argv[2] ?? 'dist';
 

@@ -7,6 +7,16 @@ const systemInfo = (page: Page) => page.getByRole('button', { name: 'System info
 
 const pill = (page: Page) => page.locator('app-board-pill button');
 
+/**
+ * The page the System Info tests open the dialog from: Streaming with no slots, which asks for
+ * nothing else. (Stats polls the board's Sentinel, and these tests are about the dialog.)
+ */
+const answerEmptyStreaming = (page: Page) =>
+  page.route(
+    (url) => url.pathname === '/api/mediasrc',
+    (route) => route.fulfill({ json: [] }),
+  );
+
 /** The pages with the widest page tools, and what each needs answered to show them. */
 const PAGES = [
   {
@@ -101,8 +111,9 @@ test('System information opens from the top bar, tells what it can without neat,
   page,
 }) => {
   await answerTopBar(page);
+  await answerEmptyStreaming(page);
   await page.setViewportSize(LAPTOP);
-  await page.goto('/stats');
+  await page.goto('/streaming');
   const button = systemInfo(page);
   await expect(button).toBeVisible();
 
@@ -163,8 +174,9 @@ test('every list in System information starts its values in the same column', as
         },
       }),
   );
+  await answerEmptyStreaming(page);
   await page.setViewportSize(LAPTOP);
-  await page.goto('/stats');
+  await page.goto('/streaming');
   await systemInfo(page).click();
   const dialog = page.getByRole('dialog', { name: 'System information' });
   await dialog.getByRole('button', { name: 'Components' }).click();

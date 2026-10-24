@@ -92,13 +92,15 @@ merging.
   A new page needs both, and `navigation.spec.ts` checks that they agree. The old app's paths keep
   working: `/rtsp` and `/visualizer` redirect to their pages, and `/` and unknown paths (old
   `/workspace` and `/genai` bookmarks) land on Streaming.
-- **Side panels.** Viewer, Streaming, Media and Peripherals open their side panel with the kit's
-  `neat-aside-toggle` ("Side panel") and build it from the kit's aside parts (`neatAsidePanel`,
-  `neatAsideTitle`, `neatAsideHeading`, `neatAsideActions`, `neatCode`). Whether a page's panel is
-  open is remembered per page in storage: the Viewer in its layout (`LayoutPrefs`), Streaming,
-  Media and Peripherals in `AsidePrefs` (`neat-insight:<page>:aside`). Where the user was on a page
-  (Viewer position, Streaming's slot, Media's folder and selection, Peripherals' device and modes)
-  lives in memory for the next visit (`ViewerSession`, `SourcesSession`, `PeripheralsSession`).
+- **Side panels.** Viewer, Streaming, Media, Peripherals and Stats open their side panel with the
+  kit's `neat-aside-toggle` ("Side panel") and build it from the kit's aside parts
+  (`neatAsidePanel`, `neatAsideTitle`, `neatAsideHeading`, `neatAsideActions`, `neatCode`). Whether
+  a page's panel is open is remembered per page in storage: the Viewer in its layout
+  (`LayoutPrefs`), Streaming, Media, Peripherals and Stats in `AsidePrefs`
+  (`neat-insight:<page>:aside`). Where the user was on a page (Viewer position, Streaming's slot,
+  Media's folder and selection, Peripherals' device and modes, Stats' card and thermal group) lives
+  in memory for the next visit (`ViewerSession`, `SourcesSession`, `PeripheralsSession`,
+  `StatsSession`).
 - **Shared app components.** Each is a styled pattern with more than one use (the one-place rule
   above), so use it instead of writing the markup again:
   - `app-list-column` lays out a list page's main column for `neat-page scroll="none"`: what
@@ -109,16 +111,25 @@ merging.
     for news the screen already shows another way. It is the app's one copy of the `sr-only` rule:
     the app has no Tailwind, so the kit's utility does not reach it.
   - `app-panel-title` opens a side panel: the subject as its heading (`neatAsideTitle`) with its
-    state chip beside it (Streaming's slot panel, Peripherals' device panels, Stats' areas, where
-    a null chip leaves it out). It is parked for a kit change: `neatAsideTitle` gaining a chip
-    slot would replace it.
+    optional state chip beside it (Streaming's slot panel, Peripherals' device panels, Stats'
+    areas; a null chip leaves it out). It is parked for a kit change: `neatAsideTitle` gaining a
+    chip slot would replace it.
+  - `app-stats-chart` is one metric's time chart (`neat-time-chart`) from the inputs a builder in
+    `stats/telemetry.ts` made, its values worded in the chart's unit. Every Stats chart, in the
+    cards and in each area, is this one, so none words a value or sets a scale of its own.
+  - `app-metrics-table` lists metrics as a table (name, group, value, a sparkline of the window,
+    status): Stats' All metrics and its Storage & Network area.
   - `app-board-problem-notice` says why the board cannot be used, with the way out where there is
     one: `auth_failed`'s `ssh-copy-id` command with Copy, `host_key_changed`'s fingerprints with
     Trust new key… (which asks first), and the caller's own actions (Retry, Open board settings).
-    The board dialog and Peripherals use it.
+    The board dialog, Peripherals and Stats use it.
   - `app-board-settings-action` is a callout's "Open board settings"
     (`<app-board-settings-action neatCalloutActions />`), for a problem the board's settings fix;
-    it opens the board dialog through `TopBarDialogs`. Peripherals' notices use it.
+    it opens the board dialog through `TopBarDialogs`. Peripherals' and Stats' notices use it.
+  - `app/format-bytes.ts` (`formatBytes`) words every byte count in the app (media sizes, System
+    Info's memory and disk), so one quantity reads the same everywhere.
+  - A ⋯ menu's items are the kit's `neatPopoverItem` on a `neatButton` (Stats' menu), inside a
+    `neat-popover`; there is no app component for them.
 - **Key/value lists** use the kit's `neatDetails`. Lists that should start their values in one
   column but cannot share a grid (System Info's sections open and close on their own) set the
   kit's `--neat-details-term-width` on a common ancestor rather than restyling the list's grid
@@ -132,7 +143,7 @@ merging.
   bundle on every page, and the dialogs, with the kit entries only they use, would cost every first
   paint for something most visits never open.
 - **The board** has one reader and writer, `BoardService` (root-provided): the pill, the board
-  dialog, Peripherals and (with plan 5) Stats read its state, and its actions (select, Check again,
+  dialog, Peripherals and Stats read its state, and its actions (select, Check again,
   trust a host key) answer with the fresh state; page code never fetches `/api/board` itself. It is
   re-read when the window regains focus and after every action, never polled on a timer:
   `GET /api/board` does not connect to the board, and the pages' own board traffic keeps its
@@ -150,13 +161,26 @@ merging.
   running on entry, or one a refused Start finds) goes through the page's `CameraPreview.onAdopt`,
   which selects its camera and remembers its mode, so the page never leaves, and so stops, a
   preview it just took up.
+- **Stats** splits its state by how long it lives, as Peripherals does. `SentinelTelemetry` is
+  provided by the page, so it lives exactly as long as it: leaving Stats stops every request to the
+  board (the state read, the metric polls), and because the backend holds the history, coming back
+  shows the full window at once. `SentinelInstall` is root-provided, so an install (which takes
+  minutes) outlives the page: leaving Stats and coming back still finds it running, and its toast
+  says when it ended. `StatsSession` (root) keeps the chosen card and thermal group for the next
+  visit. The history is incremental: the first poll asks for the window (`history=240`), the next
+  ones pass `after` (the newest timestamp held) and `epoch` (which history it is of), and the
+  answer holds only the newer samples; an answer marked `full` replaces the window instead (the
+  backend sends one when the `epoch` named is not its current history's: the daemon restarted or
+  the board changed). Only Stats
+  polls Sentinel: nothing else does, and `/api/metrics` (System Info's "This computer") is read
+  on open and on Refresh only.
 - **Build output.** `npm run build` writes the app to `frontend/dist` with `index.html` at its root,
   where Flask (`_resolve_frontend_dist`) and `build.sh` look for it. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 700 kB, as in the kit showcase. The initial bundle measures 691.7 kB raw with kit 0.11.1 (the
-  shared chunk 578 kB, main 21 kB, styles 92 kB; 691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the board pill and
+  at 700 kB, as in the kit showcase. The initial bundle measures 691.9 kB raw with kit 0.11.2 (the
+  shared chunk 580 kB, main 20 kB, styles 92 kB; 691.7 kB with kit 0.11.1; 691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the board pill and
   System Info's button; 650 kB with kit 0.9.0; 694 kB with kit 0.5.3, before the kit split into per-component entries),
   most of it the kit's shell, the toast host (rendered in the app root, so it is in main on purpose)
   and Angular with its router, plus the XHR backend (`withXhr()`, 4 kB: only XHR reports the upload
@@ -164,15 +188,19 @@ merging.
   ceiling stays.
   (`angular.json` cannot hold comments, so the reason lives here.) The kit's video code is imported from
   `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and stays out of the
-  initial bundle. Streaming, Media and Peripherals are lazy routes too, and so are the kit entries
-  only they use (`/file-browser`, `/select-list`, `/dialog`, and Peripherals' `/level-meter`). The
+  initial bundle. Streaming, Media, Peripherals and Stats are lazy routes too, and so are the kit
+  entries only they use (`/file-browser`, `/select-list`, `/dialog`, Peripherals' `/level-meter`
+  and the charts entry, `/charts`, which only Stats draws with and which brings d3's scale and
+  shape modules: nothing outside Stats imports it, and a type-only import is erased). The
   top bar's board and System Info dialogs are imported on their first open (`TopBarDialogs`), with
   the kit entries they bring (`/collapsible`, `/callout`, which Peripherals and the Viewer use
   too).
   `npm run check:bundle` (after a build, and in CI) fails if any of that leaks into the initial
   bundle, or goes missing from the build: its markers are the selectors of the Viewer's video tile,
-  the three lazy pages (`app-streaming-page`, `app-media-page`, `app-peripherals-page`), the two
-  dialogs (`app-board-dialog`, `app-system-info-dialog`) and those kit entries. The toast host and
+  the four lazy pages (`app-streaming-page`, `app-media-page`, `app-peripherals-page`,
+  `app-stats-page`), the two dialogs (`app-board-dialog`, `app-system-info-dialog`) and those kit
+  entries, the charts entry's among them (`neat-time-chart`, `neat-stacked-chart`,
+  `neat-heatmap`, `neat-sparkline`, `neat-chart-card`). The toast host and
   the status chip are the kit entries that are there on purpose: the app root renders the toast
   host, and the board pill shows its state in a status chip on every page. A new lazy page or
   dialog adds its selector.

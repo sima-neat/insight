@@ -1,5 +1,6 @@
 import { expect, Locator, Page, test } from '@playwright/test';
 import { pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { FakeStatsBackend } from './stats-mocks';
 import { answerTopBar } from './top-bar';
 
 // The top bar's pill reads the board on every page.
@@ -257,19 +258,22 @@ for (const { name, size } of VIEWPORTS) {
 }
 
 // Every page holds the top bar's pill and System Info without a spill: Media, Streaming, Viewer and
-// Peripherals check it in their own specs with their content; Stats, a placeholder until plan 5,
-// here.
+// Peripherals check it in their own specs with their content, Stats here with its telemetry shown,
+// which gives it the widest tools of any page: the update chip, Pause, the menu and the side
+// panel's toggle (the tablet scrolls them, R14). Stats' own spec holds its layout.
 for (const { name, size } of VIEWPORTS) {
   test(`Stats fits beside the pill and System Info at ${name}`, async ({ page }) => {
+    await new FakeStatsBackend().install(page);
     await page.setViewportSize(size);
     await page.goto('/stats');
     await expect(page.locator('app-board-pill button')).toContainText('Not checked');
     await expect(page.getByRole('button', { name: 'System information' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Page tools' })).toContainText('Live');
 
     expect(await pageOverflow(page)).toEqual([
       { horizontal: 0, vertical: 0 },
       { horizontal: 0, vertical: 0 },
     ]);
-    expect(await topBarSpill(page, false)).toEqual({ spilled: [], toolsOverflow: 0 });
+    expect(await topBarSpill(page, size === TABLET)).toEqual({ spilled: [], toolsOverflow: 0 });
   });
 }
