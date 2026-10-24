@@ -283,8 +283,12 @@ export class PeripheralsPage {
     });
     // The preview shows in its camera's panel: when that panel goes (another device selected, the
     // side panel closed), the page leaves the preview, as #170 did when the camera changed. It
-    // runs on what is shown and whose preview it is, not on the preview's state: a stop that
-    // fails keeps the preview, which must not send the stop again by itself.
+    // runs on what is shown and whose preview it is, not on the preview's state, so that a stop
+    // that fails, keeping the preview and its camera, is not sent again by itself. One case sends
+    // it once more: a start left while still starting has no camera until its answer comes and
+    // is stopped; when that stop fails before this effect runs, the effect first sees the camera
+    // with the preview kept live, and leaves it again. That is one more stop of a preview nobody
+    // shows, and its failure keeps the camera, so nothing repeats.
     effect(() => {
       const shown = this.panelCamera();
       const previewed = this.preview.camera();
