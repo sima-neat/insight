@@ -115,6 +115,9 @@ merging.
     one: `auth_failed`'s `ssh-copy-id` command with Copy, `host_key_changed`'s fingerprints with
     Trust new key… (which asks first), and the caller's own actions (Retry, Open board settings).
     The board dialog and Peripherals use it.
+  - `app-board-settings-action` is a callout's "Open board settings"
+    (`<app-board-settings-action neatCalloutActions />`), for a problem the board's settings fix;
+    it opens the board dialog through `TopBarDialogs`. Peripherals' notices use it.
 - **Key/value lists** use the kit's `neatDetails`. Lists that should start their values in one
   column but cannot share a grid (System Info's sections open and close on their own) set the
   kit's `--neat-details-term-width` on a common ancestor rather than restyling the list's grid
@@ -151,7 +154,7 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 700 kB, as in the kit showcase. The initial bundle measures 684.5 kB raw with kit 0.10.2 (the
+  at 700 kB, as in the kit showcase. The initial bundle measures 684.7 kB raw with kit 0.10.3 (the
   shared chunk 572 kB, main 21 kB, styles 91 kB; 672 kB with kit 0.10.0 before the board pill and
   System Info's button; 650 kB with kit 0.9.0; 694 kB with kit 0.5.3, before the kit split into per-component entries),
   most of it the kit's shell, the toast host (rendered in the app root, so it is in main on purpose)
