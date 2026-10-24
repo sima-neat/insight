@@ -1,11 +1,13 @@
 import { Page } from '@playwright/test';
+// Types only, erased at run time: the answers are checked against the shapes the app reads.
+import type { BoardState } from '../src/app/board/api';
 
 /**
  * What `GET /api/board` answers in every test: the SDK-paired DevKit, not checked yet. "Not
  * checked" is the widest chip a board with a target shows, so the layout checks see the pill at
  * its usual widest.
  */
-export const TOP_BAR_BOARD = {
+export const TOP_BAR_BOARD: BoardState = {
   target: {
     mode: 'ssh',
     source: 'sdk-env',

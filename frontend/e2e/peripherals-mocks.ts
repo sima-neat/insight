@@ -18,7 +18,7 @@ import { TOP_BAR_BOARD } from './top-bar';
 
 /** The SDK-paired DevKit of every test (`TOP_BAR_BOARD`), checked and connected. */
 export const CONNECTED_BOARD: BoardState = {
-  ...(TOP_BAR_BOARD as BoardState),
+  ...TOP_BAR_BOARD,
   status: { state: 'connected', checked_at: '2026-10-25T10:00:00Z', error: null },
   board: {
     hostname: 'modalix',
@@ -60,7 +60,7 @@ export const BOARD_UNREACHABLE = {
   },
 };
 
-const LABEL = TOP_BAR_BOARD.target.label;
+const LABEL = TOP_BAR_BOARD.target!.label;
 const available: DeviceAvailability = { state: 'available', users: [], reason: null };
 // SiMa Sentinel never opens a camera, so a camera's availability is always unknown.
 const unknown: DeviceAvailability = { state: 'unknown', users: [], reason: null };

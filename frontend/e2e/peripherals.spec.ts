@@ -110,10 +110,10 @@ for (const { name, size } of VIEWPORTS) {
     await expect(page).toHaveTitle('Neat Insight · Streaming');
     await expect.poll(() => backend.postedPaths().at(-1)).toBe(`${PREVIEW_URL}/p2/stop`);
 
-    // …and coming back starts it again, once, in the mode it had. The board is not scanned again.
+    // …and coming back starts it again, in the mode it had. The board is not scanned again.
+    const leftAt = backend.postedPaths().length;
     await rail(page, 'Peripherals').click();
     await expect(panel(page)).toContainText('Live preview · 1280×720 · NV12');
-    expect(backend.posted(PREVIEW_URL)).toHaveLength(3);
     expect(backend.posted(PREVIEW_URL).at(-1)).toEqual({
       id: IMX477.id,
       format: 'NV12',
@@ -121,6 +121,12 @@ for (const { name, size } of VIEWPORTS) {
       height: 720,
       fps: 60,
     });
+
+    // Exactly once (Review Focus 2): leaving again ends the visit with its stop, and between the
+    // two stops the page asked for one start and nothing else.
+    await rail(page, 'Streaming').click();
+    await expect.poll(() => backend.postedPaths().at(-1)).toBe(`${PREVIEW_URL}/p3/stop`);
+    expect(backend.postedPaths().slice(leftAt)).toEqual([PREVIEW_URL, `${PREVIEW_URL}/p3/stop`]);
     expect(backend.posted(REFRESH_URL)).toHaveLength(1);
   });
 
@@ -190,10 +196,11 @@ for (const { name, size } of VIEWPORTS) {
     await expect(button).toHaveText('Stop recording');
     await expect(panel(page)).toContainText(/Recording · 0:0\d/);
     await expect(device(page, YETI.name)).toContainText('Testing');
-    expect(backend.posted(MIC_TEST_URL)).toEqual([{ id: YETI.id }]);
+    // The button and caption change as the start is sent, before it reaches the board.
+    await expect.poll(() => backend.posted(MIC_TEST_URL)).toEqual([{ id: YETI.id }]);
 
     await button.click();
-    expect(backend.posted(`${MIC_TEST_URL}/stop`)).toEqual([{ token: 't1' }]);
+    await expect.poll(() => backend.posted(`${MIC_TEST_URL}/stop`)).toEqual([{ token: 't1' }]);
     // The recording plays once by itself; then Replay offers it again.
     const replay = panel(page).getByRole('button', { name: 'Replay' });
     await expect(replay).toBeVisible();
