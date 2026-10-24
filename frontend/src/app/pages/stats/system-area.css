@@ -1,0 +1,4 @@
+/* No box of its own: the charts are the panel's parts, one gap apart. */
+:host {
+  display: contents;
+}

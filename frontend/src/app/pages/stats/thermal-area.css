@@ -1,0 +1,27 @@
+/* No box of its own: the note, the chart and the tabs are the panel's parts, one gap apart. */
+:host {
+  display: contents;
+}
+
+.sensors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The name, the sensor's line and its reading, each in a column of its own across the rows. */
+.sensor {
+  display: grid;
+  grid-template-columns: minmax(4rem, 6rem) minmax(0, 1fr) 4.5rem;
+  align-items: center;
+  gap: var(--neat-space-3);
+  font-size: var(--neat-text-sm);
+}
+
+.value {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}

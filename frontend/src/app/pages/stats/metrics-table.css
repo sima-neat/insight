@@ -1,0 +1,50 @@
+/* The group column is dropped by what the table has room for, not by the screen: in the side panel it never fits. */
+:host {
+  display: block;
+  container-type: inline-size;
+}
+
+table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--neat-text-sm);
+}
+
+th,
+td {
+  padding: var(--neat-space-2) var(--neat-space-3);
+  border-block-end: 1px solid var(--border);
+  text-align: start;
+  vertical-align: middle;
+}
+
+thead th {
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+  font-weight: 500;
+}
+
+tbody th {
+  font-weight: 500;
+}
+
+.group {
+  color: var(--muted-foreground);
+}
+
+.value {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The trend takes what the other columns leave, but never so little that the line is a stub. */
+.trend {
+  inline-size: 8rem;
+  min-inline-size: 5rem;
+}
+
+@container (width < 40rem) {
+  .group {
+    display: none;
+  }
+}

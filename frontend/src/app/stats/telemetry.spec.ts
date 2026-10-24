@@ -13,10 +13,12 @@ import {
   currentTotal,
   currentValue,
   mergeTelemetry,
+  metricByKey,
   metricChart,
   metricsMatching,
   metricsQuery,
   pairChart,
+  powerRailsChart,
   sessionCsv,
   sessionCsvFilename,
   thermalGroups,
@@ -574,6 +576,61 @@ describe('the chart inputs', () => {
     const noAverage = without(window, (m) => m.key === 'power_average_watts');
     expect(boardPowerChart(noAverage)?.reference).toBeNull();
     expect(boardPowerChart(without(window, (m) => m.key === 'power_current_watts'))).toBeNull();
+  });
+});
+
+describe('the chart inputs, continued', () => {
+  it('metricByKey finds a metric by its key, and says nothing for one the board does not report', () => {
+    const window = live(2);
+    expect(metricByKey(window, 'cpu_usage_pct')?.label).toBe('CPU usage');
+    expect(metricByKey(window, 'no_such_metric')).toBeUndefined();
+  });
+
+  it('every chart names the unit its values are worded in', () => {
+    const window = live(5);
+    expect(metricChart(window, 'cpu_usage_pct')?.unit).toBe('%');
+    expect(metricChart(window, 'mla_mem_allocated_mb')?.unit).toBe('MB');
+    expect(pairChart(window, ['net_rx_mbps', 'net_tx_mbps'], ['Receive', 'Transmit'])?.unit).toBe(
+      'MB/s',
+    );
+    expect(thermalMaxChart(window)?.unit).toBe('C');
+    expect(boardPowerChart(window)?.unit).toBe('W');
+  });
+
+  it('powerRailsChart: a band per rail in Sentinel’s order, the total as its headline, a scale that holds the stack', () => {
+    const window = live(5);
+    const rails = powerRailsChart(window);
+    expect(rails?.series.map((s) => s.label)).toEqual([
+      'SoC and DDR VDD',
+      'HDMI 1.2V',
+      'SoC and DDR VDDQ',
+      'SoC and DDR VDD2H',
+      'MLA 0.68V',
+      'PCIe and ETH VP',
+      'SOM Platform 1.8V',
+      'SOM Platform 3.3V',
+    ]);
+    // The rails sum to 11.625 W now. The history reads 0 to 4 W on each of the eight rails, so its
+    // largest total is 32 W and the scale is a round number a tenth above that.
+    expect(rails?.headline).toBe('11.63 W across 8 rails');
+    expect(rails?.domain).toEqual([0, 40]);
+  });
+
+  it('powerRailsChart: the scale follows the largest total over the window, and a missing rail leaves no total now', () => {
+    const rails = [
+      metric({ key: 'power_rail_a_watts', short: 'A', unit: 'W', value: 1, group: 'PowerRail' }),
+      metric({ key: 'power_rail_b_watts', short: 'B', unit: 'W', value: null, group: 'PowerRail' }),
+    ];
+    const chart = powerRailsChart(
+      windowOf(rails, { power_rail_a_watts: [4, 1, 1], power_rail_b_watts: [3, null, 1] }),
+    );
+    // Only the first sample is complete: 4 + 3 = 7 W, so the scale reaches past 7.
+    expect(chart?.domain).toEqual([0, 8]);
+    expect(chart?.headline).toBe('— across 2 rails');
+    expect(
+      powerRailsChart(windowOf(rails.slice(0, 1), { power_rail_a_watts: [1] }))?.headline,
+    ).toBe('1.00 W across 1 rail');
+    expect(powerRailsChart(without(live(2), (m) => m.key.startsWith('power_rail_')))).toBeNull();
   });
 });
 

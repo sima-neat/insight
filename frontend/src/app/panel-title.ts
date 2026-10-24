@@ -11,8 +11,8 @@ export interface PanelChip {
 /**
  * A side panel's first line: what the panel is about, as its heading (`neatAsideTitle`), with its
  * state as a chip beside it: `<app-panel-title [chip]="row.state">src3</app-panel-title>`. The
- * chip sits outside the heading, so the heading names the subject only. Streaming's slot panel and
- * Peripherals' device panels open with it.
+ * chip sits outside the heading, so the heading names the subject only, and it is left out while the
+ * chip is null. Streaming's slot panel, Peripherals' device panels and Stats' areas open with it.
  */
 @Component({
   selector: 'app-panel-title',
@@ -20,10 +20,13 @@ export interface PanelChip {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <h2 neatAsideTitle><ng-content /></h2>
-    <neat-status-chip [tone]="chip().tone">{{ chip().label }}</neat-status-chip>
+    @if (chip(); as chip) {
+      <neat-status-chip [tone]="chip.tone">{{ chip.label }}</neat-status-chip>
+    }
   `,
   styleUrl: './panel-title.css',
 })
 export class PanelTitle {
-  readonly chip = input.required<PanelChip>();
+  /** The state beside the heading; null while the subject has none to show (Stats' areas with no alerts). */
+  readonly chip = input<PanelChip | null>(null);
 }

@@ -112,7 +112,8 @@ export function currentTotal(values: readonly (number | null | undefined)[]): nu
 const seriesOf = (window: TelemetryWindow, key: string): readonly (number | null)[] =>
   window.series[key] ?? [];
 
-const metricByKey = (window: TelemetryWindow, key: string): SentinelMetric | undefined =>
+/** A metric by its key; undefined when the board does not report it. */
+export const metricByKey = (window: TelemetryWindow, key: string): SentinelMetric | undefined =>
   window.metrics.find((metric) => metric.key === key);
 
 /** Thresholds that apply to every sensor: the first's when all have the same levels, else none. */
@@ -319,6 +320,8 @@ export function cardReported(window: TelemetryWindow, card: OverviewCard): boole
  */
 export interface ChartInputs {
   series: NeatSeries[];
+  /** What the values are measured in, as Sentinel spells it: the chart words them with it. */
+  unit: string | null;
   domain: readonly [number, number];
   thresholds: NeatThreshold[];
   tone: NeatChartTone;
@@ -339,6 +342,7 @@ export function metricChart(
   const values = seriesOf(window, key);
   return {
     series: [{ key, label: metric.short || metric.label, values }],
+    unit: metric.unit,
     domain: scaleFor(metric.unit, [values, [metric.value]], ceiling),
     thresholds: thresholdsOf(metric),
     tone: lineTone(metric.status),
@@ -367,6 +371,7 @@ export function pairChart(
   }));
   return {
     series,
+    unit,
     domain: scaleFor(
       unit,
       series.map((item) => item.values),
@@ -389,6 +394,7 @@ export function thermalMaxChart(window: TelemetryWindow): ChartInputs | null {
   const name = hottest ? ` (${hottest.short || hottest.label})` : '';
   return {
     series: [{ key: 'thermal-max', label: 'Hottest sensor', values }],
+    unit: 'C',
     domain: scaleFor('C', [values]),
     thresholds,
     tone: lineTone(hottest?.status ?? 'unavailable'),
@@ -418,6 +424,33 @@ export function boardPowerChart(
     reference: isNumber(average)
       ? { value: average, label: `Session average ${fixedValue(average, 'W', 1)}` }
       : null,
+  };
+}
+
+/**
+ * The power rails as the bands of one stack, each in Sentinel's order and under its short name,
+ * on a scale that holds the largest total any sample reached. The headline is the rails' total now
+ * with their count, "—" in place of the total while a rail has no reading (a partial sum was never
+ * measured). Null when the board reports no rail.
+ */
+export function powerRailsChart(
+  window: TelemetryWindow,
+): Pick<ChartInputs, 'series' | 'domain' | 'headline'> | null {
+  const rails = metricsMatching(window, /^power_rail_/);
+  if (!rails.length) return null;
+  const series = rails.map((rail) => ({
+    key: rail.key,
+    label: rail.short || rail.label,
+    values: seriesOf(window, rail.key),
+  }));
+  const totals = window.timestamps.map((_, i) =>
+    currentTotal(series.map((band) => band.values[i])),
+  );
+  const total = currentTotal(rails.map((rail) => rail.value));
+  return {
+    series,
+    domain: scaleFor('W', [totals]),
+    headline: `${isNumber(total) ? fixedValue(total, 'W', 2) : '—'} across ${rails.length} ${rails.length === 1 ? 'rail' : 'rails'}`,
   };
 }
 

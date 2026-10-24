@@ -1,16 +1,15 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import type { NeatTone } from '@sima/neat-ui';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
-import { PanelTitle } from './panel-title';
+import { PanelTitle, type PanelChip } from './panel-title';
 
 @Component({
   imports: [PanelTitle],
   template: `<app-panel-title [chip]="chip()">src3</app-panel-title>`,
 })
 class Host {
-  readonly chip = signal<{ label: string; tone: NeatTone }>({ label: 'Live', tone: 'success' });
+  readonly chip = signal<PanelChip | null>({ label: 'Live', tone: 'success' });
 }
 
 describe('PanelTitle', () => {
@@ -31,5 +30,18 @@ describe('PanelTitle', () => {
     await fixture.whenStable();
     expect(chip.nativeElement.textContent.trim()).toBe('Idle');
     expect(chip.componentInstance.tone()).toBe('neutral');
+  });
+
+  it('shows no chip while there is none, and shows it again when one comes', async () => {
+    const fixture = TestBed.createComponent(Host);
+    fixture.componentInstance.chip.set(null);
+    await fixture.whenStable();
+    const title: HTMLElement = fixture.nativeElement.querySelector('app-panel-title');
+    expect(title.querySelector('h2')!.textContent!.trim()).toBe('src3');
+    expect(title.querySelector('neat-status-chip')).toBeNull();
+
+    fixture.componentInstance.chip.set({ label: '2 warnings', tone: 'warning' });
+    await fixture.whenStable();
+    expect(title.querySelector('neat-status-chip')!.textContent!.trim()).toBe('2 warnings');
   });
 });

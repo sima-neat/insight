@@ -109,8 +109,9 @@ merging.
     for news the screen already shows another way. It is the app's one copy of the `sr-only` rule:
     the app has no Tailwind, so the kit's utility does not reach it.
   - `app-panel-title` opens a side panel: the subject as its heading (`neatAsideTitle`) with its
-    state chip beside it (Streaming's slot panel, Peripherals' device panels). It is parked for a
-    kit change: `neatAsideTitle` gaining a chip slot would replace it.
+    state chip beside it (Streaming's slot panel, Peripherals' device panels, Stats' areas, where
+    a null chip leaves it out). It is parked for a kit change: `neatAsideTitle` gaining a chip
+    slot would replace it.
   - `app-board-problem-notice` says why the board cannot be used, with the way out where there is
     one: `auth_failed`'s `ssh-copy-id` command with Copy, `host_key_changed`'s fingerprints with
     Trust new key… (which asks first), and the caller's own actions (Retry, Open board settings).
