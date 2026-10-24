@@ -30,6 +30,10 @@ each.
 - `POST /api/vf/offer` and the viewer URL (7c71a11, 1cc8e23, 55547e8): vf offers are proxied
   through Flask (JSON only, a bounded channel, vf errors as text), and the viewer URL points at
   `/viewer`.
+- `GET /api/sysinfo`: when `neat` is not on PATH it answers 200 with the `neat --json` shape, unknown
+  fields null or empty and a `missing: ["neat"]` list (ports and the web UI address still filled in),
+  where upstream returns invented sample data (`_fake_sysinfo_payload`, removed here). A `neat`
+  answer passes through unchanged.
 
 ## Port log
 

@@ -246,7 +246,7 @@
         "operationId": "getSystemInfo",
         "responses": {
           "200": {
-            "description": "Structured output from `neat --json`, enriched with Insight URL and port information.",
+            "description": "Structured output from `neat --json`, enriched with Insight URL and port information. When the `neat` command is not installed the status is still 200 with the same shape: unknown fields are null or empty and a `missing` list names what could not be read (`[\"neat\"]`). `missing` is absent when `neat` answered.",
             "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
           },
           "500": {"$ref": "#/components/responses/InternalError"},

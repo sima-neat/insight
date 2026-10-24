@@ -136,6 +136,12 @@ class ApiDocumentationTests(unittest.TestCase):
             responses["504"]["$ref"], "#/components/responses/GatewayTimeout"
         )
 
+    def test_openapi_documents_missing(self):
+        # A neat that is not installed is a 200 with a `missing` list, not an error, so the 200 has to say so.
+        description = self.spec["paths"]["/api/sysinfo"]["get"]["responses"]["200"]["description"]
+
+        self.assertIn("`missing`", description)
+
     def test_board_change_and_preview_operations_document_propagated_errors(self):
         expected = {
             ("/api/board/select", "post"): {"400", "409", "502", "504"},
