@@ -551,6 +551,37 @@ test.describe('Streaming with mocked slots', () => {
     });
   }
 
+  test('a row carries the tint of its state chip’s tone; an idle row has none', async ({
+    page,
+  }) => {
+    await withMockedSlots(page);
+    await page.goto('/streaming');
+    await expect(rows(page)).toHaveCount(48);
+    // Away from src1, so the Live row is at rest (a selected row takes the stronger tint).
+    await row(page, 'src2').click();
+
+    /** The colour `background: var(token)` computes to, to compare with a row's. */
+    const tokenColour = (token: string) =>
+      page.evaluate((name) => {
+        const probe = document.createElement('div');
+        probe.style.background = `var(${name})`;
+        document.body.append(probe);
+        const colour = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return colour;
+      }, token);
+    const rowColour = (name: string) =>
+      row(page, name).evaluate((element) => getComputedStyle(element).backgroundColor);
+
+    const none = 'rgba(0, 0, 0, 0)';
+    const success = await tokenColour('--neat-tint-success');
+    const highlight = await tokenColour('--neat-tint-highlight');
+    expect([success, highlight]).not.toContain(none);
+    await expect.poll(() => rowColour('src1')).toBe(success);
+    expect(await rowColour('src4')).toBe(highlight);
+    expect(await rowColour('src3')).toBe(none);
+  });
+
   test('rows show kind, source, state, rate and codec for files, a webcam, an external publisher and pulls', async ({
     page,
   }) => {

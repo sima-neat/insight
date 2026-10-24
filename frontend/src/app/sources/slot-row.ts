@@ -42,12 +42,16 @@ export interface SlotLocal {
   readonly encode?: Progress;
 }
 
+/*
+ * Each state's words and tone, in one place: the state chip shows the tone, and Streaming's list
+ * tints the slot's row with the same one (an idle row, neutral, stays plain).
+ */
 const IDLE: SlotStateView = { label: 'Idle', tone: 'neutral' };
 const LIVE: SlotStateView = { label: 'Live', tone: 'success' };
 const ENCODING: SlotStateView = { label: 'Encoding', tone: 'info' };
-const EXTERNAL: SlotStateView = { label: 'External', tone: 'info' };
+const EXTERNAL: SlotStateView = { label: 'External', tone: 'highlight' };
 const PULL_STATES: Record<SlotPullStatus, SlotStateView> = {
-  connecting: { label: 'Connecting…', tone: 'neutral' },
+  connecting: { label: 'Connecting…', tone: 'info' },
   live: { label: 'Pulled', tone: 'success' },
   unreachable: { label: 'Unreachable', tone: 'warning' },
   auth_failed: { label: 'Auth failed', tone: 'danger' },

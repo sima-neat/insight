@@ -15,6 +15,7 @@ import {
   NeatNote,
   NeatPage,
   NeatPageToolbar,
+  type NeatTone,
   NeatTooltip,
 } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
@@ -191,6 +192,8 @@ export class StreamingPage {
 
   /** A row's identity across poll answers. */
   protected readonly rowKey = (row: SlotRow): number => row.slot.index;
+  /** A row is tinted with its state chip's tone: the same `SlotStateView`, so they never differ. */
+  protected readonly rowTone = (row: SlotRow): NeatTone => row.state.tone;
 
   constructor() {
     const destroyRef = inject(DestroyRef);

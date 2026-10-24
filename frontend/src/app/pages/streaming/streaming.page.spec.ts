@@ -6,6 +6,7 @@ import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { NeatShell, type NeatTone } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
+import { NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type {
@@ -24,6 +25,7 @@ import type {
 import { CamerasService } from '../../sources/cameras.service';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import type { Progress } from '../../sources/progress-lines';
+import type { SlotRow } from '../../sources/slot-row';
 import { SlotsService } from '../../sources/slots.service';
 import { ApiRequestError } from '../../sources/stream-lines';
 import type { Camera } from '../../sources/webcam-publishing';
@@ -356,7 +358,7 @@ describe('StreamingPage', () => {
     expect(['src1', 'src2', 'src4', 'src5', 'src6'].map(tone)).toEqual([
       'success',
       'neutral',
-      'info',
+      'highlight',
       'success',
       'warning',
     ]);
@@ -367,6 +369,38 @@ describe('StreamingPage', () => {
     expect(codec.querySelector('[role="img"]')!.getAttribute('aria-label')).toBe(
       'AV1 cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.',
     );
+  });
+
+  it('tints each row with its state chip’s tone, from one mapping; an idle row stays plain', async () => {
+    // src6 cannot reach its camera; src9 and src10 are pulls refused and still connecting; src7
+    // encodes a rendition.
+    const answer = mixedSlots();
+    const pull = answer[5].pull!;
+    answer[8] = { ...answer[5], index: 9, pull: { ...pull, status: 'auth_failed', error: null } };
+    answer[9] = { ...answer[5], index: 10, pull: { ...pull, status: 'connecting', error: null } };
+    slots.encodes.set(
+      new Map([[7, { title: 'Encoding 15 fps rendition…', detail: '', percent: 10 }]]),
+    );
+    await open(answer);
+    const list = fixture.debugElement.query(By.directive(NeatSelectList))
+      .componentInstance as NeatSelectList<SlotRow>;
+    const rowTone = list.rowTone();
+    const states = ['src1', 'src2', 'src4', 'src5', 'src6', 'src9', 'src10', 'src7'].map((name) => {
+      const row = list.items().find((item) => item.name === name)!;
+      const chip = toneOf(rowOf(name).querySelector('neat-status-chip')!);
+      expect(rowTone(row), name).toBe(chip);
+      return `${row.state.label} ${chip}`;
+    });
+    expect(states).toEqual([
+      'Live success',
+      'Idle neutral',
+      'External highlight',
+      'Pulled success',
+      'Unreachable warning',
+      'Auth failed danger',
+      'Connecting… info',
+      'Encoding info',
+    ]);
   });
 
   it('gives up the Rate and Codec columns, headings included, where the list is under 28rem', async () => {

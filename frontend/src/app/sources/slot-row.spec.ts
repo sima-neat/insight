@@ -150,7 +150,7 @@ describe('slotRow', () => {
       'src6',
       'EXT',
       '⇢ RTSP · 192.168.1.20:41234 · 1280×720 · 30 fps',
-      'External (info)',
+      'External (highlight)',
       '30 fps',
       'H.264',
     ]);
@@ -224,7 +224,7 @@ describe('slotRow', () => {
       'src9',
       'URL',
       '⇠ RTSP · 10.0.0.7:554 · connecting…',
-      'Connecting… (neutral)',
+      'Connecting… (info)',
       '',
       '-',
     ]);
