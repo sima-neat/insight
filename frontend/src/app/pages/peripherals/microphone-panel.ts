@@ -35,6 +35,7 @@ import {
 } from '../../peripherals/mic-test-state';
 import { createPlaybackLevel, type PlaybackLevel } from '../../peripherals/playback-level';
 import { DeviceDetails } from './device-details';
+import { DeviceErrors } from './device-errors';
 
 /** The microphone and board a test is shown for; another of either starts afresh (ruling F12). */
 interface ShownTest {
@@ -62,6 +63,7 @@ interface ShownTest {
   imports: [
     Announcement,
     DeviceDetails,
+    DeviceErrors,
     NeatAsideHeading,
     NeatButton,
     NeatCallout,

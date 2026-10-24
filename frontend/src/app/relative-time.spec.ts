@@ -1,4 +1,4 @@
-import { formatRelativeTime } from './relative-time';
+import { elapsedSeconds, formatRelativeTime } from './relative-time';
 
 describe('formatRelativeTime', () => {
   // #170's "relative times and durations", the time half (durations are not ported).
@@ -28,5 +28,17 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime(ago(86_399), now)).toBe('23 h ago');
     expect(formatRelativeTime(ago(86_400), now)).toBe('1 d ago');
     expect(formatRelativeTime('yesterday', now)).toBe('');
+  });
+});
+
+describe('elapsedSeconds', () => {
+  it('counts whole seconds since a moment, rounded, and never below zero', () => {
+    const since = Date.parse('2026-09-21T10:00:00Z');
+    expect(elapsedSeconds(since, since)).toBe(0);
+    expect(elapsedSeconds(since, since + 1499)).toBe(1);
+    expect(elapsedSeconds(since, since + 1500)).toBe(2);
+    expect(elapsedSeconds(since, since + 12_000)).toBe(12);
+    // A clock that stepped back reads as just started.
+    expect(elapsedSeconds(since, since - 3000)).toBe(0);
   });
 });

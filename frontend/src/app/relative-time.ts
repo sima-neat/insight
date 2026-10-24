@@ -13,3 +13,11 @@ export function formatRelativeTime(iso: string | null, now: number): string {
   if (seconds < 86_400) return `${Math.floor(seconds / 3600)} h ago`;
   return `${Math.floor(seconds / 86_400)} d ago`;
 }
+
+/**
+ * The whole seconds from `since` to `now` (ms since the epoch), for a count that ticks while
+ * something runs ("Scanning… 3 s"); never below zero, should the clock step back.
+ */
+export function elapsedSeconds(since: number, now: number): number {
+  return Math.max(0, Math.round((now - since) / 1000));
+}

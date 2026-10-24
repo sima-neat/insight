@@ -13,6 +13,7 @@ import { NeatSelect } from '@sima/neat-ui/select';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { Announcement } from '../../announcement';
 import { CONNECTION_CODES } from '../../board/board-error';
+import { BoardSettingsAction } from '../../board/board-settings-action';
 import { BoardService } from '../../board/board.service';
 import { ticking } from '../../clock';
 import { PanelTitle } from '../../panel-title';
@@ -41,9 +42,10 @@ import {
   previewStatus,
   previewStreamUrl,
 } from '../../peripherals/preview-state';
+import { elapsedSeconds } from '../../relative-time';
 import { PreviewFrame, type PreviewStream } from '../../sources/preview-frame';
-import { TopBarDialogs } from '../../top-bar-dialogs';
 import { DeviceDetails } from './device-details';
+import { DeviceErrors } from './device-errors';
 
 /** The panel's one main button: what it does now, and whether it waits for the board. */
 interface PreviewAction {
@@ -79,7 +81,9 @@ let nextId = 0;
   selector: 'app-camera-panel',
   imports: [
     Announcement,
+    BoardSettingsAction,
     DeviceDetails,
+    DeviceErrors,
     NeatAsideActions,
     NeatButton,
     NeatCallout,
@@ -105,7 +109,6 @@ export class CameraPanel {
   private readonly peripherals = inject(PeripheralsService);
   private readonly session = inject(PeripheralsSession);
   private readonly preview = inject(CameraPreview);
-  private readonly dialogs = inject(TopBarDialogs);
   /** For "Starting the camera on the board… N s". */
   private readonly now = ticking(1000);
 
@@ -196,7 +199,7 @@ export class CameraPanel {
       }
       case 'starting': {
         const since = this.startedAt() ?? this.now();
-        return `Starting the camera on the board… ${Math.max(0, Math.round((this.now() - since) / 1000))} s`;
+        return `Starting the camera on the board… ${elapsedSeconds(since, this.now())} s`;
       }
       case 'stopping':
         return 'Stopping the preview…';
@@ -282,10 +285,6 @@ export class CameraPanel {
 
   protected streamFailed(): void {
     void this.preview.streamFailed();
-  }
-
-  protected openBoard(): void {
-    void this.dialogs.openBoard();
   }
 
   /**

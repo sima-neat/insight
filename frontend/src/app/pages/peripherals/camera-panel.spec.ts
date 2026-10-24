@@ -137,8 +137,7 @@ describe('CameraPanel', () => {
   const titleChip = (): string =>
     panel().querySelector('app-panel-title neat-status-chip')!.textContent!.trim();
   /** The status line's sentence; '' when there is none. */
-  const statusLine = (): string =>
-    panel().querySelector('.status > p')?.textContent?.trim() ?? '';
+  const statusLine = (): string => panel().querySelector('.status > p')?.textContent?.trim() ?? '';
   /** #170's preview status beside the status line, as its words and tone; null when idle. */
   const statusChip = (): { label: string; tone: string } | null => {
     const chip = fixture.debugElement
@@ -164,7 +163,11 @@ describe('CameraPanel', () => {
   const notes = (): string[] =>
     [...panel().querySelectorAll(':scope > p[neatNote]')].map((note) => note.textContent!.trim());
   const callouts = () =>
-    [...panel().querySelectorAll<HTMLElement>(':scope > neat-callout')].map((callout) => ({
+    [
+      ...panel().querySelectorAll<HTMLElement>(
+        ':scope > neat-callout, :scope > app-device-errors > neat-callout',
+      ),
+    ].map((callout) => ({
       heading: callout.querySelector('[role="heading"]')?.textContent?.trim() ?? '',
       text: callout.textContent!.replace(/\s+/g, ' ').trim(),
       element: callout,
@@ -203,6 +206,7 @@ describe('CameraPanel', () => {
       'app-panel-title',
       'app-preview-frame',
       'div.status',
+      'app-device-errors',
       'div.modes',
       'div.actions',
       'app-device-details',

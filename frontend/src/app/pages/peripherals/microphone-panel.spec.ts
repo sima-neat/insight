@@ -220,7 +220,11 @@ describe('MicrophonePanel', () => {
   };
   const audio = (): HTMLAudioElement => panel().querySelector('audio')!;
   const callouts = () =>
-    [...panel().querySelectorAll<HTMLElement>(':scope > neat-callout')].map((callout) => ({
+    [
+      ...panel().querySelectorAll<HTMLElement>(
+        ':scope > neat-callout, :scope > app-device-errors > neat-callout',
+      ),
+    ].map((callout) => ({
       tone: callout.getAttribute('tone'),
       announce: callout.getAttribute('role'),
       heading: callout.querySelector('[role="heading"]')?.textContent?.trim() ?? '',
@@ -238,7 +242,16 @@ describe('MicrophonePanel', () => {
     const parts = [...panel().children]
       .filter((child) => !['APP-ANNOUNCEMENT', 'AUDIO'].includes(child.tagName))
       .map((child) => child.tagName.toLowerCase());
-    expect(parts).toEqual(['app-panel-title', 'p', 'h3', 'ul', 'h3', 'div', 'app-device-details']);
+    expect(parts).toEqual([
+      'app-panel-title',
+      'p',
+      'app-device-errors',
+      'h3',
+      'ul',
+      'h3',
+      'div',
+      'app-device-details',
+    ]);
     expect(headings()).toEqual(['Capture', 'Test Microphone']);
     expect(captureLines()).toEqual(['S24_3LE · 2 ch · 24-bit · 32 · 44.1 · 48 kHz']);
     expect(
@@ -265,9 +278,9 @@ describe('MicrophonePanel', () => {
         body: 'Replug the microphone, then refresh.',
       },
     ]);
-    expect(panel().querySelector('neat-callout')!.previousElementSibling!.textContent!.trim()).toBe(
-      'Part of HD Webcam C270',
-    );
+    expect(
+      panel().querySelector('app-device-errors')!.previousElementSibling!.textContent!.trim(),
+    ).toBe('Part of HD Webcam C270');
     fixture.destroy();
 
     // A device that does not report its formats, and one that lists none.

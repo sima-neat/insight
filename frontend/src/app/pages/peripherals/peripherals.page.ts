@@ -26,6 +26,7 @@ import { Announcement } from '../../announcement';
 import { AsidePrefs } from '../../aside-prefs';
 import { problemOf, type BoardProblem } from '../../board/board-error';
 import { BoardProblemNotice } from '../../board/board-problem-notice';
+import { BoardSettingsAction } from '../../board/board-settings-action';
 import { BoardService } from '../../board/board.service';
 import { CellText } from '../../cell-text';
 import { ticking } from '../../clock';
@@ -53,7 +54,7 @@ import { PeripheralsSession, type PreviewResume } from '../../peripherals/periph
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import { ListColumn } from '../../list-column';
 import { PanelTitle } from '../../panel-title';
-import { formatRelativeTime } from '../../relative-time';
+import { elapsedSeconds, formatRelativeTime } from '../../relative-time';
 import { TopBarDialogs } from '../../top-bar-dialogs';
 import { CameraPanel } from './camera-panel';
 import { DeviceDetails } from './device-details';
@@ -101,6 +102,7 @@ interface ShownDevice {
   imports: [
     Announcement,
     BoardProblemNotice,
+    BoardSettingsAction,
     CameraPanel,
     CellText,
     DeviceDetails,
@@ -250,7 +252,7 @@ export class PeripheralsPage {
   protected readonly refreshLabel = computed(() => {
     const since = this.peripherals.scanning();
     if (since === null) return 'Refresh';
-    return `Scanning… ${Math.max(0, Math.round((this.now() - since) / 1000))} s`;
+    return `Scanning… ${elapsedSeconds(since, this.now())} s`;
   });
   /** #170's status line for screen readers (ruling F28): a scan running, or a stale snapshot. */
   protected readonly scanStatus = computed(() => {

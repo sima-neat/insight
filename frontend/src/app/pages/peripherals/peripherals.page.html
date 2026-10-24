@@ -31,16 +31,7 @@
       }
       @case ('read-failed') {
         <app-board-problem-notice class="state" [problem]="board.error()!" announce>
-          <button
-            neatButton
-            neatCalloutActions
-            type="button"
-            size="small"
-            variant="outlined"
-            (click)="openBoard()"
-          >
-            Open board settings
-          </button>
+          <app-board-settings-action neatCalloutActions />
         </app-board-problem-notice>
       }
       @case ('no-target') {

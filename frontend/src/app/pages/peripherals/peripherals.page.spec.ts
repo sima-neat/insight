@@ -594,9 +594,9 @@ describe('PeripheralsPage', () => {
       session: webcamLive,
       error: null,
     });
-    expect(aside()!.querySelector('app-camera-panel app-preview-frame img')?.getAttribute('src')).toBe(
-      webcamLive.stream_url,
-    );
+    expect(
+      aside()!.querySelector('app-camera-panel app-preview-frame img')?.getAttribute('src'),
+    ).toBe(webcamLive.stream_url);
     expect(chipOf('HD Webcam C270')).toBe('Previewing');
     await settle();
     expect(posts(stopUrl(webcamLive.id))).toHaveLength(0);
@@ -607,7 +607,7 @@ describe('PeripheralsPage', () => {
     expect(answer('POST', stopUrl(webcamLive.id), { session: null })).toBe(1);
   });
 
-  it("a Start refused for a preview another tab shows selects its camera, in another tab, with Stop", async () => {
+  it('a Start refused for a preview another tab shows selects its camera, in another tab, with Stop', async () => {
     const shownThere = { ...webcamLive, viewer: true };
     await visit();
     await startRefusedFor(shownThere);

@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output } f
 import { NeatButton, NeatNote } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { CONNECTION_CODES, type BoardProblem } from '../../board/board-error';
+import { BoardSettingsAction } from '../../board/board-settings-action';
 import { BoardService } from '../../board/board.service';
 import type { PeripheralIssue } from '../../peripherals/api';
 import {
@@ -11,7 +12,6 @@ import {
   sortIssues,
 } from '../../peripherals/devices';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
-import { TopBarDialogs } from '../../top-bar-dialogs';
 
 /**
  * What Peripherals says above its device list (#170's banners, copy per Inv-PB §2.2), in this
@@ -25,7 +25,7 @@ import { TopBarDialogs } from '../../top-bar-dialogs';
  */
 @Component({
   selector: 'app-peripherals-banners',
-  imports: [NeatButton, NeatCallout, NeatNote],
+  imports: [BoardSettingsAction, NeatButton, NeatCallout, NeatNote],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (stale()) {
@@ -77,16 +77,7 @@ import { TopBarDialogs } from '../../top-bar-dialogs';
           <p>{{ problem.hint }}</p>
         }
         @if (connectionFailed()) {
-          <button
-            neatButton
-            neatCalloutActions
-            type="button"
-            size="small"
-            variant="outlined"
-            (click)="openBoard()"
-          >
-            Open board settings
-          </button>
+          <app-board-settings-action neatCalloutActions />
         }
       </neat-callout>
     }
@@ -118,7 +109,6 @@ export class PeripheralsBanners {
 
   private readonly board = inject(BoardService);
   protected readonly peripherals = inject(PeripheralsService);
-  private readonly dialogs = inject(TopBarDialogs);
 
   protected readonly stale = computed(() =>
     isSnapshotStale(this.board.state(), this.peripherals.snapshot()),
@@ -141,8 +131,4 @@ export class PeripheralsBanners {
       hint: issue.hint,
     })),
   );
-
-  protected openBoard(): void {
-    void this.dialogs.openBoard();
-  }
 }

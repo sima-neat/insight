@@ -1,0 +1,7 @@
+/*
+ * No box of its own: each callout is one of the panel's parts, spaced by the panel's gap, and a
+ * device without errors leaves no empty part (and no gap) behind.
+ */
+:host {
+  display: contents;
+}

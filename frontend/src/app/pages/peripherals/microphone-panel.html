@@ -2,13 +2,7 @@
 @if (partOf()) {
   <p neatNote>{{ partOf() }}</p>
 }
-@for (problem of microphone().errors; track $index) {
-  <neat-callout tone="danger" [heading]="problem.message">
-    @if (problem.hint) {
-      <p>{{ problem.hint }}</p>
-    }
-  </neat-callout>
-}
+<app-device-errors [errors]="microphone().errors" />
 
 <h3 neatAsideHeading>Capture</h3>
 @if (captureLines(); as lines) {

@@ -15,13 +15,7 @@
 <app-announcement>{{ announcement() }}</app-announcement>
 
 <!-- Above the modes: "No usable modes" points up to the message that says why. -->
-@for (problem of camera().errors; track $index) {
-  <neat-callout tone="danger" [heading]="problem.message">
-    @if (problem.hint) {
-      <p>{{ problem.hint }}</p>
-    }
-  </neat-callout>
-}
+<app-device-errors [errors]="camera().errors" />
 
 @if (selection(); as selection) {
   <div class="modes">
@@ -112,16 +106,7 @@
       </neat-collapsible>
     }
     @if (errorOpensBoard()) {
-      <button
-        neatButton
-        neatCalloutActions
-        type="button"
-        size="small"
-        variant="outlined"
-        (click)="openBoard()"
-      >
-        Open board settings
-      </button>
+      <app-board-settings-action neatCalloutActions />
     }
   </neat-callout>
 }
