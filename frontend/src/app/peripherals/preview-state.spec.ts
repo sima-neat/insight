@@ -220,7 +220,10 @@ describe('preview state', () => {
       const current = { cameraId: 'camera:a', generation: 3, selection };
       const deps: Omit<PreviewStartDeps, 'post' | 'lookup'> = {
         dispatch: (event) => log.push(['dispatch', event.type]),
-        adopt: (session) => log.push(['adopt', session.id]),
+        adopt: (session) => {
+          log.push(['adopt', session.id]);
+          return true;
+        },
         start: (mode) => log.push(['start', mode.width]),
         stop: async (session) => {
           log.push(['stop', session.id]);
@@ -264,6 +267,24 @@ describe('preview state', () => {
     expect(p.log).toEqual([
       ['dispatch', 'start'],
       ['adopt', 's1'],
+    ]);
+
+    // A running preview the page cannot show (its camera is not listed) is not taken up: the
+    // refusal shows, with the camera it names.
+    p = page(a);
+    await runPreviewStart(requested, {
+      ...p.deps,
+      post: refused,
+      lookup: async () => sessionFor(a),
+      adopt: (session) => {
+        p.log.push(['adopt', session.id]);
+        return false;
+      },
+    });
+    expect(p.log).toEqual([
+      ['dispatch', 'start'],
+      ['adopt', 's1'],
+      ['dispatch', 'failed'],
     ]);
 
     // A start for A answers after B was picked, so it is stopped; C is picked during that stop, so C is
@@ -327,7 +348,10 @@ describe('preview state', () => {
           return true;
         },
         start: (next) => log.push(['start', next.width]),
-        adopt: (session) => log.push(['adopt', session.id]),
+        adopt: (session) => {
+          log.push(['adopt', session.id]);
+          return true;
+        },
         dispatch: (event) => log.push(['dispatch', event.type]),
         view: () => ({ cameraId: imx477.id, generation: 3, selection: mode }),
         normalize: problemOf,

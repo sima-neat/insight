@@ -81,7 +81,8 @@ interface ShownDevice {
  * page ends what they run.
  *
  * **Entering** reads the board, the snapshot and the running preview together. A preview running
- * then is adopted, its camera selected and its mode remembered; otherwise the preview this page
+ * then is adopted, its camera selected and its mode remembered, as is one a refused Start finds
+ * later (`showAdopted`); otherwise the preview this page
  * left running on the last visit (`PeripheralsSession.resume`) starts again once, while its board
  * and camera are still there. Then the board's first scan runs by itself, once per board
  * (`scanOnce`).
@@ -293,6 +294,8 @@ export class PeripheralsPage {
         if (active && previewed !== shown) void this.preview.leave();
       });
     });
+    // Every preview the page takes up selects its camera, on entry and after a refused Start alike.
+    this.preview.onAdopt((session) => this.showAdopted(session));
     void this.enter();
   }
 
@@ -350,22 +353,28 @@ export class PeripheralsPage {
     if (this.destroyed) return;
     const resume = this.pendingResume;
     this.pendingResume = null;
-    if (running && running.state !== 'stopped') this.adopt(running);
+    if (running && running.state !== 'stopped') this.preview.adopt(running);
     else if (resume) this.resume(resume);
     const board = this.board.state();
     if (board) this.peripherals.scanOnce(board);
   }
 
   /**
-   * Shows a preview running as the page opens: its camera selected, its mode remembered, and the
-   * side panel open, since the preview shows there (with the panel closed it would be stopped).
+   * Shows a preview the page takes up (`CameraPreview.onAdopt`), one running as the page opens or
+   * one a refused Start found (#170's `adoptPreview`): its camera selected, its mode remembered so
+   * that the pickers match the video, and the side panel open, since the preview shows there (with
+   * the panel closed it would be stopped). A camera the list does not show has no panel to show it
+   * in, nor has any camera while a body state stands in the list's place: answers false then.
    */
-  private adopt(session: PreviewSession): void {
-    this.preview.adopt(session);
-    if (!session.camera_id) return;
+  private showAdopted(session: PreviewSession): boolean {
+    const listed = this.list().rows.some(
+      (row) => row.item.id === session.camera_id && isCamera(row.item),
+    );
+    if (this.body() !== 'list' || !listed) return false;
     this.selectedId.set(session.camera_id);
     this.asides.setOpen('peripherals', true);
     this.session.setMode(session.camera_id, session.mode);
+    return true;
   }
 
   /**

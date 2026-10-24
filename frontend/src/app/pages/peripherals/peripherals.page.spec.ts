@@ -542,6 +542,133 @@ describe('PeripheralsPage', () => {
     answer('POST', stopUrl(live30.id), { session: null });
   });
 
+  /**
+   * Presses the shown camera's Start, which the backend refuses because `running` already runs
+   * (another tab, or a client of the API, started it after this page read the preview); the page
+   * then reads the running preview, as #170 did.
+   */
+  async function startRefusedFor(running: PreviewSession): Promise<void> {
+    startButton().click();
+    await settle();
+    answer(
+      'POST',
+      START_URL,
+      {
+        error: `A preview of ${running.camera_id} is already starting or running.`,
+        code: 'preview_active',
+        hint: 'Stop that preview before starting another one.',
+        camera_id: running.camera_id,
+      },
+      { status: 409, statusText: 'Conflict' },
+    );
+    await settle();
+    answer('GET', PREVIEW_URL, { session: running });
+    await settle();
+  }
+  const startButton = (): HTMLButtonElement =>
+    aside()!.querySelector<HTMLButtonElement>('app-camera-panel .actions button')!;
+  const webcamLive = previewSession({
+    id: 'c270',
+    camera_id: usb.id,
+    mode: sel('MJPG', 1280, 720, 30),
+    stream_url: `${START_URL}/c270/stream`,
+  });
+
+  // Final review I-1 (Review Focus 3): a refused Start takes the running preview up the way
+  // entering the page does, rather than leaving it, which stopped it.
+  it("a Start refused for another camera's preview selects that camera and its mode, and stops nothing", async () => {
+    await visit();
+    expect(selectedRow()).toBe(rowOf(imx477.name));
+    await startRefusedFor(webcamLive);
+
+    expect(selectedRow()).toBe(rowOf('HD Webcam C270'));
+    expect(aside()!.querySelector('app-camera-panel h2')?.textContent?.trim()).toBe(
+      'HD Webcam C270',
+    );
+    expect(TestBed.inject(PeripheralsSession).modes().get(usb.id)).toEqual(
+      sel('MJPG', 1280, 720, 30),
+    );
+    // Nobody showed it yet, so it shows here, live.
+    expect(pageInjector().get(CameraPreview).state()).toEqual({
+      status: 'live',
+      session: webcamLive,
+      error: null,
+    });
+    expect(aside()!.querySelector('app-camera-panel app-preview-frame img')?.getAttribute('src')).toBe(
+      webcamLive.stream_url,
+    );
+    expect(chipOf('HD Webcam C270')).toBe('Previewing');
+    await settle();
+    expect(posts(stopUrl(webcamLive.id))).toHaveLength(0);
+    expect(posts(START_URL)).toHaveLength(0);
+
+    // It is this page's now: leaving stops it, as it would one adopted on entry.
+    await leave();
+    expect(answer('POST', stopUrl(webcamLive.id), { session: null })).toBe(1);
+  });
+
+  it("a Start refused for a preview another tab shows selects its camera, in another tab, with Stop", async () => {
+    const shownThere = { ...webcamLive, viewer: true };
+    await visit();
+    await startRefusedFor(shownThere);
+
+    expect(selectedRow()).toBe(rowOf('HD Webcam C270'));
+    expect(pageInjector().get(CameraPreview).state().status).toBe('elsewhere');
+    expect(aside()!.querySelector('app-camera-panel')!.textContent).toContain(
+      'This preview is showing in another tab or window.',
+    );
+    expect(startButton().textContent!.trim()).toBe('Stop preview');
+    await settle();
+    expect(posts(stopUrl(webcamLive.id))).toHaveLength(0);
+
+    // The other tab's to stop: leaving lets go of it.
+    await leave();
+    expect(posts(stopUrl(webcamLive.id))).toHaveLength(0);
+  });
+
+  it('a Start refused for the same camera in another mode remembers that mode, so the pickers match the video', async () => {
+    const running60 = previewSession({
+      id: '9a2d',
+      mode: sel('NV12', 1920, 1080, 60),
+      stream_url: `${START_URL}/9a2d/stream`,
+    });
+    await visit();
+    await startRefusedFor(running60);
+
+    expect(selectedRow()).toBe(rowOf(imx477.name));
+    expect(TestBed.inject(PeripheralsSession).modes().get(imx477.id)).toEqual(
+      sel('NV12', 1920, 1080, 60),
+    );
+    expect(pageInjector().get(CameraPreview).state().session).toEqual(running60);
+    await settle();
+    expect(posts(stopUrl(running60.id))).toHaveLength(0);
+    await leave();
+    answer('POST', stopUrl(running60.id), { session: null });
+  });
+
+  it('a Start refused for a camera the scan does not list says so, and leaves that preview alone', async () => {
+    const unlisted = previewSession({
+      id: 'e4d1',
+      camera_id: 'mipi:/base/axi/i2c@88000/imx477@1a',
+      stream_url: `${START_URL}/e4d1/stream`,
+    });
+    await visit();
+    await startRefusedFor(unlisted);
+
+    // No panel could show it: taking it up would only leave it again, which stops it.
+    expect(selectedRow()).toBe(rowOf(imx477.name));
+    const state = pageInjector().get(CameraPreview).state();
+    expect(state.status).toBe('error');
+    expect(state.error?.code).toBe('preview_active');
+    expect(aside()!.textContent).toContain(
+      'The running preview is on mipi:/base/axi/i2c@88000/imx477@1a.',
+    );
+    await settle();
+    expect(posts(stopUrl(unlisted.id))).toHaveLength(0);
+    await leave();
+    expect(posts(stopUrl(unlisted.id))).toHaveLength(0);
+  });
+
   // F23: the panel's title carries the row's chip, Previewing included.
   it("the side panel shows the selected camera's panel, titled with its row's chip", async () => {
     await visit({ preview: live30 });

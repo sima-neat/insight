@@ -53,7 +53,9 @@ const NOTHING_SHOWN: Pick<PreviewView, 'cameraId' | 'selection'> = {
  *
  * **Two tabs.** The backend runs one preview per Insight and its stream has one reader. A preview
  * another tab shows is `elsewhere`, with Stop; a start refused with `preview_active` adopts the
- * running session instead of failing (Review Focus 3).
+ * running session instead of failing (Review Focus 3), whatever camera it is on. Every adoption
+ * goes through the page first (`onAdopt`), which shows the session's camera, so that the page
+ * never leaves, and thereby stops, a preview it just took up.
  *
  * **Watching.** While `live` or `elsewhere`, the preview is read every 2.5 s through
  * `visiblePoller` (a hidden tab reads nothing, and reads at once when it shows): an `<img>` fires
@@ -82,6 +84,8 @@ export class CameraPreview {
   private stopping: Promise<boolean> | null = null;
   /** Set by `release()`: the page is gone, so nothing is watched any more. */
   private released = false;
+  /** The page's step for an adopted session (`onAdopt`); without a page, every session is taken up. */
+  private show: (session: PreviewSession) => boolean = () => true;
 
   private watch: { sessionId: string; cancel: () => void } | null = null;
   private watchTick: (() => void) | null = null;
@@ -199,12 +203,25 @@ export class CameraPreview {
   }
 
   /**
-   * Shows a session this page did not start: one running when the page opened, or the one a
-   * refused start found. The page selects its camera and mode (`adoptedSelection`).
+   * How the page shows a session it adopts, on entry and after a refused start alike: it selects
+   * the session's camera, opens the side panel and remembers the mode the session streams, and
+   * answers whether that camera's panel shows now. The page sets it once, as it is created.
    */
-  adopt(session: PreviewSession): void {
+  onAdopt(show: (session: PreviewSession) => boolean): void {
+    this.show = show;
+  }
+
+  /**
+   * Takes up a session this page did not start: one running when the page opened, or the one a
+   * refused start found. The page shows it first (`onAdopt`); one it cannot show (its camera is not
+   * listed) is not taken up, since the page leaves a preview no panel shows, which would stop
+   * another tab's preview. Answers whether it was taken up.
+   */
+  adopt(session: PreviewSession): boolean {
+    if (!this.show(session)) return false;
     this.shown.set({ cameraId: session.camera_id, selection: adoptedSelection(session) });
     this.dispatch({ type: 'adopt', session });
+    return true;
   }
 
   /**

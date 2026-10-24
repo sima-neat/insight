@@ -242,6 +242,45 @@ for (const { name, size } of VIEWPORTS) {
   });
 }
 
+// Final review I-1 (Review Focus 3): a Start refused because another camera's preview runs takes
+// that preview up, its camera selected, rather than stopping it or ending idle.
+test("a Start refused for another camera's preview selects that camera and shows its preview, stopping nothing", async ({
+  page,
+}) => {
+  const backend = new FakePeripheralsBackend();
+  await backend.install(page);
+  await page.goto('/peripherals');
+  await expect(panelTitle(page)).toHaveText(IMX477.name);
+
+  for (const viewing of [false, true]) {
+    // A client of the API previews the webcam after this page read the preview.
+    backend.startElsewhere(C270, { format: 'MJPG', width: 1280, height: 720, fps: 30 }, viewing);
+    await device(page, IMX477.name).click();
+    await expect(panelTitle(page)).toHaveText(IMX477.name);
+    const before = backend.postedPaths().length;
+    await panel(page).getByRole('button', { name: 'Start preview' }).click();
+
+    await expect(panelTitle(page)).toHaveText(C270.name);
+    await expect(device(page, C270.name)).toHaveAttribute('aria-selected', 'true');
+    await expect(device(page, C270.name)).toContainText('Previewing');
+    if (viewing) {
+      await expect(panel(page)).toContainText('This preview is showing in another tab or window.');
+    } else {
+      await expect(
+        panel(page).getByRole('img', { name: `Live preview of ${C270.name}` }),
+      ).toBeVisible();
+      await expect(panel(page)).toContainText('Live preview · 1280×720 · MJPG · 30 fps');
+    }
+    const stop = panel(page).getByRole('button', { name: 'Stop preview' });
+    await expect(stop).toBeVisible();
+    // The refused start is all the page sent: nothing stopped the other preview.
+    expect(backend.postedPaths().slice(before)).toEqual([PREVIEW_URL]);
+    // Stopped by hand for the next round.
+    await stop.click();
+    await expect(panel(page).getByRole('button', { name: 'Start preview' })).toBeVisible();
+  }
+});
+
 test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side panel open and closed, beside the pill and System Info', async ({
   page,
 }) => {

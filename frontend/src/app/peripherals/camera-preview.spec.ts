@@ -145,6 +145,48 @@ describe('CameraPreview', () => {
     await answerRead(other);
   });
 
+  // Final review I-1: the page shows every adopted preview, on entry and after a refused start.
+  it('an adopted preview is shown by the page first, and one the page cannot show is not adopted', async () => {
+    const shown: PreviewSession[] = [];
+    let canShow = false;
+    preview.onAdopt((session) => {
+      shown.push(session);
+      return canShow;
+    });
+    const webcam = { ...live30, id: 'c270', camera_id: usb.id };
+    const refuse = () =>
+      http
+        .expectOne({ method: 'POST', url: START_URL })
+        .flush(
+          { error: 'A preview is already running.', code: 'preview_active', camera_id: usb.id },
+          { status: 409, statusText: 'Conflict' },
+        );
+
+    // Not shown: the refusal stays, and nothing is stopped or watched.
+    let started = preview.start(imx477, mode30, 3);
+    refuse();
+    await settle();
+    await answerRead(webcam);
+    await started;
+    expect(shown).toEqual([webcam]);
+    expect(preview.adopt(webcam)).toBe(false);
+    expect(preview.state().status).toBe('error');
+    expect(preview.state().error?.code).toBe('preview_active');
+    expect(preview.camera()).toBe(imx477.id);
+
+    // Shown: taken up, its camera now the preview's.
+    canShow = true;
+    started = preview.start(imx477, mode30, 3);
+    refuse();
+    await settle();
+    await answerRead(webcam);
+    await started;
+    expect(shown).toEqual([webcam, webcam, webcam]);
+    expect(preview.state()).toEqual({ status: 'live', session: webcam, error: null });
+    expect(preview.camera()).toBe(usb.id);
+    await answerRead(webcam);
+  });
+
   it('a mode change restarts the live preview on the new mode, and only the camera it shows', async () => {
     await adoptLive();
     // Another camera's menus and the mode already streaming leave the preview alone.

@@ -142,7 +142,10 @@ merging.
   `MicTest` are provided by the page, so they live exactly as long as it: leaving Peripherals stops
   the camera preview (the next visit starts it again, once), and a microphone recording is left to
   finish on the board for the next visit to take up. The backend runs one preview and one test per
-  Insight; the controllers handle another tab holding them.
+  Insight; the controllers handle another tab holding them. A preview the page takes up (one
+  running on entry, or one a refused Start finds) goes through the page's `CameraPreview.onAdopt`,
+  which selects its camera and remembers its mode, so the page never leaves, and so stops, a
+  preview it just took up.
 - **Build output.** `npm run build` writes the app to `frontend/dist` with `index.html` at its root,
   where Flask (`_resolve_frontend_dist`) and `build.sh` look for it. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves

@@ -74,14 +74,16 @@ export interface PreviewRequested {
 /**
  * The requests and the page a start works with (`runPreviewStart`). `lookup` answers the running
  * session, null when none runs or the read failed. `stop` resolves whether the session stopped.
- * `reloadBoard` re-reads the board when an answer names a generation the page does not know.
+ * `adopt` answers whether the page took the running session up; one it cannot show is not, and
+ * the refusal shows instead. `reloadBoard` re-reads the board when an answer names a generation
+ * the page does not know.
  */
 export interface PreviewStartDeps {
   post(mode: CameraSelection): Promise<PreviewSession>;
   lookup(): Promise<PreviewSession | null>;
   stop(session: PreviewSession): Promise<boolean>;
   start(mode: CameraSelection): unknown;
-  adopt(session: PreviewSession): void;
+  adopt(session: PreviewSession): boolean;
   dispatch(event: PreviewEvent): void;
   view(): PreviewView;
   normalize(failure: unknown): BoardProblem;
@@ -265,7 +267,8 @@ export async function runPreviewStart(
     const running = error.code === 'preview_active' ? await deps.lookup() : null;
     if (startSuperseded(requested, deps.view())) return deps.dispatch({ type: 'reset' });
     const existing = sessionToAdopt(error, running);
-    return existing ? deps.adopt(existing) : deps.dispatch({ type: 'failed', error });
+    if (existing && deps.adopt(existing)) return;
+    return deps.dispatch({ type: 'failed', error });
   }
   // A session for a camera, board or mode no longer shown would label one camera's video as
   // another's, or disagree with the menus: it is stopped instead.

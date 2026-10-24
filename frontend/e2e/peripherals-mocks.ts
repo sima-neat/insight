@@ -359,6 +359,16 @@ export class FakePeripheralsBackend {
   }
 
   /**
+   * A preview started by someone else after the page read the preview: another tab, or a client
+   * of the API (which may preview a USB camera's MJPG, as the backend allows). `viewing`: that tab
+   * shows its stream.
+   */
+  startElsewhere(camera: CameraItem, mode: CameraModeChoice, viewing: boolean): void {
+    this.preview = previewSession(`p${++this.previews}`, camera, mode);
+    this.viewer = viewing;
+  }
+
+  /**
    * Answers every endpoint of the board, the scan, the preview and the microphone test, and the
    * Streaming page's slots (empty), where the flows leave Peripherals to.
    */
@@ -440,6 +450,19 @@ export class FakePeripheralsBackend {
       (url) => url.pathname === '/api/peripherals/cameras/preview',
       (route) => {
         record(route.request());
+        // One preview per Insight: a start while one runs is refused (`PreviewManager.start`).
+        if (this.preview) {
+          const running = this.preview.camera_id;
+          return route.fulfill({
+            status: 409,
+            json: {
+              error: `A preview of ${running} is already starting or running.`,
+              code: 'preview_active',
+              hint: 'Stop that preview before starting another one.',
+              camera_id: running,
+            },
+          });
+        }
         const { id, format, width, height, fps } = route.request().postDataJSON();
         const camera = [IMX477, C270].find((item) => item.id === id)!;
         this.preview = previewSession(`p${++this.previews}`, camera, {
