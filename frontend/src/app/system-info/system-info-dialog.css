@@ -11,10 +11,6 @@
   --neat-details-term-width: 10rem;
 }
 
-.facts > dt {
-  overflow-wrap: anywhere;
-}
-
 /* The version and its status chip on one line; the muted line under it is the paragraph. */
 .component {
   display: flex;

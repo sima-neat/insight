@@ -2,7 +2,7 @@
 <ng-template #keyValues let-label="label" let-entries="entries">
   <neat-collapsible [label]="label" [open]="true" [headingLevel]="3">
     @if (entries.length) {
-      <dl neatDetails class="facts">
+      <dl neatDetails>
         @for (entry of entries; track entry[0]) {
           <dt>{{ entry[0] }}</dt>
           <dd>{{ entry[1] }}</dd>
@@ -42,7 +42,7 @@
       @if (!neatMissing()) {
         <neat-collapsible label="Components" [headingLevel]="3">
           @if (components().length) {
-            <dl neatDetails class="facts">
+            <dl neatDetails>
               @for (component of components(); track component.key) {
                 <dt>{{ component.name }}</dt>
                 <dd>
@@ -66,7 +66,7 @@
 
       <neat-collapsible label="Exposed ports" [headingLevel]="3">
         @if (ports().length) {
-          <dl neatDetails class="facts">
+          <dl neatDetails>
             @for (port of ports(); track $index) {
               <dt>{{ port.name }}</dt>
               <dd>{{ port.summary }}</dd>
