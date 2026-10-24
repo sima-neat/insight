@@ -42,7 +42,7 @@
       </button>
     </div>
     @if (infoError() || infoRows().length > 0) {
-      <dl class="details">
+      <dl neatDetails>
         @if (infoError(); as error) {
           <dt>Error</dt>
           <dd>{{ error }}</dd>

@@ -2,9 +2,11 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component, computed, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { NeatShell } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
+import { NeatStatusChip, type NeatStatusTone } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type {
   AssignRequest,
@@ -211,7 +213,26 @@ describe('StreamingPage', () => {
     });
   });
 
+  beforeEach(() => {
+    // jsdom has no ResizeObserver; the slot list watches its width to give up narrow columns.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {
+          // jsdom lays nothing out, so no width ever changes.
+        }
+        unobserve(): void {
+          // The kit's slider shares an observer and lets go of its element this way.
+        }
+        disconnect(): void {
+          // Nothing observed.
+        }
+      },
+    );
+  });
+
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -251,6 +272,12 @@ describe('StreamingPage', () => {
       return shown.textContent!.trim();
     });
   const rowOf = (name: string): HTMLElement => rows().find((row) => cells(row)[0] === name)!;
+  /** The tone a kit status chip was given, which its fill shows. */
+  const toneOf = (chip: Element): NeatStatusTone =>
+    fixture.debugElement
+      .queryAll(By.directive(NeatStatusChip))
+      .find((debug) => debug.nativeElement === chip)!
+      .componentInstance.tone();
   const aside = (): HTMLElement | null => root().querySelector('aside');
   const asideHeading = () => aside()?.querySelector('h2')?.textContent?.trim();
   const notice = () => root().querySelector('[role="status"]')?.textContent?.trim() ?? '';
@@ -319,8 +346,7 @@ describe('StreamingPage', () => {
     ]);
     expect(cells(rowOf('src48'))).toEqual(['src48', '', 'Not assigned', 'Idle', '', '-']);
     // The chips carry the state's tone for the theme's status colours.
-    const tone = (name: string) =>
-      rowOf(name).querySelector('app-status-chip')!.getAttribute('data-tone');
+    const tone = (name: string) => toneOf(rowOf(name).querySelector('neat-status-chip')!);
     expect(['src1', 'src2', 'src4', 'src5', 'src6'].map(tone)).toEqual([
       'success',
       'neutral',
@@ -330,11 +356,42 @@ describe('StreamingPage', () => {
     ]);
     // The undecodable codec is in warning colours, and its glyph is named by the warning, which
     // the row is read with.
-    const codec = rowOf('src4').querySelector(':scope > div:last-child app-status-chip')!;
-    expect(codec.getAttribute('data-tone')).toBe('warning');
+    const codec = rowOf('src4').querySelector(':scope > div:last-child neat-status-chip')!;
+    expect(toneOf(codec)).toBe('warning');
     expect(codec.querySelector('[role="img"]')!.getAttribute('aria-label')).toBe(
       'AV1 cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.',
     );
+  });
+
+  it('gives up the Rate and Codec columns, headings included, where the list is under 28rem', async () => {
+    // A tablet beside the side panel: the list measures its width as it first renders.
+    let listWidth = 447;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return { width: this.tagName === 'NEAT-SELECT-LIST' ? listWidth : 0 } as DOMRect;
+    });
+    const headings = () =>
+      [...root().querySelectorAll('[data-slot="select-list-header"] span')].map((cell) =>
+        cell.textContent!.trim(),
+      );
+
+    await open();
+    expect(headings()).toEqual(['Slot', 'Kind', 'Source', 'State']);
+    expect(cells(rowOf('src1'))).toEqual(['src1', 'VID', 'people/walk.mp4', 'Live']);
+
+    fixture.destroy();
+    listWidth = 448;
+    await open();
+    expect(headings()).toEqual(['Slot', 'Kind', 'Source', 'State', 'Rate', 'Codec']);
+    expect(cells(rowOf('src1'))).toEqual([
+      'src1',
+      'VID',
+      'people/walk.mp4',
+      'Live',
+      '30 fps',
+      'H.264',
+    ]);
   });
 
   it('shows an encoding slot as Encoding with its percent', async () => {

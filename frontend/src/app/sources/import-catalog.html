@@ -22,7 +22,7 @@
 </div>
 
 @if (state.error(); as error) {
-  <app-error-note role="alert">{{ error }}</app-error-note>
+  <neat-error-note>{{ error }}</neat-error-note>
 }
 @if (state.loading() && !state.index()) {
   <p neatNote>Loading catalog...</p>
@@ -34,17 +34,41 @@
       <ng-template>
         <div class="mode">
           <app-catalog-filters [assets]="assets()" [(filter)]="state.filter" />
-          <p neatNote>
-            {{ typeRows().length }} matching assets / {{ typeSelection().length }} selected
-          </p>
+          <div class="bulk">
+            <p neatNote>
+              {{ typeRows().length }} matching assets / {{ typeSelection().length }} selected
+            </p>
+            <button
+              neatButton
+              type="button"
+              variant="text"
+              size="small"
+              [disabled]="typeRows().length === 0"
+              (click)="checkAllTypes()"
+            >
+              Select All
+            </button>
+            <button
+              neatButton
+              type="button"
+              variant="text"
+              size="small"
+              [disabled]="typeSelection().length === 0"
+              (click)="clearTypes()"
+            >
+              Clear
+            </button>
+          </div>
           <neat-select-list
             class="list"
             label="Catalog assets"
             emptyLabel="No catalog assets match the selected type filters."
+            hint="Press Space to check or uncheck the asset."
+            checkable
             [items]="typeRows()"
             [trackBy]="byAssetPath"
-            [selected]="typeSelection()[0] ?? null"
-            (selectedChange)="pickType($event)"
+            [(checked)]="state.typePaths"
+            (activated)="toggleType($event)"
           >
             <ng-template neatColumn="source" width="minmax(0, 1fr)" let-row>
               <app-cell-text>{{ row.source }}</app-cell-text>
@@ -63,7 +87,7 @@
               [disabled]="typeSelection().length === 0 || runner.busy()"
               (click)="importRows(typeSelection())"
             >
-              {{ importing() ? 'Importing...' : 'Import' }}
+              {{ importing() ? 'Importing...' : 'Import Selected' }}
             </button>
           </app-import-summary>
         </div>

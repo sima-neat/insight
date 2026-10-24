@@ -1,5 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { NeatDetails } from '@sima/neat-ui/details';
 import type { NeatLateNoticeDetails } from '@sima/neat-ui/video';
 import { LateNotice, type RaiseTarget } from './late-notice';
 
@@ -31,12 +33,13 @@ describe('LateNotice', () => {
 
   const root = (): HTMLElement => fixture.nativeElement;
   const text = () => root().textContent?.replace(/\s+/g, ' ').trim() ?? '';
-  /** The term → description pairs of the values list. */
+  /** The term → description pairs of the values list, a kit details list. */
   const values = () =>
-    [...root().querySelectorAll('dt')].map((term) => [
-      term.textContent?.trim(),
-      term.nextElementSibling?.textContent?.trim(),
-    ]);
+    [
+      ...(
+        fixture.debugElement.query(By.directive(NeatDetails)).nativeElement as HTMLElement
+      ).querySelectorAll('dt'),
+    ].map((term) => [term.textContent?.trim(), term.nextElementSibling?.textContent?.trim()]);
   const flat = (element: Element | null) => element?.textContent?.replace(/\s+/g, ' ').trim();
   /** The text an element's `aria-describedby` points at. */
   const description = (element: Element) =>

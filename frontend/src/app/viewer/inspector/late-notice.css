@@ -19,22 +19,6 @@
   margin: 0;
 }
 
-.values {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--neat-space-2) var(--neat-space-3);
-  margin: 0;
-}
-
-.values dt {
-  color: var(--muted-foreground);
-}
-
-.values dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-
 .actions {
   display: flex;
   flex-direction: column;

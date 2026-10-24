@@ -15,6 +15,18 @@
   gap: var(--neat-space-3);
 }
 
+/* The count, with Select All and Clear at the row's end. */
+.bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+.bulk p {
+  flex: 1 1 auto;
+}
+
 /* A list fills the height it is given and scrolls its rows inside it. */
 .list {
   display: flex;

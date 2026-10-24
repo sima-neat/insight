@@ -15,6 +15,7 @@ import {
 } from '@angular/core';
 import { NeatButton, NeatIcon, NeatNote, NeatTooltip } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
+import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import {
   lateNoticeDetails,
@@ -209,6 +210,7 @@ function describeLateness(reading: LatenessReading | null): string {
   imports: [
     LateNotice,
     NeatButton,
+    NeatDetails,
     NeatIcon,
     NeatNote,
     NeatRoiEditor,

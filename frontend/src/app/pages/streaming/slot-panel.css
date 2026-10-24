@@ -87,31 +87,22 @@ code {
   gap: var(--neat-space-3);
 }
 
-.details {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--neat-space-2) var(--neat-space-3);
-  margin: 0;
-  font-size: var(--neat-text-sm);
-}
-
-.details dt {
-  color: var(--muted-foreground);
-}
-
-.details dd {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-variant-numeric: tabular-nums;
-}
-
-/* The URL and its Copy, apart, wrapping as one when the URL is long. */
-.details .url {
+/*
+ * The URL and its Copy side by side: a long URL wraps within its own column, and Copy keeps its
+ * place beside it rather than drop to a line of its own.
+ */
+.url {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--neat-space-2);
+}
+
+.url code {
+  min-width: 0;
+}
+
+.url button {
+  flex: none;
 }
 
 .frame-rate {

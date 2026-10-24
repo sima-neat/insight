@@ -1,7 +1,0 @@
-:host {
-  display: block;
-  color: var(--destructive);
-  font-size: var(--neat-text-sm);
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-}

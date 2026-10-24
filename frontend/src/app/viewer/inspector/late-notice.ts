@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { NeatButton } from '@sima/neat-ui';
+import { NeatDetails } from '@sima/neat-ui/details';
 import type { NeatLateNoticeBlocker, NeatLateNoticeDetails } from '@sima/neat-ui/video';
 
 /** Which of the notice's actions was taken: this channel's own buffer, or the global one. */
@@ -26,14 +27,14 @@ const BLOCKED_TEXT: Readonly<Record<NeatLateNoticeBlocker, string>> = {
  */
 @Component({
   selector: 'app-late-notice',
-  imports: [NeatButton],
+  imports: [NeatButton, NeatDetails],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'region', 'aria-labelledby': 'late-notice-title' },
   template: `
     @let notice = details();
     <h3 id="late-notice-title" class="title">Overlays are being dropped</h3>
     <p class="text">Metadata arrives after its video frame was already shown.</p>
-    <dl class="values">
+    <dl neatDetails>
       <dt>Arrives after its frame</dt>
       <dd>{{ notice.latenessMs === null ? 'not measured' : '~' + notice.latenessMs + ' ms' }}</dd>
       <dt>Video sync buffer</dt>

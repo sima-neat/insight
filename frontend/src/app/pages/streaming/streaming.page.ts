@@ -27,6 +27,7 @@ import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-
 import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatSlider } from '@sima/neat-ui/slider';
+import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { CellText } from '../../cell-text';
 import type { MediaNode, RenditionsCleared } from '../../sources/api';
@@ -38,7 +39,6 @@ import { SlotsService } from '../../sources/slots.service';
 import { SlotControl } from './slot-control';
 import { SlotPanel } from './slot-panel';
 import { isInUse, type SlotRow, slotRow } from '../../sources/slot-row';
-import { StatusChip } from './status-chip';
 import { messageOf } from '../../sources/stream-lines';
 
 /** The slots Insight has, `src1`–`src48`: hard-coded as in #170 (the spec keeps it so). */
@@ -98,10 +98,10 @@ function clearedMessage({ removed, freed_bytes, kept }: RenditionsCleared): stri
     NeatSegmented,
     NeatSelectList,
     NeatSlider,
+    NeatStatusChip,
     NeatTooltip,
     SlotPanel,
     SlotsNotice,
-    StatusChip,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './streaming.page.html',

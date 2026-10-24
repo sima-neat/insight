@@ -2,6 +2,8 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component, computed, inject, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { Observable, Subject } from 'rxjs';
 import type {
@@ -228,13 +230,14 @@ describe('SlotPanel', () => {
     [...root().querySelectorAll<HTMLInputElement>('input')].find(
       (input) =>
         input.getAttribute('aria-label') === label ||
-        input.closest('label')?.firstChild?.textContent?.trim() === label,
+        input.closest('neat-field label')?.firstChild?.textContent?.trim() === label,
     )!;
   const dialog = () => document.querySelector<HTMLElement>('neat-dialog-panel');
   const confirmDialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
   const details = (): Record<string, string> => {
     const values: Record<string, string> = {};
-    const list = root().querySelector('dl')!;
+    // The kit's details list.
+    const list: HTMLElement = fixture.debugElement.query(By.directive(NeatDetails)).nativeElement;
     for (const term of list.querySelectorAll('dt')) {
       values[text(term)] = text(term.nextElementSibling!);
     }
@@ -267,7 +270,7 @@ describe('SlotPanel', () => {
     slots.slots.set([fileSlot(2, { state: 'playing' })]);
     await open();
     expect(text(root().querySelector('h2')!)).toBe('src2');
-    expect(text(root().querySelector('header app-status-chip')!)).toBe('Live');
+    expect(text(root().querySelector('header neat-status-chip')!)).toBe('Live');
     expect(root().querySelector('app-slot-preview')).not.toBeNull();
   });
 
@@ -354,7 +357,7 @@ describe('SlotPanel', () => {
       'Camera permission was denied. Allow camera access for this site and try again.',
     );
     await fixture.whenStable();
-    expect(root().querySelector('[role="alert"]')!.textContent).toContain(
+    expect(root().querySelector('neat-error-note[role="alert"]')!.textContent).toContain(
       'Camera permission was denied.',
     );
 
@@ -391,7 +394,7 @@ describe('SlotPanel', () => {
     await settle();
     expect(toasts.error).toHaveBeenCalledWith('The camera rejected the username or password');
     // Also under the form, where the credentials are typed again (Q13 d, as #170's dialog).
-    const inline = root().querySelector('form [role="alert"]')!;
+    const inline = root().querySelector('form neat-error-note[role="alert"]')!;
     expect(text(inline)).toBe('The camera rejected the username or password');
     expect(field('Stream URL').value).toBe('rtsp://10.0.0.7/stream1');
     expect(button('Pull')!.disabled).toBe(false);
@@ -399,7 +402,7 @@ describe('SlotPanel', () => {
     // A new attempt clears it.
     slots.pull.mockReturnValueOnce(new Promise(() => undefined));
     await click(button('Pull'));
-    expect(root().querySelector('form [role="alert"]')).toBeNull();
+    expect(root().querySelector('form neat-error-note[role="alert"]')).toBeNull();
   });
 
   it('Change… assigns the picked file through the cameras service, and keeps the picker open on a refusal', async () => {
@@ -474,7 +477,7 @@ describe('SlotPanel', () => {
     expect(slots.prepare).toHaveBeenCalledWith(2);
     expect(slots.start).not.toHaveBeenCalled();
     expect(text(encodeStatus()!)).toContain('Preparing rendition…');
-    expect(text(root().querySelector('header app-status-chip')!)).toBe('Encoding');
+    expect(text(root().querySelector('header neat-status-chip')!)).toBe('Encoding');
     // The rate cannot change while the encode runs.
     expect(field('Frames per second').disabled).toBe(true);
 

@@ -1,5 +1,7 @@
 import { Component, computed, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { MediaInfo, Slot } from '../../sources/api';
 import { type DeleteOutcome, MediaLibraryService } from '../../sources/media-library.service';
@@ -105,11 +107,13 @@ describe('MediaPanel', () => {
     [...panel().querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => b.textContent?.trim() === label,
     )!;
+  /** The info table's rows, a kit details list. */
   const infoRows = () =>
-    [...panel().querySelectorAll('dt')].map((dt) => [
-      dt.textContent!.trim(),
-      dt.nextElementSibling!.textContent!.trim(),
-    ]);
+    [
+      ...(
+        fixture.debugElement.query(By.directive(NeatDetails)).nativeElement as HTMLElement
+      ).querySelectorAll('dt'),
+    ].map((dt) => [dt.textContent!.trim(), dt.nextElementSibling!.textContent!.trim()]);
   const confirmDialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
   const confirmText = () =>
     [...(confirmDialog()?.querySelectorAll('h2, p') ?? [])]

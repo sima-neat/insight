@@ -11,10 +11,9 @@ import {
   signal,
 } from '@angular/core';
 import { NeatButton, NeatNote } from '@sima/neat-ui';
+import { NeatErrorNote, NeatField } from '@sima/neat-ui/field';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
-import { ErrorNote } from '../error-note';
-import { FieldLabel } from '../field-label';
 import type { YoutubePreview, YoutubeTarget } from './api';
 import { ImportPreview } from './import-preview';
 import { ImportRunner } from './import-runner';
@@ -81,11 +80,11 @@ export class YoutubeTabState {
 @Component({
   selector: 'app-import-youtube',
   imports: [
-    ErrorNote,
-    FieldLabel,
     ImportPreview,
     ImportSummary,
     NeatButton,
+    NeatErrorNote,
+    NeatField,
     NeatInput,
     NeatNote,
     NeatSelect,

@@ -182,6 +182,44 @@ describe('MediaPage', () => {
     expect(slots.watchers).toBe(0);
   });
 
+  it('says it is loading until the library first answers', async () => {
+    library.tree.set(null);
+    let answer!: () => void;
+    library.refresh.mockReturnValueOnce(
+      new Promise<undefined>((resolve) => (answer = () => resolve(undefined))),
+    );
+    await open();
+    expect(root().querySelector('.library')!.textContent).toContain('Loading media…');
+    expect(root().querySelector('neat-file-browser')).toBeNull();
+
+    library.tree.set(TREE);
+    answer();
+    await settle();
+    expect(root().querySelector('.library')!.textContent).not.toContain('Loading media…');
+    expect(rows().map(nameOf)).toEqual(['people', 'cars.mp4', 'idle.mp4', 'notes.txt']);
+  });
+
+  it('a first fetch that fails stops loading and shows the empty library', async () => {
+    library.tree.set(null);
+    library.refresh.mockRejectedValueOnce(
+      new ApiRequestError(500, 'Media folder unreadable', null),
+    );
+    await open();
+    // The failure reaches the page a few promise turns after the navigation settled.
+    await new Promise((resolve) => setTimeout(resolve));
+    await settle();
+    expect(toasts.error).toHaveBeenCalledWith('Media folder unreadable');
+    expect(root().querySelector('.library')!.textContent).not.toContain('Loading media…');
+    expect(root().querySelector('neat-file-browser')).not.toBeNull();
+  });
+
+  it('shows a library fetched before at once, while it is fetched again', async () => {
+    library.refresh.mockReturnValueOnce(new Promise<undefined>(() => undefined));
+    await open();
+    expect(root().querySelector('.library')!.textContent).not.toContain('Loading media…');
+    expect(rows()).toHaveLength(4);
+  });
+
   it('a library that cannot be fetched is reported', async () => {
     library.refresh.mockRejectedValueOnce(
       new ApiRequestError(500, 'Media folder unreadable', null),

@@ -22,15 +22,16 @@ import {
   NeatTooltip,
 } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
+import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatDialog, type NeatDialogRef } from '@sima/neat-ui/dialog';
+import { NeatErrorNote, NeatField } from '@sima/neat-ui/field';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatProgress } from '@sima/neat-ui/progress';
 import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
+import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import { ErrorNote } from '../../error-note';
-import { FieldLabel } from '../../field-label';
 import type { Slot, SlotTransport } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
@@ -57,7 +58,6 @@ import {
   slotOutput,
   streamUrl,
 } from '../../sources/slot-row';
-import { StatusChip } from './status-chip';
 import { messageOf } from '../../sources/stream-lines';
 
 /** Which form the source switch shows. */
@@ -119,12 +119,13 @@ function formFor(slot: Slot): SourceForm {
 @Component({
   selector: 'app-slot-panel',
   imports: [
-    ErrorNote,
-    FieldLabel,
     FpsStepper,
     MediaPicker,
     NeatButton,
     NeatColumn,
+    NeatDetails,
+    NeatErrorNote,
+    NeatField,
     NeatInlineButton,
     NeatInput,
     NeatNote,
@@ -132,9 +133,9 @@ function formFor(slot: Slot): SourceForm {
     NeatSegmented,
     NeatSelect,
     NeatSelectList,
+    NeatStatusChip,
     NeatTooltip,
     SlotPreview,
-    StatusChip,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './slot-panel.html',

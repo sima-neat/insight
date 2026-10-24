@@ -6,14 +6,15 @@ import {
   ElementRef,
   inject,
   Injectable,
-  signal,
+  input,
+  linkedSignal,
   viewChild,
 } from '@angular/core';
 import { NeatButton, NeatNote } from '@sima/neat-ui';
 import { NeatDialog, NeatDialogBody } from '@sima/neat-ui/dialog';
+import { NeatErrorNote } from '@sima/neat-ui/field';
 import { NeatProgress } from '@sima/neat-ui/progress';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
-import { ErrorNote } from '../error-note';
 import { CatalogTabState, ImportCatalog } from './import-catalog';
 import { ImportLocal } from './import-local';
 import { type ImportKind, ImportRunner } from './import-runner';
@@ -29,23 +30,14 @@ import { ImportYoutube, YoutubeTabState } from './import-youtube';
 @Injectable({ providedIn: 'root' })
 export class ImportDialogs {
   private readonly dialogs = inject(NeatDialog);
-  private openingTab: ImportKind = 'local';
 
   open(tab: ImportKind = 'local'): Promise<string | null> {
-    this.openingTab = tab;
-    const dialog = this.dialogs.open<string | null>(ImportDialog, {
+    const dialog = this.dialogs.open<ImportDialog, string | null>(ImportDialog, {
       title: 'Import media',
       size: 'large',
+      inputs: { openingTab: tab },
     });
     return dialog.closed.then((path) => path ?? null);
-  }
-
-  /**
-   * The tab the dialog being opened starts on. `NeatDialog` gives its content no inputs, so the
-   * dialog reads it from here as it is created.
-   */
-  tabToOpen(): ImportKind {
-    return this.openingTab;
   }
 }
 
@@ -60,12 +52,12 @@ export class ImportDialogs {
 @Component({
   selector: 'app-import-dialog',
   imports: [
-    ErrorNote,
     ImportCatalog,
     ImportLocal,
     ImportYoutube,
     NeatButton,
     NeatDialogBody,
+    NeatErrorNote,
     NeatNote,
     NeatProgress,
     NeatTab,
@@ -77,8 +69,12 @@ export class ImportDialogs {
   styleUrl: './import-dialog.css',
 })
 export class ImportDialog {
+  /** The tab the dialog opens on. */
+  readonly openingTab = input<ImportKind>('local');
+
   protected readonly runner = inject(ImportRunner);
-  protected readonly tab = signal<string | undefined>(inject(ImportDialogs).tabToOpen());
+  /** The tab shown: the opening one until the user picks another. */
+  protected readonly tab = linkedSignal<string | undefined>(() => this.openingTab());
 
   private readonly work = viewChild.required<ElementRef<HTMLElement>>('work');
   private readonly keepBoth = viewChild<ElementRef<HTMLButtonElement>>('keepBoth');

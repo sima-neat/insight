@@ -22,21 +22,25 @@
 <neat-page scroll="none" [aside]="asideOpen() ? 'open' : 'closed'">
   <div class="library">
     <app-slots-notice />
-    <neat-file-browser
-      mode="manage"
-      [rootLabel]="rootLabel"
-      [root]="nodes()"
-      [countLabel]="countLabel"
-      [labels]="labels"
-      [filterPlaceholder]="placeholder()"
-      [(folder)]="folder"
-      [(selected)]="selected"
-      [(checked)]="checked"
-    >
-      <ng-template neatColumn="inUse" header="In use" width="minmax(0, 1fr)" let-file>
-        <app-cell-text>{{ inUseOf(file.path) }}</app-cell-text>
-      </ng-template>
-    </neat-file-browser>
+    @if (loading()) {
+      <p neatNote>Loading media…</p>
+    } @else {
+      <neat-file-browser
+        mode="manage"
+        [rootLabel]="rootLabel"
+        [root]="nodes()"
+        [countLabel]="countLabel"
+        [labels]="labels"
+        [filterPlaceholder]="placeholder()"
+        [(folder)]="folder"
+        [(selected)]="selected"
+        [(checked)]="checked"
+      >
+        <ng-template neatColumn="inUse" header="In use" width="minmax(0, 1fr)" let-file>
+          <app-cell-text>{{ inUseOf(file.path) }}</app-cell-text>
+        </ng-template>
+      </neat-file-browser>
+    }
   </div>
 
   @if (asideOpen()) {

@@ -89,7 +89,8 @@ describe('ImportRunner', () => {
       'Uploaded to /data/media/a.mp4',
       'Could not restart src4: MediaMTX is down',
     );
-    expect(toasts.error).toHaveBeenCalledWith('Could not restart src4: MediaMTX is down');
+    expect(toasts.warning).toHaveBeenCalledWith('Could not restart src4: MediaMTX is down');
+    expect(toasts.error).not.toHaveBeenCalled();
     lines(library.last, 'Upload complete.');
     done(library.last);
 
@@ -196,7 +197,9 @@ describe('ImportRunner', () => {
     expect(toast.title).toBe('Uploading media');
 
     runner.hold();
-    expect(toast.done).toHaveBeenCalledWith('Uploading media continues in the import dialog.');
+    // The toast goes without a word: the dialog shows the work again, to its outcome.
+    expect(toast.dismiss).toHaveBeenCalledOnce();
+    expect(toast.done).not.toHaveBeenCalled();
     lines(library.last, 'Uploaded to /data/media/a.mp4', 'Optimizing a.mp4: 40% (00:04 / 00:10)');
     expect(toast.update).not.toHaveBeenCalledWith(
       'Preparing media 1/2 · a.mp4 - 00:04 / 00:10',
@@ -218,7 +221,7 @@ describe('ImportRunner', () => {
   });
 
   it('a failure of its own while reading frees the runner and is reported', async () => {
-    toasts.error.mockImplementationOnce(() => {
+    toasts.warning.mockImplementationOnce(() => {
       throw new Error('toast host gone');
     });
     const outcome = runner.upload([new File(['x'], 'a.mp4')]);
@@ -230,7 +233,7 @@ describe('ImportRunner', () => {
   });
 
   it('also when the request answers while it is being sent', async () => {
-    toasts.error.mockImplementationOnce(() => {
+    toasts.warning.mockImplementationOnce(() => {
       throw new Error('toast host gone');
     });
     vi.spyOn(library, 'upload').mockReturnValueOnce(

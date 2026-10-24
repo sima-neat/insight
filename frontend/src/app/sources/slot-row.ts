@@ -1,3 +1,4 @@
+import type { NeatStatusTone } from '@sima/neat-ui/status-chip';
 import type { Slot, SlotExternal, SlotPull, SlotPullStatus, SlotReader } from './api';
 import type { Progress } from './progress-lines';
 import type { Camera } from './webcam-publishing';
@@ -12,12 +13,10 @@ import type { Camera } from './webcam-publishing';
 /** The kind of source in a slot: a file, a camera, an external publisher or a pulled stream. */
 export type SlotKind = 'VID' | 'CAM' | 'EXT' | 'URL' | '';
 
-/** The theme's status colour a state chip takes. */
-export type SlotTone = 'neutral' | 'success' | 'info' | 'warning' | 'danger';
-
 export interface SlotStateView {
   readonly label: string;
-  readonly tone: SlotTone;
+  /** The theme's status colour the state's chip takes. */
+  readonly tone: NeatStatusTone;
 }
 
 /** One row of the slot list: a column each, ready to show. */

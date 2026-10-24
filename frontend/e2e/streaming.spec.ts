@@ -290,6 +290,16 @@ test.describe('Streaming with mocked slots', () => {
         ),
       );
 
+    /** Whether the stream URL's Copy sits beside the URL rather than on a line of its own. */
+    const copyBesideUrl = () =>
+      panel(page)
+        .locator('dd', { has: page.getByRole('button', { name: /^Copy stream URL/ }) })
+        .evaluate((value) => {
+          const url = value.querySelector('code')!.getBoundingClientRect();
+          const copy = value.querySelector('button')!.getBoundingClientRect();
+          return copy.left >= url.right && copy.top < url.bottom && copy.bottom > url.top;
+        });
+
     for (const viewport of [LAPTOP, DESKTOP, TABLET]) {
       await page.setViewportSize(viewport);
       // A playing file, a file at its own rate, an external publisher and a pull.
@@ -303,6 +313,7 @@ test.describe('Streaming with mocked slots', () => {
             { horizontal: 0, vertical: 0 },
             { horizontal: 0, vertical: 0 },
           ]);
+        await expect.poll(copyBesideUrl).toBe(true);
       }
     }
 

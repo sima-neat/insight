@@ -1,8 +1,11 @@
 import { Location } from '@angular/common';
 import { provideLocationMocks } from '@angular/common/testing';
-import { Component, inject } from '@angular/core';
+import { Component, getDebugNode, inject, type Type } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
+import { NeatButton } from '@sima/neat-ui';
+import { NeatInput } from '@sima/neat-ui/input';
+import { NeatSelect } from '@sima/neat-ui/select';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { CatalogAsset, CatalogIndex, YoutubePreview } from './api';
 import { ImportDialogs } from './import-dialog';
@@ -164,10 +167,13 @@ describe('ImportDialog', () => {
       .querySelector('input')!;
   const list = (label: string) =>
     dialog()!.querySelector<HTMLElement>(`[role="listbox"][aria-label="${label}"]`)!;
-  /** A list's rows, each as its cells' text. */
+  const options = (label: string) => [
+    ...list(label).querySelectorAll<HTMLElement>('[role="option"]'),
+  ];
+  /** A list's rows, each as its cells' text (a checked list's boxes have none). */
   const rows = (label: string) =>
-    [...list(label).querySelectorAll<HTMLElement>('[role="option"]')].map((row) =>
-      [...row.querySelectorAll(':scope > div')].map(text).join(' '),
+    options(label).map((row) =>
+      [...row.querySelectorAll(':scope > div')].map(text).filter(Boolean).join(' '),
     );
 
   async function click(element: HTMLElement | undefined): Promise<void> {
@@ -217,7 +223,7 @@ describe('ImportDialog', () => {
   };
   /** The name-clash question, its slots and its answers. */
   const clash = () => [...dialog()!.querySelectorAll('.clash p, .clash button')].map(text);
-  const alert = () => text(dialog()!.querySelector('[role="alert"]'));
+  const alert = () => text(dialog()!.querySelector('neat-error-note[role="alert"]'));
 
   it('uploads files in order with byte progress, then processing lines, then closes on success', async () => {
     await open();
@@ -368,7 +374,8 @@ describe('ImportDialog', () => {
     await TestBed.inject(Router).navigateByUrl('/media');
     await settle();
     await open();
-    expect(toast.done).toHaveBeenCalledWith('Uploading media continues in the import dialog.');
+    expect(toast.dismiss).toHaveBeenCalledOnce();
+    expect(toast.done).not.toHaveBeenCalled();
     expect(progress()!.title).toBe('Uploading media 1/2');
     // It is this dialog's work now: not dismissed by Escape, and it closes when the work is done.
     await escape();
@@ -426,7 +433,7 @@ describe('ImportDialog', () => {
     ]);
   });
 
-  it('catalog filters are one component used by both modes; Import imports the picked asset', async () => {
+  it('catalog filters are one component used by both modes; Import Selected imports the checked asset', async () => {
     library.catalog.mockResolvedValue(CATALOG);
     await open();
     // Loaded only once the Catalog tab opens.
@@ -458,9 +465,9 @@ describe('ImportDialog', () => {
     expect(text()).toContain('A narrow alley');
 
     await click(tab('Catalog by asset type'));
-    await click(list('Catalog assets').querySelectorAll<HTMLElement>('[role="option"]')[1]);
+    await click(options('Catalog assets')[1]);
     expect(text()).toContain('1 asset(s) selected');
-    await click(button('Import'));
+    await click(button('Import Selected'));
     expect(library.calls.map((call) => call.body)).toEqual(['street/1080_hevc.mp4']);
     lines(library.last, 'Saved catalog asset to catalog/street/1080_hevc.mp4');
     lines(library.last, 'Catalog import complete.');
@@ -470,6 +477,65 @@ describe('ImportDialog', () => {
     expect(dialog()).toBeNull();
     expect(opener.result).toBe('catalog/street/1080_hevc.mp4');
     expect(toasts.status).toHaveBeenCalledWith('Imported 1 catalog asset(s).');
+  });
+
+  it('by asset type, assets are checked and imported one after the other (Q17)', async () => {
+    library.catalog.mockResolvedValue(CATALOG);
+    await open('catalog');
+    const assets = list('Catalog assets');
+    const box = (row: number) =>
+      options('Catalog assets')[row].querySelector<HTMLElement>('[data-slot="select-list-check"]')!;
+    const checked = () =>
+      options('Catalog assets').map((row) => row.getAttribute('aria-selected') === 'true');
+    const filters = dialog()!.querySelector('app-catalog-filters')!;
+
+    expect(assets.getAttribute('aria-multiselectable')).toBe('true');
+    expect(text(document.getElementById(assets.getAttribute('aria-describedby')!))).toBe(
+      'Press Space to check or uncheck the asset.',
+    );
+    expect(button('Select All')!.disabled).toBe(false);
+    expect(button('Clear')!.disabled).toBe(true);
+    expect(button('Import Selected')!.disabled).toBe(true);
+
+    // A click on a box, or anywhere on the row as on #170's checkbox labels, checks the asset.
+    await click(box(0));
+    await click(options('Catalog assets')[2]);
+    expect(checked()).toEqual([true, false, true]);
+    expect(text()).toContain('3 matching assets / 2 selected');
+    expect(text()).toContain('2 asset(s) selected');
+    expect(text()).toContain('Total selected: 2.0 MB');
+    await click(options('Catalog assets')[2]);
+    expect(checked()).toEqual([true, false, false]);
+
+    // Only what the filter shows counts and imports; Select All checks every matching asset.
+    await pick(filters.querySelectorAll('neat-select')[1], 'H.265');
+    expect(text()).toContain('2 matching assets / 0 selected');
+    await click(button('Select All'));
+    expect(checked()).toEqual([true, true]);
+    expect(text()).toContain('2 matching assets / 2 selected');
+
+    await click(button('Clear'));
+    expect(checked()).toEqual([false, false]);
+    expect(button('Clear')!.disabled).toBe(true);
+
+    await click(button('Select All'));
+    await click(button('Import Selected'));
+    expect(library.calls.map((call) => call.body)).toEqual(['alley/720_hevc.mp4']);
+    expect(progress()!.title).toBe('Importing catalog asset 1/2');
+    lines(library.last, 'Saved catalog asset to catalog/alley/720_hevc.mp4');
+    done(library.last);
+    await settle();
+    expect(library.calls.map((call) => call.body)).toEqual([
+      'alley/720_hevc.mp4',
+      'street/1080_hevc.mp4',
+    ]);
+    lines(library.last, 'Saved catalog asset to catalog/street/1080_hevc.mp4');
+    done(library.last);
+    await settle();
+
+    expect(dialog()).toBeNull();
+    expect(opener.result).toBe('catalog/street/1080_hevc.mp4');
+    expect(toasts.status).toHaveBeenCalledWith('Imported 2 catalog asset(s).');
   });
 
   it('YouTube import needs a validated link and Cancel Import aborts it', async () => {
@@ -509,6 +575,25 @@ describe('ImportDialog', () => {
     expect(toasts.status).toHaveBeenCalledWith('YouTube import canceled.');
     expect(dialog()).not.toBeNull();
     expect(button('Cancel Import')).toBeUndefined();
+  });
+
+  it('lines up the YouTube row: kit fields, and every control in it of the small size', async () => {
+    await open('youtube');
+    const row = dialog()!.querySelector('app-import-youtube .form')!;
+    const sizeOf = <T extends { size: () => string }>(element: Element, type: Type<T>) =>
+      getDebugNode(element)!.injector.get(type).size();
+
+    expect([...row.querySelectorAll('neat-field label > span')].map(text)).toEqual([
+      'YouTube URL',
+      'Start Time',
+    ]);
+    expect(
+      [...row.querySelectorAll('neat-field input')].map((input) => sizeOf(input, NeatInput)),
+    ).toEqual(['small', 'small']);
+    expect(
+      [...row.querySelectorAll('neat-select')].map((select) => sizeOf(select, NeatSelect)),
+    ).toEqual(['small', 'small']);
+    expect(sizeOf(row.querySelector(':scope > button')!, NeatButton)).toBe('small');
   });
 
   it('a live link says the clip length caps the import, as #170 did', async () => {

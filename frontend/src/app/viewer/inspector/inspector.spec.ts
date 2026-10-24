@@ -6,6 +6,7 @@ import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import { NeatIcon } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
+import { NeatDetails } from '@sima/neat-ui/details';
 import {
   type NeatFrameStats,
   type NeatMetadataSnapshot,
@@ -105,15 +106,21 @@ describe('ViewerInspector', () => {
   const previewTile = (): NeatVideoTile | null =>
     fixture.debugElement.query(By.directive(ViewerInspector))?.query(By.directive(NeatVideoTile))
       ?.componentInstance ?? null;
-  /** The status list's term → description pairs. */
+  /**
+   * The status list's term → description pairs, none without the list: the kit details list in the
+   * inspector, outside its late notice.
+   */
   const status = () =>
-    [...inspector().querySelectorAll('.status dt')].map((term) => [
-      term.textContent?.trim(),
-      term.nextElementSibling?.textContent?.trim(),
-    ]);
+    [
+      ...(fixture.debugElement
+        .queryAll(By.directive(NeatDetails))
+        .map((list) => list.nativeElement as HTMLElement)
+        .find((list) => list.closest('app-viewer-inspector') && !list.closest('app-late-notice'))
+        ?.querySelectorAll('dt') ?? []),
+    ].map((term) => [term.textContent?.trim(), term.nextElementSibling?.textContent?.trim()]);
   const notice = () => inspector().querySelector('app-late-notice');
   const noticeValue = (term: string) =>
-    [...notice()!.querySelectorAll('dt')]
+    [...notice()!.querySelectorAll('dl[neatDetails] > dt')]
       .find((element) => element.textContent?.trim() === term)
       ?.nextElementSibling?.textContent?.trim();
 

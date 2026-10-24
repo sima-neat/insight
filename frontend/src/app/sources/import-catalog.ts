@@ -7,11 +7,11 @@ import {
   signal,
 } from '@angular/core';
 import { NeatButton, NeatNote } from '@sima/neat-ui';
+import { NeatErrorNote } from '@sima/neat-ui/field';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import { CellText } from '../cell-text';
-import { ErrorNote } from '../error-note';
 import type { CatalogAsset, CatalogIndex, CatalogSource } from './api';
 import {
   assetMatchesSearch,
@@ -71,8 +71,8 @@ export class CatalogTabState {
   readonly sourceId = signal<string | null>(null);
   /** By name: the variant picked; null takes the first that passes the filter. */
   readonly variantPath = signal<string | null>(null);
-  /** By type: the asset picked. */
-  readonly typePath = signal<string | null>(null);
+  /** By type: the assets checked, including those the search or filter hides now. */
+  readonly typePaths = signal<readonly string[]>([]);
 }
 
 /**
@@ -85,11 +85,11 @@ export class CatalogTabState {
   imports: [
     CatalogFilters,
     CellText,
-    ErrorNote,
     ImportPreview,
     ImportSummary,
     NeatButton,
     NeatColumn,
+    NeatErrorNote,
     NeatInput,
     NeatNote,
     NeatSelectList,
@@ -192,13 +192,13 @@ export class ImportCatalog {
     );
   });
   /**
-   * The assets picked by type. One for now: the kit's list picks a single row; Task 15 gives it
-   * checked rows (ruling Q17) and this becomes the checked assets, with Select All, Clear and
-   * "Import Selected". Everything below reads the selection from here.
+   * The assets checked by type, of those the list shows. One the search or the filter hides is
+   * neither counted nor imported, as in #170; unlike #170, which dropped it, it stays checked for
+   * when it shows again, as the kit's checked list keeps keys it does not list.
    */
   protected readonly typeSelection = computed((): readonly AssetRow[] => {
-    const picked = this.typeRows().find((row) => row.asset.path === this.state.typePath());
-    return picked ? [picked] : [];
+    const checked = new Set(this.state.typePaths());
+    return this.typeRows().filter((row) => checked.has(row.asset.path));
   });
   protected readonly typeBytes = computed(() =>
     formatBytes(totalBytes(this.typeSelection().map((row) => row.asset))),
@@ -240,8 +240,23 @@ export class ImportCatalog {
     this.state.variantPath.set(row?.asset.path ?? null);
   }
 
-  protected pickType(row: AssetRow | null): void {
-    this.state.typePath.set(row?.asset.path ?? null);
+  /** A click on an asset's row checks or unchecks it, as #170's checkbox labels did. */
+  protected toggleType(row: AssetRow): void {
+    const path = row.asset.path;
+    this.state.typePaths.update((paths) =>
+      paths.includes(path) ? paths.filter((one) => one !== path) : [...paths, path],
+    );
+  }
+
+  /** Checks every asset the list shows, keeping those checked before. */
+  protected checkAllTypes(): void {
+    this.state.typePaths.update((paths) => [
+      ...new Set([...paths, ...this.typeRows().map(byAssetPath)]),
+    ]);
+  }
+
+  protected clearTypes(): void {
+    this.state.typePaths.set([]);
   }
 
   protected importRows(rows: readonly AssetRow[]): void {

@@ -38,23 +38,3 @@ code {
   align-items: center;
   gap: var(--neat-space-2);
 }
-
-/* The info table: names muted in one column, values beside them. */
-.details {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--neat-space-2) var(--neat-space-3);
-  margin: 0;
-  font-size: var(--neat-text-sm);
-}
-
-.details dt {
-  color: var(--muted-foreground);
-}
-
-.details dd {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-variant-numeric: tabular-nums;
-}

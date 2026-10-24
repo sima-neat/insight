@@ -1,6 +1,6 @@
 <header class="slot-header">
   <h2>{{ row().name }}</h2>
-  <app-status-chip [tone]="row().state.tone">{{ row().state.label }}</app-status-chip>
+  <neat-status-chip [tone]="row().state.tone">{{ row().state.label }}</neat-status-chip>
 </header>
 
 <app-slot-preview [slot]="slot()" [localStream]="localStream()" />
@@ -81,7 +81,7 @@
           </p>
         }
         @if (cameras.error(); as error) {
-          <app-error-note role="alert">{{ error }}</app-error-note>
+          <neat-error-note>{{ error }}</neat-error-note>
         }
       }
       <div class="buttons">
@@ -132,7 +132,7 @@
             it.
           </p>
         }
-        <app-field label="Stream URL"
+        <neat-field label="Stream URL"
           ><input
             #urlField
             neatInput
@@ -141,9 +141,9 @@
             placeholder="rtsp://192.168.1.10:554/stream1"
             [value]="url()"
             (input)="url.set(urlField.value)"
-        /></app-field>
+        /></neat-field>
         <div class="credentials">
-          <app-field label="Username"
+          <neat-field label="Username"
             ><input
               #userField
               neatInput
@@ -152,8 +152,8 @@
               autocomplete="off"
               [value]="username()"
               (input)="username.set(userField.value)"
-          /></app-field>
-          <app-field label="Password"
+          /></neat-field>
+          <neat-field label="Password"
             ><input
               #passwordField
               neatInput
@@ -162,14 +162,14 @@
               autocomplete="new-password"
               [value]="password()"
               (input)="password.set(passwordField.value)"
-          /></app-field>
+          /></neat-field>
         </div>
         <p neatNote>
           Most IP cameras need a username and password. Credentials typed into the URL work too and
           are never shown again.
         </p>
         @if (pullError(); as error) {
-          <app-error-note role="alert">{{ error }}</app-error-note>
+          <neat-error-note>{{ error }}</neat-error-note>
         }
         <div class="buttons">
           <button neatButton type="submit" size="small" [disabled]="!canPull()">
@@ -247,7 +247,7 @@
 }
 
 <h3>Details</h3>
-<dl class="details">
+<dl neatDetails>
   @if (holder(); as holder) {
     @if (pullSource(); as source) {
       <dt>Source</dt>

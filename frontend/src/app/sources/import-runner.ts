@@ -273,13 +273,12 @@ export class ImportRunner {
   }
 
   /**
-   * Shows the work in a dialog again. The kit's progress toast cannot be removed, only settled,
-   * so it settles with a status that says where the work went.
+   * Shows the work in a dialog again. The toast goes without an outcome: the dialog that took the
+   * work back shows it, and reports how it ended.
    */
   private takeFromToast(): void {
-    const job = this.job();
-    if (!job || !this.toast) return;
-    this.toast.done(`${TOAST_TITLES[job]} continues in the import dialog.`);
+    if (!this.toast) return;
+    this.toast.dismiss();
     this.toast = null;
   }
 
@@ -355,7 +354,7 @@ export class ImportRunner {
       this.library.upload(file, onConflict),
       (line) => {
         const warning = restartWarning(line);
-        if (warning) this.toasts.error(warning);
+        if (warning) this.toasts.warning(warning);
         this.showLine(uploadProgress(line), position, total, file.name);
       },
       (loaded, size) =>

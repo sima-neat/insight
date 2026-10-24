@@ -476,7 +476,7 @@ test.describe('Import with mocked APIs', () => {
     const assets = importDialog(page).getByRole('listbox', { name: 'Catalog assets' });
     await assets.getByRole('option').filter({ hasText: 'Street' }).click();
     await expect(importDialog(page)).toContainText('1 asset(s) selected');
-    await dialogButton(page, 'Import').click();
+    await dialogButton(page, 'Import Selected').click();
 
     await expect(importDialog(page)).toHaveCount(0);
     expect(imported).toEqual(['street/street_720p30_30fps_h264.mp4']);
@@ -532,6 +532,45 @@ test.describe('Import with mocked APIs', () => {
       await expect(importDialog(page).getByLabel('YouTube URL')).toBeVisible();
       expect(await height()).toBe(local);
     }
+  });
+
+  test('the YouTube row lines up: names on one baseline, controls level with Validate', async ({
+    page,
+  }) => {
+    await withMockedMedia(page);
+    await page.setViewportSize(LAPTOP);
+    await page.goto('/media');
+    await tool(page, 'Import…').click();
+    await importDialog(page).getByRole('tab', { name: 'YouTube', exact: true }).click();
+    const row = importDialog(page).locator('app-import-youtube .form');
+    await expect(row.getByRole('button', { name: 'Validate' })).toBeVisible();
+
+    // Under the URL, which spans the row: target, start, length and Validate side by side.
+    const edges = await row.evaluate((form) => {
+      const box = (element: Element) => element.getBoundingClientRect();
+      const named = (text: string) =>
+        [...form.querySelectorAll('label, span')].find(
+          (element) => element.textContent?.trim() === text && element.children.length === 0,
+        )!;
+      const combos = [...form.querySelectorAll('[role="combobox"]')];
+      const controls = [
+        combos[0],
+        form.querySelectorAll('neat-field input')[1],
+        combos[1],
+        form.querySelector(':scope > button')!,
+      ].map(box);
+      const names = ['Target Resolution & FPS', 'Start Time', 'Clip Length'].map(
+        (text) => box(named(text)).bottom,
+      );
+      return {
+        tops: controls.map((control) => Math.round(control.top)),
+        bottoms: controls.map((control) => Math.round(control.bottom)),
+        names: names.map(Math.round),
+      };
+    });
+    expect(new Set(edges.tops).size, `control tops ${edges.tops}`).toBe(1);
+    expect(new Set(edges.bottoms).size, `control bottoms ${edges.bottoms}`).toBe(1);
+    expect(new Set(edges.names).size, `name baselines ${edges.names}`).toBe(1);
   });
 
   test('a YouTube link is validated before import, and Cancel Import aborts the import', async ({

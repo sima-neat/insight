@@ -9,7 +9,6 @@
 
 /* The list fills the page's content box under the notice, and scrolls its rows inside. */
 .slots {
-  container: slots / inline-size;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -17,18 +16,6 @@
 
 neat-select-list {
   flex: 1 1 0;
-}
-
-/*
- * Where the list is too narrow for every column (a tablet beside the side panel), rate and codec
- * give their room to the slot, its source and its state. What is left of their columns would only
- * show a sliver of each value, so the values are clipped away entirely; they are still read with
- * the row, which `visibility` or `display` would prevent.
- */
-@container slots (width < 28rem) {
-  .gives-way {
-    clip-path: inset(50%);
-  }
 }
 
 /* The kind is a code (VID, CAM, EXT, URL), set off from the source it qualifies. */

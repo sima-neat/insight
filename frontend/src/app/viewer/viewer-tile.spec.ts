@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { NeatStatusChipButton } from '@sima/neat-ui/status-chip';
 import { bufferSettleMs, type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { ChannelLateness } from './channel-lateness';
 import { ChannelPlayback } from './channel-playback';
@@ -188,6 +189,10 @@ describe('ViewerTile', () => {
 
     await play();
     expect(chip()?.textContent?.trim()).toBe('Metadata late');
+    // The kit's status chip, as a button, in the warning tone of any warning.
+    const kitChip = fixture.debugElement.query(By.directive(NeatStatusChipButton));
+    expect(kitChip.nativeElement).toBe(chip());
+    expect(kitChip.injector.get(NeatStatusChipButton).tone()).toBe('warning');
 
     chip()!.click();
     expect(host().lateNotices).toBe(1);

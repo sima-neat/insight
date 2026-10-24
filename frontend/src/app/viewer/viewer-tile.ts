@@ -10,6 +10,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { NeatStatusChipButton } from '@sima/neat-ui/status-chip';
 import {
   type NeatFrameStats,
   type NeatLatenessSnapshot,
@@ -37,7 +38,7 @@ import { VfConnections } from './vf/vf-connections';
  */
 @Component({
   selector: 'app-viewer-tile',
-  imports: [NeatVideoTile],
+  imports: [NeatStatusChipButton, NeatVideoTile],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     role: 'group',
@@ -58,7 +59,13 @@ import { VfConnections } from './vf/vf-connections';
       (frameStats)="onFrameStats($event)"
     >
       @if (lateShown()) {
-        <button neatTileChip type="button" class="late-chip" (click)="lateNotice.emit()">
+        <button
+          neatStatusChip
+          neatTileChip
+          tone="warning"
+          type="button"
+          (click)="lateNotice.emit()"
+        >
           Metadata late
         </button>
       }

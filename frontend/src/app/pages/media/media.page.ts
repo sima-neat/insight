@@ -7,7 +7,14 @@ import {
   linkedSignal,
   signal,
 } from '@angular/core';
-import { NeatButton, NeatIcon, NeatPage, NeatPageToolbar, NeatTooltip } from '@sima/neat-ui';
+import {
+  NeatButton,
+  NeatIcon,
+  NeatNote,
+  NeatPage,
+  NeatPageToolbar,
+  NeatTooltip,
+} from '@sima/neat-ui';
 import { NeatFileBrowser } from '@sima/neat-ui/file-browser';
 import { NeatColumn } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
@@ -54,6 +61,7 @@ function inUseText(slots: readonly Slot[], encodes: ReadonlyMap<number, Progress
     NeatColumn,
     NeatFileBrowser,
     NeatIcon,
+    NeatNote,
     NeatPage,
     NeatPageToolbar,
     NeatTooltip,
@@ -87,6 +95,13 @@ export class MediaPage {
     },
   });
   protected readonly checked = signal<readonly string[]>([]);
+  /** This page's fetch of the library has answered, or failed. */
+  private readonly fetched = signal(false);
+  /**
+   * Nothing to list until the library first answers: a library fetched before (on another page)
+   * shows at once, and a first fetch that fails shows the empty library under its error toast.
+   */
+  protected readonly loading = computed(() => this.library.tree() === null && !this.fetched());
   protected readonly placeholder = computed(() => mediaFilterPlaceholder(this.folder()));
   protected readonly asideOpen = signal(true);
 
@@ -104,9 +119,12 @@ export class MediaPage {
 
   constructor() {
     inject(DestroyRef).onDestroy(this.slots.watch());
-    this.library.refresh().catch((failure: unknown) => {
-      this.toasts.error(messageOf(failure));
-    });
+    this.library
+      .refresh()
+      .catch((failure: unknown) => {
+        this.toasts.error(messageOf(failure));
+      })
+      .finally(() => this.fetched.set(true));
   }
 
   protected inUseOf(path: string): string {
