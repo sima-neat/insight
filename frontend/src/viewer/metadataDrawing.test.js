@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-import { drawMetadata, hasDrawableMetadata } from "./metadataDrawing.js";
+import {
+  drawMetadata,
+  drawVideoFrame,
+  hasDrawableMetadata,
+  prepareOverlayCanvas,
+} from "./metadataDrawing.js";
 
 const drawingSource = readFileSync(
   new URL("../../../webrtc/static/drawing.js", import.meta.url),
@@ -311,5 +316,41 @@ test("unknown metadata cannot invoke inherited properties as drawing strategies"
   strategies.disabled = false;
   for (const type of ["unknown", "__proto__", "constructor", "inherited", "disabled", null, { toString: null }]) {
     assert.doesNotThrow(() => drawMetadata(recordingContext(), {}, { type }, {}, 0, {}));
+  }
+});
+
+test("the video frame and its overlays share one letterboxed rectangle", (t) => {
+  const strategies = loadStrategies(t);
+  const frames = [];
+  const ctx = { ...recordingContext(), drawImage(...args) { frames.push(args); } };
+  const canvas = { clientWidth: 800, clientHeight: 600 };
+  const video = { videoWidth: 1280, videoHeight: 720 };
+
+  drawVideoFrame(ctx, canvas, video);
+  strategies["object-detection"](ctx, canvas, {
+    objects: [{ bbox: [0, 0, 1280, 720], label: "car", confidence: 1 }],
+  }, video, 0, { settings: { general: { showRoi: false }, type: {} } });
+
+  assert.deepEqual(frames, [[video, 0, 75, 800, 450]]);
+  assert.deepEqual(ctx.boxes, [[0, 75, 800, 450]]);
+});
+
+test("the overlay canvas matches the screen's pixel density up to 2x", () => {
+  for (const [devicePixelRatio, expected] of [[undefined, 1], [1.5, 1.5], [2, 2], [3, 2]]) {
+    const calls = [];
+    const ctx = {
+      setTransform(...args) { calls.push(["setTransform", ...args]); },
+      clearRect(...args) { calls.push(["clearRect", ...args]); },
+    };
+    const canvas = { clientWidth: 640, clientHeight: 360, width: 0, height: 0 };
+
+    prepareOverlayCanvas(ctx, canvas, devicePixelRatio);
+
+    assert.equal(canvas.width, 640 * expected);
+    assert.equal(canvas.height, 360 * expected);
+    assert.deepEqual(calls, [
+      ["setTransform", expected, 0, 0, expected, 0, 0],
+      ["clearRect", 0, 0, 640, 360],
+    ]);
   }
 });

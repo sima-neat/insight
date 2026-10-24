@@ -616,3 +616,5 @@ window.drawStrategies = {
 
 // Exposed for frontend/src/viewer/rleMask.test.js.
 window.decodeRleMaskAlpha = decodeRleMaskAlpha;
+// The viewer draws the video frame into the overlay canvas with this geometry.
+window.computeScaleAndOffset = computeScaleAndOffset;
