@@ -70,7 +70,7 @@
     }
 
     @if (facts().length) {
-      <neat-collapsible label="Details" summary="Hostname, Build, Machine, Model, Camera setup">
+      <neat-collapsible label="Details" [summary]="factTerms()">
         <dl neatDetails>
           @for (fact of facts(); track fact[0]) {
             <dt>{{ fact[0] }}</dt>

@@ -13,16 +13,18 @@ class Host {}
 describe('TopBarDialogs', () => {
   let fixture: ComponentFixture<Host>;
   let loadBoard: ReturnType<typeof vi.fn>;
+  let toasts: { status: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     // The real module, counted: whether it loads, and how often, is what this spec is about.
     loadBoard = vi.fn(() => import('./board/board-dialog'));
+    toasts = { status: vi.fn(), error: vi.fn() };
     TestBed.configureTestingModule({
       providers: [
         { provide: TOP_BAR_DIALOG_MODULES, useValue: { board: loadBoard } },
         { provide: BoardService, useValue: new FakeBoard() },
         { provide: PeripheralsService, useValue: new FakePeripherals() },
-        { provide: NeatToasts, useValue: { status: vi.fn(), error: vi.fn() } },
+        { provide: NeatToasts, useValue: toasts },
       ],
     });
     fixture = TestBed.createComponent(Host);
@@ -70,14 +72,19 @@ describe('TopBarDialogs', () => {
     expect(loadBoard).toHaveBeenCalledTimes(1);
   });
 
-  it('a module that failed to load is loaded again on the next open', async () => {
+  it('a module that failed to load says so, and is loaded again on the next open', async () => {
     const dialogs = TestBed.inject(TopBarDialogs);
     loadBoard.mockRejectedValueOnce(new Error('Failed to fetch dynamically imported module'));
-    await expect(dialogs.openBoard()).rejects.toThrow('Failed to fetch');
+    // Settles rather than rejects: every caller (the pill, Peripherals, Stats) gets the toast.
+    await expect(dialogs.openBoard()).resolves.toBeUndefined();
+    expect(toasts.error).toHaveBeenCalledExactlyOnceWith(
+      'Could not open the board dialog. Reload the page to try again.',
+    );
     expect(boardDialogs()).toHaveLength(0);
 
     void dialogs.openBoard();
     await shown();
     expect(loadBoard).toHaveBeenCalledTimes(2);
+    expect(toasts.error).toHaveBeenCalledTimes(1);
   });
 });

@@ -69,14 +69,12 @@ describe('App', () => {
 
   it('puts the board pill at the end of the top bar, naming the board it read', async () => {
     const fixture = TestBed.createComponent(App);
-    http
-      .expectOne('/api/board')
-      .flush(
-        boardState({
-          target: DEVKIT,
-          status: { state: 'connected', checked_at: null, error: null },
-        }),
-      );
+    http.expectOne('/api/board').flush(
+      boardState({
+        target: DEVKIT,
+        status: { state: 'connected', checked_at: null, error: null },
+      }),
+    );
     await settle(fixture);
     const root: HTMLElement = fixture.nativeElement;
 
@@ -107,5 +105,33 @@ describe('App', () => {
     );
     await settle(fixture);
     expect(document.querySelector('app-board-dialog')?.textContent).toContain('Open shell');
+  });
+
+  it('closing the board dialog gives the focus back to the pill', async () => {
+    const fixture = TestBed.createComponent(App);
+    http.expectOne('/api/board').flush(boardState({ target: DEVKIT }));
+    await settle(fixture);
+    const pill: HTMLButtonElement = fixture.nativeElement.querySelector('app-board-pill button');
+
+    pill.focus();
+    pill.click();
+    await vi.waitFor(() => expect(document.querySelector('app-board-dialog')).not.toBeNull());
+    http.expectOne('/api/devkit-shell').flush(shellInfo());
+    http.expectOne('/api/peripherals').flush(
+      { error: 'No board', code: 'no_target' },
+      {
+        status: 409,
+        statusText: 'Conflict',
+      },
+    );
+    await settle(fixture);
+    // The focus moved into the dialog, which opens after an asynchronous import.
+    expect(document.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true);
+
+    document
+      .querySelector('[role="dialog"]')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector('app-board-dialog')).toBeNull());
+    expect(document.activeElement).toBe(pill);
   });
 });

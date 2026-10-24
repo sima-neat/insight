@@ -1,7 +1,9 @@
-/* A long board name (a host name, an IPv6 address) is cut at a fixed width so that the pill never
-   crowds the page tools; the tooltip has it in full. */
+/* A long board name (a host name, an IPv6 address) is cut so that the pill never crowds the page
+   tools: at this width the Viewer's top bar at 1366×768 still has room for System Info's button
+   (ruling Q10; e2e/top-bar.spec.ts measures it). "DevKit: 192.168.100.200" just fits. The
+   tooltip names the target in full. */
 .label {
-  max-inline-size: 12rem;
+  max-inline-size: 10rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

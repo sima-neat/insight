@@ -81,6 +81,11 @@ export class BoardDialog {
 
   /** The browser shell's details for the board selected; null until read, or when they could not be. */
   protected readonly shell = signal<ShellInfo | null>(null);
+  /**
+   * Whether a shell read has answered. The actions wait for it: shown before, a connected board's
+   * row would be Check again alone, and Open shell would then be put before it under the pointer.
+   */
+  private readonly shellKnown = signal(false);
   private readonly shellReads = new LatestOnly();
 
   /** The action running; every action waits for it (#170 ran one at a time). */
@@ -112,7 +117,7 @@ export class BoardDialog {
   protected readonly actions = computed<{ action: BoardAction; variant: NeatButtonVariant }[]>(
     () => {
       const state = this.board.state();
-      if (!state?.target) return [];
+      if (!state?.target || !this.shellKnown()) return [];
       const shell = this.shell()?.launch_supported === true;
       if (shell && state.status.state === 'connected') {
         return [
@@ -134,6 +139,12 @@ export class BoardDialog {
     if (!state?.target) return [];
     return boardFacts(state, boardCameraSetup(state, this.peripherals.snapshot()));
   });
+  /** The collapsed Details' hint: the terms it holds. */
+  protected readonly factTerms = computed(() =>
+    this.facts()
+      .map(([term]) => term)
+      .join(', '),
+  );
 
   constructor() {
     // The camera setup comes from the last scan; reading it never contacts the board, and without
@@ -193,6 +204,9 @@ export class BoardDialog {
   private async readShell(): Promise<void> {
     const request = this.shellReads.next();
     const info = await this.board.shellInfo();
-    if (this.shellReads.accept(request)) this.shell.set(info);
+    if (this.shellReads.accept(request)) {
+      this.shell.set(info);
+      this.shellKnown.set(true);
+    }
   }
 }

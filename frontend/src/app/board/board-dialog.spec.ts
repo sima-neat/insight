@@ -192,6 +192,8 @@ describe('BoardDialog', () => {
     await settle();
     expect(actions()).toEqual(['Opening shell…', 'Check again']);
     expect(button('Opening shell…').getAttribute('aria-disabled')).toBe('true');
+    // One action at a time, as #170: Check again waits too.
+    expect(button('Check again').getAttribute('aria-disabled')).toBe('true');
 
     start.resolve(shellInfo({ running: true, launch_url: 'https://localhost:8022/?go' }));
     await settle();
@@ -224,6 +226,26 @@ describe('BoardDialog', () => {
     await settle();
     expect(blank.close).toHaveBeenCalledTimes(1);
     expect(toasts.error).toHaveBeenLastCalledWith('DevKit shell launch URL is unavailable.');
+  });
+
+  it('shows the actions once the shell details are in, so that they do not reorder under the pointer', async () => {
+    board.state.set(connected());
+    const read = deferred<ShellInfo | null>();
+    board.shellInfo.mockReturnValue(read.promise);
+    await open();
+    // Check again alone first, with Open shell put before it a moment later, would take a quick
+    // click meant for the leading action.
+    expect(dialog().querySelector('.actions')).toBeNull();
+
+    read.resolve(shellInfo());
+    await settle();
+    expect(actions()).toEqual(['Open shell', 'Check again']);
+
+    // A later board's read keeps the row shown meanwhile.
+    board.shellInfo.mockReturnValue(new Promise(() => undefined));
+    board.state.set(connected({ generation: 2 }));
+    await settle();
+    expect(actions()).toEqual(['Open shell', 'Check again']);
   });
 
   it('shell details read for an earlier board cannot overwrite the newer board', async () => {
@@ -323,7 +345,8 @@ describe('BoardDialog', () => {
 
     const details = dialog().querySelector('neat-collapsible')!;
     const trigger = details.querySelector('button')!;
-    expect(words(trigger)).toBe('Details Hostname, Build, Machine, Model, Camera setup');
+    // The hint names what the section holds: here no Machine, which the board did not report.
+    expect(words(trigger)).toBe('Details Hostname, Build, Model, Camera setup');
     expect(trigger.getAttribute('aria-expanded')).toBe('false');
     const facts = () =>
       [...details.querySelectorAll('dl dt')].map((term) => [
@@ -344,6 +367,7 @@ describe('BoardDialog', () => {
       ['Hostname', 'devkit'],
       ['Build', '2.0.0'],
     ]);
+    expect(words(trigger)).toBe('Details Hostname, Build');
   });
 
   it('never checked: no Checked line and no Details', async () => {

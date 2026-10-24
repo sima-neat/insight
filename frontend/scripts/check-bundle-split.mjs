@@ -5,8 +5,9 @@
 // entries only they use, are meant to load with their routes, and the top bar's board dialog on
 // its first open, so the first paint does not pay for them. The compiler already rejects video
 // symbols imported from the kit's primary entry point, but nothing else notices when an import in
-// the shared code (a page, the shell, `app.config`) drags one of these into the main chunk. This script checks the result: each marker below is a
-// component selector, a string that survives minification, so it shows where the code ended up.
+// the shared code (a page, the shell, `app.config`) drags one of these into the main chunk. This
+// script checks the result: each marker below is a component selector, a string that survives
+// minification, so it shows where the code ended up.
 //
 // `neat-toast-host` and `neat-status-chip` are not markers on purpose: the app root renders the
 // toast host and the top bar's board pill shows its state in a status chip, so those two kit
