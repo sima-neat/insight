@@ -38,7 +38,36 @@
       <ng-container
         *ngTemplateOutlet="keyValues; context: { label: 'Insight', entries: insight() }"
       />
+    } @else if (failure(); as failure) {
+      <neat-error-note>{{ failure }}</neat-error-note>
+    } @else {
+      <p neatNote role="status">Loading system information…</p>
+    }
 
+    <!-- Outside the block of neat's data, which is split around it so that the section still sits
+         after Insight: the host's readings do not come from neat, so a failed or slow /api/sysinfo
+         does not hide them. -->
+    <neat-collapsible label="This computer" [open]="true" [headingLevel]="3">
+      @if (readings(); as readings) {
+        <p neatNote>{{ readings.note }}</p>
+        @if (readings.rows.length) {
+          <dl neatDetails>
+            @for (row of readings.rows; track row.term) {
+              <dt>{{ row.term }}</dt>
+              <dd>{{ row.value }}</dd>
+            }
+          </dl>
+        }
+      }
+      @if (readingsNotice()) {
+        <p neatNote>{{ readingsNotice() }}</p>
+      }
+      @if (metricsFailure(); as failure) {
+        <neat-error-note>Could not read this computer: {{ failure }}</neat-error-note>
+      }
+    </neat-collapsible>
+
+    @if (info()) {
       @if (!neatMissing()) {
         <neat-collapsible label="Components" [headingLevel]="3">
           @if (components().length) {
@@ -82,10 +111,6 @@
           *ngTemplateOutlet="keyValues; context: { label: 'Update check', entries: updateCheck() }"
         />
       }
-    } @else if (failure(); as failure) {
-      <neat-error-note>{{ failure }}</neat-error-note>
-    } @else {
-      <p neatNote role="status">Loading system information…</p>
     }
   </div>
 </neat-dialog-body>

@@ -115,6 +115,9 @@ test('System information opens from the top bar, tells what it can without neat,
   await expect(dialog.getByText('The neat command is not installed here')).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'Insight' })).toBeVisible();
   await expect(dialog.getByText('https://127.0.0.1:9900').first()).toBeVisible();
+  // The host's readings do not come from neat: they are there beside its note.
+  await expect(dialog.getByRole('heading', { name: 'This computer' })).toBeVisible();
+  await expect(dialog.getByText('61% · 120.00 GB of 200.00 GB · /home/sima')).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'Environment' })).toHaveCount(0);
   await expect(dialog.getByRole('heading', { name: 'Components' })).toHaveCount(0);
   // Exposed ports start closed.
@@ -180,8 +183,8 @@ test('every list in System information starts its values in the same column', as
       };
     }),
   );
-  // Environment, Insight, Components, Exposed ports and Update check.
-  expect(columns).toHaveLength(5);
+  // Environment, Insight, This computer, Components, Exposed ports and Update check.
+  expect(columns).toHaveLength(6);
   expect(new Set(columns.map((column) => column.valueStart)).size).toBe(1);
   expect(columns.every((column) => column.termsFit)).toBe(true);
 });

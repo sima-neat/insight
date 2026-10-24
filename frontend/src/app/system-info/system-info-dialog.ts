@@ -10,6 +10,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import type { Subscription } from 'rxjs';
 import { NeatButton, NeatCode, NeatNote } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
@@ -19,7 +20,8 @@ import { NeatErrorNote } from '@sima/neat-ui/field';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { Announcement } from '../announcement';
 import { messageOf, withRequestErrors } from '../sources/stream-lines';
-import type { SystemInfo } from './api';
+import type { HostMetrics, SystemInfo } from './api';
+import { hostNotice, hostReadings } from './host-readings';
 import {
   componentNote,
   componentStatus,
@@ -30,6 +32,7 @@ import {
 } from './readable';
 
 const SYSINFO_URL = '/api/sysinfo';
+const METRICS_URL = '/api/metrics';
 
 /**
  * Opens the System Info dialog. `TopBarDialogs` calls it after importing this module on the first
@@ -54,14 +57,20 @@ function entriesOf(section: Record<string, unknown> | undefined): Entry[] {
 
 /**
  * The System Info dialog (spec, "Peripherals, board connection and System Info"), opened by the
- * top bar's ⓘ from any page: the environment, Insight, its components, the ports the SDK
- * publishes and the update check, each a section of the outline. Environment, Insight and Update
- * check start open; Components and Exposed ports, the long ones, start closed.
+ * top bar's ⓘ from any page: the environment, Insight, "This computer", its components, the ports
+ * the SDK publishes and the update check, each a section of the outline. Environment, Insight,
+ * This computer and Update check start open; Components and Exposed ports, the long ones, start
+ * closed.
  *
  * Every open and every Refresh asks `GET /api/sysinfo`, which runs `neat` for up to 15 s, so
  * Refresh waits for the answer in flight: there is never more than one request, and its answer
  * is the newest. A failed Refresh keeps what is shown and says so above it; before any data the
  * message stands alone (Inv-PB §6.6, where #170 dropped the data).
+ *
+ * "This computer" is the host's readings from `GET /api/metrics`, asked beside it. They are
+ * quick, so they do not wait: a Refresh drops a read that is still out and keeps only the newest
+ * answer. A failed read keeps the readings shown and says so in the section; neither request's
+ * failure touches the other's data, and "This computer" does not depend on `neat` answering.
  *
  * Without the `neat` command Insight still answers, with `missing: ['neat']`. What only `neat`
  * knows (the environment, the components and the update check) is then replaced by one note,
@@ -99,6 +108,21 @@ export class SystemInfoDialog {
   protected readonly loading = signal(false);
   /** What a screen reader is told when a Refresh has replaced the data (a failure is an alert). */
   protected readonly announcement = signal('');
+
+  /** The last good answer of `/api/metrics`; null until the first one. */
+  private readonly metrics = signal<HostMetrics | null>(null);
+  /** Why the newest read of `/api/metrics` failed; cleared by the next good answer. */
+  protected readonly metricsFailure = signal<string | null>(null);
+  private metricsRequest: Subscription | null = null;
+
+  protected readonly readings = computed(() => {
+    const metrics = this.metrics();
+    return metrics && hostReadings(metrics);
+  });
+  /** In place of the rows; "Reading this computer…" until the first answer, unless that failed. */
+  protected readonly readingsNotice = computed(() =>
+    this.metricsFailure() && !this.readings() ? '' : hostNotice(this.readings()),
+  );
 
   /** `neat` is not installed: the sections that only it can fill are not shown. */
   protected readonly neatMissing = computed(() => this.info()?.missing?.includes('neat') ?? false);
@@ -143,6 +167,7 @@ export class SystemInfoDialog {
    */
   protected refresh(): void {
     if (this.loading()) return;
+    this.readMetrics();
     this.loading.set(true);
     this.announcement.set('');
     this.http
@@ -160,6 +185,21 @@ export class SystemInfoDialog {
           this.failure.set(messageOf(failure));
           this.loading.set(false);
         },
+      });
+  }
+
+  /** Replaces a read still out: only the newest answer counts, and a stale one cannot land late. */
+  private readMetrics(): void {
+    this.metricsRequest?.unsubscribe();
+    this.metricsRequest = this.http
+      .get<HostMetrics>(METRICS_URL)
+      .pipe(withRequestErrors(), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (metrics) => {
+          this.metrics.set(metrics);
+          this.metricsFailure.set(null);
+        },
+        error: (failure: unknown) => this.metricsFailure.set(messageOf(failure)),
       });
   }
 }

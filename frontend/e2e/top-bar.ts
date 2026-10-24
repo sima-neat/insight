@@ -1,6 +1,7 @@
 import { Page } from '@playwright/test';
 // Types only, erased at run time: the answers are checked against the shapes the app reads.
 import type { BoardState } from '../src/app/board/api';
+import type { HostMetrics } from '../src/app/system-info/api';
 
 /**
  * What `GET /api/board` answers in every test: the SDK-paired DevKit, not checked yet. "Not
@@ -61,11 +62,21 @@ const SYSINFO = {
   missing: ['neat'],
 };
 
+/** What `GET /api/metrics` answers, for System Info's "This computer": a local machine, with no temperature. */
+const HOST_METRICS: HostMetrics = {
+  cpu_load: 34,
+  memory: { total: 16 * 1024 ** 3, used: 8 * 1024 ** 3, percent: 52 },
+  disk: { mount: '/home/sima', total: 200 * 1024 ** 3, used: 120 * 1024 ** 3, percent: 61 },
+  temperature_celsius_avg: null,
+  REMOTE: false,
+};
+
 /**
  * Answers the top bar's own requests, made on every page: the board for the pill, and the System
- * Info. Whatever serves the app (the dev server has no API) then cannot change what the top bar
- * shows, nor leave a failed request in a test that is about something else. Call it before the
- * page loads; a test's own route for the same URL, added later, takes precedence.
+ * Info (its `neat` data and the readings of "This computer"). Whatever serves the app (the dev
+ * server has no API) then cannot change what the top bar shows, nor leave a failed request in a
+ * test that is about something else. Call it before the page loads; a test's own route for the
+ * same URL, added later, takes precedence.
  */
 export async function answerTopBar(page: Page): Promise<void> {
   await page.route(
@@ -75,5 +86,9 @@ export async function answerTopBar(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname === '/api/sysinfo',
     (route) => route.fulfill({ json: SYSINFO }),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/metrics',
+    (route) => route.fulfill({ json: HOST_METRICS }),
   );
 }

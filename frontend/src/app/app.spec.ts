@@ -161,6 +161,7 @@ describe('App', () => {
     // The dialog's module loads on this first open.
     await vi.waitFor(() => expect(document.querySelector('app-system-info-dialog')).not.toBeNull());
     http.expectOne('/api/sysinfo').flush({ insight: { webUiUrl: 'https://127.0.0.1:9900' } });
+    http.expectOne('/api/metrics').flush({ cpu_load: 3, memory: {}, disk: null, REMOTE: false });
     await settle(fixture);
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toContain(
       'System information',

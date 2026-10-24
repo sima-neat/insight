@@ -2,7 +2,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideHttpClient } from '@angular/common/http';
 import { Component, Injector } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import type { SystemInfo } from './api';
+import type { HostMetrics, SystemInfo } from './api';
 import { openSystemInfoDialog } from './system-info-dialog';
 
 /** Something to render, so that change detection runs for the dialog in the overlay. */
@@ -53,6 +53,23 @@ function withoutNeat(): SystemInfo {
   };
 }
 
+/** What `GET /api/metrics` answers on a local machine, with the temperature Insight has none of. */
+function hostMetrics(overrides: Partial<HostMetrics> = {}): HostMetrics {
+  return {
+    cpu_load: 34,
+    memory: { total: 16 * 1024 ** 3, used: 8 * 1024 ** 3, percent: 52 },
+    disk: { mount: '/home/sima', total: 200 * 1024 ** 3, used: 120 * 1024 ** 3, percent: 61 },
+    temperature_celsius_avg: null,
+    REMOTE: false,
+    ...overrides,
+  };
+}
+
+interface Failure {
+  status: number;
+  error: string;
+}
+
 describe('SystemInfoDialog', () => {
   let http: HttpTestingController;
   let fixture: ComponentFixture<Host>;
@@ -76,16 +93,31 @@ describe('SystemInfoDialog', () => {
     await fixture.whenStable();
   }
 
-  /** Opens the dialog and answers its first request with `answer` (a payload or a failure). */
-  async function open(answer: SystemInfo | { status: number; error: string }): Promise<void> {
+  /**
+   * Opens the dialog and answers its first requests: `answer` for `/api/sysinfo` and `metrics` for
+   * `/api/metrics` (each a payload or a failure).
+   */
+  async function open(
+    answer: SystemInfo | Failure,
+    metrics: HostMetrics | Failure = hostMetrics(),
+  ): Promise<void> {
     openSystemInfoDialog(TestBed.inject(Injector));
     await settle();
-    reply(answer);
+    reply(answer, metrics);
     await settle();
   }
 
-  function reply(answer: SystemInfo | { status: number; error: string }): void {
-    const request = http.expectOne('/api/sysinfo');
+  /** Answers the pending requests, `/api/sysinfo` and `/api/metrics`, as Open and Refresh send them. */
+  function reply(
+    answer: SystemInfo | Failure,
+    metrics: HostMetrics | Failure = hostMetrics(),
+  ): void {
+    flush('/api/sysinfo', answer);
+    flush('/api/metrics', metrics);
+  }
+
+  function flush(url: string, answer: SystemInfo | HostMetrics | Failure): void {
+    const request = http.expectOne(url);
     if ('status' in answer) {
       request.flush({ error: answer.error }, { status: answer.status, statusText: 'Error' });
     } else {
@@ -135,6 +167,7 @@ describe('SystemInfoDialog', () => {
     ).toEqual([
       'Environment: true',
       'Insight: true',
+      'This computer: true',
       'Components: false',
       'Exposed ports: false',
       'Update check: true',
@@ -144,7 +177,14 @@ describe('SystemInfoDialog', () => {
       [...dialog().querySelectorAll('[role="heading"]')].map(
         (heading) => `${heading.getAttribute('aria-level')} ${text(heading)}`,
       ),
-    ).toEqual(['3 Environment', '3 Insight', '3 Components', '3 Exposed ports', '3 Update check']);
+    ).toEqual([
+      '3 Environment',
+      '3 Insight',
+      '3 This computer',
+      '3 Components',
+      '3 Exposed ports',
+      '3 Update check',
+    ]);
   });
 
   it('names the environment and the web address under the title', async () => {
@@ -213,7 +253,7 @@ describe('SystemInfoDialog', () => {
       [...dialog().querySelectorAll('neat-collapsible')].map((one) =>
         text(one.querySelector('button')),
       ),
-    ).toEqual(['Insight', 'Exposed ports']);
+    ).toEqual(['Insight', 'This computer', 'Exposed ports']);
     expect(text(dialog().querySelector('neat-callout'))).toContain(
       'The neat command is not installed here, so the environment, component versions and update check are unknown.',
     );
@@ -226,7 +266,12 @@ describe('SystemInfoDialog', () => {
     openSystemInfoDialog(TestBed.inject(Injector));
     await settle();
     expect(text(dialog())).toContain('Loading system information…');
-    expect(dialog().querySelector('neat-collapsible')).toBeNull();
+    // Only "This computer" has anything to show before neat answers (it says it is reading).
+    expect(
+      [...dialog().querySelectorAll('neat-collapsible')].map((one) =>
+        text(one.querySelector('button')),
+      ),
+    ).toEqual(['This computer']);
     expect(button('Refreshing…').getAttribute('aria-disabled')).toBe('true');
     reply(sysinfo());
     await settle();
@@ -237,7 +282,11 @@ describe('SystemInfoDialog', () => {
   it('a failure with no data shows the message alone, and Refresh tries again', async () => {
     await open({ status: 502, error: 'neat exited with status 3' });
     expect(text(errorNote())).toBe('neat exited with status 3');
-    expect(dialog().querySelector('neat-collapsible')).toBeNull();
+    expect(
+      [...dialog().querySelectorAll('neat-collapsible')].map((one) =>
+        text(one.querySelector('button')),
+      ),
+    ).toEqual(['This computer']);
 
     button('Refresh').click();
     await settle();
@@ -256,6 +305,7 @@ describe('SystemInfoDialog', () => {
     // One request at a time: another click while one is out sends nothing.
     button('Refreshing…').click();
     const request = http.expectOne('/api/sysinfo');
+    http.expectOne('/api/metrics').flush(hostMetrics());
     request.flush(
       sysinfo({ insight: { serviceState: 'Stopped', webUiUrl: 'https://10.1.1.5:9900' } }),
     );
@@ -300,13 +350,151 @@ describe('SystemInfoDialog', () => {
     openSystemInfoDialog(TestBed.inject(Injector));
     await settle();
     const first = http.expectOne('/api/sysinfo');
+    const firstMetrics = http.expectOne('/api/metrics');
     button('Close').click();
     await settle();
     // neat runs for seconds: nobody is waiting for this answer any more.
     expect(first.cancelled).toBe(true);
+    expect(firstMetrics.cancelled).toBe(true);
 
     await open(sysinfo());
     expect(rows('Insight')).toHaveLength(3);
+  });
+
+  describe('This computer', () => {
+    const computerNote = () => text(section('This computer')!.querySelector('p'));
+    /** What the section reports about a failed read, apart from the System Info's own failure. */
+    const computerError = () => section('This computer')!.querySelector('neat-error-note');
+
+    it('This computer lists CPU, memory used of total and disk used of total with its mount', async () => {
+      await open(sysinfo());
+      expect(computerNote()).toBe('The machine Insight runs on, not the board.');
+      expect(section('This computer')!.querySelector('p')!.hasAttribute('neatNote')).toBe(true);
+      expect(rows('This computer')).toEqual([
+        'CPU: 34%',
+        'Memory: 52% · 8.00 GB of 16.00 GB',
+        'Disk: 61% · 120.00 GB of 200.00 GB · /home/sima',
+      ]);
+      expect(section('This computer')!.querySelector('dl')!.hasAttribute('neatDetails')).toBe(true);
+    });
+
+    it('shows the temperature only when Insight reports one, never a remote 0', async () => {
+      await open(sysinfo(), hostMetrics({ temperature_celsius_avg: 48.5 }));
+      expect(rows('This computer')).toContain('Temperature: 48.5 °C');
+      button('Refresh').click();
+      await settle();
+      reply(sysinfo(), hostMetrics({ REMOTE: true, temperature_celsius_avg: 0 }));
+      await settle();
+      expect(rows('This computer').filter((row) => row.startsWith('Temperature'))).toEqual([]);
+    });
+
+    it('a remote DevKit says so, and one that is not connected says it reports nothing', async () => {
+      await open(sysinfo(), hostMetrics({ REMOTE: true }));
+      expect(computerNote()).toBe(
+        'Remote DevKit from the legacy REMOTE_DEVKIT configuration, not the board.',
+      );
+      expect(rows('This computer')).toHaveLength(3);
+
+      button('Refresh').click();
+      await settle();
+      reply(sysinfo(), {
+        cpu_load: '',
+        memory: {},
+        disk: {},
+        temperature_celsius_avg: 0,
+        REMOTE: true,
+      });
+      await settle();
+      expect(section('This computer')!.querySelector('dl')).toBeNull();
+      expect(text(section('This computer'))).toContain(
+        'A remote DevKit is configured for this endpoint but is not connected, so it reports nothing.',
+      );
+    });
+
+    it('says so when Insight answers with no reading, instead of listing nothing', async () => {
+      await open(
+        sysinfo(),
+        hostMetrics({ cpu_load: null, memory: {}, disk: null, temperature_celsius_avg: null }),
+      );
+      expect(section('This computer')!.querySelector('dl')).toBeNull();
+      expect(text(section('This computer'))).toContain(
+        'Insight answered with no CPU, memory or disk reading for this computer, so none is shown rather than zeros.',
+      );
+    });
+
+    it('reads /api/metrics when the dialog opens and on Refresh; a failed read keeps the readings and says so', async () => {
+      await open(sysinfo());
+      expect(rows('This computer')[0]).toBe('CPU: 34%');
+      expect(computerError()).toBeNull();
+
+      button('Refresh').click();
+      await settle();
+      reply(sysinfo(), { status: 500, error: 'psutil failed' });
+      await settle();
+      expect(text(computerError())).toBe('Could not read this computer: psutil failed');
+      // The last readings stay, and the rest of the dialog is not told of it.
+      expect(rows('This computer')[0]).toBe('CPU: 34%');
+      expect(text(errorNote())).toBe('Could not read this computer: psutil failed');
+      expect(rows('Insight')).toHaveLength(3);
+
+      // A good answer replaces the readings and clears the failure.
+      button('Refresh').click();
+      await settle();
+      reply(sysinfo(), hostMetrics({ cpu_load: 71 }));
+      await settle();
+      expect(computerError()).toBeNull();
+      expect(rows('This computer')[0]).toBe('CPU: 71%');
+    });
+
+    it('says Reading this computer… only until the first answer', async () => {
+      openSystemInfoDialog(TestBed.inject(Injector));
+      await settle();
+      expect(text(section('This computer'))).toContain('Reading this computer…');
+      expect(section('This computer')!.querySelector('dl')).toBeNull();
+
+      flush('/api/metrics', hostMetrics());
+      await settle();
+      expect(text(section('This computer'))).not.toContain('Reading this computer…');
+      expect(rows('This computer')).toHaveLength(3);
+
+      // A Refresh keeps the readings and does not say it is reading again.
+      flush('/api/sysinfo', sysinfo());
+      await settle();
+      button('Refresh').click();
+      await settle();
+      expect(text(section('This computer'))).not.toContain('Reading this computer…');
+      expect(rows('This computer')).toHaveLength(3);
+      reply(sysinfo());
+    });
+
+    it('a failed first read shows the failure instead of the notice', async () => {
+      await open(sysinfo(), { status: 500, error: 'psutil failed' });
+      expect(words(section('This computer'))).toBe(
+        'This computer Could not read this computer: psutil failed',
+      );
+    });
+
+    it('stays when /api/sysinfo fails, and the failure with no data stays too', async () => {
+      await open({ status: 502, error: 'neat exited with status 3' });
+      expect(rows('This computer')[0]).toBe('CPU: 34%');
+      expect(text(errorNote())).toBe('neat exited with status 3');
+    });
+
+    it('only the newest answer counts: a Refresh drops the read still out', async () => {
+      openSystemInfoDialog(TestBed.inject(Injector));
+      await settle();
+      const first = http.expectOne('/api/metrics');
+      http.expectOne('/api/sysinfo').flush(sysinfo());
+      await settle();
+
+      button('Refresh').click();
+      await settle();
+      expect(first.cancelled).toBe(true);
+      http.expectOne('/api/sysinfo').flush(sysinfo());
+      http.expectOne('/api/metrics').flush(hostMetrics({ cpu_load: 9 }));
+      await settle();
+      expect(rows('This computer')[0]).toBe('CPU: 9%');
+    });
   });
 
   it('tells a screen reader when a Refresh has replaced the data, not for the first answer', async () => {

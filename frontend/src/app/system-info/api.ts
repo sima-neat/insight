@@ -47,3 +47,32 @@ export interface SystemInfo {
    */
   missing?: string[];
 }
+
+/** What Insight knows of the memory or disk of the machine it reads; every field may be missing. */
+export interface HostUsage {
+  /** Bytes. */
+  total?: number;
+  /** Bytes. */
+  used?: number;
+  percent?: number;
+  /** The volume holding Insight's data; disks only. */
+  mount?: string;
+}
+
+/**
+ * The shape of Flask's `GET /api/metrics` (schema `HostMetrics` in `neat_insight/openapi.json`),
+ * as far as System Info reads it: the machine Insight itself runs on, or the remote DevKit of the
+ * legacy `REMOTE_DEVKIT` configuration, which is not the board the Stats page watches. The
+ * deprecated `mla_allocated_bytes` and `pipeline_status` are left out, as nothing reads them.
+ *
+ * A remote DevKit that is not connected answers `cpu_load: ""` with empty `memory` and `disk`.
+ * The temperature is only read on a Davinci board, and is 0 for a remote DevKit it cannot reach.
+ */
+export interface HostMetrics {
+  /** Percent; `""` for a remote DevKit that is not connected. */
+  cpu_load: number | '' | null;
+  memory: HostUsage;
+  disk: HostUsage | null;
+  temperature_celsius_avg?: number | null;
+  REMOTE: boolean;
+}
