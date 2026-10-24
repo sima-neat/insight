@@ -177,6 +177,21 @@ describe('SlotPanel', () => {
     imports = { open: vi.fn<() => Promise<string | null>>() };
     writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    // jsdom has no ResizeObserver, which some of the kit's controls measure themselves with.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {
+          // Nothing to measure in jsdom.
+        }
+        unobserve(): void {
+          // Nothing observed.
+        }
+        disconnect(): void {
+          // Nothing observed.
+        }
+      },
+    );
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
@@ -563,21 +578,6 @@ describe('SlotPanel', () => {
   });
 
   it('offers the transport only where the media allows more than one, and sends a change', async () => {
-    // The kit select's list measures itself and scrolls its active option into view.
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        observe(): void {
-          // Nothing to measure in jsdom.
-        }
-        unobserve(): void {
-          // Nothing observed.
-        }
-        disconnect(): void {
-          // Nothing observed.
-        }
-      },
-    );
     Element.prototype.scrollIntoView = vi.fn();
     await open();
     expect(root().querySelector('neat-select')).toBeNull();

@@ -1,12 +1,12 @@
 <app-preview-frame [file]="file()">
-  @for (src of liveSources(); track src) {
+  @for (image of liveImages(); track image.src) {
     <img
       #live
       appEndsStream
-      [src]="src"
+      [src]="image.src"
       [alt]="'Live preview of src' + slot().index"
       [class.waiting]="connecting()"
-      (error)="failed(src)"
+      (error)="failed(image.src)"
     />
   } @empty {
     @if (failure(); as failure) {

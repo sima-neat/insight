@@ -23,10 +23,29 @@ describe('routes', () => {
   let router: Router;
 
   beforeEach(async () => {
+    // jsdom has no ResizeObserver; the real pages render here, and the kit measures with it.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {
+          // jsdom lays nothing out, so nothing ever resizes.
+        }
+        unobserve(): void {
+          // Nothing observed.
+        }
+        disconnect(): void {
+          // Nothing observed.
+        }
+      },
+    );
     // The app's own providers, so the routes are tested with the title strategy the app uses.
     TestBed.configureTestingModule({ providers: appConfig.providers });
     harness = await RouterTestingHarness.create();
     router = TestBed.inject(Router);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it.each(PAGES)('%s renders its page', async (path, page) => {

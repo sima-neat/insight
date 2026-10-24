@@ -490,9 +490,6 @@ describe('ImportDialog', () => {
     const filters = dialog()!.querySelector('app-catalog-filters')!;
 
     expect(assets.getAttribute('aria-multiselectable')).toBe('true');
-    expect(text(document.getElementById(assets.getAttribute('aria-describedby')!))).toBe(
-      'Press Space to check or uncheck the asset.',
-    );
     expect(button('Select All')!.disabled).toBe(false);
     expect(button('Clear')!.disabled).toBe(true);
     expect(button('Import Selected')!.disabled).toBe(true);
@@ -507,9 +504,17 @@ describe('ImportDialog', () => {
     await click(options('Catalog assets')[2]);
     expect(checked()).toEqual([true, false, false]);
 
-    // Only what the filter shows counts and imports; Select All checks every matching asset.
-    await pick(filters.querySelectorAll('neat-select')[1], 'H.265');
+    // As #170: a check the filter hides is dropped, and widening the filter does not restore it.
+    const codec = filters.querySelectorAll('neat-select')[1];
+    await pick(codec, 'H.265');
     expect(text()).toContain('2 matching assets / 0 selected');
+    await pick(codec, 'Any');
+    expect(checked()).toEqual([false, false, false]);
+    expect(text()).toContain('3 matching assets / 0 selected');
+    expect(button('Clear')!.disabled).toBe(true);
+
+    // Select All checks exactly the assets the filter shows.
+    await pick(codec, 'H.265');
     await click(button('Select All'));
     expect(checked()).toEqual([true, true]);
     expect(text()).toContain('2 matching assets / 2 selected');

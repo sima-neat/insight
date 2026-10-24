@@ -122,10 +122,14 @@ export class SlotPreview {
   protected readonly liveSrc = computed(() =>
     isLive(this.slot()) ? previewSrc(this.slot().index, this.token(), this.since()) : null,
   );
-  /** The live image's sources, one or none: rendered with `@for` so a new URL is a new image. */
-  protected readonly liveSources = computed(() => {
+  /**
+   * The live image, one or none, keyed by its URL: rendered with `@for` so a new URL is a new
+   * image, which ends the old one's stream. (Tracked by the key rather than by identity, which
+   * Angular reports as an accidental re-creation of the whole list.)
+   */
+  protected readonly liveImages = computed((): readonly { readonly src: string }[] => {
     const src = this.liveSrc();
-    return src === null || this.failure() !== null ? [] : [src];
+    return src === null || this.failure() !== null ? [] : [{ src }];
   });
   /** Why the current live image failed, once known; reset by a new image. */
   protected readonly failure = linkedSignal<string | null, PreviewFailure | 'checking' | null>({
@@ -134,7 +138,7 @@ export class SlotPreview {
   });
   private readonly shownSrc = signal<string | null>(null);
   protected readonly connecting = computed(
-    () => this.liveSources().length > 0 && this.shownSrc() !== this.liveSrc(),
+    () => this.liveImages().length > 0 && this.shownSrc() !== this.liveSrc(),
   );
 
   /**
@@ -169,7 +173,7 @@ export class SlotPreview {
     // One watch per live image, ended when the image changes (another slot, a retry, an error)
     // or the preview goes.
     effect((onCleanup) => {
-      const src = this.liveSources()[0];
+      const src = this.liveImages()[0]?.src;
       if (src === undefined) return;
       onCleanup(
         watchFirstFrame(

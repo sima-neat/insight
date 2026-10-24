@@ -2,9 +2,11 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   inject,
   Injectable,
   signal,
+  untracked,
 } from '@angular/core';
 import { NeatButton, NeatNote } from '@sima/neat-ui';
 import { NeatErrorNote } from '@sima/neat-ui/field';
@@ -71,7 +73,7 @@ export class CatalogTabState {
   readonly sourceId = signal<string | null>(null);
   /** By name: the variant picked; null takes the first that passes the filter. */
   readonly variantPath = signal<string | null>(null);
-  /** By type: the assets checked, including those the search or filter hides now. */
+  /** By type: the assets checked, of those the search and the filter show. */
   readonly typePaths = signal<readonly string[]>([]);
 }
 
@@ -191,11 +193,7 @@ export class ImportCatalog {
       ),
     );
   });
-  /**
-   * The assets checked by type, of those the list shows. One the search or the filter hides is
-   * neither counted nor imported, as in #170; unlike #170, which dropped it, it stays checked for
-   * when it shows again, as the kit's checked list keeps keys it does not list.
-   */
+  /** The assets checked by type, in the list's order. */
   protected readonly typeSelection = computed((): readonly AssetRow[] => {
     const checked = new Set(this.state.typePaths());
     return this.typeRows().filter((row) => checked.has(row.asset.path));
@@ -210,6 +208,17 @@ export class ImportCatalog {
 
   constructor() {
     if (this.state.index() === null && !this.state.loading()) void this.load();
+
+    // As #170: a check the search or the filter hides is dropped, so nothing is checked that the
+    // list does not show (the kit's checked list would keep it).
+    effect(() => {
+      const shown = new Set(this.typeRows().map(byAssetPath));
+      untracked(() => {
+        const paths = this.state.typePaths();
+        const kept = paths.filter((path) => shown.has(path));
+        if (kept.length !== paths.length) this.state.typePaths.set(kept);
+      });
+    });
   }
 
   protected async load(): Promise<void> {
@@ -248,11 +257,9 @@ export class ImportCatalog {
     );
   }
 
-  /** Checks every asset the list shows, keeping those checked before. */
+  /** Checks exactly the assets the list shows, as #170's Select All did. */
   protected checkAllTypes(): void {
-    this.state.typePaths.update((paths) => [
-      ...new Set([...paths, ...this.typeRows().map(byAssetPath)]),
-    ]);
+    this.state.typePaths.set(this.typeRows().map(byAssetPath));
   }
 
   protected clearTypes(): void {
