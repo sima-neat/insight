@@ -1,0 +1,8 @@
+/* A long board name (a host name, an IPv6 address) is cut at a fixed width so that the pill never
+   crowds the page tools; the tooltip has it in full. */
+.label {
+  max-inline-size: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

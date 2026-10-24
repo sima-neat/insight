@@ -1,5 +1,9 @@
 import { expect, Locator, Page, test } from '@playwright/test';
 import { TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { answerTopBar } from './top-bar';
+
+// The top bar's pill reads the board on every page.
+test.beforeEach(({ page }) => answerTopBar(page));
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const railItem = (page: Page, label: string) =>

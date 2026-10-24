@@ -114,9 +114,11 @@ merging.
   (`angular.json` cannot hold comments, so the reason lives here.) The kit's video code is imported from
   `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and stays out of the
   initial bundle. Streaming and Media are lazy routes too, and so are the kit entries only they use
-  (`/file-browser`, `/select-list`, `/dialog`). `npm run check:bundle` (after a build, and in CI)
-  fails if any of that leaks into the initial bundle; the toast host is the kit entry that is
-  there on purpose.
+  (`/file-browser`, `/select-list`, `/dialog`). The top bar's board dialog is imported on its first
+  open (`TopBarDialogs`), with the kit entries it brings (`/collapsible`, `/callout`).
+  `npm run check:bundle` (after a build, and in CI) fails if any of that leaks into the initial
+  bundle; the toast host and the board pill's status chip are the kit entries that are there on
+  purpose.
 - **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`; the
   video part is its `@sima/neat-ui/video` entry point) draws and knows nothing of vf:
   `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the matching frames;

@@ -1,0 +1,99 @@
+<neat-dialog-body>
+  <div class="board">
+    @if (board.state(); as state) {
+      <div class="status">
+        <p class="status-line">
+          @if (chip(); as chip) {
+            <neat-status-chip [tone]="chip.tone">{{ chip.label }}</neat-status-chip>
+          }
+          @if (summary()) {
+            <span>{{ summary() }}</span>
+          }
+        </p>
+        @if (checked()) {
+          <p neatNote class="checked">Checked {{ checked() }}</p>
+        }
+      </div>
+
+      @if (actions().length) {
+        <div class="actions">
+          @for (item of actions(); track item.action) {
+            @if (item.action === 'shell') {
+              <button
+                neatButton
+                type="button"
+                size="small"
+                [variant]="item.variant"
+                [attr.aria-disabled]="busy() || !shellAvailable() ? true : null"
+                [neatTooltip]="noWebssh"
+                [neatTooltipDisabled]="shellAvailable()"
+                (click)="openShell()"
+              >
+                {{ busy() === 'shell' ? 'Opening shell…' : 'Open shell' }}
+              </button>
+            } @else {
+              <button
+                neatButton
+                type="button"
+                size="small"
+                [variant]="item.variant"
+                [attr.aria-disabled]="busy() ? true : null"
+                (click)="check()"
+              >
+                {{ busy() === 'check' ? 'Checking…' : 'Check again' }}
+              </button>
+            }
+          }
+        </div>
+      }
+    } @else if (!board.error()) {
+      <p neatNote role="status">Loading board…</p>
+    }
+
+    @if (board.error(); as problem) {
+      <neat-callout tone="danger">
+        <p>{{ problem.message }}</p>
+        @if (problem.hint) {
+          <p neatNote>{{ problem.hint }}</p>
+        }
+        <button
+          neatButton
+          neatCalloutActions
+          type="button"
+          size="small"
+          variant="outlined"
+          (click)="retry()"
+        >
+          Retry
+        </button>
+      </neat-callout>
+    }
+
+    @if (facts().length) {
+      <neat-collapsible label="Details" summary="Hostname, Build, Machine, Model, Camera setup">
+        <dl neatDetails>
+          @for (fact of facts(); track fact[0]) {
+            <dt>{{ fact[0] }}</dt>
+            <dd>{{ fact[1] }}</dd>
+          }
+        </dl>
+      </neat-collapsible>
+    }
+
+    @if (board.state()?.target === null) {
+      <neat-callout tone="info" heading="No board selected">
+        <p>Insight needs a board to discover peripherals. Any of these gives it one:</p>
+        <ol class="steps">
+          <li>Run Insight on the board itself; it then uses that board automatically.</li>
+          <li>
+            Pair the SDK with a DevKit: run
+            <code neatCode>sima-cli sdk setup --devkit &lt;ip&gt;</code>, then reload this page.
+          </li>
+          <li>
+            Enter a board below. Insight connects with your SSH key; it never asks for a password.
+          </li>
+        </ol>
+      </neat-callout>
+    }
+  </div>
+</neat-dialog-body>

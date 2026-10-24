@@ -1,0 +1,31 @@
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-4);
+}
+
+.status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+}
+
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--neat-space-2);
+}
+
+/* The kit's base styles strip list markers; the steps are an ordered list and read as one. */
+.steps {
+  margin: var(--neat-space-2) 0 0;
+  padding-inline-start: var(--neat-space-6);
+  list-style: decimal;
+}

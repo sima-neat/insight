@@ -1,7 +1,10 @@
 import type { BoardState, BoardTarget } from './api';
 import { BoardProblem } from './board-error';
 import {
+  boardFacts,
   boardIndicator,
+  boardStateChip,
+  boardSummary,
   cameraSetupRows,
   connectionState,
   defaultTargetText,
@@ -242,5 +245,53 @@ describe('the board’s words', () => {
     expect(cameraSetupRows(null)).toEqual([]);
     expect(overlayName('modalix-som-imx219.dtbo')).toBe('modalix-som-imx219');
     expect(overlayName('no-extension')).toBe('no-extension');
+  });
+});
+
+describe('the board dialog’s words', () => {
+  const devkit = target({
+    mode: 'ssh',
+    source: 'sdk-env',
+    host: '192.168.1.20',
+    label: 'sima@192.168.1.20',
+  });
+  const identity = {
+    hostname: 'devkit',
+    machine: 'modalix',
+    build_version: '2.0.0',
+    fingerprint: 'abcd',
+  };
+
+  it('the status chip has the long labels, and No board without a target', () => {
+    const status = (state: 'unknown' | 'connected' | 'error') =>
+      boardStateChip(board({ target: devkit, status: { state, checked_at: null, error: null } }));
+    expect(status('connected')).toEqual({ label: 'Connected', tone: 'success' });
+    expect(status('error')).toEqual({ label: 'Connection failed', tone: 'danger' });
+    expect(status('unknown')).toEqual({ label: 'Not checked', tone: 'neutral' });
+    expect(boardStateChip(board())).toEqual({ label: 'No board', tone: 'warning' });
+  });
+
+  it('the status line joins the hostname, the target and its source, each only when known', () => {
+    expect(boardSummary(board({ target: devkit, board: identity }))).toBe(
+      'devkit · sima@192.168.1.20 · SDK DevKit',
+    );
+    expect(boardSummary(board({ target: devkit }))).toBe('sima@192.168.1.20 · SDK DevKit');
+    expect(boardSummary(board({ target: localTarget }))).toBe('This board · On this board');
+    expect(boardSummary(board())).toBe('');
+  });
+
+  it('the facts are those the board reported, then the camera setup', () => {
+    expect(boardFacts(board({ target: devkit, board: identity }), cameraSetup)).toEqual([
+      ['Hostname', 'devkit'],
+      ['Build', '2.0.0'],
+      ['Machine', 'modalix'],
+      ['Model', 'SiMa.ai Modalix SoM 16Gig Board'],
+      ['Camera setup', 'modalix-som-waveshare-ARDU-IMX477-1CAM'],
+    ]);
+    const partial = { ...identity, hostname: null, machine: '' };
+    expect(boardFacts(board({ target: devkit, board: partial }), null)).toEqual([
+      ['Build', '2.0.0'],
+    ]);
+    expect(boardFacts(board({ target: devkit }), null)).toEqual([]);
   });
 });

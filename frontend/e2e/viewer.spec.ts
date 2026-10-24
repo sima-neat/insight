@@ -4,6 +4,10 @@ import { closeSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, Locator, Page, test } from '@playwright/test';
 import { LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { answerTopBar } from './top-bar';
+
+// The top bar's pill reads the board on every page.
+test.beforeEach(({ page }) => answerTopBar(page));
 
 const deployed = !!process.env['INSIGHT_BASE_URL'];
 

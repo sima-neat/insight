@@ -107,6 +107,46 @@ function targetName(target: BoardTarget | null): string {
   return `${target.source === 'sdk-env' ? 'DevKit' : 'Board'}: ${target.host}`;
 }
 
+/** The board dialog's state chip: the connection's long label, or "No board" without a target. */
+export function boardStateChip(state: BoardState): BoardChip {
+  if (!state.target) return { label: 'No board', tone: 'warning' };
+  const connection = connectionState(state.status);
+  return { label: connection.label, tone: connection.tone };
+}
+
+/**
+ * The board dialog's status line after the chip: the hostname the board reported, the target and
+ * where it comes from, each left out when unknown. '' without a target.
+ */
+export function boardSummary(state: BoardState): string {
+  const target = state.target;
+  if (!target) return '';
+  return [state.board?.hostname, target.label, sourceLabel(target.source)]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+const IDENTITY_FACTS: readonly [key: 'hostname' | 'build_version' | 'machine', term: string][] = [
+  ['hostname', 'Hostname'],
+  ['build_version', 'Build'],
+  ['machine', 'Machine'],
+];
+
+/**
+ * The board dialog's Details as [term, value] rows: the identity facts the board reported, then
+ * the camera setup (`cameraSetupRows`) of the board it belongs to (`boardCameraSetup`).
+ */
+export function boardFacts(
+  state: BoardState,
+  setup: CameraSetup | null,
+): [term: string, value: string][] {
+  const identity = IDENTITY_FACTS.flatMap(([key, term]): [string, string][] => {
+    const value = state.board?.[key];
+    return value ? [[term, value]] : [];
+  });
+  return [...identity, ...cameraSetupRows(setup)];
+}
+
 export function sourceLabel(source: BoardSource): string {
   return SOURCES[source] ?? '';
 }

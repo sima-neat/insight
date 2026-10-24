@@ -1,5 +1,9 @@
 import { expect, Page, test } from '@playwright/test';
 import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { answerTopBar } from './top-bar';
+
+// The top bar's pill reads the board on every page.
+test.beforeEach(({ page }) => answerTopBar(page));
 
 /** The fields of a `GET /api/mediasrc` slot these tests set; the rest take an unassigned slot's values. */
 const slot = (index: number, fields: Record<string, unknown> = {}) => ({

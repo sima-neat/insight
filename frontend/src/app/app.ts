@@ -3,14 +3,16 @@ import { RouterOutlet } from '@angular/router';
 import { NeatShell } from '@sima/neat-ui';
 import { NeatToastHost } from '@sima/neat-ui/toast';
 import { APP_NAME } from './app-name';
+import { BoardPill } from './board/board-pill';
 import { INSIGHT_NAV } from './navigation';
 
 @Component({
   selector: 'app-root',
-  imports: [NeatShell, NeatToastHost, RouterOutlet],
+  imports: [BoardPill, NeatShell, NeatToastHost, RouterOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <neat-shell [appName]="appName" [navItems]="nav">
+      <app-board-pill neatTopbarEnd />
       <router-outlet />
     </neat-shell>
     <neat-toast-host />
