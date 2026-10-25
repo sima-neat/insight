@@ -102,8 +102,11 @@ export interface SentinelMetric {
  * where it was not (a `null` timestamp is a sample without a time).
  *
  * With `after` and `epoch` in the request the answer holds only the samples newer than `after`,
- * unless `full`: then it replaces the caller's window. `epoch` names which history it is of; it
- * changes when the board's daemon restarts or the board is switched.
+ * unless `full`: then it replaces the caller's window. The backend answers `full` for a request
+ * without `after`, one naming another `epoch`, one whose `after` it no longer holds, and one with
+ * more newer samples than its `history` limit. `epoch` names which history it is of; it changes
+ * when the history restarts (another board, a daemon restart, a polling gap, a clock step) and when
+ * a reseed adds samples before the ones held.
  */
 export interface MetricsHistory {
   timestamps: (string | null)[];

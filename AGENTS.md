@@ -115,8 +115,10 @@ merging.
     areas; a null chip leaves it out). It is parked for a kit change: `neatAsideTitle` gaining a
     chip slot would replace it.
   - `app-stats-chart` is one metric's time chart (`neat-time-chart`) from the inputs a builder in
-    `stats/telemetry.ts` made, its values worded in the chart's unit. Every Stats chart, in the
-    cards and in each area, is this one, so none words a value or sets a scale of its own.
+    `stats/telemetry.ts` made, its values worded in the chart's unit. Every Stats time chart, in
+    the cards and in each area, is this one, so none words a value or sets a scale of its own. The
+    other Stats charts are the kit's, used directly: Power rails' `neat-stacked-chart`, the
+    per-core `neat-heatmap` and the tables' `neat-sparkline`; the Power tiles are `neat-chart-card`.
   - `app-metrics-table` lists metrics as a table (name, group, value, a sparkline of the window,
     status): Stats' All metrics and its Storage & Network area.
   - `app-board-problem-notice` says why the board cannot be used, with the way out where there is
@@ -128,8 +130,8 @@ merging.
     it opens the board dialog through `TopBarDialogs`. Peripherals' and Stats' notices use it.
   - `app/format-bytes.ts` (`formatBytes`) words every byte count in the app (media sizes, System
     Info's memory and disk), so one quantity reads the same everywhere.
-  - A ⋯ menu's items are the kit's `neatPopoverItem` on a `neatButton` (Stats' menu), inside a
-    `neat-popover`; there is no app component for them.
+  - A ⋯ menu's items are the kit's `neatPopoverItem` on a `neatButton` (Streaming's and Stats'
+    menus), inside a `neat-popover`; there is no app component for them.
 - **Key/value lists** use the kit's `neatDetails`. Lists that should start their values in one
   column but cannot share a grid (System Info's sections open and close on their own) set the
   kit's `--neat-details-term-width` on a common ancestor rather than restyling the list's grid
@@ -169,32 +171,33 @@ merging.
   says when it ended. `StatsSession` (root) keeps the chosen card and thermal group for the next
   visit. The history is incremental: the first poll asks for the window (`history=240`), the next
   ones pass `after` (the newest timestamp held) and `epoch` (which history it is of), and the
-  answer holds only the newer samples; an answer marked `full` replaces the window instead (the
-  backend sends one when the `epoch` named is not its current history's: the daemon restarted or
-  the board changed). Only Stats
-  polls Sentinel: nothing else does, and `/api/metrics` (System Info's "This computer") is read
-  on open and on Refresh only.
+  answer holds only the newer samples. An answer marked `full` replaces the window instead. The
+  backend sends one for a first poll (no `after`); when its history restarted, so the `epoch`
+  named is not its current one (another board, a daemon restart, a polling gap, a clock step, or
+  a reseed that added earlier samples); when it no longer holds the `after` sample; and when more
+  samples came after it than `history` allows. Only Stats polls Sentinel: nothing else does, and
+  `/api/metrics` (System Info's "This computer") is read on open and on Refresh only.
 - **Build output.** `npm run build` writes the app to `frontend/dist` with `index.html` at its root,
   where Flask (`_resolve_frontend_dist`) and `build.sh` look for it. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 700 kB, as in the kit showcase. The initial bundle measures 691.9 kB raw with kit 0.11.2 (the
-  shared chunk 580 kB, main 20 kB, styles 92 kB; 691.7 kB with kit 0.11.1; 691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the board pill and
-  System Info's button; 650 kB with kit 0.9.0; 694 kB with kit 0.5.3, before the kit split into per-component entries),
-  most of it the kit's shell, the toast host (rendered in the app root, so it is in main on purpose)
-  and Angular with its router, plus the XHR backend (`withXhr()`, 4 kB: only XHR reports the upload
-  progress of imports); the warning leaves little headroom on purpose, and the 1 MB error
-  ceiling stays.
-  (`angular.json` cannot hold comments, so the reason lives here.) The kit's video code is imported from
-  `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and stays out of the
-  initial bundle. Streaming, Media, Peripherals and Stats are lazy routes too, and so are the kit
-  entries only they use (`/file-browser`, `/select-list`, `/dialog`, Peripherals' `/level-meter`
-  and the charts entry, `/charts`, which only Stats draws with and which brings d3's scale and
-  shape modules: nothing outside Stats imports it, and a type-only import is erased). The
-  top bar's board and System Info dialogs are imported on their first open (`TopBarDialogs`), with
-  the kit entries they bring (`/collapsible`, `/callout`, which Peripherals and the Viewer use
-  too).
+  at 700 kB, as in the kit showcase. The initial bundle measures 691.9 kB raw with kit 0.11.3 (the
+  shared chunk 580 kB, main 20 kB, styles 92 kB; 691.9 kB with kit 0.11.2; 691.7 kB with kit
+  0.11.1; 691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the
+  board pill and System Info's button; 650 kB with kit 0.9.0; 694 kB with kit 0.5.3, before the
+  kit split into per-component entries), most of it the kit's shell, the toast host (rendered in
+  the app root, so it is in main on purpose) and Angular with its router, plus the XHR backend
+  (`withXhr()`, 4 kB: only XHR reports the upload progress of imports); the warning leaves little
+  headroom on purpose, and the 1 MB error ceiling stays. (`angular.json` cannot hold comments, so
+  the reason lives here.) The kit's video code is imported from `@sima/neat-ui/video`, only by the
+  Viewer, so it loads with that route and stays out of the initial bundle. Streaming, Media,
+  Peripherals and Stats are lazy routes too, and so are the kit entries only they use
+  (`/file-browser`, `/select-list`, `/dialog`, Peripherals' `/level-meter` and the charts entry,
+  `/charts`, which only Stats draws with and which brings d3's scale and shape modules: nothing
+  outside Stats imports it, and a type-only import is erased). The top bar's board and System Info
+  dialogs are imported on their first open (`TopBarDialogs`), with the kit entries they bring
+  (`/collapsible`, `/callout`, which Peripherals and the Viewer use too).
   `npm run check:bundle` (after a build, and in CI) fails if any of that leaks into the initial
   bundle, or goes missing from the build: its markers are the selectors of the Viewer's video tile,
   the four lazy pages (`app-streaming-page`, `app-media-page`, `app-peripherals-page`,
