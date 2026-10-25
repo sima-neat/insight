@@ -4,6 +4,11 @@ import { Page } from '@playwright/test';
 export const LAPTOP = { width: 1366, height: 768 };
 export const DESKTOP = { width: 1920, height: 1080 };
 export const TABLET = { width: 768, height: 1024 };
+/**
+ * A phone, below the kit's narrow breakpoint (48rem). Not in `VIEWPORTS`: those flows assume the
+ * side panel sits beside the page and the top bar names the page, neither of which holds here.
+ */
+export const PHONE = { width: 390, height: 844 };
 
 /** The three viewports by name, for tests that run a flow at each of them. */
 export const VIEWPORTS = [

@@ -1,10 +1,28 @@
 /* A long board name (a host name, an IPv6 address) is cut so that the pill never crowds the page
    tools: at this width the Viewer's top bar at 1366×768 still has room for System Info's button
    (ruling Q10; e2e/top-bar.spec.ts measures it). "DevKit: 192.168.100.200" just fits. The
-   tooltip names the target in full. */
+   tooltip names the target in full.
+   On a phone the bar has less room than that cap, so the pill itself may shrink, and the label
+   gives way first: a flex item does not shrink below its content unless it is told it may, and
+   without that the pill would stick out past the bar's edge. The chip keeps its words. */
+:host {
+  display: flex;
+  min-inline-size: 0;
+}
+
+button {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
 .label {
+  min-inline-size: 0;
   max-inline-size: 10rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+neat-status-chip {
+  flex: none;
 }

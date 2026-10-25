@@ -1,6 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { LAPTOP, topBarSpill } from './layout';
-import { answerTopBar, LONG_BOARD, LONG_HOST } from './top-bar';
+import { answerSlots, answerTopBar, answerViewer, LONG_BOARD, LONG_HOST } from './top-bar';
 
 /** The top bar's System Info button, ⓘ, after the pill. */
 const systemInfo = (page: Page) => page.getByRole('button', { name: 'System information' });
@@ -19,55 +19,8 @@ const answerEmptyStreaming = (page: Page) =>
 
 /** The pages with the widest page tools, and what each needs answered to show them. */
 const PAGES = [
-  {
-    path: '/viewer',
-    answer: async (page: Page) => {
-      await page.route(
-        (url) => url.pathname === '/api/viewer-url',
-        (route) =>
-          route.fulfill({
-            json: {
-              url: 'https://127.0.0.1:9900/viewer?max_channels=16',
-              max_video_channels: 16,
-              channel_limit_source: 'sdk-port-map',
-              sdk_channel_limited: true,
-            },
-          }),
-      );
-      await page.route(
-        (url) => url.pathname === '/api/ingest/stats',
-        (route) =>
-          route.fulfill({
-            json: { time: '2026-10-22T12:00:00Z', active_ttl_ms: 3000, channels: [] },
-          }),
-      );
-      await page.route(
-        (url) => url.pathname === '/api/vf/offer',
-        (route) => route.fulfill({ status: 503, contentType: 'text/plain', body: 'No stream' }),
-      );
-    },
-  },
-  {
-    path: '/streaming',
-    answer: (page: Page) =>
-      page.route(
-        (url) => url.pathname === '/api/mediasrc',
-        (route) =>
-          route.fulfill({
-            json: Array.from({ length: 48 }, (_, i) => ({
-              index: i + 1,
-              file: '',
-              state: 'stopped',
-              transport: '',
-              codec: 'unknown',
-              type: 'file',
-              allowed_transports: [],
-              urls: {},
-              readers: [],
-            })),
-          }),
-      ),
-  },
+  { path: '/viewer', answer: answerViewer },
+  { path: '/streaming', answer: (page: Page) => answerSlots(page, 48) },
 ];
 
 for (const { path, answer } of PAGES) {

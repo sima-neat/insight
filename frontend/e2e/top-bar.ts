@@ -92,3 +92,55 @@ export async function answerTopBar(page: Page): Promise<void> {
     (route) => route.fulfill({ json: HOST_METRICS }),
   );
 }
+
+/** The Streaming and Media pages' slots (`GET /api/mediasrc`): `count` stopped slots, none in use. */
+export function slotRows(count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    index: i + 1,
+    file: '',
+    state: 'stopped',
+    transport: '',
+    codec: 'unknown',
+    type: 'file',
+    allowed_transports: [],
+    urls: {},
+    readers: [],
+  }));
+}
+
+/** Answers the slots with `count` stopped ones; call it before the page loads. */
+export const answerSlots = (page: Page, count: number) =>
+  page.route(
+    (url) => url.pathname === '/api/mediasrc',
+    (route) => route.fulfill({ json: slotRows(count) }),
+  );
+
+/**
+ * Answers what the Viewer asks for on load: a 16-channel limit, no live ingest, and no stream to
+ * connect to (its tiles show their no-stream state). Call it before the page loads.
+ */
+export async function answerViewer(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.pathname === '/api/viewer-url',
+    (route) =>
+      route.fulfill({
+        json: {
+          url: 'https://127.0.0.1:9900/viewer?max_channels=16',
+          max_video_channels: 16,
+          channel_limit_source: 'sdk-port-map',
+          sdk_channel_limited: true,
+        },
+      }),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/ingest/stats',
+    (route) =>
+      route.fulfill({
+        json: { time: '2026-10-22T12:00:00Z', active_ttl_ms: 3000, channels: [] },
+      }),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/vf/offer',
+    (route) => route.fulfill({ status: 503, contentType: 'text/plain', body: 'No stream' }),
+  );
+}
