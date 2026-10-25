@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Title } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
+import { App } from './app';
 import { appConfig } from './app.config';
 import { MediaPage } from './pages/media/media.page';
 import { PeripheralsPage } from './pages/peripherals/peripherals.page';
@@ -18,28 +19,37 @@ const PAGES: [path: string, page: Type<unknown>, title: string][] = [
   ['/stats', StatsPage, 'Stats'],
 ];
 
+/** The Stats views' addresses, each of which shows the Stats page. */
+const STATS_VIEWS = ['/stats/runs', '/stats/compare'];
+
+/**
+ * Stubs jsdom's missing ResizeObserver, which the kit measures with, and gives the TestBed the
+ * app's own providers, so the routes are tested with the title strategy the app uses.
+ */
+function setUp(): void {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {
+        // jsdom lays nothing out, so nothing ever resizes.
+      }
+      unobserve(): void {
+        // Nothing observed.
+      }
+      disconnect(): void {
+        // Nothing observed.
+      }
+    },
+  );
+  TestBed.configureTestingModule({ providers: appConfig.providers });
+}
+
 describe('routes', () => {
   let harness: RouterTestingHarness;
   let router: Router;
 
   beforeEach(async () => {
-    // jsdom has no ResizeObserver; the real pages render here, and the kit measures with it.
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        observe(): void {
-          // jsdom lays nothing out, so nothing ever resizes.
-        }
-        unobserve(): void {
-          // Nothing observed.
-        }
-        disconnect(): void {
-          // Nothing observed.
-        }
-      },
-    );
-    // The app's own providers, so the routes are tested with the title strategy the app uses.
-    TestBed.configureTestingModule({ providers: appConfig.providers });
+    setUp();
     harness = await RouterTestingHarness.create();
     router = TestBed.inject(Router);
   });
@@ -53,6 +63,13 @@ describe('routes', () => {
     await harness.navigateByUrl(path, page);
 
     expect(router.url).toBe(path);
+  });
+
+  it.each(STATS_VIEWS)('%s renders the Stats page, titled Stats', async (path) => {
+    await harness.navigateByUrl(path, StatsPage);
+
+    expect(router.url).toBe(path);
+    expect(TestBed.inject(Title).getTitle()).toBe('Neat Insight · Stats');
   });
 
   it('redirects / to /streaming', async () => {
@@ -85,5 +102,23 @@ describe('routes', () => {
       await harness.navigateByUrl(path, page);
       expect(documentTitle.getTitle()).toBe(`Neat Insight · ${title}`);
     }
+  });
+});
+
+describe('the rail on the Stats views', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each(STATS_VIEWS)('keeps Stats current at %s', async (path) => {
+    setUp();
+    const fixture = TestBed.createComponent(App);
+    await TestBed.inject(Router).navigateByUrl(path);
+    await fixture.whenStable();
+
+    const current = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      'nav a[aria-current="page"]',
+    );
+    expect(Array.from(current, (link) => link.textContent?.trim())).toEqual(['Stats']);
   });
 });

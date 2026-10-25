@@ -9,6 +9,7 @@ import type {
 } from '../src/app/stats/api';
 // Loaded at run time: Playwright reads the app's own fixtures (the capture of a Modalix DevKit's
 // metrics and the builders over it), so the specs and the e2e share one copy of the board.
+import { traceAnswer } from '../src/app/stats/runs.testing';
 import { METRICS_LIVE, sentinelState, withHistory } from '../src/app/stats/stats.testing';
 import { answerTopBar, TOP_BAR_BOARD } from './top-bar';
 
@@ -76,7 +77,10 @@ export class FakeStatsBackend {
   readonly queries: MetricsQuery[] = [];
   /** The newest sample's time of every answer to a metrics request, in order. */
   readonly answered: (string | null)[] = [];
-  /** The path of every request to Sentinel's endpoints (state, metrics and install), in order. */
+  /**
+   * The path of every request to Sentinel's endpoints (state, metrics, install and the trace), in
+   * order.
+   */
   readonly sentinelRequests: string[] = [];
   /** The `generation` of every `POST /api/sentinel/install`, in order. */
   readonly installs: (string | null)[] = [];
@@ -141,6 +145,14 @@ export class FakeStatsBackend {
         const answer = this.metricsAnswer(query);
         this.answered.push(answer.sampled_at);
         return route.fulfill({ json: answer });
+      },
+    );
+    // No trace records on the board: the toolbar offers Record.
+    await page.route(
+      (url) => url.pathname === '/api/sentinel/traces',
+      (route) => {
+        sentinelPath(route.request());
+        return route.fulfill({ json: traceAnswer(null, null) });
       },
     );
     await page.route(

@@ -15,4 +15,11 @@ export class StatsSession {
   readonly card: WritableSignal<OverviewCardId | null> = signal(null);
   /** The thermal group chosen in the Thermal area; null before the first choice. */
   readonly thermalGroup: WritableSignal<string | null> = signal(null);
+  /** The id of the run selected in Runs, whose detail the panel shows; null before any is. */
+  readonly run: WritableSignal<string | null> = signal(null);
+  /**
+   * The ids of the runs ticked in Runs, in the order they were ticked: Compare takes the first as
+   * its baseline.
+   */
+  readonly checkedRuns: WritableSignal<readonly string[]> = signal([]);
 }

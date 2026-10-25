@@ -19,11 +19,14 @@ import { boardState, DEVKIT, FakeBoard, FakePeripherals } from '../../board/boar
 import { FakeLocalStorage } from '../../fake-storage.testing';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import type { SentinelMetric, SentinelMetrics, SentinelState } from '../../stats/api';
+import { ACTIVE_TRACE, runsAnswer, traceAnswer } from '../../stats/runs.testing';
+import { SentinelTelemetry } from '../../stats/sentinel-telemetry';
 import { METRICS_LIVE, sentinelState, withHistory } from '../../stats/stats.testing';
 import {
   boardPowerChart,
   mergeTelemetry,
   metricChart,
+  metricsQuery,
   sessionCsv,
   sessionCsvFilename,
   thermalMaxChart,
@@ -34,6 +37,8 @@ import { StatsPage } from './stats.page';
 const STATE_URL = '/api/sentinel';
 const METRICS_URL = '/api/sentinel/metrics';
 const INSTALL_URL = '/api/sentinel/install';
+const TRACES_URL = '/api/sentinel/traces';
+const RUNS_URL = '/api/sentinel/runs';
 const badGateway = { status: 502, statusText: 'Bad Gateway' };
 const GENERATION = METRICS_LIVE.generation;
 const OTHER_BOARD: BoardTarget = { ...DEVKIT, host: '192.168.1.30', label: 'sima@192.168.1.30' };
@@ -155,7 +160,15 @@ describe('StatsPage', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         provideRouter([
-          { path: 'stats', component: StatsPage },
+          {
+            path: 'stats',
+            component: StatsPage,
+            children: [
+              { path: '', children: [] },
+              { path: 'runs', children: [] },
+              { path: 'compare', children: [] },
+            ],
+          },
           { path: 'elsewhere', component: Elsewhere },
         ]),
         { provide: BoardService, useValue: board },
@@ -171,7 +184,10 @@ describe('StatsPage', () => {
   afterEach(() => {
     try {
       fixture.destroy();
-      // Every request a test caused was answered and checked: a stray poll fails it.
+      // The trace is read on every visit to a board; the specs about recording answer it, the
+      // rest leave it unanswered, which shows Record.
+      http.match((request) => request.url === TRACES_URL);
+      // Every other request a test caused was answered and checked: a stray poll fails it.
       http.verify();
     } finally {
       vi.useRealTimers();
@@ -901,5 +917,168 @@ describe('StatsPage', () => {
       METRICS_LIVE.groups.flatMap((group) => group.metrics).map((m) => [m.key, m.short]),
     );
     expect(names).toEqual(METRICS_LIVE.order.map((key) => shorts.get(key)));
+  });
+
+  describe('views', () => {
+    const viewSwitch = (): HTMLElement =>
+      toolbar().querySelector('[role="radiogroup"][aria-label="Stats view"]')!;
+    const viewOption = (label: string): HTMLButtonElement =>
+      [...viewSwitch().querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
+        (option) => text(option) === label,
+      )!;
+    const checkedView = (): string => text(viewSwitch().querySelector('[aria-checked="true"]'));
+    const telemetryOf = (): SentinelTelemetry =>
+      fixture.debugElement.query(By.directive(StatsPage)).injector.get(SentinelTelemetry);
+    const runsRead = (): TestRequest => http.expectOne((request) => request.url === RUNS_URL);
+    const url = (): string => TestBed.inject(Router).url;
+
+    it('the view follows the address: /stats is Live, /stats/runs Runs, and Compare shows Runs', async () => {
+      await visit();
+      expect(viewOption('Live')).toBeDefined();
+      expect(checkedView()).toBe('Live');
+      expect(cards()).toHaveLength(6);
+
+      await go('/stats/runs');
+      await flush(runsRead(), runsAnswer());
+      expect(checkedView()).toBe('Runs');
+      expect(cards()).toHaveLength(0);
+
+      await go('/stats/compare?runs=a,b');
+      expect(checkedView()).toBe('Runs');
+      expect(cards()).toHaveLength(0);
+    });
+
+    it('the switch navigates between /stats and /stats/runs', async () => {
+      await visit();
+
+      await click(viewOption('Runs'));
+      expect(url()).toBe('/stats/runs');
+      await flush(runsRead(), runsAnswer());
+
+      await click(viewOption('Live'));
+      expect(url()).toBe('/stats');
+      await answerMetrics(
+        withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
+      );
+    });
+
+    it('keeps the page and its telemetry across the views, polls no metrics on Runs and reads only what is new back on Live', async () => {
+      await visit();
+      const page = fixture.debugElement.query(By.directive(StatsPage)).componentInstance;
+      const telemetry = telemetryOf();
+
+      await go('/stats/runs');
+      await flush(runsRead(), runsAnswer());
+      expect(fixture.debugElement.query(By.directive(StatsPage)).componentInstance).toBe(page);
+      expect(telemetryOf()).toBe(telemetry);
+      // The state is still checked every 30 s; the metrics are not polled.
+      await advance(30_000);
+      await answerState();
+      noPoll();
+      // The list is read again every 30 s while it is shown.
+      await flush(runsRead(), runsAnswer());
+      expect(announcement()).toBe('');
+
+      await go('/stats');
+      // The window held is asked after: only the samples since come back.
+      const poll = metricsPoll();
+      const held = metricsQuery(telemetry.window(), GENERATION);
+      expect(held.after).toBeDefined();
+      expect(poll.request.params.get('after')).toBe(held.after);
+      await flush(
+        poll,
+        withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
+      );
+      expect(chip()).toBe('Live');
+      expect(announcement()).toBe('Metrics are updating live.');
+      expect(cards()).toHaveLength(6);
+    });
+
+    it('the run list is read on Runs and Compare, and not on Live', async () => {
+      await visit();
+      http.expectNone((request) => request.url === RUNS_URL);
+
+      await go('/stats/compare?runs=a,b');
+      await flush(runsRead(), runsAnswer());
+
+      await go('/stats');
+      await answerMetrics(
+        withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
+      );
+      await advance(30_000);
+      await answerState();
+      http.expectNone((request) => request.url === RUNS_URL);
+      http.match((request) => request.url === METRICS_URL);
+    });
+
+    it('each view’s toolbar: Live has its update state, Record, ⋯ and the panel; Runs Record and the panel; Compare Record only', async () => {
+      await visit();
+      const sidePanel = () => toolbar().querySelector('neat-aside-toggle');
+      expect(chip()).toBe('Live');
+      expect(toolbarButton('Pause')).toBeDefined();
+      expect(toolbarButton('Record')).toBeDefined();
+      expect(toolbarButton('More actions')).toBeDefined();
+      expect(sidePanel()).not.toBeNull();
+      // Left to right: the view switch, the view's own state, Record, ⋯, the panel.
+      const order = [
+        viewSwitch(),
+        toolbar().querySelector('neat-status-chip')!,
+        toolbarButton('Record')!,
+        toolbarButton('More actions')!,
+        sidePanel()!,
+      ];
+      for (const [index, element] of order.slice(1).entries()) {
+        expect(
+          order[index].compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+      }
+
+      await go('/stats/runs');
+      await flush(runsRead(), runsAnswer());
+      expect(toolbar().querySelector('neat-status-chip')).toBeNull();
+      expect(toolbarButton('Pause')).toBeUndefined();
+      expect(toolbarButton('More actions')).toBeUndefined();
+      expect(toolbarButton('Record')).toBeDefined();
+      expect(sidePanel()).not.toBeNull();
+
+      await go('/stats/compare?runs=a,b');
+      expect(toolbarButton('Record')).toBeDefined();
+      expect(toolbarButton('More actions')).toBeUndefined();
+      expect(sidePanel()).toBeNull();
+    });
+
+    it('a trace recording shows in the toolbar on every view', async () => {
+      await go('/stats/runs');
+      await answerState();
+      await flush(
+        http.expectOne((request) => request.url === TRACES_URL),
+        traceAnswer(ACTIVE_TRACE, null),
+      );
+      await flush(runsRead(), runsAnswer());
+
+      expect(text(toolbar().querySelector('.recording'))).toMatch(
+        /^Recording · compiler-v2-bench · \d+:\d{2}(:\d{2})?$/,
+      );
+      expect(toolbarButton('Stop')).toBeDefined();
+      expect(toolbarButton('Record')).toBeUndefined();
+    });
+
+    it('Runs and Compare show the same empty states as Live, with the switch and no Record', async () => {
+      board.state.set(boardState({ target: null, generation: GENERATION }));
+      await go('/stats/runs');
+      expect(calloutHeadings()).toEqual(['Select a board to see its telemetry']);
+      expect(checkedView()).toBe('Runs');
+      expect(toolbarButton('Record')).toBeUndefined();
+
+      board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
+      await go('/stats/compare?runs=a,b');
+      expect(text(root().querySelector('neat-page p[role="status"]'))).toBe(
+        'Checking Sentinel on the board…',
+      );
+      await answerState(missingState());
+      await flush(runsRead(), runsAnswer());
+      expect(calloutHeadings()).toEqual(['Sentinel is not installed on sima@192.168.1.20']);
+      expect(toolbarButton('Record')).toBeUndefined();
+    });
   });
 });

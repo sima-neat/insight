@@ -38,13 +38,13 @@ export type TelemetryUpdate = 'live' | 'paused' | 'stopped';
  * reason it could not be read: one lost read must not take the telemetry off the page.
  *
  * **Metrics.** `GET /api/sentinel/metrics` is polled one request at a time while a board is
- * selected, its state says available, the user has not paused, no failure halted polling and the
- * tab is visible. The next poll is due 2 s after the previous one started, or longer after
- * failures in a row (`pollDelay`). A failure whose code says the board or the daemon cannot
- * answer (`haltsPolling`) halts polling and re-reads the state. A state read that says available
- * lifts the halt, and the next poll waits out the halting poll's backoff: the state can answer
- * while the metrics read keeps failing (a timeout, say), and polling at once would hit the board
- * back to back. `retry()` lifts it and polls at once.
+ * selected, its state says available, the page shows the metrics (`setWatching`), the user has not
+ * paused, no failure halted polling and the tab is visible. The next poll is due 2 s after the
+ * previous one started, or longer after failures in a row (`pollDelay`). A failure whose code
+ * says the board or the daemon cannot answer (`haltsPolling`) halts polling and re-reads the
+ * state. A state read that says available lifts the halt, and the next poll waits out the halting
+ * poll's backoff: the state can answer while the metrics read keeps failing (a timeout, say), and
+ * polling at once would hit the board back to back. `retry()` lifts it and polls at once.
  *
  * **Board changes.** Everything held is the current board generation's. A board change drops it,
  * re-reads the state and frees the poll slot: a request still out to the previous board is
@@ -100,6 +100,12 @@ export class SentinelTelemetry {
   /** The user paused the metrics. A board change keeps it: it is the user's choice, not the board's. */
   readonly paused = this.pausedValue.asReadonly();
 
+  /**
+   * The page shows the metrics (Live). The state is read either way: the other views' gating
+   * (checking, not ready) and the Record button follow it.
+   */
+  private readonly watching = signal(true);
+
   /** A failure said the board or the daemon cannot answer: no poll until the state says it can. */
   private readonly halted = signal(false);
   private readonly visible = signal(this.document.visibilityState === 'visible');
@@ -116,6 +122,7 @@ export class SentinelTelemetry {
       state !== null &&
       state.available &&
       state.generation === this.board.generation() &&
+      this.watching() &&
       !this.pausedValue() &&
       !this.halted() &&
       this.visible()
@@ -196,6 +203,16 @@ export class SentinelTelemetry {
       this.document.removeEventListener('visibilitychange', onVisibility);
       view?.removeEventListener('focus', onFocus);
     });
+  }
+
+  /**
+   * Whether the page shows the metrics. While it does not, no metric is polled (a poll already
+   * out still lands); showing them again polls at once, for the samples after the newest held.
+   */
+  setWatching(watching: boolean): void {
+    this.watching.set(watching);
+    // The page calls this from its own effect, which must not come to depend on the polling.
+    untracked(() => this.sync());
   }
 
   /** No more metric polls until `resume()`. A poll already out still lands. */

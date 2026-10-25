@@ -314,6 +314,47 @@ describe('SentinelTelemetry', () => {
     await answerMetrics(nextSample(3));
   });
 
+  it('setWatching(false) stops metric polls but not the 30 s state re-read; watching again polls at once, incrementally', async () => {
+    await openLive();
+    telemetry.setWatching(false);
+
+    await advance(30_000);
+    await answerState();
+    noPoll();
+
+    telemetry.setWatching(true);
+    const next = metricsPoll();
+    expect(next.request.params.get('after')).toBe('2026-10-24T10:00:04.000Z');
+    expect(next.request.params.get('epoch')).toBe('1');
+    await flush(next, nextSample(3));
+    expect(telemetry.window()?.timestamps).toHaveLength(4);
+    expect(telemetry.update()).toBe('live');
+  });
+
+  it('a poll out when watching stops still lands, and schedules no next one', async () => {
+    await openLive();
+    await advance(2000);
+    const out = metricsPoll();
+    telemetry.setWatching(false);
+    await flush(out, nextSample(3));
+    expect(telemetry.window()?.timestamps).toHaveLength(4);
+
+    await advance(10_000);
+    noPoll();
+  });
+
+  it('a page opened while not watching reads the state but polls nothing until it watches', async () => {
+    open();
+    telemetry.setWatching(false);
+    await answerState();
+    noPoll();
+
+    telemetry.setWatching(true);
+    const first = metricsPoll();
+    expect(first.request.params.keys()).toEqual(['history']);
+    await flush(first, metrics(3));
+  });
+
   it('hiding the tab stops both; showing it polls once at once, however often it was hidden and shown', async () => {
     await openLive();
     setVisibility('hidden');

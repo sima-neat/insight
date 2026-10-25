@@ -4,10 +4,13 @@ import {
   Component,
   computed,
   DOCUMENT,
+  effect,
   inject,
   linkedSignal,
   signal,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { NavigationEnd, PRIMARY_OUTLET, Router, type UrlTree } from '@angular/router';
 import {
   NeatAsidePanel,
   NeatAsideToggle,
@@ -28,7 +31,9 @@ import {
   NeatPopoverItem,
   NeatPopoverTrigger,
 } from '@sima/neat-ui/popover';
+import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
+import { filter, map } from 'rxjs';
 import { Announcement } from '../../announcement';
 import { AsidePrefs } from '../../aside-prefs';
 import { BoardProblemNotice } from '../../board/board-problem-notice';
@@ -40,20 +45,38 @@ import { downloadCsv } from '../../stats/csv-download';
 import { daemonView, healthProblems, type DaemonView } from '../../stats/daemon-view';
 import { failureOf, type SentinelFailure } from '../../stats/sentinel-failure';
 import { SentinelInstall } from '../../stats/sentinel-install';
+import { SentinelRuns } from '../../stats/sentinel-runs';
 import { SentinelTelemetry, type TelemetryUpdate } from '../../stats/sentinel-telemetry';
 import { StatsSession } from '../../stats/stats-session';
 import { sessionCsv, sessionCsvFilename, type OverviewCardId } from '../../stats/telemetry';
 import { TopBarDialogs } from '../../top-bar-dialogs';
 import { MetricsTable } from './metrics-table';
 import { overviewCards } from './overview-cards';
+import { RecordTrace } from './record-trace';
 import { StatsAreaPanel } from './stats-area-panel';
 import { StatsChart } from './stats-chart';
 
 /**
  * What stands in the page, the first that applies: the board could not be read, no board is
- * selected, Sentinel is being checked, the telemetry, or Sentinel is not ready.
+ * selected, Sentinel is being checked, the view (Sentinel answers, or answered on this board), or
+ * Sentinel is not ready. The same for every view.
  */
-type Body = 'read-failed' | 'no-target' | 'checking' | 'telemetry' | 'not-ready';
+type Body = 'read-failed' | 'no-target' | 'checking' | 'ready' | 'not-ready';
+
+/** The page's views, each at its own address under `/stats`. */
+type StatsView = 'live' | 'runs' | 'compare';
+
+/** The view an address names: `/stats/runs` is Runs, `/stats/compare` Compare, the rest Live. */
+function statsView(url: UrlTree): StatsView {
+  const view = url.root.children[PRIMARY_OUTLET]?.segments[1]?.path;
+  return view === 'runs' || view === 'compare' ? view : 'live';
+}
+
+/** The switch offers Live and Runs; a comparison is opened from Runs, which it shows as chosen. */
+const VIEW_OPTIONS: NeatSegmentedOption<'live' | 'runs'>[] = [
+  { value: 'live', label: 'Live' },
+  { value: 'runs', label: 'Runs' },
+];
 
 const UPDATE_CHIPS: Record<TelemetryUpdate, { label: string; tone: NeatTone }> = {
   live: { label: 'Live', tone: 'success' },
@@ -98,11 +121,15 @@ function notReadyHeading(
 }
 
 /**
- * Stats: the selected board's live Sentinel telemetry as overview cards, the chosen card's area in
- * the side panel and every metric under All metrics (spec, "Stats, live telemetry").
- * `SentinelTelemetry` is provided here, so leaving the page stops every request to the board; the
- * install belongs to `SentinelInstall`, which outlives the page, and where the user left the panel
- * to `StatsSession`.
+ * Stats, in three views at their own addresses (spec, "Stats, runs"): Live (`/stats`), the selected
+ * board's live Sentinel telemetry as overview cards, the chosen card's area in the side panel and
+ * every metric under All metrics (spec, "Stats, live telemetry"); Runs (`/stats/runs`), the runs
+ * saved on the board; and Compare (`/stats/compare`). The views are child routes without
+ * components, so the page stays one instance across them. `SentinelTelemetry` and `SentinelRuns`
+ * are provided here, so leaving the page stops every request to the board; while Live is not shown
+ * the metrics are not polled, and the run list is read only while Runs or Compare is. The install
+ * belongs to `SentinelInstall`, which outlives the page, and where the user left the page to
+ * `StatsSession`. A trace can be recorded and stopped from the toolbar on every view.
  *
  * Telemetry once read stays on the page under whatever failure follows (#170): a board that stops
  * answering keeps its last values. The top bar's update state and its Pause, Resume or Retry are
@@ -129,13 +156,15 @@ function notReadyHeading(
     NeatPopoverContent,
     NeatPopoverItem,
     NeatPopoverTrigger,
+    NeatSegmented,
     NeatStatusChip,
     NeatTooltip,
     NgTemplateOutlet,
+    RecordTrace,
     StatsAreaPanel,
     StatsChart,
   ],
-  providers: [SentinelTelemetry],
+  providers: [SentinelTelemetry, SentinelRuns],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './stats.page.html',
   styleUrl: './stats.page.css',
@@ -143,6 +172,8 @@ function notReadyHeading(
 export class StatsPage {
   protected readonly board = inject(BoardService);
   protected readonly telemetry = inject(SentinelTelemetry);
+  private readonly runs = inject(SentinelRuns);
+  private readonly router = inject(Router);
   protected readonly install = inject(SentinelInstall);
   private readonly session = inject(StatsSession);
   private readonly dialogs = inject(TopBarDialogs);
@@ -152,6 +183,19 @@ export class StatsPage {
 
   /** For "Session started … ago", which moves in steps of 10 s and more. */
   private readonly now = ticking(10_000);
+
+  /** The view the address names, followed as the router moves between the views. */
+  protected readonly view = toSignal(
+    this.router.events.pipe(
+      filter((event) => event instanceof NavigationEnd),
+      map(() => statsView(this.router.parseUrl(this.router.url))),
+    ),
+    { initialValue: statsView(this.router.parseUrl(this.router.url)) },
+  );
+  protected readonly viewOptions = VIEW_OPTIONS;
+  protected readonly switchValue = computed<'live' | 'runs'>(() =>
+    this.view() === 'live' ? 'live' : 'runs',
+  );
 
   protected readonly moreOpen = signal(false);
   /** All metrics starts closed on every visit; its table is built only while it is open. */
@@ -175,7 +219,7 @@ export class StatsPage {
     // Until the board is first read, Insight is still finding out what there is to check.
     if (board === null) return this.board.error() ? 'read-failed' : 'checking';
     if (board.target === null) return 'no-target';
-    if (this.telemetryShown()) return 'telemetry';
+    if (this.telemetryShown()) return 'ready';
     // Before the first state read has answered (a hidden tab sends it when it shows), it checks.
     const read = this.telemetry.state() !== null || this.telemetry.stateFailure() !== null;
     return this.telemetry.checking() || !read ? 'checking' : 'not-ready';
@@ -232,8 +276,13 @@ export class StatsPage {
   protected readonly area = computed(
     () => this.cards().find((view) => view.card.id === this.session.card())?.card.area ?? 'thermal',
   );
-  /** The panel is about the telemetry, so it is shown only with it. */
-  protected readonly asideShown = computed(() => this.asideOpen() && this.body() === 'telemetry');
+  /**
+   * The panel is about what the view shows (the chosen card's area on Live, the selected run on
+   * Runs), so it is shown only with it; Compare takes the full width.
+   */
+  protected readonly asideShown = computed(
+    () => this.asideOpen() && this.body() === 'ready' && this.view() !== 'compare',
+  );
 
   protected readonly updateChip = computed(() => UPDATE_CHIPS[this.telemetry.update()]);
 
@@ -250,14 +299,17 @@ export class StatsPage {
   });
 
   /**
-   * The update state as it is said, while the telemetry is shown. A hidden tab reads `stopped`
+   * The update state as it is said, while the telemetry is shown (on Live, where the metrics are
+   * polled: the other views stop them, which is no news either). A hidden tab reads `stopped`
    * (nothing polls) and reads `live` again when it shows: neither is news to anyone. So a change
    * made while the tab is hidden keeps what was said, and the tab coming back says only what
    * differs from it. Computed when the update changes, under the visibility it changed under.
    */
   protected readonly announcement = linkedSignal<string, string>({
     source: () =>
-      this.body() === 'telemetry' ? UPDATE_ANNOUNCEMENTS[this.telemetry.update()] : '',
+      this.body() === 'ready' && this.view() === 'live'
+        ? UPDATE_ANNOUNCEMENTS[this.telemetry.update()]
+        : '',
     computation: (said, previous) =>
       previous && this.document.visibilityState !== 'visible' ? previous.value : said,
   });
@@ -326,6 +378,21 @@ export class StatsPage {
     if (!outcome || outcome.generation !== this.board.generation()) return '';
     return outcome.ok ? outcome.log : outcome.failure.detail;
   });
+
+  constructor() {
+    // The metrics are polled only while Live shows them; Compare reads the run list too, for its
+    // callouts about runs that are gone or still recording.
+    effect(() => {
+      const view = this.view();
+      this.telemetry.setWatching(view === 'live');
+      this.runs.setRunsShown(view === 'runs' || view === 'compare');
+    });
+  }
+
+  /** The switch's choice, as its address: the router then moves the view. */
+  protected openView(view: 'live' | 'runs'): void {
+    void this.router.navigateByUrl(view === 'runs' ? '/stats/runs' : '/stats');
+  }
 
   protected openBoard(): void {
     void this.dialogs.openBoard();

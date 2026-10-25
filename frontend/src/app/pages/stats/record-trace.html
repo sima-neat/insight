@@ -1,0 +1,81 @@
+@if (runs.trace(); as trace) {
+  <!-- Not a live region: the elapsed time changes every second. -->
+  <span class="recording">
+    Recording · <span class="name">{{ trace.name }}</span>
+    @if (elapsed(); as elapsed) {
+      · <span class="elapsed">{{ elapsed }}</span>
+    }
+  </span>
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    [disabled]="runs.traceBusy() !== null"
+    (click)="stop()"
+  >
+    Stop
+  </button>
+} @else {
+  <neat-popover label="Start a trace" align="end" [open]="open()" (openChange)="setOpen($event)">
+    <button neatButton neatPopoverTrigger type="button" variant="text" size="small">Record</button>
+    <ng-template neatPopoverContent>
+      <form class="form" (submit)="$event.preventDefault(); start()">
+        <neat-field label="Name" [error]="errorOf('name')">
+          <input
+            #nameInput
+            neatInput
+            size="small"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            [value]="name()"
+            (input)="edit('name', nameInput.value)"
+          />
+        </neat-field>
+        <neat-field label="Note (optional)" [error]="errorOf('note')">
+          <input
+            #noteInput
+            neatInput
+            size="small"
+            type="text"
+            autocomplete="off"
+            [value]="note()"
+            (input)="edit('note', noteInput.value)"
+          />
+        </neat-field>
+        <neat-field label="Tags (optional, comma separated)" [error]="errorOf('tags')">
+          <input
+            #tagsInput
+            neatInput
+            size="small"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            [value]="tags()"
+            (input)="edit('tags', tagsInput.value)"
+          />
+        </neat-field>
+        <p neatNote>
+          A trace records the board while your workload runs and is saved on the board as a run you
+          can reopen and compare.
+        </p>
+        @if (failure(); as failure) {
+          <neat-error-note>{{ failure.title }}</neat-error-note>
+          @if (failure.hint) {
+            <p neatNote>{{ failure.hint }}</p>
+          }
+        }
+        <div class="buttons">
+          <button neatButton type="button" variant="text" size="small" (click)="setOpen(false)">
+            Cancel
+          </button>
+          <!-- It waits with aria-disabled while the start is out, so the focus stays on it. -->
+          <button neatButton type="submit" size="small" [attr.aria-disabled]="starting() || null">
+            {{ starting() ? 'Starting…' : 'Start' }}
+          </button>
+        </div>
+      </form>
+    </ng-template>
+  </neat-popover>
+}
