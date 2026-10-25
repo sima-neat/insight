@@ -1,9 +1,7 @@
 import {
-  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
-  DOCUMENT,
   ElementRef,
   inject,
   Injector,
@@ -16,6 +14,7 @@ import { NeatInput } from '@sima/neat-ui/input';
 import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-ui/popover';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { ticking } from '../../clock';
+import { holdFocus } from '../../hold-focus';
 import { formatElapsed } from '../../stats/format';
 import { parseTags, traceName, validateTrace } from '../../stats/runs';
 import type { SentinelFailure } from '../../stats/sentinel-failure';
@@ -71,7 +70,6 @@ function traceProblem(
 export class RecordTrace {
   protected readonly runs = inject(SentinelRuns);
   private readonly toasts = inject(NeatToasts);
-  private readonly document = inject(DOCUMENT);
   private readonly host: ElementRef<HTMLElement> = inject(ElementRef);
   private readonly injector = inject(Injector);
   /** The elapsed time moves in seconds. */
@@ -162,16 +160,6 @@ export class RecordTrace {
    * Stop) is gone by then, which leaves the focus on the body. It moves to this state's button.
    */
   private holdFocus(): void {
-    afterNextRender(
-      {
-        read: () => {
-          const focused = this.document.activeElement;
-          if (focused === null || focused === this.document.body) {
-            this.host.nativeElement.querySelector('button')?.focus();
-          }
-        },
-      },
-      { injector: this.injector },
-    );
+    holdFocus(this.injector, () => this.host.nativeElement.querySelector('button'));
   }
 }

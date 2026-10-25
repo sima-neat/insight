@@ -1,9 +1,7 @@
 import {
-  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
-  DOCUMENT,
   effect,
   inject,
   Injector,
@@ -20,6 +18,7 @@ import { NeatToasts } from '@sima/neat-ui/toast';
 import { AsidePrefs } from '../../aside-prefs';
 import { CellText } from '../../cell-text';
 import { ticking } from '../../clock';
+import { holdFocus } from '../../hold-focus';
 import { ListColumn } from '../../list-column';
 import type { RunSummary } from '../../stats/api';
 import { canCheckRun, MAX_CHECKED_RUNS, runLine, runWhen } from '../../stats/runs';
@@ -122,7 +121,6 @@ export class RunsView {
   private readonly confirm = inject(NeatConfirm);
   private readonly toasts = inject(NeatToasts);
   private readonly router = inject(Router);
-  private readonly document = inject(DOCUMENT);
   private readonly injector = inject(Injector);
   private readonly list = viewChild(NeatSelectList);
 
@@ -245,14 +243,6 @@ export class RunsView {
    * leaves the focus on the body, and the list takes it. A button still there keeps it.
    */
   private holdFocus(): void {
-    afterNextRender(
-      {
-        read: () => {
-          const focused = this.document.activeElement;
-          if (focused === null || focused === this.document.body) this.list()?.focus();
-        },
-      },
-      { injector: this.injector },
-    );
+    holdFocus(this.injector, () => this.list());
   }
 }

@@ -1,9 +1,7 @@
 import {
-  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
-  DOCUMENT,
   ElementRef,
   inject,
   Injector,
@@ -23,6 +21,7 @@ import {
 import { NeatConfirm, type NeatConfirmOptions } from '@sima/neat-ui/confirm';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { holdFocus } from '../../hold-focus';
 import type { Slot } from '../../sources/api';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { filePreview, PreviewFrame } from '../../sources/preview-frame';
@@ -100,7 +99,6 @@ export class MediaPanel {
   private readonly toasts = inject(NeatToasts);
   private readonly lead = viewChild.required<ElementRef<HTMLElement>>('lead');
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  private readonly document = inject(DOCUMENT);
   private readonly injector = inject(Injector);
 
   /** A delete is under way: Delete… waits until it has finished. */
@@ -191,20 +189,10 @@ export class MediaPanel {
    * leaves the focus on the body. Focus still in the panel, or already on the body, moves on.
    */
   private holdFocus(): void {
-    afterNextRender(
-      {
-        read: () => {
-          const focused = this.document.activeElement;
-          if (
-            focused === null ||
-            focused === this.document.body ||
-            this.host.nativeElement.contains(focused)
-          ) {
-            this.lead().nativeElement.focus();
-          }
-        },
-      },
-      { injector: this.injector },
+    holdFocus(
+      this.injector,
+      () => this.lead().nativeElement,
+      () => this.host.nativeElement,
     );
   }
 }

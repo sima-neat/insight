@@ -145,6 +145,9 @@ merging.
     `app-board-problem-notice` instead.
   - `app/format-bytes.ts` (`formatBytes`) words every byte count in the app (media sizes, System
     Info's memory and disk), so one quantity reads the same everywhere.
+  - `app/hold-focus.ts` (`holdFocus`) keeps the keyboard in place when a click removed the
+    button it was on: after the next render, a focus that fell to the body moves to the element
+    named (Media's panel, Stats' Runs view and Record).
   - A ⋯ menu's items are the kit's `neatPopoverItem` on a `neatButton` (Streaming's and Stats'
     menus), inside a `neat-popover`; there is no app component for them.
 - **Key/value lists** use the kit's `neatDetails`. Lists that should start their values in one
