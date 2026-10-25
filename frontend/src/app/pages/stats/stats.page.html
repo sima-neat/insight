@@ -287,10 +287,7 @@
           <app-run-panel [run]="run" />
         } @else if (selected.listed) {
           <neat-callout tone="info" heading="This run is no longer on the board" [headingLevel]="2">
-            <p>
-              It was deleted elsewhere (from the Sentinel CLI, another browser or by the board's
-              retention). Pick another run from the list.
-            </p>
+            <p>The board's run list no longer has it. Pick another run from the list.</p>
           </neat-callout>
         } @else {
           <p neatNote>Reading runs from the board…</p>

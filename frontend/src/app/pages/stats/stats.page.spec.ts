@@ -27,6 +27,7 @@ import {
   traceAnswer,
 } from '../../stats/runs.testing';
 import { SentinelTelemetry } from '../../stats/sentinel-telemetry';
+import { StatsSession } from '../../stats/stats-session';
 import { METRICS_LIVE, sentinelState, withHistory } from '../../stats/stats.testing';
 import {
   boardPowerChart,
@@ -1084,6 +1085,33 @@ describe('StatsPage', () => {
       expect(text(aside()?.querySelector('neat-callout [role="heading"]'))).toBe(
         'This run is no longer on the board',
       );
+    });
+
+    it('the runs ticked and selected belong to their board: another board starts with none', async () => {
+      const session = TestBed.inject(StatsSession);
+      await visit();
+      await go('/stats/runs');
+      await flush(runsRead(), runsAnswer());
+      // The recording run is selected: its panel reads nothing from the board.
+      session.run.set(RUNS_LIST[0].id);
+      session.checkedRuns.set([RUNS_LIST[1].id, RUNS_LIST[2].id]);
+      await settle();
+
+      // Re-read, the same board keeps them.
+      board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
+      await settle();
+      expect(session.run()).toBe(RUNS_LIST[0].id);
+      expect(session.checkedRuns()).toEqual([RUNS_LIST[1].id, RUNS_LIST[2].id]);
+
+      // Away from Stats when the board changes: the next visit finds none.
+      await go('/elsewhere');
+      board.state.set(boardState({ target: OTHER_BOARD, generation: GENERATION + 1 }));
+      await go('/stats/runs');
+      expect(session.run()).toBeNull();
+      expect(session.checkedRuns()).toEqual([]);
+      await answerState(sentinelState({ generation: GENERATION + 1 }));
+      await flush(runsRead(), runsAnswer(RUNS_LIST, GENERATION + 1));
+      expect(text(aside()?.querySelector('section'))).toBe('Select a run to see its detail.');
     });
 
     it('each view’s toolbar: Live has its update state, Record, ⋯ and the panel; Runs Record and the panel; Compare Record only', async () => {

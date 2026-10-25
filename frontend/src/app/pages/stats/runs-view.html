@@ -56,13 +56,13 @@
     }
 
     @if (checkedCount() > 0) {
-      <div class="selection" role="toolbar" aria-label="Selected runs">
+      <div class="selection" role="group" aria-label="Selected runs">
         <span class="count">{{ checkedCount() }} selected</span>
         <button
           neatButton
           type="button"
           size="small"
-          [disabled]="!canCompare()"
+          [disabled]="!canCompare() || deleting()"
           (click)="compare()"
         >
           Compare

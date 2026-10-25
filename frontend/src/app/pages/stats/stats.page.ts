@@ -8,6 +8,7 @@ import {
   inject,
   linkedSignal,
   signal,
+  untracked,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, PRIMARY_OUTLET, Router, type UrlTree } from '@angular/router';
@@ -418,6 +419,11 @@ export class StatsPage {
       const view = this.view();
       this.telemetry.setWatching(view === 'live');
       this.runs.setRunsShown(view === 'runs' || view === 'compare');
+    });
+    // The runs selected and ticked are the board's they were chosen on.
+    effect(() => {
+      const generation = this.board.generation();
+      if (generation !== null) untracked(() => this.session.followBoard(generation));
     });
   }
 

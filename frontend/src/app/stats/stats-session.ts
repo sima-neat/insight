@@ -22,4 +22,20 @@ export class StatsSession {
    * its baseline.
    */
   readonly checkedRuns: WritableSignal<readonly string[]> = signal([]);
+
+  /** The board generation `run` and `checkedRuns` were chosen on; undefined before the first. */
+  private runsGeneration: number | undefined = undefined;
+
+  /**
+   * Follows the board the page shows. The selected and ticked runs are ids on the board they were
+   * chosen on, so another board (a new generation, switched to here or while Stats was away)
+   * starts with none rather than with ids its own runs may not have.
+   */
+  followBoard(generation: number): void {
+    if (this.runsGeneration !== undefined && generation !== this.runsGeneration) {
+      this.run.set(null);
+      this.checkedRuns.set([]);
+    }
+    this.runsGeneration = generation;
+  }
 }

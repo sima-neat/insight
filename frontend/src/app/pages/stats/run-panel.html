@@ -72,7 +72,13 @@
     </neat-collapsible>
   }
 } @else if (failure(); as failure) {
-  <neat-callout tone="danger" [heading]="failure.title" [headingLevel]="3">
+  <!-- Retry waits with aria-disabled rather than disabled, so the focus stays on it. -->
+  <neat-callout
+    tone="danger"
+    [heading]="failure.title"
+    [headingLevel]="3"
+    [attr.aria-busy]="retrying() || null"
+  >
     <p>{{ failure.problem.message }}</p>
     @if (failure.hint) {
       <p neatNote>{{ failure.hint }}</p>
@@ -83,9 +89,10 @@
       type="button"
       size="small"
       variant="outlined"
+      [attr.aria-disabled]="retrying() || null"
       (click)="retry()"
     >
-      Retry
+      {{ retrying() ? 'Retrying…' : 'Retry' }}
     </button>
   </neat-callout>
 } @else {

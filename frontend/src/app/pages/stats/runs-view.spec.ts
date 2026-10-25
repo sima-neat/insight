@@ -106,7 +106,7 @@ describe('RunsView', () => {
   const box = (option: HTMLElement): HTMLElement | null =>
     option.querySelector('[data-slot="select-list-check"]');
   const bar = (): HTMLElement | null =>
-    root().querySelector('[role="toolbar"][aria-label="Selected runs"]');
+    root().querySelector('[role="group"][aria-label="Selected runs"]');
   const barButton = (name: string): HTMLButtonElement =>
     [...bar()!.querySelectorAll<HTMLButtonElement>('button')].find((b) => text(b) === name)!;
   const callout = (): HTMLElement | null => root().querySelector('neat-callout');
@@ -249,6 +249,20 @@ describe('RunsView', () => {
     expect(confirm.ask.mock.calls[0][0].title).toBe('Delete tes3?');
     expect(toasts.status).toHaveBeenCalledWith('Deleted 1 run from the board.');
     expect(session.run()).toBe(HW_LONG.id);
+  });
+
+  it('Compare and Delete wait while a delete is out', async () => {
+    let finish!: (outcome: DeleteOutcome) => void;
+    runs.deleteRuns.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    await renderChecked(TES3.id, HW_SHORT.id);
+
+    await click(barButton('Delete'));
+    expect(barButton('Compare').disabled).toBe(true);
+    expect(barButton('Delete').disabled).toBe(true);
+
+    finish({ deleted: [], failed: [{ id: TES3.id, failure: failure('not_found') }], notTried: [] });
+    await settle();
+    expect(barButton('Compare').disabled).toBe(false);
   });
 
   it('Cancel deletes nothing and keeps the runs ticked', async () => {

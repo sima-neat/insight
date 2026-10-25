@@ -157,7 +157,10 @@ export class RunPanel {
     };
   });
 
+  /** The failed run is being read again: Retry waits, and says so. */
+  protected readonly retrying = computed(() => this.detail.isLoading());
+
   protected retry(): void {
-    this.detail.reload();
+    if (!this.retrying()) this.detail.reload();
   }
 }

@@ -195,6 +195,33 @@ describe('RunPanel', () => {
     expect(rows()).toHaveLength(11);
   });
 
+  it('Retry waits, and says so, while the run is read again', async () => {
+    const failure = failureOf(new BoardProblem('Gone.', 'sentinel_failed', '', {}), 7);
+    runs.readRun.mockResolvedValue({ failure });
+    await render();
+    const retry = () =>
+      [...root().querySelectorAll<HTMLButtonElement>('neat-callout button')].find((b) =>
+        text(b).startsWith('Retr'),
+      )!;
+    expect(retry().getAttribute('aria-disabled')).toBeNull();
+
+    let answer!: (read: RunRead) => void;
+    runs.readRun.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    retry().click();
+    await settle();
+    expect(text(retry())).toBe('Retrying…');
+    expect(retry().getAttribute('aria-disabled')).toBe('true');
+    // A second press meanwhile asks nothing more.
+    retry().click();
+    await settle();
+    expect(runs.readRun).toHaveBeenCalledTimes(2);
+
+    answer({ failure });
+    await settle();
+    expect(text(retry())).toBe('Retry');
+    expect(retry().getAttribute('aria-disabled')).toBeNull();
+  });
+
   it('a stale read shows nothing of it', async () => {
     runs.readRun.mockResolvedValue({ stale: true });
     await render();

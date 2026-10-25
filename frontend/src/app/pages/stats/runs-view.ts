@@ -149,7 +149,7 @@ export class RunsView {
     () => this.checkedCount() >= 2 && this.checkedCount() <= MAX_CHECKED_RUNS,
   );
 
-  /** A delete is under way: Delete waits until it has finished. */
+  /** A delete is under way: Delete and Compare wait until it has finished. */
   protected readonly deleting = signal(false);
   /** Delete is asking; it stays enabled so the dialog can give the focus back on Cancel. */
   private asking = false;
@@ -182,7 +182,7 @@ export class RunsView {
 
   protected compare(): void {
     const ids = this.session.checkedRuns();
-    if (!this.canCompare()) return;
+    if (!this.canCompare() || this.deleting()) return;
     void this.router.navigate(['/stats/compare'], {
       queryParams: { runs: ids.join(','), baseline: ids[0] },
     });
