@@ -123,7 +123,7 @@ function statusOf(
  * Text order that does not depend on the browser's locale (the module words dates by hand for the
  * same reason): case-insensitive first, then by code unit.
  */
-function compareText(a: string, b: string): number {
+export function compareText(a: string, b: string): number {
   const [x, y] = [a.toLowerCase(), b.toLowerCase()];
   if (x !== y) return x < y ? -1 : 1;
   return a === b ? 0 : a < b ? -1 : 1;
@@ -255,10 +255,14 @@ export function percentile(sorted: readonly number[], fraction: number): number 
   return sorted[Math.round((sorted.length - 1) * fraction)];
 }
 
+/** "2026-10-25", the local day of a date, as file and trace names carry it. */
+export function localDay(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 /** The name a new trace starts with, from the local time: "run-2026-10-25-0841". */
 export function traceName(date: Date): string {
-  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-  return `run-${day}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+  return `run-${localDay(date)}-${pad(date.getHours())}${pad(date.getMinutes())}`;
 }
 
 /** Tags typed as comma-separated text: trimmed, empty ones dropped, a repeat dropped. */
