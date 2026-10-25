@@ -284,6 +284,11 @@ test.describe('phone width', () => {
     answer(page: Page, board: BoardState | null): Promise<void>;
     /** Resolves once the page shows its content, with the board healthy. */
     shown(page: Page): Promise<void>;
+    /**
+     * Whether the page's tools fit the phone's row, so that the Side panel toggle (their last
+     * control) is in view without scrolling. Streaming's and the Viewer's do not yet.
+     */
+    readonly toolsFit: boolean;
   }
 
   /** `GET /api/board`, when a test picks the board; each page's own mock answers it otherwise. */
@@ -297,6 +302,7 @@ test.describe('phone width', () => {
   const PAGES: PhonePage[] = [
     {
       path: '/media',
+      toolsFit: true,
       answer: async (page, board) => {
         await page.route(
           (url) => url.pathname === '/api/media-files',
@@ -310,6 +316,7 @@ test.describe('phone width', () => {
     },
     {
       path: '/streaming',
+      toolsFit: false,
       answer: async (page, board) => {
         await answerSlots(page, 8);
         await answerBoard(page, board);
@@ -321,6 +328,7 @@ test.describe('phone width', () => {
     },
     {
       path: '/viewer',
+      toolsFit: false,
       answer: async (page, board) => {
         await answerViewer(page);
         await answerBoard(page, board);
@@ -329,6 +337,7 @@ test.describe('phone width', () => {
     },
     {
       path: '/peripherals',
+      toolsFit: true,
       answer: async (page, board) => {
         const backend = new FakePeripheralsBackend();
         if (board) backend.board = board;
@@ -343,6 +352,7 @@ test.describe('phone width', () => {
     },
     {
       path: '/stats',
+      toolsFit: true,
       answer: async (page, board) => {
         const backend = new FakeStatsBackend();
         if (board) backend.board = board;
@@ -373,6 +383,44 @@ test.describe('phone width', () => {
           panel.bottom <= main.bottom + 0.5,
         bodyWidth: aside.previousElementSibling!.getBoundingClientRect().width,
         mainClientWidth: document.querySelector('main')!.clientWidth,
+      };
+    });
+
+  /**
+   * What a person sees of the page tools on a phone, in real boxes and without scrolling: the group
+   * is the top bar's own row under the logo, as wide as the bar inside its padding, and the side
+   * panel toggle lies wholly inside the group's visible box.
+   */
+  const toolsRow = (page: Page) =>
+    page.evaluate(() => {
+      const box = (element: Element) => element.getBoundingClientRect();
+      const bar = document.querySelector('header')!;
+      const tools = bar.querySelector('[role="group"][aria-label="Page tools"]')!;
+      const toggle = tools.querySelector('button[aria-label="Side panel"]')!;
+      const [barBox, toolsBox, toggleBox, logoBox] = [
+        bar,
+        tools,
+        toggle,
+        bar.querySelector('neat-logo')!,
+      ].map(box);
+      const padding = getComputedStyle(bar);
+      return {
+        belowLogo: toolsBox.top >= logoBox.bottom - 0.5,
+        spansBar:
+          Math.abs(toolsBox.left - (barBox.left + parseFloat(padding.paddingLeft))) <= 0.5 &&
+          Math.abs(toolsBox.right - (barBox.right - parseFloat(padding.paddingRight))) <= 0.5,
+        toggleVisible:
+          toggleBox.left >= toolsBox.left - 0.5 &&
+          toggleBox.right <= toolsBox.right + 0.5 &&
+          toggleBox.top >= toolsBox.top - 0.5 &&
+          toggleBox.bottom <= toolsBox.bottom + 0.5,
+        scrollLeft: tools.scrollLeft,
+        widths: {
+          tools: toolsBox.width,
+          toolsContent: tools.scrollWidth,
+          toggleRight: toggleBox.right,
+          toolsRight: toolsBox.right,
+        },
       };
     });
 
@@ -417,6 +465,9 @@ test.describe('phone width', () => {
         { horizontal: 0, vertical: 0 },
       ]);
 
+      // The tools are the bar's own row under the logo, as wide as the bar inside its padding.
+      expect(await toolsRow(page)).toMatchObject({ belowLogo: true, spansBar: true });
+
       await sidePanelButton(page).click();
       await expectFloating(page);
       expect(await topBarSpill(page, true)).toEqual({ spilled: [], toolsOverflow: 0 });
@@ -424,6 +475,25 @@ test.describe('phone width', () => {
       // The toggle stays in view over the open panel and closes it.
       await sidePanelButton(page).click();
       await expect(asides(page)).toHaveCount(0);
+    });
+  }
+
+  for (const { path, answer, shown, toolsFit } of PAGES) {
+    test(`${path} shows the Side panel toggle in its tools row without scrolling`, async ({
+      page,
+    }) => {
+      // Expected to fail where the tools are wider than the row: the toggle then sits past its
+      // edge, where a person cannot see it. This starts failing the day the page's tools fit.
+      test.fail(!toolsFit, 'the page tools are wider than the phone row');
+      await answer(page, null);
+      await page.goto(path);
+      await shown(page);
+
+      const row = await toolsRow(page);
+      expect(row, `the tools row: ${JSON.stringify(row.widths)}`).toMatchObject({
+        toggleVisible: true,
+        scrollLeft: 0,
+      });
     });
   }
 
@@ -501,24 +571,26 @@ test.describe('phone width', () => {
     await PAGES[0].answer(page, null);
     await page.goto('/media');
     const main = page.getByRole('main');
-    const railBox = () => nav(page).boundingBox();
+    const railBox = async () => (await nav(page).boundingBox())!;
+    const toggle = page.getByRole('button', { name: 'Show labels' });
     const mainLeft = (await main.boundingBox())!.x;
     // Collapsed, the rail sits beside the page.
-    expect((await railBox())!.x + (await railBox())!.width).toBeLessThanOrEqual(mainLeft);
+    const beside = await railBox();
+    expect(beside.x + beside.width).toBeLessThanOrEqual(mainLeft);
 
-    await page.getByRole('button', { name: 'Show labels' }).click();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
-    await expect(railItem(page, 'Streaming')).toContainText('Streaming');
     expect((await main.boundingBox())!.x).toBe(mainLeft);
-    const expanded = (await railBox())!;
+    const expanded = await railBox();
     expect(expanded.x + expanded.width).toBeGreaterThan(mainLeft);
 
     await railItem(page, 'Streaming').click();
 
     await expect(page).toHaveURL(/\/streaming$/);
-    await expect(page.getByRole('button', { name: 'Show labels' })).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
     expect((await main.boundingBox())!.x).toBe(mainLeft);
-    const collapsed = (await railBox())!;
+    const collapsed = await railBox();
     expect(collapsed.x + collapsed.width).toBeLessThanOrEqual(mainLeft);
   });
 });

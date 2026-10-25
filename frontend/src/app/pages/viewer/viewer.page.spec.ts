@@ -998,13 +998,16 @@ describe('ViewerPage', () => {
     expect(root().querySelector('aside')).toBeNull();
     expect(button('Side panel').getAttribute('aria-pressed')).toBe('false');
 
+    const writes = storage.writes.length;
+
     await click(button('Side panel'));
 
     expect(root().querySelector('aside')).not.toBeNull();
     expect(button('Side panel').getAttribute('aria-pressed')).toBe('true');
-    expect(storage.readStored('layout')).toMatchObject({ inspector: true });
     await click(button('Side panel'));
     expect(root().querySelector('aside')).toBeNull();
+    // Neither opening nor closing wrote anything: the layout still says what a wide screen chose.
+    expect(storage.writes).toHaveLength(writes);
     expect(storage.readStored('layout')).toMatchObject({ inspector: true });
   });
 

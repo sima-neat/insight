@@ -6,10 +6,16 @@ import { FakeLocalStorage } from './fake-storage.testing';
 
 describe('AsidePrefs', () => {
   let storage: FakeLocalStorage;
+  /** Whether the screen is narrow, as the kit reports it; the tests outside "narrow" run wide. */
+  const narrow = signal(false);
 
   beforeEach(() => {
+    narrow.set(false);
     storage = new FakeLocalStorage();
     vi.stubGlobal('localStorage', storage);
+    TestBed.configureTestingModule({
+      providers: [{ provide: NeatViewport, useValue: { narrow } }],
+    });
   });
 
   afterEach(() => {
@@ -61,14 +67,7 @@ describe('AsidePrefs', () => {
 
   describe('on a narrow screen', () => {
     const PAGES: AsidePage[] = ['streaming', 'media', 'peripherals', 'stats'];
-    let narrow: ReturnType<typeof signal<boolean>>;
-
-    beforeEach(() => {
-      narrow = signal(true);
-      TestBed.configureTestingModule({
-        providers: [{ provide: NeatViewport, useValue: { narrow } }],
-      });
-    });
+    beforeEach(() => narrow.set(true));
 
     it('starts every page’s panel closed although open is stored', () => {
       for (const page of PAGES) storage.values.set(`neat-insight:${page}:aside`, 'open');
