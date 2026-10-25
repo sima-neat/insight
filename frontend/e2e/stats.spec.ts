@@ -4,10 +4,20 @@ import { pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
 import { FakeStatsBackend, NO_BOARD, SENTINEL_FAILED, STATS_BOARD } from './stats-mocks';
 
 // Stats against a fake board and Sentinel (`FakeStatsBackend`), at every viewport. Time is the
-// page's clock: it runs on its own, and the tests move it with `fastForward` where they wait for
-// a poll (2 s apart) or for the polls to stay away.
+// page's clock, which only the tests move on (`advance`) where they wait for a poll (2 s apart) or
+// for the polls to stay away; see `holdClock` for the slice that lets the page render.
 
 const POLL_MS = 2000;
+/** Real time let pass after a clock step, so that answers land and the polls they schedule get a turn. */
+const SETTLE_MS = 250;
+/**
+ * The page's clock stands still but for a slice of `FAKE_SLICE_MS` every `REAL_SLICE_MS` of real
+ * time: a tenth of real speed, so a poll (2 s of page time) is 20 s of real time away however
+ * slow the machine is, which makes the counts of requests exact. Not paused outright because
+ * Angular renders on timers (and the lazy routes load on them): a stopped clock stops the page.
+ */
+const FAKE_SLICE_MS = 5;
+const REAL_SLICE_MS = 50;
 const BOARD_LABEL = STATS_BOARD.target!.label;
 
 const tools = (page: Page) => page.getByRole('group', { name: 'Page tools' });
@@ -37,14 +47,40 @@ async function openStats(
   const backend = new FakeStatsBackend();
   setUp(backend);
   await backend.install(page);
-  await page.clock.install();
+  await holdClock(page);
   await page.setViewportSize(size);
   await page.goto('/stats');
   return backend;
 }
 
-/** Moves the page's clock on by `ms`: the poll that is due, or none while none is scheduled. */
-const advance = (page: Page, ms: number) => page.clock.fastForward(ms);
+/** Stops the page's clock but for a slice at a time (`FAKE_SLICE_MS`), until the page closes. */
+async function holdClock(page: Page): Promise<void> {
+  const start = Date.parse('2026-10-24T10:05:00Z');
+  await page.clock.install({ time: start });
+  await page.clock.pauseAt(start + 1000);
+  let running = false;
+  const timer = setInterval(() => {
+    if (running) return;
+    running = true;
+    page.clock
+      .runFor(FAKE_SLICE_MS)
+      .catch(() => undefined)
+      .finally(() => (running = false));
+  }, REAL_SLICE_MS);
+  page.on('close', () => clearInterval(timer));
+}
+
+/**
+ * Moves the page's clock on by `ms`, in `steps` steps with real time to settle after each. A poll
+ * is scheduled only once its predecessor's answer has landed, and one clock step fires a due
+ * timer once, so a loop that should not be running needs several steps to show itself.
+ */
+async function advance(page: Page, ms: number, steps = 1): Promise<void> {
+  for (let step = 0; step < steps; step++) {
+    await page.clock.runFor(ms / steps);
+    await page.waitForTimeout(SETTLE_MS);
+  }
+}
 
 for (const { name, size } of VIEWPORTS) {
   test(`six cards show the board's readings, and a click on Board power opens its area and marks it at ${name}`, async ({
@@ -113,9 +149,9 @@ for (const { name, size } of VIEWPORTS) {
     await expect(page).toHaveURL(/\/streaming$/);
     await expect(page).toHaveTitle('Neat Insight · Streaming');
     // A request that left before the page did may still be on its way.
-    await advance(page, 60_000);
+    await page.waitForTimeout(SETTLE_MS);
     const sent = backend.sentinelRequests.length;
-    await advance(page, 120_000);
+    await advance(page, 180_000, 6);
     expect(backend.sentinelRequests).toHaveLength(sent);
 
     // Coming back reads the window again, in full, and finds the panel as it was left.
@@ -138,9 +174,9 @@ for (const { name, size } of VIEWPORTS) {
     await expect(tools(page)).toContainText('Paused');
     await expect(toolButton(page, 'Resume')).toBeVisible();
     // A poll that left before the click may still land.
-    await advance(page, POLL_MS);
+    await page.waitForTimeout(SETTLE_MS);
     const paused = backend.polls;
-    await advance(page, 60_000);
+    await advance(page, 60_000, 6);
     expect(backend.polls).toBe(paused);
 
     await toolButton(page, 'Resume').click();
