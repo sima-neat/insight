@@ -58,7 +58,7 @@
           neatButton
           type="button"
           size="small"
-          variant="danger"
+          variant="danger-text"
           [attr.aria-disabled]="deleting() || null"
           (click)="delete()"
         >
@@ -67,9 +67,6 @@
         <button neatButton type="button" size="small" variant="text" (click)="clear()">
           Clear
         </button>
-        @if (atCap()) {
-          <span neatNote class="cap">At most {{ maxRuns }} runs can be compared.</span>
-        }
       </div>
     }
   </div>
@@ -82,7 +79,8 @@
       checkable
       [items]="rows"
       [trackBy]="rowId"
-      [canCheck]="canCheck()"
+      [canCheck]="canCheck"
+      [checkBlocked]="checkBlocked()"
       [(checked)]="session.checkedRuns"
       [selected]="selectedRow()"
       (selectedChange)="select($event)"

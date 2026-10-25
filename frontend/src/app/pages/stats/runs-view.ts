@@ -21,7 +21,13 @@ import { ticking } from '../../clock';
 import { holdFocus } from '../../hold-focus';
 import { ListColumn } from '../../list-column';
 import type { RunSummary } from '../../stats/api';
-import { canCheckRun, MAX_CHECKED_RUNS, runLine, runWhen } from '../../stats/runs';
+import {
+  canCheckRun,
+  checkBlockReason,
+  MAX_CHECKED_RUNS,
+  runLine,
+  runWhen,
+} from '../../stats/runs';
 import { type DeleteOutcome, SentinelRuns } from '../../stats/sentinel-runs';
 import { StatsSession } from '../../stats/stats-session';
 import { SentinelFailureCallout } from './sentinel-failure-callout';
@@ -153,16 +159,16 @@ export class RunsView {
 
   protected readonly rowId = (row: RunRow): string => row.id;
 
-  /** Which rows have a box: a new function when the ticks change, so the list asks again. */
-  protected readonly canCheck = computed(() => {
+  /** Which rows have a box. */
+  protected readonly canCheck = (row: RunRow): boolean => canCheckRun(row.run);
+
+  /** Why a row's box is blocked: a new function when the ticks change, so the list asks again. */
+  protected readonly checkBlocked = computed(() => {
     const checked = this.session.checkedRuns();
-    return (row: RunRow) => canCheckRun(row.run, checked);
+    return (row: RunRow) => checkBlockReason(row.run, checked);
   });
 
   protected readonly checkedCount = computed(() => this.session.checkedRuns().length);
-  /** At the cap the unticked rows have no box (the kit has no disabled one), which is said. */
-  protected readonly atCap = computed(() => this.checkedCount() >= MAX_CHECKED_RUNS);
-  protected readonly maxRuns = MAX_CHECKED_RUNS;
   protected readonly canCompare = computed(
     () => this.checkedCount() >= 2 && this.checkedCount() <= MAX_CHECKED_RUNS,
   );

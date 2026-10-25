@@ -15,6 +15,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { NeatButton, NeatIcon, NeatNote } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
+import { NeatSeriesSwatch } from '@sima/neat-ui/charts';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
 import { NeatSwitch } from '@sima/neat-ui/switch';
@@ -55,11 +56,6 @@ const COMPARE_URL = '/api/sentinel/compare';
 
 /** #170's words for a comparison body without a comparison's parts (Inv-S §2.10). */
 const UNKNOWN_COMPARISON = 'This Sentinel build returned a comparison Insight cannot lay out.';
-
-/** A run's colour: its place among the runs, as the chart colours its line. */
-function seriesColour(index: number): string {
-  return `var(--neat-series-${index + 1})`;
-}
 
 /**
  * What the address and the run list allow, the first that applies: fewer than two runs named,
@@ -103,6 +99,7 @@ type Comparison = { answer: CompareExport } | { failure: SentinelFailure } | nul
     NeatNote,
     NeatNumeric,
     NeatSelect,
+    NeatSeriesSwatch,
     NeatSwitch,
     NeatTab,
     NeatTable,
@@ -192,8 +189,8 @@ export class CompareView {
   });
 
   /**
-   * Each run in its series colour, the baseline first, with its note: the chips, and the headings
-   * of the per-metric table's run columns.
+   * Each run with its place for the swatch, the baseline first, with its note: the chips, and the
+   * headings of the per-metric table's run columns.
    */
   protected readonly chips = computed(
     () =>
@@ -202,7 +199,7 @@ export class CompareView {
         name: run.metadata.name,
         note: run.metadata.note ?? '',
         baseline: index === 0,
-        colour: seriesColour(index),
+        index,
       })) ?? [],
   );
 
@@ -258,7 +255,7 @@ export class CompareView {
     return compareSummary(answer.runs, series.key).map((row, index) => ({
       id: row.id,
       name: row.name,
-      colour: seriesColour(index),
+      index,
       empty: row.samples === 0,
       samples: row.samples === 0 ? 'No samples' : String(row.samples),
       minimum: value(row.minimum),

@@ -14,7 +14,7 @@
     <div class="actions">
       <neat-select
         label="Baseline"
-        showLabel
+        labelPosition="inline"
         size="small"
         [options]="choice.options"
         [value]="choice.baseline"
@@ -130,11 +130,11 @@
 <app-announcement>{{ announcement() }}</app-announcement>
 
 <!--
-  A run as the chips and the per-metric headings name it: its colour, its name, and B on the
+  A run as the chips and the per-metric headings name it: its swatch, its name, and B on the
   baseline (said as ", baseline").
 -->
 <ng-template #runName let-run>
-  <span class="swatch" [style.--series]="run.colour"></span>
+  <neat-series-swatch [index]="run.index" />
   <span class="name">{{ run.name }}</span>
   @if (run.baseline) {
     <span class="mark" aria-hidden="true">B</span><span class="visually-hidden">, baseline</span>
@@ -176,7 +176,7 @@
           <tr>
             <th scope="row">
               <span class="run">
-                <span class="swatch" [style.--series]="row.colour"></span>
+                <neat-series-swatch [index]="row.index" />
                 {{ row.name }}
               </span>
             </th>

@@ -2,6 +2,7 @@ import type { RunSummary, SavedRun } from './api';
 import {
   MAX_CHECKED_RUNS,
   canCheckRun,
+  checkBlockReason,
   formatRunTime,
   isRecording,
   isSavedRun,
@@ -61,17 +62,29 @@ describe('runWhen', () => {
 });
 
 describe('checking runs', () => {
-  const ids = Array.from({ length: MAX_CHECKED_RUNS }, (_, i) => `checked-${i}`);
-
   it('the recording run cannot be checked', () => {
-    expect(canCheckRun(RECORDING_RUN, [])).toBe(false);
+    expect(canCheckRun(RECORDING_RUN)).toBe(false);
   });
 
-  it('a ninth run cannot be checked, but a checked one can be unchecked', () => {
+  it('a run at the cap is still checkable: only the recording run has no box', () => {
+    expect(canCheckRun(COMPLETE)).toBe(true);
+  });
+});
+
+describe('the cap on checked runs', () => {
+  const ids = Array.from({ length: MAX_CHECKED_RUNS }, (_, i) => `checked-${i}`);
+
+  it('is 8', () => {
     expect(MAX_CHECKED_RUNS).toBe(8);
-    expect(canCheckRun(COMPLETE, ids)).toBe(false);
-    expect(canCheckRun(COMPLETE, ids.slice(1))).toBe(true);
-    expect(canCheckRun(summary({ id: ids[3] }), ids)).toBe(true);
+  });
+
+  it('blocks an unchecked run with the reason once 8 are checked', () => {
+    expect(checkBlockReason(COMPLETE, ids)).toBe('At most 8 runs can be compared.');
+  });
+
+  it('blocks nothing below the cap, and never a checked run, which can always be unchecked', () => {
+    expect(checkBlockReason(COMPLETE, ids.slice(1))).toBeNull();
+    expect(checkBlockReason(summary({ id: ids[3] }), ids)).toBeNull();
   });
 });
 

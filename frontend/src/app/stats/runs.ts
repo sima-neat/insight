@@ -82,14 +82,18 @@ export function runWhen(startedAt: string, now: number): string {
   return year === new Date(now).getFullYear() ? shortDate(date) : `${shortDate(date)}, ${year}`;
 }
 
+/** Whether a run's checkbox exists: never on the recording run, whose samples are still coming. */
+export function canCheckRun(run: RunSummary): boolean {
+  return !isRecording(run);
+}
+
 /**
- * Whether a run's checkbox can be ticked: never the recording run, whose samples are still
- * coming, and not an unchecked one once the comparison is full. A checked run can always be
- * unticked.
+ * Why a run's box cannot be ticked now, or null: an unticked run once the comparison is full. A
+ * ticked run can always be unticked.
  */
-export function canCheckRun(run: RunSummary, checked: readonly string[]): boolean {
-  if (isRecording(run)) return false;
-  return checked.includes(run.id) || checked.length < MAX_CHECKED_RUNS;
+export function checkBlockReason(run: RunSummary, checked: readonly string[]): string | null {
+  if (checked.includes(run.id) || checked.length < MAX_CHECKED_RUNS) return null;
+  return `At most ${MAX_CHECKED_RUNS} runs can be compared.`;
 }
 
 /** One metric of a saved run with its statistics over the run's own samples. */

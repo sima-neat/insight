@@ -9,7 +9,7 @@ import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { NeatTimeChart } from '@sima/neat-ui/charts';
+import { NeatSeriesSwatch, NeatTimeChart } from '@sima/neat-ui/charts';
 import { NeatSelect } from '@sima/neat-ui/select';
 import { BoardProblem } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
@@ -170,6 +170,12 @@ describe('CompareView', () => {
   const metricTable = () => root().querySelector('table[aria-label="Per-metric comparison"]');
   const chart = (): NeatTimeChart | undefined =>
     harness.fixture.debugElement.query(By.directive(NeatTimeChart))?.componentInstance;
+  /** The series index of each kit swatch inside `container`, in document order. */
+  const swatchIndexes = (container: Element): number[] =>
+    harness.fixture.debugElement
+      .queryAll(By.directive(NeatSeriesSwatch))
+      .filter((swatch) => container.contains(swatch.nativeElement))
+      .map((swatch) => swatch.injector.get(NeatSeriesSwatch).index());
   const baselineSelect = (): NeatSelect<string> =>
     harness.fixture.debugElement.query(By.directive(NeatSelect)).componentInstance;
 
@@ -194,6 +200,7 @@ describe('CompareView', () => {
     expect(text(root().querySelector('h2'))).toBe('Comparison');
     expect(text(root().querySelector('.facts'))).toBe('2 runs · common window 6.0 s');
     expect(baselineSelect().label()).toBe('Baseline');
+    expect(baselineSelect().labelPosition()).toBe('inline');
     expect(baselineSelect().value()).toBe(BASELINE);
     expect(baselineSelect().options()).toEqual([
       { value: BASELINE, label: 'tes3' },
@@ -217,10 +224,8 @@ describe('CompareView', () => {
       '',
     ]);
     expect(chips()[0].querySelector('.mark')!.getAttribute('aria-hidden')).toBe('true');
-    const swatches = chips().map((chip) =>
-      chip.querySelector<HTMLElement>('.swatch')!.style.getPropertyValue('--series'),
-    );
-    expect(swatches).toEqual(['var(--neat-series-1)', 'var(--neat-series-2)']);
+    // The kit's swatch, by the run's place: the colour the chart draws its line in.
+    expect(chips().map(swatchIndexes)).toEqual([[0], [1]]);
   });
 
   it('choosing another baseline opens the same runs with it, which asks for them the other way round', async () => {
@@ -286,6 +291,9 @@ describe('CompareView', () => {
       'vs. baseline',
       'Energy',
     ]);
+    // Each summary row names its run by the swatch of its place too.
+    const summaryRows = [...summaryTable()!.querySelectorAll('tbody tr')];
+    expect(summaryRows.map(swatchIndexes)).toEqual([[0], [1]]);
     const [, other] = compareSummary(COMPARE_RAW.runs, 'power_current_watts');
     expect(formatChange(other.change)).toBe('−4.58%');
     expect(rows(summaryTable())).toEqual([
@@ -363,11 +371,7 @@ describe('CompareView', () => {
     ]);
     expect(columns.map((th) => text(th.querySelector('.mark')))).toEqual(['B', '']);
     expect(text(columns[0].querySelector('.visually-hidden'))).toBe(', baseline');
-    expect(
-      columns.map((th) =>
-        th.querySelector<HTMLElement>('.swatch')!.style.getPropertyValue('--series'),
-      ),
-    ).toEqual(['var(--neat-series-1)', 'var(--neat-series-2)']);
+    expect(columns.map(swatchIndexes)).toEqual([[0], [1]]);
     expect(columns.map((th) => text(th.querySelector('.note')))).toEqual([
       '',
       'Insight hardware validation',

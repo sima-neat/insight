@@ -1,6 +1,7 @@
-import { Component, signal } from '@angular/core';
+import { Component, getDebugNode, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
+import { NeatButton } from '@sima/neat-ui';
 import { NeatConfirm, type NeatConfirmOptions } from '@sima/neat-ui/confirm';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { AsidePrefs } from '../../aside-prefs';
@@ -163,35 +164,75 @@ describe('RunsView', () => {
     ).toEqual([true, true, true, true]);
   });
 
-  it('ticks runs in the order they are ticked, and offers no ninth', async () => {
+  it('ticks runs in the order they are ticked', async () => {
     runs.runs.set(finishedRuns(10));
     await render();
 
     await click(box(optionNamed('run 3'))!);
     await click(box(optionNamed('run 1'))!);
     expect(session.checkedRuns()).toEqual(['run-3', 'run-1']);
-
-    session.checkedRuns.set(finishedRuns(8).map((run) => run.id));
-    await settle();
-    // The two unticked runs lose their boxes; a ticked one can still be unticked.
-    expect(box(optionNamed('run 8'))).toBeNull();
-    expect(box(optionNamed('run 9'))).toBeNull();
-    await click(box(optionNamed('run 0'))!);
-    expect(session.checkedRuns()).toHaveLength(7);
-    expect(box(optionNamed('run 9'))).not.toBeNull();
   });
 
-  it('at 8 ticked runs the selection bar says why the others have no box', async () => {
-    const cap = () => text(bar()?.querySelector('.cap'));
+  describe('at 8 ticked runs', () => {
+    const reason = 'At most 8 runs can be compared.';
+    const description = (option: HTMLElement): string =>
+      text(
+        option
+          .getAttribute('aria-describedby')
+          ?.split(' ')
+          .map((id) => root().querySelector(`[id="${id}"]`))
+          .find(Boolean),
+      );
+
+    beforeEach(async () => {
+      runs.runs.set(finishedRuns(10));
+      await renderChecked(...finishedRuns(8).map((run) => run.id));
+    });
+
+    it('shows the unticked runs a disabled box that gives the reason, and no note', () => {
+      for (const name of ['run 8', 'run 9']) {
+        const option = optionNamed(name);
+        expect(box(option)?.hasAttribute('data-blocked')).toBe(true);
+        expect(option.getAttribute('aria-disabled')).toBe('true');
+        expect(description(option)).toBe(reason);
+      }
+      expect(bar()?.querySelector('.cap')).toBeNull();
+      expect(text(bar())).not.toContain(reason);
+    });
+
+    it('leaves the ticked runs and the recording run as they were', () => {
+      expect(box(optionNamed('run 0'))?.hasAttribute('data-blocked')).toBe(false);
+      expect(optionNamed('run 0').hasAttribute('aria-disabled')).toBe(false);
+    });
+
+    it('does not tick a blocked run on a click or on Space, which still lands on its row', async () => {
+      session.run.set('run-8');
+      await settle();
+      await click(box(optionNamed('run 8'))!);
+      expect(session.checkedRuns()).toHaveLength(8);
+
+      const list = root().querySelector<HTMLElement>('[role="listbox"]')!;
+      list.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+      await settle();
+      expect(session.checkedRuns()).toHaveLength(8);
+      expect(list.getAttribute('aria-activedescendant')).toBe(optionNamed('run 8').id);
+    });
+
+    it('unticking one frees the others', async () => {
+      await click(box(optionNamed('run 0'))!);
+      expect(session.checkedRuns()).toHaveLength(7);
+      expect(box(optionNamed('run 9'))?.hasAttribute('data-blocked')).toBe(false);
+      expect(optionNamed('run 9').hasAttribute('aria-disabled')).toBe(false);
+      await click(box(optionNamed('run 9'))!);
+      expect(session.checkedRuns()).toHaveLength(8);
+    });
+  });
+
+  it('shows no reason below the cap', async () => {
     runs.runs.set(finishedRuns(10));
     await renderChecked(...finishedRuns(7).map((run) => run.id));
-    expect(cap()).toBe('');
-
-    await click(box(optionNamed('run 7'))!);
-    expect(cap()).toBe('At most 8 runs can be compared.');
-
-    await click(box(optionNamed('run 7'))!);
-    expect(cap()).toBe('');
+    expect(root().querySelector('[data-blocked]')).toBeNull();
+    expect(text(bar())).not.toContain('At most');
   });
 
   it('a click on a row selects it and opens the side panel on it', async () => {
@@ -251,6 +292,13 @@ describe('RunsView', () => {
     expect(session.run()).toBeNull();
     expect(callout()).toBeNull();
     expect(document.activeElement?.getAttribute('role')).toBe('listbox');
+  });
+
+  it('Delete is the quiet red text button, not a filled one', async () => {
+    await renderChecked(TES3.id);
+    expect(getDebugNode(barButton('Delete'))!.injector.get(NeatButton).variant()).toBe(
+      'danger-text',
+    );
   });
 
   it('Delete of one run names it, and keeps the open run when it was another', async () => {

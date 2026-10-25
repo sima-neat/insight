@@ -10,13 +10,13 @@
 }
 
 /*
- * Back to Runs, the heading and its facts at the start; the baseline and Export CSV at the end,
- * lined up with the select's box under its label. On a phone the actions wrap under the rest.
+ * Back to Runs, the heading and its facts at the start; the baseline (its label before the box)
+ * and Export CSV at the end. On a phone the actions wrap under the rest.
  */
 .header {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
+  align-items: center;
   gap: var(--neat-space-2) var(--neat-space-4);
 }
 
@@ -34,13 +34,14 @@
 
 .actions {
   display: flex;
-  align-items: end;
+  align-items: center;
   gap: var(--neat-space-3);
   margin-inline-start: auto;
 }
 
+/* The label takes some of the width, so the box keeps about the 12rem it had under it. */
 .actions neat-select {
-  min-inline-size: 12rem;
+  min-inline-size: 16rem;
 }
 
 /* One chip per run: its colour, its name, and B on the baseline. */
@@ -90,15 +91,6 @@
   font-weight: 400;
   white-space: normal;
   overflow-wrap: anywhere;
-}
-
-/* A run's colour as the chart's legend draws it, so a chip and a row match its line. */
-.swatch {
-  flex: none;
-  inline-size: 0.625rem;
-  block-size: 0.625rem;
-  border-radius: 2px;
-  background: var(--series);
 }
 
 .run {
