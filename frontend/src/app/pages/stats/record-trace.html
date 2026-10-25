@@ -1,17 +1,21 @@
 @if (runs.trace(); as trace) {
-  <!-- Not a live region: the elapsed time changes every second. -->
-  <span class="recording">
-    Recording · <span class="name">{{ trace.name }}</span>
+  <!--
+    Plain text, so it reads "Recording · <name> · 0:34" with single spaces; not a live region,
+    since the time changes every second.
+  -->
+  <span class="recording"
+    >Recording · <span class="name">{{ trace.name }}</span>
     @if (elapsed(); as elapsed) {
       · <span class="elapsed">{{ elapsed }}</span>
     }
   </span>
+  <!-- It waits with aria-disabled while a start or stop is out, so the focus stays on it. -->
   <button
     neatButton
     type="button"
     variant="text"
     size="small"
-    [disabled]="runs.traceBusy() !== null"
+    [attr.aria-disabled]="runs.traceBusy() !== null || null"
     (click)="stop()"
   >
     Stop

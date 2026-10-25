@@ -2,8 +2,9 @@ import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { BoardProblem } from '../../board/board-error';
-import type { RunMetadata, TraceRequest } from '../../stats/api';
-import { ACTIVE_TRACE } from '../../stats/runs.testing';
+import { deferred } from '../../board/board.testing';
+import type { RunMetadata, RunSummary, TraceRequest } from '../../stats/api';
+import { ACTIVE_TRACE, RECORDING_RUN } from '../../stats/runs.testing';
 import { failureOf, type SentinelAction, type SentinelFailure } from '../../stats/sentinel-failure';
 import { SentinelRuns } from '../../stats/sentinel-runs';
 import { RecordTrace } from './record-trace';
@@ -11,6 +12,8 @@ import { RecordTrace } from './record-trace';
 /** The part of `SentinelRuns` the toolbar uses, with the changes as spies. */
 class FakeRuns {
   readonly trace = signal<RunMetadata | null>(null);
+  readonly traceSummary = signal<RunSummary | null>(null);
+  readonly traceReadAt = signal<number | null>(null);
   readonly traceBusy = signal<'start' | 'stop' | null>(null);
   readonly startTrace = vi.fn<(request: TraceRequest) => Promise<SentinelFailure | null>>(
     async () => null,
@@ -172,6 +175,18 @@ describe('RecordTrace', () => {
     expect(runs.startTrace).toHaveBeenCalledExactlyOnceWith({ name: 'run-2026-10-25-0841' });
   });
 
+  it('validates the note as it is sent, trimmed', async () => {
+    await openPopover();
+    await type('Note (optional)', `  ${'x'.repeat(512)}  `);
+    await click(button(panel()!, 'Start')!);
+
+    expect(runs.startTrace).toHaveBeenCalledExactlyOnceWith({
+      name: 'run-2026-10-25-0841',
+      note: 'x'.repeat(512),
+    });
+    expect(panel()).toBeNull();
+  });
+
   it('a refused start shows its title and hint in the popover, which stays open', async () => {
     runs.startTrace.mockResolvedValue(
       failure('trace_conflict', 'start', 'Stop the running trace first.'),
@@ -184,35 +199,96 @@ describe('RecordTrace', () => {
     expect(text(panel())).toContain('Stop the running trace first.');
   });
 
-  it('while a trace records, says so with its name and elapsed time, and Stop stops it', async () => {
-    vi.setSystemTime(Date.parse(ACTIVE_TRACE.started_at) + 34_400);
-    runs.trace.set(ACTIVE_TRACE);
-    await render();
+  it('a start refused after the popover was closed toasts its title', async () => {
+    const answer = deferred<SentinelFailure | null>();
+    runs.startTrace.mockReturnValue(answer.promise);
+    await openPopover();
+    await click(button(panel()!, 'Start')!);
+    await click(button(panel()!, 'Cancel')!);
+    expect(panel()).toBeNull();
 
-    expect(text(root().querySelector('.recording'))).toBe('Recording · compiler-v2-bench · 0:34');
+    answer.resolve(failure('trace_conflict', 'start'));
+    await settle();
+    expect(toasts.error).toHaveBeenCalledWith('That trace cannot start');
+    expect(panel()).toBeNull();
+  });
+
+  /** Shows `trace` recording, as read `readAgo` ms ago with `summary`. */
+  async function recording(
+    summary: RunSummary | null,
+    readAgo: number,
+    trace: RunMetadata = ACTIVE_TRACE,
+  ): Promise<void> {
+    runs.trace.set(trace);
+    runs.traceSummary.set(summary);
+    runs.traceReadAt.set(Date.now() - readAgo);
+    await render();
+  }
+
+  // Exact, spaces and all: the line is laid out as text.
+  const recordingLine = (): string | null | undefined =>
+    root().querySelector('.recording')?.textContent;
+
+  it('while a trace records, says so with its name and the time it has recorded, and Stop stops it', async () => {
+    // A summary of 34 s, read 5 s ago.
+    await recording({ ...RECORDING_RUN, duration_ms: 34_000 }, 5000);
+
+    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:39');
     expect(button(root(), 'Record')).toBeUndefined();
     vi.advanceTimersByTime(1000);
     await settle();
-    expect(text(root().querySelector('.recording'))).toBe('Recording · compiler-v2-bench · 0:35');
+    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:40');
 
     await click(button(root(), 'Stop')!);
     expect(runs.stopTrace).toHaveBeenCalledOnce();
   });
 
-  it('Stop is disabled while a start or stop is out', async () => {
-    runs.trace.set(ACTIVE_TRACE);
-    runs.traceBusy.set('stop');
-    await render();
+  it.each(['2025-03-01T00:00:00.123456789Z', '2027-01-01T00:00:00Z'])(
+    'the time recorded does not depend on the board’s clock (started %s)',
+    async (startedAt) => {
+      await recording({ ...RECORDING_RUN, duration_ms: 34_000, started_at: startedAt }, 5000, {
+        ...ACTIVE_TRACE,
+        started_at: startedAt,
+      });
 
-    expect(button(root(), 'Stop')?.disabled).toBe(true);
+      expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:39');
+    },
+  );
+
+  it('right after a start, with no summary yet, counts from the start’s answer', async () => {
+    await recording(null, 3000);
+
+    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:03');
   });
 
-  it('a failed stop toasts its title', async () => {
-    runs.stopTrace.mockResolvedValue(failure('trace_conflict', 'stop'));
-    runs.trace.set(ACTIVE_TRACE);
-    await render();
+  it('Stop waits while a start or stop is out, and keeps the focus', async () => {
+    await recording(RECORDING_RUN, 0);
+    runs.traceBusy.set('start');
+    await settle();
+    const stop = button(root(), 'Stop')!;
+    expect(stop.disabled).toBe(false);
+    expect(stop.getAttribute('aria-disabled')).toBe('true');
+    await click(stop);
+    expect(runs.stopTrace).not.toHaveBeenCalled();
+  });
 
-    await click(button(root(), 'Stop')!);
+  it('a failed stop toasts its title and leaves the focus on Stop', async () => {
+    const answer = deferred<SentinelFailure | null>();
+    runs.stopTrace.mockImplementation(() => {
+      runs.traceBusy.set('stop');
+      return answer.promise.finally(() => runs.traceBusy.set(null));
+    });
+    await recording(RECORDING_RUN, 0);
+
+    const stop = button(root(), 'Stop')!;
+    stop.focus();
+    await click(stop);
+    expect(stop.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(stop);
+
+    answer.resolve(failure('trace_conflict', 'stop'));
+    await settle();
     expect(toasts.error).toHaveBeenCalledWith('The trace changed before it was stopped');
+    expect(document.activeElement).toBe(button(root(), 'Stop'));
   });
 });

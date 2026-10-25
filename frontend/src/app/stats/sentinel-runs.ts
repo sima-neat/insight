@@ -103,6 +103,15 @@ export class SentinelRuns {
   /** The recording run's totals so far, as of the last trace read; null without one. */
   readonly traceSummary = this.traceSummaryValue.asReadonly();
 
+  private readonly traceReadAtValue = signal<number | null>(null);
+  /**
+   * When the trace shown and its summary were applied, on this browser's clock (`Date.now()`);
+   * null without a trace. How long a trace has recorded is told from it and the summary's
+   * `duration_ms` (or from it alone after a start, which answers no summary), never from the
+   * board's `started_at`: a board's clock is often not set, and the two clocks cannot be compared.
+   */
+  readonly traceReadAt = this.traceReadAtValue.asReadonly();
+
   private readonly traceFailureValue = signal<SentinelFailure | null>(null);
   /** Why the newest trace read failed; cleared by the next good one. */
   readonly traceFailure = this.traceFailureValue.asReadonly();
@@ -129,6 +138,7 @@ export class SentinelRuns {
     apply: ({ sentinel }) => {
       this.traceValue.set(sentinel.trace);
       this.traceSummaryValue.set(sentinel.summary ?? null);
+      this.traceReadAtValue.set(sentinel.trace === null ? null : Date.now());
     },
   };
 
@@ -219,6 +229,7 @@ export class SentinelRuns {
     this.invalidate(this.traceSlot);
     this.traceValue.set(null);
     this.traceSummaryValue.set(null);
+    this.traceReadAtValue.set(null);
     this.traceFailureValue.set(null);
     this.rereadRuns();
     return null;
@@ -319,6 +330,7 @@ export class SentinelRuns {
     this.traceBusyValue.set(null);
     this.traceValue.set(null);
     this.traceSummaryValue.set(null);
+    this.traceReadAtValue.set(null);
     this.traceFailureValue.set(null);
     this.runsValue.set(null);
     this.runsFailureValue.set(null);

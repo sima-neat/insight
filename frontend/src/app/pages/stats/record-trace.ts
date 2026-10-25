@@ -94,13 +94,16 @@ export class RecordTrace {
   protected readonly starting = computed(() => this.runs.traceBusy() === 'start');
 
   /**
-   * How long the trace has recorded, from its start on the board's clock; '' when its start
-   * cannot be read.
+   * How long the trace has recorded: the last summary's duration plus the time since it was read,
+   * or the time since the start's answer before any summary, all on this browser's clock
+   * (`SentinelRuns.traceReadAt` says why not the board's `started_at`). The clock ticks up to a
+   * second behind a read, so the time since is never below zero.
    */
   protected readonly elapsed = computed(() => {
-    const trace = this.runs.trace();
-    const started = Date.parse(trace?.started_at ?? '');
-    return Number.isFinite(started) ? formatElapsed(this.now() - started) : '';
+    const readAt = this.runs.traceReadAt();
+    if (readAt === null) return '';
+    const recorded = this.runs.traceSummary()?.duration_ms ?? 0;
+    return formatElapsed(recorded + Math.max(0, this.now() - readAt));
   });
 
   protected errorOf(field: TraceField): string {
@@ -126,19 +129,21 @@ export class RecordTrace {
   /** Starts the trace the form describes, as validated: the popover closes once it records. */
   protected async start(): Promise<void> {
     if (this.runs.traceBusy() !== null) return;
+    const note = this.note().trim();
     const tags = parseTags(this.tags());
-    const problem = traceProblem(this.name(), this.note(), tags);
+    const problem = traceProblem(this.name(), note, tags);
     this.problem.set(problem);
     this.failure.set(null);
     if (problem) return;
-    const note = this.note().trim();
     const failure = await this.runs.startTrace({
       name: this.name().trim(),
       ...(note === '' ? {} : { note }),
       ...(tags.length === 0 ? {} : { tags }),
     });
     if (failure) {
-      this.failure.set(failure);
+      // Closed while the start was out (Cancel, Escape): the refusal is said where it is seen.
+      if (this.open()) this.failure.set(failure);
+      else this.toasts.error(failure.title);
       return;
     }
     this.open.set(false);

@@ -932,7 +932,7 @@ describe('StatsPage', () => {
     const runsRead = (): TestRequest => http.expectOne((request) => request.url === RUNS_URL);
     const url = (): string => TestBed.inject(Router).url;
 
-    it('the view follows the address: /stats is Live, /stats/runs Runs, and Compare shows Runs', async () => {
+    it('the view follows the address: /stats is Live, /stats/runs Runs, /stats/compare Compare', async () => {
       await visit();
       expect(viewOption('Live')).toBeDefined();
       expect(checkedView()).toBe('Live');
@@ -944,8 +944,24 @@ describe('StatsPage', () => {
       expect(cards()).toHaveLength(0);
 
       await go('/stats/compare?runs=a,b');
-      expect(checkedView()).toBe('Runs');
+      expect(checkedView()).toBe('Compare');
       expect(cards()).toHaveLength(0);
+    });
+
+    it('while a comparison is open the switch offers Compare as well, and Runs goes back to the list', async () => {
+      const options = () => [...viewSwitch().querySelectorAll('[role="radio"]')].map(text);
+      await visit();
+      expect(options()).toEqual(['Live', 'Runs']);
+
+      await go('/stats/compare?runs=a,b');
+      await flush(runsRead(), runsAnswer());
+      expect(options()).toEqual(['Live', 'Runs', 'Compare']);
+      expect(checkedView()).toBe('Compare');
+
+      await click(viewOption('Runs'));
+      expect(url()).toBe('/stats/runs');
+      expect(options()).toEqual(['Live', 'Runs']);
+      expect(checkedView()).toBe('Runs');
     });
 
     it('the switch navigates between /stats and /stats/runs', async () => {

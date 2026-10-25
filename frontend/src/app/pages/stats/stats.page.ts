@@ -72,11 +72,25 @@ function statsView(url: UrlTree): StatsView {
   return view === 'runs' || view === 'compare' ? view : 'live';
 }
 
-/** The switch offers Live and Runs; a comparison is opened from Runs, which it shows as chosen. */
-const VIEW_OPTIONS: NeatSegmentedOption<'live' | 'runs'>[] = [
+/**
+ * The switch offers Live and Runs, and Compare while a comparison is open: a comparison is opened
+ * from Runs, and Runs then leads back to the list.
+ */
+const VIEW_OPTIONS: NeatSegmentedOption<StatsView>[] = [
   { value: 'live', label: 'Live' },
   { value: 'runs', label: 'Runs' },
 ];
+const COMPARE_OPTIONS: NeatSegmentedOption<StatsView>[] = [
+  ...VIEW_OPTIONS,
+  { value: 'compare', label: 'Compare' },
+];
+
+/** Where the switch takes each view it offers; Compare is only ever the one already open. */
+const VIEW_URLS: Record<StatsView, string | null> = {
+  live: '/stats',
+  runs: '/stats/runs',
+  compare: null,
+};
 
 const UPDATE_CHIPS: Record<TelemetryUpdate, { label: string; tone: NeatTone }> = {
   live: { label: 'Live', tone: 'success' },
@@ -192,9 +206,8 @@ export class StatsPage {
     ),
     { initialValue: statsView(this.router.parseUrl(this.router.url)) },
   );
-  protected readonly viewOptions = VIEW_OPTIONS;
-  protected readonly switchValue = computed<'live' | 'runs'>(() =>
-    this.view() === 'live' ? 'live' : 'runs',
+  protected readonly viewOptions = computed(() =>
+    this.view() === 'compare' ? COMPARE_OPTIONS : VIEW_OPTIONS,
   );
 
   protected readonly moreOpen = signal(false);
@@ -390,8 +403,9 @@ export class StatsPage {
   }
 
   /** The switch's choice, as its address: the router then moves the view. */
-  protected openView(view: 'live' | 'runs'): void {
-    void this.router.navigateByUrl(view === 'runs' ? '/stats/runs' : '/stats');
+  protected openView(view: StatsView): void {
+    const url = VIEW_URLS[view];
+    if (url) void this.router.navigateByUrl(url);
   }
 
   protected openBoard(): void {

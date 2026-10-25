@@ -5,8 +5,8 @@
 <ng-container *neatPageToolbar>
   <neat-segmented
     label="Stats view"
-    [options]="viewOptions"
-    [value]="switchValue()"
+    [options]="viewOptions()"
+    [value]="view()"
     (valueChange)="openView($event)"
   />
 

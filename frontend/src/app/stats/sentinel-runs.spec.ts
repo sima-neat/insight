@@ -174,6 +174,36 @@ describe('SentinelRuns', () => {
     expect(runs.traceFailure()).toBeNull();
   });
 
+  it('traceReadAt is the local time the trace shown was read or started, and null without one', async () => {
+    vi.setSystemTime(Date.parse('2026-10-25T08:00:00Z'));
+    open();
+    expect(runs.traceReadAt()).toBeNull();
+    await advance(1500);
+    await flush(traceRead(), traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
+    expect(runs.traceReadAt()).toBe(Date.parse('2026-10-25T08:00:01.500Z'));
+
+    // A refused read keeps the trace, and when it was read.
+    await advance(30_000);
+    await fail(traceRead(), 'timeout');
+    expect(runs.traceReadAt()).toBe(Date.parse('2026-10-25T08:00:01.500Z'));
+
+    const stopped = runs.stopTrace();
+    await flush(stopRequest(), traceAnswer(null, null));
+    expect(await stopped).toBeNull();
+    expect(runs.traceReadAt()).toBeNull();
+
+    await advance(2000);
+    const started = runs.startTrace({ name: 'bench' });
+    await flush(startRequest(), traceAnswer(ACTIVE_TRACE));
+    expect(await started).toBeNull();
+    expect(runs.traceSummary()).toBeNull();
+    expect(runs.traceReadAt()).toBe(Date.now());
+
+    switchBoard(GENERATION + 1);
+    expect(runs.traceReadAt()).toBeNull();
+    http.match((request) => request.url === TRACES_URL);
+  });
+
   it('a periodic trace read is skipped while one is out', async () => {
     open();
     const out = traceRead();

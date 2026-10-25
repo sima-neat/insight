@@ -8,18 +8,16 @@
  * elapsed time does, whose digits keep their width as they tick.
  */
 .recording {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.25em;
-  min-inline-size: 0;
   font-size: var(--neat-text-sm);
-  white-space: pre;
+  white-space: nowrap;
 }
 
 .name {
+  display: inline-block;
   overflow: hidden;
   max-inline-size: 16rem;
   text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 
 .elapsed {
