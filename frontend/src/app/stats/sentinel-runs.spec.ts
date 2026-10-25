@@ -247,7 +247,7 @@ describe('SentinelRuns', () => {
     expect(runs.runs()).toEqual(RUNS_LIST);
   });
 
-  it('start leaves out an empty note and tags, and returns a refusal as a start failure', async () => {
+  it('start leaves out an empty note and tags and words a refusal as a start', async () => {
     await openWithRuns();
     const started = runs.startTrace({ name: 'bench', note: '   ', tags: [' '] });
     const request = startRequest();
@@ -496,12 +496,16 @@ describe('SentinelRuns', () => {
 
   it('a board switch clears trace and runs', async () => {
     open();
-    const staleTrace = traceRead();
+    await flush(traceRead(), traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
     runs.setRunsShown(true);
     await flush(runsRead(), runsAnswer());
     await advance(30_000);
-    await fail(staleTrace, 'timeout');
+    // Failed reads keep what was read before them, beside their failures.
+    await fail(traceRead(), 'timeout');
     await fail(runsRead(), 'timeout');
+    expect(runs.trace()).toEqual(ACTIVE_TRACE);
+    expect(runs.traceSummary()).toEqual(RECORDING_RUN);
+    expect(runs.runs()).toEqual(RUNS_LIST);
     expect(runs.traceFailure()).not.toBeNull();
     expect(runs.runsFailure()).not.toBeNull();
     await advance(30_000);
@@ -537,12 +541,75 @@ describe('SentinelRuns', () => {
     expect(runs.runs()).toBeNull();
   });
 
+  it('a board switch while a start is out applies nothing of it', async () => {
+    open();
+    await flush(traceRead(), traceAnswer(null, null));
+    const started = runs.startTrace({ name: 'compiler-v2-bench' });
+    const request = startRequest();
+    switchBoard(GENERATION + 1);
+    expect(runs.traceBusy()).toBeNull();
+    const newTrace = traceRead();
+
+    await flush(request, traceAnswer(ACTIVE_TRACE));
+    const failure = await started;
+    expect([failure?.code, failure?.action, failure?.problem.message]).toEqual([
+      'stale_snapshot',
+      'start',
+      'The selected board changed before the answer arrived; ' +
+        'the change may have been made on the board selected before.',
+    ]);
+    expect(failure?.hint).toBe('Check the board selected now.');
+    expect(runs.trace()).toBeNull();
+    expect(runs.traceBusy()).toBeNull();
+    expect(board.reload).not.toHaveBeenCalled();
+    await flush(newTrace, traceAnswer(null, null, GENERATION + 1));
+    expect(runs.trace()).toBeNull();
+  });
+
+  it('a stop refusal landing after a board switch is not shown for the new board', async () => {
+    open();
+    await flush(traceRead(), traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
+    const stopped = runs.stopTrace();
+    const request = stopRequest();
+    switchBoard(GENERATION + 1);
+    expect(runs.traceBusy()).toBeNull();
+    const other = { ...ACTIVE_TRACE, id: 'other', name: 'other' };
+    await flush(traceRead(), traceAnswer(other, null, GENERATION + 1));
+
+    await fail(request, 'trace_conflict');
+    const failure = await stopped;
+    expect([failure?.code, failure?.action]).toEqual(['stale_snapshot', 'stop']);
+    // The new board's trace stays shown, and the old board's conflict reads nothing.
+    expect(runs.trace()).toEqual(other);
+    expect(runs.traceBusy()).toBeNull();
+    noTraceRead();
+  });
+
+  it('a delete failure naming another generation stops the batch', async () => {
+    await openWithRuns();
+    const [first, second] = FINISHED;
+    const deleting = runs.deleteRuns([first.id, second.id]);
+    await fail(deleteRequest(first.id), 'not_found', GENERATION + 1);
+    const outcome = await deleting;
+    expect(outcome.failed.map(({ id, failure }) => [id, failure.code])).toEqual([
+      [first.id, 'not_found'],
+    ]);
+    expect(outcome.notTried).toEqual([second.id]);
+    expect(board.reload).toHaveBeenCalledTimes(1);
+    await flush(runsRead(), runsAnswer());
+  });
+
   it('before the board is known nothing is sent', async () => {
     board.state.set(null);
     open();
     runs.setRunsShown(true);
     await advance(60_000);
-    expect((await runs.startTrace({ name: 'bench' }))?.code).toBe('no_target');
+    const refused = await runs.startTrace({ name: 'bench' });
+    expect([refused?.code, refused?.title, refused?.problem.message]).toEqual([
+      'no_target',
+      'No board is selected',
+      'Choose a board in the top bar first.',
+    ]);
     const read = await runs.readRun(FINISHED[0].id);
     expect('failure' in read && read.failure.code).toBe('no_target');
     expect(await runs.deleteRuns([FINISHED[0].id])).toEqual({
@@ -624,7 +691,7 @@ describe('SentinelRuns', () => {
 
     await flush(traceOut, traceAnswer(ACTIVE_TRACE, RECORDING_RUN, GENERATION + 1));
     await flush(runsOut, runsAnswer(FINISHED));
-    await flush(removal, deleteAnswer(FINISHED[0].id, RUNS_LIST));
+    await flush(removal, deleteAnswer(FINISHED[0].id, RUNS_LIST, GENERATION + 1));
     await flush(runOut, runAnswer(savedRun()));
     expect((await deleting).notTried).toEqual([FINISHED[1].id]);
     expect(await reading).toEqual({ stale: true });

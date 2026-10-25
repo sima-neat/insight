@@ -85,8 +85,9 @@ const STALE: RunRead = { stale: true };
  * **Board changes.** Everything held is the current board generation's: a board change drops it
  * and reads the new board at once, never waiting for a request still out to the previous one. An
  * answer or failure naming another generation than it was asked under means another client
- * switched the board: the board is reloaded and the answer dropped. A change whose answer is not
- * for the board shown now is reported as a `stale_snapshot` failure and nothing of it applies.
+ * switched the board: the board is reloaded and the answer dropped. A change whose answer or
+ * failure lands after the board shown changed is reported as a `stale_snapshot` failure and
+ * nothing of it applies: the previous board's refusal must not show against the new one.
  */
 @Injectable()
 export class SentinelRuns {
@@ -256,10 +257,11 @@ export class SentinelRuns {
 
   /**
    * Deletes runs one at a time, in the order given. A failure that says the board, the daemon or
-   * Insight cannot answer, or that the board changed (`stale_snapshot`), stops the batch: the
-   * next request would fail the same way, or hit another board. Any other (a run another client
-   * removed, `not_found`; a run still recording, `trace_conflict`) is recorded and the batch goes
-   * on. The runs the last successful answer leaves apply at once, then the list is read again.
+   * Insight cannot answer, or that the board changed (`stale_snapshot`, or a failure naming
+   * another generation), stops the batch: the next request would fail the same way, or hit
+   * another board. Any other (a run another client removed, `not_found`; a run still recording,
+   * `trace_conflict`) is recorded and the batch goes on. The runs the last successful answer
+   * leaves apply at once, then the list is read again.
    */
   async deleteRuns(ids: readonly string[]): Promise<DeleteOutcome> {
     const generation = this.board.generation();
@@ -281,7 +283,7 @@ export class SentinelRuns {
         continue;
       }
       outcome.failed.push({ id, failure: result.failure });
-      if (stopsBatch(result.failure.code)) {
+      if (stopsBatch(result.failure, generation)) {
         outcome.notTried.push(...ids.slice(index + 1));
         break;
       }
@@ -397,26 +399,27 @@ export class SentinelRuns {
   }
 
   /**
-   * Sends a change to the board of `generation` and says how it went: the answer when it is for
-   * the board shown now, else the failure to report. An answer or failure naming another
-   * generation reloads the board.
+   * Sends a change to the board of `generation` and says how it went: the answer or failure when
+   * the page still shows that board, else that it was not applied. An answer or failure naming
+   * another generation reloads the board; after the page was left nothing more happens.
    */
   private async change<T extends { generation: number }>(
     request: Observable<T>,
     generation: number,
     action: SentinelAction,
   ): Promise<{ answer: T } | { failure: SentinelFailure }> {
+    const unapplied = { failure: notApplied(generation, action) };
     try {
       const answer = await firstValueFrom(request.pipe(withRequestErrors()));
+      if (this.destroyed) return unapplied;
       if (answer.generation !== generation) void this.board.reload();
-      if (answer.generation !== generation || !this.isShown(generation)) {
-        return { failure: notApplied(generation, action) };
-      }
-      return { answer };
+      return answer.generation === generation && this.isShown(generation) ? { answer } : unapplied;
     } catch (error) {
+      if (this.destroyed) return unapplied;
       const failure = failureOf(error, generation, action);
+      // The backend's own stale_snapshot names the board selected now: it is reported as it is.
       if (failure.generation !== generation) void this.board.reload();
-      return { failure };
+      return this.isShown(generation) ? { failure } : unapplied;
     }
   }
 }
@@ -438,30 +441,37 @@ function trimmed({ name, note, tags }: TraceRequest): TraceRequest {
 }
 
 /**
- * Whether a delete failing with this code stops the batch: the board or the daemon cannot answer
- * (`haltsPolling`), the board changed, or Insight itself did not answer as it should.
+ * Whether a delete failure stops the batch: the board or the daemon cannot answer
+ * (`haltsPolling`), the board changed (`stale_snapshot`, or the failure names another generation
+ * than the batch was sent under), or Insight itself did not answer as it should.
  */
-function stopsBatch(code: string): boolean {
+function stopsBatch({ code, generation }: SentinelFailure, sent: number): boolean {
   return (
-    haltsPolling(code) || code === 'stale_snapshot' || code === 'network' || code === 'bad_response'
+    generation !== sent ||
+    haltsPolling(code) ||
+    code === 'stale_snapshot' ||
+    code === 'network' ||
+    code === 'bad_response'
   );
 }
 
 /** A change asked for while no board is known; the page offers none then. */
 function noBoard(action: SentinelAction): SentinelFailure {
-  return failureOf(new BoardProblem('No board is selected.', 'no_target', '', {}), null, action);
+  const problem = new BoardProblem('Choose a board in the top bar first.', 'no_target', '', {});
+  return failureOf(problem, null, action);
 }
 
 /**
  * A change whose answer is not for the board shown now: the board changed while it was out. It
- * may have happened on the previous board, so the backend's own "nothing was changed" does not
- * apply.
+ * may have been made on the previous board, so the backend's own "nothing was changed" does not
+ * apply; the hint is given so that fallback is not used.
  */
 function notApplied(generation: number, action: SentinelAction): SentinelFailure {
   const problem = new BoardProblem(
-    'The selected board changed before the answer arrived, so Insight did not apply it.',
+    'The selected board changed before the answer arrived; ' +
+      'the change may have been made on the board selected before.',
     'stale_snapshot',
-    'Check the board selected now, then try again.',
+    'Check the board selected now.',
     {},
   );
   return failureOf(problem, generation, action);
