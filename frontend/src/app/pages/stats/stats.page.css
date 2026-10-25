@@ -1,14 +1,5 @@
-/*
- * The telemetry, top to bottom: what is wrong, the cards, then All metrics.
- *
- * It is the containing block of the charts' visually hidden live regions, which the kit positions
- * absolutely beside their charts. The page's scroll container (the kit's `neat-page` body) is not
- * positioned, so without this they fall back to the viewport: on a screen that does not fit every
- * card the live regions of the cards below the fold lie past the page, and the document's
- * scrollable area grows by that much.
- */
+/* The telemetry, top to bottom: what is wrong, the cards, then All metrics. */
 .telemetry {
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--neat-space-4);
