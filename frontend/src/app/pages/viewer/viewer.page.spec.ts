@@ -1,9 +1,10 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
+import { NeatViewport } from '@sima/neat-ui';
 import { NeatNumberField } from '@sima/neat-ui/number-field';
 import { type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { FakeConnections } from '../../viewer/fake-connections.testing';
@@ -28,8 +29,11 @@ describe('ViewerPage', () => {
   let fake: FakeConnections;
   let http: HttpTestingController;
   let fixture: ComponentFixture<Shell>;
+  /** Whether the screen is narrow, as the kit reports it; wide unless a test says otherwise. */
+  const narrow = signal(false);
 
   beforeEach(() => {
+    narrow.set(false);
     storage = new FakeLocalStorage();
     vi.stubGlobal('localStorage', storage);
     FakeResizeObserver.instances = [];
@@ -43,6 +47,7 @@ describe('ViewerPage', () => {
         ]),
         provideHttpClient(),
         provideHttpClientTesting(),
+        { provide: NeatViewport, useValue: { narrow } },
       ],
     });
     TestBed.overrideComponent(ViewerPage, {
@@ -984,6 +989,23 @@ describe('ViewerPage', () => {
     expect(page().inspectorTab()).toBe('General');
     expect(root().querySelector('aside')?.textContent).toContain('Channel 3');
     expect(button('Side panel').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('on a narrow screen the inspector starts closed although the layout stores it open, and opening it stores nothing', async () => {
+    narrow.set(true);
+    storage.seed({ layout: { inspector: true, tileWidths: { 16: 300 } } });
+    await open('/viewer');
+    expect(root().querySelector('aside')).toBeNull();
+    expect(button('Side panel').getAttribute('aria-pressed')).toBe('false');
+
+    await click(button('Side panel'));
+
+    expect(root().querySelector('aside')).not.toBeNull();
+    expect(button('Side panel').getAttribute('aria-pressed')).toBe('true');
+    expect(storage.readStored('layout')).toMatchObject({ inspector: true });
+    await click(button('Side panel'));
+    expect(root().querySelector('aside')).toBeNull();
+    expect(storage.readStored('layout')).toMatchObject({ inspector: true });
   });
 
   it('has no tile shape control', async () => {

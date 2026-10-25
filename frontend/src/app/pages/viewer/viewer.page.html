@@ -125,10 +125,10 @@
       </span>
     </ng-template>
   </neat-popover>
-  <neat-aside-toggle [open]="prefs.inspector()" (openChange)="prefs.setInspector($event)" />
+  <neat-aside-toggle [open]="inspector.open()" (openChange)="inspector.set($event)" />
 </ng-container>
 
-<neat-page scroll="none" padding="none" [aside]="prefs.inspector() ? 'open' : 'closed'">
+<neat-page scroll="none" padding="none" [aside]="inspector.open() ? 'open' : 'closed'">
   <div class="grid-area">
     <p class="notice" role="status">
       @if (liveUnknown()) {
@@ -164,7 +164,7 @@
     }
   </div>
 
-  @if (prefs.inspector()) {
+  @if (inspector.open()) {
     <app-viewer-inspector
       neatPageAside
       [channel]="selectedChannel()"

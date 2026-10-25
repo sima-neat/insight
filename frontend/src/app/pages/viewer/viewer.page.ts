@@ -19,6 +19,7 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
 import {
   NeatAsideToggle,
+  neatAsideOpen,
   NeatButton,
   NeatIcon,
   NeatNote,
@@ -146,6 +147,13 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
 })
 export class ViewerPage {
   protected readonly prefs = inject(LayoutPrefs);
+  /**
+   * The inspector, which opens beside the grid. The layout remembers it for wide screens; on narrow
+   * ones it floats over the grid, starts closed and is not remembered (`neatAsideOpen`).
+   */
+  protected readonly inspector = neatAsideOpen(this.prefs.inspector, (open) =>
+    this.prefs.setInspector(open),
+  );
   private readonly connections = inject(VfConnections);
   private readonly liveness = inject(ChannelLiveness);
   private readonly storage = inject(ViewerStorage);
@@ -418,7 +426,7 @@ export class ViewerPage {
    * with none on screen the toolbar's side panel toggle, which opens it again.
    */
   protected closeInspector(): void {
-    this.prefs.setInspector(false);
+    this.inspector.set(false);
     afterNextRender(
       () => {
         const index = this.state.pageChannels().indexOf(this.state.selected() ?? -1);
@@ -434,7 +442,7 @@ export class ViewerPage {
   protected openLateNotice(channel: number): void {
     this.state.select(channel);
     this.inspectorTab.set('General');
-    this.prefs.setInspector(true);
+    this.inspector.set(true);
   }
 
   /**

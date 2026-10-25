@@ -39,7 +39,7 @@
                   // lives in the main bundle and adds about 30 kB. The video code is not part of it:
                   // it comes from @sima/neat-ui/video and loads with the Viewer route only.
                   "type": "initial",
-                  "maximumWarning": "700kB",
+                  "maximumWarning": "600kB",
                   "maximumError": "1MB"
                 },
                 {

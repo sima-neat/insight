@@ -1,5 +1,7 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { AsidePrefs } from './aside-prefs';
+import { NeatViewport } from '@sima/neat-ui';
+import { AsidePage, AsidePrefs } from './aside-prefs';
 import { FakeLocalStorage } from './fake-storage.testing';
 
 describe('AsidePrefs', () => {
@@ -55,5 +57,49 @@ describe('AsidePrefs', () => {
     expect(prefs.open('streaming')).toBe(true);
     prefs.setOpen('streaming', false);
     expect(prefs.open('streaming')).toBe(false);
+  });
+
+  describe('on a narrow screen', () => {
+    const PAGES: AsidePage[] = ['streaming', 'media', 'peripherals', 'stats'];
+    let narrow: ReturnType<typeof signal<boolean>>;
+
+    beforeEach(() => {
+      narrow = signal(true);
+      TestBed.configureTestingModule({
+        providers: [{ provide: NeatViewport, useValue: { narrow } }],
+      });
+    });
+
+    it('starts every page’s panel closed although open is stored', () => {
+      for (const page of PAGES) storage.values.set(`neat-insight:${page}:aside`, 'open');
+      const prefs = TestBed.inject(AsidePrefs);
+      for (const page of PAGES) expect(prefs.open(page)).toBe(false);
+    });
+
+    it('opens and closes the panel without touching storage', () => {
+      storage.values.set('neat-insight:stats:aside', 'closed');
+      const prefs = TestBed.inject(AsidePrefs);
+
+      prefs.setOpen('stats', true);
+      expect(prefs.open('stats')).toBe(true);
+      prefs.setOpen('streaming', true);
+      prefs.setOpen('streaming', false);
+
+      expect(storage.values.get('neat-insight:stats:aside')).toBe('closed');
+      expect(storage.values.has('neat-insight:streaming:aside')).toBe(false);
+      expect(storage.writes).toEqual([]);
+    });
+
+    it('shows the remembered choice again on a wide screen', () => {
+      storage.values.set('neat-insight:media:aside', 'closed');
+      const prefs = TestBed.inject(AsidePrefs);
+      prefs.setOpen('media', true);
+      expect(prefs.open('media')).toBe(true);
+
+      narrow.set(false);
+
+      expect(prefs.open('media')).toBe(false);
+      expect(prefs.open('streaming')).toBe(true);
+    });
   });
 });

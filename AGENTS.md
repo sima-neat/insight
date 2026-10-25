@@ -97,10 +97,14 @@ merging.
   (`neatAsidePanel`, `neatAsideTitle`, `neatAsideHeading`, `neatAsideActions`, `neatCode`). Whether
   a page's panel is open is remembered per page in storage: the Viewer in its layout
   (`LayoutPrefs`), Streaming, Media, Peripherals and Stats in `AsidePrefs`
-  (`neat-insight:<page>:aside`). Where the user was on a page (Viewer position, Streaming's slot,
-  Media's folder and selection, Peripherals' device and modes, Stats' card and thermal group) lives
-  in memory for the next visit (`ViewerSession`, `SourcesSession`, `PeripheralsSession`,
-  `StatsSession`).
+  (`neat-insight:<page>:aside`). That is the wide-screen choice. On a narrow screen (below 48rem)
+  the kit floats the panel over the page, so it starts closed there and opening or closing it is
+  not remembered: each page keeps its state through the kit's `neatAsideOpen` (`AsidePrefs` for
+  four pages, the Viewer's `inspector` for the fifth), and a phone never overwrites what a wide
+  screen chose. The panel is still `neat-aside-toggle`'s to close. Where the user was on a page
+  (Viewer position, Streaming's slot, Media's folder and selection, Peripherals' device and modes,
+  Stats' card and thermal group) lives in memory for the next visit (`ViewerSession`,
+  `SourcesSession`, `PeripheralsSession`, `StatsSession`).
 - **Shared app components.** Each is a styled pattern with more than one use (the one-place rule
   above), so use it instead of writing the markup again:
   - `app-list-column` lays out a list page's main column for `neat-page scroll="none"`: what
@@ -182,20 +186,19 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 700 kB, as in the kit showcase. The initial bundle measures 568.6 kB raw with kit 0.12.0 (the
-  shared chunk 456 kB, main 20 kB, styles 92 kB; 691.9 kB with kit 0.11.3 and 0.11.2, before the
-  icons became plain Lucide drawings; 691.7 kB with kit
-  0.11.1; 691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the
-  board pill and System Info's button; 650 kB with kit 0.9.0; 694 kB with kit 0.5.3, before the
-  kit split into per-component entries), most of it the kit's shell, the toast host (rendered in
-  the app root, so it is in main on purpose) and Angular with its router, plus the XHR backend
-  (`withXhr()`, 4 kB: only XHR reports the upload progress of imports); the warning leaves little
-  headroom on purpose, and the 1 MB error ceiling stays. (`angular.json` cannot hold comments, so
-  the reason lives here.) The kit's video code is imported from `@sima/neat-ui/video`, only by the
-  Viewer, so it loads with that route and stays out of the initial bundle. Streaming, Media,
-  Peripherals and Stats are lazy routes too, and so are the kit entries only they use
-  (`/file-browser`, `/select-list`, `/dialog`, Peripherals' `/level-meter` and the charts entry,
-  `/charts`, which only Stats draws with and which brings d3's scale and shape modules: nothing
+  at 600 kB. The initial bundle measures 568.8 kB raw with kit 0.12.0 (the shared chunk 456 kB,
+  main 20 kB, styles 92 kB; 691.9 kB with kit 0.11.3 and 0.11.2, before the icons became plain
+  Lucide drawings; 691.7 kB with kit 0.11.1; 691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3;
+  672 kB with kit 0.10.0 before the board pill and System Info's button; 650 kB with kit 0.9.0;
+  694 kB with kit 0.5.3, before the kit split into per-component entries), most of it the kit's
+  shell, the toast host (rendered in the app root, so it is in main on purpose) and Angular with
+  its router, plus the XHR backend (`withXhr()`, 4 kB: only XHR reports the upload progress of
+  imports); the warning sits about 30 kB above that, so growth shows up early, and the 1 MB error
+  ceiling stays. (`angular.json` cannot hold comments, so the reason lives here.) The kit's video
+  code is imported from `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and
+  stays out of the initial bundle. Streaming, Media, Peripherals and Stats are lazy routes too, and
+  so are the kit entries only they use (`/file-browser`, `/select-list`, `/dialog`, Peripherals'
+  `/level-meter` and the charts entry, `/charts`, which only Stats draws with and which brings d3's scale and shape modules: nothing
   outside Stats imports it, and a type-only import is erased). The top bar's board and System Info
   dialogs are imported on their first open (`TopBarDialogs`), with the kit entries they bring
   (`/collapsible`, `/callout`, which Peripherals and the Viewer use too).
