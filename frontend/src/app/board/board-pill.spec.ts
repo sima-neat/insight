@@ -1,6 +1,6 @@
-import { getDebugNode } from '@angular/core';
+import { getDebugNode, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import { NeatIcon } from '@sima/neat-ui';
+import { NeatIcon, NeatViewport } from '@sima/neat-ui';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { TopBarDialogs } from '../top-bar-dialogs';
 import { BoardProblem } from './board-error';
@@ -12,14 +12,17 @@ describe('BoardPill', () => {
   let board: FakeBoard;
   let dialogs: { openBoard: ReturnType<typeof vi.fn> };
   let fixture: ComponentFixture<BoardPill>;
+  let narrow: ReturnType<typeof signal<boolean>>;
 
   beforeEach(() => {
     board = new FakeBoard();
     dialogs = { openBoard: vi.fn(async () => undefined) };
+    narrow = signal(false);
     TestBed.configureTestingModule({
       providers: [
         { provide: BoardService, useValue: board },
         { provide: TopBarDialogs, useValue: dialogs },
+        { provide: NeatViewport, useValue: { narrow } },
       ],
     });
   });
@@ -35,7 +38,8 @@ describe('BoardPill', () => {
     return fixture.nativeElement.querySelector('button');
   }
 
-  const label = (button: HTMLElement) => button.querySelector('.label')?.textContent?.trim();
+  const label = (button: HTMLElement) =>
+    button.querySelector('.label, .label-clipped')?.textContent?.trim();
   const chip = (button: HTMLElement) => button.querySelector('neat-status-chip')!;
   const tone = (button: HTMLElement) =>
     (getDebugNode(chip(button))!.componentInstance as NeatStatusChip).tone();
@@ -91,5 +95,32 @@ describe('BoardPill', () => {
     board.error.set(null);
     await fixture.whenStable();
     expect(chip(button).textContent?.trim()).toBe('Not checked');
+  });
+
+  it('a narrow screen clips the label out of sight and keeps it in the button name', async () => {
+    board.state.set(boardState({ target: DEVKIT }));
+    narrow.set(true);
+    const button = await render();
+
+    expect(button.querySelector('.label')).toBeNull();
+    const clipped = button.querySelector('.label-clipped');
+    expect(clipped?.textContent?.trim()).toBe('DevKit: 192.168.1.20');
+    expect(getComputedStyle(clipped!).clipPath).toBe('inset(50%)');
+    // The button is named from its content: the clipped label is still in it.
+    expect(button.textContent).toContain('DevKit: 192.168.1.20');
+
+    // Back on a wide screen the label is shown again.
+    narrow.set(false);
+    await fixture.whenStable();
+    expect(button.querySelector('.label-clipped')).toBeNull();
+    expect(getComputedStyle(button.querySelector('.label')!).clipPath).not.toBe('inset(50%)');
+  });
+
+  it('a wide screen shows the label', async () => {
+    board.state.set(boardState({ target: DEVKIT }));
+    const button = await render();
+
+    expect(button.querySelector('.label-clipped')).toBeNull();
+    expect(label(button)).toBe('DevKit: 192.168.1.20');
   });
 });

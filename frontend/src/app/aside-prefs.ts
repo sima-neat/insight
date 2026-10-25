@@ -10,8 +10,9 @@ const CLOSED = 'closed';
 
 /**
  * Whether Streaming's, Media's, Peripherals' and Stats' side panels are open: remembered per page,
- * across visits and reloads, as the Viewer remembers its own (`LayoutPrefs.inspector`). One rule
- * for all five pages.
+ * across visits and reloads, as the Viewer remembers its own (`LayoutPrefs.inspector`). The rule
+ * for when a panel is open is the same on all five pages; only how long a phone's choice lives
+ * differs, as the last sentence says.
  * Stored as `neat-insight:<page>:aside`; on a wide screen a panel is open until the user closes it,
  * as it was before anything was remembered. A narrow screen floats the panel over the page, so
  * there it starts closed and opening or closing it is not remembered (`neatAsideOpen`): a phone

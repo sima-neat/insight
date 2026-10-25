@@ -508,6 +508,11 @@ test.describe('phone width', () => {
       await expect(appName).toBeAttached();
       expect(await visuallyHidden(appName)).toBe(true);
 
+      // The pill gives up its board label to the eye, not to the button's name.
+      const pill = page.locator('app-board-pill button');
+      expect(await visuallyHidden(pill.locator('.label-clipped'))).toBe(true);
+      await expect(pill).toHaveAccessibleName(/DevKit/);
+
       // The panel is open until closed on a wide screen, and nothing was stored: still none here.
       await expect(asides(page)).toHaveCount(0);
       expect(await topBarSpill(page, true)).toEqual({ spilled: [], toolsOverflow: 0 });
