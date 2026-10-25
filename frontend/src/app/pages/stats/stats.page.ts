@@ -41,12 +41,7 @@ import { failureOf, type SentinelFailure } from '../../stats/sentinel-failure';
 import { SentinelInstall } from '../../stats/sentinel-install';
 import { SentinelTelemetry, type TelemetryUpdate } from '../../stats/sentinel-telemetry';
 import { StatsSession } from '../../stats/stats-session';
-import {
-  OVERVIEW_CARDS,
-  sessionCsv,
-  sessionCsvFilename,
-  type OverviewCardId,
-} from '../../stats/telemetry';
+import { sessionCsv, sessionCsvFilename, type OverviewCardId } from '../../stats/telemetry';
 import { TopBarDialogs } from '../../top-bar-dialogs';
 import { MetricsTable } from './metrics-table';
 import { overviewCards } from './overview-cards';
@@ -160,8 +155,6 @@ export class StatsPage {
   protected readonly moreOpen = signal(false);
   /** All metrics starts closed on every visit; its table is built only while it is open. */
   protected readonly allMetricsOpen = signal(false);
-  /** Check again is out. */
-  protected readonly rechecking = signal(false);
 
   private readonly target = computed(() => this.board.state()?.target ?? null);
   private readonly daemon = computed(() => daemonView(this.telemetry.state()));
@@ -207,6 +200,18 @@ export class StatsPage {
     return [state, this.telemetry.failure()].find(boardCoded) ?? null;
   });
 
+  /**
+   * The callout over the telemetry when the board's notice does not stand there: why the last poll
+   * failed, else why the state says Sentinel cannot be used. A state read can stop the polling with
+   * no poll failing (after Resume, on focus, or on the 30 s check), and the values on screen must
+   * not stop changing without a reason. An unavailable state always carries its `status.error`.
+   */
+  protected readonly telemetryProblem = computed(() => {
+    const failure = this.telemetry.failure();
+    if (failure) return failure;
+    return this.telemetry.state()?.available === false ? this.stateProblem() : null;
+  });
+
   protected readonly collectorErrors = computed(() =>
     healthProblems(this.telemetry.state()?.health ?? null),
   );
@@ -218,20 +223,29 @@ export class StatsPage {
 
   /** The chosen card, while the panel shows its area. */
   protected readonly selectedCard = computed(() => (this.asideOpen() ? this.session.card() : null));
-  /** The panel's area: the chosen card's, Thermal before any is chosen. */
+  /**
+   * The panel's area: the chosen card's while this board shows that card, Thermal before any is
+   * chosen and after a switch to a board without it (a board with no power metrics has no Power
+   * area to show).
+   */
   protected readonly area = computed(
-    () => OVERVIEW_CARDS.find((card) => card.id === this.session.card())?.area ?? 'thermal',
+    () => this.cards().find((view) => view.card.id === this.session.card())?.card.area ?? 'thermal',
   );
   /** The panel is about the telemetry, so it is shown only with it. */
   protected readonly asideShown = computed(() => this.asideOpen() && this.body() === 'telemetry');
 
   protected readonly updateChip = computed(() => UPDATE_CHIPS[this.telemetry.update()]);
 
-  /** Retry where the values stopped on a failure that asking again can help (Inv-S §13.22). */
-  protected readonly updateAction = computed<'pause' | 'resume' | 'retry'>(() => {
+  /**
+   * The top bar's button: Pause while live, Resume while paused, Retry where the values stopped on
+   * a failure that asking again can help, and none where neither helps: Pause beside Not updating
+   * would pause nothing (Inv-S §13.22). The chip and the callout say why.
+   */
+  protected readonly updateAction = computed<'pause' | 'resume' | 'retry' | null>(() => {
     const update = this.telemetry.update();
+    if (update === 'live') return 'pause';
     if (update === 'paused') return 'resume';
-    return update === 'stopped' && this.telemetry.failure()?.retryable ? 'retry' : 'pause';
+    return this.telemetry.failure()?.retryable ? 'retry' : null;
   });
 
   /**
@@ -265,6 +279,14 @@ export class StatsPage {
     if (!running) return null;
     return { here: running.generation === this.board.generation(), label: running.label };
   });
+
+  /**
+   * Install waits: an install runs, or the state is read again (after an install, or Check again),
+   * so the state held may already be out of date.
+   */
+  protected readonly installWaits = computed(
+    () => this.installing() !== null || this.telemetry.rechecking(),
+  );
 
   /** Another board's install: a press would do nothing, so the button says why (ruling F18). */
   protected readonly installTooltip = computed(() => {
@@ -316,18 +338,12 @@ export class StatsPage {
   protected installSentinel(): void {
     const generation = this.board.generation();
     const label = this.target()?.label;
-    if (this.install.running() || generation === null || !label) return;
+    if (this.installWaits() || generation === null || !label) return;
     void this.install.install(generation, label);
   }
 
-  protected async recheck(): Promise<void> {
-    if (this.rechecking()) return;
-    this.rechecking.set(true);
-    try {
-      await this.telemetry.recheck();
-    } finally {
-      this.rechecking.set(false);
-    }
+  protected recheck(): void {
+    if (!this.telemetry.rechecking()) void this.telemetry.recheck();
   }
 
   /** Downloads the window as CSV through a Blob URL, let go once the download has started. */

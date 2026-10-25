@@ -484,9 +484,12 @@ describe('StatsPage', () => {
     expect(text(note)).toBe('Checking Sentinel on the board…');
     expect(toolbar().querySelector('neat-status-chip')).toBeNull();
     expect(toolbarButton('Pause')).toBeUndefined();
+    // The side panel is about the telemetry: no toggle for a panel that is not there.
+    expect(toolbarButton('Side panel')).toBeUndefined();
 
     await answerState();
     expect(root().querySelector('neat-page p[role="status"]')).toBeNull();
+    expect(toolbarButton('Side panel')).toBeDefined();
     // Telemetry is shown from here; the cards wait for the first reading.
     expect(text(root().querySelector('neat-page'))).toContain(
       'Waiting for the first reading from Sentinel…',
@@ -507,11 +510,12 @@ describe('StatsPage', () => {
     );
     expect(buttonNamed('Install Sentinel')).toBeDefined();
     expect(buttonNamed('Check again')).toBeUndefined();
-    // Not ready: no update state, no cards, no side panel.
+    // Not ready: no update state, no cards, no side panel and no toggle for it.
     expect(toolbar().querySelector('neat-status-chip')).toBeNull();
     expect(toolbarButton('Pause')).toBeUndefined();
     expect(cards()).toHaveLength(0);
     expect(aside()).toBeNull();
+    expect(toolbarButton('Side panel')).toBeUndefined();
     noPoll();
 
     await go('/elsewhere');
@@ -578,6 +582,18 @@ describe('StatsPage', () => {
     expect(toasts.status).toHaveBeenCalledWith('Sentinel installed on sima@192.168.1.20.');
     const recheck = stateRead();
     expect(recheck.request.params.get('refresh')).toBe('1');
+    // Until that read answers, the state held is the one from before the install: Install is not
+    // offered again, and the installer's output stays.
+    expect(buttonNamed('Install Sentinel')).toBeUndefined();
+    const checking = buttonNamed('Checking…')!;
+    expect(checking.getAttribute('aria-disabled')).toBe('true');
+    expect(root().querySelector('neat-page .empty')?.getAttribute('aria-busy')).toBe('true');
+    const output = [...root().querySelectorAll('neat-collapsible')].find((section) =>
+      text(section).startsWith('Installer output'),
+    );
+    expect(output?.querySelector('pre')?.textContent).toBe('Sentinel installed.');
+    await click(checking);
+    http.expectNone((request) => request.url === INSTALL_URL);
     await flush(recheck, sentinelState());
     await answerMetrics();
     expect(cards()).toHaveLength(6);
@@ -641,6 +657,67 @@ describe('StatsPage', () => {
       withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
     );
     expect(callout('Sentinel could not answer')).toBeUndefined();
+  });
+
+  it('the top bar offers no button where neither pausing nor asking again helps (Inv-S §13.22)', async () => {
+    await visit();
+    await advance(2000);
+    // A refused key: only the board's settings fix it, and its state read fails the same way.
+    await flush(metricsPoll(), failed('auth_failed'), true);
+    await flush(stateRead(), failed('auth_failed'), true);
+
+    expect(chip()).toBe('Not updating');
+    expect(cards()).toHaveLength(6);
+    expect(toolbarButton('Pause')).toBeUndefined();
+    expect(toolbarButton('Resume')).toBeUndefined();
+    expect(toolbarButton('Retry')).toBeUndefined();
+  });
+
+  it('a state read that stops the polling shows its reason over the cards, and Retry reads the state again', async () => {
+    await visit();
+    // The window regains focus and the state says the daemon stopped, before any poll failed.
+    window.dispatchEvent(new Event('focus'));
+    await answerState(stoppedState());
+
+    expect(chip()).toBe('Not updating');
+    expect(cards()).toHaveLength(6);
+    const stopped = callout('The Sentinel service is stopped')!;
+    expect(text(stopped)).toContain('The simaai-sentinel service is installed but inactive.');
+    expect(text(stopped)).toContain(
+      'Start it on the board with `sudo systemctl start simaai-sentinel`.',
+    );
+    expect(
+      stopped.compareDocumentPosition(cards()[0]) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // No poll failed, so the top bar has nothing to retry; the callout's Retry asks the board.
+    expect(toolbarButton('Pause')).toBeUndefined();
+    expect(toolbarButton('Retry')).toBeUndefined();
+    noPoll();
+
+    await click(stopped.querySelector<HTMLButtonElement>('button')!);
+    const read = stateRead();
+    expect(read.request.params.get('refresh')).toBe('1');
+    await flush(read, sentinelState());
+    await answerMetrics(
+      withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
+    );
+    expect(chip()).toBe('Live');
+    expect(callout('The Sentinel service is stopped')).toBeUndefined();
+  });
+
+  it('after a board switch the panel shows Thermal when the chosen card is not on the new board', async () => {
+    await visit();
+    await click(cardNamed('Board power').querySelector<HTMLButtonElement>('button.activator')!);
+    expect(asideTitle()).toBe('Power');
+
+    board.state.set(boardState({ target: OTHER_BOARD, generation: GENERATION + 1 }));
+    await settle();
+    await answerState(sentinelState({ generation: GENERATION + 1 }));
+    const unpowered = dropping(METRICS_LIVE, (key) => key.startsWith('power_'));
+    await answerMetrics({ ...live(unpowered), generation: GENERATION + 1 });
+
+    expect(cards().map((card) => cardText(card).heading)).not.toContain('Board power');
+    expect(asideTitle()).toBe('Thermal');
   });
 
   it('an install outcome for another board is not shown', async () => {

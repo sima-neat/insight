@@ -14,7 +14,7 @@
           Retry
         </button>
       }
-      @default {
+      @case ('pause') {
         <button neatButton type="button" variant="text" size="small" (click)="telemetry.pause()">
           <neat-icon name="pause" />
           Pause
@@ -61,7 +61,10 @@
       </button>
     </ng-template>
   </neat-popover>
-  <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('stats', $event)" />
+  <!-- The panel is about the telemetry, so its toggle shows only with it, like the chip (F15). -->
+  @if (body() === 'telemetry') {
+    <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('stats', $event)" />
+  }
 </ng-container>
 
 <neat-page [aside]="asideShown() ? 'open' : 'closed'">
@@ -111,7 +114,7 @@
             }
             <app-board-settings-action neatCalloutActions />
           </app-board-problem-notice>
-        } @else if (telemetry.failure(); as failure) {
+        } @else if (telemetryProblem(); as failure) {
           <neat-callout tone="danger" [heading]="failure.title" [headingLevel]="2">
             <p>{{ failure.problem.message }}</p>
             @if (failure.hint) {
@@ -199,15 +202,16 @@
           <app-board-settings-action neatCalloutActions />
         </app-board-problem-notice>
       } @else {
-        <div class="empty" [attr.aria-busy]="installing()?.here || rechecking() || null">
+        <div class="empty" [attr.aria-busy]="installing()?.here || telemetry.rechecking() || null">
           <neat-callout [tone]="notReady().tone" [heading]="notReady().heading" [headingLevel]="2">
             @if (notReady().body; as body) {
               <p>{{ body }}</p>
             }
             @if (canInstall()) {
               <!--
-                While an install runs it waits with aria-disabled rather than disabled, so that a
-                keyboard still reaches the tooltip that names the board it runs on.
+                While an install runs, or the state is read again after one, it waits with
+                aria-disabled rather than disabled, so that a keyboard still reaches the tooltip
+                that names the board an install runs on.
               -->
               <button
                 neatButton
@@ -216,10 +220,16 @@
                 size="small"
                 [neatTooltip]="installTooltip()"
                 neatTooltipPosition="bottom"
-                [attr.aria-disabled]="installing() ? true : null"
+                [attr.aria-disabled]="installWaits() || null"
                 (click)="installSentinel()"
               >
-                {{ installing()?.here ? 'Installing…' : 'Install Sentinel' }}
+                @if (installing()?.here) {
+                  Installing…
+                } @else if (telemetry.rechecking()) {
+                  Checking…
+                } @else {
+                  Install Sentinel
+                }
               </button>
             } @else {
               <ng-container ngProjectAs="[neatCalloutActions]" [ngTemplateOutlet]="checkAgain" />
@@ -254,9 +264,9 @@
     type="button"
     size="small"
     variant="outlined"
-    [attr.aria-disabled]="rechecking() || null"
+    [attr.aria-disabled]="telemetry.rechecking() || null"
     (click)="recheck()"
   >
-    {{ rechecking() ? 'Checking…' : 'Check again' }}
+    {{ telemetry.rechecking() ? 'Checking…' : 'Check again' }}
   </button>
 </ng-template>
