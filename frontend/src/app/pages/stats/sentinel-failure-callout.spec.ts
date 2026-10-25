@@ -37,6 +37,13 @@ describe('SentinelFailureCallout', () => {
     expect(root().querySelector('neat-callout [neatNote]')).not.toBeNull();
   });
 
+  it('is announced as an alert when it appears, labelled by its heading', async () => {
+    await show({ failure: failure('timeout') });
+    const callout = root().querySelector('neat-callout')!;
+    expect(callout.getAttribute('role')).toBe('alert');
+    expect(callout.getAttribute('aria-labelledby')).toBe(heading()!.id);
+  });
+
   it('leaves out a hint it has none of, and its heading is level 3 by default', async () => {
     await show({ failure: failure('bad_response') });
     expect(heading()!.getAttribute('aria-level')).toBe('3');
