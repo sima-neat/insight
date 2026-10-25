@@ -284,11 +284,6 @@ test.describe('phone width', () => {
     answer(page: Page, board: BoardState | null): Promise<void>;
     /** Resolves once the page shows its content, with the board healthy. */
     shown(page: Page): Promise<void>;
-    /**
-     * Whether the page's tools fit the phone's row, so that the Side panel toggle (their last
-     * control) is in view without scrolling. Streaming's and the Viewer's do not yet.
-     */
-    readonly toolsFit: boolean;
   }
 
   /** `GET /api/board`, when a test picks the board; each page's own mock answers it otherwise. */
@@ -302,7 +297,6 @@ test.describe('phone width', () => {
   const PAGES: PhonePage[] = [
     {
       path: '/media',
-      toolsFit: true,
       answer: async (page, board) => {
         await page.route(
           (url) => url.pathname === '/api/media-files',
@@ -316,7 +310,6 @@ test.describe('phone width', () => {
     },
     {
       path: '/streaming',
-      toolsFit: false,
       answer: async (page, board) => {
         await answerSlots(page, 8);
         await answerBoard(page, board);
@@ -328,7 +321,6 @@ test.describe('phone width', () => {
     },
     {
       path: '/viewer',
-      toolsFit: false,
       answer: async (page, board) => {
         await answerViewer(page);
         await answerBoard(page, board);
@@ -337,7 +329,6 @@ test.describe('phone width', () => {
     },
     {
       path: '/peripherals',
-      toolsFit: true,
       answer: async (page, board) => {
         const backend = new FakePeripheralsBackend();
         if (board) backend.board = board;
@@ -352,7 +343,6 @@ test.describe('phone width', () => {
     },
     {
       path: '/stats',
-      toolsFit: true,
       answer: async (page, board) => {
         const backend = new FakeStatsBackend();
         if (board) backend.board = board;
@@ -424,6 +414,42 @@ test.describe('phone width', () => {
       };
     });
 
+  /**
+   * The top bar's rows on a phone: the logo, the board pill and the actions share the first row
+   * (their vertical centres level), the tools are the second, and the bar is those two and nothing
+   * else (a wrapped line of its own for the pill or the actions would add one).
+   */
+  const topBarRows = (page: Page) =>
+    page.evaluate(() => {
+      const bar = document.querySelector('header')!;
+      const box = (element: Element) => element.getBoundingClientRect();
+      const first = [
+        bar.querySelector('neat-logo')!,
+        bar.querySelector('app-board-pill button')!,
+        bar.querySelector('button[aria-label="Dark mode"]')!,
+        bar.querySelector('button[aria-label="Kiosk mode"]')!,
+        bar.querySelector('button[aria-label="System information"]')!,
+      ].map(box);
+      const tools = box(bar.querySelector('[role="group"][aria-label="Page tools"]')!);
+      const centres = first.map((item) => (item.top + item.bottom) / 2);
+      const firstBottom = Math.max(...first.map((item) => item.bottom));
+      return {
+        centreSpread: Math.max(...centres) - Math.min(...centres),
+        toolsBelow: tools.top >= firstBottom - 0.5,
+        // Two rows and the bar's 1 px border: no third row between or after.
+        extra: box(bar).height - (firstBottom - box(bar).top) - tools.height,
+        pill: box(bar.querySelector('app-board-pill button')!).width,
+      };
+    });
+
+  /** Two rows, the first holding logo, pill and actions side by side. */
+  async function expectTwoRows(page: Page): Promise<void> {
+    const rows = await topBarRows(page);
+    expect(rows.centreSpread, JSON.stringify(rows)).toBeLessThanOrEqual(4);
+    expect(rows.toolsBelow, JSON.stringify(rows)).toBe(true);
+    expect(rows.extra, JSON.stringify(rows)).toBeLessThanOrEqual(2);
+  }
+
   /** The panel floats over the page: the body keeps `main`'s whole width. */
   async function expectFloating(page: Page): Promise<void> {
     await expect(asides(page)).toBeVisible();
@@ -441,6 +467,8 @@ test.describe('phone width', () => {
 
       await expect(page.locator('app-board-pill button')).toContainText('Error');
       await expect(page.getByRole('button', { name: 'System information' })).toBeVisible();
+      await expect(tools(page)).toBeVisible();
+      await expectTwoRows(page);
       expect(await topBarSpill(page, true)).toEqual({ spilled: [], toolsOverflow: 0 });
       expect(await pageOverflow(page)).toEqual([
         { horizontal: 0, vertical: 0 },
@@ -467,6 +495,7 @@ test.describe('phone width', () => {
 
       // The tools are the bar's own row under the logo, as wide as the bar inside its padding.
       expect(await toolsRow(page)).toMatchObject({ belowLogo: true, spansBar: true });
+      await expectTwoRows(page);
 
       await sidePanelButton(page).click();
       await expectFloating(page);
@@ -478,17 +507,15 @@ test.describe('phone width', () => {
     });
   }
 
-  for (const { path, answer, shown, toolsFit } of PAGES) {
+  for (const { path, answer, shown } of PAGES) {
     test(`${path} shows the Side panel toggle in its tools row without scrolling`, async ({
       page,
     }) => {
-      // Expected to fail where the tools are wider than the row: the toggle then sits past its
-      // edge, where a person cannot see it. This starts failing the day the page's tools fit.
-      test.fail(!toolsFit, 'the page tools are wider than the phone row');
       await answer(page, null);
       await page.goto(path);
       await shown(page);
 
+      // The side panel toggle leads the tools on a phone, so it is in view however many tools follow.
       const row = await toolsRow(page);
       expect(row, `the tools row: ${JSON.stringify(row.widths)}`).toMatchObject({
         toggleVisible: true,
