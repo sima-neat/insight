@@ -200,6 +200,12 @@ describe('RunsView', () => {
       expect(text(bar())).not.toContain(reason);
     });
 
+    it('says in the count that 8 is the most that can be compared', () => {
+      expect(text(bar()!.querySelector('.count'))).toBe(
+        '8 selected, the most that can be compared',
+      );
+    });
+
     it('leaves the ticked runs as they were', () => {
       expect(box(optionNamed('run 0'))?.hasAttribute('data-blocked')).toBe(false);
       expect(optionNamed('run 0').hasAttribute('aria-disabled')).toBe(false);
@@ -238,6 +244,7 @@ describe('RunsView', () => {
     await renderChecked(...finishedRuns(7).map((run) => run.id));
     expect(root().querySelector('[data-blocked]')).toBeNull();
     expect(text(bar())).not.toContain('At most');
+    expect(text(bar()!.querySelector('.count'))).toBe('7 selected');
   });
 
   it('a click on a row selects it and opens the side panel on it', async () => {

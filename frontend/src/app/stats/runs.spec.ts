@@ -66,7 +66,7 @@ describe('checking runs', () => {
     expect(canCheckRun(RECORDING_RUN)).toBe(false);
   });
 
-  it('a run at the cap is still checkable: only the recording run has no box', () => {
+  it('a finished run has a box', () => {
     expect(canCheckRun(COMPLETE)).toBe(true);
   });
 });

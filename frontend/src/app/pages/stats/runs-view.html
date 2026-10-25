@@ -43,7 +43,7 @@
 
     @if (checkedCount() > 0) {
       <div class="selection" role="group" aria-label="Selected runs">
-        <span class="count">{{ checkedCount() }} selected</span>
+        <span class="count">{{ countText() }}</span>
         <button
           neatButton
           type="button"

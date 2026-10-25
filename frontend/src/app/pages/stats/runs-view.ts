@@ -169,6 +169,15 @@ export class RunsView {
   });
 
   protected readonly checkedCount = computed(() => this.session.checkedRuns().length);
+  /**
+   * The count says why no more can be ticked at the cap: the greyed boxes give the reason only
+   * to a pointer, so on touch the bar is the one place it shows.
+   */
+  protected readonly countText = computed(() =>
+    this.checkedCount() >= MAX_CHECKED_RUNS
+      ? `${MAX_CHECKED_RUNS} selected, the most that can be compared`
+      : `${this.checkedCount()} selected`,
+  );
   protected readonly canCompare = computed(
     () => this.checkedCount() >= 2 && this.checkedCount() <= MAX_CHECKED_RUNS,
   );
