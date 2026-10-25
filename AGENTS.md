@@ -186,9 +186,9 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 600 kB. The initial bundle measures 568.8 kB raw with kit 0.12.0 (the shared chunk 456 kB,
-  main 20 kB, styles 92 kB; 691.9 kB with kit 0.11.3 and 0.11.2, before the icons became plain
-  Lucide drawings; 691.7 kB with kit 0.11.1; 691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3;
+  at 600 kB. The initial bundle measures 569.1 kB raw with kit 0.12.1 (the shared chunk 457 kB,
+  main 20 kB, styles 92 kB; 568.8 kB with kit 0.12.0; 691.9 kB with kit 0.11.3 and 0.11.2, before
+  the icons became plain Lucide drawings; 691.7 kB with kit 0.11.1; 691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3;
   672 kB with kit 0.10.0 before the board pill and System Info's button; 650 kB with kit 0.9.0;
   694 kB with kit 0.5.3, before the kit split into per-component entries), most of it the kit's
   shell, the toast host (rendered in the app root, so it is in main on purpose) and Angular with
@@ -198,10 +198,11 @@ merging.
   code is imported from `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and
   stays out of the initial bundle. Streaming, Media, Peripherals and Stats are lazy routes too, and
   so are the kit entries only they use (`/file-browser`, `/select-list`, `/dialog`, Peripherals'
-  `/level-meter` and the charts entry, `/charts`, which only Stats draws with and which brings d3's scale and shape modules: nothing
-  outside Stats imports it, and a type-only import is erased). The top bar's board and System Info
-  dialogs are imported on their first open (`TopBarDialogs`), with the kit entries they bring
-  (`/collapsible`, `/callout`, which Peripherals and the Viewer use too).
+  `/level-meter` and the charts entry, `/charts`, which only Stats draws with and which brings d3's
+  scale and shape modules: nothing outside Stats imports it, and a type-only import is erased). The
+  top bar's board and System Info dialogs are imported on their first open (`TopBarDialogs`), with
+  the kit entries they bring (`/collapsible`, `/callout`, which Peripherals and the Viewer use
+  too).
   `npm run check:bundle` (after a build, and in CI) fails if any of that leaks into the initial
   bundle, or goes missing from the build: its markers are the selectors of the Viewer's video tile,
   the four lazy pages (`app-streaming-page`, `app-media-page`, `app-peripherals-page`,
