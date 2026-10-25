@@ -5,7 +5,7 @@ import {
   computed,
   input,
 } from '@angular/core';
-import { NeatTimeChart, type NeatReference } from '@sima/neat-ui/charts';
+import { type NeatChartAxis, NeatTimeChart, type NeatReference } from '@sima/neat-ui/charts';
 import { formatValue } from '../../stats/format';
 import type { ChartInputs } from '../../stats/telemetry';
 
@@ -13,11 +13,11 @@ import type { ChartInputs } from '../../stats/telemetry';
 export type StatsChartInputs = ChartInputs & { readonly reference?: NeatReference | null };
 
 /**
- * One metric's time chart in the side panel: the inputs a builder in `telemetry.ts` made
- * (`metricChart`, `pairChart`, `thermalMaxChart`, `boardPowerChart`) on the kit's `neat-time-chart`,
- * its values worded in the chart's unit. A null chart, a metric the board does not report, draws
- * nothing (#170). Every area's charts are this, so none of them words a value or sets a scale of
- * its own.
+ * One metric's time chart: the inputs a builder made (in `telemetry.ts`: `metricChart`,
+ * `pairChart`, `thermalMaxChart`, `boardPowerChart`; the comparison's overlay from `compare.ts`) on
+ * the kit's `neat-time-chart`, its values worded in the chart's unit. A null chart, a metric the
+ * board does not report, draws nothing (#170). Every Stats time chart is this, so none of them
+ * words a value or sets a scale of its own.
  */
 @Component({
   selector: 'app-stats-chart',
@@ -37,6 +37,7 @@ export type StatsChartInputs = ChartInputs & { readonly reference?: NeatReferenc
         [size]="size()"
         [headless]="headless()"
         [valueLabels]="valueLabels()"
+        [axis]="axis()"
         [format]="format()"
       />
     }
@@ -53,6 +54,11 @@ export class StatsChart {
   readonly headless = input(false, { transform: booleanAttribute });
   /** Whether the grid and the levels carry their values; a card's small plot leaves them out. */
   readonly valueLabels = input(true, { transform: booleanAttribute });
+  /**
+   * What the time axis counts: back from the newest sample for a live window, forward from the
+   * first for runs read from their start.
+   */
+  readonly axis = input<NeatChartAxis>('recent');
 
   private readonly unit = computed(() => this.chart()?.unit ?? null);
   /** One function per unit, so the chart does not re-word its values on every poll. */

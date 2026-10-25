@@ -51,6 +51,7 @@ import { SentinelTelemetry, type TelemetryUpdate } from '../../stats/sentinel-te
 import { StatsSession } from '../../stats/stats-session';
 import { sessionCsv, sessionCsvFilename, type OverviewCardId } from '../../stats/telemetry';
 import { TopBarDialogs } from '../../top-bar-dialogs';
+import { CompareView } from './compare-view';
 import { MetricsTable } from './metrics-table';
 import { overviewCards } from './overview-cards';
 import { RecordTrace } from './record-trace';
@@ -158,6 +159,7 @@ function notReadyHeading(
     Announcement,
     BoardProblemNotice,
     BoardSettingsAction,
+    CompareView,
     MetricsTable,
     NeatAsidePanel,
     NeatAsideToggle,

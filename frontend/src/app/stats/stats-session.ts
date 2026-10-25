@@ -22,6 +22,11 @@ export class StatsSession {
    * its baseline.
    */
   readonly checkedRuns: WritableSignal<readonly string[]> = signal([]);
+  /**
+   * The series Compare draws (a key of `COMPARE_SERIES`); null before the first choice, and
+   * Compare falls back to the first series the runs share while this is not one of them.
+   */
+  readonly compareSeries: WritableSignal<string | null> = signal(null);
 
   /** The board generation `run` and `checkedRuns` were chosen on; undefined before the first. */
   private runsGeneration: number | undefined = undefined;

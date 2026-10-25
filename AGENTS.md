@@ -123,10 +123,12 @@ merging.
     areas; a null chip leaves it out). It is parked for a kit change: `neatAsideTitle` gaining a
     chip slot would replace it.
   - `app-stats-chart` is one metric's time chart (`neat-time-chart`) from the inputs a builder in
-    `stats/telemetry.ts` made, its values worded in the chart's unit. Every Stats time chart, in
-    the cards and in each area, is this one, so none words a value or sets a scale of its own. The
-    other Stats charts are the kit's, used directly: Power rails' `neat-stacked-chart`, the
-    per-core `neat-heatmap` and the tables' `neat-sparkline`; the Power tiles are `neat-chart-card`.
+    `stats/telemetry.ts` (or Compare's overlay in `stats/compare.ts`) made, its values worded in
+    the chart's unit. Every Stats time chart, in the cards, in each area and in Compare (whose
+    time axis counts from the runs' start, `axis="elapsed"`), is this one, so none words a value
+    or sets a scale of its own. The other Stats charts are the kit's, used directly: Power rails'
+    `neat-stacked-chart`, the per-core `neat-heatmap` and the tables' `neat-sparkline`; the Power
+    tiles are `neat-chart-card`.
   - `app-metrics-table` lists metrics as a table (name, group, value, a sparkline of the window,
     status): Stats' All metrics and its Storage & Network area.
   - `app-board-problem-notice` says why the board cannot be used, with the way out where there is

@@ -21,6 +21,7 @@ import { PeripheralsService } from '../../peripherals/peripherals.service';
 import type { SentinelMetric, SentinelMetrics, SentinelState } from '../../stats/api';
 import {
   ACTIVE_TRACE,
+  COMPARE_RAW,
   RUNS_LIST,
   runsAnswer,
   SAVED_RUN,
@@ -158,12 +159,16 @@ describe('StatsPage', () => {
     visibility = 'visible';
     vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
     vi.stubGlobal('localStorage', new FakeLocalStorage());
-    // jsdom has no ResizeObserver; the run list watches its width to give up a column.
+    // jsdom has no ResizeObserver; the run list watches its width to give up a column, and
+    // Compare's tab strips theirs to scroll their tabs.
     vi.stubGlobal(
       'ResizeObserver',
       class {
         observe(): void {
           // jsdom lays nothing out, so no width ever changes.
+        }
+        unobserve(): void {
+          // Nothing was observed.
         }
         disconnect(): void {
           // Nothing was observed.
@@ -1032,6 +1037,25 @@ describe('StatsPage', () => {
       expect(chip()).toBe('Live');
       expect(announcement()).toBe('Metrics are updating live.');
       expect(cards()).toHaveLength(6);
+    });
+
+    it('Compare shows the comparison of the runs the address names, across the full width', async () => {
+      const [baseline, other] = COMPARE_RAW.runs.map((run) => run.metadata.id);
+      await visit();
+      await go(`/stats/compare?runs=${baseline},${other}&baseline=${baseline}`);
+      // The run list first: it says whether the runs are still on the board and finished.
+      await flush(runsRead(), runsAnswer());
+      const request = http.expectOne((request) => request.url === '/api/sentinel/compare');
+      expect(request.request.params.get('runs')).toBe(`${baseline},${other}`);
+      await flush(request, {
+        board: METRICS_LIVE.board,
+        generation: GENERATION,
+        sentinel: COMPARE_RAW,
+      });
+
+      const chips = [...root().querySelectorAll('neat-page ul[aria-label="Compared runs"] .name')];
+      expect(chips.map(text)).toEqual(['tes3', 'insight-hw-1790177227']);
+      expect(aside()).toBeNull();
     });
 
     it('the run list is read on Runs and Compare, and not on Live', async () => {

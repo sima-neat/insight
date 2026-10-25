@@ -218,6 +218,8 @@
         </div>
       } @else if (view() === 'runs') {
         <app-stats-runs />
+      } @else {
+        <app-stats-compare />
       }
     }
     @case ('not-ready') {

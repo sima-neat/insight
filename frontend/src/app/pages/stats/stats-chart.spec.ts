@@ -33,7 +33,15 @@ describe('StatsChart', () => {
     expect(chart()!.size()).toBe('medium');
     expect(chart()!.headless()).toBe(false);
     expect(chart()!.valueLabels()).toBe(true);
+    expect(chart()!.axis()).toBe('recent');
     expect(chart()!.format()(1234.5)).toBe('1235 MB');
+  });
+
+  it('counts its time axis forward from the first sample when asked, as a comparison of runs does', async () => {
+    await show({ chart: metricChart(window, 'mla_mem_allocated_mb'), label: 'MLA memory' });
+    fixture.componentRef.setInput('axis', 'elapsed');
+    await fixture.whenStable();
+    expect(chart()!.axis()).toBe('elapsed');
   });
 
   it('takes the size, headlessness and value labels it is asked for, and the reference line a chart carries', async () => {
