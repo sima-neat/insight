@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { Locator, Page } from '@playwright/test';
 
 /** The viewports every page's layout is held to. */
 export const LAPTOP = { width: 1366, height: 768 };
@@ -55,4 +55,9 @@ export function topBarSpill(page: Page, toolbarMayScroll: boolean) {
     const toolsOverflow = mayScroll || !tools ? 0 : tools.scrollWidth - tools.clientWidth;
     return { spilled, toolsOverflow };
   }, toolbarMayScroll);
+}
+
+/** How far an element's content reaches past its right edge. */
+export function sidewaysOverflow(element: Locator): Promise<number> {
+  return element.evaluate((node) => node.scrollWidth - node.clientWidth);
 }

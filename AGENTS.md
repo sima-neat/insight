@@ -105,8 +105,8 @@ merging.
   Peripherals and Stats an opened panel is kept for the session (`AsidePrefs` is root-provided),
   while the Viewer's inspector, owned by the page, starts closed on each visit. The panel is still
   `neat-aside-toggle`'s to close. Where the user was on a page (Viewer position, Streaming's slot,
-  Media's folder and selection, Peripherals' device and modes, Stats' card and thermal group)
-  lives in memory for the next visit (`ViewerSession`, `SourcesSession`, `PeripheralsSession`,
+  Media's folder and selection, Peripherals' device and modes, Stats' card, thermal group and
+  runs) lives in memory for the next visit (`ViewerSession`, `SourcesSession`, `PeripheralsSession`,
   `StatsSession`).
 - **Shared app components.** Each is a styled pattern with more than one use (the one-place rule
   above), so use it instead of writing the markup again:
@@ -186,13 +186,28 @@ merging.
   running on entry, or one a refused Start finds) goes through the page's `CameraPreview.onAdopt`,
   which selects its camera and remembers its mode, so the page never leaves, and so stops, a
   preview it just took up.
-- **Stats** splits its state by how long it lives, as Peripherals does. `SentinelTelemetry` is
-  provided by the page, so it lives exactly as long as it: leaving Stats stops every request to the
-  board (the state read, the metric polls), and because the backend holds the history, coming back
-  shows the full window at once. `SentinelInstall` is root-provided, so an install (which takes
-  minutes) outlives the page: leaving Stats and coming back still finds it running, and its toast
-  says when it ended. `StatsSession` (root) keeps the chosen card and thermal group for the next
-  visit. The history is incremental: the first poll asks for the window (`history=240`), the next
+- **Stats** has three views, each at its own address so that it can be bookmarked or shared: Live
+  (`/stats`), Runs (`/stats/runs`) and Compare (`/stats/compare?runs=<a>,<b>[,…]&baseline=<a>`,
+  runs named by id). They are child routes without components of their own (`app.routes.ts`), so
+  the page stays one instance across them, its services keep what they read, and it draws the
+  view its address names; the view switch (`neat-segmented`, "Stats view") only navigates, and
+  offers Compare while one is open. Their shared parts are listed above (`app-stats-chart`, with
+  Compare's elapsed axis, `app-sentinel-failure`, the kit's table). The page splits its state by
+  how long it lives, as Peripherals does. `SentinelTelemetry` and `SentinelRuns` are provided by
+  the page, so they live exactly as long as it: leaving Stats stops every request to the board
+  (the state read, the metric polls, the trace and run reads), and because the backend holds the
+  history, coming back shows the full window at once. The metrics are polled only while Live shows
+  them (`SentinelTelemetry.setWatching`). `SentinelRuns` reads the trace being recorded every 30 s
+  on every view, since Record and the recording line sit in each view's toolbar, and the run list
+  every 30 s while Runs or Compare shows (`setRunsShown`); its start, stop and delete send
+  `?generation=`, and an answer naming another generation reloads the board rather than applying.
+  Compare asks Sentinel for the comparison itself (`/api/sentinel/compare?raw=1`, the baseline
+  first), once the run list says every run is still on the board and finished. `SentinelInstall`
+  is root-provided, so an install (which takes minutes) outlives the page: leaving Stats and
+  coming back still finds it running, and its toast says when it ended. `StatsSession` (root)
+  keeps the chosen card and thermal group, the selected and ticked runs (by id, dropped on
+  another board) and Compare's series for the next visit.
+  The metric history is incremental: the first poll asks for the window (`history=240`), the next
   ones pass `after` (the newest timestamp held) and `epoch` (which history it is of), and the
   answer holds only the newer samples. An answer marked `full` replaces the window instead. The
   backend sends one for a first poll (no `after`); when its history restarted, so the `epoch`
@@ -227,12 +242,13 @@ merging.
   `npm run check:bundle` (after a build, and in CI) fails if any of that leaks into the initial
   bundle, or goes missing from the build: its markers are the selectors of the Viewer's video tile,
   the four lazy pages (`app-streaming-page`, `app-media-page`, `app-peripherals-page`,
-  `app-stats-page`), the two dialogs (`app-board-dialog`, `app-system-info-dialog`) and those kit
-  entries, the charts entry's among them (`neat-time-chart`, `neat-stacked-chart`,
-  `neat-heatmap`, `neat-sparkline`, `neat-chart-card`). The toast host and
-  the status chip are the kit entries that are there on purpose: the app root renders the toast
-  host, and the board pill shows its state in a status chip on every page. A new lazy page or
-  dialog adds its selector.
+  `app-stats-page`), the parts only Stats uses (`app-stats-runs`, `app-stats-compare`,
+  `app-run-panel`, `app-record-trace`, `app-sentinel-failure`), the two dialogs
+  (`app-board-dialog`, `app-system-info-dialog`) and those kit entries, the charts entry's among
+  them (`neat-time-chart`, `neat-stacked-chart`, `neat-heatmap`, `neat-sparkline`,
+  `neat-chart-card`). The toast host and the status chip are the kit entries that are there on
+  purpose: the app root renders the toast host, and the board pill shows its state in a status
+  chip on every page. A new lazy page or dialog adds its selector.
 - **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`; the
   video part is its `@sima/neat-ui/video` entry point) draws and knows nothing of vf:
   `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the matching frames;

@@ -58,6 +58,17 @@ const LAZY_CODE = [
   // The microphone test's meter, on the Peripherals route only.
   { marker: 'neat-level-meter', what: 'the kit’s level meter', route: 'the Peripherals route' },
   { marker: 'app-stats-page', what: 'the Stats page', route: 'the Stats route' },
+  // Stats' Runs and Compare views and the parts only the Stats page uses: they load with its
+  // route, and an import from shared code would drag them into main.
+  { marker: 'app-stats-runs', what: 'Stats’ Runs view', route: 'the Stats route' },
+  { marker: 'app-stats-compare', what: 'Stats’ Compare view', route: 'the Stats route' },
+  { marker: 'app-run-panel', what: 'Stats’ run panel', route: 'the Stats route' },
+  { marker: 'app-record-trace', what: 'Stats’ Record control', route: 'the Stats route' },
+  {
+    marker: 'app-sentinel-failure',
+    what: 'the Sentinel failure callout',
+    route: 'the Stats route',
+  },
   // The kit's charts entry (`@sima/neat-ui/charts`, with d3's scale and shape modules behind it):
   // only Stats draws charts, so these load with its route.
   { marker: 'neat-time-chart', what: 'the kit’s time chart', route: 'the Stats route' },

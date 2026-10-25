@@ -1,31 +1,23 @@
-import { expect, Locator, Page, test } from '@playwright/test';
+import { expect, Page, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
-import { FakeStatsBackend, NO_BOARD, SENTINEL_FAILED, STATS_BOARD } from './stats-mocks';
+import { pageOverflow, sidewaysOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { NO_BOARD, SENTINEL_FAILED, STATS_BOARD } from './stats-mocks';
+import {
+  advance,
+  openStats,
+  POLL_MS,
+  rail,
+  SETTLE_MS,
+  toast,
+  toolButton,
+  tools,
+} from './stats-page';
 
-// Stats against a fake board and Sentinel (`FakeStatsBackend`), at every viewport. Time is the
-// page's clock, which only the tests move on (`advance`) where they wait for a poll (2 s apart) or
-// for the polls to stay away; see `holdClock` for the slice that lets the page render.
+// Stats' Live view against a fake board and Sentinel (`FakeStatsBackend`), at every viewport,
+// on the page's held clock (`stats-page.ts`).
 
-const POLL_MS = 2000;
-/** Real time let pass after a clock step, so that answers land and the polls they schedule get a turn. */
-const SETTLE_MS = 250;
-/**
- * The page's clock stands still but for a slice of `FAKE_SLICE_MS` every `REAL_SLICE_MS` of real
- * time: a tenth of real speed, so a poll (2 s of page time) is 20 s of real time away however
- * slow the machine is, which makes the counts of requests exact. Not paused outright because
- * Angular renders on timers (and the lazy routes load on them): a stopped clock stops the page.
- */
-const FAKE_SLICE_MS = 5;
-const REAL_SLICE_MS = 50;
 const BOARD_LABEL = STATS_BOARD.target!.label;
 
-const tools = (page: Page) => page.getByRole('group', { name: 'Page tools' });
-const toolButton = (page: Page, name: string) => tools(page).getByRole('button', { name });
-const rail = (page: Page, name: string) =>
-  page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name, exact: true });
-const toast = (page: Page, text: string) =>
-  page.locator('[data-slot="toast"]').filter({ hasText: text });
 const panel = (page: Page) => page.getByRole('region', { name: 'Stats area' });
 /** The side panel's own scroll container: the panel sits inside it, beside the page's body. */
 const aside = (page: Page) => panel(page).locator('xpath=ancestor::aside');
@@ -37,50 +29,6 @@ const card = (page: Page, heading: string) =>
   cards(page).filter({ has: page.getByRole('button', { name: heading, exact: true }) });
 const cardButton = (page: Page, heading: string) =>
   card(page, heading).getByRole('button', { name: heading, exact: true });
-
-/** Opens Stats on a fake board and Sentinel; `setUp` changes the fake before the page loads. */
-async function openStats(
-  page: Page,
-  size: { width: number; height: number },
-  setUp: (backend: FakeStatsBackend) => void = () => undefined,
-): Promise<FakeStatsBackend> {
-  const backend = new FakeStatsBackend();
-  setUp(backend);
-  await backend.install(page);
-  await holdClock(page);
-  await page.setViewportSize(size);
-  await page.goto('/stats');
-  return backend;
-}
-
-/** Stops the page's clock but for a slice at a time (`FAKE_SLICE_MS`), until the page closes. */
-async function holdClock(page: Page): Promise<void> {
-  const start = Date.parse('2026-10-24T10:05:00Z');
-  await page.clock.install({ time: start });
-  await page.clock.pauseAt(start + 1000);
-  let running = false;
-  const timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    page.clock
-      .runFor(FAKE_SLICE_MS)
-      .catch(() => undefined)
-      .finally(() => (running = false));
-  }, REAL_SLICE_MS);
-  page.on('close', () => clearInterval(timer));
-}
-
-/**
- * Moves the page's clock on by `ms`, in `steps` steps with real time to settle after each. A poll
- * is scheduled only once its predecessor's answer has landed, and one clock step fires a due
- * timer once, so a loop that should not be running needs several steps to show itself.
- */
-async function advance(page: Page, ms: number, steps = 1): Promise<void> {
-  for (let step = 0; step < steps; step++) {
-    await page.clock.runFor(ms / steps);
-    await page.waitForTimeout(SETTLE_MS);
-  }
-}
 
 for (const { name, size } of VIEWPORTS) {
   test(`six cards show the board's readings, and a click on Board power opens its area and marks it at ${name}`, async ({
@@ -380,9 +328,4 @@ for (const { name, size } of VIEWPORTS) {
       }
     }
   });
-}
-
-/** How far an element's content reaches past its right edge. */
-function sidewaysOverflow(element: Locator): Promise<number> {
-  return element.evaluate((node) => node.scrollWidth - node.clientWidth);
 }
