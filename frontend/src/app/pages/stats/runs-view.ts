@@ -38,7 +38,13 @@ interface RunRow {
 /** What a delete that did not delete every run says, run by run, by name. */
 interface DeleteReport {
   readonly title: string;
-  readonly failures: readonly { name: string; title: string; hint: string; detail: string }[];
+  readonly failures: readonly {
+    name: string;
+    title: string;
+    message: string;
+    hint: string;
+    detail: string;
+  }[];
   /** The runs after the failure that stopped the batch: still selected. */
   readonly notTried: readonly string[];
   readonly deleted: readonly string[];
@@ -50,7 +56,7 @@ const plural = (count: number): string => (count === 1 ? 'run' : 'runs');
 function deleteQuestion(names: readonly string[]): NeatConfirmOptions {
   return {
     title: names.length === 1 ? `Delete ${names[0]}?` : `Delete ${names.length} runs?`,
-    message: 'This removes them from the board and cannot be undone.',
+    message: `This removes ${names.length === 1 ? 'it' : 'them'} from the board and cannot be undone.`,
     confirmLabel: 'Delete',
     tone: 'danger',
   };
@@ -75,6 +81,7 @@ function deleteReport(
     failures: outcome.failed.map(({ id, failure }) => ({
       name: nameOf(id),
       title: failure.title,
+      message: failure.problem.message,
       hint: failure.hint,
       detail: failure.detail,
     })),
@@ -153,11 +160,17 @@ export class RunsView {
   });
 
   protected readonly checkedCount = computed(() => this.session.checkedRuns().length);
+  /** At the cap the unticked rows have no box (the kit has no disabled one), which is said. */
+  protected readonly atCap = computed(() => this.checkedCount() >= MAX_CHECKED_RUNS);
+  protected readonly maxRuns = MAX_CHECKED_RUNS;
   protected readonly canCompare = computed(
     () => this.checkedCount() >= 2 && this.checkedCount() <= MAX_CHECKED_RUNS,
   );
 
-  /** A delete is under way: Delete and Compare wait until it has finished. */
+  /**
+   * A delete is under way: Delete and Compare wait until it has finished, Delete with
+   * `aria-disabled` so the focus stays on it.
+   */
   protected readonly deleting = signal(false);
   /** Delete is asking; it stays enabled so the dialog can give the focus back on Cancel. */
   private asking = false;

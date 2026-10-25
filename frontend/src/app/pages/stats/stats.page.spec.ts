@@ -1117,6 +1117,30 @@ describe('StatsPage', () => {
       );
     });
 
+    it('the side panel says when the run list could not be read, rather than reading on', async () => {
+      const saved = RUNS_LIST.find((run) => run.id === SAVED_RUN.metadata.id)!;
+      TestBed.inject(StatsSession).run.set(saved.id);
+      await visit();
+      await go('/stats/runs');
+      expect(text(aside()?.querySelector('section'))).toBe('Reading runs from the board…');
+
+      await flush(runsRead(), failed('sentinel_failed'), true);
+      expect(text(aside()?.querySelector('section'))).toBe('The run list could not be read.');
+
+      // Read on the next try: the run's panel, which reads the run. Rendered without waiting for
+      // the page to settle: the run read out keeps it unsettled.
+      await advance(30_000);
+      await answerState();
+      runsRead().flush(runsAnswer());
+      await vi.advanceTimersByTimeAsync(0);
+      TestBed.tick();
+      await flush(
+        http.expectOne((request) => request.url === `${RUNS_URL}/${encodeURIComponent(saved.id)}`),
+        { board: METRICS_LIVE.board, generation: GENERATION, sentinel: SAVED_RUN },
+      );
+      expect(asideTitle()).toBe(saved.name);
+    });
+
     it('the runs ticked and selected belong to their board: another board starts with none', async () => {
       const session = TestBed.inject(StatsSession);
       await visit();

@@ -181,6 +181,19 @@ describe('RunsView', () => {
     expect(box(optionNamed('run 9'))).not.toBeNull();
   });
 
+  it('at 8 ticked runs the selection bar says why the others have no box', async () => {
+    const cap = () => text(bar()?.querySelector('.cap'));
+    runs.runs.set(finishedRuns(10));
+    await renderChecked(...finishedRuns(7).map((run) => run.id));
+    expect(cap()).toBe('');
+
+    await click(box(optionNamed('run 7'))!);
+    expect(cap()).toBe('At most 8 runs can be compared.');
+
+    await click(box(optionNamed('run 7'))!);
+    expect(cap()).toBe('');
+  });
+
   it('a click on a row selects it and opens the side panel on it', async () => {
     await render();
 
@@ -246,23 +259,37 @@ describe('RunsView', () => {
 
     await click(barButton('Delete'));
 
-    expect(confirm.ask.mock.calls[0][0].title).toBe('Delete tes3?');
+    expect(confirm.ask.mock.calls[0][0]).toMatchObject({
+      title: 'Delete tes3?',
+      message: 'This removes it from the board and cannot be undone.',
+    });
     expect(toasts.status).toHaveBeenCalledWith('Deleted 1 run from the board.');
     expect(session.run()).toBe(HW_LONG.id);
   });
 
-  it('Compare and Delete wait while a delete is out', async () => {
+  it('Compare and Delete wait while a delete is out, Delete keeping the focus', async () => {
     let finish!: (outcome: DeleteOutcome) => void;
     runs.deleteRuns.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     await renderChecked(TES3.id, HW_SHORT.id);
 
-    await click(barButton('Delete'));
+    const remove = barButton('Delete');
+    remove.focus();
+    await click(remove);
     expect(barButton('Compare').disabled).toBe(true);
-    expect(barButton('Delete').disabled).toBe(true);
+    // Not disabled, which would drop the focus to the page: it waits with aria-disabled.
+    expect(remove.disabled).toBe(false);
+    expect(remove.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(remove);
+    await click(remove);
+    expect(confirm.ask).toHaveBeenCalledOnce();
+    expect(runs.deleteRuns).toHaveBeenCalledOnce();
 
     finish({ deleted: [], failed: [{ id: TES3.id, failure: failure('not_found') }], notTried: [] });
     await settle();
     expect(barButton('Compare').disabled).toBe(false);
+    expect(remove.getAttribute('aria-disabled')).toBeNull();
+    // The runs not deleted stay ticked, so the bar and Delete stay, and so does the focus.
+    expect(document.activeElement).toBe(remove);
   });
 
   it('Cancel deletes nothing and keeps the runs ticked', async () => {
@@ -305,8 +332,10 @@ describe('RunsView', () => {
 
     const report = callout()!;
     expect(text(report.querySelector('[role="heading"]'))).toBe('2 of 3 runs were not deleted');
+    // Each failure's title, then what the backend said, then its hint (#170).
     expect([...report.querySelectorAll('.failures p')].map(text)).toEqual([
       `insight-hw-1790177227: ${failure('stale_snapshot').title}`,
+      'Failed with stale_snapshot.',
       'Check the board.',
     ]);
     expect(text(report)).toContain('Not tried, so still selected: insight-hw-1790177178');

@@ -11,6 +11,7 @@
           @for (failure of report.failures; track $index) {
             <li>
               <p>{{ failure.name }}: {{ failure.title }}</p>
+              <p>{{ failure.message }}</p>
               @if (failure.hint) {
                 <p neatNote>{{ failure.hint }}</p>
               }
@@ -52,12 +53,13 @@
         >
           Compare
         </button>
+        <!-- It waits with aria-disabled while a delete runs, so the focus stays on it. -->
         <button
           neatButton
           type="button"
           size="small"
           variant="danger"
-          [disabled]="deleting()"
+          [attr.aria-disabled]="deleting() || null"
           (click)="delete()"
         >
           Delete
@@ -65,6 +67,9 @@
         <button neatButton type="button" size="small" variant="text" (click)="clear()">
           Clear
         </button>
+        @if (atCap()) {
+          <span neatNote class="cap">At most {{ maxRuns }} runs can be compared.</span>
+        }
       </div>
     }
   </div>

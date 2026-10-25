@@ -311,14 +311,21 @@ export class StatsPage {
 
   /**
    * The run the panel shows on Runs, as a list of none or one, so that the panel is built afresh
-   * for each run: its listed summary, or null while the list is being read (`listed` false) or
-   * once the run is no longer on the board.
+   * for each run: its listed summary, or null while the list is being read (`listed` false, and
+   * `failed` once its read failed: the view says why) or once the run is no longer on the board.
    */
   protected readonly selectedRuns = computed(() => {
     const id = this.session.run();
     if (id === null) return [];
     const listed = this.runs.runs();
-    return [{ id, run: listed?.find((run) => run.id === id) ?? null, listed: listed !== null }];
+    return [
+      {
+        id,
+        run: listed?.find((run) => run.id === id) ?? null,
+        listed: listed !== null,
+        failed: listed === null && this.runs.runsFailure() !== null,
+      },
+    ];
   });
 
   protected readonly updateChip = computed(() => UPDATE_CHIPS[this.telemetry.update()]);

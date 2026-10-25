@@ -278,6 +278,8 @@
           <neat-callout tone="info" heading="This run is no longer on the board" [headingLevel]="2">
             <p>The board's run list no longer has it. Pick another run from the list.</p>
           </neat-callout>
+        } @else if (selected.failed) {
+          <p neatNote>The run list could not be read.</p>
         } @else {
           <p neatNote>Reading runs from the board…</p>
         }
