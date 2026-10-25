@@ -39,7 +39,7 @@ describe('BoardPill', () => {
   }
 
   const label = (button: HTMLElement) =>
-    button.querySelector('.label, .label-clipped')?.textContent?.trim();
+    button.querySelector('span:has(+ neat-status-chip)')?.textContent?.trim();
   const chip = (button: HTMLElement) => button.querySelector('neat-status-chip')!;
   const tone = (button: HTMLElement) =>
     (getDebugNode(chip(button))!.componentInstance as NeatStatusChip).tone();
@@ -97,30 +97,31 @@ describe('BoardPill', () => {
     expect(chip(button).textContent?.trim()).toBe('Not checked');
   });
 
-  it('a narrow screen clips the label out of sight and keeps it in the button name', async () => {
+  it('a narrow screen hides the label from the eye and keeps it in the button name', async () => {
     board.state.set(boardState({ target: DEVKIT }));
     narrow.set(true);
     const button = await render();
 
     expect(button.querySelector('.label')).toBeNull();
-    const clipped = button.querySelector('.label-clipped');
-    expect(clipped?.textContent?.trim()).toBe('DevKit: 192.168.1.20');
-    expect(getComputedStyle(clipped!).clipPath).toBe('inset(50%)');
-    // The button is named from its content: the clipped label is still in it.
+    // The class is the app's global rule (`src/styles.css`), which jsdom does not load; the e2e
+    // spec measures what it does.
+    const hidden = button.querySelector('.visually-hidden');
+    expect(hidden?.textContent?.trim()).toBe('DevKit: 192.168.1.20');
+    // The button is named from its content: the hidden label is still in it.
     expect(button.textContent).toContain('DevKit: 192.168.1.20');
 
     // Back on a wide screen the label is shown again.
     narrow.set(false);
     await fixture.whenStable();
-    expect(button.querySelector('.label-clipped')).toBeNull();
-    expect(getComputedStyle(button.querySelector('.label')!).clipPath).not.toBe('inset(50%)');
+    expect(button.querySelector('.visually-hidden')).toBeNull();
+    expect(button.querySelector('.label')?.textContent?.trim()).toBe('DevKit: 192.168.1.20');
   });
 
   it('a wide screen shows the label', async () => {
     board.state.set(boardState({ target: DEVKIT }));
     const button = await render();
 
-    expect(button.querySelector('.label-clipped')).toBeNull();
+    expect(button.querySelector('.visually-hidden')).toBeNull();
     expect(label(button)).toBe('DevKit: 192.168.1.20');
   });
 });

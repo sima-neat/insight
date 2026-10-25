@@ -9,7 +9,8 @@ import { boardIndicator } from './board-view';
  * The top bar's board pill: which board Insight uses and its state, from any page; a click opens
  * the board dialog. The chip is the kit's status chip, the one kit entry the top bar adds to the
  * initial bundle; the dialog loads on its first open (`TopBarDialogs`). On a narrow screen the
- * label is clipped out of sight and stays in the button's name (`board-pill.css` says why).
+ * label is hidden from the eye (the global `visually-hidden` class) and stays in the button's name
+ * (`board-pill.css` says why).
  */
 @Component({
   selector: 'app-board-pill',
@@ -29,7 +30,7 @@ import { boardIndicator } from './board-view';
       (click)="open()"
     >
       <neat-icon name="board" />
-      <span [class]="narrow() ? 'label-clipped' : 'label'">{{ pill.label }}</span>
+      <span [class.label]="!narrow()" [class.visually-hidden]="narrow()">{{ pill.label }}</span>
       <neat-status-chip [tone]="pill.chip.tone">{{ pill.chip.label }}</neat-status-chip>
     </button>
   `,

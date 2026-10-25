@@ -1,0 +1,15 @@
+/* The app's global styles: what more than one component needs and a component stylesheet cannot
+   share. The app has no Tailwind setup, so the kit's `sr-only` utility does not reach it. */
+
+/* Out of the layout's flow, taking no room, and still read by screen readers: the one copy of the
+   rule (`Announcement` and the board pill's narrow label apply it). */
+.visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

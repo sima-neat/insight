@@ -115,8 +115,9 @@ merging.
     rows in the rest. Streaming's and Media's list sits in `app-slots-column`, which adds their
     stale-status notice; Peripherals puts its banners there.
   - `app-announcement` is a status line said to screen readers and never shown (`role="status"`),
-    for news the screen already shows another way. It is the app's one copy of the `sr-only` rule:
-    the app has no Tailwind, so the kit's utility does not reach it.
+    for news the screen already shows another way. It applies the global `visually-hidden` class,
+    the app's one copy of the `sr-only` rule (`frontend/src/styles.css`): the app has no Tailwind,
+    so the kit's utility does not reach it. Hide anything else from the eye only with that class.
   - `app-panel-title` opens a side panel: the subject as its heading (`neatAsideTitle`) with its
     optional state chip beside it (Streaming's slot panel, Peripherals' device panels, Stats'
     areas; a null chip leaves it out). It is parked for a kit change: `neatAsideTitle` gaining a

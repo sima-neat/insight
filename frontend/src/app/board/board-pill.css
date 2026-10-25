@@ -4,11 +4,10 @@
    tooltip names the target in full.
    On a narrow screen (the kit's `NeatViewport.narrow`, which states the breakpoint once) the bar
    has less room than that cap, and a label squeezed to its first letter in front of the chip
-   reads as broken. So the label is not shortened but clipped out of sight, as `Announcement`
-   does it: it keeps its place in the button's accessible name, which the chip's words and the
-   tooltip complete for the eye. The button may still shrink below its content, or it would stick
-   out past the bar's edge. */
-
+   reads as broken. So the label is not shortened but hidden from the eye with the global
+   `visually-hidden` class (`src/styles.css`): it keeps its place in the button's accessible name,
+   which the chip's words and the tooltip complete for the eye. The button may still shrink below
+   its content, or it would stick out past the bar's edge. */
 :host {
   display: flex;
   min-inline-size: 0;
@@ -24,16 +23,6 @@ button {
   max-inline-size: 10rem;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.label-clipped {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
   white-space: nowrap;
 }
 

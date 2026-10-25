@@ -29,7 +29,7 @@
                 "input": "public"
               }
             ],
-            "styles": ["@sima/neat-ui/styles/neat-ui.css"]
+            "styles": ["@sima/neat-ui/styles/neat-ui.css", "src/styles.css"]
           },
           "configurations": {
             "production": {
