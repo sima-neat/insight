@@ -35,7 +35,8 @@ function count(value: number, noun: string): string {
   return `${value} ${noun}${value === 1 ? '' : 's'}`;
 }
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
+/** A JSON object: not null, not an array. */
+export const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**

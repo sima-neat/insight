@@ -10,8 +10,10 @@ import {
   compareSummary,
   compareTable,
   formatChange,
+  isCompareExport,
   orderedIds,
   readCompareParams,
+  summarisesEveryRun,
   tableGroups,
   tableStatus,
 } from './compare';
@@ -454,5 +456,32 @@ describe('compare CSV', () => {
     expect(compareCsvFilename('x'.repeat(100), new Date(2026, 0, 2))).toBe(
       `sentinel-compare-${'x'.repeat(80)}-2026-01-02.csv`,
     );
+  });
+});
+
+describe('comparison shapes', () => {
+  it('isCompareExport: a body with runs, summaries and changes is a comparison', () => {
+    expect(isCompareExport(COMPARE_RAW)).toBe(true);
+    for (const missing of ['runs', 'summaries', 'baseline_deltas_pct'] as const) {
+      const body: Partial<CompareExport> = { ...COMPARE_RAW };
+      delete body[missing];
+      expect(isCompareExport(body)).toBe(false);
+    }
+    expect(isCompareExport(null)).toBe(false);
+    expect(isCompareExport({ ...COMPARE_RAW, runs: {} })).toBe(false);
+    expect(isCompareExport({ ...COMPARE_RAW, summaries: [] })).toBe(false);
+    // Each run is a full run: the raw comparison's runs carry their samples.
+    expect(isCompareExport({ ...COMPARE_RAW, runs: [{ metadata: BASELINE.metadata }] })).toBe(
+      false,
+    );
+  });
+
+  it('summarisesEveryRun: false once a compared run has no summary', () => {
+    expect(summarisesEveryRun(COMPARE_RAW)).toBe(true);
+    const summaries = { [BASELINE_ID]: COMPARE_RAW.summaries[BASELINE_ID] };
+    expect(summarisesEveryRun({ ...COMPARE_RAW, summaries })).toBe(false);
+    // Its cells stay empty.
+    const table = compareTable({ ...COMPARE_RAW, summaries });
+    expect(table.every((row) => row.cells[1].mean === null)).toBe(true);
   });
 });

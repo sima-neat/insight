@@ -211,6 +211,12 @@ describe('CompareView', () => {
       'insight-hw-1790177227',
     ]);
     expect(chips().map((chip) => text(chip.querySelector('.mark')))).toEqual(['B', '']);
+    // B is for the eye; a screen reader hears ", baseline".
+    expect(chips().map((chip) => text(chip.querySelector('.visually-hidden')))).toEqual([
+      ', baseline',
+      '',
+    ]);
+    expect(chips()[0].querySelector('.mark')!.getAttribute('aria-hidden')).toBe('true');
     const swatches = chips().map((chip) =>
       chip.querySelector<HTMLElement>('.swatch')!.style.getPropertyValue('--series'),
     );
@@ -348,7 +354,25 @@ describe('CompareView', () => {
       'MLA (1)',
       'Power (1)',
     ]);
-    expect(headings(metricTable())).toEqual(['Metric', 'tes3', 'insight-hw-1790177227']);
+    // Each run's heading as its chip reads it, B on the baseline, with the run's note under it.
+    const columns = [...metricTable()!.querySelectorAll('thead th')].slice(1);
+    expect(headings(metricTable())[0]).toBe('Metric');
+    expect(columns.map((th) => text(th.querySelector('.name')))).toEqual([
+      'tes3',
+      'insight-hw-1790177227',
+    ]);
+    expect(columns.map((th) => text(th.querySelector('.mark')))).toEqual(['B', '']);
+    expect(text(columns[0].querySelector('.visually-hidden'))).toBe(', baseline');
+    expect(
+      columns.map((th) =>
+        th.querySelector<HTMLElement>('.swatch')!.style.getPropertyValue('--series'),
+      ),
+    ).toEqual(['var(--neat-series-1)', 'var(--neat-series-2)']);
+    expect(columns.map((th) => text(th.querySelector('.note')))).toEqual([
+      '',
+      'Insight hardware validation',
+    ]);
+    expect(root().querySelector('.partial')).toBeNull();
     expect(rows(metricTable())).toEqual([
       ['Duration', '8.13 s', '6.67 s −18%'],
       ['Energy', '54.2 J', '51.5 J −4.9%'],
@@ -525,6 +549,56 @@ describe('CompareView', () => {
     await flush(compareRequest(), answer());
     expect(calloutHeadings()).toEqual([]);
     expect(chips()).toHaveLength(2);
+  });
+
+  it('says once that the comparison is ready, where it said it was reading it', async () => {
+    const announcement = () => text(root().querySelector('app-announcement'));
+    await openPair();
+    expect(announcement()).toBe('');
+    await flush(compareRequest(), answer());
+    expect(announcement()).toBe('Comparison ready.');
+
+    // Another baseline reads it afresh, and says so again once it is in.
+    baselineSelect().value.set(OTHER);
+    await settle();
+    expect(announcement()).toBe('');
+    await flush(compareRequest(), answer(SWAPPED));
+    expect(announcement()).toBe('Comparison ready.');
+  });
+
+  it.each(['runs', 'summaries', 'baseline_deltas_pct'] as const)(
+    'a comparison without its %s is an unexpected answer, with Retry',
+    async (missing) => {
+      const body: Partial<CompareExport> = { ...COMPARE_RAW };
+      delete body[missing];
+      await openPair();
+      await flush(compareRequest(), answer(body as CompareExport));
+      expect(calloutHeadings()).toEqual(['Insight answered something unexpected']);
+      expect(text(callout())).toContain(
+        'This Sentinel build returned a comparison Insight cannot lay out.',
+      );
+      expect(chips()).toHaveLength(0);
+      expect(text(root().querySelector('app-announcement'))).toBe('');
+
+      await click(buttonNamed('Retry'));
+      await flush(compareRequest(), answer());
+      expect(chips()).toHaveLength(2);
+    },
+  );
+
+  it('says when Sentinel summarised only some of the runs, whose cells stay empty', async () => {
+    const summaries = { [BASELINE]: COMPARE_RAW.summaries[BASELINE] };
+    await openPair();
+    await flush(compareRequest(), answer({ ...COMPARE_RAW, summaries }));
+    await click(
+      [...root().querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+        text(button).startsWith('Per-metric comparison'),
+      )!,
+    );
+    expect(text(root().querySelector('.partial'))).toBe(
+      'Sentinel summarised only some of these runs.',
+    );
+    expect(rows(metricTable()).every((row) => row[2] === '—')).toBe(true);
   });
 
   it('drops an answer for another board and reloads the board', async () => {

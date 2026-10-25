@@ -23,6 +23,7 @@ import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import { firstValueFrom, map } from 'rxjs';
 import { BoardService } from '../../board/board.service';
 import { LatestOnly } from '../../polling';
+import { Announcement } from '../../announcement';
 import { withRequestErrors } from '../../sources/stream-lines';
 import type { CompareAnswer, CompareExport } from '../../stats/api';
 import {
@@ -35,20 +36,25 @@ import {
   compareSummary,
   compareTable,
   formatChange,
+  isCompareExport,
   orderedIds,
   readCompareParams,
   tableGroups,
+  summarisesEveryRun,
   tableStatus,
 } from '../../stats/compare';
 import { downloadCsv } from '../../stats/csv-download';
 import { formatDuration, formatEnergy, formatValue } from '../../stats/format';
-import { failureOf, type SentinelFailure } from '../../stats/sentinel-failure';
+import { failureOf, type SentinelFailure, unexpectedAnswer } from '../../stats/sentinel-failure';
 import { SentinelRuns } from '../../stats/sentinel-runs';
 import { StatsSession } from '../../stats/stats-session';
 import { SentinelFailureCallout } from './sentinel-failure-callout';
 import { StatsChart, type StatsChartInputs } from './stats-chart';
 
 const COMPARE_URL = '/api/sentinel/compare';
+
+/** #170's words for a comparison body without a comparison's parts (Inv-S §2.10). */
+const UNKNOWN_COMPARISON = 'This Sentinel build returned a comparison Insight cannot lay out.';
 
 /** A run's colour: its place among the runs, as the chart colours its line. */
 function seriesColour(index: number): string {
@@ -89,6 +95,7 @@ type Comparison = { answer: CompareExport } | { failure: SentinelFailure } | nul
 @Component({
   selector: 'app-stats-compare',
   imports: [
+    Announcement,
     NeatButton,
     NeatCallout,
     NeatCollapsible,
@@ -184,16 +191,32 @@ export class CompareView {
     return comparison && 'failure' in comparison ? comparison.failure : null;
   });
 
-  /** Each run in its series colour, the baseline first. */
+  /**
+   * Each run in its series colour, the baseline first, with its note: the chips, and the headings
+   * of the per-metric table's run columns.
+   */
   protected readonly chips = computed(
     () =>
       this.answer()?.runs.map((run, index) => ({
         id: run.metadata.id,
         name: run.metadata.name,
+        note: run.metadata.note ?? '',
         baseline: index === 0,
         colour: seriesColour(index),
       })) ?? [],
   );
+
+  /** A run Sentinel did not summarise has only "—" in the per-metric table, which is said. */
+  protected readonly partial = computed(() => {
+    const answer = this.answer();
+    return answer !== null && !summarisesEveryRun(answer);
+  });
+
+  /**
+   * Said to screen readers when the comparison replaces "Reading the comparison from the board…"
+   * (a failure says itself, as an alert). Empty while it is read, so each new one is heard.
+   */
+  protected readonly announcement = computed(() => (this.answer() ? 'Comparison ready.' : ''));
 
   protected readonly seriesOptions = computed(() => {
     const answer = this.answer();
@@ -331,7 +354,7 @@ export class CompareView {
   /**
    * Asks Sentinel to compare `runs` on the board of `generation`, dropping whatever was shown;
    * null asks nothing. An answer is shown only while it is the newest request's and the page is
-   * on that board.
+   * on that board; one without a comparison's parts (`isCompareExport`) is shown as a failure.
    */
   private async load(runs: string | null, generation: number | null): Promise<void> {
     const request = this.reads.next();
@@ -349,7 +372,12 @@ export class CompareView {
         void this.board.reload();
         return;
       }
-      if (this.board.generation() === generation) this.comparison.set({ answer: answer.sentinel });
+      if (this.board.generation() !== generation) return;
+      this.comparison.set(
+        isCompareExport(answer.sentinel)
+          ? { answer: answer.sentinel }
+          : { failure: unexpectedAnswer(UNKNOWN_COMPARISON, generation) },
+      );
     } catch (error) {
       if (!current()) return;
       const failure = failureOf(error, generation);

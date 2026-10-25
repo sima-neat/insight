@@ -77,6 +77,21 @@
   font-weight: 600;
 }
 
+/*
+ * A run column's note, muted under its name. It wraps (the heading's figures keep to one line)
+ * within a width, so a long note does not widen the column.
+ */
+.note {
+  display: block;
+  max-inline-size: 16rem;
+  margin-inline-start: auto;
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+  font-weight: 400;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* A run's colour as the chart's legend draws it, so a chip and a row match its line. */
 .swatch {
   flex: none;

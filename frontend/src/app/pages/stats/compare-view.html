@@ -75,12 +75,10 @@
       <ul class="chips" aria-label="Compared runs">
         @for (chip of chips(); track chip.id) {
           <li class="chip">
-            <span class="swatch" [style.--series]="chip.colour"></span>
-            <span class="name">{{ chip.name }}</span>
-            @if (chip.baseline) {
-              <span class="mark" aria-hidden="true">B</span>
-              <span class="visually-hidden">, baseline</span>
-            }
+            <ng-container
+              [ngTemplateOutlet]="runName"
+              [ngTemplateOutletContext]="{ $implicit: chip }"
+            />
           </li>
         }
       </ul>
@@ -104,6 +102,9 @@
       <neat-collapsible label="Per-metric comparison" [summary]="rowCount()" [(open)]="tableOpen">
         <!-- Every metric of every run: built only while someone looks. -->
         @if (tableOpen()) {
+          @if (partial()) {
+            <p neatNote class="partial">Sentinel summarised only some of these runs.</p>
+          }
           <neat-tabs
             label="Metric groups"
             [value]="shownGroup()"
@@ -124,6 +125,21 @@
     }
   }
 }
+
+<!-- Said once the comparison is in, where the reading note stood; empty while it is read. -->
+<app-announcement>{{ announcement() }}</app-announcement>
+
+<!--
+  A run as the chips and the per-metric headings name it: its colour, its name, and B on the
+  baseline (said as ", baseline").
+-->
+<ng-template #runName let-run>
+  <span class="swatch" [style.--series]="run.colour"></span>
+  <span class="name">{{ run.name }}</span>
+  @if (run.baseline) {
+    <span class="mark" aria-hidden="true">B</span><span class="visually-hidden">, baseline</span>
+  }
+</ng-template>
 
 <!-- The open series tab's panel: its chart over the common window, then its summary per run. -->
 <ng-template #seriesPanel>
@@ -200,7 +216,17 @@
         <tr>
           <th scope="col">Metric</th>
           @for (column of table().columns; track column.id) {
-            <th scope="col" neatNumeric>{{ column.name }}</th>
+            <th scope="col" neatNumeric>
+              <span class="run">
+                <ng-container
+                  [ngTemplateOutlet]="runName"
+                  [ngTemplateOutletContext]="{ $implicit: column }"
+                />
+              </span>
+              @if (column.note) {
+                <span class="note">{{ column.note }}</span>
+              }
+            </th>
           }
         </tr>
       </thead>

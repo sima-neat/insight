@@ -12,13 +12,37 @@ import type { ParamMap } from '@angular/router';
 import type { NeatSeries } from '@sima/neat-ui/charts';
 import type { CompareExport, RunSample, RunTotals, SavedRun } from './api';
 import { formatNumber, isNumber, isThermalMetric, unitSuffix } from './format';
-import { compareText, localDay, percentile } from './runs';
+import { compareText, isObject, isSavedRun, localDay, percentile } from './runs';
 import { csvField } from './telemetry';
 
 const POWER_KEY = 'power_current_watts';
 const THERMAL_MAX = 'thermal_max';
 const RUN_TOTALS_GROUP = 'Run totals';
 const OTHER_GROUP = 'Other';
+
+/**
+ * Whether a body has a raw comparison's parts: full runs (`isSavedRun`), the summaries and the
+ * changes, which the view reads; a body without them is not laid out (spec, "the fallbacks for
+ * unknown body shapes"). Only the parts are checked, not every field in them.
+ */
+export function isCompareExport(body: unknown): body is CompareExport {
+  return (
+    isObject(body) &&
+    Array.isArray(body['runs']) &&
+    body['runs'].every(isSavedRun) &&
+    isObject(body['summaries']) &&
+    isObject(body['baseline_deltas_pct'])
+  );
+}
+
+/**
+ * Whether Sentinel summarised every compared run. A run without a summary has no cells in the
+ * per-metric table (they read "—"), which the view says (#170: "Sentinel summarised only some of
+ * these runs").
+ */
+export function summarisesEveryRun(answer: CompareExport): boolean {
+  return answer.runs.every((run) => isObject(answer.summaries[run.metadata.id]));
+}
 
 /** The group filter that shows every row of the per-metric table. */
 export const ALL_GROUPS = 'All';
