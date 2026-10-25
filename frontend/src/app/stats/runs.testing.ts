@@ -33,11 +33,10 @@ export const ACTIVE_TRACE: RunMetadata = tracesActive.trace;
 export const SAVED_RUN: SavedRun = runDetail;
 
 /**
- * `GET /api/sentinel/compare?raw=1` for `tes3` against that run. The capture predates the
- * daemon's `system` and `sentinel_version` in run metadata and its metric `short` and
- * `description`, so it is cast; a consumer must read only what both captures hold.
+ * `GET /api/sentinel/compare?raw=1` for `tes3` (the baseline) against the run of `SAVED_RUN`,
+ * four metrics each, one of which (`cpu_usage_pct`) neither run took a reading of.
  */
-export const COMPARE_RAW = compareRaw.sentinel as unknown as CompareExport;
+export const COMPARE_RAW: CompareExport = compareRaw.sentinel;
 
 /** An answer to the runs list (or to a delete, which answers the runs left). */
 export function runsAnswer(

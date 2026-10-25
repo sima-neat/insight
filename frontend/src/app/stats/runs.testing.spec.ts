@@ -72,4 +72,24 @@ describe('the runs fixtures', () => {
       COMPARE_RAW.runs.map((run) => run.metadata.id).sort(),
     );
   });
+
+  it('the raw compare gives every metric a run lists a summary and a delta, as the daemon does', () => {
+    for (const run of COMPARE_RAW.runs) {
+      const keys = run.metrics.map((metric) => metric.key).sort();
+      const id = run.metadata.id;
+      expect(Object.keys(COMPARE_RAW.summaries[id].metrics).sort(), id).toEqual(keys);
+      expect(Object.keys(COMPARE_RAW.baseline_deltas_pct[id]).sort(), id).toEqual(keys);
+    }
+    // A metric nobody read counts none and has no change to report.
+    const baseline = COMPARE_RAW.summaries[COMPARE_RAW.baseline_id];
+    expect(baseline.metrics['cpu_usage_pct']).toEqual({
+      count: 0,
+      minimum: null,
+      maximum: null,
+      mean: null,
+      median: null,
+      p95: null,
+    });
+    expect(Object.values(COMPARE_RAW.baseline_deltas_pct).flatMap(Object.values)).toContain(null);
+  });
 });

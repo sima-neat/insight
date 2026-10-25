@@ -178,14 +178,18 @@ export interface RunMetadata {
   system: Record<string, string>;
 }
 
-/** A metric as a run recorded it: the definition, without a reading or a status. */
+/**
+ * A metric as a run recorded it: the definition, without a reading or a status. Sentinel stores
+ * `unit` and `description` as plain strings and Insight passes a run through unchanged, so a
+ * metric with neither has "" (the live metrics, which Insight rebuilds, use null for none).
+ */
 export interface RunMetricDefinition {
   key: string;
   label: string;
   short: string;
-  description: string | null;
+  description: string;
   group: string;
-  unit: string | null;
+  unit: string;
   warn: number | null;
   critical: number | null;
 }
@@ -198,6 +202,8 @@ export interface RunSample {
 
 /** `GET /api/sentinel/runs/<id>`: a run in full. */
 export interface SavedRun {
+  /** Sentinel's file format; the run endpoint drops it, a raw comparison's runs keep it. */
+  schema?: number;
   metadata: RunMetadata;
   metrics: RunMetricDefinition[];
   samples: RunSample[];

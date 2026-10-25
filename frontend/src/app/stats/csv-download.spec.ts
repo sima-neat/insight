@@ -16,13 +16,15 @@ describe('downloadCsv', () => {
       URL.revokeObjectURL = revoke;
     });
     const downloads: { href: string; download: string }[] = [];
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+    // The runner does not restore mocks between tests, so the click is let go by hand.
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
       this: HTMLAnchorElement,
     ) {
       downloads.push({ href: this.href, download: this.download });
       // The download has not started until the click returns, so the URL must still be good.
       expect(revokeObjectURL).not.toHaveBeenCalled();
     });
+    onTestFinished(() => click.mockRestore());
 
     downloadCsv(document, 'a,b\r\n1,2\r\n', 'sentinel-test.csv');
 
