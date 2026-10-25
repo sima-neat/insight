@@ -40,19 +40,6 @@ td + td {
   font-size: var(--neat-text-xs);
 }
 
-/*
- * The figures keep their digits aligned but not `neatNumeric`'s end alignment: a maximum's chip
- * sits after its figure, which would shift the figures of the rows that have one.
- */
-td {
-  font-variant-numeric: tabular-nums;
-}
-
-/* A figure keeps its unit on its line. */
-.figure {
-  white-space: nowrap;
-}
-
 /* A maximum's chip sits after it, and goes under it where the panel is narrow. */
 .maximum {
   display: flex;

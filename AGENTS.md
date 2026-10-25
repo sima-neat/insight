@@ -144,12 +144,14 @@ merging.
   column but cannot share a grid (System Info's sections open and close on their own) set the
   kit's `--neat-details-term-width` on a common ancestor rather than restyling the list's grid
   from app CSS.
-- **Data tables** use the kit's `table[neatTable]`, with `neatNumeric` on a figure column's heading
-  and cells (end-aligned, one line, tabular digits): Stats' metrics table and run panel, and the
-  comparison tables. A table's cell padding, rules, heading look and text size are the kit's, so
-  none restates them; what is one table's own (the metrics table's narrow-container rule and
-  dropped group column, the run panel's flush edges and group headings) is plain CSS in its
-  component, which wins over the kit's defaults without a heavier selector.
+- **Data tables** use the kit's `table[neatTable]`: Stats' metrics table and run panel, and the
+  comparison tables. A figure column's heading and cells take `neatNumeric` (end-aligned, one
+  line, tabular digits), or `neatFigure` (the same, start-aligned) where a cell holds something
+  after its figure, as the run panel's maximum holds its status chip. A table's cell padding,
+  rules, heading look and text size are the kit's, so none restates them; what is one table's own
+  (the metrics table's narrow-container rule and dropped group column, the run panel's flush
+  edges and group headings) is plain CSS in its component, which overrides the kit's defaults
+  without a heavier selector.
 - **The top bar** carries the page's title and tools, then its end items (`neatTopbarEnd`) on
   every page: the board pill (`app-board-pill`), which names the board Insight uses and its state
   and opens the board dialog, and System Info's ⓘ. `TopBarDialogs` opens both dialogs, from there

@@ -128,8 +128,7 @@ describe('RunPanel', () => {
     expect(chips.map(text)).toEqual(['Warning']);
     // The chip is on the maximum, after its figure.
     const maximum = root().querySelector('table tbody:last-child tr:last-child td:last-child')!;
-    expect(text(maximum.querySelector('.figure'))).toBe('40.3 °C');
-    expect(text(maximum.querySelector('neat-status-chip'))).toBe('Warning');
+    expect(text(maximum)).toBe('40.3 °C Warning');
     expect(text(root().querySelector('.facts'))).toMatch(/· 1 past a threshold$/);
   });
 

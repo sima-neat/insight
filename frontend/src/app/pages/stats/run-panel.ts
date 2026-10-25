@@ -12,7 +12,7 @@ import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
-import { NeatTable } from '@sima/neat-ui/table';
+import { NeatFigure, NeatTable } from '@sima/neat-ui/table';
 import { type PanelChip, PanelTitle } from '../../panel-title';
 import type { RunSummary, SavedRun } from '../../stats/api';
 import { formatDuration, formatEnergy, formatValue, statusLabel } from '../../stats/format';
@@ -91,6 +91,7 @@ function undefinedSentence(keys: readonly string[]): string {
     NeatCallout,
     NeatCollapsible,
     NeatDetails,
+    NeatFigure,
     NeatNote,
     NeatStatusChip,
     NeatTable,
