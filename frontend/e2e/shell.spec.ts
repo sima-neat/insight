@@ -280,6 +280,8 @@ test.describe('phone width', () => {
 
   interface PhonePage {
     readonly path: string;
+    /** The page's title, which the top bar's heading says. */
+    readonly title: string;
     /** Answers what the page asks for, with `board` where the test chooses it. */
     answer(page: Page, board: BoardState | null): Promise<void>;
     /** Resolves once the page shows its content, with the board healthy. */
@@ -297,6 +299,7 @@ test.describe('phone width', () => {
   const PAGES: PhonePage[] = [
     {
       path: '/media',
+      title: 'Media',
       answer: async (page, board) => {
         await page.route(
           (url) => url.pathname === '/api/media-files',
@@ -310,6 +313,7 @@ test.describe('phone width', () => {
     },
     {
       path: '/streaming',
+      title: 'Streaming',
       answer: async (page, board) => {
         await answerSlots(page, 8);
         await answerBoard(page, board);
@@ -321,6 +325,7 @@ test.describe('phone width', () => {
     },
     {
       path: '/viewer',
+      title: 'Viewer',
       answer: async (page, board) => {
         await answerViewer(page);
         await answerBoard(page, board);
@@ -329,6 +334,7 @@ test.describe('phone width', () => {
     },
     {
       path: '/peripherals',
+      title: 'Peripherals',
       answer: async (page, board) => {
         const backend = new FakePeripheralsBackend();
         if (board) backend.board = board;
@@ -343,6 +349,7 @@ test.describe('phone width', () => {
     },
     {
       path: '/stats',
+      title: 'Stats',
       answer: async (page, board) => {
         const backend = new FakeStatsBackend();
         if (board) backend.board = board;
@@ -477,13 +484,29 @@ test.describe('phone width', () => {
     });
   }
 
-  for (const { path, answer, shown } of PAGES) {
+  /**
+   * Whether the element is clipped to a 1 px line: there for screen readers, not for the eye. A
+   * shown text line is taller; the width is not compared, since a flex item keeps its padding.
+   */
+  const visuallyHidden = (locator: Locator) =>
+    locator.evaluate((element) => element.getBoundingClientRect().height <= 1);
+
+  for (const { path, title, answer, shown } of PAGES) {
     test(`${path} starts without its side panel; the toolbar button floats it over the page and closes it`, async ({
       page,
     }) => {
       await answer(page, null);
       await page.goto(path);
       await shown(page);
+
+      // The bar hides the page title and the app name from the eye, not from screen readers.
+      const heading = page.getByRole('heading', { level: 1 });
+      await expect(heading).toHaveCount(1);
+      await expect(heading).toHaveText(title);
+      expect(await visuallyHidden(heading)).toBe(true);
+      const appName = page.locator('header').getByText('Neat Insight', { exact: true });
+      await expect(appName).toBeAttached();
+      expect(await visuallyHidden(appName)).toBe(true);
 
       // The panel is open until closed on a wide screen, and nothing was stored: still none here.
       await expect(asides(page)).toHaveCount(0);

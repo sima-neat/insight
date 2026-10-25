@@ -15,7 +15,9 @@ const CLOSED = 'closed';
  * Stored as `neat-insight:<page>:aside`; on a wide screen a panel is open until the user closes it,
  * as it was before anything was remembered. A narrow screen floats the panel over the page, so
  * there it starts closed and opening or closing it is not remembered (`neatAsideOpen`): a phone
- * must not overwrite what was chosen on a wide screen.
+ * must not overwrite what was chosen on a wide screen. That choice lives as long as this root
+ * service, so a phone keeps an opened panel for the session; the Viewer's inspector, owned by its
+ * page, starts closed on every visit.
  */
 @Injectable({ providedIn: 'root' })
 export class AsidePrefs {
