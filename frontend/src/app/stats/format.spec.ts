@@ -2,6 +2,9 @@ import type { MetricStatus, SentinelMetric } from './api';
 import {
   alertLabel,
   fixedValue,
+  formatDuration,
+  formatElapsed,
+  formatEnergy,
   formatNumber,
   formatValue,
   isTemperatureUnit,
@@ -199,5 +202,25 @@ describe('how a status is worded and drawn', () => {
       { value: 90, tone: 'danger', label: 'Critical 90%' },
     ]);
     expect(thresholdsOf(metric({ warn: null, critical: null, unit: 'W' }))).toEqual([]);
+  });
+
+  it('formatDuration reads seconds with one decimal under an hour and hours with minutes after', () => {
+    expect(formatDuration(34_379)).toBe('34.4 s');
+    expect(formatDuration(0)).toBe('0.0 s');
+    expect(formatDuration(3_720_000)).toBe('1 h 2 min');
+    expect(formatDuration(3_600_000)).toBe('1 h 0 min');
+  });
+
+  it('formatEnergy words joules, kilojoules from 1000 J and an unmeasured run as a dash', () => {
+    expect(formatEnergy(274.9)).toBe('275 J');
+    expect(formatEnergy(1024)).toBe('1.02 kJ');
+    expect(formatEnergy(999.6)).toBe('1.00 kJ');
+    expect(formatEnergy(null)).toBe('—');
+  });
+
+  it('formatElapsed is a clock: m:ss, and h:mm:ss from an hour', () => {
+    expect(formatElapsed(34_000)).toBe('0:34');
+    expect(formatElapsed(725_900)).toBe('12:05');
+    expect(formatElapsed(3_725_000)).toBe('1:02:05');
   });
 });

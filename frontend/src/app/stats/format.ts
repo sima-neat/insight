@@ -164,3 +164,28 @@ export function thresholdsOf(metric: SentinelMetric): NeatThreshold[] {
   }
   return thresholds;
 }
+
+/** How long a run took: seconds with one decimal under an hour ("34.4 s"), then "1 h 2 min". */
+export function formatDuration(ms: number): string {
+  if (ms < 3_600_000) return `${(ms / 1000).toFixed(1)} s`;
+  const minutes = Math.floor(ms / 60_000);
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
+/** The energy of a run: whole joules ("275 J"), kilojoules from 1000 J ("1.02 kJ"), a dash for none. */
+export function formatEnergy(joules: number | null): string {
+  if (!isNumber(joules)) return '—';
+  const whole = Math.round(joules);
+  return whole < 1000 ? `${whole} J` : `${(joules / 1000).toFixed(2)} kJ`;
+}
+
+/** The time a trace has been recording, as a clock: "0:34", "12:05", "1:02:05". */
+export function formatElapsed(ms: number): string {
+  const total = Math.floor(Math.max(0, ms) / 1000);
+  const seconds = String(total % 60).padStart(2, '0');
+  const minutes = Math.floor(total / 60) % 60;
+  const hours = Math.floor(total / 3600);
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
+    : `${minutes}:${seconds}`;
+}
