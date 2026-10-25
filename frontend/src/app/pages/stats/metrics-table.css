@@ -4,36 +4,8 @@
   container-type: inline-size;
 }
 
-table {
-  inline-size: 100%;
-  border-collapse: collapse;
-  font-size: var(--neat-text-sm);
-}
-
-th,
-td {
-  padding: var(--neat-space-2) var(--neat-space-3);
-  border-block-end: 1px solid var(--border);
-  text-align: start;
-  vertical-align: middle;
-}
-
-th {
-  font-weight: 500;
-}
-
-thead th {
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
-}
-
 .group {
   color: var(--muted-foreground);
-}
-
-.value {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 
 /*
@@ -50,7 +22,11 @@ neat-sparkline {
   min-inline-size: 3rem;
 }
 
-/* Narrow, the cells give up some of their padding so that the five columns fit a side panel. */
+/*
+ * Narrow, the cells give up some of their padding so that the five columns fit a side panel. This
+ * stays here and not in the kit's table: it reads the container this component declares above,
+ * and 40rem is where these five columns stop fitting, which another table would place elsewhere.
+ */
 @container (width < 40rem) {
   th,
   td {

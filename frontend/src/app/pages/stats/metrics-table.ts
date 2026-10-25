@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { NeatSparkline } from '@sima/neat-ui/charts';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
+import { NeatNumeric, NeatTable } from '@sima/neat-ui/table';
 import type { SentinelMetric } from '../../stats/api';
 import { formatValue, lineTone, statusLabel, thresholdText } from '../../stats/format';
 import type { TelemetryWindow } from '../../stats/telemetry';
@@ -12,15 +13,15 @@ import type { TelemetryWindow } from '../../stats/telemetry';
  */
 @Component({
   selector: 'app-metrics-table',
-  imports: [NeatSparkline, NeatStatusChip],
+  imports: [NeatNumeric, NeatSparkline, NeatStatusChip, NeatTable],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <table [attr.aria-label]="label()">
+    <table neatTable [attr.aria-label]="label()">
       <thead>
         <tr>
           <th scope="col">Metric</th>
           <th scope="col" class="group">Group</th>
-          <th scope="col">Value</th>
+          <th scope="col" neatNumeric>Value</th>
           <th scope="col">Trend</th>
           <th scope="col">Status</th>
         </tr>
@@ -30,7 +31,7 @@ import type { TelemetryWindow } from '../../stats/telemetry';
           <tr>
             <th scope="row" [attr.title]="row.title">{{ row.name }}</th>
             <td class="group">{{ row.group }}</td>
-            <td class="value">{{ row.value }}</td>
+            <td neatNumeric>{{ row.value }}</td>
             <td class="trend">
               <neat-sparkline
                 [label]="row.name"

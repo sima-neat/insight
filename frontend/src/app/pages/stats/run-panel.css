@@ -18,37 +18,19 @@
   gap: var(--neat-space-2);
 }
 
-table {
-  inline-size: 100%;
-  border-collapse: collapse;
-  font-size: var(--neat-text-sm);
-}
-
 /*
  * The metric's name takes what the figures leave: no inset at the panel's edges, and a gap before
- * each figure only.
+ * each figure only. The kit's table pads every cell on both sides.
  */
 th,
 td {
-  padding: var(--neat-space-2) 0;
-  border-block-end: 1px solid var(--border);
-  text-align: start;
-  vertical-align: middle;
+  padding-inline: 0;
 }
 
 th + th,
 th + td,
 td + td {
   padding-inline-start: var(--neat-space-3);
-}
-
-th {
-  font-weight: 500;
-}
-
-thead th {
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
 }
 
 /* A group's name heads its rows, set off from the metrics under it. */
@@ -58,6 +40,10 @@ thead th {
   font-size: var(--neat-text-xs);
 }
 
+/*
+ * The figures keep their digits aligned but not `neatNumeric`'s end alignment: a maximum's chip
+ * sits after its figure, which would shift the figures of the rows that have one.
+ */
 td {
   font-variant-numeric: tabular-nums;
 }
