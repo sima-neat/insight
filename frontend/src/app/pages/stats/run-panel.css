@@ -1,0 +1,82 @@
+/*
+ * No box of its own: the title and the run's parts are the side panel's, one gap apart (the
+ * column `neatAsidePanel` makes).
+ */
+:host {
+  display: contents;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--neat-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--neat-space-2);
+}
+
+table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--neat-text-sm);
+}
+
+/*
+ * The metric's name takes what the figures leave: no inset at the panel's edges, and a gap before
+ * each figure only.
+ */
+th,
+td {
+  padding: var(--neat-space-2) 0;
+  border-block-end: 1px solid var(--border);
+  text-align: start;
+  vertical-align: middle;
+}
+
+th + th,
+th + td,
+td + td {
+  padding-inline-start: var(--neat-space-3);
+}
+
+th {
+  font-weight: 500;
+}
+
+thead th {
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+}
+
+/* A group's name heads its rows, set off from the metrics under it. */
+.group {
+  padding-block-start: var(--neat-space-3);
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+}
+
+td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A figure keeps its unit on its line. */
+.figure {
+  white-space: nowrap;
+}
+
+/* A maximum's chip sits after it, and goes under it where the panel is narrow. */
+.maximum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+/* A field Insight does not know keeps its lines; a long one wraps instead of widening the panel. */
+.raw {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

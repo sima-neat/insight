@@ -19,7 +19,13 @@ import { boardState, DEVKIT, FakeBoard, FakePeripherals } from '../../board/boar
 import { FakeLocalStorage } from '../../fake-storage.testing';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import type { SentinelMetric, SentinelMetrics, SentinelState } from '../../stats/api';
-import { ACTIVE_TRACE, runsAnswer, traceAnswer } from '../../stats/runs.testing';
+import {
+  ACTIVE_TRACE,
+  RUNS_LIST,
+  runsAnswer,
+  SAVED_RUN,
+  traceAnswer,
+} from '../../stats/runs.testing';
 import { SentinelTelemetry } from '../../stats/sentinel-telemetry';
 import { METRICS_LIVE, sentinelState, withHistory } from '../../stats/stats.testing';
 import {
@@ -151,6 +157,18 @@ describe('StatsPage', () => {
     visibility = 'visible';
     vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
     vi.stubGlobal('localStorage', new FakeLocalStorage());
+    // jsdom has no ResizeObserver; the run list watches its width to give up a column.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {
+          // jsdom lays nothing out, so no width ever changes.
+        }
+        disconnect(): void {
+          // Nothing was observed.
+        }
+      },
+    );
     board = new FakeBoard();
     board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
     toasts = { status: vi.fn(), error: vi.fn() };
@@ -198,10 +216,15 @@ describe('StatsPage', () => {
 
   const root = (): HTMLElement => fixture.nativeElement;
 
-  /** Lets the requests and promise chains behind an answer run, then renders. */
+  /**
+   * Lets the requests and promise chains behind an answer run, then renders. The render is run
+   * here rather than waited for: a clock that ticks while time is moved on (Runs' "5 min ago")
+   * schedules it a fake millisecond later, which moving on by nothing never reaches.
+   */
   async function settle(): Promise<void> {
     for (let turn = 0; turn < 3; turn++) {
       await vi.advanceTimersByTimeAsync(0);
+      TestBed.tick();
       await fixture.whenStable();
     }
   }
@@ -1025,6 +1048,42 @@ describe('StatsPage', () => {
       await answerState();
       http.expectNone((request) => request.url === RUNS_URL);
       http.match((request) => request.url === METRICS_URL);
+    });
+
+    it('Runs lists the runs, opens the selected one in the side panel and says when it is gone', async () => {
+      const saved = RUNS_LIST.find((run) => run.id === SAVED_RUN.metadata.id)!;
+      const runRead = () =>
+        http.expectOne((request) => request.url === `${RUNS_URL}/${encodeURIComponent(saved.id)}`);
+      await visit();
+      await go('/stats/runs');
+      await flush(runsRead(), runsAnswer());
+
+      // A list page: the list scrolls its rows, not the page.
+      expect(root().querySelector('neat-page app-stats-runs neat-select-list')).not.toBeNull();
+      expect(text(aside()?.querySelector('section'))).toBe('Select a run to see its detail.');
+
+      const row = [...root().querySelectorAll<HTMLElement>('[role="option"]')].find((option) =>
+        text(option).startsWith(saved.name),
+      )!;
+      // Rendered without waiting for the page to settle: the run read out keeps it unsettled.
+      row.click();
+      await vi.advanceTimersByTimeAsync(0);
+      TestBed.tick();
+      await flush(runRead(), {
+        board: METRICS_LIVE.board,
+        generation: GENERATION,
+        sentinel: SAVED_RUN,
+      });
+      expect(asideTitle()).toBe(saved.name);
+      expect(aside()?.querySelector('table')).not.toBeNull();
+
+      // Deleted elsewhere (the Sentinel CLI): the next read of the list no longer has it.
+      await advance(30_000);
+      await answerState();
+      await flush(runsRead(), runsAnswer(RUNS_LIST.filter((run) => run.id !== saved.id)));
+      expect(text(aside()?.querySelector('neat-callout [role="heading"]'))).toBe(
+        'This run is no longer on the board',
+      );
     });
 
     it('each view’s toolbar: Live has its update state, Record, ⋯ and the panel; Runs Record and the panel; Compare Record only', async () => {

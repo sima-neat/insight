@@ -1,0 +1,107 @@
+<app-panel-title [chip]="chip()">{{ run().name }}</app-panel-title>
+
+@if (recording()) {
+  <dl neatDetails>
+    @for (fact of live().facts; track fact.label) {
+      <dt>{{ fact.label }}</dt>
+      <dd>{{ fact.value }}</dd>
+    }
+  </dl>
+  <ng-container *ngTemplateOutlet="noteAndTags; context: live()" />
+} @else if (saved(); as saved) {
+  <p neatNote class="facts">{{ saved.facts }}</p>
+  <ng-container *ngTemplateOutlet="noteAndTags; context: saved" />
+
+  <h3 neatAsideHeading>Metrics</h3>
+  <table aria-label="Metrics of the run">
+    <thead>
+      <tr>
+        <th scope="col">Metric</th>
+        <th scope="col">Mean</th>
+        <th scope="col">Min</th>
+        <th scope="col">Max</th>
+      </tr>
+    </thead>
+    @for (group of saved.groups; track group.name) {
+      <tbody>
+        <tr>
+          <th scope="rowgroup" colspan="4" class="group">{{ group.name }}</th>
+        </tr>
+        @for (row of group.rows; track row.key) {
+          <tr>
+            <th scope="row">{{ row.label }}</th>
+            <td>
+              <span class="figure">{{ row.mean }}</span>
+            </td>
+            <td>
+              <span class="figure">{{ row.minimum }}</span>
+            </td>
+            <td>
+              <div class="maximum">
+                <span class="figure">{{ row.maximum }}</span>
+                @if (row.chip; as chip) {
+                  <neat-status-chip [tone]="chip.tone">{{ chip.label }}</neat-status-chip>
+                }
+              </div>
+            </td>
+          </tr>
+        }
+      </tbody>
+    }
+  </table>
+  @if (saved.undefined) {
+    <p neatNote class="undefined">{{ saved.undefined }}</p>
+  }
+
+  <neat-collapsible label="Run metadata" [headingLevel]="3">
+    <dl neatDetails>
+      @for (fact of saved.metadata; track $index) {
+        <dt>{{ fact.label }}</dt>
+        <dd>{{ fact.value }}</dd>
+      }
+    </dl>
+  </neat-collapsible>
+  @if (saved.others.length) {
+    <neat-collapsible label="Other fields" [headingLevel]="3">
+      <dl neatDetails>
+        @for (field of saved.others; track field.key) {
+          <dt>{{ field.key }}</dt>
+          <dd class="raw">{{ field.value }}</dd>
+        }
+      </dl>
+    </neat-collapsible>
+  }
+} @else if (failure(); as failure) {
+  <neat-callout tone="danger" [heading]="failure.title" [headingLevel]="3">
+    <p>{{ failure.problem.message }}</p>
+    @if (failure.hint) {
+      <p neatNote>{{ failure.hint }}</p>
+    }
+    <button
+      neatButton
+      neatCalloutActions
+      type="button"
+      size="small"
+      variant="outlined"
+      (click)="retry()"
+    >
+      Retry
+    </button>
+  </neat-callout>
+} @else {
+  <p neatNote role="status">Reading the run from the board…</p>
+}
+
+<!-- The note and tags a run was started with, each only when it has some. -->
+<ng-template #noteAndTags let-note="note" let-tags="tags">
+  @if (note) {
+    <p class="note">{{ note }}</p>
+  }
+  @if (tags.length) {
+    <div class="tags">
+      @for (tag of tags; track tag) {
+        <neat-status-chip tone="neutral">{{ tag }}</neat-status-chip>
+      }
+    </div>
+  }
+</ng-template>

@@ -53,6 +53,8 @@ import { TopBarDialogs } from '../../top-bar-dialogs';
 import { MetricsTable } from './metrics-table';
 import { overviewCards } from './overview-cards';
 import { RecordTrace } from './record-trace';
+import { RunPanel } from './run-panel';
+import { RunsView } from './runs-view';
 import { StatsAreaPanel } from './stats-area-panel';
 import { StatsChart } from './stats-chart';
 
@@ -175,6 +177,8 @@ function notReadyHeading(
     NeatTooltip,
     NgTemplateOutlet,
     RecordTrace,
+    RunPanel,
+    RunsView,
     StatsAreaPanel,
     StatsChart,
   ],
@@ -296,6 +300,21 @@ export class StatsPage {
   protected readonly asideShown = computed(
     () => this.asideOpen() && this.body() === 'ready' && this.view() !== 'compare',
   );
+
+  /** Runs is a list page: the list scrolls its rows, the page nothing (a body state scrolls). */
+  protected readonly listShown = computed(() => this.body() === 'ready' && this.view() === 'runs');
+
+  /**
+   * The run the panel shows on Runs, as a list of none or one, so that the panel is built afresh
+   * for each run: its listed summary, or null while the list is being read (`listed` false) or
+   * once the run is no longer on the board.
+   */
+  protected readonly selectedRuns = computed(() => {
+    const id = this.session.run();
+    if (id === null) return [];
+    const listed = this.runs.runs();
+    return [{ id, run: listed?.find((run) => run.id === id) ?? null, listed: listed !== null }];
+  });
 
   protected readonly updateChip = computed(() => UPDATE_CHIPS[this.telemetry.update()]);
 

@@ -1,0 +1,51 @@
+/* The column is `app-list-column`'s, filling the page as on the other list pages. */
+:host {
+  display: contents;
+}
+
+/* Each part above the list keeps a gap to the next and to the list; none takes room absent. */
+.above > * {
+  margin-block-end: var(--neat-space-3);
+}
+
+/* "2 selected", then Compare, Delete and Clear in a row, wrapping on a phone. */
+.selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+.count {
+  margin-inline-end: var(--neat-space-2);
+  font-size: var(--neat-text-sm);
+  font-weight: 500;
+}
+
+/* One entry per run not deleted: what failed, its hint and what the board said. */
+.failures {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* What the board said keeps its lines; a long one wraps rather than widening the page. */
+pre {
+  margin: 0;
+  font-size: var(--neat-text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The recorded line and the time are about the run named first. */
+.secondary {
+  color: var(--muted-foreground);
+}
+
+/* The reading note keeps its own height at the top of the column rather than filling the row. */
+.state {
+  align-self: start;
+}

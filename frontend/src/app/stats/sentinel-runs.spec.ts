@@ -253,6 +253,22 @@ describe('SentinelRuns', () => {
     noRunsRead();
   });
 
+  it('rereadRuns reads the list at once while it is shown (Retry), and not while it is not', async () => {
+    await openWithRuns();
+    runs.rereadRuns();
+    await fail(runsRead(), 'sentinel_failed');
+    expect(runs.runsFailure()?.code).toBe('sentinel_failed');
+
+    runs.rereadRuns();
+    await flush(runsRead(), runsAnswer(FINISHED));
+    expect(runs.runs()).toEqual(FINISHED);
+    expect(runs.runsFailure()).toBeNull();
+
+    runs.setRunsShown(false);
+    runs.rereadRuns();
+    noRunsRead();
+  });
+
   it('start sends the generation and the trimmed request; success sets the trace and re-reads runs', async () => {
     await openWithRuns(FINISHED);
     const started = runs.startTrace({

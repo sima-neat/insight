@@ -183,6 +183,16 @@ export class SentinelRuns {
   }
 
   /**
+   * Reads the run list again at once while it is shown: after a change, and for the page's Retry
+   * after a failed read. A read still out is dropped; this one answers for it.
+   */
+  rereadRuns(): void {
+    if (!this.runsShown) return;
+    this.invalidate(this.runsSlot);
+    void this.read(this.runsSlot);
+  }
+
+  /**
    * Starts a trace on the current board, with the name, note and tags trimmed and an empty note or
    * tag left out. Resolves with null once the trace is shown, else with why it did not start; a
    * `trace_conflict` (another trace records, or the name is taken) re-reads the trace.
@@ -379,13 +389,6 @@ export class SentinelRuns {
     } finally {
       if (slot.out === request) slot.out = null;
     }
-  }
-
-  /** Reads the run list again after a change, when it is shown. */
-  private rereadRuns(): void {
-    if (!this.runsShown) return;
-    this.invalidate(this.runsSlot);
-    void this.read(this.runsSlot);
   }
 
   /** A start or stop failed. A conflict means the trace shown is out of date: it is read again. */

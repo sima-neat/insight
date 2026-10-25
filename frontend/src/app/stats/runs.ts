@@ -1,5 +1,5 @@
 import { formatRelativeTime } from '../relative-time';
-import type { MetricStatus, RunSample, RunSummary, SavedRun } from './api';
+import type { MetricStatus, RunMetadata, RunSample, RunSummary, SavedRun } from './api';
 import { formatDuration, formatEnergy, isNumber } from './format';
 
 /** How many runs can be compared at once; the backend refuses more. */
@@ -24,6 +24,11 @@ function shortDate(date: Date): string {
 /** "08:41:10", the local time of day. */
 function clock(date: Date): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** "Oct 25, 08:41:10", a local date and time of day. */
+function dateTime(date: Date): string {
+  return `${shortDate(date)}, ${clock(date)}`;
 }
 
 function count(value: number, noun: string): string {
@@ -153,7 +158,7 @@ export function runFacts(run: SavedRun): string {
   if (times.length > 0) {
     const from = new Date(times[0]);
     const to = new Date(times[times.length - 1]);
-    const start = `${shortDate(from)}, ${clock(from)}`;
+    const start = dateTime(from);
     if (times.length === 1) facts.push(start);
     else {
       const sameDay = shortDate(from) === shortDate(to);
@@ -163,6 +168,75 @@ export function runFacts(run: SavedRun): string {
   const past = runMetricRows(run).filter((row) => row.status !== 'ok').length;
   if (past > 0) facts.push(`${past} past a threshold`);
   return facts.join(' · ');
+}
+
+/** A time Sentinel gives, as a local date and time: "Oct 25, 08:41:10"; '' if unreadable. */
+export function formatRunTime(iso: string | null): string {
+  const time = Date.parse(iso ?? '');
+  return Number.isFinite(time) ? dateTime(new Date(time)) : '';
+}
+
+/** A fact about a run as a key/value list shows it. */
+export interface RunFact {
+  label: string;
+  value: string;
+}
+
+/** Names for the board facts Sentinel records today; any other keeps its key. */
+const SYSTEM_LABELS: Record<string, string> = {
+  architecture: 'Architecture',
+  device_tree_model: 'Board model',
+  hostname: 'Hostname',
+  os_release: 'OS release',
+};
+
+/**
+ * The name `/etc/os-release` gives the system (`PRETTY_NAME`), which Sentinel records whole: its
+ * every line would fill the panel. The text as it is when it names none.
+ */
+function osName(release: string): string {
+  const pretty = /^PRETTY_NAME=(?:"([^"]*)"|(.*))$/m.exec(release);
+  return pretty ? (pretty[1] ?? pretty[2]).trim() : release;
+}
+
+/**
+ * What Sentinel keeps about a run besides its name, note and tags (which a panel shows on their
+ * own): its id, start and end, sample interval, Sentinel version, then the board's facts in the
+ * order recorded.
+ */
+export function runMetadataRows(metadata: RunMetadata): RunFact[] {
+  const interval = metadata.sample_interval_ms;
+  const rows: RunFact[] = [
+    { label: 'Id', value: metadata.id },
+    { label: 'Started', value: formatRunTime(metadata.started_at) || '—' },
+    {
+      label: 'Ended',
+      value:
+        metadata.ended_at === null ? 'Still recording' : formatRunTime(metadata.ended_at) || '—',
+    },
+    { label: 'Sample interval', value: isNumber(interval) ? `${interval} ms` : '—' },
+    { label: 'Sentinel version', value: metadata.sentinel_version },
+  ];
+  for (const [key, value] of Object.entries(metadata.system)) {
+    rows.push({
+      label: SYSTEM_LABELS[key] ?? key,
+      value: key === 'os_release' ? osName(value) : value,
+    });
+  }
+  return rows;
+}
+
+/** The parts of a run every run has; anything else a Sentinel build adds is listed as it came. */
+const RUN_PARTS = new Set(['metadata', 'metrics', 'samples']);
+
+/** What a run carries besides its metadata, metrics and samples, as text (JSON for non-strings). */
+export function otherRunFields(run: SavedRun): { key: string; value: string }[] {
+  return Object.entries(run)
+    .filter(([key]) => !RUN_PARTS.has(key))
+    .map(([key, value]) => ({
+      key,
+      value: typeof value === 'string' ? value : JSON.stringify(value),
+    }));
 }
 
 /** The keys the samples of a run carry readings for that the run defines no metric for. */

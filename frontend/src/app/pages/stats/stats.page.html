@@ -84,7 +84,7 @@
   }
 </ng-container>
 
-<neat-page [aside]="asideShown() ? 'open' : 'closed'">
+<neat-page [scroll]="listShown() ? 'none' : 'body'" [aside]="asideShown() ? 'open' : 'closed'">
   <app-announcement>{{ announcement() }}</app-announcement>
 
   @switch (body()) {
@@ -216,6 +216,8 @@
             <p neatNote>Waiting for the first reading from Sentinel…</p>
           }
         </div>
+      } @else if (view() === 'runs') {
+        <app-stats-runs />
       }
     }
     @case ('not-ready') {
@@ -274,6 +276,27 @@
         <app-stats-area-panel [area]="area()" [window]="window" />
       } @else {
         <p neatNote>Waiting for the first reading from Sentinel…</p>
+      }
+    </section>
+  }
+
+  @if (asideShown() && view() === 'runs') {
+    <section neatPageAside neatAsidePanel aria-label="Selected run">
+      @for (selected of selectedRuns(); track selected.id) {
+        @if (selected.run; as run) {
+          <app-run-panel [run]="run" />
+        } @else if (selected.listed) {
+          <neat-callout tone="info" heading="This run is no longer on the board" [headingLevel]="2">
+            <p>
+              It was deleted elsewhere (from the Sentinel CLI, another browser or by the board's
+              retention). Pick another run from the list.
+            </p>
+          </neat-callout>
+        } @else {
+          <p neatNote>Reading runs from the board…</p>
+        }
+      } @empty {
+        <p neatNote>Select a run to see its detail.</p>
       }
     </section>
   }

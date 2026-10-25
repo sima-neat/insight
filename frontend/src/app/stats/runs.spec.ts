@@ -2,18 +2,21 @@ import type { RunSummary, SavedRun } from './api';
 import {
   MAX_CHECKED_RUNS,
   canCheckRun,
+  formatRunTime,
   isRecording,
+  otherRunFields,
   parseTags,
   percentile,
   runFacts,
   runLine,
+  runMetadataRows,
   runMetricRows,
   runWhen,
   traceName,
   undefinedKeys,
   validateTrace,
 } from './runs';
-import { RECORDING_RUN, RUNS_LIST, SAVED_RUN, savedRun } from './runs.testing';
+import { ACTIVE_TRACE, RECORDING_RUN, RUNS_LIST, SAVED_RUN, savedRun } from './runs.testing';
 
 const COMPLETE = RUNS_LIST[3];
 
@@ -288,5 +291,65 @@ describe('validateTrace', () => {
   it('reports the first failure in the order name, note, tags', () => {
     expect(validateTrace('a,b', 'x'.repeat(513), ['x'.repeat(81)])).toMatch(/comma/);
     expect(validateTrace('a', 'x'.repeat(513), ['x'.repeat(81)])).toMatch(/note/);
+  });
+});
+
+describe('formatRunTime', () => {
+  it('words a time as its local date and time of day, and an unreadable one as nothing', () => {
+    expect(formatRunTime(iso(2026, 9, 25, 8, 41, 10))).toBe('Oct 25, 08:41:10');
+    expect(formatRunTime('nonsense')).toBe('');
+    expect(formatRunTime(null)).toBe('');
+  });
+});
+
+describe('runMetadataRows', () => {
+  it('lists the id, times, sample interval, Sentinel version and the board facts', () => {
+    const metadata = {
+      ...SAVED_RUN.metadata,
+      started_at: iso(2026, 8, 23, 15, 27, 12),
+      ended_at: iso(2026, 8, 23, 15, 27, 19),
+    };
+    expect(runMetadataRows(metadata)).toEqual([
+      { label: 'Id', value: '20260923T152712.952Z-insight-hw-1790177227' },
+      { label: 'Started', value: 'Sep 23, 15:27:12' },
+      { label: 'Ended', value: 'Sep 23, 15:27:19' },
+      { label: 'Sample interval', value: '1989 ms' },
+      { label: 'Sentinel version', value: 'main:80ab7de4da31' },
+      { label: 'Architecture', value: 'aarch64' },
+      { label: 'Board model', value: 'SiMa.ai Modalix SoM 16Gig Board' },
+      { label: 'Hostname', value: 'modalix' },
+      // The release file's own name for the system, rather than its every line.
+      { label: 'OS release', value: 'eLxr 12 (aria)' },
+    ]);
+  });
+
+  it('says what is not known, and keeps facts it has no name for under their key', () => {
+    const metadata = {
+      ...ACTIVE_TRACE,
+      started_at: 'nonsense',
+      sample_interval_ms: null,
+      system: { os_release: 'NAME=Other', kernel: '6.1' },
+    };
+    expect(runMetadataRows(metadata)).toEqual([
+      { label: 'Id', value: ACTIVE_TRACE.id },
+      { label: 'Started', value: '—' },
+      { label: 'Ended', value: 'Still recording' },
+      { label: 'Sample interval', value: '—' },
+      { label: 'Sentinel version', value: 'main:80ab7de4da31' },
+      { label: 'OS release', value: 'NAME=Other' },
+      { label: 'kernel', value: '6.1' },
+    ]);
+  });
+});
+
+describe('otherRunFields', () => {
+  it('lists what a run carries besides its metadata, metrics and samples', () => {
+    expect(otherRunFields(SAVED_RUN)).toEqual([]);
+    const run = { ...SAVED_RUN, schema: 2, origin: 'cli', extra: { a: 1 } };
+    expect(otherRunFields(run)).toEqual([
+      { key: 'schema', value: '2' },
+      { key: 'origin', value: 'cli' },
+      { key: 'extra', value: '{"a":1}' },
+    ]);
   });
 });
