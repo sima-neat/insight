@@ -207,7 +207,8 @@ describe('SentinelTelemetry', () => {
     await advance(27_999);
     noPoll();
 
-    // The 30 s re-read finds the daemon back: polling starts again at once.
+    // The 30 s re-read finds the daemon back: the halting poll's backoff is long over, so polling
+    // starts again at once.
     await advance(1);
     await answerState();
     await answerMetrics(nextSample(3));
@@ -223,8 +224,50 @@ describe('SentinelTelemetry', () => {
     noStateRead();
     setVisibility('visible');
     noPoll();
+    // The state says available a moment after the failure: the poll waits out its backoff.
     await answerState();
+    await advance(3999);
+    noPoll();
+    await advance(1);
     await answerMetrics(metrics(3, 0, { full: false }));
+  });
+
+  it('a halting failure whose state read says available polls again after the backoff, not at once', async () => {
+    await openLive();
+    await advance(2000);
+    // A metrics read that times out halts polling, while the state read beside it still answers.
+    // Polling at once would hit the board back to back for as long as that lasts.
+    await failMetrics('timeout');
+    await answerState();
+    expect(telemetry.failure()?.code).toBe('timeout');
+    await advance(3999);
+    noPoll();
+    await advance(1);
+    await failMetrics('timeout');
+    await answerState();
+    // The backoff grows as for any failures in a row.
+    await advance(7999);
+    noPoll();
+    await advance(1);
+    await answerMetrics(nextSample(3));
+    expect(telemetry.failure()).toBeNull();
+  });
+
+  it('retry re-reads the state with refresh=1 while the held state says Sentinel is unavailable', async () => {
+    await openLive();
+    await advance(2000);
+    await failMetrics('sentinel_stopped');
+    await answerState({ available: false, status: { state: 'stopped', error: null } });
+
+    // The user started the service and pressed Retry: nothing is polled on the held state, so the
+    // service manager is asked again, and an available answer polls at once.
+    telemetry.retry();
+    const read = stateRead();
+    expect(read.request.params.get('refresh')).toBe('1');
+    noPoll();
+    await flush(read, sentinelState({ generation: 3 }));
+    await answerMetrics(nextSample(3));
+    expect(telemetry.failure()).toBeNull();
   });
 
   it('a failed poll keeps the window and records the failure; retry clears the halt and polls at once', async () => {
@@ -526,7 +569,10 @@ describe('SentinelTelemetry', () => {
     TestBed.tick();
     const recheck = stateRead();
     expect(recheck.request.params.get('refresh')).toBe('1');
+    // The held state predates the install until this read answers.
+    expect(telemetry.rechecking()).toBe(true);
     await flush(recheck, sentinelState({ generation: 3 }));
+    expect(telemetry.rechecking()).toBe(false);
 
     // Another board's install, or a failed one, changes nothing here.
     outcome.set({ generation: 2, ok: true, log: 'installed' });
@@ -539,13 +585,17 @@ describe('SentinelTelemetry', () => {
     TestBed.tick();
     noStateRead();
 
-    // One that ends while the tab is hidden is read when the tab shows again.
+    // One that ends while the tab is hidden is read with refresh=1 when the tab shows again.
     setVisibility('hidden');
     outcome.set({ generation: 3, ok: true, log: 'installed once more' });
     TestBed.tick();
     noStateRead();
     setVisibility('visible');
-    await flush(stateRead(), sentinelState({ generation: 3 }));
+    const shown = stateRead();
+    expect(shown.request.params.get('refresh')).toBe('1');
+    expect(telemetry.rechecking()).toBe(true);
+    await flush(shown, sentinelState({ generation: 3 }));
+    expect(telemetry.rechecking()).toBe(false);
     await answerMetrics(nextSample(3));
   });
 
@@ -563,5 +613,28 @@ describe('SentinelTelemetry', () => {
     await done;
     expect(telemetry.state()?.available).toBe(true);
     await answerMetrics();
+  });
+
+  it('rechecking holds while a refresh=1 read is out to the current board, and a board change ends it', async () => {
+    open();
+    await answerState({ available: false, status: { state: 'missing', error: null } });
+    expect(telemetry.rechecking()).toBe(false);
+
+    void telemetry.recheck();
+    expect(telemetry.rechecking()).toBe(true);
+
+    // The read went with the board it was sent to; the new board's own read is not a recheck.
+    switchBoard(4);
+    expect(telemetry.rechecking()).toBe(false);
+    const [old, fresh] = stateReads();
+    expect(old.request.params.get('refresh')).toBe('1');
+    expect(fresh.request.params.has('refresh')).toBe(false);
+    await flush(old, sentinelState({ generation: 3 }));
+    expect(telemetry.state()).toBeNull();
+    await flush(
+      fresh,
+      sentinelState({ generation: 4, available: false, status: { state: 'missing', error: null } }),
+    );
+    expect(telemetry.rechecking()).toBe(false);
   });
 });

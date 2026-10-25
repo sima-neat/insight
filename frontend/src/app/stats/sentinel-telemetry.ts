@@ -41,8 +41,10 @@ export type TelemetryUpdate = 'live' | 'paused' | 'stopped';
  * selected, its state says available, the user has not paused, no failure halted polling and the
  * tab is visible. The next poll is due 2 s after the previous one started, or longer after
  * failures in a row (`pollDelay`). A failure whose code says the board or the daemon cannot
- * answer (`haltsPolling`) halts polling and re-reads the state; a state read that says available,
- * or `retry()`, starts it again.
+ * answer (`haltsPolling`) halts polling and re-reads the state. A state read that says available
+ * lifts the halt, and the next poll waits out the halting poll's backoff: the state can answer
+ * while the metrics read keeps failing (a timeout, say), and polling at once would hit the board
+ * back to back. `retry()` lifts it and polls at once.
  *
  * **Board changes.** Everything held is the current board generation's. A board change drops it,
  * re-reads the state and frees the poll slot: a request still out to the previous board is
@@ -50,6 +52,10 @@ export type TelemetryUpdate = 'live' | 'paused' | 'stopped';
  * available (#170's "a board switch is not blocked by a request still out to the previous
  * board"). An answer or failure that names another generation than the one it was asked under
  * means another client switched the board: the board is reloaded and the answer dropped.
+ *
+ * **Install.** A successful install on the current board re-reads the state with `refresh=1`
+ * (from the tab showing again, if it ended while hidden): until that read answers, the held state
+ * is the one from before the install, which `rechecking` says.
  *
  * **Hidden tab.** A hidden tab sends nothing: each request runs on the board. Showing it again
  * reads the state and polls at once, once, however often it was hidden and shown.
@@ -73,6 +79,14 @@ export class SentinelTelemetry {
   private readonly stateReadsOut = signal(0);
   /** The state is being read and none is known yet: the page says it is checking. */
   readonly checking = computed(() => this.stateReadsOut() > 0 && this.stateValue() === null);
+
+  /** `refresh=1` state reads out to the current board. */
+  private readonly rechecksOut = signal(0);
+  /**
+   * The board's service manager is being asked again ("Check again", or after an install): the
+   * state held may be out of date, so the page offers neither again until the answer.
+   */
+  readonly rechecking = computed(() => this.rechecksOut() > 0);
 
   private readonly windowValue = signal<TelemetryWindow | null>(null);
   /** The telemetry held for the current board; null until its first answer. */
@@ -129,6 +143,13 @@ export class SentinelTelemetry {
    * after it was sent: the previous board's count went with that board.
    */
   private switches = 0;
+  /** An install succeeded while the tab was hidden: the next state read asks with `refresh=1`. */
+  private recheckOnShow = false;
+  /**
+   * When the poll that halted polling started: a state read that lifts the halt schedules the next
+   * poll from it.
+   */
+  private haltedAt = 0;
   /** The board generation everything held is of; undefined before the first look at the board. */
   private generation: number | null | undefined = undefined;
   private destroyed = false;
@@ -148,12 +169,11 @@ export class SentinelTelemetry {
       const outcome = this.install.outcome();
       if (outcome === seen) return;
       seen = outcome;
-      // A hidden tab sends nothing. It reads the state when it shows again, and the install left
-      // the daemon status it ended with in the backend's cache for that read.
+      // A hidden tab sends nothing: the state check reads the state when it shows again.
       untracked(() => {
-        if (outcome?.ok && outcome.generation === this.board.generation() && this.visible()) {
-          void this.recheck();
-        }
+        if (!outcome?.ok || outcome.generation !== this.board.generation()) return;
+        if (this.visible()) void this.recheck();
+        else this.recheckOnShow = true;
       });
     });
 
@@ -192,12 +212,15 @@ export class SentinelTelemetry {
 
   /**
    * Clears the halt and the backoff and polls at once. A poll still out is this retry's poll; a
-   * backed-off one waiting is sent now. The failure stays until a poll answers.
+   * backed-off one waiting is sent now. The failure stays until a poll answers. While the held
+   * state says Sentinel cannot be used, nothing would be polled on it: the state is read again with
+   * `refresh=1` (the user may just have started the service), and an available answer polls.
    */
   retry(): void {
     this.failures = 0;
     this.halted.set(false);
     if (this.polled === null) this.stopTimer();
+    if (this.stateValue()?.available !== true) void this.readState(true);
     this.sync();
   }
 
@@ -226,6 +249,8 @@ export class SentinelTelemetry {
     this.switches++;
     this.stateReads.discard();
     this.stateReadsOut.set(0);
+    this.rechecksOut.set(0);
+    this.recheckOnShow = false;
     this.polled = null;
     this.stopTimer();
     this.failures = 0;
@@ -240,11 +265,13 @@ export class SentinelTelemetry {
    * Reads the state unless a read is out, which answers for this one, or the tab is hidden: the
    * state check reads it at once when the tab shows. The document is asked, not `visible`: the
    * state check's own visibilitychange listener may run before the one that updates `visible`.
+   * After an install that ended while the tab was hidden, the read asks with `refresh=1`, sent even
+   * while another is out: an answer from before the install must not stand for it.
    */
   private checkState(): void {
-    if (this.stateReadsOut() === 0 && this.document.visibilityState === 'visible') {
-      void this.readState(false);
-    }
+    if (this.document.visibilityState !== 'visible') return;
+    if (this.recheckOnShow) void this.recheck();
+    else if (this.stateReadsOut() === 0) void this.readState(false);
   }
 
   private async readState(refresh: boolean): Promise<void> {
@@ -253,6 +280,11 @@ export class SentinelTelemetry {
     const request = this.stateReads.next();
     const switches = this.switches;
     this.stateReadsOut.update((count) => count + 1);
+    if (refresh) {
+      this.recheckOnShow = false;
+      this.rechecksOut.update((count) => count + 1);
+    }
+    let lifted = false;
     try {
       const state = await firstValueFrom(
         this.http
@@ -267,6 +299,7 @@ export class SentinelTelemetry {
       }
       this.stateValue.set(state);
       this.stateFailureValue.set(null);
+      lifted = state.available && this.halted();
       if (state.available) this.halted.set(false);
     } catch (error) {
       // A failure answers for the reads sent before it as well, as an answer would.
@@ -279,9 +312,14 @@ export class SentinelTelemetry {
       }
       this.stateFailureValue.set(failure);
     } finally {
-      if (switches === this.switches) this.stateReadsOut.update((count) => count - 1);
+      if (switches === this.switches) {
+        this.stateReadsOut.update((count) => count - 1);
+        if (refresh) this.rechecksOut.update((count) => count - 1);
+      }
     }
-    this.sync();
+    // While halted nothing is scheduled or out, so the halting poll's backoff is armed here.
+    if (lifted) this.scheduleAfter(this.haltedAt);
+    else this.sync();
   }
 
   /**
@@ -332,6 +370,7 @@ export class SentinelTelemetry {
         // The next poll would fail the same way: the state says why, and when to go on.
         if (haltsPolling(failure.code)) {
           this.halted.set(true);
+          this.haltedAt = started;
           this.checkState();
         }
       }
