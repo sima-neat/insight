@@ -1,6 +1,14 @@
 import { expect, Locator, Page, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { LAPTOP, pageOverflow, sidewaysOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import {
+  LAPTOP,
+  pageOverflow,
+  PHONE,
+  sidewaysOverflow,
+  TABLET,
+  topBarSpill,
+  VIEWPORTS,
+} from './layout';
 import { STATS_BOARD } from './stats-mocks';
 import { advance, openStats, POLL_MS, SETTLE_MS, toast, toolButton, tools } from './stats-page';
 
@@ -269,6 +277,19 @@ for (const { name, size } of VIEWPORTS) {
     await expectFits(page, size);
   });
 }
+
+test('the comparison header fits a phone: the baseline and Export CSV wrap, nothing leaves the page', async ({
+  page,
+}) => {
+  await openStats(page, PHONE, undefined, compareAddress([TES3, HW], TES3));
+  const exportCsv = compareView(page).getByRole('button', { name: 'Export CSV' });
+  await expect(exportCsv).toBeVisible();
+  // The page scrolls down on a phone; only sideways must stay at nothing.
+  expect((await pageOverflow(page)).map((overflow) => overflow.horizontal)).toEqual([0, 0]);
+  const box = (await exportCsv.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(PHONE.width);
+});
 
 /**
  * Neither the document nor the shell's content area overflows, and nothing spills out of the top

@@ -185,7 +185,7 @@ describe('RunsView', () => {
       );
 
     beforeEach(async () => {
-      runs.runs.set(finishedRuns(10));
+      runs.runs.set([RECORDING, ...finishedRuns(10)]);
       await renderChecked(...finishedRuns(8).map((run) => run.id));
     });
 
@@ -200,9 +200,14 @@ describe('RunsView', () => {
       expect(text(bar())).not.toContain(reason);
     });
 
-    it('leaves the ticked runs and the recording run as they were', () => {
+    it('leaves the ticked runs as they were', () => {
       expect(box(optionNamed('run 0'))?.hasAttribute('data-blocked')).toBe(false);
       expect(optionNamed('run 0').hasAttribute('aria-disabled')).toBe(false);
+    });
+
+    it('leaves the recording run without a box, and not disabled: it was never tickable', () => {
+      expect(box(optionNamed(RECORDING.name))).toBeNull();
+      expect(optionNamed(RECORDING.name).hasAttribute('aria-disabled')).toBe(false);
     });
 
     it('does not tick a blocked run on a click or on Space, which still lands on its row', async () => {

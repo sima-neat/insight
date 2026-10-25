@@ -34,14 +34,19 @@
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--neat-space-3);
+  max-inline-size: 100%;
   margin-inline-start: auto;
 }
 
-/* The label takes some of the width, so the box keeps about the 12rem it had under it. */
+/*
+ * The label takes some of the width, so the box keeps about the 12rem it had under it, but never
+ * more than the view: on a phone the select takes the row and Export CSV wraps under it.
+ */
 .actions neat-select {
-  min-inline-size: 16rem;
+  min-inline-size: min(16rem, 100cqi);
 }
 
 /* One chip per run: its colour, its name, and B on the baseline. */

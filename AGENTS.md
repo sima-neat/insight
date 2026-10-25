@@ -226,9 +226,10 @@ merging.
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
   at 600 kB. The initial bundle measures 571.6 kB raw with kit 0.15.1 (the shared chunk 457 kB,
-  main 20 kB, styles 94 kB; 571.4 kB with kit 0.14.1; 571.3 kB with kit 0.14.0; 569.7 kB with kit 0.13.0; 569.4 kB with kit
-  0.12.2; 569.1 kB with kit 0.12.1; 568.8 kB with kit 0.12.0; 691.9 kB with kit 0.11.3 and 0.11.2,
-  before the icons became plain Lucide drawings; 691.7 kB with kit 0.11.1;
+  main 20 kB, styles 94 kB; 571.4 kB with kit 0.14.1; 571.3 kB with kit 0.14.0; 569.7 kB with kit
+  0.13.0; 569.4 kB with kit 0.12.2; 569.1 kB with kit 0.12.1; 568.8 kB with kit 0.12.0; 691.9 kB
+  with kit 0.11.3 and 0.11.2, before the icons became plain Lucide drawings; 691.7 kB with kit
+  0.11.1;
   691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the board pill
   and System Info's button; 650 kB with kit 0.9.0;
   694 kB with kit 0.5.3, before the kit split into per-component entries), most of it the kit's
