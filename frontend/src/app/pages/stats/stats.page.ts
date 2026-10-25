@@ -36,6 +36,7 @@ import { BoardSettingsAction } from '../../board/board-settings-action';
 import { BoardService } from '../../board/board.service';
 import { ticking } from '../../clock';
 import { formatRelativeTime } from '../../relative-time';
+import { downloadCsv } from '../../stats/csv-download';
 import { daemonView, healthProblems, type DaemonView } from '../../stats/daemon-view';
 import { failureOf, type SentinelFailure } from '../../stats/sentinel-failure';
 import { SentinelInstall } from '../../stats/sentinel-install';
@@ -346,16 +347,11 @@ export class StatsPage {
     if (!this.telemetry.rechecking()) void this.telemetry.recheck();
   }
 
-  /** Downloads the window as CSV through a Blob URL, let go once the download has started. */
+  /** Downloads the window as CSV. */
   protected exportCsv(): void {
     const window = this.telemetry.window();
     if (!window || !this.canExport()) return;
     this.moreOpen.set(false);
-    const url = URL.createObjectURL(new Blob([sessionCsv(window)], { type: 'text/csv' }));
-    const link = this.document.createElement('a');
-    link.href = url;
-    link.download = sessionCsvFilename(new Date());
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(this.document, sessionCsv(window), sessionCsvFilename(new Date()));
   }
 }

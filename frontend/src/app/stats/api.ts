@@ -10,6 +10,10 @@
  * `already_installed`, `invalid_request`, `request_too_large`, `response_too_large` and
  * `stale_snapshot`, and every body carries the `generation` it was answered under.
  *
+ * The traces and runs endpoints (`neat_insight/sentinel/api.py`; the shapes are Sentinel's own,
+ * `runs.rs` and `api.rs` in its repo) answer the board envelope with Sentinel's body, minus its
+ * schema marker, under `sentinel`.
+ *
  * `GET /api/metrics` (this computer, not the board) is typed beside System Info, which reads it.
  */
 
@@ -142,3 +146,126 @@ export interface MetricsQuery {
   after?: string;
   epoch?: number;
 }
+
+/**
+ * A run as the list shows it (`GET /api/sentinel/runs`, and the stop answer's `summary`). It holds
+ * no note or tags: those are in the run's metadata. A run still being recorded has a null
+ * `ended_at`, and the totals are of the samples taken so far.
+ */
+export interface RunSummary {
+  id: string;
+  name: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_ms: number;
+  samples: number;
+  /** The integral of the board power over the run; null when it took no power reading. */
+  energy_joules: number | null;
+}
+
+/** What Sentinel keeps about a run besides its samples. */
+export interface RunMetadata {
+  id: string;
+  name: string;
+  note: string | null;
+  tags: string[];
+  started_at: string;
+  /** Null while the run is being recorded. */
+  ended_at: string | null;
+  sample_interval_ms: number | null;
+  sentinel_version: string;
+  /** Facts about the board the run was taken on: `architecture`, `hostname`, `os_release`, ... */
+  system: Record<string, string>;
+}
+
+/** A metric as a run recorded it: the definition, without a reading or a status. */
+export interface RunMetricDefinition {
+  key: string;
+  label: string;
+  short: string;
+  description: string | null;
+  group: string;
+  unit: string | null;
+  warn: number | null;
+  critical: number | null;
+}
+
+/** One reading of every metric the run recorded; a metric not read at that time is null or absent. */
+export interface RunSample {
+  timestamp: string;
+  values: Record<string, number | null>;
+}
+
+/** `GET /api/sentinel/runs/<id>`: a run in full. */
+export interface SavedRun {
+  metadata: RunMetadata;
+  metrics: RunMetricDefinition[];
+  samples: RunSample[];
+}
+
+/** A metric's readings in a run: how many there were and, unless none, their spread. */
+export interface RunStatistics {
+  count: number;
+  minimum: number | null;
+  maximum: number | null;
+  mean: number | null;
+  median: number | null;
+  p95: number | null;
+}
+
+/** A run's totals in a comparison. */
+export interface RunTotals {
+  duration_ms: number;
+  samples: number;
+  energy_joules: number | null;
+  metrics: Record<string, RunStatistics>;
+}
+
+/**
+ * `GET /api/sentinel/compare?raw=1`, keyed by run id. `runs` are full runs (without `raw` they
+ * are the metadata only). Each run's `baseline_deltas_pct` is its mean's change against the
+ * baseline's, in percent; null where either run has no mean for the metric.
+ */
+export interface CompareExport {
+  baseline_id: string;
+  generated_at: string;
+  runs: SavedRun[];
+  summaries: Record<string, RunTotals>;
+  baseline_deltas_pct: Record<string, Record<string, number | null>>;
+}
+
+/** The body of `POST /api/sentinel/traces`; the server trims the name and checks every limit. */
+export interface TraceRequest {
+  name: string;
+  note?: string;
+  tags?: string[];
+}
+
+/** What every traces and runs answer holds besides Sentinel's own body. */
+export interface SentinelAnswer<T> {
+  board: BoardSummary;
+  generation: number;
+  sentinel: T;
+}
+
+/** `GET /api/sentinel/runs`, and the answer of a delete (see `DeleteAnswer`). */
+export type RunsAnswer = SentinelAnswer<{ runs: RunSummary[] }>;
+
+/**
+ * The trace being recorded: `GET /api/sentinel/traces` (null when none is, with its summary so
+ * far otherwise), the start answer (a `trace`, no summary) and the stop answer (the finished
+ * trace with the summary of its run).
+ */
+export type TraceAnswer = SentinelAnswer<{
+  trace: RunMetadata | null;
+  summary?: RunSummary | null;
+}>;
+
+/** `GET /api/sentinel/runs/<id>`. */
+export type RunAnswer = SentinelAnswer<SavedRun>;
+
+/** `DELETE /api/sentinel/runs/<id>`: the run that went and the runs that are left. */
+export type DeleteAnswer = RunsAnswer & { deleted: { id: string; name: string } };
+
+/** `GET /api/sentinel/compare?raw=1`. */
+export type CompareAnswer = SentinelAnswer<CompareExport>;

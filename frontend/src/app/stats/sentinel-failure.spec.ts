@@ -270,6 +270,38 @@ describe('failureOf', () => {
     expect(failureOf(timeout, null).action).toBe('read');
   });
 
+  it('a board that changed under a request says so, whatever the request was', () => {
+    for (const action of ['read', 'install', 'start', 'stop', 'delete'] as const) {
+      const failure = failureOf({ error: 'x', code: 'stale_snapshot' }, 1, action);
+      expect([failure.title, failure.hint, failure.action], action).toEqual([
+        'The board changed while Insight was working',
+        'Nothing was changed. Insight has read the board again.',
+        action,
+      ]);
+    }
+    // The backend's own hint still wins over the page's.
+    expect(
+      failureOf({ error: 'x', code: 'stale_snapshot', hint: 'Try again.' }, 1, 'start').hint,
+    ).toBe('Try again.');
+  });
+
+  it('a trace conflict is titled by what was being asked', () => {
+    const title = (action: 'read' | 'start' | 'stop' | 'delete') =>
+      failureOf({ error: 'x', code: 'trace_conflict' }, 1, action).title;
+    expect(title('start')).toBe('That trace cannot start');
+    expect(title('stop')).toBe('The trace changed before it was stopped');
+    expect(title('delete')).toBe('That run is still recording');
+    // The default keeps the wording the code had before the actions existed.
+    expect(title('read')).toBe('That trace cannot start');
+  });
+
+  it('a run that is gone is titled as a deleted run only when it was being deleted', () => {
+    const gone = { error: 'x', code: 'not_found' };
+    expect(failureOf(gone, 1, 'delete').title).toBe('That run is no longer on the board');
+    expect(failureOf(gone, 1).title).toBe('That run is not on this board');
+    expect(failureOf(gone, 1, 'stop').title).toBe('That run is not on this board');
+  });
+
   it('a failure that lands after a board switch carries the generation it was issued under', () => {
     const unreachable = { error: 'ssh: connect failed', code: 'unreachable' };
     expect(failureOf(unreachable, 3).generation).toBe(3);

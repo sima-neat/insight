@@ -67,6 +67,7 @@ const TITLES: Record<string, string> = {
   sentinel_schema: 'Sentinel and Insight speak different API versions',
   sentinel_failed: 'Sentinel could not answer',
   already_installed: 'Sentinel is already installed',
+  stale_snapshot: 'The board changed while Insight was working',
   trace_conflict: 'That trace cannot start',
   not_found: 'That run is not on this board',
   invalid_request: 'The request was rejected',
@@ -88,10 +89,17 @@ const FALLBACK_HINTS: Record<string, string> = {
   host_key_changed:
     'Confirm the fingerprint in the board dialog, from the board pill in the top bar, before trusting the new key.',
   timeout: 'Check the board is awake and on the network, then retry.',
+  stale_snapshot: 'Nothing was changed. Insight has read the board again.',
   sentinel_missing: 'Install Sentinel from this page, or start it on the board.',
   sentinel_stopped: 'Start it on the board with `sudo systemctl start simaai-sentinel`.',
   sentinel_failed: 'Check `systemctl status simaai-sentinel` on the board.',
 };
+
+/**
+ * What a Sentinel request was for. A read is the default; the rest change something on the board,
+ * and the same codes mean something else for them.
+ */
+export type SentinelAction = 'read' | 'install' | 'start' | 'stop' | 'delete';
 
 /**
  * The same codes mean something else when they come back from POST /api/sentinel/install. Nothing
@@ -112,6 +120,31 @@ const INSTALL_HINTS: Record<string, string> = {
   sentinel_failed: 'Check the installer output below, or run the install in a shell on the board.',
 };
 
+/**
+ * `trace_conflict` is the one code three requests answer for different reasons: starting while a
+ * trace runs or a name is taken (the default title says that, so a start needs no entry),
+ * stopping a trace that is no longer the one shown, and deleting a run still being recorded.
+ * Deleting a run another client already removed is a `not_found`.
+ */
+const STOP_TITLES: Record<string, string> = {
+  trace_conflict: 'The trace changed before it was stopped',
+};
+
+const DELETE_TITLES: Record<string, string> = {
+  trace_conflict: 'That run is still recording',
+  not_found: 'That run is no longer on the board',
+};
+
+const ACTION_TITLES: Partial<Record<SentinelAction, Record<string, string>>> = {
+  install: INSTALL_TITLES,
+  stop: STOP_TITLES,
+  delete: DELETE_TITLES,
+};
+
+const ACTION_HINTS: Partial<Record<SentinelAction, Record<string, string>>> = {
+  install: INSTALL_HINTS,
+};
+
 /** What a Sentinel request failed with: what the page says about it, and where the fix is. */
 export interface SentinelFailure {
   /** The failure as the board's UI reads it, with the whole error body in `details`. */
@@ -124,7 +157,7 @@ export interface SentinelFailure {
    */
   generation: number | null;
   /** What the failure came out of, so the page can label the output attached to it. */
-  action: 'read' | 'install';
+  action: SentinelAction;
   title: string;
   /** The backend's hint, else the page's own for the code; '' when there is none. */
   hint: string;
@@ -142,16 +175,15 @@ export interface SentinelFailure {
  * One readable failure: a title, the backend's sentence (in `problem`), its hint, and where the fix
  * is. `generation` is the board generation the request was issued under, so a failure that lands
  * after a board switch can be told from the new board's. `action` says what was being asked, since
- * the same codes mean something else for an install.
+ * the same codes mean something else for an install, a stop or a delete.
  */
 export function failureOf(
   failure: unknown,
   generation: number | null,
-  action: 'read' | 'install' = 'read',
+  action: SentinelAction = 'read',
 ): SentinelFailure {
   const problem = problemOf(failure);
   const code = problem.code;
-  const installing = action === 'install';
   const answered = problem.details['generation'];
   const detail = problem.details['detail'];
   return {
@@ -159,8 +191,8 @@ export function failureOf(
     code,
     generation: Number.isInteger(answered) ? (answered as number) : generation,
     action,
-    title: (installing && INSTALL_TITLES[code]) || TITLES[code] || FALLBACK_TITLE,
-    hint: problem.hint || (installing && INSTALL_HINTS[code]) || FALLBACK_HINTS[code] || '',
+    title: ACTION_TITLES[action]?.[code] || TITLES[code] || FALLBACK_TITLE,
+    hint: problem.hint || ACTION_HINTS[action]?.[code] || FALLBACK_HINTS[code] || '',
     detail: typeof detail === 'string' ? detail : '',
     board: BOARD_CODES.has(code),
     daemon: DAEMON_CODES.has(code),
