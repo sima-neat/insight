@@ -4,6 +4,7 @@ import {
   canCheckRun,
   formatRunTime,
   isRecording,
+  isSavedRun,
   otherRunFields,
   parseTags,
   percentile,
@@ -351,5 +352,23 @@ describe('otherRunFields', () => {
       { key: 'origin', value: 'cli' },
       { key: 'extra', value: '{"a":1}' },
     ]);
+  });
+});
+
+describe('isSavedRun', () => {
+  it('a body with a run’s parts is a run, one missing any is not', () => {
+    expect(isSavedRun(SAVED_RUN)).toBe(true);
+    expect(isSavedRun({ ...SAVED_RUN, samples: [] })).toBe(true);
+    for (const body of [
+      null,
+      'run',
+      [],
+      { metrics: [], samples: [] },
+      { ...SAVED_RUN, metadata: null },
+      { ...SAVED_RUN, metrics: {} },
+      { ...SAVED_RUN, samples: undefined },
+    ]) {
+      expect(isSavedRun(body)).toBe(false);
+    }
   });
 });

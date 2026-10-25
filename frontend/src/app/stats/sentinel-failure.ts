@@ -199,3 +199,16 @@ export function failureOf(
     retryable: !NOT_RETRYABLE.has(code),
   };
 }
+
+/**
+ * An answer Insight could not read: its body lacks what the page needs (a Sentinel build that
+ * answers in another shape, or an answer cut short). `message` says what was expected; the title
+ * is `bad_response`'s, and asking again may help.
+ */
+export function unexpectedAnswer(
+  message: string,
+  generation: number | null,
+  action: SentinelAction = 'read',
+): SentinelFailure {
+  return failureOf(new BoardProblem(message, 'bad_response', '', {}), generation, action);
+}

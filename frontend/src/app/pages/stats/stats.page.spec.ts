@@ -1209,9 +1209,24 @@ describe('StatsPage', () => {
         'Checking Sentinel on the board…',
       );
       await answerState(missingState());
-      await flush(runsRead(), runsAnswer());
       expect(calloutHeadings()).toEqual(['Sentinel is not installed on sima@192.168.1.20']);
       expect(toolbarButton('Record')).toBeUndefined();
+    });
+
+    it('reads no trace and no runs while Sentinel is not ready, and reads them once it is', async () => {
+      const traceReads = () => http.match((request) => request.url === TRACES_URL);
+      await go('/stats/runs');
+      // Before the state answers, and with a stopped daemon, nothing is asked of it.
+      expect(traceReads()).toHaveLength(0);
+      await answerState(stoppedState());
+      await advance(30_000);
+      expect(traceReads()).toHaveLength(0);
+      http.expectNone((request) => request.url === RUNS_URL);
+
+      // Started on the board: the next state check finds it ready, and both are read at once.
+      await flush(stateRead(), sentinelState());
+      expect(traceReads()).toHaveLength(1);
+      await flush(runsRead(), runsAnswer());
     });
   });
 });

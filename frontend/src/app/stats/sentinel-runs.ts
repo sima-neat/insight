@@ -25,11 +25,13 @@ import type {
   TraceAnswer,
   TraceRequest,
 } from './api';
+import { isSavedRun } from './runs';
 import {
   failureOf,
   haltsPolling,
   type SentinelAction,
   type SentinelFailure,
+  unexpectedAnswer,
 } from './sentinel-failure';
 
 const TRACES_URL = '/api/sentinel/traces';
@@ -64,17 +66,23 @@ interface ReadSlot<T> {
 
 const STALE: RunRead = { stale: true };
 
+/** #170's words for a run body without a run's parts (Inv-S §2.10). */
+const UNKNOWN_RUN = 'This Sentinel build answered with a run body Insight does not know.';
+
 /**
  * The selected board's Sentinel traces and runs, for the Stats page. Provided by the page beside
  * `SentinelTelemetry`, so it lives exactly as long as the page: leaving Stats stops every read.
  *
- * **Reads.** The active trace (`GET /api/sentinel/traces`) is read when the page opens and when
- * the board changes, then every 30 s, so a trace started or stopped elsewhere (the Sentinel CLI,
- * another browser) shows within that. The run list (`GET /api/sentinel/runs`) is read the same
- * way while the page says it is shown (`setRunsShown`), and again after each start, stop and
- * delete. A hidden tab sends nothing: each read runs on the board, and showing the tab again
- * reads at once. A periodic read due while one is out is left to that one. Only the newest answer
- * applies; a failed read keeps what was read before, beside its failure.
+ * **Reads.** Nothing is read until the page says Sentinel is ready (`setSentinelReady`): a
+ * missing or stopped daemon would only answer each read with the failure the page already shows.
+ * From then on the active trace (`GET /api/sentinel/traces`) is read at once and when the board
+ * changes, then every 30 s, so a trace started or stopped elsewhere (the Sentinel CLI, another
+ * browser) shows within that. The run list (`GET /api/sentinel/runs`) is read the same way while
+ * the page says it is shown (`setRunsShown`), and again after each start, stop and delete, and
+ * when a trace read finds another trace than the one before (started or stopped elsewhere), so
+ * the list and the toolbar agree. A hidden tab sends nothing: each read runs on the board, and
+ * showing the tab again reads at once. A periodic read due while one is out is left to that one.
+ * Only the newest answer applies; a failed read keeps what was read before, beside its failure.
  *
  * **Changes.** Start, stop and delete send the board generation they were asked under
  * (`?generation=`), so the backend refuses one that outlives a board switch (`stale_snapshot`).
@@ -136,9 +144,9 @@ export class SentinelRuns {
     out: null,
     failure: this.traceFailureValue,
     apply: ({ sentinel }) => {
-      this.traceValue.set(sentinel.trace);
-      this.traceSummaryValue.set(sentinel.summary ?? null);
-      this.traceReadAtValue.set(sentinel.trace === null ? null : Date.now());
+      // Another trace than the last read showed was started or stopped elsewhere, which changes
+      // the run list too: it is read now rather than up to 30 s later.
+      if (this.showTrace(sentinel.trace, sentinel.summary ?? null)) this.rereadRuns();
     },
   };
 
@@ -155,6 +163,10 @@ export class SentinelRuns {
   /** The start or stop `traceBusy` stands for; only that one clears it. */
   private busyWith: object | null = null;
   private runsShown = false;
+  /** The page says Sentinel answers on the board: until then nothing is read. */
+  private sentinelReady = false;
+  /** The id of the trace shown (null for none); undefined before the board's first trace answer. */
+  private traceSeen: string | null | undefined = undefined;
   /** The board generation everything held is of; undefined before the first look at the board. */
   private generation: number | null | undefined = undefined;
   private destroyed = false;
@@ -179,7 +191,20 @@ export class SentinelRuns {
   setRunsShown(shown: boolean): void {
     this.runsShown = shown;
     // The page calls this from its own effect, which must not come to depend on the board.
-    untracked(() => this.runsReads.setActive(shown && this.targeted()));
+    untracked(() => this.runsReads.setActive(this.reading() && shown));
+  }
+
+  /**
+   * Whether Sentinel is ready on the board, as the page's state read says. Until it is, and while
+   * it is not (missing, stopped, not answering), nothing is read and what was read stays; once
+   * it is, the trace (and the run list while shown) is read at once.
+   */
+  setSentinelReady(ready: boolean): void {
+    this.sentinelReady = ready;
+    untracked(() => {
+      this.traceReads.setActive(this.reading());
+      this.runsReads.setActive(this.reading() && this.runsShown);
+    });
   }
 
   /**
@@ -209,7 +234,8 @@ export class SentinelRuns {
     this.clearBusy(busy);
     if ('failure' in result) return this.failedTrace(result.failure);
     this.invalidate(this.traceSlot);
-    this.traceSlot.apply(result.answer);
+    const { trace, summary } = result.answer.sentinel;
+    this.showTrace(trace, summary ?? null);
     this.traceFailureValue.set(null);
     this.rereadRuns();
     return null;
@@ -237,9 +263,7 @@ export class SentinelRuns {
     this.clearBusy(busy);
     if ('failure' in result) return this.failedTrace(result.failure);
     this.invalidate(this.traceSlot);
-    this.traceValue.set(null);
-    this.traceSummaryValue.set(null);
-    this.traceReadAtValue.set(null);
+    this.showTrace(null, null);
     this.traceFailureValue.set(null);
     this.rereadRuns();
     return null;
@@ -248,7 +272,8 @@ export class SentinelRuns {
   /**
    * Reads one run in full. The newest call wins: every older call still out resolves with
    * `{stale: true}`, as does one whose answer lands after a board change or after the page was
-   * left, so a caller shows what it gets unless it is stale.
+   * left, so a caller shows what it gets unless it is stale. A body without a run's parts
+   * (`isSavedRun`) resolves with a `bad_response` failure rather than as a run.
    */
   async readRun(id: string): Promise<RunRead> {
     const generation = this.board.generation();
@@ -264,7 +289,10 @@ export class SentinelRuns {
         void this.board.reload();
         return STALE;
       }
-      return this.isShown(generation) ? { run: answer.sentinel } : STALE;
+      if (!this.isShown(generation)) return STALE;
+      return isSavedRun(answer.sentinel)
+        ? { run: answer.sentinel }
+        : { failure: unexpectedAnswer(UNKNOWN_RUN, generation) };
     } catch (error) {
       if (!current()) return STALE;
       const failure = failureOf(error, generation);
@@ -327,10 +355,31 @@ export class SentinelRuns {
     }
     // Restarting the pollers reads the board at once (once the tab shows, if it is hidden) and
     // counts their 30 s from now.
+    const reading = targeted && this.sentinelReady;
     this.traceReads.setActive(false);
-    this.traceReads.setActive(targeted);
+    this.traceReads.setActive(reading);
     this.runsReads.setActive(false);
-    this.runsReads.setActive(targeted && this.runsShown);
+    this.runsReads.setActive(reading && this.runsShown);
+  }
+
+  /** Whether reads go to the board: one is selected and the page says Sentinel is ready. */
+  private reading(): boolean {
+    return this.targeted() && this.sentinelReady;
+  }
+
+  /**
+   * Shows `trace` with its summary, as read now (the start's answer counts as a read), and says
+   * whether it is another trace than the one shown before. The board's first answer is not: there
+   * was nothing before it to differ from.
+   */
+  private showTrace(trace: RunMetadata | null, summary: RunSummary | null): boolean {
+    const id = trace?.id ?? null;
+    const moved = this.traceSeen !== undefined && this.traceSeen !== id;
+    this.traceSeen = id;
+    this.traceValue.set(trace);
+    this.traceSummaryValue.set(summary);
+    this.traceReadAtValue.set(trace === null ? null : Date.now());
+    return moved;
   }
 
   private reset(): void {
@@ -338,9 +387,8 @@ export class SentinelRuns {
     this.invalidate(this.runsSlot);
     this.busyWith = null;
     this.traceBusyValue.set(null);
-    this.traceValue.set(null);
-    this.traceSummaryValue.set(null);
-    this.traceReadAtValue.set(null);
+    this.showTrace(null, null);
+    this.traceSeen = undefined;
     this.traceFailureValue.set(null);
     this.runsValue.set(null);
     this.runsFailureValue.set(null);
@@ -358,12 +406,12 @@ export class SentinelRuns {
   }
 
   /**
-   * Reads the trace or the run list unless one is out, which answers for this one, or the tab is
-   * hidden: the poller reads at once when it shows.
+   * Reads the trace or the run list unless one is out, which answers for this one, the tab is
+   * hidden (the poller reads at once when it shows) or nothing is read now (`reading`).
    */
   private async read<T extends { generation: number }>(slot: ReadSlot<T>): Promise<void> {
     const generation = this.board.generation();
-    if (this.destroyed || !this.targeted() || generation === null) return;
+    if (this.destroyed || !this.reading() || generation === null) return;
     if (this.document.visibilityState !== 'visible' || slot.out !== null) return;
     const request = slot.reads.next();
     slot.out = request;

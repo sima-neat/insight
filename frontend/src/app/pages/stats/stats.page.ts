@@ -424,6 +424,9 @@ export class StatsPage {
       this.telemetry.setWatching(view === 'live');
       this.runs.setRunsShown(view === 'runs' || view === 'compare');
     });
+    // The trace and the runs are read only while the state says Sentinel answers: a missing or
+    // stopped daemon would answer each with the failure the page shows already.
+    effect(() => this.runs.setSentinelReady(this.telemetry.state()?.available === true));
     // The runs selected and ticked are the board's they were chosen on.
     effect(() => {
       const generation = this.board.generation();

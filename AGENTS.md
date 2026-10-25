@@ -200,9 +200,11 @@ merging.
   the page, so they live exactly as long as it: leaving Stats stops every request to the board
   (the state read, the metric polls, the trace and run reads), and because the backend holds the
   history, coming back shows the full window at once. The metrics are polled only while Live shows
-  them (`SentinelTelemetry.setWatching`). `SentinelRuns` reads the trace being recorded every 30 s
-  on every view, since Record and the recording line sit in each view's toolbar, and the run list
-  every 30 s while Runs or Compare shows (`setRunsShown`); its start, stop and delete send
+  them (`SentinelTelemetry.setWatching`). `SentinelRuns` reads nothing until the state says
+  Sentinel answers (`setSentinelReady`); then it reads the trace being recorded every 30 s on
+  every view, since Record and the recording line sit in each view's toolbar, and the run list
+  every 30 s while Runs or Compare shows (`setRunsShown`), and at once when a trace read finds
+  another trace than before; its start, stop and delete send
   `?generation=`, and an answer naming another generation reloads the board rather than applying.
   Compare asks Sentinel for the comparison itself (`/api/sentinel/compare?raw=1`, the baseline
   first), once the run list says every run is still on the board and finished. `SentinelInstall`

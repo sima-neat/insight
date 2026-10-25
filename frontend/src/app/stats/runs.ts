@@ -35,6 +35,24 @@ function count(value: number, noun: string): string {
   return `${value} ${noun}${value === 1 ? '' : 's'}`;
 }
 
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Whether a body has a full run's parts (`metadata`, `metrics`, `samples`), which every view of a
+ * run reads; a body without them is not shown as a run (spec, "the fallbacks for unknown body
+ * shapes"). Only the parts are checked, not every field in them: cheap, and enough to tell a
+ * Sentinel build that answers in another shape.
+ */
+export function isSavedRun(body: unknown): body is SavedRun {
+  return (
+    isObject(body) &&
+    isObject(body['metadata']) &&
+    Array.isArray(body['metrics']) &&
+    Array.isArray(body['samples'])
+  );
+}
+
 /** A run still being recorded: Sentinel gives it no end yet. */
 export function isRecording(run: RunSummary): boolean {
   return run.ended_at === null;

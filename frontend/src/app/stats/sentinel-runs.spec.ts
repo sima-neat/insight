@@ -9,7 +9,7 @@ import { TestBed } from '@angular/core/testing';
 import type { BoardTarget } from '../board/api';
 import { BoardService } from '../board/board.service';
 import { boardState, DEVKIT, FakeBoard } from '../board/board.testing';
-import type { DeleteAnswer, RunAnswer, RunSummary } from './api';
+import type { DeleteAnswer, RunAnswer, RunSummary, SavedRun } from './api';
 import {
   ACTIVE_TRACE,
   RECORDING_RUN,
@@ -78,11 +78,15 @@ describe('SentinelRuns', () => {
     vi.restoreAllMocks();
   });
 
-  /** Opens the page: the service lives in the page's injector, as the Stats page provides it. */
-  function open(): void {
+  /**
+   * Opens the page: the service lives in the page's injector, as the Stats page provides it. The
+   * page says Sentinel is ready unless `ready` is false.
+   */
+  function open(ready = true): void {
     page = createEnvironmentInjector([SentinelRuns], TestBed.inject(EnvironmentInjector));
     runs = page.get(SentinelRuns);
     TestBed.tick();
+    if (ready) runs.setSentinelReady(true);
   }
 
   /** Leaves the page, which destroys the service with it. */
@@ -253,6 +257,63 @@ describe('SentinelRuns', () => {
     noRunsRead();
   });
 
+  it('reads nothing while Sentinel is not ready, and reads at once when it is', async () => {
+    open(false);
+    runs.setRunsShown(true);
+    await advance(60_000);
+    noTraceRead();
+    noRunsRead();
+
+    runs.setSentinelReady(true);
+    await flush(traceRead(), traceAnswer(null, null));
+    await flush(runsRead(), runsAnswer());
+
+    // Stopped again: the reads stop, and what was read stays.
+    runs.setSentinelReady(false);
+    runs.rereadRuns();
+    await advance(60_000);
+    noTraceRead();
+    noRunsRead();
+    expect(runs.runs()).toEqual(RUNS_LIST);
+  });
+
+  it('a trace started or stopped elsewhere reads the run list again at once', async () => {
+    // The list is read 10 s after the trace, so their 30 s reads fall apart.
+    open();
+    await flush(traceRead(), traceAnswer(null, null));
+    await advance(10_000);
+    runs.setRunsShown(true);
+    await flush(runsRead(), runsAnswer(FINISHED));
+
+    // The same (no) trace, read again: the list waits for its own 30 s.
+    await advance(20_000);
+    await flush(traceRead(), traceAnswer(null, null));
+    noRunsRead();
+    await advance(10_000);
+    await flush(runsRead(), runsAnswer(FINISHED));
+
+    // Started from the CLI: the list is read at once, and now leads with it.
+    await advance(20_000);
+    await flush(traceRead(), traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
+    await flush(runsRead(), runsAnswer());
+    expect(runs.runs()).toEqual(RUNS_LIST);
+
+    // Still the same trace: nothing more.
+    await advance(10_000);
+    await flush(runsRead(), runsAnswer());
+    await advance(20_000);
+    await flush(traceRead(), traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
+    noRunsRead();
+
+    // Stopped elsewhere: read again at once.
+    await advance(10_000);
+    await flush(runsRead(), runsAnswer());
+    await advance(20_000);
+    await flush(traceRead(), traceAnswer(null, null));
+    await flush(runsRead(), runsAnswer(FINISHED));
+    expect(runs.runs()).toEqual(FINISHED);
+  });
+
   it('rereadRuns reads the list at once while it is shown (Retry), and not while it is not', async () => {
     await openWithRuns();
     runs.rereadRuns();
@@ -307,10 +368,11 @@ describe('SentinelRuns', () => {
     ]);
     expect(runs.traceBusy()).toBeNull();
     expect(runs.trace()).toBeNull();
-    // Another trace may be recording: the trace is read again, the runs are not.
+    // Another trace may be recording: the trace is read again, and the trace it finds (started
+    // elsewhere) reads the runs again too, which now list it.
     await flush(traceRead(), traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
     expect(runs.trace()).toEqual(ACTIVE_TRACE);
-    noRunsRead();
+    await flush(runsRead(), runsAnswer());
   });
 
   it('stop sends the generation and the shown trace id', async () => {
@@ -721,6 +783,25 @@ describe('SentinelRuns', () => {
     await flush(traceRead(), traceAnswer(null, null, GENERATION + 1));
     await flush(runsRead(), runsAnswer(RUNS_LIST, GENERATION + 1));
     expect(board.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('readRun: an answer of a shape Insight does not know is an unexpected answer', async () => {
+    await openWithRuns();
+    for (const missing of ['metadata', 'metrics', 'samples'] as const) {
+      const read = runs.readRun(FINISHED[0].id);
+      const body: Partial<SavedRun> = { ...SAVED_RUN };
+      delete body[missing];
+      await flush(runRead(FINISHED[0].id), {
+        board: METRICS_LIVE.board,
+        generation: GENERATION,
+        sentinel: body,
+      });
+      const result = await read;
+      expect('failure' in result && [result.failure.code, result.failure.title]).toEqual([
+        'bad_response',
+        'Insight answered something unexpected',
+      ]);
+    }
   });
 
   it('destroying the service stops every timer and continuations do nothing', async () => {
