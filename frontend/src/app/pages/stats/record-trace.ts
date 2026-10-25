@@ -2,10 +2,12 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   ElementRef,
   inject,
   Injector,
   signal,
+  untracked,
   type WritableSignal,
 } from '@angular/core';
 import { NeatButton, NeatNote } from '@sima/neat-ui';
@@ -13,6 +15,7 @@ import { NeatErrorNote, NeatField } from '@sima/neat-ui/field';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-ui/popover';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { Announcement } from '../../announcement';
 import { ticking } from '../../clock';
 import { holdFocus } from '../../hold-focus';
 import { formatElapsed } from '../../stats/format';
@@ -54,6 +57,7 @@ function traceProblem(
 @Component({
   selector: 'app-record-trace',
   imports: [
+    Announcement,
     NeatButton,
     NeatErrorNote,
     NeatField,
@@ -88,6 +92,8 @@ export class RecordTrace {
   protected readonly problem = signal<{ field: TraceField; message: string } | null>(null);
   /** Why the last Start was refused, until the popover opens again or Start is pressed. */
   protected readonly failure = signal<SentinelFailure | null>(null);
+  /** What a successful start says to screen readers, until the trace ends. */
+  protected readonly announced = signal('');
 
   protected readonly starting = computed(() => this.runs.traceBusy() === 'start');
 
@@ -95,14 +101,27 @@ export class RecordTrace {
    * How long the trace has recorded: the last summary's duration plus the time since it was read,
    * or the time since the start's answer before any summary, all on this browser's clock
    * (`SentinelRuns.traceReadAt` says why not the board's `started_at`). The clock ticks up to a
-   * second behind a read, so the time since is never below zero.
+   * second behind a read, so the time since is never below zero. While the newest trace read
+   * failed it is left out.
    */
   protected readonly elapsed = computed(() => {
     const readAt = this.runs.traceReadAt();
-    if (readAt === null) return '';
+    // While the trace cannot be read, whether it still records is not known: no clock runs on.
+    if (readAt === null || this.runs.traceFailure() !== null) return '';
     const recorded = this.runs.traceSummary()?.duration_ms ?? 0;
     return formatElapsed(recorded + Math.max(0, this.now() - readAt));
   });
+
+  constructor() {
+    // A trace that shows (a refused start read it, or the 30 s read found one) replaces Record and
+    // its popover; the popover is closed with it, so it neither opens by itself once the trace
+    // ends nor keeps a start's refusal from the toast. A trace that ends takes its start's
+    // announcement with it: the line would otherwise still say it records.
+    effect(() => {
+      const recording = this.runs.trace() !== null;
+      untracked(() => (recording ? this.open.set(false) : this.announced.set('')));
+    });
+  }
 
   protected errorOf(field: TraceField): string {
     const problem = this.problem();
@@ -133,8 +152,9 @@ export class RecordTrace {
     this.problem.set(problem);
     this.failure.set(null);
     if (problem) return;
+    const name = this.name().trim();
     const failure = await this.runs.startTrace({
-      name: this.name().trim(),
+      name,
       ...(note === '' ? {} : { note }),
       ...(tags.length === 0 ? {} : { tags }),
     });
@@ -145,6 +165,7 @@ export class RecordTrace {
       return;
     }
     this.open.set(false);
+    this.announced.set(`Recording ${name}`);
     this.holdFocus();
   }
 

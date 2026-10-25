@@ -15,6 +15,7 @@ class FakeRuns {
   readonly traceSummary = signal<RunSummary | null>(null);
   readonly traceReadAt = signal<number | null>(null);
   readonly traceBusy = signal<'start' | 'stop' | null>(null);
+  readonly traceFailure = signal<SentinelFailure | null>(null);
   readonly startTrace = vi.fn<(request: TraceRequest) => Promise<SentinelFailure | null>>(
     async () => null,
   );
@@ -69,6 +70,7 @@ describe('RecordTrace', () => {
     )!;
   const input = (label: string): HTMLInputElement => field(label).querySelector('input')!;
   const errorOf = (label: string): string => text(field(label).querySelector('neat-error-note'));
+  const announcement = (): string => text(root().querySelector('app-announcement'));
 
   async function settle(): Promise<void> {
     for (let turn = 0; turn < 3; turn++) {
@@ -213,6 +215,64 @@ describe('RecordTrace', () => {
     expect(panel()).toBeNull();
   });
 
+  it('a trace that appears while the popover is open closes it for good', async () => {
+    await openPopover();
+    // The 30 s read finds a trace started from the CLI: Stop replaces Record and its popover.
+    runs.trace.set(ACTIVE_TRACE);
+    runs.traceReadAt.set(Date.now());
+    await settle();
+    expect(panel()).toBeNull();
+    expect(button(root(), 'Record')).toBeUndefined();
+
+    // Once it ends, Record comes back closed, without taking the focus.
+    const elsewhere = document.createElement('button');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    runs.trace.set(null);
+    runs.traceReadAt.set(null);
+    await settle();
+    expect(button(root(), 'Record')).toBeDefined();
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+
+  it('a start refused after a trace replaced the popover toasts its title', async () => {
+    const answer = deferred<SentinelFailure | null>();
+    runs.startTrace.mockReturnValue(answer.promise);
+    await openPopover();
+    await click(button(panel()!, 'Start')!);
+    // The conflict re-reads the trace, which shows another trace recording before the answer.
+    runs.trace.set(ACTIVE_TRACE);
+    await settle();
+    expect(panel()).toBeNull();
+
+    answer.resolve(failure('trace_conflict', 'start'));
+    await settle();
+    expect(toasts.error).toHaveBeenCalledWith('That trace cannot start');
+    runs.trace.set(null);
+    await settle();
+    expect(panel()).toBeNull();
+  });
+
+  it('a successful start is announced with the trace’s name', async () => {
+    await openPopover();
+    expect(announcement()).toBe('');
+    await type('Name', ' bench-1 ');
+    // The start answers with the trace it started, which the toolbar then shows.
+    runs.startTrace.mockImplementation(async () => {
+      runs.trace.set(ACTIVE_TRACE);
+      return null;
+    });
+    await click(button(panel()!, 'Start')!);
+    expect(announcement()).toBe('Recording bench-1');
+
+    // Stopped, the line no longer says so.
+    runs.trace.set(null);
+    await settle();
+    expect(announcement()).toBe('');
+  });
+
   /** Shows `trace` recording, as read `readAgo` ms ago with `summary`. */
   async function recording(
     summary: RunSummary | null,
@@ -254,6 +314,22 @@ describe('RecordTrace', () => {
       expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:39');
     },
   );
+
+  it('while the trace cannot be read, leaves the time out rather than counting on', async () => {
+    await recording({ ...RECORDING_RUN, duration_ms: 34_000 }, 5000);
+    runs.traceFailure.set(failure('timeout', 'read'));
+    await settle();
+    expect(recordingLine()).toBe('Recording · compiler-v2-bench');
+
+    runs.traceFailure.set(null);
+    await settle();
+    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:39');
+  });
+
+  it('Stop is named for what it stops', async () => {
+    await recording(RECORDING_RUN, 0);
+    expect(button(root(), 'Stop')!.getAttribute('aria-label')).toBe('Stop the trace');
+  });
 
   it('right after a start, with no summary yet, counts from the start’s answer', async () => {
     await recording(null, 3000);

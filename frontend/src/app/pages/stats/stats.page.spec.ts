@@ -277,7 +277,13 @@ describe('StatsPage', () => {
       (button) => (button.getAttribute('aria-label') ?? text(button)) === name,
     );
   const chip = (): string => text(toolbar().querySelector('neat-status-chip'));
-  const announcement = (): string => text(root().querySelector('app-announcement'));
+  /** The page's own status line; Record has its own for the trace it starts. */
+  const announcement = (): string =>
+    text(
+      [...root().querySelectorAll('app-announcement')].find(
+        (element) => !element.closest('app-record-trace'),
+      ),
+    );
   const buttonNamed = (label: string): HTMLButtonElement | undefined =>
     [...root().querySelectorAll<HTMLButtonElement>('neat-page button')].find(
       (button) => text(button) === label,
@@ -1186,7 +1192,7 @@ describe('StatsPage', () => {
       expect(text(toolbar().querySelector('.recording'))).toMatch(
         /^Recording · compiler-v2-bench · \d+:\d{2}(:\d{2})?$/,
       );
-      expect(toolbarButton('Stop')).toBeDefined();
+      expect(toolbarButton('Stop the trace')).toBeDefined();
       expect(toolbarButton('Record')).toBeUndefined();
     });
 

@@ -15,6 +15,7 @@
     type="button"
     variant="text"
     size="small"
+    aria-label="Stop the trace"
     [attr.aria-disabled]="runs.traceBusy() !== null || null"
     (click)="stop()"
   >
@@ -83,3 +84,5 @@
     </ng-template>
   </neat-popover>
 }
+<!-- Always there, so the start it says is heard; the toolbar shows it as the recording line. -->
+<app-announcement>{{ announced() }}</app-announcement>
