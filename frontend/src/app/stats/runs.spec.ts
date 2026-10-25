@@ -129,13 +129,24 @@ describe('runMetricRows', () => {
     ]);
   });
 
-  it('sorts by group, then label', () => {
-    const rows = runMetricRows(SAVED_RUN);
-    const sorted = [...rows].sort(
-      (a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label),
-    );
-    expect(rows.map((r) => r.key)).toEqual(sorted.map((r) => r.key));
-    expect(rows).toHaveLength(SAVED_RUN.metrics.length);
+  it('sorts by group, then label, whatever the locale', () => {
+    expect(runMetricRows(SAVED_RUN).map((row) => row.label)).toEqual([
+      'CPU core 0 usage',
+      'CPU core 11 usage',
+      'eMMC disk used MB',
+      'Linux memory used',
+      'Current board power',
+      'TOP RTSN-6',
+    ]);
+  });
+
+  it('reads the statistics of a very long run without spreading its values', () => {
+    const samples = Array.from({ length: 200_000 }, (_, i) => ({
+      timestamp: SAVED_RUN.samples[0].timestamp,
+      values: { rtsn_6: i % 1000 },
+    }));
+    const row = runMetricRows(savedRun({ samples })).find((r) => r.key === 'rtsn_6');
+    expect(row).toMatchObject({ minimum: 0, maximum: 999, mean: 499.5, status: 'critical' });
   });
 });
 
@@ -165,6 +176,22 @@ describe('runFacts', () => {
       samples: [sample(iso(2026, 9, 25, 23, 59, 50)), sample(iso(2026, 9, 26, 0, 0, 10))],
     });
     expect(runFacts(run)).toContain('Oct 25, 23:59:50–Oct 26, 00:00:10');
+  });
+
+  it('leaves a sample with an unreadable timestamp out of the range', () => {
+    const run = savedRun({
+      metrics: [],
+      samples: [
+        sample('nonsense'),
+        sample(iso(2026, 9, 25, 8, 41, 10)),
+        sample(iso(2026, 9, 25, 8, 41, 44)),
+        sample(''),
+      ],
+    });
+    expect(runFacts(run)).toBe('4 samples · 0 metrics · Oct 25, 08:41:10–08:41:44');
+    expect(runFacts(savedRun({ metrics: [], samples: [sample('nonsense')] }))).toBe(
+      '1 sample · 0 metrics',
+    );
   });
 
   it('gives a single sample as one timestamp, and none as no time', () => {
@@ -228,6 +255,9 @@ describe('validateTrace', () => {
   it('refuses control characters and a comma in the name', () => {
     expect(validateTrace('a\nb', '', [])).toBe('The name cannot contain control characters.');
     expect(validateTrace('a\u0085b', '', [])).toBe('The name cannot contain control characters.');
+    expect(validateTrace('a\u007fb', '', [])).toBe('The name cannot contain control characters.');
+    expect(validateTrace('a\u009fb', '', [])).toBe('The name cannot contain control characters.');
+    expect(validateTrace('a\u00a0b', '', [])).toBeNull();
     expect(validateTrace('a,b', '', [])).toBe(
       'The name cannot contain a comma; runs are compared by a comma-separated list of names.',
     );
@@ -251,6 +281,8 @@ describe('validateTrace', () => {
     ).toBe('At most 16 tags can be attached to a trace.');
     expect(validateTrace('a', '', ['x'.repeat(81)])).toBe('A tag can be at most 80 characters.');
     expect(validateTrace('a', '', ['x'.repeat(80)])).toBeNull();
+    expect(validateTrace('a', '', ['ok', '  '])).toBe('A tag cannot be empty.');
+    expect(validateTrace('a', '', [''])).toBe('A tag cannot be empty.');
   });
 
   it('reports the first failure in the order name, note, tags', () => {

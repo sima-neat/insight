@@ -204,9 +204,14 @@ describe('how a status is worded and drawn', () => {
     expect(thresholdsOf(metric({ warn: null, critical: null, unit: 'W' }))).toEqual([]);
   });
 
-  it('formatDuration reads seconds with one decimal under an hour and hours with minutes after', () => {
+  it('formatDuration reads tenths under a minute, whole seconds to the hour, then hours', () => {
     expect(formatDuration(34_379)).toBe('34.4 s');
     expect(formatDuration(0)).toBe('0.0 s');
+    expect(formatDuration(59_940)).toBe('59.9 s');
+    expect(formatDuration(59_960)).toBe('1 min 0 s');
+    expect(formatDuration(120_000)).toBe('2 min 0 s');
+    expect(formatDuration(1_205_000)).toBe('20 min 5 s');
+    expect(formatDuration(3_599_600)).toBe('1 h 0 min');
     expect(formatDuration(3_720_000)).toBe('1 h 2 min');
     expect(formatDuration(3_600_000)).toBe('1 h 0 min');
   });

@@ -165,10 +165,15 @@ export function thresholdsOf(metric: SentinelMetric): NeatThreshold[] {
   return thresholds;
 }
 
-/** How long a run took: seconds with one decimal under an hour ("34.4 s"), then "1 h 2 min". */
+/**
+ * How long a run took: seconds with one decimal under a minute ("34.4 s"), whole seconds to the
+ * hour ("20 min 5 s"), then hours and minutes ("1 h 2 min").
+ */
 export function formatDuration(ms: number): string {
-  if (ms < 3_600_000) return `${(ms / 1000).toFixed(1)} s`;
-  const minutes = Math.floor(ms / 60_000);
+  if (Math.round(ms / 100) < 600) return `${(ms / 1000).toFixed(1)} s`;
+  const seconds = Math.round(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  if (seconds < 3600) return `${minutes} min ${seconds % 60} s`;
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 

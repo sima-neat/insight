@@ -1,5 +1,5 @@
 import { formatRelativeTime } from '../relative-time';
-import type { RunSample, RunSummary, SavedRun } from './api';
+import type { MetricStatus, RunSample, RunSummary, SavedRun } from './api';
 import { formatDuration, formatEnergy, isNumber } from './format';
 
 /** How many runs can be compared at once; the backend refuses more. */
@@ -79,11 +79,29 @@ export interface RunMetricRow {
   minimum: number | null;
   maximum: number | null;
   /** The maximum against the metric's thresholds. */
-  status: 'ok' | 'warn' | 'critical';
+  status: Exclude<MetricStatus, 'unavailable'>;
 }
 
-function readings(samples: readonly RunSample[], key: string): number[] {
-  return samples.map((sample) => sample.values[key]).filter(isNumber);
+/** Minimum, maximum and mean of the readings of a key, in one pass: no spread, so no length limit. */
+function statistics(
+  samples: readonly RunSample[],
+  key: string,
+): Pick<RunMetricRow, 'minimum' | 'maximum' | 'mean'> {
+  let count = 0;
+  let sum = 0;
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const sample of samples) {
+    const value = sample.values[key];
+    if (!isNumber(value)) continue;
+    count++;
+    sum += value;
+    if (value < minimum) minimum = value;
+    if (value > maximum) maximum = value;
+  }
+  return count
+    ? { minimum, maximum, mean: sum / count }
+    : { minimum: null, maximum: null, mean: null };
 }
 
 function statusOf(
@@ -96,40 +114,47 @@ function statusOf(
   return isNumber(warn) && maximum >= warn ? 'warn' : 'ok';
 }
 
+/**
+ * Text order that does not depend on the browser's locale (the module words dates by hand for the
+ * same reason): case-insensitive first, then by code unit.
+ */
+function compareText(a: string, b: string): number {
+  const [x, y] = [a.toLowerCase(), b.toLowerCase()];
+  if (x !== y) return x < y ? -1 : 1;
+  return a === b ? 0 : a < b ? -1 : 1;
+}
+
 /** The metrics of a saved run, by group and then label, with their statistics and status. */
 export function runMetricRows(run: SavedRun): RunMetricRow[] {
   return run.metrics
     .map((metric): RunMetricRow => {
-      const values = readings(run.samples, metric.key);
-      const maximum = values.length ? Math.max(...values) : null;
+      const stats = statistics(run.samples, metric.key);
       return {
         key: metric.key,
         label: metric.label,
         group: metric.group,
         unit: metric.unit || null,
-        mean: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
-        minimum: values.length ? Math.min(...values) : null,
-        maximum,
-        status: statusOf(maximum, metric.warn, metric.critical),
+        ...stats,
+        status: statusOf(stats.maximum, metric.warn, metric.critical),
       };
     })
-    .sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
+    .sort((a, b) => compareText(a.group, b.group) || compareText(a.label, b.label));
 }
 
 /**
  * A saved run in one line of facts: "17 samples · 59 metrics · Oct 25, 08:41:10–08:41:44 · 1 past
  * a threshold". The clause for thresholds is left out at none, the time range when there is no
- * sample, and it is one timestamp for a single sample.
+ * sample, and it is one timestamp for a single sample. A sample whose timestamp cannot be read
+ * is left out of the range.
  */
 export function runFacts(run: SavedRun): string {
   const facts = [count(run.samples.length, 'sample'), count(run.metrics.length, 'metric')];
-  const first = run.samples.at(0);
-  const last = run.samples.at(-1);
-  if (first && last) {
-    const from = new Date(Date.parse(first.timestamp));
-    const to = new Date(Date.parse(last.timestamp));
+  const times = run.samples.map((sample) => Date.parse(sample.timestamp)).filter(Number.isFinite);
+  if (times.length > 0) {
+    const from = new Date(times[0]);
+    const to = new Date(times[times.length - 1]);
     const start = `${shortDate(from)}, ${clock(from)}`;
-    if (run.samples.length === 1) facts.push(start);
+    if (times.length === 1) facts.push(start);
     else {
       const sameDay = shortDate(from) === shortDate(to);
       facts.push(`${start}–${sameDay ? '' : `${shortDate(to)}, `}${clock(to)}`);
@@ -187,6 +212,8 @@ function characters(text: string): number {
 /**
  * The first reason the server would refuse a trace, in its own order and limits (name in UTF-8
  * bytes, note and tags in characters), so the form says so before sending; null when it is fine.
+ * Callers send exactly the tags they validated (trimmed, as `parseTags` returns them), so the
+ * server counts the same text.
  */
 export function validateTrace(name: string, note: string, tags: readonly string[]): string | null {
   const trimmed = name.trim();
@@ -200,8 +227,10 @@ export function validateTrace(name: string, note: string, tags: readonly string[
   }
   if (characters(note) > NOTE_CHARACTERS) return 'The note can be at most 512 characters.';
   if (tags.length > MAX_TAGS) return 'At most 16 tags can be attached to a trace.';
-  if (tags.some((tag) => characters(tag.trim()) > TAG_CHARACTERS)) {
-    return 'A tag can be at most 80 characters.';
+  for (const tag of tags) {
+    const trimmedTag = tag.trim();
+    if (!trimmedTag) return 'A tag cannot be empty.';
+    if (characters(trimmedTag) > TAG_CHARACTERS) return 'A tag can be at most 80 characters.';
   }
   return null;
 }
