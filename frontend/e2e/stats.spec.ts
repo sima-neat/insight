@@ -166,6 +166,9 @@ for (const { name, size } of VIEWPORTS) {
     page,
   }) => {
     const backend = await openStats(page, size);
+    // The first answer schedules the next poll, which the clock step below fires; "Live" alone
+    // can show before that answer has landed.
+    await expect(cards(page)).toHaveCount(6);
     await expect(tools(page)).toContainText('Live');
     await advance(page, POLL_MS);
     await expect.poll(() => backend.polls).toBe(2);
@@ -183,8 +186,14 @@ for (const { name, size } of VIEWPORTS) {
     await expect.poll(() => backend.polls).toBe(paused + 1);
     await expect(tools(page)).toContainText('Live');
     await expect(toolButton(page, 'Pause')).toBeVisible();
-    await advance(page, POLL_MS);
-    await expect.poll(() => backend.polls).toBe(paused + 2);
+    // The poll after the resumed one is scheduled when its answer lands, which may be after the
+    // first step: step again until it is fired.
+    await expect
+      .poll(async () => {
+        await advance(page, POLL_MS);
+        return backend.polls;
+      })
+      .toBeGreaterThanOrEqual(paused + 2);
   });
 
   test(`a poll that fails with 502 shows why and not updating, and Retry in the top bar polls again at ${name}`, async ({
