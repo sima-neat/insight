@@ -2,22 +2,7 @@
   <!-- Above the list, each taking the height it needs and none while absent. -->
   <div class="above">
     @if (runs.runsFailure(); as failure) {
-      <neat-callout tone="danger" [heading]="failure.title" [headingLevel]="2">
-        <p>{{ failure.problem.message }}</p>
-        @if (failure.hint) {
-          <p neatNote>{{ failure.hint }}</p>
-        }
-        <button
-          neatButton
-          neatCalloutActions
-          type="button"
-          size="small"
-          variant="outlined"
-          (click)="runs.rereadRuns()"
-        >
-          Retry
-        </button>
-      </neat-callout>
+      <app-sentinel-failure [failure]="failure" [headingLevel]="2" (retry)="runs.rereadRuns()" />
     }
 
     @if (report(); as report) {

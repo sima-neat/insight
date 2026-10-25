@@ -48,22 +48,7 @@
     <p neatNote role="status">Reading runs from the board…</p>
   }
   @case ('list-failed') {
-    <neat-callout tone="danger" [heading]="state.failure.title" [headingLevel]="3">
-      <p>{{ state.failure.problem.message }}</p>
-      @if (state.failure.hint) {
-        <p neatNote>{{ state.failure.hint }}</p>
-      }
-      <button
-        neatButton
-        neatCalloutActions
-        type="button"
-        size="small"
-        variant="outlined"
-        (click)="runs.rereadRuns()"
-      >
-        Retry
-      </button>
-    </neat-callout>
+    <app-sentinel-failure [failure]="state.failure" (retry)="runs.rereadRuns()" />
   }
   @case ('missing') {
     <neat-callout tone="info" heading="Some runs are no longer on the board" [headingLevel]="3">
@@ -133,24 +118,7 @@
         }
       </neat-collapsible>
     } @else if (failure(); as failure) {
-      <neat-callout tone="danger" [heading]="failure.title" [headingLevel]="3">
-        <p>{{ failure.problem.message }}</p>
-        @if (failure.hint) {
-          <p neatNote>{{ failure.hint }}</p>
-        }
-        @if (failure.retryable) {
-          <button
-            neatButton
-            neatCalloutActions
-            type="button"
-            size="small"
-            variant="outlined"
-            (click)="retry()"
-          >
-            Retry
-          </button>
-        }
-      </neat-callout>
+      <app-sentinel-failure [failure]="failure" (retry)="retry()" />
     } @else {
       <p neatNote role="status">Reading the comparison from the board…</p>
     }
@@ -198,7 +166,15 @@
             </th>
             <td neatNumeric class="wide">{{ row.samples }}</td>
             <td neatNumeric class="spread">{{ row.minimum }}</td>
-            <td neatNumeric>{{ row.mean }}</td>
+            <td neatNumeric>
+              <!-- Where Samples gives way to the width, a run without readings says so here. -->
+              @if (row.empty) {
+                <span class="wide">{{ row.mean }}</span>
+                <span class="narrow">{{ row.samples }}</span>
+              } @else {
+                {{ row.mean }}
+              }
+            </td>
             <td neatNumeric class="spread">{{ row.median }}</td>
             <td neatNumeric class="spread">{{ row.p95 }}</td>
             <td neatNumeric class="wide">{{ row.maximum }}</td>
@@ -215,7 +191,10 @@
 <ng-template #metricTable>
   <div class="metrics">
     <button neatSwitch [(checked)]="changesOnly">Changes only</button>
-    <p neatNote role="status" class="table-status">{{ table().status }}</p>
+    <!-- Always rendered, so screen readers hear it when it starts to say something. -->
+    <p neatNote role="status" class="table-status" [class.visually-hidden]="!table().status">
+      {{ table().status }}
+    </p>
     <table neatTable aria-label="Per-metric comparison">
       <thead>
         <tr>

@@ -282,10 +282,13 @@ function spread(
   };
 }
 
-/** A mean's change against the baseline's, in percent; none from a baseline of 0 or no mean. */
-function changeOf(mean: number | null, baseline: number | null): number | null {
-  if (!isNumber(mean) || !isNumber(baseline) || baseline === 0) return null;
-  return ((mean - baseline) / baseline) * 100;
+/**
+ * A value's change against the baseline's (a mean's, a run total's), in percent; none from a
+ * baseline of 0 or without both values.
+ */
+function changeOf(value: number | null, baseline: number | null): number | null {
+  if (!isNumber(value) || !isNumber(baseline) || baseline === 0) return null;
+  return ((value - baseline) / baseline) * 100;
 }
 
 /**
@@ -319,10 +322,16 @@ export function compareSummary(runs: readonly SavedRun[], key: string): CompareS
   }));
 }
 
-/** A run's cell in the per-metric table: Sentinel's mean and its change against the baseline. */
+/**
+ * A run's cell in the per-metric table: Sentinel's mean (a run total's value) and its change
+ * against the baseline's.
+ */
 export interface CompareCell {
   mean: number | null;
-  /** In percent; null for the baseline, for a run without a mean, and where Sentinel has none. */
+  /**
+   * In percent; null for the baseline, for a run without a value, where Sentinel has none, and
+   * for a total whose baseline has none or 0.
+   */
   change: number | null;
 }
 
@@ -339,8 +348,9 @@ export interface CompareTableRow {
 
 /**
  * The totals Sentinel reports per run beside its metric summaries. It publishes no change for
- * them, so none is shown. The duration comes in milliseconds and reads in seconds, as in the rest
- * of the view; the keys stay Sentinel's, as #170's CSV wrote them.
+ * them, so `compareTable` works it out against the baseline's total, as Sentinel does for a mean.
+ * The duration comes in milliseconds and reads in seconds, as in the rest of the view; the keys
+ * stay Sentinel's, as #170's CSV wrote them.
  */
 const RUN_TOTALS: readonly {
   key: string;
@@ -401,18 +411,27 @@ function metricRow(answer: CompareExport, key: string): CompareTableRow {
  * totals (Duration, Energy, Samples), then every metric any run summarised, by label.
  */
 export function compareTable(answer: CompareExport): CompareTableRow[] {
-  const totals = RUN_TOTALS.map((total): CompareTableRow => ({
-    key: total.key,
-    label: total.label,
-    group: RUN_TOTALS_GROUP,
-    unit: total.unit,
-    definitionsDiffer: false,
-    cells: answer.runs.map((run) => {
-      const summary = answer.summaries[run.metadata.id] as RunTotals | undefined;
+  const { baseline_id: baselineId, summaries } = answer;
+  const totals = RUN_TOTALS.map((total): CompareTableRow => {
+    const valueOf = (id: string): number | null => {
+      const summary = summaries[id] as RunTotals | undefined;
       const value = summary ? total.value(summary) : null;
-      return { mean: isNumber(value) ? value : null, change: null };
-    }),
-  }));
+      return isNumber(value) ? value : null;
+    };
+    const base = valueOf(baselineId);
+    return {
+      key: total.key,
+      label: total.label,
+      group: RUN_TOTALS_GROUP,
+      unit: total.unit,
+      definitionsDiffer: false,
+      cells: answer.runs.map((run) => {
+        const id = run.metadata.id;
+        const value = valueOf(id);
+        return { mean: value, change: id === baselineId ? null : changeOf(value, base) };
+      }),
+    };
+  });
   const keys = new Set(
     answer.runs.flatMap((run) => Object.keys(answer.summaries[run.metadata.id]?.metrics ?? {})),
   );
@@ -435,8 +454,8 @@ export function tableGroups(rows: readonly CompareTableRow[]): { group: string; 
 }
 
 /**
- * The rows where some run differs from the baseline by a change Sentinel published. The
- * baseline's own cells carry none (`metricRow`), and neither do the run totals.
+ * The rows where some run differs from the baseline: a metric by the change Sentinel published, a
+ * run total by its own (`compareTable`). The baseline's own cells carry none.
  */
 export function changesOnly(rows: readonly CompareTableRow[]): CompareTableRow[] {
   return rows.filter((row) => row.cells.some((cell) => isNumber(cell.change) && cell.change !== 0));

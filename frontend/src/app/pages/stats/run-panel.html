@@ -68,29 +68,7 @@
     </neat-collapsible>
   }
 } @else if (failure(); as failure) {
-  <!-- Retry waits with aria-disabled rather than disabled, so the focus stays on it. -->
-  <neat-callout
-    tone="danger"
-    [heading]="failure.title"
-    [headingLevel]="3"
-    [attr.aria-busy]="retrying() || null"
-  >
-    <p>{{ failure.problem.message }}</p>
-    @if (failure.hint) {
-      <p neatNote>{{ failure.hint }}</p>
-    }
-    <button
-      neatButton
-      neatCalloutActions
-      type="button"
-      size="small"
-      variant="outlined"
-      [attr.aria-disabled]="retrying() || null"
-      (click)="retry()"
-    >
-      {{ retrying() ? 'Retrying…' : 'Retry' }}
-    </button>
-  </neat-callout>
+  <app-sentinel-failure [failure]="failure" [busy]="retrying()" (retry)="retry()" />
 } @else {
   <p neatNote role="status">Reading the run from the board…</p>
 }

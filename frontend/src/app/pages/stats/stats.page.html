@@ -133,24 +133,11 @@
               <app-board-settings-action neatCalloutActions />
             </app-board-problem-notice>
           } @else if (telemetryProblem(); as failure) {
-            <neat-callout tone="danger" [heading]="failure.title" [headingLevel]="2">
-              <p>{{ failure.problem.message }}</p>
-              @if (failure.hint) {
-                <p neatNote>{{ failure.hint }}</p>
-              }
-              @if (failure.retryable) {
-                <button
-                  neatButton
-                  neatCalloutActions
-                  type="button"
-                  size="small"
-                  variant="outlined"
-                  (click)="telemetry.retry()"
-                >
-                  Retry
-                </button>
-              }
-            </neat-callout>
+            <app-sentinel-failure
+              [failure]="failure"
+              [headingLevel]="2"
+              (retry)="telemetry.retry()"
+            />
           }
 
           @if (collectorErrors().length) {

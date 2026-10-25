@@ -25,6 +25,7 @@ import type { RunSummary } from '../../stats/api';
 import { canCheckRun, MAX_CHECKED_RUNS, runLine, runWhen } from '../../stats/runs';
 import { type DeleteOutcome, SentinelRuns } from '../../stats/sentinel-runs';
 import { StatsSession } from '../../stats/stats-session';
+import { SentinelFailureCallout } from './sentinel-failure-callout';
 
 /** A run as its row shows it. */
 interface RunRow {
@@ -100,7 +101,16 @@ function deleteReport(
  */
 @Component({
   selector: 'app-stats-runs',
-  imports: [CellText, ListColumn, NeatButton, NeatCallout, NeatColumn, NeatNote, NeatSelectList],
+  imports: [
+    CellText,
+    ListColumn,
+    NeatButton,
+    NeatCallout,
+    NeatColumn,
+    NeatNote,
+    NeatSelectList,
+    SentinelFailureCallout,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './runs-view.html',
   styleUrl: './runs-view.css',

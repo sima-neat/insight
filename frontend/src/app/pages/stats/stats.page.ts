@@ -57,6 +57,7 @@ import { overviewCards } from './overview-cards';
 import { RecordTrace } from './record-trace';
 import { RunPanel } from './run-panel';
 import { RunsView } from './runs-view';
+import { SentinelFailureCallout } from './sentinel-failure-callout';
 import { StatsAreaPanel } from './stats-area-panel';
 import { StatsChart } from './stats-chart';
 
@@ -182,6 +183,7 @@ function notReadyHeading(
     RecordTrace,
     RunPanel,
     RunsView,
+    SentinelFailureCallout,
     StatsAreaPanel,
     StatsChart,
   ],

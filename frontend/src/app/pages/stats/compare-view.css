@@ -92,26 +92,28 @@
   gap: var(--neat-space-2);
 }
 
-/* A tab's panel: the chart over its summary, or the filters over the per-metric table. */
-.series,
-.metrics {
+/* A series tab's panel: the chart over its summary. */
+.series {
   display: flex;
   flex-direction: column;
   gap: var(--neat-space-4);
   padding-block-start: var(--neat-space-2);
 }
 
+/*
+ * A group tab's panel: Changes only, the status line and the table, closer together. The status
+ * line takes no room while it says nothing (it is visually hidden then).
+ */
 .metrics {
+  display: flex;
+  flex-direction: column;
   gap: var(--neat-space-3);
+  padding-block-start: var(--neat-space-2);
 }
 
-/* The switch hugs its label; the status line takes no room while it says nothing. */
+/* The switch hugs its label. */
 .metrics [neatSwitch] {
   align-self: start;
-}
-
-.table-status:empty {
-  display: none;
 }
 
 /* A run's change follows its mean, in the same colour: lower is not always better. */
@@ -122,8 +124,13 @@
 /*
  * Narrow, the cells give up some of their padding and the summary its least needed columns: the
  * spread (Min, Median, P95) first, then Samples, Max and Energy on a phone, which keeps each run's
- * mean and change; a change goes under its mean. The widths are where these columns stop fitting.
+ * mean and change; a run without readings then says "No samples" in its Mean cell (`.narrow`), and
+ * a change goes under its mean. The widths are where these columns stop fitting.
  */
+.narrow {
+  display: none;
+}
+
 @container (width < 46rem) {
   th,
   td {
@@ -143,5 +150,9 @@
 @container (width < 28rem) {
   .wide {
     display: none;
+  }
+
+  .narrow {
+    display: inline;
   }
 }

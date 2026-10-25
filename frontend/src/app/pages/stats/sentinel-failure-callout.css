@@ -1,0 +1,4 @@
+/* A block, so that the caller's spacing (a margin, a gap) applies to it as to a bare callout. */
+:host {
+  display: block;
+}

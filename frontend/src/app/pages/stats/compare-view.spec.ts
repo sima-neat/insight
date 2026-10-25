@@ -11,12 +11,13 @@ import { provideRouter, Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { NeatTimeChart } from '@sima/neat-ui/charts';
 import { NeatSelect } from '@sima/neat-ui/select';
+import { BoardProblem } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
 import { boardState, DEVKIT, FakeBoard } from '../../board/board.testing';
 import type { CompareAnswer, CompareExport, RunSummary } from '../../stats/api';
 import { compareCsv, compareCsvFilename, compareSummary, formatChange } from '../../stats/compare';
 import { COMPARE_RAW, RECORDING_RUN, RUNS_LIST } from '../../stats/runs.testing';
-import type { SentinelFailure } from '../../stats/sentinel-failure';
+import { failureOf, type SentinelFailure } from '../../stats/sentinel-failure';
 import { SentinelRuns } from '../../stats/sentinel-runs';
 import { StatsSession } from '../../stats/stats-session';
 import { METRICS_LIVE } from '../../stats/stats.testing';
@@ -160,6 +161,12 @@ describe('CompareView', () => {
   const headings = (table: Element | null): string[] =>
     [...(table?.querySelectorAll('thead th') ?? [])].map(text);
   const summaryTable = () => root().querySelector('table[aria-label="Summary"]');
+  /** Each summary row's Mean cell. */
+  const meanCells = (): Element[] =>
+    [...(summaryTable()?.querySelectorAll('tbody tr') ?? [])].map(
+      (row) => row.querySelectorAll('td')[2],
+    );
+  const status = (): HTMLElement => root().querySelector<HTMLElement>('.table-status')!;
   const metricTable = () => root().querySelector('table[aria-label="Per-metric comparison"]');
   const chart = (): NeatTimeChart | undefined =>
     harness.fixture.debugElement.query(By.directive(NeatTimeChart))?.componentInstance;
@@ -289,6 +296,8 @@ describe('CompareView', () => {
         '52 J',
       ],
     ]);
+    // A run with samples has nothing to say in their place.
+    expect(meanCells().map((cell) => cell.querySelector('.narrow'))).toEqual([null, null]);
     // The change is plain text: lower is not always better.
     const change = summaryTable()!.querySelectorAll('tbody tr')[1].querySelectorAll('td')[6];
     expect(change.className).toBe('');
@@ -305,9 +314,16 @@ describe('CompareView', () => {
       'No run has two readings of CPU usage to draw.',
     );
     expect(text(root().querySelector('.facts'))).toBe('2 runs');
-    expect(rows(summaryTable()).map((row) => row.slice(0, 3))).toEqual([
-      ['tes3', 'No samples', '—'],
-      ['insight-hw-1790177227', 'No samples', '—'],
+    expect(rows(summaryTable()).map((row) => row.slice(0, 2))).toEqual([
+      ['tes3', 'No samples'],
+      ['insight-hw-1790177227', 'No samples'],
+    ]);
+    // Where Samples gives way to the width (`.wide`), the Mean cell says it instead (`.narrow`).
+    const means = meanCells();
+    expect(means.map((cell) => text(cell.querySelector('.wide')))).toEqual(['—', '—']);
+    expect(means.map((cell) => text(cell.querySelector('.narrow')))).toEqual([
+      'No samples',
+      'No samples',
     ]);
   });
 
@@ -334,34 +350,38 @@ describe('CompareView', () => {
     ]);
     expect(headings(metricTable())).toEqual(['Metric', 'tes3', 'insight-hw-1790177227']);
     expect(rows(metricTable())).toEqual([
-      ['Duration', '8.13 s', '6.67 s'],
-      ['Energy', '54.2 J', '51.5 J'],
-      ['Samples', '4', '4'],
+      ['Duration', '8.13 s', '6.67 s −18%'],
+      ['Energy', '54.2 J', '51.5 J −4.9%'],
+      ['Samples', '4', '4 ±0%'],
       ['CPU usage', '—', '—'],
       ['Current board power', '9.03 W', '8.62 W −4.58%'],
       ['LM96163 temp2', '54.8 °C', '40.7 °C −25.8%'],
       ['MLA RTSN-0', '52.2 °C', '38.5 °C −26.3%'],
     ]);
-    expect(text(root().querySelector('.table-status'))).toBe('');
+    // A live region that says nothing yet: there for screen readers, out of the eye's way.
+    expect(text(status())).toBe('');
+    expect(status().getAttribute('role')).toBe('status');
+    expect(status().classList).toContain('visually-hidden');
 
     const changesOnly = root().querySelector<HTMLButtonElement>('button[role="switch"]')!;
     expect(text(changesOnly)).toBe('Changes only');
     await click(changesOnly);
     expect(rows(metricTable()).map((row) => row[0])).toEqual([
+      'Duration',
+      'Energy',
       'Current board power',
       'LM96163 temp2',
       'MLA RTSN-0',
     ]);
-    expect(text(root().querySelector('.table-status'))).toBe(
-      'Showing 3 of 7 rows. Changes only hides 4 rows where no run differs from the baseline. ' +
+    expect(text(status())).toBe(
+      'Showing 5 of 7 rows. Changes only hides 2 rows where no run differs from the baseline. ' +
         'Export CSV still writes all 7.',
     );
+    expect(status().classList).not.toContain('visually-hidden');
 
     await click(tab('Metric groups', 'MLA (1)'));
     expect(rows(metricTable()).map((row) => row[0])).toEqual(['MLA RTSN-0']);
-    expect(text(root().querySelector('.table-status'))).toBe(
-      'Showing 1 of 7 rows. Export CSV still writes all 7.',
-    );
+    expect(text(status())).toBe('Showing 1 of 7 rows. Export CSV still writes all 7.');
   });
 
   it('a group the next baseline’s definitions do not have falls back to All', async () => {
@@ -449,12 +469,7 @@ describe('CompareView', () => {
 
   it('a run list that cannot be read says why, with Retry', async () => {
     runs.runs.set(null);
-    runs.runsFailure.set({
-      code: 'timeout',
-      title: 'The board took too long to answer',
-      hint: 'Check the board is awake and on the network, then retry.',
-      problem: { message: 'Timed out.' },
-    } as SentinelFailure);
+    runs.runsFailure.set(failureOf(new BoardProblem('Timed out.', 'timeout', '', {}), GENERATION));
     await openPair();
     noRequest();
     expect(calloutHeadings()).toEqual(['The board took too long to answer']);

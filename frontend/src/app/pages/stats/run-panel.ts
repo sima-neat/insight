@@ -7,8 +7,7 @@ import {
   input,
   resource,
 } from '@angular/core';
-import { NeatAsideHeading, NeatButton, NeatNote } from '@sima/neat-ui';
-import { NeatCallout } from '@sima/neat-ui/callout';
+import { NeatAsideHeading, NeatNote } from '@sima/neat-ui';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
@@ -26,6 +25,7 @@ import {
   undefinedKeys,
 } from '../../stats/runs';
 import { SentinelRuns } from '../../stats/sentinel-runs';
+import { SentinelFailureCallout } from './sentinel-failure-callout';
 
 /** The recording run's chip, beside its name. */
 const RECORDING_CHIP: PanelChip = { label: 'Recording', tone: 'info' };
@@ -87,8 +87,6 @@ function undefinedSentence(keys: readonly string[]): string {
   selector: 'app-run-panel',
   imports: [
     NeatAsideHeading,
-    NeatButton,
-    NeatCallout,
     NeatCollapsible,
     NeatDetails,
     NeatFigure,
@@ -97,6 +95,7 @@ function undefinedSentence(keys: readonly string[]): string {
     NeatTable,
     NgTemplateOutlet,
     PanelTitle,
+    SentinelFailureCallout,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './run-panel.html',

@@ -279,7 +279,32 @@ describe('compare table', () => {
     ]);
     expect(rows[0].cells.map((cell) => cell.mean)).toEqual([8.129, 6.667]);
     expect(rows[1].cells.map((cell) => cell.mean)).toEqual([54.1891436875, 51.533604984375]);
-    expect(rows[2].cells.map((cell) => cell.change)).toEqual([null, null]);
+  });
+
+  it('gives each run total its change against the baseline’s, none for the baseline itself', () => {
+    expect(rows[0].cells).toEqual([
+      { mean: 8.129, change: null },
+      { mean: 6.667, change: ((6.667 - 8.129) / 8.129) * 100 },
+    ]);
+    expect(rows[1].cells[1].change).toBeCloseTo(-4.9005, 3);
+    expect(rows[2].cells).toEqual([
+      { mean: 4, change: null },
+      { mean: 4, change: 0 },
+    ]);
+  });
+
+  it('gives a run total no change where the baseline has none, or none to divide by', () => {
+    const baseline = COMPARE_RAW.summaries[BASELINE_ID];
+    const answer: CompareExport = {
+      ...COMPARE_RAW,
+      summaries: {
+        ...COMPARE_RAW.summaries,
+        [BASELINE_ID]: { ...baseline, duration_ms: 0, energy_joules: null },
+      },
+    };
+    const [duration, energy] = compareTable(answer);
+    expect(duration.cells[1]).toEqual({ mean: 6.667, change: null });
+    expect(energy.cells.map((cell) => cell.change)).toEqual([null, null]);
   });
 
   it('carries each run mean and Sentinel change, none for the baseline', () => {
@@ -337,6 +362,8 @@ describe('compare table', () => {
 
   it('keeps for Changes only the rows where some run changed', () => {
     expect(changesOnly(rows).map((row) => row.key)).toEqual([
+      'duration_ms',
+      'energy_joules',
       'power_current_watts',
       'lm96163_temp2',
       'rtsn_0',
@@ -386,7 +413,10 @@ describe('compare CSV', () => {
         'insight-hw-1790177227 (Insight hardware validation) mean,' +
         'insight-hw-1790177227 (Insight hardware validation) change vs baseline (%)',
     );
-    expect(lines[1]).toBe('duration_ms,Duration,Run totals,s,8.129,,6.667,');
+    expect(lines[1]).toBe(
+      `duration_ms,Duration,Run totals,s,8.129,,6.667,${((6.667 - 8.129) / 8.129) * 100}`,
+    );
+    expect(lines[3]).toBe('samples,Samples,Run totals,,4,,4,0');
     expect(lines).toContain(
       'power_current_watts,Current board power,Power,W,9.03125,,8.6171875,-4.58477508650519',
     );

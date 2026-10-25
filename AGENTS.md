@@ -138,6 +138,11 @@ merging.
   - `app-board-settings-action` is a callout's "Open board settings"
     (`<app-board-settings-action neatCalloutActions />`), for a problem the board's settings fix;
     it opens the board dialog through `TopBarDialogs`. Peripherals' and Stats' notices use it.
+  - `app-sentinel-failure` says why a Sentinel request failed: a danger callout with
+    `failureOf`'s title, the backend's message and hint, and Retry (`retry`) only where asking
+    again can help; `busy` makes Retry read "Retrying…" and wait with the focus kept on it. Stats'
+    Live, Runs and Compare views and the run panel use it; a board-coded failure has
+    `app-board-problem-notice` instead.
   - `app/format-bytes.ts` (`formatBytes`) words every byte count in the app (media sizes, System
     Info's memory and disk), so one quantity reads the same everywhere.
   - A ⋯ menu's items are the kit's `neatPopoverItem` on a `neatButton` (Streaming's and Stats'

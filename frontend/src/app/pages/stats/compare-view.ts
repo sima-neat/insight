@@ -45,9 +45,15 @@ import { formatDuration, formatEnergy, formatValue } from '../../stats/format';
 import { failureOf, type SentinelFailure } from '../../stats/sentinel-failure';
 import { SentinelRuns } from '../../stats/sentinel-runs';
 import { StatsSession } from '../../stats/stats-session';
+import { SentinelFailureCallout } from './sentinel-failure-callout';
 import { StatsChart, type StatsChartInputs } from './stats-chart';
 
 const COMPARE_URL = '/api/sentinel/compare';
+
+/** A run's colour: its place among the runs, as the chart colours its line. */
+function seriesColour(index: number): string {
+  return `var(--neat-series-${index + 1})`;
+}
 
 /**
  * What the address and the run list allow, the first that applies: fewer than two runs named,
@@ -96,6 +102,7 @@ type Comparison = { answer: CompareExport } | { failure: SentinelFailure } | nul
     NeatTabs,
     NgTemplateOutlet,
     RouterLink,
+    SentinelFailureCallout,
     StatsChart,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -177,14 +184,14 @@ export class CompareView {
     return comparison && 'failure' in comparison ? comparison.failure : null;
   });
 
-  /** Each run in its series colour (its place among the runs, as the chart colours it). */
+  /** Each run in its series colour, the baseline first. */
   protected readonly chips = computed(
     () =>
       this.answer()?.runs.map((run, index) => ({
         id: run.metadata.id,
         name: run.metadata.name,
         baseline: index === 0,
-        colour: `var(--neat-series-${index + 1})`,
+        colour: seriesColour(index),
       })) ?? [],
   );
 
@@ -228,7 +235,8 @@ export class CompareView {
     return compareSummary(answer.runs, series.key).map((row, index) => ({
       id: row.id,
       name: row.name,
-      colour: this.chips()[index]?.colour ?? '',
+      colour: seriesColour(index),
+      empty: row.samples === 0,
       samples: row.samples === 0 ? 'No samples' : String(row.samples),
       minimum: value(row.minimum),
       mean: value(row.mean),
