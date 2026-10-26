@@ -191,15 +191,21 @@ export class CamerasService {
 
   /**
    * Registers the slot as a webcam on the server and remembers `deviceId` as its camera; nothing is
-   * published until `publish`. A session the slot has is ended first (the old track would keep
-   * publishing to the same MediaMTX path, and the new one would be refused), and the server is told
-   * by the release claim. Rejects with the server's message, leaving the slot with no camera.
+   * published until `publish`. With no `deviceId` the slot is a webcam with no camera yet (the
+   * source switch's Camera), and any camera it had is forgotten. A session the slot has is ended
+   * first (the old track would keep publishing to the same MediaMTX path, and the new one would be
+   * refused), and the server is told by the release claim. Rejects with the server's message,
+   * leaving the slot with no camera.
    */
-  assign(slot: number, deviceId: string): Promise<void> {
-    const camera: Camera = {
-      deviceId,
-      label: this.cameras().find((c) => c.deviceId === deviceId)?.label ?? UNKNOWN_CAMERA_LABEL,
-    };
+  assign(slot: number, deviceId: string | null): Promise<void> {
+    const camera: Camera | null =
+      deviceId === null
+        ? null
+        : {
+            deviceId,
+            label:
+              this.cameras().find((c) => c.deviceId === deviceId)?.label ?? UNKNOWN_CAMERA_LABEL,
+          };
     const claim = releaseClaim(this.sessions.get(slot));
     return this.whileChanging(slot, async () => {
       // The slot is invalidated by this, so the generation is the one this assignment belongs to;

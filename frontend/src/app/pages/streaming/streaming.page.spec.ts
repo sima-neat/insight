@@ -162,6 +162,8 @@ class FakeCameras {
     void options;
     return RELEASED;
   });
+  /** What the side panel's source switch clears a slot with. */
+  readonly assignFile = vi.fn(async () => ({ success: true }));
 }
 
 /** A library with streamable files, unless a test sets another answer (or none). */

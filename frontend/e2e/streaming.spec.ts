@@ -232,6 +232,23 @@ async function withMockedSlots(page: Page): Promise<Mocked> {
     (target, { file }) => Object.assign(target, file ? { file, ...PROBED } : slot(target.index)),
     ok,
   );
+  // A webcam slot is registered with no device; the server answers with the slot it made.
+  await slotAction(
+    'assign-webcam',
+    (target) =>
+      Object.assign(target, {
+        type: 'webcam',
+        file: '',
+        state: 'stopped',
+        active_file: null,
+        pull: undefined,
+        codec: 'h264',
+        transport: 'rtsp',
+        native_fps: null,
+        allowed_transports: ['rtsp'],
+      }),
+    (target) => ({ success: true, source: target }),
+  );
   await slotAction(
     'start',
     (target) => Object.assign(target, { state: 'playing', active_file: target['file'] }),
@@ -536,6 +553,85 @@ test.describe('Streaming with mocked slots', () => {
       expect(await cells(page, 'src11')).toEqual(
         shownAt(size, ['src11', '', 'Not assigned', 'Idle', '', '-']),
       );
+    });
+
+    test(`the source switch applies at once on a stopped slot, and the keyboard stays on it at ${name}`, async ({
+      page,
+    }) => {
+      const mocked = await withMockedSlots(page);
+      await page.setViewportSize(size);
+      await page.goto('/streaming');
+      await expect(rows(page)).toHaveCount(48);
+
+      // src9 holds an idle file.
+      await row(page, 'src9').click();
+      await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src9');
+      const file = panel(page).getByRole('radio', { name: 'File' });
+      const camera = panel(page).getByRole('radio', { name: 'Camera' });
+      await file.focus();
+      await page.keyboard.press('ArrowRight');
+      await expect(panel(page).getByRole('radio', { name: 'Camera', checked: true })).toBeVisible();
+      await expect(camera).toBeFocused();
+      expect(mocked.posts.get('assign-webcam')).toEqual([{ index: 9 }]);
+      expect((await cells(page, 'src9'))[1]).toBe('CAM');
+
+      await file.click();
+      await expect(panel(page).getByText('File: Not assigned')).toBeVisible();
+      expect(mocked.posts.get('assign')).toEqual([{ index: 9, file: '' }]);
+      expect((await cells(page, 'src9'))[1]).toBe('');
+    });
+
+    test(`the source switch asks before it stops a live slot, and Cancel changes nothing at ${name}`, async ({
+      page,
+    }) => {
+      const mocked = await withMockedSlots(page);
+      await page.setViewportSize(size);
+      await page.goto('/streaming');
+      await expect(rows(page)).toHaveCount(48);
+
+      // src1 is playing a file.
+      await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
+      await panel(page).getByRole('radio', { name: 'Camera' }).click();
+      const question = confirmDialog(page);
+      await expect(question).toContainText('Stop src1?');
+      await expect(question).toContainText(
+        'Switching to Camera stops src1 and removes its people/walk_720p30.mp4.',
+      );
+      await question.getByRole('button', { name: 'Cancel' }).click();
+      await expect(question).toBeHidden();
+      await expect(panel(page).getByRole('radio', { name: 'File', checked: true })).toBeVisible();
+      await expect(panel(page)).toContainText('File: people/walk_720p30.mp4');
+      expect(mocked.posts.get('stop')).toBeUndefined();
+      expect(mocked.posts.get('assign-webcam')).toBeUndefined();
+      expect((await cells(page, 'src1'))[3]).toBe('Live');
+
+      await panel(page).getByRole('radio', { name: 'Camera' }).click();
+      await question.getByRole('button', { name: 'Stop and switch' }).click();
+      // The switch shows Camera at once; the row is a camera once the slot has been stopped and
+      // registered.
+      await expect.poll(async () => (await cells(page, 'src1'))[1]).toBe('CAM');
+      expect(mocked.posts.get('stop')).toEqual([{ index: 1 }]);
+      expect(mocked.posts.get('assign-webcam')).toEqual([{ index: 1 }]);
+      expect(await cells(page, 'src1')).toEqual(
+        shownAt(size, ['src1', 'CAM', 'Select a camera', 'Idle', '', 'H.264']),
+      );
+    });
+
+    test(`an empty slot left on Stream URL shows it again at ${name}`, async ({ page }) => {
+      await withMockedSlots(page);
+      await page.setViewportSize(size);
+      await page.goto('/streaming');
+      await expect(rows(page)).toHaveCount(48);
+
+      await row(page, 'src12').click();
+      await panel(page).getByRole('radio', { name: 'Stream URL' }).click();
+      await row(page, 'src13').click();
+      await expect(panel(page).getByRole('radio', { name: 'File', checked: true })).toBeVisible();
+      await row(page, 'src12').click();
+      await expect(
+        panel(page).getByRole('radio', { name: 'Stream URL', checked: true }),
+      ).toBeVisible();
+      await expect(panel(page).getByLabel('Stream URL', { exact: true })).toBeVisible();
     });
 
     test(`an external publisher is taken over after a confirmation at ${name}`, async ({

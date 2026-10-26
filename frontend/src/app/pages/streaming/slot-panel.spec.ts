@@ -108,6 +108,25 @@ class FakeSlots {
   }
 }
 
+/** The slots as the server leaves them after the change a camera action asks for. */
+const WEBCAM_SLOT: Partial<Slot> = {
+  type: 'webcam',
+  file: '',
+  state: 'stopped',
+  codec: 'h264',
+  transport: 'rtsp',
+};
+const EMPTY_SLOT: Partial<Slot> = {
+  type: 'file',
+  file: '',
+  state: 'stopped',
+  codec: '',
+  transport: '',
+  allowed_transports: [],
+  native_fps: null,
+};
+
+/** Like the real service, a change shows in the slots and in the cameras it remembers. */
 class FakeCameras {
   readonly cameras = signal<readonly Camera[]>([]);
   readonly state = signal<CameraAccessState>('unknown');
@@ -116,7 +135,12 @@ class FakeCameras {
   readonly localStreams = signal<ReadonlyMap<number, MediaStream>>(new Map());
   readonly changingSlots = signal<ReadonlySet<number>>(new Set());
   readonly anyChanging = computed(() => this.changingSlots().size > 0);
-  readonly assign = vi.fn<(slot: number, deviceId: string) => Promise<void>>(async () => undefined);
+  readonly assign = vi.fn<(slot: number, deviceId: string | null) => Promise<void>>(
+    async (slot, deviceId) => {
+      this.slots.update(slot, WEBCAM_SLOT);
+      this.remember(slot, this.cameras().find((camera) => camera.deviceId === deviceId) ?? null);
+    },
+  );
   readonly assignFile = vi.fn<
     (request: Omit<AssignRequest, 'publisher_released'>) => Promise<SuccessResponse>
   >(async () => OK);
@@ -126,6 +150,30 @@ class FakeCameras {
     this.state.set('granted');
     this.cameras.set(CAMERAS);
   });
+
+  constructor(private readonly slots: FakeSlots) {}
+
+  /**
+   * Makes clearing and stopping show in the slots, as the server's answers do on the next read;
+   * the specs that only count calls leave the slots alone.
+   */
+  followTheServer(): void {
+    this.assignFile.mockImplementation(async ({ index, file }) => {
+      if (file === '') {
+        this.slots.update(index, EMPTY_SLOT);
+        this.remember(index, null);
+      }
+      return OK;
+    });
+    this.release.mockImplementation(async (slot) => this.slots.update(slot, { state: 'stopped' }));
+  }
+
+  private remember(slot: number, camera: Camera | null): void {
+    const next = new Map(this.assignments());
+    if (camera) next.set(slot, camera);
+    else next.delete(slot);
+    this.assignments.set(next);
+  }
 }
 
 class FakeLibrary {
@@ -176,7 +224,7 @@ describe('SlotPanel', () => {
 
   beforeEach(() => {
     slots = new FakeSlots();
-    cameras = new FakeCameras();
+    cameras = new FakeCameras(slots);
     library = new FakeLibrary();
     toasts = { error: vi.fn(), status: vi.fn() };
     imports = { open: vi.fn<() => Promise<string | null>>() };
@@ -300,37 +348,317 @@ describe('SlotPanel', () => {
     expect(root().querySelector('app-slot-preview')).not.toBeNull();
   });
 
-  it('the switch changes only the form; nothing is sent until Assign, Pull or Clear', async () => {
-    cameras.cameras.set(CAMERAS);
-    await open();
-    // A file slot opens on its file.
-    expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
-    expect(text()).toContain('File: people/walk.mp4 · 30 fps');
+  const row = () => fixture.componentInstance.row();
 
-    await click(sourceKind('Camera'));
-    // The hints name the slot's real URL, with the server's mapped port.
-    expect(text()).toContain(
-      'The browser publishes the camera to rtsp://10.0.0.2:8554/src2 while this tab stays open.',
-    );
-    expect(text()).not.toContain('File: people/walk.mp4');
-    await click(sourceKind('Stream URL'));
-    expect(field('Stream URL')).toBeDefined();
-    expect(text()).toContain(
-      'Insight pulls the stream and forwards it unchanged to rtsp://10.0.0.2:8554/src2. RTSP and RTSPS only.',
-    );
-    await click(sourceKind('File'));
-    sentNothing();
+  describe('the source switch', () => {
+    beforeEach(() => {
+      cameras.followTheServer();
+      slots.stop.mockImplementation(async ({ index }) => {
+        slots.update(index, { state: 'stopped' });
+        return OK;
+      });
+    });
 
+    it('applies at once on a stopped slot: Camera registers a webcam with no camera picked', async () => {
+      await open();
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+      expect(text()).toContain('File: people/walk.mp4 · 30 fps');
+      expect(row().kind).toBe('VID');
+
+      await click(sourceKind('Camera'));
+      expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(2, null);
+      // The row is a camera from the next read, and the form is the camera's.
+      expect(row().kind).toBe('CAM');
+      expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
+      // The hints name the slot's real URL, with the server's mapped port.
+      expect(text()).toContain(
+        'The browser publishes the camera to rtsp://10.0.0.2:8554/src2 while this tab stays open.',
+      );
+      expect(text()).not.toContain('File: people/walk.mp4');
+      expect(slots.assign).not.toHaveBeenCalled();
+    });
+
+    it('applies at once on a stopped slot: File clears a webcam, and a file slot keeps its file', async () => {
+      slots.slots.set([slot(2, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      await open();
+      expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
+
+      await click(sourceKind('File'));
+      expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
+      expect(row().kind).toBe('');
+      expect(text()).toContain('File: Not assigned');
+
+      // A file slot is on File already: choosing it again changes nothing.
+      cameras.assignFile.mockClear();
+      slots.slots.set([fileSlot()]);
+      await settle();
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+      await click(sourceKind('File'));
+      sentNothing();
+      expect(text()).toContain('File: people/walk.mp4');
+    });
+
+    it('applies at once on a stopped slot: Stream URL clears a webcam or a file, and leaves an empty slot alone', async () => {
+      await open();
+      await click(sourceKind('Stream URL'));
+      expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
+      expect(row().kind).toBe('');
+      expect(field('Stream URL')).toBeDefined();
+      expect(text()).toContain(
+        'Insight pulls the stream and forwards it unchanged to rtsp://10.0.0.2:8554/src2. RTSP and RTSPS only.',
+      );
+
+      // Nothing left to clear on an empty slot: only the form changes.
+      cameras.assignFile.mockClear();
+      await click(sourceKind('File'));
+      await click(sourceKind('Stream URL'));
+      sentNothing();
+
+      // A webcam is cleared the same way.
+      await click(sourceKind('Camera'));
+      expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(2, null);
+      await click(sourceKind('Stream URL'));
+      expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
+      expect(row().kind).toBe('');
+    });
+
+    it('a refused change shows the server’s message and goes back to the slot’s form', async () => {
+      cameras.assign.mockRejectedValueOnce(new Error('src2 is held by another browser'));
+      await open();
+      await click(sourceKind('Camera'));
+      expect(toasts.error).toHaveBeenCalledWith('src2 is held by another browser');
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+      expect(text()).toContain('File: people/walk.mp4');
+    });
+
+    it('remembers the form left on an empty slot, for the session', async () => {
+      slots.slots.set([slot(3), fileSlot(2)]);
+      await open(3);
+      await click(sourceKind('Stream URL'));
+      sentNothing();
+      expect(sourceKind('Stream URL').getAttribute('aria-checked')).toBe('true');
+
+      // Another slot, then back: the panel is built afresh each time.
+      fixture.destroy();
+      await open(2);
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+      fixture.destroy();
+      await open(3);
+      expect(sourceKind('Stream URL').getAttribute('aria-checked')).toBe('true');
+      expect(field('Stream URL')).toBeDefined();
+
+      // Clearing lands on File, which is then what the slot is remembered on.
+      await click(sourceKind('File'));
+      fixture.destroy();
+      await open(3);
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('asks first on a live file slot, and Cancel changes nothing', async () => {
+      slots.slots.set([fileSlot(2, { state: 'playing' })]);
+      await open();
+      await click(sourceKind('Camera'));
+
+      const ask = confirmDialog()!;
+      expect(text(ask)).toContain('Stop src2?');
+      expect(text(ask)).toContain(
+        'Switching to Camera stops src2 and removes its people/walk.mp4.',
+      );
+      expect(buttonIn(ask, 'Stop and switch')).toBeDefined();
+      // Nothing happens until the answer.
+      sentNothing();
+
+      await click(buttonIn(ask, 'Cancel'));
+      sentNothing();
+      expect(confirmDialog()).toBeNull();
+      // The switch shows the slot's form again, and the form is the file's.
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+      expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('false');
+      expect(text()).toContain('File: people/walk.mp4');
+      expect(row().state.label).toBe('Live');
+
+      // Cancelled again, now for Stream URL: still nothing, and the same form shown.
+      await click(sourceKind('Stream URL'));
+      expect(text(confirmDialog()!)).toContain(
+        'Switching to Stream URL stops src2 and removes its people/walk.mp4.',
+      );
+      await click(buttonIn(confirmDialog()!, 'Cancel'));
+      sentNothing();
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('stops a live file slot, then switches, once the question is confirmed', async () => {
+      slots.slots.set([fileSlot(2, { state: 'playing' })]);
+      await open();
+      await click(sourceKind('Camera'));
+      await click(buttonIn(confirmDialog()!, 'Stop and switch'));
+
+      expect(slots.stop).toHaveBeenCalledExactlyOnceWith({ index: 2 });
+      expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(2, null);
+      expect(slots.stop.mock.invocationCallOrder[0]).toBeLessThan(
+        cameras.assign.mock.invocationCallOrder[0],
+      );
+      expect(row().kind).toBe('CAM');
+      expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('stops a live webcam through the cameras service, then clears it, once confirmed', async () => {
+      slots.slots.set([
+        slot(2, { type: 'webcam', state: 'playing', codec: 'h264', transport: 'rtsp' }),
+      ]);
+      cameras.assignments.set(new Map([[2, CAMERAS[0]]]));
+      await open();
+      await click(sourceKind('File'));
+      expect(text(confirmDialog()!)).toContain(
+        'Switching to File stops src2 and removes its camera.',
+      );
+      sentNothing();
+      expect(cameras.release).not.toHaveBeenCalled();
+
+      await click(buttonIn(confirmDialog()!, 'Stop and switch'));
+      expect(cameras.release).toHaveBeenCalledExactlyOnceWith(2);
+      expect(slots.stop).not.toHaveBeenCalled();
+      expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
+      expect(cameras.release.mock.invocationCallOrder[0]).toBeLessThan(
+        cameras.assignFile.mock.invocationCallOrder[0],
+      );
+      expect(row().kind).toBe('');
+    });
+
+    it('waits while the slot is busy or encoding', async () => {
+      await open();
+      let registered!: () => void;
+      cameras.assign.mockImplementationOnce(
+        () => new Promise<void>((resolve) => (registered = resolve)),
+      );
+      await click(sourceKind('Camera'));
+      // The change is in flight, so the switch cannot start a second one.
+      expect(sourceKind('File').hasAttribute('disabled')).toBe(true);
+      registered();
+      await settle();
+      expect(sourceKind('File').hasAttribute('disabled')).toBe(false);
+
+      // An encode in progress holds it too, as it holds Change….
+      slots.slots.set([fileSlot(2, { fps: 15 })]);
+      await settle();
+      await click(button('Start'));
+      expect(text(button('Cancel encoding'))).toBe('Cancel encoding');
+      expect(sourceKind('Camera').hasAttribute('disabled')).toBe(true);
+    });
+
+    it('is hidden while an external publisher or a pull holds the slot, as before', async () => {
+      slots.slots.set([slot(2, { state: 'pulled', pull: undefined })]);
+      await open();
+      expect(root().querySelector('[role="radiogroup"][aria-label="Source"]')).toBeNull();
+    });
+  });
+
+  describe('the cameras', () => {
+    const cameraList = () =>
+      root().querySelector<HTMLElement>('[role="listbox"][aria-label="Cameras"]')!;
+    const options = () => [...cameraList().querySelectorAll<HTMLElement>('[role="option"]')];
+
+    it('assigns a camera when it is clicked, and there is no Assign button', async () => {
+      slots.slots.set([slot(2, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      cameras.cameras.set(CAMERAS);
+      await open();
+      expect(button('Assign')).toBeUndefined();
+      expect(options().every((option) => option.getAttribute('aria-selected') === 'false')).toBe(
+        true,
+      );
+
+      await click(options()[1]);
+      expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(2, 'd2');
+      // The list's selection is the assigned camera.
+      expect(options()[1].getAttribute('aria-selected')).toBe('true');
+      // What comes next for an assigned camera is starting it.
+      expect(document.activeElement).toBe(button('Start'));
+
+      // The assigned camera again changes nothing.
+      await click(options()[1]);
+      expect(cameras.assign).toHaveBeenCalledOnce();
+    });
+
+    it('shows the assigned camera as selected, and a refused assignment puts the selection back', async () => {
+      slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      cameras.cameras.set(CAMERAS);
+      cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+      await open(3);
+      expect(options()[0].getAttribute('aria-selected')).toBe('true');
+
+      cameras.assign.mockRejectedValueOnce(new Error('src3 is held by another browser'));
+      await click(options()[1]);
+      expect(toasts.error).toHaveBeenCalledWith('src3 is held by another browser');
+      expect(options()[0].getAttribute('aria-selected')).toBe('true');
+      expect(options()[1].getAttribute('aria-selected')).toBe('false');
+
+      // An assignment on another slot finishing meanwhile leaves this slot's camera alone.
+      cameras.assignments.set(
+        new Map([
+          [3, CAMERAS[0]],
+          [5, CAMERAS[1]],
+        ]),
+      );
+      await settle();
+      expect(options()[0].getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('waits while the slot is changing: a click then assigns nothing, and the selection stays', async () => {
+      slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      cameras.cameras.set(CAMERAS);
+      cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+      await open(3);
+      cameras.changingSlots.set(new Set([3]));
+      await settle();
+
+      await click(options()[1]);
+      expect(cameras.assign).not.toHaveBeenCalled();
+      expect(options()[0].getAttribute('aria-selected')).toBe('true');
+      expect(options()[1].getAttribute('aria-selected')).toBe('false');
+    });
+  });
+
+  it('opens on the form for what the slot holds, and words the camera access as Media did', async () => {
+    cameras.followTheServer();
+    slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+    await open(3);
+    expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
+    expect(text()).toContain(
+      "No cameras enabled yet. Insight needs this browser's permission to use them.",
+    );
+    expect(button('Enable camera access')).toBeDefined();
+    await click(button('Enable camera access'));
+    expect(cameras.requestAccess).toHaveBeenCalledOnce();
+    expect(button('Refresh cameras')).toBeDefined();
+
+    cameras.state.set('requesting');
+    await fixture.whenStable();
+    expect(button('Requesting…')!.disabled).toBe(true);
+
+    cameras.state.set('denied');
+    cameras.error.set(
+      'Camera permission was denied. Allow camera access for this site and try again.',
+    );
+    await fixture.whenStable();
+    expect(root().querySelector('neat-error-note[role="alert"]')!.textContent).toContain(
+      'Camera permission was denied.',
+    );
+
+    // A webcam slot can be cleared from its own form; the empty slot is then a file slot.
     await click(button('Clear'));
-    expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
+    expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 3, file: '' });
+    expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
 
-    await click(sourceKind('Camera'));
-    const cameraList = root().querySelector<HTMLElement>('[role="listbox"][aria-label="Cameras"]')!;
-    expect(button('Assign')!.disabled).toBe(true);
-    await click([...cameraList.querySelectorAll<HTMLElement>('[role="option"]')][1]);
-    await click(button('Assign'));
-    expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(2, 'd2');
+    // The switch cleared what stood in the way of a pull, so nothing tells the user to clear it.
+    await click(sourceKind('Stream URL'));
+    expect(text()).not.toContain('Clear it on the Camera tab');
+    await type(field('Stream URL'), 'rtsp://10.0.0.7/stream1');
+    expect(button('Pull')!.disabled).toBe(false);
+  });
 
+  it('a pull sends the trimmed URL and credentials, names the source from the server’s record, and forgets the password', async () => {
+    slots.slots.set([slot(2)]);
+    await open();
     await click(sourceKind('Stream URL'));
     slots.pull.mockResolvedValueOnce(
       slot(2, {
@@ -364,64 +692,6 @@ describe('SlotPanel', () => {
     // Named from the server's credential-free record, never from what was typed.
     expect(toasts.status).toHaveBeenCalledWith('src2 is pulling from rtsp://10.0.0.7:554/stream1.');
     expect(field('Password').value).toBe('');
-  });
-
-  it('keeps a camera picked and not yet assigned while another slot’s camera changes', async () => {
-    slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
-    cameras.cameras.set(CAMERAS);
-    cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
-    await open(3);
-    const cameraList = root().querySelector<HTMLElement>('[role="listbox"][aria-label="Cameras"]')!;
-    const options = () => [...cameraList.querySelectorAll<HTMLElement>('[role="option"]')];
-    await click(options()[1]);
-    expect(button('Assign')!.disabled).toBe(false);
-
-    // An assign on src5 finishes meanwhile.
-    cameras.assignments.set(
-      new Map([
-        [3, CAMERAS[0]],
-        [5, CAMERAS[1]],
-      ]),
-    );
-    await settle();
-    expect(options()[1].getAttribute('aria-selected')).toBe('true');
-    expect(button('Assign')!.disabled).toBe(false);
-  });
-
-  it('opens on the form for what the slot holds, and words the camera access as Media did', async () => {
-    slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
-    await open(3);
-    expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
-    expect(text()).toContain(
-      "No cameras enabled yet. Insight needs this browser's permission to use them.",
-    );
-    expect(button('Enable camera access')).toBeDefined();
-    await click(button('Enable camera access'));
-    expect(cameras.requestAccess).toHaveBeenCalledOnce();
-    expect(button('Refresh cameras')).toBeDefined();
-
-    cameras.state.set('requesting');
-    await fixture.whenStable();
-    expect(button('Requesting…')!.disabled).toBe(true);
-
-    cameras.state.set('denied');
-    cameras.error.set(
-      'Camera permission was denied. Allow camera access for this site and try again.',
-    );
-    await fixture.whenStable();
-    expect(root().querySelector('neat-error-note[role="alert"]')!.textContent).toContain(
-      'Camera permission was denied.',
-    );
-
-    // A webcam slot can be cleared from its own form, and refuses a pull until it is.
-    await click(button('Clear'));
-    expect(cameras.assignFile).toHaveBeenCalledWith({ index: 3, file: '' });
-    await click(sourceKind('Stream URL'));
-    expect(text()).toContain(
-      'This slot is a webcam source. Clear it on the Camera tab before pulling a stream into it.',
-    );
-    await type(field('Stream URL'), 'rtsp://10.0.0.7/stream1');
-    expect(button('Pull')!.disabled).toBe(true);
   });
 
   it('a refused pull shows the server message and keeps the form to try again', async () => {
@@ -992,15 +1262,6 @@ describe('SlotPanel', () => {
     button('Clear')!.focus();
     await click(button('Clear'));
     expect(document.activeElement).toBe(button('Change…'));
-
-    // A camera assigned: what comes next is starting it.
-    cameras.cameras.set(CAMERAS);
-    await click(sourceKind('Camera'));
-    const cameraList = root().querySelector<HTMLElement>('[role="listbox"][aria-label="Cameras"]')!;
-    await click([...cameraList.querySelectorAll<HTMLElement>('[role="option"]')][0]);
-    button('Assign')!.focus();
-    await click(button('Assign'));
-    expect(document.activeElement).toBe(action);
   });
 
   it('says why the frame rate cannot change, in words the stepper is described by', async () => {

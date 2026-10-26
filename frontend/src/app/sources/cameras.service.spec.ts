@@ -256,6 +256,27 @@ describe('CamerasService', () => {
       });
     });
 
+    it('with no camera registers the slot as a webcam and leaves it with none', async () => {
+      const service = await create();
+      await service.assign(2, 'cam-laptop');
+
+      await service.assign(2, null);
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith({ index: 2 });
+      expect(service.assignments().has(2)).toBe(false);
+
+      // A publishing slot is ended first, as for another camera.
+      await publishDesk(service);
+      await service.assign(1, null);
+      expect(peerOf().closed).toBe(true);
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith({
+        index: 1,
+        publisher_released: true,
+        publisher_session: 'session-1',
+      });
+      expect(service.assignments().has(1)).toBe(false);
+      expect(service.localStreams().has(1)).toBe(false);
+    });
+
     it('holds the slot as changing while the request is in flight, and lets go on success and failure', async () => {
       const service = await create();
       const answer = deferred<{ success: true }>();

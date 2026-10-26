@@ -30,7 +30,13 @@
 
 @if (!held()) {
   <h3 neatAsideHeading>Source</h3>
-  <neat-segmented label="Source" [options]="sourceForms" [(value)]="form" />
+  <neat-segmented
+    label="Source"
+    [options]="sourceForms"
+    [value]="form()"
+    [disabled]="busy() || encode() !== null"
+    (valueChange)="switchSource($event)"
+  />
   @switch (form()) {
     @case ('file') {
       <p class="text">File: {{ fileDetail() }}</p>
@@ -72,7 +78,7 @@
             label="Cameras"
             [items]="cameras.cameras()"
             [trackBy]="cameraKey"
-            [selected]="pickedCameraItem()"
+            [selected]="assignedCamera()"
             (selectedChange)="selectCamera($event)"
           >
             <ng-template neatColumn="camera" let-camera>{{ camera.label }}</ng-template>
@@ -110,15 +116,6 @@
             Clear
           </button>
         }
-        <button
-          neatButton
-          type="button"
-          size="small"
-          [disabled]="!canAssignCamera()"
-          (click)="assignCamera()"
-        >
-          Assign
-        </button>
       </div>
     }
     @case ('url') {
@@ -128,12 +125,6 @@
           <code neatCode>{{ rtspUrl() }}</code
           >. RTSP and RTSPS only.
         </p>
-        @if (isWebcam()) {
-          <p neatNote>
-            This slot is a webcam source. Clear it on the Camera tab before pulling a stream into
-            it.
-          </p>
-        }
         <neat-field label="Stream URL"
           ><input
             #urlField

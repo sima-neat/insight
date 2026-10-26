@@ -104,10 +104,10 @@ merging.
   screen chose. The two differ in how long a phone's choice lives: on Streaming, Media,
   Peripherals and Stats an opened panel is kept for the session (`AsidePrefs` is root-provided),
   while the Viewer's inspector, owned by the page, starts closed on each visit. The panel is still
-  `neat-aside-toggle`'s to close. Where the user was on a page (Viewer position, Streaming's slot,
-  Media's folder and selection, Peripherals' device and modes, Stats' card, thermal group and
-  runs) lives in memory for the next visit (`ViewerSession`, `SourcesSession`, `PeripheralsSession`,
-  `StatsSession`).
+  `neat-aside-toggle`'s to close. Where the user was on a page (Viewer position, Streaming's slot
+  and the source form its empty slots were left on, Media's folder and selection, Peripherals'
+  device and modes, Stats' card, thermal group and runs) lives in memory for the next visit
+  (`ViewerSession`, `SourcesSession`, `PeripheralsSession`, `StatsSession`).
 - **Shared app components.** Each is a styled pattern with more than one use (the one-place rule
   above), so use it instead of writing the markup again:
   - `app-list-column` lays out a list page's main column for `neat-page scroll="none"`: what

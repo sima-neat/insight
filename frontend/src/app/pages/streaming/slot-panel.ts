@@ -10,7 +10,6 @@ import {
   linkedSignal,
   signal,
   type TemplateRef,
-  untracked,
   viewChild,
 } from '@angular/core';
 import {
@@ -37,6 +36,7 @@ import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { copyText } from '../../clipboard';
+import { holdFocus } from '../../hold-focus';
 import { PanelTitle } from '../../panel-title';
 import type { Slot, SlotTransport } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
@@ -54,6 +54,7 @@ import {
   externalChip,
   formatBitrate,
   isAssigned,
+  isLive,
   liveFor,
   protocolLabel,
   pullSourceText,
@@ -65,6 +66,7 @@ import {
   streamUrl,
 } from '../../sources/slot-row';
 import { messageOf } from '../../sources/stream-lines';
+import { type EmptySourceForm, SourcesSession } from '../sources-session';
 
 /** Which form the source switch shows. */
 type SourceForm = 'file' | 'camera' | 'url';
@@ -98,10 +100,14 @@ interface PrimaryAction {
 
 let nextPanelId = 0;
 
-/** The form for what the slot holds: a webcam its camera, a pull its URL, anything else its file. */
-function formFor(slot: Slot): SourceForm {
+/**
+ * The form for what the slot holds: a pull its URL, a webcam its camera, a file its file. An empty
+ * slot holds nothing, so it shows the form it was left on.
+ */
+function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
   if (slot.state === 'pulled') return 'url';
-  return slot.type === 'webcam' ? 'camera' : 'file';
+  if (slot.type === 'webcam') return 'camera';
+  return slot.file ? 'file' : (left ?? 'file');
 }
 
 /**
@@ -111,8 +117,9 @@ function formFor(slot: Slot): SourceForm {
  * - the slot and its state, and its live preview (`SlotPreview`);
  * - its actions: Start and Stop; Cancel encoding while a rendition encodes; "Take over…" for an
  *   external publisher; Stop pulling for a pull;
- * - the source switch, File / Camera / Stream URL, which only chooses the form shown: nothing
- *   changes until Assign, Pull or Clear;
+ * - the source switch, File / Camera / Stream URL, which applies at once on a stopped slot (Camera
+ *   registers it as a webcam, File and Stream URL clear a webcam, Stream URL a file as well) and
+ *   asks first on a live one, whose stream it stops. A camera is assigned by clicking it;
  * - the output frame rate of a file slot, and its transport where the media allows a choice;
  * - the details: output, URL with Copy, live for, bitrate, readers, publisher or source.
  *
@@ -163,6 +170,7 @@ export class SlotPanel {
   private readonly dialogs = inject(NeatDialog);
   private readonly imports = inject(ImportDialogs);
   private readonly confirm = inject(NeatConfirm);
+  private readonly session = inject(SourcesSession);
   private readonly toasts = inject(NeatToasts);
   private readonly injector = inject(Injector);
 
@@ -170,6 +178,8 @@ export class SlotPanel {
   private readonly stepper = viewChild(FpsStepper);
   private readonly primaryButton = viewChild.required<ElementRef<HTMLButtonElement>>('primary');
   private readonly changeButton = viewChild<ElementRef<HTMLButtonElement>>('change');
+  private readonly sourceSwitch = viewChild<NeatSegmented<SourceForm>>(NeatSegmented);
+  private readonly cameraList = viewChild<NeatSelectList<Camera, string>>(NeatSelectList);
 
   protected readonly fpsReasonId = `slot-panel-${nextPanelId++}-fps-reason`;
 
@@ -177,11 +187,14 @@ export class SlotPanel {
   protected readonly index = computed(() => this.slot().index);
   protected readonly sourceForms = SOURCE_FORMS;
 
+  /** The form for what the slot holds now, or for the one an empty slot was left on. */
+  private readonly slotForm = computed(() =>
+    formFor(this.slot(), this.session.emptyForm(this.index())),
+  );
+  /** The form shown: the slot's, and the one a switch is changing to until the slot shows it. */
+  protected readonly form = linkedSignal(this.slotForm);
+
   // What belongs to this slot alone starts afresh when the slot changes.
-  protected readonly form = linkedSignal<number, SourceForm>({
-    source: this.index,
-    computation: () => untracked(() => formFor(this.slot())),
-  });
   protected readonly url = linkedSignal({ source: this.index, computation: () => '' });
   protected readonly username = linkedSignal({ source: this.index, computation: () => '' });
   protected readonly password = linkedSignal({ source: this.index, computation: () => '' });
@@ -195,8 +208,6 @@ export class SlotPanel {
   private readonly assignedCameraId = computed(
     () => this.cameras.assignments().get(this.index())?.deviceId ?? null,
   );
-  /** The camera picked in the list, back to the assigned one when this slot's assignment changes. */
-  protected readonly pickedCamera = linkedSignal<string | null>(() => this.assignedCameraId());
   protected readonly pulling = signal(false);
   protected readonly pickerBusy = signal(false);
 
@@ -323,22 +334,18 @@ export class SlotPanel {
 
   // The camera form.
   protected readonly cameraKey = (camera: Camera): string => camera.deviceId;
-  protected readonly pickedCameraItem = computed(
-    () => this.cameras.cameras().find((camera) => camera.deviceId === this.pickedCamera()) ?? null,
+  /** The list's selection is the assigned camera, when it is one the browser lists. */
+  protected readonly assignedCamera = computed(
+    () =>
+      this.cameras.cameras().find((camera) => camera.deviceId === this.assignedCameraId()) ?? null,
   );
   protected readonly accessLabel = computed(() => {
     if (this.cameras.state() === 'requesting') return 'Requesting…';
     return this.cameras.cameras().length > 0 ? 'Refresh cameras' : 'Enable camera access';
   });
-  protected readonly canAssignCamera = computed(() => {
-    const picked = this.pickedCamera();
-    return !this.busy() && picked !== null && picked !== this.camera()?.deviceId;
-  });
 
   // The stream URL form.
-  protected readonly canPull = computed(
-    () => STREAM_URL.test(this.url().trim()) && !this.isWebcam() && !this.busy(),
-  );
+  protected readonly canPull = computed(() => STREAM_URL.test(this.url().trim()) && !this.busy());
 
   // Details.
   protected readonly output = computed(() => slotOutput(this.slot()));
@@ -436,14 +443,15 @@ export class SlotPanel {
   }
 
   private async stop(): Promise<void> {
-    const index = this.index();
-    const webcam = this.isWebcam();
-    // A webcam is this browser's to end; the cameras service stops it bound to its session.
-    await this.act(() =>
-      this.control.run<unknown>(index, () =>
-        webcam ? this.cameras.release(index) : this.slots.stop({ index }),
-      ),
-    );
+    const slot = this.slot();
+    await this.act(() => this.control.run<unknown>(slot.index, () => this.endStream(slot)));
+  }
+
+  /** A webcam is this browser's to end; the cameras service stops it bound to its session. */
+  private endStream(slot: Slot): Promise<unknown> {
+    return slot.type === 'webcam'
+      ? this.cameras.release(slot.index)
+      : this.slots.stop({ index: slot.index });
   }
 
   private cancelEncoding(): void {
@@ -510,6 +518,8 @@ export class SlotPanel {
    */
   protected async clear(): Promise<void> {
     const index = this.index();
+    // An empty slot shows the File form, which is what a cleared one is.
+    this.session.rememberEmptyForm(index, 'file');
     const cleared = await this.act(() =>
       this.control.run(index, () => this.cameras.assignFile({ index, file: '' })),
     );
@@ -520,19 +530,86 @@ export class SlotPanel {
     await this.cameras.requestAccess();
   }
 
-  protected selectCamera(camera: Camera | null): void {
-    this.pickedCamera.set(camera?.deviceId ?? null);
+  /**
+   * Switches the slot to the form clicked. A stopped slot changes at once; a live one is asked
+   * first, and Cancel changes nothing. A refusal leaves the slot as it was. The switch waits while
+   * the slot is busy, so no second change races the first.
+   */
+  protected async switchSource(target: SourceForm): Promise<void> {
+    const from = this.slotForm();
+    const slot = this.slot();
+    this.showForm(target);
+    if (target === from) return;
+    try {
+      if (isLive(slot) && !(await this.confirmStop(slot, target))) return this.showForm(from);
+      if (target !== 'camera') this.session.rememberEmptyForm(slot.index, target);
+      const switched = await this.act(() =>
+        this.control.run(slot.index, async () => {
+          if (isLive(slot)) await this.endStream(slot);
+          await this.applyForm(slot, target);
+        }),
+      );
+      if (!switched) this.showForm(this.slotForm());
+    } finally {
+      // The switch was disabled while the change ran, which drops the focus it had.
+      holdFocus(this.injector, () => this.sourceSwitch());
+    }
   }
 
-  protected async assignCamera(): Promise<void> {
-    const deviceId = this.pickedCamera();
-    if (deviceId === null) return;
+  /**
+   * Shows a form in the content and in the switch, which holds the choice it was clicked to:
+   * a binding writes nothing back to a switch whose value it did not change, so a choice taken
+   * back is set on the switch itself.
+   */
+  private showForm(form: SourceForm): void {
+    this.form.set(form);
+    this.sourceSwitch()?.value.set(form);
+  }
+
+  private confirmStop(slot: Slot, target: SourceForm): Promise<boolean> {
+    const name = `src${slot.index}`;
+    const label = SOURCE_FORMS.find((option) => option.value === target)!.label;
+    return this.confirm.ask({
+      title: `Stop ${name}?`,
+      message: `Switching to ${label} stops ${name} and removes its ${slot.type === 'webcam' ? 'camera' : slot.file}.`,
+      confirmLabel: 'Stop and switch',
+      tone: 'danger',
+    });
+  }
+
+  /**
+   * What the switch changes on the server, for a slot that is stopped: Camera registers a webcam
+   * with no camera, which the list then picks; File and Stream URL clear a webcam, and Stream URL
+   * a file too. An empty slot, or a file slot switched to File, has nothing to change.
+   */
+  private async applyForm(slot: Slot, target: SourceForm): Promise<void> {
+    const webcam = slot.type === 'webcam';
+    switch (target) {
+      case 'camera':
+        if (!webcam) await this.cameras.assign(slot.index, null);
+        return;
+      case 'file':
+        if (webcam) await this.cameras.assignFile({ index: slot.index, file: '' });
+        return;
+      case 'url':
+        if (webcam || slot.file) await this.cameras.assignFile({ index: slot.index, file: '' });
+        return;
+    }
+  }
+
+  /** A click on a camera assigns it. The list waits for an assignment, so a click then is undone. */
+  protected async selectCamera(camera: Camera | null): Promise<void> {
+    const assigned = this.assignedCamera();
+    if (camera?.deviceId === assigned?.deviceId) return;
+    if (camera === null || this.busy()) return this.cameraList()?.selected.set(assigned);
     const index = this.index();
-    const assigned = await this.act(() =>
-      this.control.run(index, () => this.cameras.assign(index, deviceId)),
+    const done = await this.act(() =>
+      this.control.run(index, () => this.cameras.assign(index, camera.deviceId)),
     );
+    // A refusal leaves the camera the slot had; the list goes back to it.
+    this.cameraList()?.selected.set(this.assignedCamera());
     // What comes next for a camera picked is starting it.
-    if (assigned) this.focusAfterRender(() => this.primaryButton());
+    if (done) this.focusAfterRender(() => this.primaryButton());
   }
 
   protected async pull(): Promise<void> {

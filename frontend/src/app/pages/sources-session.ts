@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 
 /** What Streaming keeps of itself while another page is shown. */
 export interface StreamingVisit {
@@ -16,6 +16,9 @@ export interface MediaVisit {
   readonly checked: readonly string[];
 }
 
+/** The forms the source switch can show for an empty slot: a camera registers the slot as a webcam. */
+export type EmptySourceForm = 'file' | 'url';
+
 /**
  * Where the user left Streaming and Media, so that coming back from another page finds them as
  * they were: #170 kept the selected slot, the media folder and the selection across its tabs, all
@@ -29,4 +32,19 @@ export class SourcesSession {
   streaming: StreamingVisit = { slot: 1 };
   /** Media as the last visit left it; before any, the root with nothing selected. */
   media: MediaVisit = { folder: '', selected: null, checked: [] };
+
+  private readonly emptyForms = signal<ReadonlyMap<number, EmptySourceForm>>(new Map());
+
+  /**
+   * The source form the user left an empty slot on, so that coming back to it shows the form it
+   * was left on: an empty slot has no file, camera or pull to tell. A signal, since the panel
+   * derives the form it shows from it.
+   */
+  emptyForm(slot: number): EmptySourceForm | undefined {
+    return this.emptyForms().get(slot);
+  }
+
+  rememberEmptyForm(slot: number, form: EmptySourceForm): void {
+    this.emptyForms.update((all) => new Map(all).set(slot, form));
+  }
 }
