@@ -96,6 +96,23 @@ export function checkBlockReason(run: RunSummary, checked: readonly string[]): s
   return `At most ${MAX_CHECKED_RUNS} runs can be compared.`;
 }
 
+/**
+ * The checked runs held to the cap. The list reads `checkBlockReason` once per gesture, so Ctrl+A
+ * or a long Shift range can tick past it; what is over goes, the first `MAX_CHECKED_RUNS` in
+ * display order (`order`, the listed run ids) staying, each in the place it was ticked, since the
+ * first ticked is the comparison's baseline. A selection within the cap comes back as it is.
+ */
+export function capChecked(
+  checked: readonly string[],
+  order: readonly string[],
+): readonly string[] {
+  if (checked.length <= MAX_CHECKED_RUNS) return checked;
+  const position = new Map(order.map((id, index) => [id, index]));
+  const shown = (id: string) => position.get(id) ?? order.length;
+  const kept = new Set([...checked].sort((a, b) => shown(a) - shown(b)).slice(0, MAX_CHECKED_RUNS));
+  return checked.filter((id) => kept.has(id));
+}
+
 /** One metric of a saved run with its statistics over the run's own samples. */
 export interface RunMetricRow {
   key: string;

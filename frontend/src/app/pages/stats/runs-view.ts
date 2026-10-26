@@ -23,6 +23,7 @@ import { ListColumn } from '../../list-column';
 import type { RunSummary } from '../../stats/api';
 import {
   canCheckRun,
+  capChecked,
   checkBlockReason,
   MAX_CHECKED_RUNS,
   runLine,
@@ -205,6 +206,11 @@ export class RunsView {
         if (kept.length !== checked.length) this.session.checkedRuns.set(kept);
       });
     });
+  }
+
+  /** The list's ticks, held to the cap: a bulk tick can go past it (`capChecked`). */
+  protected check(ids: readonly string[]): void {
+    this.session.checkedRuns.set(capChecked(ids, this.rows()?.map((row) => row.id) ?? []));
   }
 
   protected select(row: RunRow | null): void {

@@ -7,6 +7,7 @@ import { NeatToasts } from '@sima/neat-ui/toast';
 import { AsidePrefs } from '../../aside-prefs';
 import { BoardProblem } from '../../board/board-error';
 import type { RunSummary } from '../../stats/api';
+import { MAX_CHECKED_RUNS } from '../../stats/runs';
 import { RUNS_LIST } from '../../stats/runs.testing';
 import { failureOf, type SentinelFailure } from '../../stats/sentinel-failure';
 import { type DeleteOutcome, SentinelRuns } from '../../stats/sentinel-runs';
@@ -236,6 +237,41 @@ describe('RunsView', () => {
       expect(optionNamed('run 9').hasAttribute('aria-disabled')).toBe(false);
       await click(box(optionNamed('run 9'))!);
       expect(session.checkedRuns()).toHaveLength(8);
+    });
+  });
+
+  describe('a bulk tick past the cap', () => {
+    const list = (): HTMLElement => root().querySelector<HTMLElement>('[role="listbox"]')!;
+    const firstEight = Array.from({ length: MAX_CHECKED_RUNS }, (_, index) => `run-${index}`);
+
+    beforeEach(async () => {
+      runs.runs.set([RECORDING, ...finishedRuns(10)]);
+      await render();
+    });
+
+    it('Ctrl+A over 10 runs leaves the first 8 in display order ticked, never the recording one', async () => {
+      list().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+      await settle();
+
+      expect(session.checkedRuns()).toEqual(firstEight);
+      expect(
+        options().filter((option) => option.getAttribute('aria-selected') === 'true'),
+      ).toHaveLength(8);
+      expect(text(bar()!.querySelector('.count'))).toBe(
+        '8 selected, the most that can be compared',
+      );
+    });
+
+    it('a Shift-click range of 10 runs stops at the same 8', async () => {
+      await click(optionNamed('run 0'));
+      optionNamed('run 9').dispatchEvent(
+        new MouseEvent('click', { shiftKey: true, bubbles: true, cancelable: true }),
+      );
+      await settle();
+
+      expect(session.checkedRuns()).toEqual(firstEight);
     });
   });
 

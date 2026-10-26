@@ -1,5 +1,6 @@
 import type { RunSummary, SavedRun } from './api';
 import {
+  capChecked,
   MAX_CHECKED_RUNS,
   canCheckRun,
   checkBlockReason,
@@ -85,6 +86,28 @@ describe('the cap on checked runs', () => {
   it('blocks nothing below the cap, and never a checked run, which can always be unchecked', () => {
     expect(checkBlockReason(COMPLETE, ids.slice(1))).toBeNull();
     expect(checkBlockReason(summary({ id: ids[3] }), ids)).toBeNull();
+  });
+});
+
+describe('capChecked', () => {
+  const order = Array.from({ length: 12 }, (_, i) => `run-${i}`);
+
+  it('leaves a selection within the cap as it is, in the order it was ticked', () => {
+    const checked = ['run-5', 'run-1', 'run-3'];
+    expect(capChecked(checked, order)).toBe(checked);
+    const full = order.slice(0, MAX_CHECKED_RUNS).reverse();
+    expect(capChecked(full, order)).toBe(full);
+  });
+
+  it('keeps the first 8 in display order when a bulk tick went past the cap', () => {
+    expect(capChecked(order, order)).toEqual(order.slice(0, 8));
+    // The display order decides, not the order the ticks came in; the survivors keep theirs.
+    const shuffled = ['run-9', ...order.slice(0, 8).reverse(), 'run-11'];
+    expect(capChecked(shuffled, order)).toEqual(order.slice(0, 8).reverse());
+  });
+
+  it('puts a run the list does not hold after the listed ones', () => {
+    expect(capChecked(['gone', ...order.slice(0, 8)], order)).toEqual(order.slice(0, 8));
   });
 });
 
