@@ -82,7 +82,7 @@
   [notes]="[state.target() + ' / ' + minutes() + ' min max / H.264 / WebRTC-friendly import']"
 >
   @if (importing()) {
-    <button neatButton type="button" variant="danger" (click)="cancel()">Cancel Import</button>
+    <button neatButton type="button" variant="danger-text" (click)="cancel()">Cancel Import</button>
   }
   <button neatButton type="button" [disabled]="!canImport()" (click)="importClip()">
     {{ importing() ? 'Importing...' : 'Import' }}
