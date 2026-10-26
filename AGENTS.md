@@ -225,8 +225,9 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 600 kB. The initial bundle measures 579.0 kB raw with kit 0.16.0 (the shared chunk 459 kB,
-  main 23 kB, styles 97 kB; 578.1 kB before the start hook that resumes the tab's webcams, whose
+  at 600 kB. The initial bundle measures 580.2 kB raw with kit 0.16.0 (the shared chunk 461 kB,
+  main 23 kB, styles 97 kB; 579.0 kB before Stats' recording dots, whose `neat-live-dot` is in
+  the primary entry; 578.1 kB before the start hook that resumes the tab's webcams, whose
   camera service stays in a lazy chunk; 571.6 kB with kit 0.15.1; 571.4 kB with kit 0.14.1;
   571.3 kB with kit 0.14.0; 569.7 kB with kit 0.13.0; 569.4 kB with kit 0.12.2; 569.1 kB with kit
   0.12.1; 568.8 kB with kit 0.12.0; 691.9 kB with kit 0.11.3 and 0.11.2, before the icons became

@@ -4,7 +4,7 @@
     since the time changes every second.
   -->
   <span class="recording"
-    >Recording · <span class="name">{{ trace.name }}</span>
+    ><neat-live-dot class="dot" pulse />Recording · <span class="name">{{ trace.name }}</span>
     @if (elapsed(); as elapsed) {
       · <span class="elapsed">{{ elapsed }}</span>
     }
@@ -13,17 +13,21 @@
   <button
     neatButton
     type="button"
-    variant="text"
+    variant="danger"
     size="small"
     aria-label="Stop the trace"
     [attr.aria-disabled]="runs.traceBusy() !== null || null"
     (click)="stop()"
   >
+    <neat-icon name="stop" />
     Stop
   </button>
 } @else {
   <neat-popover label="Start a trace" align="end" [open]="open()" (openChange)="setOpen($event)">
-    <button neatButton neatPopoverTrigger type="button" variant="text" size="small">Record</button>
+    <button neatButton neatPopoverTrigger type="button" variant="text" size="small">
+      <neat-live-dot />
+      Record
+    </button>
     <ng-template neatPopoverContent>
       <form class="form" (submit)="$event.preventDefault(); start()">
         <neat-field label="Name" [error]="errorOf('name')">

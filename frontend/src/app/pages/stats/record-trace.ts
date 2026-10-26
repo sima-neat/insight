@@ -10,7 +10,7 @@ import {
   untracked,
   type WritableSignal,
 } from '@angular/core';
-import { NeatButton, NeatNote } from '@sima/neat-ui';
+import { NeatButton, NeatIcon, NeatLiveDot, NeatNote } from '@sima/neat-ui';
 import { NeatErrorNote, NeatField } from '@sima/neat-ui/field';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-ui/popover';
@@ -61,7 +61,9 @@ function traceProblem(
     NeatButton,
     NeatErrorNote,
     NeatField,
+    NeatIcon,
     NeatInput,
+    NeatLiveDot,
     NeatNote,
     NeatPopover,
     NeatPopoverContent,

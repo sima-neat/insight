@@ -12,6 +12,12 @@
   white-space: nowrap;
 }
 
+/* The dot leads the words; the line's text stays plain so it reads with single spaces. */
+.dot {
+  margin-inline-end: var(--neat-space-2);
+  vertical-align: middle;
+}
+
 .name {
   display: inline-block;
   overflow: hidden;

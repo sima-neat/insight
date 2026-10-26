@@ -1,5 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { NeatButton } from '@sima/neat-ui';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { BoardProblem } from '../../board/board-error';
 import { deferred } from '../../board/board.testing';
@@ -324,6 +326,37 @@ describe('RecordTrace', () => {
     runs.traceFailure.set(null);
     await settle();
     expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:39');
+  });
+
+  it('a still live dot marks the Record button, before its word', async () => {
+    await render();
+    const record = button(root(), 'Record')!;
+    const dot = record.querySelector('neat-live-dot');
+    expect(dot).not.toBeNull();
+    expect(dot!.hasAttribute('pulse')).toBe(false);
+    // Before the word, not after it.
+    expect(record.firstElementChild).toBe(dot);
+  });
+
+  it('a pulsing live dot leads the recording line', async () => {
+    await recording(RECORDING_RUN, 0);
+    const line = root().querySelector('.recording')!;
+    const dot = line.querySelector('neat-live-dot');
+    expect(dot).not.toBeNull();
+    expect(dot!.hasAttribute('pulse')).toBe(true);
+    expect(line.firstElementChild).toBe(dot);
+    expect(line.firstChild).toBe(dot);
+  });
+
+  it('Stop is a small danger button with the stop icon', async () => {
+    await recording(RECORDING_RUN, 0);
+    const stop = button(root(), 'Stop')!;
+    // The kit words variant and size as classes, so ask the directive for what it was given.
+    const kit = fixture.debugElement.query(By.css('button[aria-label="Stop the trace"]'));
+    const stopButton = kit.injector.get(NeatButton);
+    expect(stopButton.variant()).toBe('danger');
+    expect(stopButton.size()).toBe('small');
+    expect(stop.querySelector('neat-icon[name="stop"]')).not.toBeNull();
   });
 
   it('Stop is named for what it stops', async () => {
