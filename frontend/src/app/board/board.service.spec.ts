@@ -156,7 +156,7 @@ describe('BoardService', () => {
   });
 
   // "Not checked" goes: a read never connects to the board, so Insight checks the connection
-  // itself, once per app load, rather than leaving the pill at "Not checked" until the user asks.
+  // itself, once per app load, rather than leaving the board block at "Not checked" until the user asks.
   describe('connection check on load', () => {
     const testRequests = () => http.match({ method: 'POST', url: '/api/board/test' });
 
@@ -235,7 +235,7 @@ describe('BoardService', () => {
       expect(service.checking()).toBe(true);
       testRequests()[0].flush({ error: 'Unreachable.', code: 'unreachable', hint: '' }, badGateway);
       await tick();
-      // Still checking while the failure is re-read: the pill goes from Checking… to its result.
+      // Still checking while the failure is re-read: the block goes from Checking… to its result.
       expect(service.checking()).toBe(true);
       http.expectOne(BOARD_URL).flush(boardA);
       await again;

@@ -46,7 +46,7 @@ const NO_WEBSSH = 'webssh is not installed in this Insight environment';
 const NO_LAUNCH_URL = 'DevKit shell launch URL is unavailable.';
 
 /**
- * The board dialog (spec, "Board connection"), opened by the top bar's pill from any page: the
+ * The board dialog (spec, "Board connection"), opened by the rail's board block from any page: the
  * board's state and when it was checked, the one action that fits it in front, why the board
  * cannot be used with the way out (`BoardProblemNotice`: the key command, the host-key trust),
  * the board's facts under a collapsed Details, and Change board (`BoardForm`). Without a board it

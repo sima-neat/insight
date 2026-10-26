@@ -13,7 +13,7 @@ import { FakePeripheralsBackend, HOST_KEY_CHANGED_BOARD } from './peripherals-mo
 import { FakeStatsBackend, STATS_BOARD } from './stats-mocks';
 import { answerSlots, answerTopBar, answerViewer, LONG_BOARD } from './top-bar';
 
-// The top bar's pill reads the board on every page.
+// The rail's board block reads the board on every page.
 test.beforeEach(({ page }) => answerTopBar(page));
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
@@ -255,16 +255,16 @@ for (const { name, size } of VIEWPORTS) {
   });
 }
 
-// Every page holds the top bar's pill and System Info without a spill: Media, Streaming, Viewer and
-// Peripherals check it in their own specs with their content, Stats here with its telemetry shown,
-// which gives it the widest tools of any page: the update chip, Pause, the menu and the side
-// panel's toggle (the tablet scrolls them, R14). Stats' own spec holds its layout.
+// Every page holds its top bar without a spill, and the rail its board and System Info: Media,
+// Streaming, Viewer and Peripherals check it in their own specs with their content, Stats here
+// with its telemetry shown, which gives it the widest tools of any page: the update chip, Pause and
+// the menu (the tablet scrolls them, R14). Stats' own spec holds its layout.
 for (const { name, size } of VIEWPORTS) {
-  test(`Stats fits beside the pill and System Info at ${name}`, async ({ page }) => {
+  test(`Stats fits with the board and System Info in the rail at ${name}`, async ({ page }) => {
     await new FakeStatsBackend().install(page);
     await page.setViewportSize(size);
     await page.goto('/stats');
-    await expect(page.locator('app-board-pill button')).toContainText('Connected');
+    await expect(page.locator('app-board-rail button')).toHaveAccessibleName(/Connected$/);
     await expect(page.getByRole('button', { name: 'System information' })).toBeVisible();
     await expect(page.getByRole('group', { name: 'Page tools' })).toContainText('Live');
 
@@ -280,8 +280,8 @@ test.describe('phone width', () => {
   test.use({ viewport: PHONE });
 
   /**
-   * The widest board pill: a connection that failed, on a host name far past the pill's cap. Its
-   * generation is the Stats fixtures', which the telemetry answers carry.
+   * The widest board block: a connection that failed, on a host name far past what the rail
+   * shows. Its generation is the Stats fixtures', which the telemetry answers carry.
    */
   const ERROR_BOARD: BoardState = {
     ...HOST_KEY_CHANGED_BOARD,
@@ -438,9 +438,9 @@ test.describe('phone width', () => {
     });
 
   /**
-   * The top bar's rows on a phone: the logo, the board pill and the actions share the first row
-   * (their vertical centres level), the tools are the second, and the bar is those two and nothing
-   * else (a wrapped line of its own for the pill or the actions would add one).
+   * The top bar's rows on a phone: the logo, the kiosk button and the page's side-panel toggle
+   * share the first row (their vertical centres level), the tools are the second, and the bar is
+   * those two and nothing else (a wrapped line of its own for the buttons would add one).
    */
   const topBarRows = (page: Page) =>
     page.evaluate(() => {
@@ -448,10 +448,8 @@ test.describe('phone width', () => {
       const box = (element: Element) => element.getBoundingClientRect();
       const first = [
         bar.querySelector('neat-logo')!,
-        bar.querySelector('app-board-pill button')!,
-        bar.querySelector('button[aria-label="Side panel"]')!,
         bar.querySelector('button[aria-label="Kiosk mode"]')!,
-        bar.querySelector('button[aria-label="System information"]')!,
+        bar.querySelector('button[aria-label="Side panel"]')!,
       ].map(box);
       const tools = box(bar.querySelector('[role="group"][aria-label="Page tools"]')!);
       const centres = first.map((item) => (item.top + item.bottom) / 2);
@@ -461,11 +459,10 @@ test.describe('phone width', () => {
         toolsBelow: tools.top >= firstBottom - 0.5,
         // Two rows and the bar's 1 px border: no third row between or after.
         extra: box(bar).height - (firstBottom - box(bar).top) - tools.height,
-        pill: box(bar.querySelector('app-board-pill button')!).width,
       };
     });
 
-  /** Two rows, the first holding logo, pill and actions side by side. */
+  /** Two rows, the first holding the logo, the kiosk button and the toggle side by side. */
   async function expectTwoRows(page: Page): Promise<void> {
     const rows = await topBarRows(page);
     expect(rows.centreSpread, JSON.stringify(rows)).toBeLessThanOrEqual(4);
@@ -482,13 +479,13 @@ test.describe('phone width', () => {
   }
 
   for (const { path, answer } of PAGES) {
-    test(`${path} holds its top bar with the board in an error state, and no page scrolls sideways`, async ({
+    test(`${path} holds its top bar and rail with the board in an error state, and no page scrolls sideways`, async ({
       page,
     }) => {
       await answer(page, ERROR_BOARD);
       await page.goto(path);
 
-      await expect(page.locator('app-board-pill button')).toContainText('Error');
+      await expect(page.locator('app-board-rail button')).toContainText('Error');
       await expect(page.getByRole('button', { name: 'System information' })).toBeVisible();
       await expect(tools(page)).toBeVisible();
       await expectTwoRows(page);
@@ -524,10 +521,10 @@ test.describe('phone width', () => {
       await expect(appName).toBeAttached();
       expect(await visuallyHidden(appName)).toBe(true);
 
-      // The pill gives up its board label to the eye, not to the button's name.
-      const pill = page.locator('app-board-pill button');
-      expect(await visuallyHidden(pill.locator('.visually-hidden'))).toBe(true);
-      await expect(pill).toHaveAccessibleName(/DevKit/);
+      // The collapsed rail keeps the board's name for screen readers: state and all.
+      await expect(page.locator('app-board-rail button')).toHaveAccessibleName(
+        'DevKit — 192.168.100.200 — Connected',
+      );
 
       // The panel is open until closed on a wide screen, and nothing was stored: still none here.
       await expect(asides(page)).toHaveCount(0);

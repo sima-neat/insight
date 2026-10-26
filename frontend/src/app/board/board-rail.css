@@ -1,0 +1,74 @@
+/* The block has no box of its own: the rail item inside is a row of the rail's end group. */
+:host {
+  display: contents;
+}
+
+/* Each state's colours, stated once: the dot's, and the second line's. A connected board is quiet,
+   so its address stays the rail's muted text; any other state says itself in its colour. The
+   warning's text is the theme's line step, since `--warning` is a fill, too faint for text. */
+button[data-tone='success'] {
+  --board-dot: var(--success);
+  --board-detail: var(--muted-foreground);
+}
+
+button[data-tone='warning'] {
+  --board-dot: var(--warning);
+  --board-detail: var(--neat-line-warning);
+}
+
+button[data-tone='danger'] {
+  --board-dot: var(--destructive);
+  --board-detail: var(--destructive);
+}
+
+button[data-tone='neutral'] {
+  --board-dot: var(--muted-foreground);
+  --board-detail: var(--muted-foreground);
+}
+
+/* The dot's ring is the surface it sits on, so it cuts the icon cleanly; the item's hover fill is
+   another surface. */
+button {
+  --board-dot-ring: var(--sidebar);
+}
+
+button:hover {
+  --board-dot-ring: var(--sidebar-accent);
+}
+
+.mark {
+  position: relative;
+  display: inline-flex;
+}
+
+.dot {
+  position: absolute;
+  inset-block-end: -0.125rem;
+  inset-inline-end: -0.125rem;
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border-radius: 50%;
+  background: var(--board-dot);
+  box-shadow: 0 0 0 0.125rem var(--board-dot-ring);
+}
+
+/* The kit ellipsizes only the label's own line; these are the app's, so each cuts itself. */
+.lines {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.name,
+.detail {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail {
+  color: var(--board-detail);
+  font-size: var(--neat-text-xs);
+}

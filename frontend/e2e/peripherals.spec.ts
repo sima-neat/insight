@@ -3,7 +3,7 @@ import { pageOverflow, TABLET, sidePanelToggle, topBarSpill, VIEWPORTS } from '.
 import { BOARD_UNREACHABLE, C270, FakePeripheralsBackend, IMX477, YETI } from './peripherals-mocks';
 import { answerTopBar, LONG_BOARD } from './top-bar';
 
-// The top bar's pill reads the board on every page; the backend below answers it for these tests.
+// The rail's board block reads the board on every page; the backend below answers it for these tests.
 test.beforeEach(({ page }) => answerTopBar(page));
 
 const PREVIEW_URL = '/api/peripherals/cameras/preview';
@@ -328,14 +328,14 @@ test("a Start refused for another camera's preview selects that camera and shows
   }
 });
 
-test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side panel open and closed, beside the pill and System Info', async ({
+test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side panel open and closed, with the board and System Info in the rail', async ({
   page,
 }) => {
   const backend = new FakePeripheralsBackend();
   await backend.install(page);
   await page.goto('/peripherals');
   await expect(devices(page).getByRole('group', { name: 'Cameras · 2' })).toBeVisible();
-  await expect(page.locator('app-board-pill button')).toContainText('Connected');
+  await expect(page.locator('app-board-rail button')).toHaveAccessibleName(/Connected$/);
   await expect(page.getByRole('button', { name: 'System information' })).toBeVisible();
 
   for (const { size } of VIEWPORTS) {
@@ -360,9 +360,9 @@ test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side pane
   }
 });
 
-// Final review M-7: the widest top bar Peripherals shows: a board name at the pill's cap and a
-// scan running for a while.
-test('Peripherals fits with its widest top bar: a long board name, an old scan and Scanning… N s', async ({
+// Final review M-7: the widest top bar Peripherals shows: a scan running for a while, with a board
+// whose long name the rail cuts (the top bar no longer carries the board).
+test('Peripherals fits with its widest top bar: an old scan and Scanning… N s, on a long-named board', async ({
   page,
 }) => {
   const backend = new FakePeripheralsBackend();
@@ -372,7 +372,7 @@ test('Peripherals fits with its widest top bar: a long board name, an old scan a
   const release = backend.holdScans();
   await page.clock.install();
   await page.goto('/peripherals');
-  await expect(page.locator('app-board-pill button')).toContainText('Connected');
+  await expect(page.locator('app-board-rail button')).toHaveAccessibleName(/Connected$/);
   await expect(tool(page, 'Scanning… 0 s')).toBeVisible();
   await page.clock.fastForward(12_000);
   await expect(tool(page, 'Scanning… 12 s')).toBeVisible();

@@ -8,10 +8,14 @@ import {
 } from './peripherals-mocks';
 import { answerTopBar } from './top-bar';
 
-// The top bar's pill and System Info, from a page that has nothing to do with the board.
+// The rail's board block and System Info, from a page that has nothing to do with the board.
 test.beforeEach(({ page }) => answerTopBar(page));
 
-const pill = (page: Page) => page.locator('app-board-pill button');
+/**
+ * The rail's board block; its name says the board, its address and its state. While a dialog is
+ * open the page behind it is hidden from assistive technology, so the name is read from the label.
+ */
+const board = (page: Page) => page.locator('app-board-rail button');
 const boardDialog = (page: Page) => page.getByRole('dialog', { name: 'Board' });
 const systemInfo = (page: Page) => page.getByRole('button', { name: 'System information' });
 const systemInfoDialog = (page: Page) => page.getByRole('dialog', { name: 'System information' });
@@ -20,19 +24,18 @@ const toast = (page: Page, text: string) =>
   page.locator('[data-slot="toast"]').filter({ hasText: text });
 
 for (const { name, size } of VIEWPORTS) {
-  test(`from Streaming, the pill opens the board dialog, and Change board saves the board at ${name}`, async ({
+  test(`from Streaming, the board block opens the board dialog, and Change board saves the board at ${name}`, async ({
     page,
   }) => {
     const backend = new FakePeripheralsBackend();
     await backend.install(page);
     await page.setViewportSize(size);
     await page.goto('/streaming');
-    await expect(pill(page)).toContainText('DevKit: 192.168.100.200');
-    await expect(pill(page)).toContainText('Connected');
+    await expect(board(page)).toHaveAccessibleName('DevKit — 192.168.100.200 — Connected');
     // Already checked: the app does not connect to the board by itself.
     expect(backend.posted('/api/board/test')).toEqual([]);
 
-    await pill(page).click();
+    await board(page).click();
     const dialog = boardDialog(page);
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('Connected');
@@ -49,14 +52,13 @@ for (const { name, size } of VIEWPORTS) {
     expect(backend.posted('/api/board/select')).toEqual([
       { host: '192.168.2.2', port: 22, user: 'sima' },
     ]);
-    // The pill follows the new board, which is not checked yet.
-    await expect(pill(page)).toContainText('Board: 192.168.2.2');
-    await expect(pill(page)).toContainText('Not checked');
+    // The block follows the new board, which is not checked yet.
+    await expect(board(page)).toHaveAttribute('aria-label', 'Board — 192.168.2.2 — Not checked');
     await expect(dialog.getByRole('button', { name: 'Check again' })).toBeVisible();
 
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
-    await expect(pill(page)).toBeFocused();
+    await expect(board(page)).toBeFocused();
   });
 
   test(`a changed host key shows both fingerprints, and Trust new key asks first at ${name}`, async ({
@@ -67,9 +69,9 @@ for (const { name, size } of VIEWPORTS) {
     await backend.install(page);
     await page.setViewportSize(size);
     await page.goto('/streaming');
-    await expect(pill(page)).toContainText('Error');
+    await expect(board(page)).toContainText('Error');
 
-    await pill(page).click();
+    await board(page).click();
     const dialog = boardDialog(page);
     await expect(dialog).toContainText('Connection failed');
     await expect(dialog).toContainText(
@@ -97,10 +99,10 @@ for (const { name, size } of VIEWPORTS) {
       { fingerprint: error['presented_fingerprint'] },
     ]);
     await expect(dialog.getByText('Expected')).toHaveCount(0);
-    await expect(pill(page)).toContainText('Not checked');
+    await expect(board(page)).toHaveAttribute('aria-label', /Not checked$/);
   });
 
-  test(`a board that cannot be read shows Error in the pill, not Loading…, and the dialog retries at ${name}`, async ({
+  test(`a board that cannot be read shows Error in the board block, not Loading…, and the dialog retries at ${name}`, async ({
     page,
   }) => {
     const backend = new FakePeripheralsBackend();
@@ -108,19 +110,18 @@ for (const { name, size } of VIEWPORTS) {
     await backend.install(page);
     await page.setViewportSize(size);
     await page.goto('/streaming');
-    await expect(pill(page)).toHaveText(/^\s*Board\s*Error\s*$/);
-    await pill(page).hover();
-    await expect(page.getByRole('tooltip')).toHaveText(/^Could not read the board: /);
+    await expect(board(page)).toHaveText(/^\s*Board\s*Error\s*$/);
+    await board(page).hover();
+    await expect(page.getByRole('tooltip')).toHaveText(/^Board — Could not read the board: /);
 
-    await pill(page).click();
+    await board(page).click();
     const dialog = boardDialog(page);
     const retry = dialog.getByRole('button', { name: 'Retry' });
     await expect(retry).toBeVisible();
     backend.boardFails = false;
     await retry.click();
     await expect(dialog).toContainText('Connected');
-    await expect(pill(page)).toContainText('DevKit: 192.168.100.200');
-    await expect(pill(page)).toContainText('Connected');
+    await expect(board(page)).toHaveAttribute('aria-label', 'DevKit — 192.168.100.200 — Connected');
   });
 
   test(`System information says what is missing, keeps its data after a failed Refresh, and Escape closes it at ${name}`, async ({
@@ -149,7 +150,7 @@ for (const { name, size } of VIEWPORTS) {
   });
 }
 
-// The pill's last good state stays named while a later read fails (ruling Q4): on focus, the
+// The block's last good state stays named while a later read fails (ruling Q4): on focus, the
 // board is read again.
 test('a read that fails after a good one keeps the board named, with Error and the board in the tooltip', async ({
   page,
@@ -157,26 +158,26 @@ test('a read that fails after a good one keeps the board named, with Error and t
   const backend = new FakePeripheralsBackend();
   await backend.install(page);
   await page.goto('/streaming');
-  await expect(pill(page)).toContainText('Connected');
+  await expect(board(page)).toHaveAccessibleName(/Connected$/);
 
   backend.boardFails = true;
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(pill(page)).toContainText('Error');
-  await expect(pill(page)).toContainText('DevKit: 192.168.100.200');
-  await pill(page).hover();
+  await expect(board(page)).toContainText('DevKit');
+  await expect(board(page)).toContainText('Error');
+  await board(page).hover();
   await expect(page.getByRole('tooltip')).toHaveText(
-    new RegExp(`^${CONNECTED_BOARD.target!.label} — Could not read the board: `),
+    new RegExp(`^DevKit — ${CONNECTED_BOARD.target!.host} — Could not read the board: `),
   );
 });
 
 // "Not checked" goes: a board never connected to is checked once when the app loads.
-test('a board that was never checked is checked once as the app loads, Checking… meanwhile, and the pill shows the result', async ({
+test('a board that was never checked is checked once as the app loads, Checking… meanwhile, and the board block shows the result', async ({
   page,
 }) => {
   const backend = new FakePeripheralsBackend();
   backend.board = UNCHECKED_BOARD;
   await backend.install(page);
-  // The check is held open, as a slow SSH connection would: the pill says it is checking.
+  // The check is held open, as a slow SSH connection would: the block says it is checking.
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   await page.route(
@@ -187,19 +188,19 @@ test('a board that was never checked is checked once as the app loads, Checking�
     },
   );
   await page.goto('/streaming');
-  await expect(pill(page)).toContainText('Checking…');
+  await expect(board(page)).toContainText('Checking…');
   release();
-  await expect(pill(page)).toContainText('Connected');
+  await expect(board(page)).toHaveAccessibleName(/Connected$/);
   expect(backend.posted('/api/board/test')).toEqual([{}]);
 });
 
-test('a failed check on load shows Error in the pill, with no toast', async ({ page }) => {
+test('a failed check on load shows Error in the board block, with no toast', async ({ page }) => {
   const backend = new FakePeripheralsBackend();
   backend.board = UNCHECKED_BOARD;
   backend.checkFails = true;
   await backend.install(page);
   await page.goto('/streaming');
-  await expect(pill(page)).toContainText('Error');
+  await expect(board(page)).toContainText('Error');
   expect(backend.posted('/api/board/test')).toHaveLength(1);
   await expect(page.locator('[data-slot="toast"]')).toHaveCount(0);
 });

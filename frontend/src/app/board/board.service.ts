@@ -10,7 +10,7 @@ const BOARD_URL = '/api/board';
 const SHELL_URL = '/api/devkit-shell';
 
 /**
- * The selected board, as one service for the whole app: the top bar's pill, the board dialog,
+ * The selected board, as one service for the whole app: the rail's board block, the board dialog,
  * Peripherals and Stats read the same state and reload it here. Page code never fetches
  * `/api/board` itself.
  *
@@ -23,9 +23,9 @@ const SHELL_URL = '/api/devkit-shell';
  *
  * **The check on load.** A read never connects, so a board never connected to would stay "Not
  * checked". The first read of an app load that gets an answer therefore runs `test()` when a board
- * is selected and its state is unknown, silently: a failure only lands in the state (the pill
+ * is selected and its state is unknown, silently: a failure only lands in the state (the block
  * shows Error). Later reads, focus included, never check; "Check again" is the user's. While a
- * check is out, `checking` says so, and the pill reads Checking… rather than Not checked: over
+ * check is out, `checking` says so, and the block reads Checking… rather than Not checked: over
  * SSH a check takes seconds, and a full timeout when the board is unreachable.
  *
  * **Actions.** Select, Check again and Trust each answer with the fresh board state, which wins
@@ -152,7 +152,7 @@ export class BoardService {
   /**
    * Checks the connection the first time a read is answered, if there is a board whose state is
    * unknown. The failure is dropped on purpose: `act` reloads the state it recorded, which the
-   * pill shows, and a toast for a check the user did not ask for would only nag.
+   * block shows, and a toast for a check the user did not ask for would only nag.
    */
   private checkOnce(state: BoardState): void {
     if (this.checkDecided) return;

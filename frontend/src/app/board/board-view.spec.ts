@@ -2,7 +2,7 @@ import type { BoardState, BoardTarget } from './api';
 import { BoardProblem } from './board-error';
 import {
   boardFacts,
-  boardIndicator,
+  boardRailView,
   boardStateChip,
   boardSummary,
   cameraSetupRows,
@@ -43,120 +43,118 @@ const cameraSetup = {
   overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo'],
 };
 
-describe('boardIndicator', () => {
-  // #170's test; its `state.short` is the chip's label and its `title` the tooltip.
-  it('the masthead board indicator collapses board state into a label and a short pill', () => {
-    expect(boardIndicator(null, null).chip.label).toBe('Loading…');
-    const none = boardIndicator(board({ target: null }), null);
-    expect(none.label).toBe('No board');
-    expect(none.chip.label).toBe('Not selected');
-    // The masthead names the machine the way the SDK does; sima@host is a connection string and
-    // stays in the panel.
-    const connected = boardIndicator(
-      board({
-        target: target({
-          label: 'sima@192.168.2.2',
-          mode: 'ssh',
-          source: 'sdk-env',
-          host: '192.168.2.2',
-        }),
-        status: { state: 'connected', checked_at: null, error: null },
-      }),
-      null,
-    );
-    expect(connected.label).toBe('DevKit: 192.168.2.2');
-    expect(connected.chip.label).toBe('Connected');
-    expect(connected.chip.tone).toBe('success');
-    // The full target stays in the tooltip.
-    expect(connected.tooltip).toMatch(/^sima@192\.168\.2\.2 — Connected/);
-    const manual = boardIndicator(
-      board({
-        target: target({ label: 'sima@10.0.0.4', mode: 'ssh', source: 'manual', host: '10.0.0.4' }),
-        status: { state: 'connected', checked_at: null, error: null },
-      }),
-      null,
-    );
-    // A hand-entered board is not called a DevKit.
-    expect(manual.label).toBe('Board: 10.0.0.4');
-    expect(boardIndicator(board({ target: localTarget }), null).label).toBe('This board');
-    const failedStatus = { state: 'error', checked_at: null, error: null } as const;
-    const failed = boardIndicator(board({ target: localTarget, status: failedStatus }), null);
-    expect(failed.chip.label).toBe('Error');
-    // The card keeps the long label.
-    expect(connectionState(failedStatus).label).toBe('Connection failed');
-    expect(boardIndicator(board({ target: localTarget }), null).chip.label).toBe('Not checked');
+describe('boardRailView', () => {
+  const connected = { state: 'connected', checked_at: null, error: null } as const;
+  const failedStatus = { state: 'error', checked_at: null, error: null } as const;
+  const devkit = target({
+    label: 'sima@192.168.2.2',
+    mode: 'ssh',
+    source: 'sdk-env',
+    host: '192.168.2.2',
+    port: 22,
+  });
+  const unreachable = new BoardProblem(
+    'Could not reach the Insight server.',
+    'network',
+    'Check that Insight is still running, then retry.',
+    {},
+  );
+
+  it('a connected board is quiet: its short name, its address, a success dot', () => {
+    expect(boardRailView(board({ target: devkit, status: connected }), null)).toEqual({
+      name: 'DevKit',
+      detail: '192.168.2.2',
+      tone: 'success',
+      summary: 'DevKit — 192.168.2.2 — Connected',
+    });
+    // A hand-entered board is not called a DevKit; a port other than SSH's is part of the address.
+    const manual = target({
+      label: 'sima@10.0.0.4',
+      source: 'manual',
+      host: '10.0.0.4',
+      port: 2222,
+    });
+    expect(boardRailView(board({ target: manual, status: connected }), null)).toMatchObject({
+      name: 'Board',
+      detail: '10.0.0.4:2222',
+    });
   });
 
-  it('keeps #170’s tooltips and maps its tones to the kit’s', () => {
-    expect(boardIndicator(null, null)).toEqual({
-      label: 'Board',
-      chip: { label: 'Loading…', tone: 'neutral' },
-      tooltip: 'Loading the selected board',
+  it('this board has no address, so its state is the second line even when connected', () => {
+    expect(boardRailView(board({ target: localTarget, status: connected }), null)).toEqual({
+      name: 'This board',
+      detail: 'Connected',
+      tone: 'success',
+      summary: 'This board — Connected',
     });
-    expect(boardIndicator(board(), null)).toEqual({
-      label: 'No board',
-      chip: { label: 'Not selected', tone: 'warning' },
-      tooltip: 'No board is selected. Open board settings to choose one.',
-    });
-    const failed = boardIndicator(
-      board({ target: localTarget, status: { state: 'error', checked_at: null, error: null } }),
-      null,
-    );
-    expect(failed.chip).toEqual({ label: 'Error', tone: 'danger' });
-    expect(failed.tooltip).toBe('This board — Connection failed. Open board settings.');
-    expect(boardIndicator(board({ target: localTarget }), null).chip).toEqual({
-      label: 'Not checked',
+  });
+
+  it('a board that is not connected says its state in words, with the dot of its tone', () => {
+    expect(boardRailView(board({ target: devkit }), null)).toEqual({
+      name: 'DevKit',
+      detail: 'Not checked',
       tone: 'neutral',
+      summary: 'DevKit — 192.168.2.2 — Not checked',
+    });
+    // The short word is shown; the accessible name and tooltip have the long one.
+    expect(boardRailView(board({ target: devkit, status: failedStatus }), null)).toEqual({
+      name: 'DevKit',
+      detail: 'Error',
+      tone: 'danger',
+      summary: 'DevKit — 192.168.2.2 — Connection failed',
+    });
+    expect(connectionState(failedStatus).label).toBe('Connection failed');
+    expect(boardRailView(board({ target: null }), null)).toEqual({
+      name: 'No board',
+      detail: 'Not selected',
+      tone: 'neutral',
+      summary: 'No board — Not selected',
+    });
+    expect(boardRailView(null, null)).toEqual({
+      name: 'Board',
+      detail: 'Loading…',
+      tone: 'neutral',
+      summary: 'Board — Loading the selected board',
     });
   });
 
   it('says Checking… in place of Not checked while a connection check is out, and only there', () => {
-    expect(boardIndicator(board({ target: localTarget }), null, true)).toEqual({
-      label: 'This board',
-      chip: { label: 'Checking…', tone: 'neutral' },
-      tooltip: 'This board — Checking the connection. Open board settings.',
+    expect(boardRailView(board({ target: devkit }), null, true)).toEqual({
+      name: 'DevKit',
+      detail: 'Checking…',
+      tone: 'warning',
+      summary: 'DevKit — 192.168.2.2 — Checking the connection',
     });
     // A known state, no board, or a failed read keeps its own words while a check runs.
-    const connected = { state: 'connected', checked_at: null, error: null } as const;
-    expect(
-      boardIndicator(board({ target: localTarget, status: connected }), null, true).chip.label,
-    ).toBe('Connected');
-    expect(boardIndicator(board(), null, true).chip.label).toBe('Not selected');
-    expect(boardIndicator(null, null, true).chip.label).toBe('Loading…');
-    const unreachable = new BoardProblem('Could not reach the Insight server.', 'network', '', {});
-    expect(boardIndicator(board({ target: localTarget }), unreachable, true).chip.label).toBe(
-      'Error',
+    expect(boardRailView(board({ target: devkit, status: connected }), null, true).detail).toBe(
+      '192.168.2.2',
     );
+    expect(boardRailView(board(), null, true).detail).toBe('Not selected');
+    expect(boardRailView(null, null, true).detail).toBe('Loading…');
+    expect(boardRailView(board({ target: devkit }), unreachable, true).detail).toBe('Error');
   });
 
-  it('boardIndicator shows Error with the reason when the board could not be read, not Loading…', () => {
-    const unreachable = new BoardProblem(
-      'Could not reach the Insight server.',
-      'network',
-      'Check that Insight is still running, then retry.',
-      {},
-    );
-    expect(boardIndicator(null, unreachable)).toEqual({
-      label: 'Board',
-      chip: { label: 'Error', tone: 'danger' },
-      tooltip: 'Could not read the board: Could not reach the Insight server.',
+  it('shows Error with the reason when the board could not be read, not Loading…', () => {
+    expect(boardRailView(null, unreachable)).toEqual({
+      name: 'Board',
+      detail: 'Error',
+      tone: 'danger',
+      summary: 'Board — Could not read the board: Could not reach the Insight server.',
     });
-    // With a last good state the pill still names the board, and says the read failed (F35).
-    const connected = board({
-      target: target({ label: 'sima@10.0.0.4', host: '10.0.0.4' }),
-      status: { state: 'connected', checked_at: null, error: null },
-    });
-    // The tooltip names the board in full, as it does in every other state: the label may be cut.
-    expect(boardIndicator(connected, unreachable)).toEqual({
-      label: 'Board: 10.0.0.4',
-      chip: { label: 'Error', tone: 'danger' },
-      tooltip: 'sima@10.0.0.4 — Could not read the board: Could not reach the Insight server.',
+    // With a last good state the block still names the board, and says the read failed (F35).
+    expect(boardRailView(board({ target: devkit, status: connected }), unreachable)).toEqual({
+      name: 'DevKit',
+      detail: 'Error',
+      tone: 'danger',
+      summary:
+        'DevKit — 192.168.2.2 — Could not read the board: Could not reach the Insight server.',
     });
     // A last state with no board selected keeps saying so (ruling Q4).
-    expect(boardIndicator(board({ target: null }), unreachable)).toEqual({
-      label: 'No board',
-      chip: { label: 'Error', tone: 'danger' },
-      tooltip: 'Could not read the board: Could not reach the Insight server.',
+    expect(boardRailView(board({ target: null }), unreachable)).toEqual({
+      name: 'No board',
+      detail: 'Error',
+      tone: 'danger',
+      summary: 'No board — Could not read the board: Could not reach the Insight server.',
     });
   });
 });

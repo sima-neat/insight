@@ -171,7 +171,7 @@ export class PeripheralsPage {
    * In priority order (ruling F35): loading while the board's first read or this visit's first
    * snapshot read is out (a snapshot read before, on an earlier visit, shows at once); the board
    * could not be read with no state known; no board is selected. A read failure with a last good
-   * state keeps the list: the pill says the read failed.
+   * state keeps the list: the board block says the read failed.
    */
   protected readonly body = computed<Body>(() => {
     const state = this.board.state();

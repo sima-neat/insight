@@ -1,7 +1,7 @@
 /**
  * The board form's values and checks (#170's `model.js`, copy per Inv-PB §2.5), as pure
  * functions. Only the board dialog's form uses them, so they live apart from `board-view.ts`,
- * which the top bar's pill imports: kept there, they would be in the initial bundle (ruling Q14).
+ * which the rail's board block imports: kept there, they would be in the initial bundle (ruling Q14).
  */
 
 import type { BoardDefaults, BoardState, SshAddress } from './api';

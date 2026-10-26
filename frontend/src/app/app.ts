@@ -1,31 +1,39 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { NeatButton, NeatIcon, NeatShell, NeatTooltip } from '@sima/neat-ui';
+import { NeatIcon, NeatRailDivider, NeatRailItem, NeatShell } from '@sima/neat-ui';
 import { NeatToastHost } from '@sima/neat-ui/toast';
 import { APP_NAME } from './app-name';
-import { BoardPill } from './board/board-pill';
+import { BoardRail } from './board/board-rail';
 import { INSIGHT_NAV } from './navigation';
 import { TopBarDialogs } from './top-bar-dialogs';
 
+/**
+ * The shell: the rail is the app's (the pages, then at its bottom the board, System information
+ * and the kit's theme item), the top bar the page's (its title and tools, the kiosk button and
+ * the page's side-panel toggle, all the kit's).
+ */
 @Component({
   selector: 'app-root',
-  imports: [BoardPill, NeatButton, NeatIcon, NeatShell, NeatToastHost, NeatTooltip, RouterOutlet],
+  imports: [
+    BoardRail,
+    NeatIcon,
+    NeatRailDivider,
+    NeatRailItem,
+    NeatShell,
+    NeatToastHost,
+    RouterOutlet,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <neat-shell [appName]="appName" [navItems]="nav">
-      <app-board-pill neatTopbarEnd />
+      <app-board-rail neatRailEnd />
+      <hr neatRailEnd neatRailDivider />
       <button
-        neatTopbarEnd
-        neatButton
+        neatRailEnd
+        neatRailItem
         type="button"
-        variant="text"
-        size="large"
-        iconOnly
-        rounded
-        aria-label="System information"
+        label="System information"
         aria-haspopup="dialog"
-        neatTooltip="System information"
-        neatTooltipPosition="bottom"
         (click)="openSystemInfo()"
       >
         <neat-icon name="info" />

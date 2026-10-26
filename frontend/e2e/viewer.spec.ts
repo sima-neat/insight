@@ -6,7 +6,7 @@ import { expect, Locator, Page, test } from '@playwright/test';
 import { LAPTOP, pageOverflow, sidePanelToggle, TABLET, topBarSpill, VIEWPORTS } from './layout';
 import { answerTopBar } from './top-bar';
 
-// The top bar's pill reads the board on every page.
+// The rail's board block reads the board on every page.
 test.beforeEach(({ page }) => answerTopBar(page));
 
 const deployed = !!process.env['INSIGHT_BASE_URL'];

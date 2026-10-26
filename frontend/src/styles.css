@@ -2,7 +2,7 @@
    share. The app has no Tailwind setup, so the kit's `sr-only` utility does not reach it. */
 
 /* Out of the layout's flow, taking no room, and still read by screen readers: the one copy of the
-   rule (`Announcement` and the board pill's narrow label apply it). */
+   rule (`Announcement` and Compare's hidden text apply it). */
 .visually-hidden {
   position: absolute;
   inline-size: 1px;

@@ -27,7 +27,7 @@ export const TOP_BAR_BOARD: BoardState = {
   board: null,
 };
 
-/** A board whose name runs far past the pill's label cap: a long host name, entered by hand. */
+/** A board whose host name is far longer than the rail can show: entered by hand. */
 export const LONG_HOST = 'devkit-lab-bench-07.vision.corp.example.com';
 export const LONG_BOARD: BoardState = {
   ...TOP_BAR_BOARD,
@@ -72,7 +72,7 @@ const HOST_METRICS: HostMetrics = {
 };
 
 /**
- * Answers the top bar's own requests, made on every page: the board for the pill, and the System
+ * Answers the top bar's own requests, made on every page: the board for the rail's board block, and the System
  * Info (its `neat` data and the readings of "This computer"). Whatever serves the app (the dev
  * server has no API) then cannot change what the top bar shows, nor leave a failed request in a
  * test that is about something else. Call it before the page loads; a test's own route for the

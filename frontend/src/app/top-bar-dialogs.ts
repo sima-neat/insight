@@ -2,17 +2,17 @@ import { inject, Injectable, InjectionToken, Injector } from '@angular/core';
 import type { NeatDialogRef } from '@sima/neat-ui/dialog';
 import { NeatToasts } from '@sima/neat-ui/toast';
 
-/** What a top-bar dialog's module exports to open it: the dialog's ref, from the kit's `NeatDialog`. */
+/** What a dialog's module exports to open it: the dialog's ref, from the kit's `NeatDialog`. */
 type OpenDialog = (injector: Injector) => NeatDialogRef<unknown>;
 
-/** Each top-bar dialog's module, loaded by a dynamic import. */
+/** Each of the rail's dialogs' modules, loaded by a dynamic import. */
 export interface TopBarDialogModules {
   board(): Promise<{ openBoardDialog: OpenDialog }>;
   systemInfo(): Promise<{ openSystemInfoDialog: OpenDialog }>;
 }
 
 /**
- * Where the top-bar dialogs' code comes from. The top bar is on every page, so whatever it imports
+ * Where the dialogs' code comes from. The rail is on every page, so whatever it imports
  * statically is in the initial bundle; the dialogs, and the kit entries only they use (the dialog,
  * the collapsible, the callout), are imported on their first open instead. A token so that a test
  * can see when a module loads.
@@ -37,9 +37,9 @@ const LOAD_FAILED: Record<DialogName, string> = {
 };
 
 /**
- * Opens the dialogs of the top bar's end items, from there and from any page that links to them
+ * Opens the dialogs of the rail's board and System information items, from there and from any page that links to them
  * (Peripherals' and Stats' "Open board settings"). Each opens once at a time: a second call while
- * its dialog is loading or open (a double click on the pill) does nothing but wait for the same
+ * its dialog is loading or open (a double click on the board block) does nothing but wait for the same
  * close. A module that cannot be loaded (the server gone, or its chunk replaced by a newer build)
  * is reported here, in a toast, for every caller; the next open tries again.
  */

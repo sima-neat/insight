@@ -1,5 +1,5 @@
 /**
- * The board's words: what the pill and the board dialog say about the board, as pure
+ * The board's words: what the rail's board block and the board dialog say about the board, as pure
  * functions of the board state (#170's `peripherals/model.js`, copy per Inv-PB §2.1 and §2.5).
  * #170's tones map to the kit's: ok `success`, warn `warning`, periph-danger `danger`, none
  * `neutral`.
@@ -9,7 +9,7 @@ import type { NeatTone } from '@sima/neat-ui';
 import type { BoardSource, BoardState, BoardStatus, BoardTarget, CameraSetup } from './api';
 import type { BoardProblem } from './board-error';
 
-/** A connection state in words: the long label (the dialog), the short one (the pill's chip). */
+/** A connection state in words: the long label (the dialog), the short one (the board block's second line). */
 export interface ConnectionState {
   label: string;
   short: string;
@@ -21,11 +21,17 @@ export interface BoardChip {
   tone: NeatTone;
 }
 
-/** The top bar's pill: which board, its state as a chip, and the tooltip that says both in full. */
-export interface BoardIndicator {
-  label: string;
-  chip: BoardChip;
-  tooltip: string;
+/**
+ * The rail's board block: the short name, then a second line (the address when connected, the
+ * state in words otherwise), the tone of the state's dot and words, and `summary`, "name — address
+ * — state" in full, which is the block's accessible name and its tooltip while the rail is
+ * collapsed.
+ */
+export interface BoardRailView {
+  name: string;
+  detail: string;
+  tone: NeatTone;
+  summary: string;
 }
 
 const SOURCES: Record<BoardSource, string> = {
@@ -43,64 +49,54 @@ export function connectionState(status: BoardStatus): ConnectionState {
 }
 
 /**
- * The pill's words. The state is the last good answer; `error` the last read failure, which wins
- * over it so that a board Insight can no longer read never looks fine (Inv-PB §6.1): the pill
- * keeps naming the last known board and says why it could not be read. Loading is only the
- * moment before the first answer, when there is neither. `checking` (a connection check is out)
- * turns Not checked into Checking…; a known state keeps its words until the check answers.
+ * The block's words. The state is the last good answer; `error` the last read failure, which wins
+ * over it so that a board Insight can no longer read never looks fine (Inv-PB §6.1): the block
+ * keeps naming the last known board and says why it could not be read. Loading is only the moment
+ * before the first answer, when there is neither. `checking` (a connection check is out) turns Not
+ * checked into Checking…; a known state keeps its words until the check answers.
  */
-export function boardIndicator(
+export function boardRailView(
   state: BoardState | null,
   error: BoardProblem | null,
   checking = false,
-): BoardIndicator {
-  if (error) {
-    // The last known board is named in full, as in every other state: the label may be cut.
-    const named = state?.target ? `${state.target.label} — ` : '';
-    return {
-      label: state ? targetName(state.target) : 'Board',
-      chip: { label: 'Error', tone: 'danger' },
-      tooltip: `${named}Could not read the board: ${error.message}`,
-    };
-  }
-  if (!state) {
-    return {
-      label: 'Board',
-      chip: { label: 'Loading…', tone: 'neutral' },
-      tooltip: 'Loading the selected board',
-    };
-  }
-  const target = state.target;
-  if (!target) {
-    return {
-      label: targetName(target),
-      chip: { label: 'Not selected', tone: 'warning' },
-      tooltip: 'No board is selected. Open board settings to choose one.',
-    };
-  }
+): BoardRailView {
+  const target = state?.target ?? null;
+  const name = state ? targetName(target) : 'Board';
+  const address = targetAddress(target);
+  const view = (detail: string, tone: NeatTone, words: string): BoardRailView => ({
+    name,
+    detail,
+    tone,
+    summary: [name, address, words].filter(Boolean).join(' — '),
+  });
+
+  if (error) return view('Error', 'danger', `Could not read the board: ${error.message}`);
+  if (!state) return view('Loading…', 'neutral', 'Loading the selected board');
+  if (!target) return view('Not selected', 'neutral', 'Not selected');
   if (checking && state.status.state === 'unknown') {
-    return {
-      label: targetName(target),
-      chip: { label: 'Checking…', tone: 'neutral' },
-      tooltip: `${target.label} — Checking the connection. Open board settings.`,
-    };
+    return view('Checking…', 'warning', 'Checking the connection');
   }
   const connection = connectionState(state.status);
-  return {
-    label: targetName(target),
-    chip: { label: connection.short, tone: connection.tone },
-    tooltip: `${target.label} — ${connection.label}. Open board settings.`,
-  };
+  // The address stands for the board while it is reachable; this board has none, so it says so.
+  const detail = connection.tone === 'success' && address ? address : connection.short;
+  return view(detail, connection.tone, connection.label);
 }
 
-/**
- * Which machine, in the words the rest of the SDK uses for it. "sima@host" is the connection
- * string, which belongs in the dialog, not the pill.
- */
+/** Which machine, short: the SDK's DevKit, a board entered by hand, or the one Insight runs on. */
 function targetName(target: BoardTarget | null): string {
   if (!target) return 'No board';
   if (target.mode === 'local') return 'This board';
-  return `${target.source === 'sdk-env' ? 'DevKit' : 'Board'}: ${target.host}`;
+  return target.source === 'sdk-env' ? 'DevKit' : 'Board';
+}
+
+/**
+ * Where the board is: its host, with the SSH port when it is not the usual one. "sima@host" is the
+ * connection string, which belongs in the dialog. Null for this board and for a target without a
+ * host.
+ */
+function targetAddress(target: BoardTarget | null): string | null {
+  if (!target || target.mode === 'local' || !target.host) return null;
+  return target.port && target.port !== 22 ? `${target.host}:${target.port}` : target.host;
 }
 
 /** The board dialog's state chip: the connection's long label, or "No board" without a target. */

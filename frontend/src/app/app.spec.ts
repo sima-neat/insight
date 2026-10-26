@@ -24,7 +24,7 @@ describe('App', () => {
   let http: HttpTestingController;
 
   beforeEach(() => {
-    // The app's own HTTP client, answered here: the top bar's pill reads the board at start.
+    // The app's own HTTP client, answered here: the rail's board block reads the board at start.
     TestBed.configureTestingModule({
       providers: [...appConfig.providers, provideHttpClientTesting()],
     });
@@ -35,6 +35,17 @@ describe('App', () => {
     http.verify();
     document.querySelectorAll('.cdk-overlay-container').forEach((container) => container.remove());
   });
+
+  /** A rail button by its name: collapsed, its text is there for screen readers. */
+  const railButton = (root: HTMLElement, name: string): HTMLButtonElement =>
+    [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => (button.getAttribute('aria-label') ?? button.textContent?.trim()) === name,
+    )!;
+  const boardButton = (root: HTMLElement): HTMLButtonElement =>
+    root.querySelector('app-board-rail button')!;
+
+  const boardLines = (button: HTMLElement) =>
+    [...button.querySelectorAll('.lines > span')].map((line) => line.textContent?.trim());
 
   /** Lets the promise chains behind an answered request run, then change detection. */
   async function settle(fixture: { whenStable(): Promise<unknown> }): Promise<void> {
@@ -74,7 +85,7 @@ describe('App', () => {
     expect(root.querySelector('neat-shell neat-toast-host')).toBeNull();
   });
 
-  it('puts the board pill at the end of the top bar, naming the board it read', async () => {
+  it('puts the board at the end of the rail, naming the board it read, and none in the top bar', async () => {
     const fixture = TestBed.createComponent(App);
     http.expectOne('/api/board').flush(
       boardState({
@@ -85,9 +96,14 @@ describe('App', () => {
     await settle(fixture);
     const root: HTMLElement = fixture.nativeElement;
 
-    const pill = root.querySelector('header .topbar-end app-board-pill button')!;
-    expect(pill.querySelector('.label')?.textContent?.trim()).toBe('DevKit: 192.168.1.20');
-    expect(pill.querySelector('neat-status-chip')?.textContent?.trim()).toBe('Connected');
+    const board = boardButton(root);
+    expect(board.closest('header')).toBeNull();
+    expect(boardLines(board)).toEqual(['DevKit', '192.168.1.20']);
+    expect(board.getAttribute('aria-label')).toBe('DevKit — 192.168.1.20 — Connected');
+    // The top bar is the page's: nothing of the app's but the kiosk button is left in it.
+    expect(root.querySelector('header app-board-rail')).toBeNull();
+    expect(root.querySelector('header [aria-label="System information"]')).toBeNull();
+    expect(root.querySelector('header .topbar-end')?.children).toHaveLength(0);
   });
 
   it('checks the connection once at start when the selected board was never checked', async () => {
@@ -99,8 +115,9 @@ describe('App', () => {
       .flush({ ...checkedDevkit(), status: { state: 'error', checked_at: null, error: null } });
     await settle(fixture);
 
-    const pill = fixture.nativeElement.querySelector('header app-board-pill button');
-    expect(pill.querySelector('neat-status-chip')?.textContent?.trim()).toBe('Error');
+    const board = boardButton(fixture.nativeElement);
+    expect(boardLines(board)).toEqual(['DevKit', 'Error']);
+    expect(board.getAttribute('data-tone')).toBe('danger');
   });
 
   it('reads the shell info when the dialog opens, never at app start', async () => {
@@ -111,7 +128,7 @@ describe('App', () => {
     http.expectNone('/api/devkit-shell');
     http.expectNone('/api/peripherals');
 
-    fixture.nativeElement.querySelector('app-board-pill button').click();
+    boardButton(fixture.nativeElement).click();
     // The dialog's module loads on this first open.
     await vi.waitFor(() => expect(document.querySelector('app-board-dialog')).not.toBeNull());
     http.expectOne('/api/devkit-shell').flush(shellInfo());
@@ -127,11 +144,11 @@ describe('App', () => {
     expect(document.querySelector('app-board-dialog')?.textContent).toContain('Open shell');
   });
 
-  it('closing the board dialog gives the focus back to the pill', async () => {
+  it('closing the board dialog gives the focus back to the board block', async () => {
     const fixture = TestBed.createComponent(App);
     http.expectOne('/api/board').flush(checkedDevkit());
     await settle(fixture);
-    const pill: HTMLButtonElement = fixture.nativeElement.querySelector('app-board-pill button');
+    const pill = boardButton(fixture.nativeElement);
 
     pill.focus();
     pill.click();
@@ -155,26 +172,31 @@ describe('App', () => {
     expect(document.activeElement).toBe(pill);
   });
 
-  it('puts System information after the pill, and loads it only when it is opened', async () => {
+  it('puts System information in the rail after the board and its divider, and loads it only when it is opened', async () => {
     const fixture = TestBed.createComponent(App);
     http.expectOne('/api/board').flush(checkedDevkit());
     await settle(fixture);
     // The command behind it runs for up to 15 s: never at app start.
     http.expectNone('/api/sysinfo');
 
-    const pill = fixture.nativeElement.querySelector('header .topbar-end app-board-pill');
-    const info = pill.nextElementSibling;
-    expect(info.getAttribute('aria-label')).toBe('System information');
+    const root: HTMLElement = fixture.nativeElement;
+    const board = root.querySelector('app-board-rail')!;
+    const divider = board.nextElementSibling!;
+    const info = divider.nextElementSibling!;
+    expect(divider.tagName).toBe('HR');
+    expect(divider.getAttribute('aria-hidden')).toBe('true');
     expect(info.tagName).toBe('BUTTON');
+    expect(info.textContent?.trim()).toBe('System information');
+    expect(info.closest('header')).toBeNull();
+    // The kit's theme item follows the app's items, then the rail's own control.
+    expect(info.nextElementSibling?.textContent?.trim()).toBe('Dark theme');
   });
 
-  it('the ⓘ button opens the dialog; Escape closes it and focus returns to the button', async () => {
+  it('System information opens from the rail; Escape closes it and focus returns to the item', async () => {
     const fixture = TestBed.createComponent(App);
     http.expectOne('/api/board').flush(checkedDevkit());
     await settle(fixture);
-    const info: HTMLButtonElement = fixture.nativeElement.querySelector(
-      'header button[aria-label="System information"]',
-    );
+    const info = railButton(fixture.nativeElement, 'System information');
 
     info.focus();
     info.click();

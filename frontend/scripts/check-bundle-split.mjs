@@ -2,17 +2,17 @@
 // build.
 //
 // The Viewer's video code (`@sima/neat-ui/video`) and the Streaming, Media, Peripherals and Stats
-// pages, with the kit entries only they use, are meant to load with their routes, and the top
-// bar's board and System Info dialogs on their first open, so the first paint does not pay for
+// pages, with the kit entries only they use, are meant to load with their routes, and the rail's
+// board and System Info dialogs on their first open, so the first paint does not pay for
 // them. The compiler already rejects video symbols imported from the kit's primary entry point,
 // but nothing else notices when an import in the shared code (a page, the shell, `app.config`)
 // drags one of these into the main chunk. This script checks the result: each marker below is a
 // component selector, a string that survives minification, so it shows where the code ended up.
 //
-// `neat-toast-host` and `neat-status-chip` are not markers on purpose: the app root renders the
-// toast host, and the top bar's board pill, on every page, shows the board's state in a status
-// chip, so those two kit entries are in the initial bundle by design (the status chip is the one
-// kit entry the pill adds there).
+// `neat-toast-host` is not a marker on purpose: the app root renders it, on every page, so that
+// kit entry is in the initial bundle by design. The status chip used to be there too, for the top
+// bar's board pill; the rail's board block draws its state without it, so it loads with the pages
+// and dialogs that show one.
 //
 // Usage: node scripts/check-bundle-split.mjs [dist-dir]   (default: dist, after `npm run build`)
 import { readdirSync, readFileSync } from 'node:fs';
@@ -29,15 +29,22 @@ const LAZY_CODE = [
     what: 'the Peripherals page',
     route: 'the Peripherals route',
   },
+  // The status chip: the pages, the board and System Info dialogs and the Viewer's tiles show
+  // states in it, and the app's own frame does not.
+  {
+    marker: 'neat-status-chip',
+    what: 'the kit’s status chip',
+    route: 'the pages, the dialogs and the Viewer’s tiles',
+  },
   // The kit entries the two pages use (the file browser, the checked and selection lists, dialogs).
   { marker: 'neat-file-browser', what: 'the kit’s file browser', route: 'Streaming and Media' },
   { marker: 'neat-select-list', what: 'the kit’s select list', route: 'Streaming and Media' },
   {
     marker: 'neat-dialog',
     what: 'the kit’s dialog',
-    route: 'Streaming, Media and the top bar’s dialogs',
+    route: 'Streaming, Media and the rail’s dialogs',
   },
-  // The top bar's dialogs are imported on their first open (`TopBarDialogs`), with the kit
+  // The rail's dialogs are imported on their first open (`TopBarDialogs`), with the kit
   // entries they bring beside them.
   { marker: 'app-board-dialog', what: 'the board dialog', route: 'the board dialog’s first open' },
   {

@@ -1,13 +1,15 @@
 import { expect, Page, test } from '@playwright/test';
 // Types only, erased at run time.
 import type { BoardState } from '../src/app/board/api';
-import { LAPTOP, topBarSpill } from './layout';
-import { answerSlots, answerTopBar, answerViewer, LONG_BOARD, LONG_HOST } from './top-bar';
+import { LAPTOP, PHONE, sidePanelToggle, topBarSpill } from './layout';
+import { answerSlots, answerTopBar, LONG_BOARD, LONG_HOST } from './top-bar';
 
-/** The top bar's System Info button, ⓘ, after the pill. */
+/** The rail's System information item, below the board block. */
 const systemInfo = (page: Page) => page.getByRole('button', { name: 'System information' });
 
-const pill = (page: Page) => page.locator('app-board-pill button');
+/** The rail's board block; its name says the board, its address and its state. */
+const board = (page: Page) => page.locator('app-board-rail button');
+const showLabels = (page: Page) => page.getByRole('button', { name: 'Show labels' });
 
 /**
  * The page the System Info tests open the dialog from: Streaming with no slots, which asks for
@@ -19,61 +21,184 @@ const answerEmptyStreaming = (page: Page) =>
     (route) => route.fulfill({ json: [] }),
   );
 
-/** The pages with the widest page tools, and what each needs answered to show them. */
-const PAGES = [
-  { path: '/viewer', answer: answerViewer },
-  { path: '/streaming', answer: (page: Page) => answerSlots(page, 48) },
-];
-
-/**
- * The long-named board with the widest chip a board with a target shows, "Not checked" (as after
- * Change board, where nothing checks), so the layout checks see the pill at its widest. A board in
- * that state is checked as the app loads; the check answers it unchanged, so the chip stays.
- */
-const UNCHECKED_LONG_BOARD: BoardState = {
+/** The board a test sees unreachable: the long-named one, whose connection check failed. */
+const UNREACHABLE_BOARD: BoardState = {
   ...LONG_BOARD,
-  status: { state: 'unknown', checked_at: null, error: null },
+  status: { state: 'error', checked_at: '2026-10-26T10:00:00Z', error: null },
 };
 
-for (const { path, answer } of PAGES) {
-  test(`on ${path} at 1366×768, a board name at the pill's cap is cut and the top bar holds System Info`, async ({
-    page,
-  }) => {
-    await answerTopBar(page);
-    await page.route(
-      (url) => url.pathname === '/api/board' || url.pathname === '/api/board/test',
-      (route) => route.fulfill({ json: UNCHECKED_LONG_BOARD }),
-    );
-    await answer(page);
-    await page.setViewportSize(LAPTOP);
-    await page.goto(path);
-    await expect(page.getByRole('group', { name: 'Page tools' })).toBeVisible();
-    await expect(pill(page)).toContainText('Board: devkit-lab');
-    await expect(pill(page)).toContainText('Not checked');
+const answerBoard = (page: Page, state: BoardState) =>
+  page.route(
+    (url) => url.pathname === '/api/board' || url.pathname === '/api/board/test',
+    (route) => route.fulfill({ json: state }),
+  );
 
-    // The name is cut at the cap…
-    const label = pill(page).locator('.label');
-    const cut = await label.evaluate((element) => element.scrollWidth > element.clientWidth);
-    expect(cut).toBe(true);
-    // …and the tooltip names the board in full.
-    await pill(page).hover();
-    await expect(page.getByRole('tooltip')).toHaveText(
-      `sima@${LONG_HOST} — Not checked. Open board settings.`,
-    );
+test('the top bar holds only the page: no board and no System information in it', async ({
+  page,
+}) => {
+  await answerTopBar(page);
+  await answerSlots(page, 48);
+  await page.setViewportSize(LAPTOP);
+  await page.goto('/streaming');
+  await expect(page.getByRole('group', { name: 'Page tools' })).toBeVisible();
 
-    // System Info's button sits whole in the bar, after the pill, and the page tools keep their
-    // room (nothing spills, nothing scrolls).
-    await expect(systemInfo(page)).toBeVisible();
-    const [pillBox, infoBox] = await Promise.all([
-      pill(page).boundingBox(),
-      systemInfo(page).boundingBox(),
-    ]);
-    expect(infoBox!.x).toBeGreaterThanOrEqual(pillBox!.x + pillBox!.width);
-    expect(await topBarSpill(page, false)).toEqual({ spilled: [], toolsOverflow: 0 });
-  });
-}
+  const header = page.getByRole('banner');
+  await expect(header.locator('app-board-rail')).toHaveCount(0);
+  await expect(header.getByRole('button', { name: 'System information' })).toHaveCount(0);
+  // The kiosk button, then the toggle, are the app's and the page's last items.
+  const [kiosk, toggle] = await Promise.all([
+    header.getByRole('button', { name: 'Kiosk mode' }).boundingBox(),
+    sidePanelToggle(page).boundingBox(),
+  ]);
+  expect(toggle!.x).toBeGreaterThanOrEqual(kiosk!.x + kiosk!.width);
+  expect(await topBarSpill(page, false)).toEqual({ spilled: [], toolsOverflow: 0 });
+});
 
-test('System information opens from the top bar, tells what it can without neat, and Escape gives the focus back', async ({
+test('the rail ends with the board, a line, System information, the theme and its own control, in that tab order after the pages', async ({
+  page,
+}) => {
+  await answerTopBar(page);
+  await answerEmptyStreaming(page);
+  await page.setViewportSize(LAPTOP);
+  await page.goto('/streaming');
+  await expect(board(page)).toBeVisible();
+
+  await page.getByRole('link', { name: 'Stats', exact: true }).focus();
+  for (const name of [
+    'DevKit — 192.168.100.200 — Connected',
+    'System information',
+    'Dark theme',
+    'Show labels',
+  ]) {
+    await page.keyboard.press('Tab');
+    await expect(page.locator(':focus')).toHaveAccessibleName(name);
+  }
+
+  // The lines: one above the group (the kit's), one below the board block, none around it.
+  const lines = page.locator('hr[aria-hidden="true"]');
+  await expect(lines).toHaveCount(2);
+  const [boardBox, infoBox, lineBox] = await Promise.all([
+    board(page).boundingBox(),
+    systemInfo(page).boundingBox(),
+    lines.nth(1).boundingBox(),
+  ]);
+  expect(lineBox!.y).toBeGreaterThanOrEqual(boardBox!.y + boardBox!.height);
+  expect(lineBox!.y + lineBox!.height).toBeLessThanOrEqual(infoBox!.y);
+  expect(lineBox!.height).toBeCloseTo(1, 0);
+});
+
+test('a connected board is quiet and has no outline; collapsed, its tooltip says name, address and state', async ({
+  page,
+}) => {
+  await answerTopBar(page);
+  await answerEmptyStreaming(page);
+  await page.setViewportSize(LAPTOP);
+  await page.goto('/streaming');
+  await expect(board(page)).toBeVisible();
+
+  // No outline and no border at rest: the block is the rail's own item, set apart by its lines.
+  expect(
+    await board(page).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.outlineStyle, style.borderTopWidth];
+    }),
+  ).toEqual(['none', '0px']);
+
+  await board(page).hover();
+  await expect(page.getByRole('tooltip')).toHaveText('DevKit — 192.168.100.200 — Connected');
+
+  // Expanded, the second line is the address in the rail's muted text, not in the success colour.
+  await page.mouse.move(700, 400);
+  await showLabels(page).click();
+  // The pointer is off the rail's items, whose hover fill changes their text.
+  await page.mouse.move(700, 400);
+  const detail = board(page).locator('.detail');
+  await expect(detail).toHaveText('192.168.100.200');
+  const [detailColour, mutedColour] = await Promise.all([
+    detail.evaluate((element) => getComputedStyle(element).color),
+    page
+      .getByRole('button', { name: 'Collapse' })
+      .evaluate((element) => getComputedStyle(element).color),
+  ]);
+  expect(detailColour).toBe(mutedColour);
+});
+
+test('an unreachable board says so in words and in the danger colour of its dot', async ({
+  page,
+}) => {
+  await answerTopBar(page);
+  await answerBoard(page, UNREACHABLE_BOARD);
+  await answerEmptyStreaming(page);
+  await page.setViewportSize(LAPTOP);
+  await page.goto('/streaming');
+  await showLabels(page).click();
+
+  await expect(board(page).locator('.detail')).toHaveText('Error');
+  await expect(board(page)).toHaveAccessibleName(`Board — ${LONG_HOST} — Connection failed`);
+  const [text, dot] = await Promise.all([
+    board(page)
+      .locator('.detail')
+      .evaluate((element) => getComputedStyle(element).color),
+    board(page)
+      .locator('.dot')
+      .evaluate((element) => getComputedStyle(element).backgroundColor),
+  ]);
+  expect(text).toBe(dot);
+});
+
+test('in the expanded rail a long address is cut on its own line and the block stays in the rail', async ({
+  page,
+}) => {
+  await answerTopBar(page);
+  await answerBoard(page, LONG_BOARD);
+  await answerEmptyStreaming(page);
+  await page.setViewportSize(LAPTOP);
+  await page.goto('/streaming');
+  await showLabels(page).click();
+
+  const detail = board(page).locator('.detail');
+  await expect(detail).toHaveText(LONG_HOST);
+  expect(await detail.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  // The short name above it is whole, and nothing reaches past the block or the rail.
+  const name = board(page).locator('.name');
+  expect(await name.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(false);
+  const [boardBox, mainBox] = await Promise.all([
+    board(page).boundingBox(),
+    page.getByRole('main').boundingBox(),
+  ]);
+  expect(boardBox!.x + boardBox!.width).toBeLessThanOrEqual(mainBox!.x);
+  expect(await detail.evaluate((e) => e.getBoundingClientRect().right)).toBeLessThanOrEqual(
+    boardBox!.x + boardBox!.width,
+  );
+});
+
+test('on a phone the rail shows the bottom group whole: board, System information, theme', async ({
+  page,
+}) => {
+  await answerTopBar(page);
+  await answerEmptyStreaming(page);
+  await page.setViewportSize(PHONE);
+  await page.goto('/streaming');
+  await expect(board(page)).toBeVisible();
+
+  for (const item of [
+    board(page),
+    systemInfo(page),
+    page.getByRole('button', { name: 'Dark theme' }),
+    showLabels(page),
+  ]) {
+    const box = (await item.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(PHONE.height);
+    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(40);
+  }
+  // Nothing app-level is left to reach in the top bar's first row but the kiosk button and the
+  // toggle; System information opens from the rail.
+  await systemInfo(page).click();
+  await expect(page.getByRole('dialog', { name: 'System information' })).toBeVisible();
+});
+
+test('System information opens from the rail, tells what it can without neat, and Escape gives the focus back', async ({
   page,
 }) => {
   await answerTopBar(page);

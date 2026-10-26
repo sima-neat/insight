@@ -112,7 +112,7 @@ describe('TopBarDialogs', () => {
     it(`a ${name} module that failed to load says so, and is loaded again on the next open`, async () => {
       const top = TestBed.inject(TopBarDialogs);
       loader().mockRejectedValueOnce(new Error('Failed to fetch dynamically imported module'));
-      // Settles rather than rejects: every caller (the pill, ⓘ, Peripherals, Stats) gets the toast.
+      // Settles rather than rejects: every caller (the board block, System information, Peripherals, Stats) gets the toast.
       await expect(open(top)).resolves.toBeUndefined();
       expect(toasts.error).toHaveBeenCalledExactlyOnceWith(failure);
       expect(dialogs(selector)).toHaveLength(0);

@@ -14,6 +14,25 @@ edge to return to the default width. The panel is at least 18rem wide and at mos
 20rem for the rest of the view. Each view remembers its own width in this browser. On a phone the
 panel floats over the view instead and cannot be resized.
 
+## The top bar and the rail
+
+The **top bar** belongs to the page you are on: the Insight logo, the page's title, then the page's
+own tools at the right. After the tools comes **Kiosk mode**, the one control of the whole app that
+stays in the bar, because it changes how the page is shown. Last, at the far right edge above the
+side panel, is the page's **Side panel** toggle. On a phone the logo, **Kiosk mode** and the toggle
+share the bar's first row, and the page's tools take the second.
+
+The **rail** at the left belongs to the app. It lists the pages, and its bottom holds the controls
+that are not about one page: the selected board, **System information** and the theme (**Dark
+theme** or **Light theme**, whichever a click switches to), then the rail's own control, **Show
+labels** while it is collapsed and **Collapse** while it is expanded. Collapsed, each item is an
+icon and its name appears as a tooltip when you point at it or focus it. The rail remembers whether
+it is expanded. On a phone it opens over the page, and it closes again when you follow a link.
+
+The board block, set apart by a line above and below it, names the selected board and its state (see
+**Selected board** below). **System information** opens the panel described under System
+Information.
+
 ## Workspace
 
 The Workspace view lets you browse the project files visible to Insight. In the Neat Development Environment, this is normally `/workspace`; outside the SDK, Insight falls back to the current working directory.
@@ -77,7 +96,7 @@ The codec is determined by the selected media and is not manually changed in the
 
 Select a source row to open its side panel. Its **Source** switch chooses what the slot takes its video from, and applies at once. **File** shows the slot's file: **Change…** opens **Source for srcN**, which has the same folder browser as Media Sources, so pick a video there and select **Assign**; **Clear** unassigns it. **Camera** makes the slot a webcam source, and you assign one of your cameras by selecting it in the list. **Stream URL** pulls a network stream (see below). Switching a stopped slot to Camera or Stream URL removes the file it had, and switching away from Camera removes its camera. On a slot that is streaming, the switch first asks whether to stop it, naming what the switch removes; **Cancel** leaves the slot and the switch as they were. A slot you leave on **Stream URL** while it is empty shows that form again when you come back to it in the same session. You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
 
-The toolbar holds the filter (**All 48** or **In use**), the **More actions** (⋯) menu and the **Side panel** toggle. The ⋯ menu has the actions on all slots: **Auto assign**, **Start…** (which asks how many streams to start), **Stop all**, and, after a line, **Reset** and **Clear renditions**. While a slot is changing, they wait; each one's tooltip says why. **Start** in the side panel shows a spinning glyph while a start is in progress, and the live preview, if its stream is not ready yet, tries again a few times before it says **Preview unavailable**, with **Retry**.
+The toolbar holds the filter (**All 48** or **In use**) and the **More actions** (⋯) menu; the **Side panel** toggle sits at the far right of the top bar. The ⋯ menu has the actions on all slots: **Auto assign**, **Start…** (which asks how many streams to start), **Stop all**, and, after a line, **Reset** and **Clear renditions**. While a slot is changing, they wait; each one's tooltip says why. **Start** in the side panel shows a spinning glyph while a start is in progress, and the live preview, if its stream is not ready yet, tries again a few times before it says **Preview unavailable**, with **Retry**.
 
 This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
 
@@ -252,12 +271,19 @@ Peripherals lists the cameras and microphones connected to a board and shows wha
 
 ### Selected board
 
-Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals and Stats use this selection.
+Insight works with one selected board, shown at the bottom of the rail with a dot that says how it
+is doing. While it is connected the block is quiet: the board's short name (**DevKit** for the SDK's
+paired board, **Board** for one you entered, **This board** when Insight runs on it) and its
+address, with a green dot. In any other state the second line says so in words and in the dot's
+colour: **Error** (red), **Checking…** (amber), **Not selected** or **Not checked** (grey). With the
+rail collapsed only the icon and its dot show, and the tooltip (and the name a screen reader reads)
+gives the name, the address and the state, for example "DevKit — 192.168.100.200 — Connected".
+Select the block to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals and Stats use this selection.
 
 When Insight opens with a board whose connection was never tested, it tests it once by itself, and
-the header says **Checking…** until the board answers, which can take until the connection times
+the board block says **Checking…** until the board answers, which can take until the connection times
 out when the board is unreachable. A board you change to in the board settings is not tested
-until you select **Check again**, so the header says **Not checked** until then.
+until you select **Check again**, so the block says **Not checked** until then.
 
 The board is chosen in this order:
 

@@ -882,7 +882,7 @@ describe('PeripheralsPage', () => {
     window.dispatchEvent(new Event('focus'));
     answer('GET', BOARD_URL, { error: 'Bad gateway' }, badGateway);
     await settle();
-    // A last good state is kept: the list stays, and the pill shows the error.
+    // A last good state is kept: the list stays, and the board block shows the error.
     expect(listbox()).not.toBeNull();
     expect(aside()?.querySelector('h2')?.textContent?.trim()).toBe(imx477.name);
 

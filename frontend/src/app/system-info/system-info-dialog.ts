@@ -57,7 +57,7 @@ function entriesOf(section: Record<string, unknown> | undefined): Entry[] {
 
 /**
  * The System Info dialog (spec, "Peripherals, board connection and System Info"), opened by the
- * top bar's ⓘ from any page: the environment, Insight, "This computer", its components, the ports
+ * rail's System information item from any page: the environment, Insight, "This computer", its components, the ports
  * the SDK publishes and the update check, each a section of the outline. Environment, Insight,
  * This computer and Update check start open; Components and Exposed ports, the long ones, start
  * closed.
