@@ -96,8 +96,7 @@ merging.
   kit's `neat-aside-toggle` ("Side panel"), declared in the page's template beside its
   `*neatPageToolbar`, never inside it (that throws in dev mode): the shell draws the button at the
   top bar's right edge, after the kiosk button, so it is not among the page's tools. A page builds
-  its panel from the kit's aside parts
-  from the kit's aside parts (`neatAsidePanel`, `neatAsideTitle`, `neatAsideHeading`,
+  its panel from the kit's aside parts (`neatAsidePanel`, `neatAsideTitle`, `neatAsideHeading`,
   `neatAsideActions`, `neatCode`). Whether
   a page's panel is open is remembered per page in storage: the Viewer in its layout
   (`LayoutPrefs`), Streaming, Media, Peripherals and Stats in `AsidePrefs`
@@ -250,7 +249,7 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns at
-  600 kB. The initial bundle measures 582.7 kB raw with kit 0.19.1 (the shared chunk 465 kB, main 22
+  600 kB. The initial bundle measures 582.8 kB raw with kit 0.19.1 (the shared chunk 465 kB, main 22
   kB, styles 96 kB; 580.8 kB with kit 0.18.0; 579.2 kB before Stats used the kit's page tabs, whose
   directives are in the primary entry and so in the shared chunk; 578.2 kB with kit 0.17.0; 579.3 kB
   while a start-up hook resumed the tab's webcams after a reload; 577.7 kB with kit 0.16.2, 3 kB

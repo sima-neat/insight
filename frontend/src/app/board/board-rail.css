@@ -5,15 +5,18 @@
 
 /* Each state's colours, stated once: the dot's, and the second line's. A connected board is quiet,
    so its address stays the rail's muted text; any other state says itself in its colour. The
-   warning's text is the theme's line step, since `--warning` is a fill, too faint for text. */
+   theme's `--warning` is a fill (2.2:1 on white), too faint for a dot or for text, so warning uses
+   the line step of its scale for the dot, and for the words the same step mixed a fifth of the way
+   to the text colour: that holds 4.5:1 on the rail and on the hover fill, which the step alone
+   (3.9:1 there) does not. */
 button[data-tone='success'] {
   --board-dot: var(--success);
   --board-detail: var(--muted-foreground);
 }
 
 button[data-tone='warning'] {
-  --board-dot: var(--warning);
-  --board-detail: var(--neat-line-warning);
+  --board-dot: var(--neat-line-warning);
+  --board-detail: color-mix(in oklab, var(--neat-line-warning) 80%, var(--foreground));
 }
 
 button[data-tone='danger'] {

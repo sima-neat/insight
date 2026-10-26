@@ -9,7 +9,10 @@ import type { NeatTone } from '@sima/neat-ui';
 import type { BoardSource, BoardState, BoardStatus, BoardTarget, CameraSetup } from './api';
 import type { BoardProblem } from './board-error';
 
-/** A connection state in words: the long label (the dialog), the short one (the board block's second line). */
+/**
+ * A connection state in words: the long label (the dialog), the short one (the board block's
+ * second line).
+ */
 export interface ConnectionState {
   label: string;
   short: string;
@@ -23,9 +26,9 @@ export interface BoardChip {
 
 /**
  * The rail's board block: the short name, then a second line (the address when connected, the
- * state in words otherwise), the tone of the state's dot and words, and `summary`, "name — address
- * — state" in full, which is the block's accessible name and its tooltip while the rail is
- * collapsed.
+ * state in words otherwise), the tone of the state's dot and words, and `summary`, "name —
+ * address — state" in full, which is the block's accessible name and its tooltip while the rail
+ * is collapsed.
  */
 export interface BoardRailView {
   name: string;
@@ -143,12 +146,18 @@ export function sourceLabel(source: BoardSource): string {
   return SOURCES[source] ?? '';
 }
 
-/** "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo" reads as "modalix-som-waveshare-ARDU-IMX477-1CAM". */
+/**
+ * "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo" reads as
+ * "modalix-som-waveshare-ARDU-IMX477-1CAM".
+ */
 export function overlayName(file: string): string {
   return (file.split('/').pop() ?? '').replace(/\.dtbo$/i, '');
 }
 
-/** The board facts for the camera setup, as [term, value] rows; each is left out when Sentinel did not report it. */
+/**
+ * The board facts for the camera setup, as [term, value] rows; each is left out when Sentinel did
+ * not report it.
+ */
 export function cameraSetupRows(setup: CameraSetup | null): [term: string, value: string][] {
   const rows: [term: string, value: string][] = [];
   if (setup?.model) rows.push(['Model', setup.model]);

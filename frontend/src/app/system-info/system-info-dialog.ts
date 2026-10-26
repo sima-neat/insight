@@ -57,10 +57,10 @@ function entriesOf(section: Record<string, unknown> | undefined): Entry[] {
 
 /**
  * The System Info dialog (spec, "Peripherals, board connection and System Info"), opened by the
- * rail's System information item from any page: the environment, Insight, "This computer", its components, the ports
- * the SDK publishes and the update check, each a section of the outline. Environment, Insight,
- * This computer and Update check start open; Components and Exposed ports, the long ones, start
- * closed.
+ * rail's System information item from any page: the environment, Insight, "This computer", its
+ * components, the ports the SDK publishes and the update check, each a section of the outline.
+ * Environment, Insight, This computer and Update check start open; Components and Exposed ports,
+ * the long ones, start closed.
  *
  * Every open and every Refresh asks `GET /api/sysinfo`, which runs `neat` for up to 15 s, so
  * Refresh waits for the answer in flight: there is never more than one request, and its answer
@@ -119,7 +119,9 @@ export class SystemInfoDialog {
     const metrics = this.metrics();
     return metrics && hostReadings(metrics);
   });
-  /** In place of the rows; "Reading this computer…" until the first answer, unless that failed. */
+  /**
+   * In place of the rows; "Reading this computer…" until the first answer, unless that failed.
+   */
   protected readonly readingsNotice = computed(() =>
     this.metricsFailure() && !this.readings() ? '' : hostNotice(this.readings()),
   );
@@ -127,7 +129,10 @@ export class SystemInfoDialog {
   /** `neat` is not installed: the sections that only it can fill are not shown. */
   protected readonly neatMissing = computed(() => this.info()?.missing?.includes('neat') ?? false);
 
-  /** Under the title: which environment, and where Insight's web UI is (or the environment's mode). */
+  /**
+   * Under the title: which environment, and where Insight's web UI is (or the environment's
+   * mode).
+   */
   protected readonly identity = computed(() => {
     const info = this.info();
     if (!info) return '';

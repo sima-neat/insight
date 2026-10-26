@@ -1,4 +1,4 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, Locator, Page, test } from '@playwright/test';
 // Types only, erased at run time.
 import type { BoardState } from '../src/app/board/api';
 import { LAPTOP, PHONE, sidePanelToggle, topBarSpill } from './layout';
@@ -158,18 +158,23 @@ test('in the expanded rail a long address is cut on its own line and the block s
 
   const detail = board(page).locator('.detail');
   await expect(detail).toHaveText(LONG_HOST);
-  expect(await detail.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  // The rail widens over a transition: measure once it has settled.
+  const cut = (line: Locator) =>
+    line.evaluate((element) => element.scrollWidth > element.clientWidth);
+  await expect.poll(() => cut(detail)).toBe(true);
   // The short name above it is whole, and nothing reaches past the block or the rail.
-  const name = board(page).locator('.name');
-  expect(await name.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(false);
-  const [boardBox, mainBox] = await Promise.all([
-    board(page).boundingBox(),
-    page.getByRole('main').boundingBox(),
-  ]);
-  expect(boardBox!.x + boardBox!.width).toBeLessThanOrEqual(mainBox!.x);
-  expect(await detail.evaluate((e) => e.getBoundingClientRect().right)).toBeLessThanOrEqual(
-    boardBox!.x + boardBox!.width,
-  );
+  await expect.poll(() => cut(board(page).locator('.name'))).toBe(false);
+  await expect
+    .poll(async () => {
+      const [boardBox, mainBox, detailRight] = await Promise.all([
+        board(page).boundingBox(),
+        page.getByRole('main').boundingBox(),
+        detail.evaluate((element) => element.getBoundingClientRect().right),
+      ]);
+      const boardRight = boardBox!.x + boardBox!.width;
+      return boardRight <= mainBox!.x && detailRight <= boardRight;
+    })
+    .toBe(true);
 });
 
 test('on a phone the rail shows the bottom group whole: board, System information, theme', async ({

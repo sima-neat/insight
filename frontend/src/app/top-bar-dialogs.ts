@@ -37,11 +37,12 @@ const LOAD_FAILED: Record<DialogName, string> = {
 };
 
 /**
- * Opens the dialogs of the rail's board and System information items, from there and from any page that links to them
- * (Peripherals' and Stats' "Open board settings"). Each opens once at a time: a second call while
- * its dialog is loading or open (a double click on the board block) does nothing but wait for the same
- * close. A module that cannot be loaded (the server gone, or its chunk replaced by a newer build)
- * is reported here, in a toast, for every caller; the next open tries again.
+ * Opens the dialogs of the rail's board and System information items, from there and from any page
+ * that links to them (Peripherals' and Stats' "Open board settings"). Each opens once at a time: a
+ * second call while its dialog is loading or open (a double click on the board block) does nothing
+ * but wait for the same close. A module that cannot be loaded (the server gone, or its chunk
+ * replaced by a newer build) is reported here, in a toast, for every caller; the next open tries
+ * again.
  */
 @Injectable({ providedIn: 'root' })
 export class TopBarDialogs {

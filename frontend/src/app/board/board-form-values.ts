@@ -1,7 +1,8 @@
 /**
  * The board form's values and checks (#170's `model.js`, copy per Inv-PB §2.5), as pure
  * functions. Only the board dialog's form uses them, so they live apart from `board-view.ts`,
- * which the rail's board block imports: kept there, they would be in the initial bundle (ruling Q14).
+ * which the rail's board block imports: kept there, they would be in the initial bundle (ruling
+ * Q14).
  */
 
 import type { BoardDefaults, BoardState, SshAddress } from './api';
@@ -13,7 +14,10 @@ export interface BoardFormValues {
   user: string;
 }
 
-/** The target Insight falls back to without a manual one, for the form's "Default: …" hint; '' for none. */
+/**
+ * The target Insight falls back to without a manual one, for the form's "Default: …" hint; '' for
+ * none.
+ */
 export function defaultTargetText(defaults: BoardDefaults): string {
   if (defaults.on_board) return 'this board (Insight is running on it)';
   const env = defaults.sdk_env;
@@ -21,7 +25,10 @@ export function defaultTargetText(defaults: BoardDefaults): string {
   return '';
 }
 
-/** The form starts from the saved manual target, else the SSH target in use, else the paired DevKit. */
+/**
+ * The form starts from the saved manual target, else the SSH target in use, else the paired
+ * DevKit.
+ */
 export function initialBoardForm(state: BoardState | null): BoardFormValues {
   const ssh = state?.target?.mode === 'ssh' ? state.target : null;
   const from = state?.saved ?? ssh ?? state?.defaults.sdk_env ?? null;
