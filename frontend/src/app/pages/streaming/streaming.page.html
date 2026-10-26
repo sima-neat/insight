@@ -1,43 +1,6 @@
 <ng-container *neatPageToolbar>
   <neat-segmented label="Slots shown" [options]="filterOptions()" [(value)]="filter" />
 
-  <button
-    neatButton
-    type="button"
-    variant="text"
-    size="small"
-    [neatTooltip]="autoAssignTooltip()"
-    neatTooltipPosition="bottom"
-    [disabled]="bulkLocked()"
-    (click)="autoAssign()"
-  >
-    Auto assign
-  </button>
-  <button
-    neatButton
-    type="button"
-    variant="text"
-    size="small"
-    [neatTooltip]="bulkTooltip()"
-    neatTooltipPosition="bottom"
-    [disabled]="bulkLocked() || noStreamableFile()"
-    (click)="openBulkStart()"
-  >
-    Start…
-  </button>
-  <button
-    neatButton
-    type="button"
-    variant="text"
-    size="small"
-    [neatTooltip]="bulkTooltip()"
-    neatTooltipPosition="bottom"
-    [disabled]="bulkLocked()"
-    (click)="stopAll()"
-  >
-    Stop all
-  </button>
-
   <neat-popover
     label="More actions"
     align="end"
@@ -58,7 +21,41 @@
       <neat-icon name="more" />
     </button>
     <ng-template neatPopoverContent>
-      <!-- The items' tooltips open to the left, where they cover no other item. -->
+      <!--
+        The bulk actions, then (after the line) the two that discard things. The items' tooltips
+        open to the left, where they cover no other item.
+      -->
+      <button
+        type="button"
+        neatPopoverItem
+        [neatTooltip]="autoAssignTooltip()"
+        neatTooltipPosition="left"
+        [disabled]="bulkLocked()"
+        (click)="autoAssign()"
+      >
+        Auto assign
+      </button>
+      <button
+        type="button"
+        neatPopoverItem
+        [neatTooltip]="bulkTooltip()"
+        neatTooltipPosition="left"
+        [disabled]="bulkLocked() || noStreamableFile()"
+        (click)="openBulkStart()"
+      >
+        Start…
+      </button>
+      <button
+        type="button"
+        neatPopoverItem
+        [neatTooltip]="bulkTooltip()"
+        neatTooltipPosition="left"
+        [disabled]="bulkLocked()"
+        (click)="stopAll()"
+      >
+        Stop all
+      </button>
+      <hr neatPopoverDivider />
       <button
         type="button"
         neatPopoverItem

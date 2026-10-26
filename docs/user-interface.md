@@ -77,6 +77,8 @@ The codec is determined by the selected media and is not manually changed in the
 
 Select a source row to open its side panel. Its **Source** switch chooses what the slot takes its video from, and applies at once. **File** shows the slot's file: **Change…** opens **Source for srcN**, which has the same folder browser as Media Sources, so pick a video there and select **Assign**; **Clear** unassigns it. **Camera** makes the slot a webcam source, and you assign one of your cameras by selecting it in the list. **Stream URL** pulls a network stream (see below). Switching a stopped slot to Camera or Stream URL removes the file it had, and switching away from Camera removes its camera. On a slot that is streaming, the switch first asks whether to stop it, naming what the switch removes; **Cancel** leaves the slot and the switch as they were. A slot you leave on **Stream URL** while it is empty shows that form again when you come back to it in the same session. You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
 
+The toolbar holds the filter (**All 48** or **In use**), the **More actions** (⋯) menu and the **Side panel** toggle. The ⋯ menu has the actions on all slots: **Auto assign**, **Start…** (which asks how many streams to start), **Stop all**, and, after a line, **Reset** and **Clear renditions**. While a slot is changing, they wait; each one's tooltip says why. **Start** in the side panel shows a spinning glyph while a start is in progress, and the live preview, if its stream is not ready yet, tries again a few times before it says **Preview unavailable**, with **Retry**.
+
 This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
 
 ![Insight Streaming Sources view showing assigned source slots and source preview.](images/insight-rtsp-source.png)
@@ -163,7 +165,7 @@ Insight encodes one rendition at a time. While another rendition is being encode
 
 MJPEG sources cannot change frame rate; the control is disabled for them.
 
-**Clear renditions** in the Streaming Sources toolbar deletes every cached rendition (except ones a playing source is using); they are re-created on the next start.
+**Clear renditions** in the Streaming Sources ⋯ menu deletes every cached rendition (except ones a playing source is using); they are re-created on the next start.
 
 ## Video Viewer
 

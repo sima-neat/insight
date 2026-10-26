@@ -1,9 +1,13 @@
 import { HttpClient, HttpHeaderResponse, provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+  type TestRequest,
+} from '@angular/common/http/testing';
 import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import type { Slot, SlotPull } from '../../sources/api';
-import { previewFailure, SlotPreview } from './slot-preview';
+import { PREVIEW_RETRIES, PREVIEW_RETRY_MS, previewFailure, SlotPreview } from './slot-preview';
 
 function slot(index: number, overrides: Partial<Slot> = {}): Slot {
   return {
@@ -52,6 +56,7 @@ describe('SlotPreview', () => {
   let http: HttpTestingController;
 
   beforeEach(() => {
+    // RxJS schedules its timers (the retry's pause) with an interval, which this fakes.
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(1_737_000_000_000);
     TestBed.configureTestingModule({
@@ -83,6 +88,48 @@ describe('SlotPreview', () => {
   /** What the browser does once the multipart stream's first frame is decoded. */
   function decodeFirstFrame(img: HTMLImageElement): void {
     Object.defineProperty(img, 'naturalWidth', { configurable: true, value: 1280 });
+  }
+
+  /** The live image fails before its first frame; the probe of the same URL is answered by `answer`. */
+  async function failEarly(
+    answer: (probe: TestRequest) => void = (probe) =>
+      probe.flush({ error: 'Source is not live' }, { status: 409, statusText: 'Conflict' }),
+  ): Promise<TestRequest> {
+    image()!.dispatchEvent(new Event('error'));
+    await fixture.whenStable();
+    const probe = http.expectOne((request) => request.url.startsWith('/stream/preview/'));
+    answer(probe);
+    await fixture.whenStable();
+    return probe;
+  }
+
+  /** Waits out the pause before an automatic retry, which then shows a new image. */
+  async function waitForRetry(): Promise<void> {
+    vi.advanceTimersByTime(PREVIEW_RETRY_MS);
+    await fixture.whenStable();
+  }
+
+  /** Fails the image and lets the retry that follows it start, `times` over. */
+  async function retriesThrough(times: number): Promise<string[]> {
+    const srcs: string[] = [];
+    for (let attempt = 0; attempt < times; attempt++) {
+      await failEarly();
+      expect(text(), `retry ${attempt + 1} is on its way`).not.toContain('Preview unavailable');
+      await waitForRetry();
+      srcs.push(image()!.getAttribute('src')!);
+    }
+    return srcs;
+  }
+
+  /** The last failure: nothing more is tried, and the user is offered Retry. */
+  async function expectGivesUp(): Promise<void> {
+    await failEarly();
+    expect(text()).toContain('Preview unavailable.');
+    expect(button('Retry')).toBeDefined();
+    vi.advanceTimersByTime(10 * PREVIEW_RETRY_MS);
+    await fixture.whenStable();
+    expect(image()).toBeNull();
+    http.expectNone((request) => request.url.startsWith('/stream/preview/'));
   }
 
   it('the preview shows the stream when live, the file when not, and the 429 message with Retry', async () => {
@@ -129,32 +176,142 @@ describe('SlotPreview', () => {
     expect(text()).toContain('Connecting to src2…');
   });
 
-  it('another failure says the preview is unavailable, with Retry', async () => {
+  it('a preview that fails before its first frame is retried by itself, a second apart, then reported unavailable with Retry', async () => {
     await show(slot(2, { state: 'pulled', pull: pull() }));
-    expect(image()!.getAttribute('src')).toBe(
-      '/stream/preview/src2.mjpg?t=1737000000000&s=2026-10-24T08%3A00%3A00Z',
-    );
-    image()!.dispatchEvent(new Event('error'));
+    const first = image()!.getAttribute('src');
+    expect(first).toBe('/stream/preview/src2.mjpg?t=1737000000000&s=2026-10-24T08%3A00%3A00Z');
+
+    // The stream was not ready yet: nothing is said, the pause is a second, and the new request
+    // is a new image.
+    await failEarly();
+    expect(image()).toBeNull();
+    expect(text()).not.toContain('Preview unavailable');
+    vi.advanceTimersByTime(PREVIEW_RETRY_MS - 1);
     await fixture.whenStable();
-    http
-      .expectOne((request) => request.url.startsWith('/stream/preview/src2.mjpg'))
-      .flush({ error: 'Source is not live' }, { status: 409, statusText: 'Conflict' });
+    expect(image()).toBeNull();
+    vi.advanceTimersByTime(1);
     await fixture.whenStable();
-    expect(text()).toContain('Preview unavailable.');
+    expect(image()!.getAttribute('src')).not.toBe(first);
+
+    // Then as many more as the limit allows, each a new request, and then it stops for good.
+    const srcs = [first, image()!.getAttribute('src')!];
+    srcs.push(...(await retriesThrough(PREVIEW_RETRIES - 1)));
+    expect(new Set(srcs).size).toBe(PREVIEW_RETRIES + 1);
+    await expectGivesUp();
     expect(text()).not.toContain('too many');
-    expect(button('Retry')).toBeDefined();
   });
 
-  it('a failure the second request does not repeat is still reported as unavailable, and the request is dropped', async () => {
+  it('a failure the second request does not repeat is retried too, and its request is dropped', async () => {
     await show(slot(2, { state: 'external' }));
-    image()!.dispatchEvent(new Event('error'));
-    await fixture.whenStable();
-    const probe = http.expectOne((request) => request.url.startsWith('/stream/preview/src2.mjpg'));
     // The stream answers this time: only its status was wanted, so the request ends there.
-    probe.event(new HttpHeaderResponse({ status: 200, statusText: 'OK' }));
-    await fixture.whenStable();
+    const probe = await failEarly((request) =>
+      request.event(new HttpHeaderResponse({ status: 200, statusText: 'OK' })),
+    );
     expect(probe.cancelled).toBe(true);
+    await waitForRetry();
+    expect(image()).not.toBeNull();
+    await retriesThrough(PREVIEW_RETRIES - 1);
+    await expectGivesUp();
+  });
+
+  it('the server’s cap on previews is reported at once and never retried by itself', async () => {
+    await show(slot(2, { state: 'external' }));
+    await failEarly((probe) =>
+      probe.flush({ error: 'Too many previews open' }, { status: 429, statusText: 'x' }),
+    );
+    expect(text()).toContain('Preview unavailable: too many previews open');
+    vi.advanceTimersByTime(10 * PREVIEW_RETRY_MS);
+    await fixture.whenStable();
+    expect(image()).toBeNull();
+    http.expectNone((request) => request.url.startsWith('/stream/preview/'));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a retry that meets the cap on previews stops there', async () => {
+    await show(slot(2, { state: 'external' }));
+    await failEarly();
+    await waitForRetry();
+    await failEarly((probe) =>
+      probe.flush({ error: 'Too many previews open' }, { status: 429, statusText: 'x' }),
+    );
+    expect(text()).toContain('too many previews open');
+    vi.advanceTimersByTime(10 * PREVIEW_RETRY_MS);
+    await fixture.whenStable();
+    expect(image()).toBeNull();
+  });
+
+  it('a frame shown starts the count again: the next stream of the slot gets all its retries', async () => {
+    await show(slot(1, { state: 'pulled', pull: pull() }));
+    await retriesThrough(PREVIEW_RETRIES - 1);
+    decodeFirstFrame(image()!);
+    vi.advanceTimersByTime(100);
+    await fixture.whenStable();
+    expect(text()).not.toContain('Connecting');
+
+    // The publisher reconnects: a new session is a new stream, which fails before its first frame.
+    host.slot.set(slot(1, { state: 'pulled', pull: pull({ since: '2026-10-24T09:00:00Z' }) }));
+    await fixture.whenStable();
+    await retriesThrough(PREVIEW_RETRIES);
+    await expectGivesUp();
+  });
+
+  it('a stream that dropped after showing frames is not retried by itself', async () => {
+    await show(slot(1, { state: 'external' }));
+    await failEarly();
+    await waitForRetry();
+    const live = image()!;
+    decodeFirstFrame(live);
+    vi.advanceTimersByTime(100);
+    await fixture.whenStable();
+    live.dispatchEvent(new Event('error'));
+    await fixture.whenStable();
+    vi.advanceTimersByTime(10 * PREVIEW_RETRY_MS);
+    await fixture.whenStable();
+    http.expectNone((request) => request.url.startsWith('/stream/preview/'));
     expect(text()).toContain('Preview unavailable.');
+  });
+
+  it('another slot and Retry each start the count again', async () => {
+    await show(slot(1, { state: 'external' }));
+    await retriesThrough(PREVIEW_RETRIES - 1);
+
+    host.slot.set(slot(4, { state: 'external' }));
+    await fixture.whenStable();
+    await retriesThrough(PREVIEW_RETRIES);
+    await expectGivesUp();
+
+    button('Retry').click();
+    await fixture.whenStable();
+    await retriesThrough(PREVIEW_RETRIES);
+    await expectGivesUp();
+  });
+
+  it('a retry waiting when the slot changes or the preview goes does nothing', async () => {
+    await show(slot(1, { state: 'external' }));
+    await failEarly();
+    expect(vi.getTimerCount()).toBe(1);
+
+    host.slot.set(slot(4, { state: 'external' }));
+    await fixture.whenStable();
+    const other = image()!;
+    const src = other.getAttribute('src');
+    vi.advanceTimersByTime(3 * PREVIEW_RETRY_MS);
+    await fixture.whenStable();
+    expect(image()).toBe(other);
+    expect(other.getAttribute('src')).toBe(src);
+
+    other.dispatchEvent(new Event('error'));
+    await fixture.whenStable();
+    http
+      .expectOne((request) => request.url.startsWith('/stream/preview/src4.mjpg'))
+      .flush(null, {
+        status: 409,
+        statusText: 'Conflict',
+      });
+    await fixture.whenStable();
+    host.shown.set(false);
+    await fixture.whenStable();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('shows the file by its kind: MJPEG through the preview route, an image as itself', async () => {

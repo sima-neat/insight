@@ -334,6 +334,12 @@ describe('StreamingPage', () => {
     expect(morePanel()).not.toBeNull();
   }
 
+  /** Opens the ⋯ menu and picks a row, as the bulk actions now are. */
+  async function choose(label: string): Promise<void> {
+    await openMore();
+    await click(menuItem(label));
+  }
+
   it('shows 48 rows with kind, source, state, rate and codec per Inv-SM §1.2 for file, webcam, external and pulled slots', async () => {
     cameras.assignments.set(new Map([[3, { deviceId: 'd1', label: 'Desk camera' }]]));
     await open();
@@ -505,7 +511,7 @@ describe('StreamingPage', () => {
       started_or_running: 1,
     });
 
-    await click(toolbarButton('Start…'));
+    await choose('Start…');
     const dialog = bulkDialog()!;
     expect(dialog.textContent).toContain('Bulk Start Streams');
     expect(dialog.textContent).toContain('How many streams do you want to start?');
@@ -530,7 +536,7 @@ describe('StreamingPage', () => {
     expect(toasts.error).toHaveBeenCalledWith('Failed: src2');
 
     // The next time it opens at the count chosen last.
-    await click(toolbarButton('Start…'));
+    await choose('Start…');
     expect(bulkDialog()!.querySelector('[role="slider"]')!.getAttribute('aria-valuenow')).toBe('2');
     await answer(bulkDialog()!, 'Cancel');
   });
@@ -566,7 +572,7 @@ describe('StreamingPage', () => {
       fps: 15,
     });
 
-    await click(toolbarButton('Start…'));
+    await choose('Start…');
     await answer(bulkDialog()!, 'Start');
     // The server must start the rate just committed, not the one before it.
     expect(slots.startBulk).not.toHaveBeenCalled();
@@ -586,7 +592,7 @@ describe('StreamingPage', () => {
     rate.value = '900';
     rate.dispatchEvent(new Event('input'));
     rate.dispatchEvent(new Event('blur'));
-    await click(toolbarButton('Start…'));
+    await choose('Start…');
     await answer(bulkDialog()!, 'Start');
     refuse();
     await settleOverlay();
@@ -661,7 +667,7 @@ describe('StreamingPage', () => {
 
   it('Start… cancelled starts nothing', async () => {
     await open();
-    await click(toolbarButton('Start…'));
+    await choose('Start…');
     await answer(bulkDialog()!, 'Cancel');
 
     expect(bulkDialog()).toBeNull();
@@ -673,7 +679,7 @@ describe('StreamingPage', () => {
     slots.startBulk.mockRejectedValue(
       new ApiRequestError(400, 'No assigned sources available to start', null),
     );
-    await click(toolbarButton('Start…'));
+    await choose('Start…');
     await answer(bulkDialog()!, 'Start');
 
     expect(toasts.error).toHaveBeenCalledWith('No assigned sources available to start');
@@ -684,7 +690,7 @@ describe('StreamingPage', () => {
 
   it('a slot that began changing while the dialog or the menu was open is reported, and nothing is sent (Q9)', async () => {
     await open();
-    await click(toolbarButton('Start…'));
+    await choose('Start…');
     cameras.anyChanging.set(true);
     await settle();
     await answer(bulkDialog()!, 'Start');
@@ -726,13 +732,13 @@ describe('StreamingPage', () => {
       available_files: 3,
     });
 
-    await click(toolbarButton('Stop all'));
+    await choose('Stop all');
     // Stop all keeps the cameras picked for the slots; auto assign turns them into file slots.
     expect(cameras.releaseAll).toHaveBeenLastCalledWith();
     expect(slots.stopAll).toHaveBeenCalledExactlyOnceWith(RELEASED);
     expect(toasts.status).toHaveBeenLastCalledWith('Stopped 2 source(s).');
 
-    await click(toolbarButton('Auto assign'));
+    await choose('Auto assign');
     expect(cameras.releaseAll).toHaveBeenLastCalledWith({ clearAssignments: true });
     expect(slots.autoAssign).toHaveBeenCalledExactlyOnceWith(RELEASED);
     expect(toasts.status).toHaveBeenLastCalledWith(
@@ -742,14 +748,14 @@ describe('StreamingPage', () => {
 
   it('the bulk actions wait while a slot change or another bulk action is in flight', async () => {
     await open();
-    const bulk = ['Auto assign', 'Start…', 'Stop all'];
-    expect(bulk.map((name) => toolbarButton(name).disabled)).toEqual([false, false, false]);
+    const bulk = ['Auto assign', 'Start…', 'Stop all', 'Reset'];
+    const disabled = () => bulk.map((name) => menuItem(name).disabled);
+    await openMore();
+    expect(disabled()).toEqual([false, false, false, false]);
 
     cameras.anyChanging.set(true);
     await settle();
-    expect(bulk.map((name) => toolbarButton(name).disabled)).toEqual([true, true, true]);
-    await openMore();
-    expect(menuItem('Reset').disabled).toBe(true);
+    expect(disabled()).toEqual([true, true, true, true]);
     await press(morePanel() as HTMLElement, 'Escape');
     await settleOverlay();
 
@@ -757,31 +763,36 @@ describe('StreamingPage', () => {
     await settle();
     let finish!: (result: StopAllResult) => void;
     slots.stopAll.mockReturnValue(new Promise((resolve) => (finish = resolve)));
-    await click(toolbarButton('Stop all'));
-    expect(bulk.map((name) => toolbarButton(name).disabled)).toEqual([true, true, true]);
+    await choose('Stop all');
+    await openMore();
+    expect(disabled()).toEqual([true, true, true, true]);
+    await press(morePanel() as HTMLElement, 'Escape');
+    await settleOverlay();
 
     finish({ ...bulkResult('Stopped 0 source(s).'), stopped_count: 0, stopped_pulled: [] });
     await settleOverlay();
-    expect(bulk.map((name) => toolbarButton(name).disabled)).toEqual([false, false, false]);
+    await openMore();
+    expect(disabled()).toEqual([false, false, false, false]);
   });
 
   it('Start… waits for the library to answer with a streamable file', async () => {
     library.tree.set(null);
     await open();
-    expect(toolbarButton('Start…').disabled).toBe(true);
+    await openMore();
+    expect(menuItem('Start…').disabled).toBe(true);
 
     library.tree.set([
       { name: 'notes.txt', path: 'notes.txt', type: 'file', streamable: false },
       { name: '/empty', path: 'empty', type: 'folder', streamable_count: 0, children: [] },
     ]);
     await settle();
-    expect(toolbarButton('Start…').disabled).toBe(true);
+    expect(menuItem('Start…').disabled).toBe(true);
 
     library.tree.set([
       { name: '/clips', path: 'clips', type: 'folder', streamable_count: 2, children: [] },
     ]);
     await settle();
-    expect(toolbarButton('Start…').disabled).toBe(false);
+    expect(menuItem('Start…').disabled).toBe(false);
   });
 
   it('Reset and Clear renditions ask first; Cancel changes nothing', async () => {
@@ -830,6 +841,55 @@ describe('StreamingPage', () => {
     expect(toasts.status).toHaveBeenLastCalledWith(
       'Removed 2 rendition(s), freed 800.0 MB. 1 kept: in use by a playing source.',
     );
+  });
+
+  it('the toolbar holds the filter, the ⋯ menu and the side-panel toggle; the bulk actions are in the menu', async () => {
+    await open();
+    const buttons = [
+      ...toolbar().querySelectorAll<HTMLButtonElement>('button:not([role="radio"])'),
+    ];
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'More actions',
+      'Side panel',
+    ]);
+    for (const label of ['Auto assign', 'Start…', 'Stop all', 'Reset']) {
+      expect(toolbarButton(label), label).toBeUndefined();
+    }
+
+    await openMore();
+    // The bulk actions first, a line, then the two that discard things.
+    const entries = [...morePanel()!.querySelectorAll<HTMLElement>('button, hr')].map((entry) =>
+      entry.tagName === 'HR' ? entry.getAttribute('role') : entry.textContent!.trim(),
+    );
+    expect(entries).toEqual([
+      'Auto assign',
+      'Start…',
+      'Stop all',
+      'separator',
+      'Reset',
+      'Clear renditions',
+    ]);
+  });
+
+  it('a bulk action chosen in the menu closes it, and the focus is on ⋯ when Start…’s dialog closes', async () => {
+    slots.stopAll.mockResolvedValue({
+      ...bulkResult('Stopped 0 source(s).'),
+      stopped_count: 0,
+      stopped_pulled: [],
+    });
+    await open();
+    await choose('Stop all');
+    expect(morePanel()).toBeNull();
+    expect(document.activeElement).toBe(toolbarButton('More actions'));
+
+    // Start… asks in a dialog; the menu waits under it, as it does under Reset's question, so the
+    // dialog has a row to give the focus back to, and closes once the dialog has.
+    await choose('Start…');
+    expect(bulkDialog()).not.toBeNull();
+    await answer(bulkDialog()!, 'Cancel');
+    expect(bulkDialog()).toBeNull();
+    expect(morePanel()).toBeNull();
+    expect(document.activeElement).toBe(toolbarButton('More actions'));
   });
 
   it('the ⋯ menu’s items are the kit’s menu rows alone: a button’s classes would fight the row look', async () => {
@@ -977,7 +1037,8 @@ describe('StreamingPage', () => {
 
     expect(toasts.error).not.toHaveBeenCalled();
     // Without the library Start… stays disabled, as in #170.
-    expect(toolbarButton('Start…').disabled).toBe(true);
+    await openMore();
+    expect(menuItem('Start…').disabled).toBe(true);
   });
 
   it('says so when the slot status could not be refreshed', async () => {

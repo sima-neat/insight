@@ -135,6 +135,8 @@ class FakeCameras {
   readonly assignments = signal<ReadonlyMap<number, Camera>>(new Map());
   readonly localStreams = signal<ReadonlyMap<number, MediaStream>>(new Map());
   readonly changingSlots = signal<ReadonlySet<number>>(new Set());
+  /** Webcams the service publishes on its own, as after a reload. */
+  readonly publishingSlots = signal<ReadonlySet<number>>(new Set());
   readonly anyChanging = computed(() => this.changingSlots().size > 0);
   readonly assign = vi.fn<(slot: number, deviceId: string | null) => Promise<void>>(
     async (slot, deviceId) => {
@@ -563,20 +565,57 @@ describe('SlotPanel', () => {
       expect(row().kind).toBe('');
     });
 
-    it('waits while the slot is busy or encoding', async () => {
+    it('never dims for a change in flight: a click then changes nothing and the form stays', async () => {
       await open();
       let registered!: () => void;
       cameras.assign.mockImplementationOnce(
-        () => new Promise<void>((resolve) => (registered = resolve)),
+        () =>
+          new Promise<void>((resolve) => {
+            registered = () => {
+              slots.update(2, WEBCAM_SLOT);
+              resolve();
+            };
+          }),
       );
       await click(sourceKind('Camera'));
-      // The change is in flight, so the switch cannot start a second one.
-      expect(sourceKind('File').hasAttribute('disabled')).toBe(true);
+      // The change is in flight. The switch stays as it is (a dimmed switch flashed on every
+      // change), and a second click does not start a second change.
+      expect(sourceKind('File').hasAttribute('disabled')).toBe(false);
+      await click(sourceKind('File'));
+      expect(cameras.assign).toHaveBeenCalledOnce();
+      expect(slots.assign).not.toHaveBeenCalled();
+      expect(cameras.assignFile).not.toHaveBeenCalled();
+      // The change in flight is not a start: Start waits without spinning.
+      expect(iconOf(button('Start')!)).toBe('play');
+      // It shows what the change in flight is changing to, not the click it ignored.
+      expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('false');
+      expect(text()).toContain('The browser publishes the camera');
       registered();
       await settle();
       expect(sourceKind('File').hasAttribute('disabled')).toBe(false);
+      expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
 
-      // An encode in progress holds it too, as it holds Change….
+      // Another action of the panel in flight ignores a click the same way, and shows the slot's form.
+      slots.slots.set([fileSlot(2)]);
+      await settle();
+      let started!: (answer: SuccessResponse) => void;
+      slots.start.mockReturnValueOnce(new Promise((resolve) => (started = resolve)));
+      await click(button('Start'));
+      expect(sourceKind('Camera').hasAttribute('disabled')).toBe(false);
+      cameras.assign.mockClear();
+      await click(sourceKind('Camera'));
+      expect(cameras.assign).not.toHaveBeenCalled();
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+      expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('false');
+      expect(text()).toContain('File: people/walk.mp4');
+      started(OK);
+      await settle();
+    });
+
+    it('waits while the slot is encoding: that is a state, not a moment', async () => {
+      await open();
+      // An encode in progress holds it, as it holds Change….
       slots.slots.set([fileSlot(2, { fps: 15 })]);
       await settle();
       await click(button('Start'));
@@ -1108,6 +1147,50 @@ describe('SlotPanel', () => {
       .find((debug) => element.contains(debug.nativeElement))
       ?.injector.get(NeatIcon)
       .name() ?? null;
+
+  it('Start spins while a start waits, keeping its name and saying it is busy; it is a play glyph otherwise', async () => {
+    let started!: (answer: SuccessResponse) => void;
+    slots.start.mockReturnValueOnce(new Promise((resolve) => (started = resolve)));
+    await open();
+    const start = () => button('Start')!;
+    expect(iconOf(start())).toBe('play');
+    expect(start().hasAttribute('aria-busy')).toBe(false);
+
+    await click(start());
+    // The start is in flight: the glyph turns, the name is the same, and assistive technology is
+    // told the button is busy rather than given a new label.
+    expect(iconOf(start())).toBe('spinner');
+    expect(start().getAttribute('aria-busy')).toBe('true');
+    expect(text(start())).toBe('Start');
+    expect(start().getAttribute('aria-label')).toBeNull();
+
+    started(OK);
+    await settle();
+    slots.update(2, { state: 'playing' });
+    await settle();
+    // Stop is not a start that waits: it keeps its own glyph.
+    expect(iconOf(button('Stop')!)).toBe('stop');
+    expect(button('Stop')!.hasAttribute('aria-busy')).toBe(false);
+  });
+
+  it('Start also spins for a webcam the camera service publishes on its own, as after a reload', async () => {
+    slots.slots.set([
+      slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp', allowed_transports: ['rtsp'] }),
+    ]);
+    cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+    await open(3);
+    expect(iconOf(button('Start')!)).toBe('play');
+
+    cameras.publishingSlots.set(new Set([3]));
+    await settle();
+    expect(iconOf(button('Start')!)).toBe('spinner');
+    expect(button('Start')!.getAttribute('aria-busy')).toBe('true');
+
+    cameras.publishingSlots.set(new Set());
+    await settle();
+    expect(iconOf(button('Start')!)).toBe('play');
+    expect(button('Start')!.hasAttribute('aria-busy')).toBe(false);
+  });
 
   it('the main action is a medium button on a row of its own, in the look of what it does', async () => {
     const pulled = slot(5, {

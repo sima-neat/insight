@@ -303,6 +303,11 @@ const tool = (page: Page, name: string) =>
   pageTools(page).getByRole('button', { name, exact: true });
 const panel = (page: Page) => page.getByRole('region', { name: 'Selected slot' });
 const morePanel = (page: Page) => page.getByRole('dialog', { name: 'More actions', exact: true });
+/** A row of the ⋯ menu, which the menu is opened for. */
+async function menuItem(page: Page, name: string) {
+  await tool(page, 'More actions').click();
+  return morePanel(page).getByRole('button', { name, exact: true });
+}
 const confirmDialog = (page: Page) => page.getByRole('alertdialog');
 /** A toast as shown; its text is also in the toast host's announcer, which is not. */
 const toast = (page: Page, text: string) =>
@@ -866,7 +871,7 @@ test.describe('Streaming with mocked slots', () => {
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
 
-    await tool(page, 'Start…').click();
+    await (await menuItem(page, 'Start…')).click();
     const dialog = page.getByRole('dialog', { name: 'Bulk Start Streams' });
     const slider = dialog.getByRole('slider', { name: 'How many streams do you want to start?' });
     // Q10: it opens at 1, as #170's did.
@@ -884,11 +889,76 @@ test.describe('Streaming with mocked slots', () => {
     await expect(toast(page, 'Failed: src2')).toBeVisible();
     expect(mocked.posts.get('start-bulk')).toEqual([{ count: 3 }]);
 
-    // It opens again at the count chosen last.
-    await tool(page, 'Start…').click();
+    // It opens again at the count chosen last. Escape closes it, the menu with it, and the focus
+    // is on ⋯ again.
+    await (await menuItem(page, 'Start…')).click();
     await expect(slider).toHaveAttribute('aria-valuenow', '3');
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
+    await expect(morePanel(page)).toHaveCount(0);
+    await expect(tool(page, 'More actions')).toBeFocused();
+  });
+
+  test('the ⋯ menu lists the bulk actions as full-width rows in keyboard order, with a line before Reset', async ({
+    page,
+  }) => {
+    await withMockedSlots(page);
+    // No renditions: the last row is disabled.
+    await page.route(
+      (url) => url.pathname === '/api/mediasrc/renditions',
+      (route) => route.fulfill({ json: { count: 0, bytes: 0 } }),
+    );
+    await page.goto('/streaming');
+    await expect(rows(page)).toHaveCount(48);
+
+    // The toolbar is the filter, ⋯ and the side-panel toggle.
+    await expect(pageTools(page).getByRole('button')).toHaveText(['', '']);
+    await expect(pageTools(page).getByRole('button', { name: 'More actions' })).toBeVisible();
+
+    await tool(page, 'More actions').click();
+    const items = morePanel(page).getByRole('button');
+    await expect(items).toHaveText([
+      'Auto assign',
+      'Start…',
+      'Stop all',
+      'Reset',
+      'Clear renditions',
+    ]);
+    await expect(morePanel(page).getByRole('separator')).toHaveCount(1);
+    // The kit moves the focus to the first row itself.
+    await expect(items.first()).toBeFocused();
+
+    // Each row is as wide as the panel's content, and none touches the one above except to abut.
+    const boxes = await items.evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const { top, bottom, width } = button.getBoundingClientRect();
+        return { top, bottom, width };
+      }),
+    );
+    expect(new Set(boxes.map((box) => Math.round(box.width))).size).toBe(1);
+    boxes
+      .slice(1)
+      .forEach((box, index) => expect(box.top).toBeGreaterThanOrEqual(boxes[index].bottom - 0.5));
+
+    // Tab walks the rows in the order they read, each showing where the focus is; the disabled
+    // row is passed over and reads as disabled.
+    for (const index of [1, 2, 3]) {
+      await page.keyboard.press('Tab');
+      await expect(items.nth(index)).toBeFocused();
+      expect(await items.nth(index).evaluate((button) => button.matches(':focus-visible'))).toBe(
+        true,
+      );
+    }
+    const colour = (index: number) =>
+      items.nth(index).evaluate((button) => getComputedStyle(button).color);
+    await expect(items.nth(4)).toBeDisabled();
+    expect(await colour(4)).not.toBe(await colour(3));
+
+    // A tooltip opens beside its row.
+    await items.first().hover();
+    await expect(page.getByRole('tooltip')).toHaveText(
+      'Auto assign unique media files to all sources',
+    );
   });
 
   test('Reset and Clear renditions ask first; Cancel and Escape change nothing', async ({
@@ -933,11 +1003,12 @@ test.describe('Streaming with mocked slots', () => {
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
 
-    await tool(page, 'Stop all').click();
+    await (await menuItem(page, 'Stop all')).click();
+    await expect(morePanel(page)).toHaveCount(0);
     await expect(
       toast(page, 'Stopped 6 source(s). External stream(s) left running: src4.'),
     ).toBeVisible();
-    await tool(page, 'Auto assign').click();
+    await (await menuItem(page, 'Auto assign')).click();
     await expect(
       toast(
         page,

@@ -36,7 +36,6 @@ import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { copyText } from '../../clipboard';
-import { holdFocus } from '../../hold-focus';
 import { PanelTitle } from '../../panel-title';
 import type { Slot, SlotTransport } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
@@ -89,7 +88,7 @@ interface PrimaryAction {
   readonly kind: 'start' | 'stop' | 'cancel' | 'takeOver' | 'stopPulling';
   readonly label: string;
   readonly variant: NeatButtonVariant;
-  /** The glyph before the label, for the actions that start or end a stream. */
+  /** The glyph before the label, for the actions that start or end a stream; a start waiting spins. */
   readonly icon: NeatIconName | null;
   /** Why the action cannot be taken at all; the button is then disabled. */
   readonly blocker: string | null;
@@ -215,6 +214,14 @@ export class SlotPanel {
   protected readonly busy = computed(
     () => this.control.busy().has(this.index()) || this.cameras.changingSlots().has(this.index()),
   );
+  /**
+   * A start of this slot is in flight, or this browser is publishing its webcam without one of
+   * the panel's (as after a reload): the slot's state says Starting… (the page ORs the same two).
+   */
+  private readonly starting = computed(
+    () =>
+      this.control.starting().has(this.index()) || this.cameras.publishingSlots().has(this.index()),
+  );
   protected readonly encode = computed(() => this.slots.encodes().get(this.index()) ?? null);
   protected readonly preparing = computed(() => this.control.preparing().has(this.index()));
   protected readonly localStream = computed(
@@ -277,13 +284,15 @@ export class SlotPanel {
     if (this.playing()) {
       return { ...plain, kind: 'stop', label: 'Stop', variant: 'danger', icon: 'stop' };
     }
+    // The glyph turns while a start waits, not for any other change of the slot; the button keeps
+    // its name, and the template says it is busy.
     return {
       kind: 'start',
       label: 'Start',
       variant: 'success',
-      icon: 'play',
+      icon: this.starting() ? 'spinner' : 'play',
       blocker: this.startBlocker(),
-      waiting: this.busy(),
+      waiting: this.busy() || this.starting(),
       tooltip: this.startTooltip(),
     };
   });
@@ -532,35 +541,32 @@ export class SlotPanel {
 
   /**
    * Switches the slot to the form clicked. A stopped slot changes at once; a live one is asked
-   * first, and Cancel changes nothing. A refusal leaves the slot as it was. The switch waits while
-   * the slot is busy, so no second change races the first.
+   * first, and Cancel changes nothing. A refusal leaves the slot as it was. While the slot is busy
+   * a click is ignored, so no second change races the first: the switch is not disabled for it,
+   * which dimmed it at every change, and shows again the form it showed before the click.
    */
   protected async switchSource(target: SourceForm): Promise<void> {
+    if (this.busy()) return this.showForm(this.form());
     const from = this.slotForm();
     const asked = this.slot();
     this.showForm(target);
     if (target === from) return;
-    try {
-      if (isLive(asked)) {
-        const confirmed = await this.confirmStop(asked, target);
-        // The slot may have changed while the question was open (stopped, taken over, switched by
-        // another tab); the answer was about the slot as it was, so it then changes nothing.
-        if (!confirmed || this.slotChangedSince(asked, from)) return this.showForm(this.slotForm());
-      }
-      const slot = this.slot();
-      const switched = await this.act(() =>
-        this.control.run(slot.index, async () => {
-          if (isLive(slot)) await this.endStream(slot);
-          await this.applyForm(slot, target);
-        }),
-      );
-      if (!switched) return this.showForm(this.slotForm());
-      // Remembered once it took, so that a refusal leaves what the empty slot was left on.
-      if (target !== 'camera') this.session.rememberEmptyForm(slot.index, target);
-    } finally {
-      // The switch was disabled while the change ran, which drops the focus it had.
-      holdFocus(this.injector, () => this.sourceSwitch());
+    if (isLive(asked)) {
+      const confirmed = await this.confirmStop(asked, target);
+      // The slot may have changed while the question was open (stopped, taken over, switched by
+      // another tab); the answer was about the slot as it was, so it then changes nothing.
+      if (!confirmed || this.slotChangedSince(asked, from)) return this.showForm(this.slotForm());
     }
+    const slot = this.slot();
+    const switched = await this.act(() =>
+      this.control.run(slot.index, async () => {
+        if (isLive(slot)) await this.endStream(slot);
+        await this.applyForm(slot, target);
+      }),
+    );
+    if (!switched) return this.showForm(this.slotForm());
+    // Remembered once it took, so that a refusal leaves what the empty slot was left on.
+    if (target !== 'camera') this.session.rememberEmptyForm(slot.index, target);
   }
 
   /** Whether the slot is another one, or shows another form or a hold, than when asked about. */

@@ -30,6 +30,7 @@ import {
   type Subscription,
   take,
   timeout,
+  timer,
 } from 'rxjs';
 import type { Slot } from '../../sources/api';
 import { EndsStream, filePreview, PreviewFrame } from '../../sources/preview-frame';
@@ -39,6 +40,15 @@ import { isLive, previewSrc } from '../../sources/slot-row';
 const FRAME_CHECK_MS = 100;
 /** How long the check of a failed preview waits for the server before calling it unavailable. */
 const PROBE_TIMEOUT_MS = 3000;
+
+/**
+ * How many times a preview that failed before its first frame is retried by itself, and the pause
+ * before each. A stream asked for the moment its slot went live often is not ready yet and a
+ * second try works; one that is really broken must not be asked for forever, so after the last
+ * try the user is offered Retry as for any failure.
+ */
+export const PREVIEW_RETRIES = 3;
+export const PREVIEW_RETRY_MS = 1000;
 
 /** Why the live preview failed: the server's cap on previews open at once (429), or anything else. */
 export type PreviewFailure = 'busy' | 'failed';
@@ -91,7 +101,9 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
  * not; and the local camera of a webcam this browser publishes until its stream is live. There is
  * no on/off switch: one preview per panel, so at most one per browser tab.
  *
- * The live image is keyed per slot and attempt: another slot, or Retry, makes a new request.
+ * The live image is keyed per slot and attempt: another slot, or Retry, makes a new request. One
+ * that fails before its first frame, for a reason other than the cap on previews, is asked for
+ * again by itself a few times before it is reported (`PREVIEW_RETRIES`).
  */
 @Component({
   selector: 'app-slot-preview',
@@ -108,6 +120,8 @@ export class SlotPreview {
   private readonly http = inject(HttpClient);
   private readonly destroyRef = inject(DestroyRef);
   private probe: Subscription | null = null;
+  /** The pause before the next automatic retry, while there is one. */
+  private pause: Subscription | null = null;
 
   private readonly index = computed(() => this.slot().index);
   /**
@@ -141,6 +155,11 @@ export class SlotPreview {
     source: this.liveSrc,
     computation: () => null,
   });
+  /**
+   * The automatic retries made since the slot was chosen, a frame was shown or the user asked
+   * again. A signal only because a linkedSignal gives "starts afresh for another slot" for free.
+   */
+  private readonly autoRetries = linkedSignal({ source: this.index, computation: () => 0 });
   private readonly shownSrc = signal<string | null>(null);
   protected readonly connecting = computed(
     () => this.liveImages().length > 0 && this.shownSrc() !== this.liveSrc(),
@@ -183,7 +202,10 @@ export class SlotPreview {
       onCleanup(
         watchFirstFrame(
           () => this.liveImage()?.nativeElement,
-          () => this.shownSrc.set(src),
+          () => {
+            this.shownSrc.set(src);
+            this.autoRetries.set(0);
+          },
         ),
       );
     });
@@ -197,7 +219,9 @@ export class SlotPreview {
 
   /**
    * The live image failed. Only a new stream can meet the server's cap on previews (429), so one
-   * that has shown frames is simply unavailable; for one that has not, find out which it is.
+   * that has shown frames is simply unavailable; for one that has not, find out which it is. The
+   * cap is reported at once and left to the user: asking again by itself would only keep it full.
+   * Any other failure before the first frame is retried by itself, quietly, while retries remain.
    */
   protected failed(src: string): void {
     if (this.shownSrc() === src) {
@@ -210,11 +234,27 @@ export class SlotPreview {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((failure) => {
         // Another slot or a retry has replaced the image meanwhile.
-        if (this.liveSrc() === src) this.failure.set(failure);
+        if (this.liveSrc() !== src) return;
+        if (failure === 'failed' && this.autoRetries() < PREVIEW_RETRIES) this.retryLater(src);
+        else this.failure.set(failure);
       });
   }
 
+  /** Stays 'checking', which shows nothing, through the pause, then asks for a new stream. */
+  private retryLater(src: string): void {
+    this.autoRetries.update((count) => count + 1);
+    this.pause?.unsubscribe();
+    this.pause = timer(PREVIEW_RETRY_MS)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        // Another slot has replaced the image meanwhile, and has its own retries.
+        if (this.liveSrc() === src) this.token.set(Date.now());
+      });
+  }
+
+  /** The user's Retry: a fresh count, since they decided this was worth another go. */
   protected retry(): void {
+    this.autoRetries.set(0);
     this.token.set(Date.now());
   }
 }

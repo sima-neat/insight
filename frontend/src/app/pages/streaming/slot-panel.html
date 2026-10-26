@@ -5,9 +5,10 @@
 <!--
   One element for the slot's main action, whatever it is now (Start, Stop, Cancel encoding, Take
   over…, Stop pulling): a press changes the action, and the focus stays on the button. While the
-  slot is busy it waits with aria-disabled rather than disabled, which would drop the focus. It is
-  the panel's main control, so it is a medium button on a row of its own, not a small one among
-  the source's.
+  slot is busy it waits with aria-disabled rather than disabled, which would drop the focus. A
+  start that waits turns its glyph and says so with aria-busy; its name stays "Start". It is the
+  panel's main control, so it is a medium button on a row of its own, not a small one among the
+  source's.
 -->
 <div neatAsideActions>
   <button
@@ -19,6 +20,7 @@
     [neatTooltip]="action().tooltip"
     [disabled]="action().blocker !== null"
     [attr.aria-disabled]="action().waiting || null"
+    [attr.aria-busy]="action().icon === 'spinner' || null"
     (click)="runAction()"
   >
     @if (action().icon; as icon) {
@@ -34,7 +36,7 @@
     label="Source"
     [options]="sourceForms"
     [value]="form()"
-    [disabled]="busy() || encode() !== null"
+    [disabled]="encode() !== null"
     (valueChange)="switchSource($event)"
   />
   @switch (form()) {

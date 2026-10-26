@@ -28,6 +28,7 @@ import {
 import {
   NeatPopover,
   NeatPopoverContent,
+  NeatPopoverDivider,
   NeatPopoverItem,
   NeatPopoverTrigger,
 } from '@sima/neat-ui/popover';
@@ -81,8 +82,8 @@ function clearedMessage({ removed, freed_bytes, kept }: RenditionsCleared): stri
 
 /**
  * Streaming: the 48 slots in a list, with the selected slot in the page's side panel, and the
- * actions on all of them in the top bar (Inv-SM §1.2). The slots come from `SlotsService`, which
- * polls them while the page is shown.
+ * actions on all of them in the top bar's ⋯ menu (Inv-SM §1.2). The slots come from
+ * `SlotsService`, which polls them while the page is shown.
  *
  * The bulk actions that stop or rewrite slots first end the webcams this browser publishes
  * (`CamerasService.releaseAll`), since only this browser can; they wait while a slot is changing
@@ -104,6 +105,7 @@ function clearedMessage({ removed, freed_bytes, kept }: RenditionsCleared): stri
     NeatPageToolbar,
     NeatPopover,
     NeatPopoverContent,
+    NeatPopoverDivider,
     NeatPopoverItem,
     NeatPopoverTrigger,
     NeatSegmented,
@@ -234,6 +236,7 @@ export class StreamingPage {
   }
 
   protected async autoAssign(): Promise<void> {
+    this.moreOpen.set(false);
     await this.runBulk('assigning', async () => {
       const released = this.cameras.releaseAll({ clearAssignments: true });
       this.toasts.status((await this.slots.autoAssign(released)).message);
@@ -241,6 +244,7 @@ export class StreamingPage {
   }
 
   protected async stopAll(): Promise<void> {
+    this.moreOpen.set(false);
     await this.runBulk('stopping', async () => {
       // The cameras stay picked for their slots: stopping is not reassigning.
       const released = this.cameras.releaseAll();
@@ -248,8 +252,17 @@ export class StreamingPage {
     });
   }
 
+  /**
+   * The menu stays open under the dialog, as under Reset's question: the dialog gives the focus
+   * back to the row that had it, and closing the menu then puts it on ⋯. Closing the menu first
+   * would leave the dialog nothing to give it back to.
+   */
   protected openBulkStart(): void {
-    this.dialogs.open(this.bulkStartDialog(), { title: 'Bulk Start Streams', size: 'small' });
+    const dialog = this.dialogs.open(this.bulkStartDialog(), {
+      title: 'Bulk Start Streams',
+      size: 'small',
+    });
+    void dialog.closed.then(() => this.moreOpen.set(false));
   }
 
   /**
