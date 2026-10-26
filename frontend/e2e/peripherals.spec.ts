@@ -82,7 +82,7 @@ for (const { name, size } of VIEWPORTS) {
     await page.setViewportSize(size);
     await page.goto('/peripherals');
 
-    // The board's first scan runs by itself; then the list is grouped, with a muted heading for
+    // The page scans the board as it opens; then the list is grouped, with a muted heading for
     // the kind that has no devices.
     await expect(
       toast(page, 'Scan complete: 2 cameras, 1 microphone on sima@192.168.100.200.'),
@@ -132,7 +132,7 @@ for (const { name, size } of VIEWPORTS) {
     await expect(page).toHaveTitle('Neat Insight · Streaming');
     await expect.poll(() => backend.postedPaths().at(-1)).toBe(`${PREVIEW_URL}/p2/stop`);
 
-    // …and coming back starts it again, in the mode it had. The board is not scanned again.
+    // …and coming back scans the board again, then starts the preview again, in the mode it had.
     const leftAt = backend.postedPaths().length;
     await rail(page, 'Peripherals').click();
     await expect(panel(page)).toContainText('Live preview · 1280×720 · NV12');
@@ -145,11 +145,15 @@ for (const { name, size } of VIEWPORTS) {
     });
 
     // Exactly once (Review Focus 2): leaving again ends the visit with its stop, and between the
-    // two stops the page asked for one start and nothing else.
+    // two stops the page asked for one scan, which came before the one start, and nothing else.
     await rail(page, 'Streaming').click();
     await expect.poll(() => backend.postedPaths().at(-1)).toBe(`${PREVIEW_URL}/p3/stop`);
-    expect(backend.postedPaths().slice(leftAt)).toEqual([PREVIEW_URL, `${PREVIEW_URL}/p3/stop`]);
-    expect(backend.posted(REFRESH_URL)).toHaveLength(1);
+    expect(backend.postedPaths().slice(leftAt)).toEqual([
+      REFRESH_URL,
+      PREVIEW_URL,
+      `${PREVIEW_URL}/p3/stop`,
+    ]);
+    expect(backend.posted(REFRESH_URL)).toHaveLength(2);
   });
 
   test(`a preview whose stream another tab holds shows as running there, with Stop at ${name}`, async ({
@@ -175,7 +179,7 @@ for (const { name, size } of VIEWPORTS) {
     expect(backend.postedPaths().at(-1)).toBe(`${PREVIEW_URL}/p1/stop`);
   });
 
-  test(`the first scan runs by itself once per board: a failed one is not repeated on the next visit at ${name}`, async ({
+  test(`every visit scans the board: a failed scan is repeated on the next visit at ${name}`, async ({
     page,
   }) => {
     const backend = new FakePeripheralsBackend();
@@ -189,18 +193,20 @@ for (const { name, size } of VIEWPORTS) {
     await rail(page, 'Streaming').click();
     await expect(page).toHaveTitle('Neat Insight · Streaming');
     await rail(page, 'Peripherals').click();
+    // Coming back scans again, though the first scan failed and nothing was scanned.
+    await expect.poll(() => backend.posted(REFRESH_URL).length).toBe(2);
+    await expect(page.getByText('Could not connect to 192.168.100.200:22')).toBeVisible();
     await expect(
       devices(page).getByRole('group', { name: 'Cameras · not scanned yet' }),
     ).toBeVisible();
-    // The page has read the board and the snapshot again, and decided not to scan.
-    await expect(page.getByText('Could not connect to 192.168.100.200:22')).toBeVisible();
-    expect(backend.posted(REFRESH_URL)).toHaveLength(1);
 
-    // Refresh is the way to try again.
+    // Once the board answers, the next visit finds the devices.
     backend.scanFailure = null;
-    await tool(page, 'Refresh').click();
+    await rail(page, 'Streaming').click();
+    await expect(page).toHaveTitle('Neat Insight · Streaming');
+    await rail(page, 'Peripherals').click();
     await expect(devices(page).getByRole('group', { name: 'Cameras · 2' })).toBeVisible();
-    expect(backend.posted(REFRESH_URL)).toHaveLength(2);
+    expect(backend.posted(REFRESH_URL)).toHaveLength(3);
   });
 
   test(`the microphone test records, plays the recording back by itself, and plays it again on Replay at ${name}`, async ({
@@ -338,21 +344,20 @@ test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side pane
   }
 });
 
-// Final review M-7: the widest top bar Peripherals shows: a board name at the pill's cap, Not
-// checked, an old scan and a scan running for a while.
+// Final review M-7: the widest top bar Peripherals shows: a board name at the pill's cap and a
+// scan running for a while.
 test('Peripherals fits with its widest top bar: a long board name, an old scan and Scanning… N s', async ({
   page,
 }) => {
   const backend = new FakePeripheralsBackend();
   backend.board = LONG_BOARD;
-  backend.scannedAgo(59);
   await backend.install(page);
+  // The visit's scan, held open.
+  const release = backend.holdScans();
   await page.clock.install();
   await page.goto('/peripherals');
-  await expect(page.locator('app-board-pill button')).toContainText('Not checked');
-  await expect(page.getByRole('group', { name: 'Page tools' })).toContainText('Scanned 59 min ago');
-  const release = backend.holdScans();
-  await tool(page, 'Refresh').click();
+  await expect(page.locator('app-board-pill button')).toContainText('Connected');
+  await expect(tool(page, 'Scanning… 0 s')).toBeVisible();
   await page.clock.fastForward(12_000);
   await expect(tool(page, 'Scanning… 12 s')).toBeVisible();
 

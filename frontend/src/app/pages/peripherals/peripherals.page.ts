@@ -85,8 +85,8 @@ interface ShownDevice {
  * then is adopted, its camera selected and its mode remembered, as is one a refused Start finds
  * later (`showAdopted`); otherwise the preview this page
  * left running on the last visit (`PeripheralsSession.resume`) starts again once, while its board
- * and camera are still there. Then the board's first scan runs by itself, once per board
- * (`scanOnce`).
+ * and camera are still there. The board is scanned on every visit (`scanOnVisit`), and that
+ * preview starts after the scan, which the backend would otherwise stop it for.
  *
  * **Leaving** records the preview to start again, then stops it (`CameraPreview.release`). The
  * next visit waits until that stop has answered, a start still in flight included, so that it
@@ -342,8 +342,8 @@ export class PeripheralsPage {
     const shownBefore = this.peripherals.snapshot();
     this.pendingResume = this.session.resume;
     this.session.resume = null;
-    // The board is read too, as #170 did: the automatic scan and the resume are decided on the
-    // board as it is now, which may have changed (or Insight restarted) while the page was away.
+    // The board is read too, as #170 did: the scan and the resume are decided on the board as it
+    // is now, which may have changed (or Insight restarted) while the page was away.
     const [loadError, running] = await Promise.all([
       this.peripherals.load().then(
         () => null,
@@ -357,12 +357,22 @@ export class PeripheralsPage {
     // A snapshot applied meanwhile (a scan of an earlier visit that answered) supersedes the failure.
     if (this.peripherals.snapshot() === shownBefore) this.loadError.set(loadError);
     if (this.destroyed) return;
+    const board = this.board.state();
+    const adopted = running && running.state !== 'stopped';
+    if (adopted) {
+      this.pendingResume = null;
+      this.preview.adopt(running);
+    }
+    const scan = board ? this.peripherals.scanOnVisit(board) : Promise.resolve();
+    if (adopted) return;
+    // The backend stops a running preview for a scan, so the preview of the last visit starts
+    // once this visit's scan ended, on the snapshot it made. Until then the resume stays with the
+    // page, for the next visit if this one is left first (`pendingResume`), and a preview the
+    // user started meanwhile is theirs to keep.
+    await scan;
     const resume = this.pendingResume;
     this.pendingResume = null;
-    if (running && running.state !== 'stopped') this.preview.adopt(running);
-    else if (resume) this.resume(resume);
-    const board = this.board.state();
-    if (board) this.peripherals.scanOnce(board);
+    if (resume && !this.destroyed && this.preview.state().status === 'idle') this.resume(resume);
   }
 
   /**

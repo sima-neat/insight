@@ -48,6 +48,13 @@ export const HOST_KEY_CHANGED_BOARD: BoardState = {
   board: null,
 };
 
+/** The DevKit before anything checked it: what Insight starts from on a fresh selection. */
+export const UNCHECKED_BOARD: BoardState = {
+  ...TOP_BAR_BOARD,
+  status: { state: 'unknown', checked_at: null, error: null },
+  board: null,
+};
+
 /** A scan's refusal when the board does not answer (502 `unreachable`, Inv-PB §4.1). */
 export const BOARD_UNREACHABLE = {
   status: 502,
@@ -333,6 +340,8 @@ export class FakePeripheralsBackend {
   /** What `GET /api/board` answers; a 500 while `boardFails` is set. */
   board: BoardState = CONNECTED_BOARD;
   boardFails = false;
+  /** The connection check (`POST /api/board/test`) fails: the board's state records the error. */
+  checkFails = false;
   /** A refresh answers this board error (with its status) instead of a scan. */
   scanFailure: { status: number; body: object } | null = null;
   /** The preview's stream answers 409 `preview_active`: another tab claimed it first. */
@@ -358,11 +367,6 @@ export class FakePeripheralsBackend {
   /** The paths posted, in order: what the page asked the board to do. */
   postedPaths(): string[] {
     return this.posts.map((post) => post.path);
-  }
-
-  /** The board was scanned `minutes` ago: the page opens on that scan and scans nothing by itself. */
-  scannedAgo(minutes: number): void {
-    this.snapshot = scanned(new Date(Date.now() - minutes * 60_000));
   }
 
   /** Holds every refresh open until the returned function is called. */
@@ -426,6 +430,26 @@ export class FakePeripheralsBackend {
           },
           saved: { host, port, user },
         });
+        return route.fulfill({ json: this.board });
+      },
+    );
+    await page.route(
+      (url) => url.pathname === '/api/board/test',
+      (route) => {
+        record(route.request());
+        if (this.checkFails) {
+          // The backend records the failure, so the next read says it.
+          this.board = {
+            ...this.board,
+            status: { state: 'error', checked_at: new Date().toISOString(), error: null },
+          };
+          return route.fulfill({ status: BOARD_UNREACHABLE.status, json: BOARD_UNREACHABLE.body });
+        }
+        this.board = {
+          ...this.board,
+          status: CONNECTED_BOARD.status,
+          board: CONNECTED_BOARD.board,
+        };
         return route.fulfill({ json: this.board });
       },
     );

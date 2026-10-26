@@ -8,15 +8,14 @@ import { BoardService } from '../board/board.service';
 import { LatestOnly } from '../polling';
 import { withRequestErrors } from '../sources/stream-lines';
 import type { PeripheralSnapshot } from './api';
-import { countLabel, isScanned } from './devices';
+import { countLabel } from './devices';
 
 const SNAPSHOT_URL = '/api/peripherals';
 const REFRESH_URL = '/api/peripherals/refresh';
 
 /**
  * The selected board's peripheral scan, for the whole app: Peripherals lists it, and the board
- * dialog reads the camera setup from it. Root-provided, so the scan and the record of automatic
- * scans outlive a visit to the page.
+ * dialog reads the camera setup from it. Root-provided, so the scan outlives a visit to the page.
  *
  * **Reads.** `GET /api/peripherals` never contacts the board: it answers the backend's cached
  * scan of the current board generation, or an empty snapshot before any. Only the newest answer
@@ -59,21 +58,10 @@ export class PeripheralsService {
   private readonly latest = new LatestOnly();
   /** The scan running or queued last, and the board generation it was started for. */
   private running: { generation: number | null; done: Promise<void> } | null = null;
-  /**
-   * The board generations scanned by `scanOnce` in this app session, since Insight last
-   * restarted as far as this app can tell (`noteGeneration`). A generation is recorded when its
-   * scan starts, so a failed automatic scan is not repeated on the next visit (#170 repeated it
-   * on every mount, Inv-PB §6.9); Refresh is the way to try again.
-   */
-  private readonly autoScanned = new Set<number>();
-  /** The board generations whose next `scanOnce` scans whatever the snapshot says (`rescanOnNextVisit`). */
-  private readonly rescanNext = new Set<number>();
-  /** The board generation last seen, to notice when it goes down. */
-  private lastGeneration: number | null = null;
 
   constructor() {
-    // Watched for as long as the app runs, so that a restart is noticed while the page is not
-    // shown too (the board is re-read on focus).
+    // Watched for as long as the app runs, so that a board change drops the old board's failure
+    // while the page is not shown too (the board is re-read on focus).
     effect(() => this.noteGeneration(this.board.generation()));
   }
 
@@ -108,30 +96,19 @@ export class PeripheralsService {
   }
 
   /**
-   * The automatic first scan of a board, once per board generation in this app session: it scans
-   * when the board has a target and the loaded snapshot is that generation's and unscanned. Call
-   * it after `load()`. A board marked by `rescanOnNextVisit` scans once regardless.
+   * The scan of a visit to Peripherals: whenever the page is entered with a board target and the
+   * loaded snapshot is the selected board's. Scanned or not, failed before or not: the devices
+   * change under the page, and a scan is the only way to see it. Never on a timer, since a scan
+   * takes seconds and stops a running camera preview. Call it after `load()`; a call while a scan
+   * of the board runs joins it (`scanFor`). Resolves when the scan ended (at once when none was
+   * due), never rejecting, so that the page can start a preview only after the scan stopped any.
    */
-  scanOnce(board: BoardState): void {
+  scanOnVisit(board: BoardState): Promise<void> {
     this.noteGeneration(board.generation);
     const snapshot = this.snapshotValue();
-    if (!board.target || snapshot === null) return;
-    if (snapshot.generation !== board.generation) return;
-    // A rescan asked for is owed whether or not the board was scanned or auto-scanned before.
-    const owed = this.rescanNext.delete(board.generation);
-    if (!owed && (isScanned(snapshot) || this.autoScanned.has(board.generation))) return;
-    this.autoScanned.add(board.generation);
-    void this.scanFor(board.generation);
-  }
-
-  /**
-   * Makes the next `scanOnce` for board `generation` scan once more, though its snapshot is
-   * scanned and the generation already auto-scanned: something changed on the board that the old
-   * scan could not have seen (Sentinel was installed, and Peripherals scans through it). The scan
-   * waits for the next visit instead of running now, since nobody is looking at Peripherals.
-   */
-  rescanOnNextVisit(generation: number): void {
-    this.rescanNext.add(generation);
+    if (!board.target || snapshot === null) return Promise.resolve();
+    if (snapshot.generation !== board.generation) return Promise.resolve();
+    return this.scanFor(board.generation);
   }
 
   /**
@@ -202,19 +179,11 @@ export class PeripheralsService {
   }
 
   /**
-   * Notes the board's generation. The counter starts over when Insight restarts, so a lower
-   * generation than the last one seen means the generations recorded as auto-scanned named the old
-   * Insight's boards: the restarted Insight's first scan of the board must not be skipped for them.
-   * (A restart that lands on the generation seen last cannot be told apart without a server
-   * identity.) A scan failure of another generation is dropped (`scanError`).
+   * Notes the board's generation: a scan failure of another generation is dropped (`scanError`),
+   * since an old board's failure says nothing about the new one.
    */
   private noteGeneration(generation: number | null): void {
     if (generation === null) return;
-    if (this.lastGeneration !== null && generation < this.lastGeneration) {
-      this.autoScanned.clear();
-      this.rescanNext.clear();
-    }
-    this.lastGeneration = generation;
     if (this.scanErrorGeneration !== generation) this.scanErrorValue.set(null);
   }
 

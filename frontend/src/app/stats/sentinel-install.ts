@@ -3,7 +3,6 @@ import { inject, Injectable, signal } from '@angular/core';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { firstValueFrom } from 'rxjs';
 import { BoardService } from '../board/board.service';
-import { PeripheralsService } from '../peripherals/peripherals.service';
 import { withRequestErrors } from '../sources/stream-lines';
 import type { SentinelInstallResult } from './api';
 import { failureOf, type SentinelFailure } from './sentinel-failure';
@@ -28,7 +27,6 @@ export type InstallOutcome =
 export class SentinelInstall {
   private readonly http = inject(HttpClient);
   private readonly board = inject(BoardService);
-  private readonly peripherals = inject(PeripheralsService);
   private readonly toasts = inject(NeatToasts);
 
   private readonly runningValue = signal<{ generation: number; label: string } | null>(null);
@@ -65,9 +63,6 @@ export class SentinelInstall {
     }
     if (outcome.ok) {
       this.toasts.status(`Sentinel installed on ${label}.`);
-      // Peripherals scans through Sentinel, so a scan from before the install found nothing or
-      // failed. The next visit to the page scans again, not a scan nobody is looking at.
-      this.peripherals.rescanOnNextVisit(generation);
     } else {
       this.toasts.error(outcome.failure.problem.message);
     }

@@ -13,6 +13,13 @@ import { boardState, DEVKIT, shellInfo } from './board/board.testing';
 @Component({ selector: 'app-stand-in-page', template: '<p>Stand-in page</p>' })
 class StandInPage {}
 
+/** The SDK-paired DevKit, already checked: an unknown state would make the app check it at start. */
+const checkedDevkit = () =>
+  boardState({
+    target: DEVKIT,
+    status: { state: 'connected', checked_at: '2026-10-26T10:00:00Z', error: null },
+  });
+
 describe('App', () => {
   let http: HttpTestingController;
 
@@ -83,9 +90,22 @@ describe('App', () => {
     expect(pill.querySelector('neat-status-chip')?.textContent?.trim()).toBe('Connected');
   });
 
-  it('reads the shell info when the dialog opens, never at app start', async () => {
+  it('checks the connection once at start when the selected board was never checked', async () => {
     const fixture = TestBed.createComponent(App);
     http.expectOne('/api/board').flush(boardState({ target: DEVKIT }));
+    await settle(fixture);
+    http
+      .expectOne({ method: 'POST', url: '/api/board/test' })
+      .flush({ ...checkedDevkit(), status: { state: 'error', checked_at: null, error: null } });
+    await settle(fixture);
+
+    const pill = fixture.nativeElement.querySelector('header app-board-pill button');
+    expect(pill.querySelector('neat-status-chip')?.textContent?.trim()).toBe('Error');
+  });
+
+  it('reads the shell info when the dialog opens, never at app start', async () => {
+    const fixture = TestBed.createComponent(App);
+    http.expectOne('/api/board').flush(checkedDevkit());
     await settle(fixture);
     // The shell details carry the launch URL with the SDK's default password (spec, "Shell URL").
     http.expectNone('/api/devkit-shell');
@@ -109,7 +129,7 @@ describe('App', () => {
 
   it('closing the board dialog gives the focus back to the pill', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(boardState({ target: DEVKIT }));
+    http.expectOne('/api/board').flush(checkedDevkit());
     await settle(fixture);
     const pill: HTMLButtonElement = fixture.nativeElement.querySelector('app-board-pill button');
 
@@ -137,7 +157,7 @@ describe('App', () => {
 
   it('puts System information after the pill, and loads it only when it is opened', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(boardState({ target: DEVKIT }));
+    http.expectOne('/api/board').flush(checkedDevkit());
     await settle(fixture);
     // The command behind it runs for up to 15 s: never at app start.
     http.expectNone('/api/sysinfo');
@@ -150,7 +170,7 @@ describe('App', () => {
 
   it('the ⓘ button opens the dialog; Escape closes it and focus returns to the button', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(boardState({ target: DEVKIT }));
+    http.expectOne('/api/board').flush(checkedDevkit());
     await settle(fixture);
     const info: HTMLButtonElement = fixture.nativeElement.querySelector(
       'header button[aria-label="System information"]',

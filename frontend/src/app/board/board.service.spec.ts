@@ -1,6 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { NeatToasts } from '@sima/neat-ui/toast';
 import type { BoardState, ShellInfo } from './api';
 import { messageOf } from '../sources/stream-lines';
 import { BoardProblem } from './board-error';
@@ -14,7 +15,8 @@ function board(label: string, generation: number, overrides: Partial<BoardState>
     saved: null,
     defaults: { on_board: false, sdk_env: null },
     generation,
-    status: { state: 'unknown', checked_at: null, error: null },
+    // Connected unless a test says otherwise: an unknown state makes the service check the board.
+    status: { state: 'connected', checked_at: '2026-10-26T10:00:00Z', error: null },
     board: null,
     ...overrides,
   };
@@ -22,6 +24,9 @@ function board(label: string, generation: number, overrides: Partial<BoardState>
 
 const boardA = board('sima@192.168.2.2', 1);
 const boardB = board('sima@192.168.2.9', 2);
+const unchecked: Partial<BoardState> = {
+  status: { state: 'unknown', checked_at: null, error: null },
+};
 
 const badGateway = { status: 502, statusText: 'Bad Gateway' };
 
@@ -30,10 +35,16 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve));
 
 describe('BoardService', () => {
   let http: HttpTestingController;
+  let toasts: { status: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
+    toasts = { status: vi.fn(), error: vi.fn() };
     TestBed.configureTestingModule({
-      providers: [provideHttpClient(), provideHttpClientTesting()],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: NeatToasts, useValue: toasts },
+      ],
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -142,6 +153,82 @@ describe('BoardService', () => {
     await tick();
     expect(service.state()).toBeNull();
     expect(service.error()?.code).toBe('network');
+  });
+
+  // "Not checked" goes: a read never connects to the board, so Insight checks the connection
+  // itself, once per app load, rather than leaving the pill at "Not checked" until the user asks.
+  describe('connection check on load', () => {
+    const testRequests = () => http.match({ method: 'POST', url: '/api/board/test' });
+
+    it('checks a selected board whose state is unknown, once, and applies the answer', async () => {
+      const service = await started(board('sima@192.168.2.2', 1, unchecked));
+      const [check] = testRequests();
+      expect(check).toBeDefined();
+      expect(check.request.body).toEqual({});
+      check.flush(boardA);
+      await tick();
+      expect(service.state()).toEqual(boardA);
+
+      // Neither a focus nor an explicit reload checks again, whatever they find.
+      window.dispatchEvent(new Event('focus'));
+      http.expectOne(BOARD_URL).flush(board('sima@192.168.2.2', 1, unchecked));
+      await tick();
+      const reload = service.reload();
+      http.expectOne(BOARD_URL).flush(board('sima@192.168.2.2', 1, unchecked));
+      await reload;
+      await tick();
+      expect(testRequests()).toHaveLength(0);
+    });
+
+    it.each([
+      ['connected', boardA],
+      [
+        'failed',
+        board('sima@192.168.2.2', 1, {
+          status: { state: 'error', checked_at: null, error: null },
+        }),
+      ],
+      ['unselected', board('sima@192.168.2.2', 1, { ...unchecked, target: null })],
+    ])('does not check a board that is %s', async (_, state) => {
+      await started(state);
+      expect(testRequests()).toHaveLength(0);
+    });
+
+    it('waits for the first read that succeeds, and decides on it for the rest of the load', async () => {
+      const service = TestBed.inject(BoardService);
+      http.expectOne(BOARD_URL).error(new ProgressEvent('error'));
+      await tick();
+      expect(testRequests()).toHaveLength(0);
+
+      const retry = service.reload();
+      http.expectOne(BOARD_URL).flush(boardA);
+      await retry;
+      // That read found the board connected: the check is spent, not owed to a later unknown.
+      window.dispatchEvent(new Event('focus'));
+      http.expectOne(BOARD_URL).flush(board('sima@192.168.2.2', 1, unchecked));
+      await tick();
+      expect(testRequests()).toHaveLength(0);
+    });
+
+    it('a failed check lands in the state only: the board is re-read, and nothing is toasted or thrown', async () => {
+      const service = await started(board('sima@192.168.2.2', 1, unchecked));
+      testRequests()[0].flush(
+        { error: 'Could not connect to sima@192.168.2.2.', code: 'unreachable', hint: '' },
+        badGateway,
+      );
+      await tick();
+      // The failed action reloads the state, where the backend recorded the failure.
+      const failed = board('sima@192.168.2.2', 1, {
+        status: { state: 'error', checked_at: '2026-10-26T10:00:05Z', error: null },
+      });
+      http.expectOne(BOARD_URL).flush(failed);
+      await tick();
+      expect(service.state()?.status.state).toBe('error');
+      expect(service.error()).toBeNull();
+      expect(toasts.error).not.toHaveBeenCalled();
+      expect(toasts.status).not.toHaveBeenCalled();
+      expect(testRequests()).toHaveLength(0);
+    });
   });
 
   // #170's four board-sync tests (ruling F4): the POST that "applies" a state is `select()`, and

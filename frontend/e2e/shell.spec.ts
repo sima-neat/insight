@@ -252,7 +252,7 @@ for (const { name, size } of VIEWPORTS) {
     await new FakeStatsBackend().install(page);
     await page.setViewportSize(size);
     await page.goto('/stats');
-    await expect(page.locator('app-board-pill button')).toContainText('Not checked');
+    await expect(page.locator('app-board-pill button')).toContainText('Connected');
     await expect(page.getByRole('button', { name: 'System information' })).toBeVisible();
     await expect(page.getByRole('group', { name: 'Page tools' })).toContainText('Live');
 

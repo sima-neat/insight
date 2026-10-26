@@ -4,9 +4,9 @@ import type { BoardState } from '../src/app/board/api';
 import type { HostMetrics } from '../src/app/system-info/api';
 
 /**
- * What `GET /api/board` answers in every test: the SDK-paired DevKit, not checked yet. "Not
- * checked" is the widest chip a board with a target shows, so the layout checks see the pill at
- * its usual widest.
+ * What `GET /api/board` answers in every test: the SDK-paired DevKit, already checked. A board
+ * whose state is unknown is checked as the app loads (`BoardService`), so a test that wants no
+ * `POST /api/board/test` starts from a checked one.
  */
 export const TOP_BAR_BOARD: BoardState = {
   target: {
@@ -23,7 +23,7 @@ export const TOP_BAR_BOARD: BoardState = {
     sdk_env: { host: '192.168.100.200', port: 22, user: 'sima' },
   },
   generation: 1,
-  status: { state: 'unknown', checked_at: null, error: null },
+  status: { state: 'connected', checked_at: '2026-10-25T10:00:00Z', error: null },
   board: null,
 };
 

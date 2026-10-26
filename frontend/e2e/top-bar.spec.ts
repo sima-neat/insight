@@ -45,7 +45,7 @@ for (const { path, answer } of PAGES) {
     // …and the tooltip names the board in full.
     await pill(page).hover();
     await expect(page.getByRole('tooltip')).toHaveText(
-      `sima@${LONG_HOST} — Not checked. Open board settings.`,
+      `sima@${LONG_HOST} — Connected. Open board settings.`,
     );
 
     // System Info's button sits whole in the bar, after the pill, and the page tools keep their

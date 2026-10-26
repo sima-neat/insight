@@ -206,53 +206,45 @@ describe('PeripheralsService', () => {
     expect(service.snapshot()?.scan_id).toBe('7:1');
   });
 
-  it('scanOnce scans an unscanned board once per generation and never repeats a failed auto scan', async () => {
-    // Nothing loaded yet: there is nothing to say whether the board was scanned.
-    service.scanOnce(board(1));
+  it('scanOnVisit scans on every visit with a target, scanned snapshot or not, and a failed scan does not stop the next visit', async () => {
+    // Nothing loaded yet: there is no snapshot of this board to replace.
+    service.scanOnVisit(board(1));
     expect(refreshes()).toHaveLength(0);
 
     const load = service.load();
     http.expectOne(LOAD_URL).flush(snapshot(1, null));
     await load;
     // No target, or a snapshot loaded for another board: no scan.
-    service.scanOnce(board(1, false));
-    service.scanOnce(board(2));
+    service.scanOnVisit(board(1, false));
+    service.scanOnVisit(board(2));
     expect(refreshes()).toHaveLength(0);
 
-    service.scanOnce(board(1));
-    service.scanOnce(board(1));
+    // Concurrent scans of one board share one.
+    service.scanOnVisit(board(1));
+    service.scanOnVisit(board(1));
     const [failed] = refreshes();
     expect(refreshes()).toHaveLength(0);
     failed.flush(unreachable, badGateway);
     await tick();
     expect(service.scanError()?.code).toBe('unreachable');
 
-    // Coming back to the page (the snapshot reloaded, still unscanned) does not scan again.
+    // The next visit scans again, though the first scan failed and the snapshot is unscanned.
     const reload = service.load();
     http.expectOne(LOAD_URL).flush(snapshot(1, null));
     await reload;
-    service.scanOnce(board(1));
-    expect(refreshes()).toHaveLength(0);
-    // The failure is still this board's, and still shown.
-    expect(service.scanError()?.code).toBe('unreachable');
-
-    // Another board is scanned once, and a scanned snapshot never scans by itself.
-    boardGeneration.set(2);
-    const next = service.load();
-    http.expectOne(LOAD_URL).flush(snapshot(2, null));
-    await next;
-    service.scanOnce(board(2));
-    refreshes()[0].flush(snapshot(2, [item('camera', 'c1')]));
+    service.scanOnVisit(board(1));
+    const [second] = refreshes();
+    expect(second).toBeDefined();
+    second.flush(snapshot(1, [item('camera', 'c1')]));
     await tick();
-    service.scanOnce(board(2));
-    expect(refreshes()).toHaveLength(0);
+    expect(service.scanError()).toBeNull();
 
-    boardGeneration.set(3);
-    const scanned = service.load();
-    http.expectOne(LOAD_URL).flush(snapshot(3, [item('camera', 'c1')]));
-    await scanned;
-    service.scanOnce(board(3));
-    expect(refreshes()).toHaveLength(0);
+    // A scanned snapshot is scanned again on the visit after: the devices may have changed.
+    const third = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(1, [item('camera', 'c1')]));
+    await third;
+    service.scanOnVisit(board(1));
+    expect(refreshes()).toHaveLength(1);
   });
 
   // Review Focus 1: a scan can take half a minute, and the board can change meanwhile.
@@ -261,7 +253,7 @@ describe('PeripheralsService', () => {
     const first = service.load();
     http.expectOne(LOAD_URL).flush(snapshot(3, null));
     await first;
-    service.scanOnce(board(3));
+    service.scanOnVisit(board(3));
     const [old] = refreshes();
 
     // The board changes, and the page is entered again for it.
@@ -269,7 +261,7 @@ describe('PeripheralsService', () => {
     const reload = service.load();
     http.expectOne(LOAD_URL).flush(snapshot(4, null));
     await reload;
-    service.scanOnce(board(4));
+    service.scanOnVisit(board(4));
     // The backend runs one scan at a time: the new board's waits for the old one.
     expect(refreshes()).toHaveLength(0);
 
@@ -349,7 +341,7 @@ describe('PeripheralsService', () => {
     expect(service.snapshot()?.generation).toBe(1);
     expect(service.snapshot()?.scan_id).toBeNull();
 
-    service.scanOnce(board(1));
+    service.scanOnVisit(board(1));
     refreshes()[0].flush(snapshot(1, [item('microphone', 'm1')]));
     await tick();
     expect(service.snapshot()?.scan_id).toBe('7:1');
@@ -363,7 +355,7 @@ describe('PeripheralsService', () => {
     const first = service.load();
     http.expectOne(LOAD_URL).flush(snapshot(3, null));
     await first;
-    service.scanOnce(board(3));
+    service.scanOnVisit(board(3));
     const [old] = refreshes();
 
     for (const generation of [4, 5]) {
@@ -371,7 +363,7 @@ describe('PeripheralsService', () => {
       const entered = service.load();
       http.expectOne(LOAD_URL).flush(snapshot(generation, null));
       await entered;
-      service.scanOnce(board(generation));
+      service.scanOnVisit(board(generation));
     }
     expect(refreshes()).toHaveLength(0);
 
@@ -404,7 +396,7 @@ describe('PeripheralsService', () => {
       const first = service.load();
       http.expectOne(LOAD_URL).flush(snapshot(3, null));
       await first;
-      service.scanOnce(board(3));
+      service.scanOnVisit(board(3));
       expect(service.scanning()).toBe(t0);
       const [old] = refreshes();
 
@@ -414,7 +406,7 @@ describe('PeripheralsService', () => {
       const entered = service.load();
       http.expectOne(LOAD_URL).flush(snapshot(4, null));
       await entered;
-      service.scanOnce(board(4));
+      service.scanOnVisit(board(4));
       expect(service.scanning()).toBe(t0 + 20_000);
 
       // The old scan answers; the board re-read after it is still out.
@@ -437,70 +429,6 @@ describe('PeripheralsService', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  // The board generation is Insight's counter in memory: a restart starts it over, so the
-  // generations this app recorded as scanned name other boards' scans than the restarted Insight's.
-  it('scanOnce scans again once an Insight restart lowered the board generation', async () => {
-    for (const generation of [1, 2]) {
-      boardGeneration.set(generation);
-      const entered = service.load();
-      http.expectOne(LOAD_URL).flush(snapshot(generation, null));
-      await entered;
-      service.scanOnce(board(generation));
-      refreshes()[0].flush(unreachable, badGateway);
-      await tick();
-    }
-
-    // Insight restarted: the board is generation 1 again, and its scan cache is empty.
-    boardGeneration.set(1);
-    const after = service.load();
-    http.expectOne(LOAD_URL).flush(snapshot(1, null));
-    await after;
-    service.scanOnce(board(1));
-    expect(refreshes()).toHaveLength(1);
-  });
-
-  it('scanOnce refreshes a scanned board once after rescanOnNextVisit for its generation, and not for another', async () => {
-    const entered = service.load();
-    http.expectOne(LOAD_URL).flush(snapshot(1, [item('camera', 'cam-1')]));
-    await entered;
-    service.scanOnce(board(1));
-    expect(refreshes()).toHaveLength(0);
-
-    // Another board's mark waits for that board.
-    service.rescanOnNextVisit(2);
-    service.scanOnce(board(1));
-    expect(refreshes()).toHaveLength(0);
-
-    service.rescanOnNextVisit(1);
-    service.scanOnce(board(1));
-    const [rescan] = refreshes();
-    rescan.flush(snapshot(1, [item('camera', 'cam-1'), item('microphone', 'mic-1')]));
-    await tick();
-    expect(service.snapshot()?.items).toHaveLength(2);
-
-    // The mark is spent: the next visit finds the board scanned again.
-    service.scanOnce(board(1));
-    expect(refreshes()).toHaveLength(0);
-  });
-
-  it('rescanOnNextVisit scans a generation that was already auto-scanned, and waits for its snapshot', async () => {
-    const entered = service.load();
-    http.expectOne(LOAD_URL).flush(snapshot(1, null));
-    await entered;
-    service.scanOnce(board(1));
-    refreshes()[0].flush(unreachable, badGateway);
-    await tick();
-    service.scanOnce(board(1));
-    expect(refreshes()).toHaveLength(0);
-
-    service.rescanOnNextVisit(1);
-    // The snapshot on show is another board's: the mark is kept for the visit that loaded this one.
-    service.scanOnce(board(2));
-    expect(refreshes()).toHaveLength(0);
-    service.scanOnce(board(1));
-    expect(refreshes()).toHaveLength(1);
   });
 
   /** Holds the board re-read that ends every scan until the test resolves it. */

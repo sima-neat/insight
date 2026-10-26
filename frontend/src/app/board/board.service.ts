@@ -21,6 +21,11 @@ const SHELL_URL = '/api/devkit-shell';
  * Answers can arrive out of order, so a read's answer is dropped once a newer read was answered or
  * an action applied its state since the read was sent: it describes a moment that is past.
  *
+ * **The check on load.** A read never connects, so a board never connected to would stay "Not
+ * checked". The first read of an app load that gets an answer therefore runs `test()` when a board
+ * is selected and its state is unknown, silently: a failure only lands in the state (the pill
+ * shows Error). Later reads, focus included, never check; "Check again" is the user's.
+ *
  * **Actions.** Select, Check again and Trust each answer with the fresh board state, which wins
  * over every read still out. A failed action reloads the state (it may have recorded the failure)
  * and then rejects with its `BoardProblem`, an `Error` whose message `messageOf` gives.
@@ -47,6 +52,8 @@ export class BoardService {
   private readonly latest = new LatestOnly();
   /** Reads sent and not settled yet. */
   private readsOut = 0;
+  /** The load's one check was decided: the first answered read either started it or found no need. */
+  private checkDecided = false;
 
   constructor() {
     void this.reload();
@@ -74,7 +81,10 @@ export class BoardService {
       const state = await firstValueFrom(
         this.http.get<BoardState>(BOARD_URL).pipe(withRequestErrors()),
       );
-      if (this.latest.accept(request)) this.apply(state);
+      if (this.latest.accept(request)) {
+        this.apply(state);
+        this.checkOnce(state);
+      }
     } catch (failure) {
       if (this.latest.isNewest(request) && this.latest.accept(request)) {
         this.errorValue.set(problemOf(failure));
@@ -119,6 +129,17 @@ export class BoardService {
     return firstValueFrom(
       this.http.post<ShellInfo>(`${SHELL_URL}/start`, {}).pipe(withRequestErrors()),
     );
+  }
+
+  /**
+   * Checks the connection the first time a read is answered, if there is a board whose state is
+   * unknown. The failure is dropped on purpose: `act` reloads the state it recorded, which the
+   * pill shows, and a toast for a check the user did not ask for would only nag.
+   */
+  private checkOnce(state: BoardState): void {
+    if (this.checkDecided) return;
+    this.checkDecided = true;
+    if (state.target && state.status.state === 'unknown') this.test().catch(() => undefined);
   }
 
   private async act(call: Observable<BoardState>): Promise<BoardState> {

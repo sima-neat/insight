@@ -3,9 +3,8 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import { FakeBoard, FakePeripherals } from '../board/board.testing';
+import { FakeBoard } from '../board/board.testing';
 import { BoardService } from '../board/board.service';
-import { PeripheralsService } from '../peripherals/peripherals.service';
 import type { SentinelDaemon } from './api';
 import { SentinelInstall } from './sentinel-install';
 
@@ -42,20 +41,17 @@ function installRequest(http: HttpTestingController) {
 describe('SentinelInstall', () => {
   let http: HttpTestingController;
   let board: FakeBoard;
-  let peripherals: FakePeripherals;
   let toasts: { status: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
   let install: SentinelInstall;
 
   beforeEach(() => {
     board = new FakeBoard();
-    peripherals = new FakePeripherals();
     toasts = { status: vi.fn(), error: vi.fn() };
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: BoardService, useValue: board },
-        { provide: PeripheralsService, useValue: peripherals },
         { provide: NeatToasts, useValue: toasts },
       ],
     });
@@ -65,7 +61,7 @@ describe('SentinelInstall', () => {
 
   afterEach(() => http.verify());
 
-  it('install posts with the generation, toasts "Sentinel installed on <label>.", and asks Peripherals to rescan', async () => {
+  it('install posts with the generation, toasts "Sentinel installed on <label>."', async () => {
     const done = install.install(3, 'sima@192.168.1.20');
     expect(install.running()).toEqual({ generation: 3, label: 'sima@192.168.1.20' });
     const request = installRequest(http);
@@ -85,7 +81,6 @@ describe('SentinelInstall', () => {
       log: 'installed simaai-sentinel 1.2.3',
     });
     expect(install.running()).toBeNull();
-    expect(peripherals.rescanOnNextVisit).toHaveBeenCalledExactlyOnceWith(3);
     expect(board.reload).toHaveBeenCalledTimes(1);
   });
 
@@ -124,7 +119,6 @@ describe('SentinelInstall', () => {
     });
     expect(toasts.error).toHaveBeenCalledExactlyOnceWith('The installer exited with status 1.');
     expect(toasts.status).not.toHaveBeenCalled();
-    expect(peripherals.rescanOnNextVisit).not.toHaveBeenCalled();
     expect(install.running()).toBeNull();
     // A failed installer may still have left the service running: the board is read again.
     expect(board.reload).toHaveBeenCalledTimes(1);

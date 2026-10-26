@@ -4,6 +4,7 @@ import {
   CONNECTED_BOARD,
   FakePeripheralsBackend,
   HOST_KEY_CHANGED_BOARD,
+  UNCHECKED_BOARD,
 } from './peripherals-mocks';
 import { answerTopBar } from './top-bar';
 
@@ -28,6 +29,8 @@ for (const { name, size } of VIEWPORTS) {
     await page.goto('/streaming');
     await expect(pill(page)).toContainText('DevKit: 192.168.100.200');
     await expect(pill(page)).toContainText('Connected');
+    // Already checked: the app does not connect to the board by itself.
+    expect(backend.posted('/api/board/test')).toEqual([]);
 
     await pill(page).click();
     const dialog = boardDialog(page);
@@ -164,4 +167,27 @@ test('a read that fails after a good one keeps the board named, with Error and t
   await expect(page.getByRole('tooltip')).toHaveText(
     new RegExp(`^${CONNECTED_BOARD.target!.label} — Could not read the board: `),
   );
+});
+
+// "Not checked" goes: a board never connected to is checked once when the app loads.
+test('a board that was never checked is checked once as the app loads, and the pill shows the result', async ({
+  page,
+}) => {
+  const backend = new FakePeripheralsBackend();
+  backend.board = UNCHECKED_BOARD;
+  await backend.install(page);
+  await page.goto('/streaming');
+  await expect(pill(page)).toContainText('Connected');
+  expect(backend.posted('/api/board/test')).toEqual([{}]);
+});
+
+test('a failed check on load shows Error in the pill, with no toast', async ({ page }) => {
+  const backend = new FakePeripheralsBackend();
+  backend.board = UNCHECKED_BOARD;
+  backend.checkFails = true;
+  await backend.install(page);
+  await page.goto('/streaming');
+  await expect(pill(page)).toContainText('Error');
+  expect(backend.posted('/api/board/test')).toHaveLength(1);
+  await expect(page.locator('[data-slot="toast"]')).toHaveCount(0);
 });

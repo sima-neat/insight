@@ -175,12 +175,14 @@ merging.
   trust a host key) answer with the fresh state; page code never fetches `/api/board` itself. It is
   re-read when the window regains focus and after every action, never polled on a timer:
   `GET /api/board` does not connect to the board, and the pages' own board traffic keeps its
-  status current. Answers arrive out of order, so a stale one is dropped; every response that
-  describes the board carries its `generation`, and an answer for another generation is never
-  applied.
+  status current. The one connection check of its own is on load: the first answered read of an
+  app load runs `test()` when a board is selected and its state is unknown, silently (a failure
+  only lands in the state, so the pill shows Error). Answers arrive out of order, so a stale one
+  is dropped; every response that describes the board carries its `generation`, and an answer for
+  another generation is never applied.
 - **Peripherals** splits its state by how long it lives. `PeripheralsService` (root) holds the
-  board's scan: the snapshot read from `GET /api/peripherals`, Refresh, and the automatic first
-  scan, which runs once per board generation in an app session rather than on every visit.
+  board's scan: the snapshot read from `GET /api/peripherals`, Refresh, and the scan of each visit
+  (`scanOnVisit`: whenever the page is entered with a board target, never on a timer).
   `PeripheralsSession` (root) remembers where the user left the page. `CameraPreview` and
   `MicTest` are provided by the page, so they live exactly as long as it: leaving Peripherals stops
   the camera preview (the next visit starts it again, once), and a microphone recording is left to
@@ -225,11 +227,11 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 600 kB. The initial bundle measures 580.2 kB raw with kit 0.16.0 (the shared chunk 461 kB,
-  main 23 kB, styles 97 kB; 579.0 kB before Stats' recording dots, whose `neat-live-dot` is in
-  the primary entry; 578.1 kB before the start hook that resumes the tab's webcams, whose
-  camera service stays in a lazy chunk; 571.6 kB with kit 0.15.1; 571.4 kB with kit 0.14.1;
-  571.3 kB with kit 0.14.0; 569.7 kB with kit 0.13.0; 569.4 kB with kit 0.12.2; 569.1 kB with kit
+  at 600 kB. The initial bundle measures 580.3 kB raw with kit 0.16.0 (the shared chunk 461 kB,
+  main 23 kB, styles 97 kB; 580.2 kB before the board's check on load; 579.0 kB before Stats'
+  recording dots, whose `neat-live-dot` is in the primary entry; 578.1 kB before the start hook
+  that resumes the tab's webcams, whose camera service stays in a lazy chunk; 571.6 kB with kit
+  0.15.1; 571.4 kB with kit 0.14.1; 571.3 kB with kit 0.14.0; 569.7 kB with kit 0.13.0; 569.4 kB with kit 0.12.2; 569.1 kB with kit
   0.12.1; 568.8 kB with kit 0.12.0; 691.9 kB with kit 0.11.3 and 0.11.2, before the icons became
   plain Lucide drawings; 691.7 kB with kit 0.11.1;
   691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the board pill
