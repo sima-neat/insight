@@ -68,11 +68,12 @@
       </ng-template>
     </neat-popover>
   }
-  <!-- The panel is about what the view shows, so its toggle shows only with it (F15). -->
-  @if (body() === 'ready' && view() !== 'compare') {
-    <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('stats', $event)" />
-  }
 </ng-container>
+
+<!-- The panel is about what the view shows, so its toggle shows only with it (F15). -->
+@if (body() === 'ready' && view() !== 'compare') {
+  <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('stats', $event)" />
+}
 
 <neat-page
   [scroll]="listShown() ? 'none' : 'body'"

@@ -72,6 +72,9 @@ describe('ViewerPage', () => {
   const toolbar = (): HTMLElement => root().querySelector('.page-toolbar')!;
   const button = (label: string): HTMLButtonElement =>
     toolbar().querySelector(`button[aria-label="${label}"]`)!;
+  /** The side-panel toggle: the kit draws it at the top bar's right edge, outside the page tools. */
+  const sidePanelToggle = (): HTMLButtonElement | null =>
+    root().querySelector<HTMLButtonElement>('header button[aria-label="Side panel"]');
   /** A toolbar popover's panel: it lives in the overlay, outside the toolbar, while it is open. */
   const dialog = (label: string): HTMLElement | null =>
     document.querySelector(`[role="dialog"][aria-label="${label}"]`);
@@ -490,7 +493,7 @@ describe('ViewerPage', () => {
     await press('ArrowRight', {}, slider());
     expect(shown()).toEqual(range(6));
 
-    await click(button('Side panel'));
+    await click(sidePanelToggle()!);
     await press('ArrowRight', {}, root().querySelector('aside [neatPageAside]')!);
     expect(shown()).toEqual(range(6));
 
@@ -578,7 +581,7 @@ describe('ViewerPage', () => {
     expect(shown()).toEqual([12, 13, 14, 15]);
   });
 
-  it('the toolbar shows slider, Fit all, paging, Go to channel, View options and Inspector, and no switches or channel input', async () => {
+  it('the toolbar shows slider, Fit all, paging, Go to channel and View options, with the Side panel toggle outside it, and no switches or channel input', async () => {
     await open('/viewer');
 
     const controls = [...toolbar().querySelectorAll('button, [role="slider"], input')];
@@ -590,8 +593,9 @@ describe('ViewerPage', () => {
       'Next page',
       'Go to channel',
       'View options',
-      'Side panel',
     ]);
+    expect(toolbar().contains(sidePanelToggle())).toBe(false);
+    expect(sidePanelToggle()).not.toBeNull();
     expect(toolbar().querySelector('[role="switch"]')).toBeNull();
     expect(channelField()).toBeNull();
     expect(button('Go to channel').getAttribute('neatTooltip')).toBe('Go to channel');
@@ -731,12 +735,12 @@ describe('ViewerPage', () => {
     await press('/', {}, slider());
     await settlePopover();
     expect(dialog('Go to channel')).toBeNull();
-    await click(button('Side panel'));
+    await click(sidePanelToggle()!);
     await press('/', {}, root().querySelector('aside [neatPageAside]')!);
     await settlePopover();
     expect(dialog('Go to channel')).toBeNull();
 
-    await click(button('Side panel'));
+    await click(sidePanelToggle()!);
     const event = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });
     window.dispatchEvent(event);
     await settlePopover();
@@ -813,7 +817,7 @@ describe('ViewerPage', () => {
       sixPerPage();
       await open('/viewer');
       await click(tileElement(4));
-      await click(button('Side panel'));
+      await click(sidePanelToggle()!);
 
       await click(root().querySelector<HTMLElement>('aside')!);
 
@@ -988,7 +992,7 @@ describe('ViewerPage', () => {
     expect(page().selectedChannel()).toBe(3);
     expect(page().inspectorTab()).toBe('General');
     expect(root().querySelector('aside')?.textContent).toContain('Channel 3');
-    expect(button('Side panel').getAttribute('aria-pressed')).toBe('true');
+    expect(sidePanelToggle()!.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('on a narrow screen the inspector starts closed although the layout stores it open, and opening it stores nothing', async () => {
@@ -996,15 +1000,15 @@ describe('ViewerPage', () => {
     storage.seed({ layout: { inspector: true, tileWidths: { 16: 300 } } });
     await open('/viewer');
     expect(root().querySelector('aside')).toBeNull();
-    expect(button('Side panel').getAttribute('aria-pressed')).toBe('false');
+    expect(sidePanelToggle()!.getAttribute('aria-pressed')).toBe('false');
 
     const writes = storage.writes.length;
 
-    await click(button('Side panel'));
+    await click(sidePanelToggle()!);
 
     expect(root().querySelector('aside')).not.toBeNull();
-    expect(button('Side panel').getAttribute('aria-pressed')).toBe('true');
-    await click(button('Side panel'));
+    expect(sidePanelToggle()!.getAttribute('aria-pressed')).toBe('true');
+    await click(sidePanelToggle()!);
     expect(root().querySelector('aside')).toBeNull();
     // Neither opening nor closing wrote anything: the layout still says what a wide screen chose.
     expect(storage.writes).toHaveLength(writes);
@@ -1080,7 +1084,7 @@ describe('ViewerPage', () => {
     sixPerPage();
     await open('/viewer');
     await jumpTo(10);
-    await click(button('Side panel'));
+    await click(sidePanelToggle()!);
     await click(
       [...root().querySelectorAll<HTMLElement>('aside [role="tab"]')].find(
         (tab) => tab.textContent?.trim() === 'General',

@@ -20,8 +20,9 @@
     <neat-icon name="refresh" />
     {{ refreshLabel() }}
   </button>
-  <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('peripherals', $event)" />
 </ng-container>
+
+<neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('peripherals', $event)" />
 
 <neat-page
   scroll="none"

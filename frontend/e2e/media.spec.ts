@@ -1,5 +1,13 @@
 import { expect, Page, test } from '@playwright/test';
-import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import {
+  DESKTOP,
+  LAPTOP,
+  pageOverflow,
+  TABLET,
+  sidePanelToggle,
+  topBarSpill,
+  VIEWPORTS,
+} from './layout';
 import { answerTopBar } from './top-bar';
 
 // The top bar's pill reads the board on every page.
@@ -229,7 +237,7 @@ test.describe('Media with mocked APIs', () => {
         await expect
           .poll(() => topBarSpill(page, size === TABLET))
           .toEqual({ spilled: [], toolsOverflow: 0 });
-        await tool(page, 'Side panel').click();
+        await sidePanelToggle(page).click();
       }
     }
   });

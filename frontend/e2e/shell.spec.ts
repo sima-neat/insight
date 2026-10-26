@@ -1,5 +1,13 @@
 import { expect, Locator, Page, test } from '@playwright/test';
-import { LAPTOP, pageOverflow, PHONE, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import {
+  LAPTOP,
+  pageOverflow,
+  PHONE,
+  sidePanelToggle,
+  TABLET,
+  topBarSpill,
+  VIEWPORTS,
+} from './layout';
 import type { BoardState } from '../src/app/board/api';
 import { FakePeripheralsBackend, HOST_KEY_CHANGED_BOARD } from './peripherals-mocks';
 import { FakeStatsBackend, STATS_BOARD } from './stats-mocks';
@@ -131,20 +139,24 @@ test.describe('under an OS dark preference', () => {
 
   test('starts light; the dark toggle survives a reload', async ({ page }) => {
     const html = page.locator('html');
-    const toggle = page.getByRole('button', { name: 'Dark mode' });
+    // The rail's theme item says what a click does: Dark theme while light, Light theme while dark.
+    const toDark = page.getByRole('button', { name: 'Dark theme' });
+    const toLight = page.getByRole('button', { name: 'Light theme' });
 
     await page.goto('/');
     await expect(railItem(page, 'Streaming')).toBeVisible();
     await expect(html).not.toHaveClass(/neat-dark/);
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(toDark).toBeVisible();
+    await expect(toLight).toHaveCount(0);
 
-    await toggle.click();
+    await toDark.click();
     await expect(html).toHaveClass(/neat-dark/);
 
     await page.reload();
     await expect(railItem(page, 'Streaming')).toBeVisible();
     await expect(html).toHaveClass(/neat-dark/);
-    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(toLight).toBeVisible();
+    await expect(toDark).toHaveCount(0);
   });
 });
 
@@ -360,7 +372,6 @@ test.describe('phone width', () => {
   ];
 
   const tools = (page: Page) => page.getByRole('group', { name: 'Page tools' });
-  const sidePanelButton = (page: Page) => tools(page).getByRole('button', { name: 'Side panel' });
   const asides = (page: Page) => page.locator('aside');
 
   /**
@@ -385,39 +396,44 @@ test.describe('phone width', () => {
 
   /**
    * What a person sees of the page tools on a phone, in real boxes and without scrolling: the group
-   * is the top bar's own row under the logo, as wide as the bar inside its padding, and the side
-   * panel toggle lies wholly inside the group's visible box.
+   * is the top bar's own row under the logo, as wide as the bar inside its padding.
    */
   const toolsRow = (page: Page) =>
     page.evaluate(() => {
       const box = (element: Element) => element.getBoundingClientRect();
       const bar = document.querySelector('header')!;
       const tools = bar.querySelector('[role="group"][aria-label="Page tools"]')!;
-      const toggle = tools.querySelector('button[aria-label="Side panel"]')!;
-      const [barBox, toolsBox, toggleBox, logoBox] = [
-        bar,
-        tools,
-        toggle,
-        bar.querySelector('neat-logo')!,
-      ].map(box);
+      const [barBox, toolsBox, logoBox] = [bar, tools, bar.querySelector('neat-logo')!].map(box);
       const padding = getComputedStyle(bar);
       return {
         belowLogo: toolsBox.top >= logoBox.bottom - 0.5,
         spansBar:
           Math.abs(toolsBox.left - (barBox.left + parseFloat(padding.paddingLeft))) <= 0.5 &&
           Math.abs(toolsBox.right - (barBox.right - parseFloat(padding.paddingRight))) <= 0.5,
-        toggleVisible:
-          toggleBox.left >= toolsBox.left - 0.5 &&
-          toggleBox.right <= toolsBox.right + 0.5 &&
-          toggleBox.top >= toolsBox.top - 0.5 &&
-          toggleBox.bottom <= toolsBox.bottom + 0.5,
         scrollLeft: tools.scrollLeft,
-        widths: {
-          tools: toolsBox.width,
-          toolsContent: tools.scrollWidth,
-          toggleRight: toggleBox.right,
-          toolsRight: toolsBox.right,
-        },
+      };
+    });
+
+  /**
+   * Where the side-panel toggle sits on a phone, in real boxes: wholly inside the bar, level with
+   * the logo on the first row, and after the kiosk button, so it is the row's last item.
+   */
+  const toggleRow = (page: Page) =>
+    page.evaluate(() => {
+      const box = (element: Element) => element.getBoundingClientRect();
+      const bar = document.querySelector('header')!;
+      const [barBox, toggleBox, kioskBox, logoBox] = [
+        bar,
+        bar.querySelector('button[aria-label="Side panel"]')!,
+        bar.querySelector('button[aria-label="Kiosk mode"]')!,
+        bar.querySelector('neat-logo')!,
+      ].map(box);
+      return {
+        inside: toggleBox.right <= barBox.right + 0.5 && toggleBox.left >= barBox.left - 0.5,
+        level: Math.abs(
+          (toggleBox.top + toggleBox.bottom) / 2 - (logoBox.top + logoBox.bottom) / 2,
+        ),
+        afterKiosk: toggleBox.left >= kioskBox.right - 0.5,
       };
     });
 
@@ -433,7 +449,7 @@ test.describe('phone width', () => {
       const first = [
         bar.querySelector('neat-logo')!,
         bar.querySelector('app-board-pill button')!,
-        bar.querySelector('button[aria-label="Dark mode"]')!,
+        bar.querySelector('button[aria-label="Side panel"]')!,
         bar.querySelector('button[aria-label="Kiosk mode"]')!,
         bar.querySelector('button[aria-label="System information"]')!,
       ].map(box);
@@ -492,7 +508,7 @@ test.describe('phone width', () => {
     locator.evaluate((element) => element.getBoundingClientRect().height <= 1);
 
   for (const { path, title, answer, shown } of PAGES) {
-    test(`${path} starts without its side panel; the toolbar button floats it over the page and closes it`, async ({
+    test(`${path} starts without its side panel; the toggle floats it over the page and closes it`, async ({
       page,
     }) => {
       await answer(page, null);
@@ -525,30 +541,30 @@ test.describe('phone width', () => {
       expect(await toolsRow(page)).toMatchObject({ belowLogo: true, spansBar: true });
       await expectTwoRows(page);
 
-      await sidePanelButton(page).click();
+      await sidePanelToggle(page).click();
       await expectFloating(page);
       expect(await topBarSpill(page, true)).toEqual({ spilled: [], toolsOverflow: 0 });
 
       // The toggle stays in view over the open panel and closes it.
-      await sidePanelButton(page).click();
+      await sidePanelToggle(page).click();
       await expect(asides(page)).toHaveCount(0);
     });
   }
 
   for (const { path, answer, shown } of PAGES) {
-    test(`${path} shows the Side panel toggle in its tools row without scrolling`, async ({
+    test(`${path} ends the first row with the Side panel toggle, outside the tools and in view`, async ({
       page,
     }) => {
       await answer(page, null);
       await page.goto(path);
       await shown(page);
 
-      // The side panel toggle leads the tools on a phone, so it is in view however many tools follow.
-      const row = await toolsRow(page);
-      expect(row, `the tools row: ${JSON.stringify(row.widths)}`).toMatchObject({
-        toggleVisible: true,
-        scrollLeft: 0,
-      });
+      // The toggle is the page's, drawn by the shell after the kiosk button, not among the tools.
+      await expect(tools(page).getByRole('button', { name: 'Side panel' })).toHaveCount(0);
+      const row = await toggleRow(page);
+      expect(row, JSON.stringify(row)).toMatchObject({ inside: true, afterKiosk: true });
+      expect(row.level).toBeLessThanOrEqual(4);
+      expect(await toolsRow(page)).toMatchObject({ scrollLeft: 0 });
     });
   }
 
@@ -564,8 +580,8 @@ test.describe('phone width', () => {
     const area = page.getByRole('region', { name: 'Stats area' });
     await expect(area.getByRole('heading', { level: 2 })).toHaveText('Storage & Network');
     // The toggle, still in the bar, closes it.
-    await expect(sidePanelButton(page)).toHaveAttribute('aria-pressed', 'true');
-    await sidePanelButton(page).click();
+    await expect(sidePanelToggle(page)).toHaveAttribute('aria-pressed', 'true');
+    await sidePanelToggle(page).click();
     await expect(asides(page)).toHaveCount(0);
   });
 
@@ -580,15 +596,15 @@ test.describe('phone width', () => {
 
     await expectFloating(page);
     await expect(page.getByRole('region', { name: 'Selected slot' })).toContainText('3');
-    await expect(sidePanelButton(page)).toHaveAttribute('aria-pressed', 'true');
-    await sidePanelButton(page).click();
+    await expect(sidePanelToggle(page)).toHaveAttribute('aria-pressed', 'true');
+    await sidePanelToggle(page).click();
     await expect(asides(page)).toHaveCount(0);
   });
 
   test('a panel opened here is closed after a reload, and nothing was stored', async ({ page }) => {
     await PAGES[0].answer(page, null);
     await page.goto('/media');
-    await sidePanelButton(page).click();
+    await sidePanelToggle(page).click();
     await expect(asides(page)).toBeVisible();
 
     await page.reload();
@@ -603,13 +619,13 @@ test.describe('phone width', () => {
     await page.setViewportSize(LAPTOP);
     await page.goto('/media');
     await expect(asides(page)).toBeVisible();
-    await sidePanelButton(page).click();
+    await sidePanelToggle(page).click();
     await expect(asides(page)).toHaveCount(0);
 
     // Narrow, the panel opens and closes freely, and the laptop's choice is left alone.
     await page.setViewportSize(PHONE);
     await expect(asides(page)).toHaveCount(0);
-    await sidePanelButton(page).click();
+    await sidePanelToggle(page).click();
     await expect(asides(page)).toBeVisible();
 
     await page.setViewportSize(LAPTOP);
@@ -627,14 +643,16 @@ test.describe('phone width', () => {
     await page.goto('/media');
     const main = page.getByRole('main');
     const railBox = async () => (await nav(page).boundingBox())!;
-    const toggle = page.getByRole('button', { name: 'Show labels' });
+    // The rail's control says what a click does, and has no pressed state.
+    const show = page.getByRole('button', { name: 'Show labels' });
+    const collapse = page.getByRole('button', { name: 'Collapse' });
     const mainLeft = (await main.boundingBox())!.x;
     // Collapsed, the rail sits beside the page.
     const beside = await railBox();
     expect(beside.x + beside.width).toBeLessThanOrEqual(mainLeft);
 
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await show.click();
+    await expect(collapse).toBeVisible();
 
     expect((await main.boundingBox())!.x).toBe(mainLeft);
     const expanded = await railBox();
@@ -643,7 +661,7 @@ test.describe('phone width', () => {
     await railItem(page, 'Streaming').click();
 
     await expect(page).toHaveURL(/\/streaming$/);
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(show).toBeVisible();
     expect((await main.boundingBox())!.x).toBe(mainLeft);
     const collapsed = await railBox();
     expect(collapsed.x + collapsed.width).toBeLessThanOrEqual(mainLeft);

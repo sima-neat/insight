@@ -78,8 +78,9 @@
       </button>
     </ng-template>
   </neat-popover>
-  <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('streaming', $event)" />
 </ng-container>
+
+<neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('streaming', $event)" />
 
 <neat-page
   scroll="none"

@@ -171,6 +171,9 @@ describe('PeripheralsPage', () => {
   const pageInjector = () => fixture.debugElement.query(By.directive(PeripheralsPage)).injector;
 
   const toolbar = (): HTMLElement => root().querySelector('.page-toolbar')!;
+  /** The side-panel toggle: the kit draws it at the top bar's right edge, outside the page tools. */
+  const sidePanelToggle = (): HTMLButtonElement | null =>
+    root().querySelector<HTMLButtonElement>('header button[aria-label="Side panel"]');
   const refreshButton = (): HTMLButtonElement =>
     [...toolbar().querySelectorAll<HTMLButtonElement>('button')].find((button) =>
       /^(Refresh|Scanning…)/.test(button.textContent!.trim()),
@@ -834,7 +837,7 @@ describe('PeripheralsPage', () => {
     answer('POST', START_URL, { session: live30 });
     await settle();
     expect(preview.state().status).toBe('live');
-    toolbar().querySelector<HTMLButtonElement>('neat-aside-toggle button')!.click();
+    sidePanelToggle()!.click();
     await settle();
     expect(answer('POST', stopUrl(live30.id), { session: null })).toBe(1);
     await settle();
@@ -1026,7 +1029,7 @@ describe('PeripheralsPage', () => {
 
   it('remembers whether the side panel is open, as peripherals', async () => {
     await visit();
-    const toggle = toolbar().querySelector<HTMLButtonElement>('neat-aside-toggle button')!;
+    const toggle = sidePanelToggle()!;
     toggle.click();
     await settle();
     expect(aside()).toBeNull();

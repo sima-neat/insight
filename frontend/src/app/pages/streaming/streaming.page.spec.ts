@@ -272,6 +272,9 @@ describe('StreamingPage', () => {
     [...toolbar().querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => (button.getAttribute('aria-label') ?? button.textContent?.trim()) === name,
     )!;
+  /** The side-panel toggle: the kit draws it at the top bar's right edge, outside the page tools. */
+  const sidePanelToggle = (): HTMLButtonElement | null =>
+    root().querySelector<HTMLButtonElement>('header button[aria-label="Side panel"]');
   const filter = (label: string): HTMLButtonElement =>
     [...toolbar().querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((radio) =>
       radioLabel(radio).startsWith(label),
@@ -825,15 +828,15 @@ describe('StreamingPage', () => {
     );
   });
 
-  it('the toolbar holds the filter, the ⋯ menu and the side-panel toggle; the bulk actions are in the menu', async () => {
+  it('the toolbar holds the filter and the ⋯ menu, the side-panel toggle sits after it; the bulk actions are in the menu', async () => {
     await open();
     const buttons = [
       ...toolbar().querySelectorAll<HTMLButtonElement>('button:not([role="radio"])'),
     ];
-    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
-      'More actions',
-      'Side panel',
-    ]);
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['More actions']);
+    // The kit draws the toggle at the top bar's right edge, outside the page's tools.
+    expect(toolbar().contains(sidePanelToggle())).toBe(false);
+    expect(sidePanelToggle()).not.toBeNull();
     for (const label of ['Auto assign', 'Start…', 'Stop all', 'Reset']) {
       expect(toolbarButton(label), label).toBeUndefined();
     }
@@ -964,7 +967,7 @@ describe('StreamingPage', () => {
 
   it('the side-panel toggle closes and opens the panel; Enter on a row opens it', async () => {
     await open();
-    const toggle = toolbarButton('Side panel');
+    const toggle = sidePanelToggle()!;
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
 
     await click(toggle);
@@ -983,7 +986,7 @@ describe('StreamingPage', () => {
     await open();
     listbox().focus();
     await press(listbox(), 'ArrowDown');
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle()!);
     expect(storage.values.get('neat-insight:streaming:aside')).toBe('closed');
 
     await TestBed.inject(Router).navigateByUrl('/elsewhere');
@@ -991,10 +994,10 @@ describe('StreamingPage', () => {
     await TestBed.inject(Router).navigateByUrl('/streaming');
     await settle();
     expect(aside()).toBeNull();
-    expect(toolbarButton('Side panel').getAttribute('aria-pressed')).toBe('false');
+    expect(sidePanelToggle()!.getAttribute('aria-pressed')).toBe('false');
     expect(rowOf('src2').getAttribute('aria-selected')).toBe('true');
 
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle()!);
     expect(asideHeading()).toBe('src2');
     expect(storage.values.get('neat-insight:streaming:aside')).toBe('open');
   });

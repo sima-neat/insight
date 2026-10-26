@@ -1,5 +1,13 @@
 import { expect, Page, Request, test } from '@playwright/test';
-import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import {
+  DESKTOP,
+  LAPTOP,
+  pageOverflow,
+  TABLET,
+  sidePanelToggle,
+  topBarSpill,
+  VIEWPORTS,
+} from './layout';
 import { answerTopBar } from './top-bar';
 
 // The top bar's pill reads the board on every page.
@@ -373,7 +381,7 @@ test.describe('Streaming with mocked slots', () => {
         await expect
           .poll(() => topBarSpill(page, size === TABLET))
           .toEqual({ spilled: [], toolsOverflow: 0 });
-        await tool(page, 'Side panel').click();
+        await sidePanelToggle(page).click();
       }
     }
 
@@ -896,7 +904,7 @@ test.describe('Streaming with mocked slots', () => {
     await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src4');
     await expect(panel(page)).toContainText('External');
 
-    await tool(page, 'Side panel').focus();
+    await sidePanelToggle(page).focus();
     await page.keyboard.press('Enter');
     await expect(panel(page)).toHaveCount(0);
 
@@ -951,9 +959,10 @@ test.describe('Streaming with mocked slots', () => {
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
 
-    // The toolbar is the filter, ⋯ and the side-panel toggle.
-    await expect(pageTools(page).getByRole('button')).toHaveText(['', '']);
+    // The tools are the filter and ⋯; the side-panel toggle is the top bar's, not among them.
+    await expect(pageTools(page).getByRole('button')).toHaveText(['']);
     await expect(pageTools(page).getByRole('button', { name: 'More actions' })).toBeVisible();
+    await expect(sidePanelToggle(page)).toBeVisible();
 
     await tool(page, 'More actions').click();
     const items = morePanel(page).getByRole('button');

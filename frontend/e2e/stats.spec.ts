@@ -1,6 +1,14 @@
 import { expect, Page, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { pageOverflow, PHONE, sidewaysOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import {
+  pageOverflow,
+  PHONE,
+  sidePanelToggle,
+  sidewaysOverflow,
+  TABLET,
+  topBarSpill,
+  VIEWPORTS,
+} from './layout';
 import { NO_BOARD, SENTINEL_FAILED, STATS_BOARD } from './stats-mocks';
 import {
   advance,
@@ -309,7 +317,7 @@ for (const { name, size } of VIEWPORTS) {
     await expectFits(page);
 
     // With the panel closed the cards have the page.
-    await page.getByRole('button', { name: 'Side panel' }).click();
+    await sidePanelToggle(page).click();
     await expect(panel(page)).toBeHidden();
     await expectFits(page);
 
@@ -339,7 +347,7 @@ test('on a phone the tabs are one row under the top bar and the floating side pa
   await expect(viewTab(page, 'Runs')).toBeVisible();
   // The panel starts closed on a phone; the toggle opens it over the page.
   await expect(panel(page)).toBeHidden();
-  await page.getByRole('button', { name: 'Side panel' }).click();
+  await sidePanelToggle(page).click();
   await expect(panel(page)).toBeVisible();
 
   const boxes = await page.evaluate(() => {

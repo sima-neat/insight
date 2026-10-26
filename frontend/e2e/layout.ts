@@ -61,3 +61,10 @@ export function topBarSpill(page: Page, toolbarMayScroll: boolean) {
 export function sidewaysOverflow(element: Locator): Promise<number> {
   return element.evaluate((node) => node.scrollWidth - node.clientWidth);
 }
+
+/**
+ * The page's side-panel toggle: the kit draws it at the top bar's right edge, after the kiosk
+ * button, outside the group of page tools.
+ */
+export const sidePanelToggle = (page: Page) =>
+  page.getByRole('banner').getByRole('button', { name: 'Side panel' });

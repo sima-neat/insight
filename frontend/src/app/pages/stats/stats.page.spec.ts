@@ -276,6 +276,9 @@ describe('StatsPage', () => {
     [...toolbar().querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => (button.getAttribute('aria-label') ?? text(button)) === name,
     );
+  /** The side-panel toggle: the kit draws it at the top bar's right edge, outside the page tools. */
+  const sidePanelToggle = (): HTMLButtonElement | null =>
+    root().querySelector<HTMLButtonElement>('header button[aria-label="Side panel"]');
   const chip = (): string => text(toolbar().querySelector('neat-status-chip'));
   /** The page's own status line; Record has its own for the trace it starts. */
   const announcement = (): string =>
@@ -485,7 +488,7 @@ describe('StatsPage', () => {
     expect(marked()).toEqual(['Board power']);
 
     // Closed, the panel marks no card; a click on the card itself opens it on that card's area.
-    await click(toolbarButton('Side panel')!);
+    await click(sidePanelToggle()!);
     expect(aside()).toBeNull();
     expect(marked()).toEqual([]);
     await click(cardNamed('CPU usage'));
@@ -550,11 +553,11 @@ describe('StatsPage', () => {
     expect(toolbar().querySelector('neat-status-chip')).toBeNull();
     expect(toolbarButton('Pause')).toBeUndefined();
     // The side panel is about the telemetry: no toggle for a panel that is not there.
-    expect(toolbarButton('Side panel')).toBeUndefined();
+    expect(sidePanelToggle()).toBeNull();
 
     await answerState();
     expect(root().querySelector('neat-page p[role="status"]')).toBeNull();
-    expect(toolbarButton('Side panel')).toBeDefined();
+    expect(sidePanelToggle()).not.toBeNull();
     // Telemetry is shown from here; the cards wait for the first reading.
     expect(text(root().querySelector('neat-page'))).toContain(
       'Waiting for the first reading from Sentinel…',
@@ -580,7 +583,7 @@ describe('StatsPage', () => {
     expect(toolbarButton('Pause')).toBeUndefined();
     expect(cards()).toHaveLength(0);
     expect(aside()).toBeNull();
-    expect(toolbarButton('Side panel')).toBeUndefined();
+    expect(sidePanelToggle()).toBeNull();
     noPoll();
 
     await go('/elsewhere');
@@ -1203,21 +1206,22 @@ describe('StatsPage', () => {
       expect(text(aside()?.querySelector('section'))).toBe('Select a run to see its detail.');
     });
 
-    it('each view’s toolbar: Live has its update state, Record, ⋯ and the panel; Runs Record and the panel; Compare Record only', async () => {
+    it('each view’s toolbar: Live has its update state, Record, ⋯ and the panel’s toggle after them; Runs Record and the toggle; Compare Record only', async () => {
       await visit();
-      const sidePanel = () => toolbar().querySelector('neat-aside-toggle');
       expect(chip()).toBe('Live');
       expect(toolbarButton('Pause')).toBeDefined();
       expect(toolbarButton('Record')).toBeDefined();
       expect(toolbarButton('More actions')).toBeDefined();
-      expect(sidePanel()).not.toBeNull();
-      // Left to right: the view's own state, Record, ⋯, the panel. The views are not in it.
+      expect(sidePanelToggle()).not.toBeNull();
+      // Left to right: the view's own state, Record, ⋯, then the panel's toggle, which the kit
+      // draws after the tools, not among them. The views are not in the toolbar.
+      expect(toolbar().contains(sidePanelToggle())).toBe(false);
       expect(toolbar().querySelector('[role="radiogroup"]')).toBeNull();
       const order = [
         toolbar().querySelector('neat-status-chip')!,
         toolbarButton('Record')!,
         toolbarButton('More actions')!,
-        sidePanel()!,
+        sidePanelToggle()!,
       ];
       for (const [index, element] of order.slice(1).entries()) {
         expect(
@@ -1231,12 +1235,12 @@ describe('StatsPage', () => {
       expect(toolbarButton('Pause')).toBeUndefined();
       expect(toolbarButton('More actions')).toBeUndefined();
       expect(toolbarButton('Record')).toBeDefined();
-      expect(sidePanel()).not.toBeNull();
+      expect(sidePanelToggle()).not.toBeNull();
 
       await go('/stats/compare?runs=a,b');
       expect(toolbarButton('Record')).toBeDefined();
       expect(toolbarButton('More actions')).toBeUndefined();
-      expect(sidePanel()).toBeNull();
+      expect(sidePanelToggle()).toBeNull();
     });
 
     it('a trace recording shows in the toolbar on every view', async () => {

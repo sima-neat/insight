@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { pageOverflow, TABLET, sidePanelToggle, topBarSpill, VIEWPORTS } from './layout';
 import { BOARD_UNREACHABLE, C270, FakePeripheralsBackend, IMX477, YETI } from './peripherals-mocks';
 import { answerTopBar, LONG_BOARD } from './top-bar';
 
@@ -355,7 +355,7 @@ test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side pane
       await expect
         .poll(() => topBarSpill(page, size === TABLET))
         .toEqual({ spilled: [], toolsOverflow: 0 });
-      await tool(page, 'Side panel').click();
+      await sidePanelToggle(page).click();
     }
   }
 });

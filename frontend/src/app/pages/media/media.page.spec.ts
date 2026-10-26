@@ -133,6 +133,9 @@ describe('MediaPage', () => {
     [...root().querySelectorAll<HTMLButtonElement>('.page-toolbar button')].find(
       (button) => (button.getAttribute('aria-label') ?? button.textContent?.trim()) === name,
     )!;
+  /** The side-panel toggle: the kit draws it at the top bar's right edge, outside the page tools. */
+  const sidePanelToggle = (): HTMLButtonElement | null =>
+    root().querySelector<HTMLButtonElement>('header button[aria-label="Side panel"]');
   const rows = (): HTMLElement[] => [...root().querySelectorAll<HTMLElement>('[role="option"]')];
   /** A row's cells as their text, in column order. */
   const cells = (row: HTMLElement): string[] =>
@@ -321,11 +324,11 @@ describe('MediaPage', () => {
 
   it('the top bar’s side-panel toggle hides and shows the panel, remembered in storage', async () => {
     await open();
-    toolbarButton('Side panel').click();
+    sidePanelToggle()!.click();
     await settle();
     expect(aside()).toBeNull();
     expect(storage.values.get('neat-insight:media:aside')).toBe('closed');
-    toolbarButton('Side panel').click();
+    sidePanelToggle()!.click();
     await settle();
     expect(aside()).not.toBeNull();
     expect(storage.values.get('neat-insight:media:aside')).toBe('open');

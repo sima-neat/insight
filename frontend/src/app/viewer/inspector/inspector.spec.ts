@@ -66,8 +66,9 @@ describe('ViewerInspector', () => {
   const root = (): HTMLElement => fixture.nativeElement;
   const page = (): ViewerPage =>
     fixture.debugElement.query(By.directive(ViewerPage)).componentInstance;
-  const toolbarButton = (label: string): HTMLButtonElement =>
-    root().querySelector(`.page-toolbar button[aria-label="${label}"]`)!;
+  /** The side-panel toggle, which the kit draws at the top bar's right edge. */
+  const sidePanelToggle = (): HTMLButtonElement =>
+    root().querySelector('header button[aria-label="Side panel"]')!;
   const aside = (): HTMLElement | null => root().querySelector('aside');
   const inspector = (): HTMLElement => aside()!.querySelector('app-viewer-inspector')!;
   const title = () => inspector().querySelector('h2')?.textContent?.trim();
@@ -200,7 +201,7 @@ describe('ViewerInspector', () => {
   /** Selects the channel's tile and opens the inspector beside the grid. */
   async function inspect(channel: number): Promise<void> {
     await click(tileElement(channel));
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
   }
 
   /** The tile plays with its metadata late as `LATE` says, for one stats tick. */
@@ -213,7 +214,7 @@ describe('ViewerInspector', () => {
 
   it('closes with an icon-only button that draws the kit’s close icon and is named "Close side panel"', async () => {
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
 
     const close = fixture.debugElement.query(
       By.css('app-viewer-inspector button[aria-label="Close side panel"]'),
@@ -234,7 +235,7 @@ describe('ViewerInspector', () => {
       },
     });
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
 
     expect(title()).toBe('All channels');
     expect(previewTile()).toBeNull();
@@ -310,7 +311,7 @@ describe('ViewerInspector', () => {
 
   it('has no reset-all footer while no channel holds a value', async () => {
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
 
     expect(footerButton()).toBeUndefined();
   });
@@ -318,7 +319,7 @@ describe('ViewerInspector', () => {
   it('the footer asks with "4 settings on 3 channels go back…", and only on All channels', async () => {
     storage.seed(FOUR_ON_THREE);
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
     const ask = vi.spyOn(TestBed.inject(NeatConfirm), 'ask');
 
     footerButton()!.click();
@@ -344,7 +345,7 @@ describe('ViewerInspector', () => {
   it('the footer goes with the last channel value and comes back with the next', async () => {
     storage.seed({ 'settings:channel:3': { version: 10, general: { lineWidth: 6 } } });
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
     await click(tab('General'));
     expect(footerButton()).toBeDefined();
 
@@ -362,7 +363,7 @@ describe('ViewerInspector', () => {
   it('asks in the singular for one setting on one channel', async () => {
     storage.seed({ 'settings:channel:3': { version: 10, general: { lineWidth: 6 } } });
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
 
     footerButton()!.click();
     await settleDialog();
@@ -377,7 +378,7 @@ describe('ViewerInspector', () => {
       'settings:channel:3': { version: 10, general: { lineWidth: 6, videoSyncBufferMs: 900 } },
     });
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
 
     footerButton()!.click();
     await settleDialog();
@@ -390,7 +391,7 @@ describe('ViewerInspector', () => {
   it('Cancel and Escape change nothing; the keys the page binds do not act behind the dialog', async () => {
     storage.seed(FOUR_ON_THREE);
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
     const writes = storage.writes.length;
     const opener = footerButton()!;
     opener.focus();
@@ -423,7 +424,7 @@ describe('ViewerInspector', () => {
   it('confirming reset-all clears every channel override; the footer disappears and focus goes to the heading', async () => {
     storage.seed(FOUR_ON_THREE);
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
     await click(tab('General'));
     expect(gridTile(1).settings().general.lineWidth).toBe(6);
     const opener = footerButton()!;
@@ -464,7 +465,7 @@ describe('ViewerInspector', () => {
     };
     storage.seed({ ...FOUR_ON_THREE, 'roi:global': regions, 'roi:channel:1': regions });
     await open();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
     footerButton()!.click();
     await settleDialog();
     expect(dialogText()).toContain('Regions of interest are kept.');
@@ -501,7 +502,7 @@ describe('ViewerInspector', () => {
     expect(fake.holders.get(2)).toBe(1);
     expect(fake.holders.get(3)).toBe(2);
 
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
     expect(fake.holders.get(3)).toBe(1);
     expect(fake.connections.size).toBe(connections);
   });
@@ -646,7 +647,7 @@ describe('ViewerInspector', () => {
     expect(document.activeElement).toBe(tileElement(2));
 
     // The close button does the same.
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
     await click(inspector().querySelector<HTMLElement>('button[aria-label="Close side panel"]')!);
     expect(aside()).toBeNull();
     expect(document.activeElement).toBe(tileElement(2));
@@ -654,10 +655,10 @@ describe('ViewerInspector', () => {
     // Escape on the grid still clears the selection; with none, focus goes back to the toggle.
     await press('Escape', tileElement(2));
     expect(page().selectedChannel()).toBeNull();
-    await click(toolbarButton('Side panel'));
+    await click(sidePanelToggle());
     await press('Escape', tab('Metadata'));
     expect(aside()).toBeNull();
-    expect(document.activeElement).toBe(toolbarButton('Side panel'));
+    expect(document.activeElement).toBe(sidePanelToggle());
   });
 
   describe('the ROI tab', () => {
@@ -679,7 +680,7 @@ describe('ViewerInspector', () => {
 
     it('the tabs are Metadata, ROI and General', async () => {
       await open();
-      await click(toolbarButton('Side panel'));
+      await click(sidePanelToggle());
 
       expect(
         [...inspector().querySelectorAll('[role="tab"]')].map((element) =>
@@ -701,7 +702,7 @@ describe('ViewerInspector', () => {
 
     it('with no channel playing the ROI tab previews the first displayed one, and another once it leaves the grid', async () => {
       await open();
-      await click(toolbarButton('Side panel'));
+      await click(sidePanelToggle());
       expect(previewTile()).toBeNull();
 
       // No grid tile plays: the first displayed channel.
@@ -740,7 +741,7 @@ describe('ViewerInspector', () => {
 
     it('with no channel selected the ROI tab previews the first displayed channel that plays, and keeps it while it plays', async () => {
       await open();
-      await click(toolbarButton('Side panel'));
+      await click(sidePanelToggle());
       // Hide empty is off: channel 0 is displayed but has no video.
       await setPlaying(2, true);
 
@@ -762,7 +763,7 @@ describe('ViewerInspector', () => {
 
     it('a channel picked in Draw on channel stays while it is displayed, whether it plays or not', async () => {
       await open();
-      await click(toolbarButton('Side panel'));
+      await click(sidePanelToggle());
       await setPlaying(2, true);
       await click(tab('ROI'));
 
@@ -777,7 +778,7 @@ describe('ViewerInspector', () => {
 
     it('typing the channel Draw on channel already shows pins it, whether it plays or not', async () => {
       await open();
-      await click(toolbarButton('Side panel'));
+      await click(sidePanelToggle());
       await setPlaying(2, true);
       await click(tab('ROI'));
       expect(backdropField().value).toBe('2');
@@ -791,7 +792,7 @@ describe('ViewerInspector', () => {
 
     it('leaving the ROI tab forgets the pick: ROI, Metadata, ROI derives the backdrop again', async () => {
       await open();
-      await click(toolbarButton('Side panel'));
+      await click(sidePanelToggle());
       await click(tab('ROI'));
       await enter(backdropField(), '4');
       expect(previewTile()!.source()).toBe(fake.connections.get(4));
@@ -812,7 +813,7 @@ describe('ViewerInspector', () => {
 
     it('Draw on channel switches the backdrop and refuses channels that are not displayed', async () => {
       await open();
-      await click(toolbarButton('Side panel'));
+      await click(sidePanelToggle());
       await click(tab('ROI'));
 
       await enter(backdropField(), '4');
@@ -880,7 +881,7 @@ describe('ViewerInspector', () => {
         'roi:channel:0': { version: 1, regions: own },
       });
       await open();
-      await click(toolbarButton('Side panel'));
+      await click(sidePanelToggle());
       await click(tab('ROI'));
 
       // All channels, drawn on channel 0, which has a list of its own: the editor shows the global one.
@@ -1016,7 +1017,7 @@ describe('ViewerInspector', () => {
 
     it('on All channels a polygon drawn on the backdrop is a global region', async () => {
       await open();
-      await click(toolbarButton('Side panel'));
+      await click(sidePanelToggle());
       await drawOn('Exclusion');
 
       await clickAt(0.1, 0.1);
@@ -1049,7 +1050,7 @@ describe('ViewerInspector', () => {
       beforeEach(async () => {
         storage.seed({ 'roi:global': { version: 1, regions: [INCLUSION, EXCLUSION] } });
         await open();
-        await click(toolbarButton('Side panel'));
+        await click(sidePanelToggle());
         await click(tab('ROI'));
         preview().videoBox.set(BOX);
         await settle();

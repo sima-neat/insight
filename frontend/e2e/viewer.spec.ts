@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { closeSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, Locator, Page, test } from '@playwright/test';
-import { LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { LAPTOP, pageOverflow, sidePanelToggle, TABLET, topBarSpill, VIEWPORTS } from './layout';
 import { answerTopBar } from './top-bar';
 
 // The top bar's pill reads the board on every page.
@@ -217,7 +217,7 @@ test.describe('the Viewer without vf', () => {
     await expect(tile(page, 15)).toHaveAttribute('aria-current', 'true');
     const columnsBefore = await columns(page);
 
-    await pageTools(page).getByRole('button', { name: 'Side panel' }).click();
+    await sidePanelToggle(page).click();
     await expect(page.locator('app-viewer-inspector')).toBeVisible();
     // The narrower area takes fewer columns, and the page moves to keep channel 15 in view.
     await expect.poll(() => columns(page)).toBeLessThan(columnsBefore);
@@ -254,7 +254,7 @@ test.describe('the Viewer without vf', () => {
 
     // The tile still selects, and a click in the inspector keeps the selection.
     await tile(page, 3).click();
-    await pageTools(page).getByRole('button', { name: 'Side panel' }).click();
+    await sidePanelToggle(page).click();
     await page.locator('app-viewer-inspector').click({ position: { x: 4, y: 4 } });
     await expect(tile(page, 3)).toHaveAttribute('aria-current', 'true');
   });
@@ -274,7 +274,7 @@ test.describe('the Viewer without vf', () => {
       );
     });
     await page.reload();
-    await pageTools(page).getByRole('button', { name: 'Side panel' }).click();
+    await sidePanelToggle(page).click();
     const inspector = page.locator('app-viewer-inspector');
     await inspector.getByRole('tab', { name: 'General' }).click();
 
@@ -516,7 +516,7 @@ test.describe('a deployed build with the test feed on channel 0', () => {
       timeout: 15_000,
     });
     await tile(page, 0).click();
-    await pageTools(page).getByRole('button', { name: 'Side panel' }).click();
+    await sidePanelToggle(page).click();
     const inspector = page.locator('app-viewer-inspector');
     await inspector.getByRole('tab', { name: 'ROI' }).click();
     await expect(inspector.locator('neat-video-tile')).toHaveAttribute('data-state', 'playing', {

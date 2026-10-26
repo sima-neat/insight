@@ -3,8 +3,9 @@
     <neat-icon name="upload" />
     Import…
   </button>
-  <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('media', $event)" />
 </ng-container>
+
+<neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('media', $event)" />
 
 <neat-page
   scroll="none"
