@@ -6,6 +6,7 @@ import {
   initialAuxiliarySessionSettings,
   nextAuxiliaryPreview,
   reconcileAuxiliaryPanelMode,
+  resizeAuxiliaryPanelRect,
   restoreAuxiliaryViewPreference,
   retainAuxiliaryViews,
   routeAuxiliarySettingsEvent,
@@ -13,6 +14,11 @@ import {
 
 const VALID_MODES = new Set(["compact", "collapsed", "expanded", "hidden"]);
 const MAX_CANVAS_PIXEL_RATIO = 2;
+const MIN_PANEL_SIZE = 120;
+const PANEL_MARGIN = 8;
+const PANEL_BOTTOM_MARGIN = 38;
+// Corners come last so they sit above the side strips where the two overlap.
+const RESIZE_HANDLES = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
 const drawWarnings = new Set();
 
 function preferenceKey(channelIndex) {
@@ -176,6 +182,9 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
   const [selectedId, setSelectedId] = useState(initialPreference.current.selectedId);
   const [rendererControls, setRendererControls] = useState([]);
   const [surfaceOpacity, setSurfaceOpacity] = useState(1);
+  const [panelRect, setPanelRect] = useState(null);
+  const panelRef = useRef(null);
+  const resizeRef = useRef(null);
   const modeRef = useRef(mode);
   const canvasRef = useRef(null);
   const payloadsRef = useRef(new Map());
@@ -463,7 +472,55 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     }
   };
 
+  const startResize = (handle) => (event) => {
+    const panel = panelRef.current;
+    const tile = panel?.offsetParent;
+    if (!tile) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    resizeRef.current = {
+      handle,
+      x: event.clientX,
+      y: event.clientY,
+      start: {
+        left: panel.offsetLeft,
+        top: panel.offsetTop,
+        width: panel.offsetWidth,
+        height: panel.offsetHeight,
+      },
+      tileWidth: tile.clientWidth,
+      tileHeight: tile.clientHeight,
+    };
+  };
+  const onResizeMove = (event) => {
+    const drag = resizeRef.current;
+    if (!drag) return;
+    const rect = resizeAuxiliaryPanelRect(
+      drag.start,
+      drag.handle,
+      event.clientX - drag.x,
+      event.clientY - drag.y,
+      { right: drag.tileWidth - PANEL_MARGIN, bottom: drag.tileHeight - PANEL_BOTTOM_MARGIN },
+      MIN_PANEL_SIZE,
+      PANEL_MARGIN,
+    );
+    // Percentages keep the chosen size inside the tile when the grid reflows.
+    setPanelRect({
+      left: `${(rect.left / drag.tileWidth) * 100}%`,
+      top: `${(rect.top / drag.tileHeight) * 100}%`,
+      width: `${(rect.width / drag.tileWidth) * 100}%`,
+      height: `${(rect.height / drag.tileHeight) * 100}%`,
+    });
+  };
+  const endResize = (event) => {
+    resizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   const hasViews = knownViews.length > 0;
+  const resized = mode === "compact" && panelRect != null;
   const selected = knownViews.find((view) => view.id === selectedId) ?? knownViews[0];
   const selectView = (viewId) => {
     if (selectedIdRef.current !== viewId) {
@@ -508,8 +565,9 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
 
   return (
     <div
-      className={`auxiliary-panel auxiliary-panel-${mode}${hasViews ? "" : " auxiliary-panel-empty"}`}
-      style={{ "--auxiliary-surface-opacity": surfaceOpacity }}
+      ref={panelRef}
+      className={`auxiliary-panel auxiliary-panel-${mode}${resized ? " auxiliary-panel-resized" : ""}${hasViews ? "" : " auxiliary-panel-empty"}`}
+      style={{ "--auxiliary-surface-opacity": surfaceOpacity, ...(resized ? panelRect : {}) }}
       aria-hidden={!hasViews}
       data-channel={channelIndex}
     >
@@ -584,6 +642,17 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
               <RendererControls controls={rendererControls} onControl={applyRendererControl} />
             </>
           )}
+          {mode === "compact" && RESIZE_HANDLES.map((handle) => (
+            <span
+              key={handle}
+              className={`auxiliary-resize-handle auxiliary-resize-${handle}`}
+              aria-hidden="true"
+              onPointerDown={startResize(handle)}
+              onPointerMove={onResizeMove}
+              onPointerUp={endResize}
+              onPointerCancel={endResize}
+            />
+          ))}
         </>
       )}
     </div>

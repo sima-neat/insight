@@ -71,6 +71,22 @@ export function reconcileAuxiliaryPanelMode(currentMode, settings, hasExplicitSe
     : "compact";
 }
 
+// Moves the edges named by `handle` ("n", "se", ...) by (dx, dy); the other edges stay put.
+// Rects are { left, top, width, height } in the tile's pixels; `bounds` limits the
+// right/bottom edges and `margin` the left/top edges.
+export function resizeAuxiliaryPanelRect(start, handle, dx, dy, bounds, minSize, margin) {
+  const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
+  let left = start.left;
+  let top = start.top;
+  let right = start.left + start.width;
+  let bottom = start.top + start.height;
+  if (handle.includes("w")) left = clamp(left + dx, margin, right - minSize);
+  else if (handle.includes("e")) right = clamp(right + dx, left + minSize, bounds.right);
+  if (handle.includes("n")) top = clamp(top + dy, margin, bottom - minSize);
+  else if (handle.includes("s")) bottom = clamp(bottom + dy, top + minSize, bounds.bottom);
+  return { left, top, width: right - left, height: bottom - top };
+}
+
 export function routeAuxiliarySettingsEvent(
   eventType,
   changedRenderer,
