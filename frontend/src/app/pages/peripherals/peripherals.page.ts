@@ -85,8 +85,9 @@ interface ShownDevice {
  * then is adopted, its camera selected and its mode remembered, as is one a refused Start finds
  * later (`showAdopted`); otherwise the preview this page
  * left running on the last visit (`PeripheralsSession.resume`) starts again once, while its board
- * and camera are still there. The board is scanned on every visit (`scanOnVisit`), and that
- * preview starts after the scan, which the backend would otherwise stop it for.
+ * and camera are still there. The board is scanned on every visit (`scanOnVisit`) unless a
+ * preview was running at entry, which a scan would stop; the resumed preview starts after the
+ * scan, and not when it failed.
  *
  * **Leaving** records the preview to start again, then stops it (`CameraPreview.release`). The
  * next visit waits until that stop has answered, a start still in flight included, so that it
@@ -363,16 +364,18 @@ export class PeripheralsPage {
       this.pendingResume = null;
       this.preview.adopt(running);
     }
-    const scan = board ? this.peripherals.scanOnVisit(board) : Promise.resolve();
+    // The backend stops a running preview for a scan, so a visit never scans over one: Refresh
+    // does, and stops it first.
     if (adopted) return;
-    // The backend stops a running preview for a scan, so the preview of the last visit starts
-    // once this visit's scan ended, on the snapshot it made. Until then the resume stays with the
-    // page, for the next visit if this one is left first (`pendingResume`), and a preview the
-    // user started meanwhile is theirs to keep.
-    await scan;
+    // The preview of the last visit starts once this visit's scan ended, on the snapshot it made.
+    // Until then the resume stays with the page, for the next visit if this one is left first
+    // (`pendingResume`); a preview the user started meanwhile is theirs to keep, and a failed scan
+    // leaves no snapshot to start on.
+    if (board) await this.peripherals.scanOnVisit(board);
     const resume = this.pendingResume;
     this.pendingResume = null;
-    if (resume && !this.destroyed && this.preview.state().status === 'idle') this.resume(resume);
+    if (!resume || this.destroyed || this.peripherals.scanError()) return;
+    if (this.preview.state().status === 'idle') this.resume(resume);
   }
 
   /**

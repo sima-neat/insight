@@ -101,7 +101,11 @@ export class BoardService {
 
   /** Connects to the board over SSH and reads its identity ("Check again"). */
   test(): Promise<BoardState> {
-    return this.act(this.http.post<BoardState>(`${BOARD_URL}/test`, {}));
+    // A board changed while the check was out (Select answered meanwhile) is not the one checked.
+    return this.act(
+      this.http.post<BoardState>(`${BOARD_URL}/test`, {}),
+      (state) => this.generation() === null || state.generation === this.generation(),
+    );
   }
 
   /** Trusts the host key a reflashed board presented; `fingerprint` must be the presented one. */
@@ -142,7 +146,10 @@ export class BoardService {
     if (state.target && state.status.state === 'unknown') this.test().catch(() => undefined);
   }
 
-  private async act(call: Observable<BoardState>): Promise<BoardState> {
+  private async act(
+    call: Observable<BoardState>,
+    current: (state: BoardState) => boolean = () => true,
+  ): Promise<BoardState> {
     let state: BoardState;
     try {
       state = await firstValueFrom(call.pipe(withRequestErrors()));
@@ -150,6 +157,8 @@ export class BoardService {
       await this.reload();
       throw problemOf(failure);
     }
+    // An answer about a board that is no longer the selected one is returned, not applied.
+    if (!current(state)) return state;
     // Reads still out were sent before this answer and may describe the board from before it.
     this.latest.discard();
     this.apply(state);

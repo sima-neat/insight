@@ -210,6 +210,20 @@ describe('BoardService', () => {
       expect(testRequests()).toHaveLength(0);
     });
 
+    it('a board change while the check is out wins: the slow answer for the old board is dropped', async () => {
+      const service = await started(board('sima@192.168.2.2', 1, unchecked));
+      const [check] = testRequests();
+
+      const select = service.select({ host: '192.168.2.9', port: 22, user: 'sima' });
+      http.expectOne({ method: 'POST', url: '/api/board/select' }).flush(boardB);
+      await select;
+
+      check.flush(boardA);
+      await tick();
+      expect(service.state()).toEqual(boardB);
+      expect(service.generation()).toBe(2);
+    });
+
     it('a failed check lands in the state only: the board is re-read, and nothing is toasted or thrown', async () => {
       const service = await started(board('sima@192.168.2.2', 1, unchecked));
       testRequests()[0].flush(

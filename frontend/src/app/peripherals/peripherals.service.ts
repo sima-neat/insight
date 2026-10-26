@@ -92,7 +92,7 @@ export class PeripheralsService {
    * runs joins it: the backend would coalesce a second request into the running scan anyway.
    */
   refresh(): Promise<void> {
-    return this.scanFor(this.board.generation());
+    return this.scanFor(this.board.generation(), true);
   }
 
   /**
@@ -102,21 +102,24 @@ export class PeripheralsService {
    * takes seconds and stops a running camera preview. Call it after `load()`; a call while a scan
    * of the board runs joins it (`scanFor`). Resolves when the scan ended (at once when none was
    * due), never rejecting, so that the page can start a preview only after the scan stopped any.
+   * A visit's scan is silent when it succeeds: a toast on every navigation would be noise, and
+   * the list changing says it. A failure shows in `scanError` as for Refresh.
    */
   scanOnVisit(board: BoardState): Promise<void> {
     this.noteGeneration(board.generation);
     const snapshot = this.snapshotValue();
     if (!board.target || snapshot === null) return Promise.resolve();
     if (snapshot.generation !== board.generation) return Promise.resolve();
-    return this.scanFor(board.generation);
+    return this.scanFor(board.generation, false);
   }
 
   /**
-   * Joins the running scan when it is one of `generation`; otherwise queues a scan after it. A
+   * Joins the running scan when it is one of `generation` (whatever it announces); otherwise
+   * queues a scan after it, which toasts its result when `announce`. A
    * scan started for an earlier board answers for that board only, and the backend runs one scan
    * at a time, so joining it would leave the new board unscanned.
    */
-  private scanFor(generation: number | null): Promise<void> {
+  private scanFor(generation: number | null, announce: boolean): Promise<void> {
     const running = this.running;
     if (running && running.generation === generation) return running.done;
     // With nothing running, the request goes out now, so `scanning` is set when this returns. A
@@ -126,8 +129,10 @@ export class PeripheralsService {
     // nothing about this one.
     if (running) this.scanningValue.set(Date.now());
     const started = running
-      ? running.done.then(() => (this.isPast(generation) ? undefined : this.scan(generation)))
-      : this.scan(generation);
+      ? running.done.then(() =>
+          this.isPast(generation) ? undefined : this.scan(generation, announce),
+        )
+      : this.scan(generation, announce);
     const entry: { generation: number | null; done: Promise<void> } = {
       generation,
       done: started.finally(() => {
@@ -140,7 +145,7 @@ export class PeripheralsService {
     return entry.done;
   }
 
-  private async scan(generation: number | null): Promise<void> {
+  private async scan(generation: number | null, announce: boolean): Promise<void> {
     this.scanningValue.set(Date.now());
     this.scanErrorValue.set(null);
     try {
@@ -151,7 +156,7 @@ export class PeripheralsService {
         // Reads still out were answered from the cache before this scan and would undo it.
         this.latest.discard();
         this.apply(snapshot);
-        this.toasts.status(scanCompleteMessage(snapshot));
+        if (announce) this.toasts.status(scanCompleteMessage(snapshot));
       }
     } catch (failure) {
       // A scan of a board the user has left failed for that board, typically because it changed.

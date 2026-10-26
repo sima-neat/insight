@@ -247,8 +247,26 @@ describe('PeripheralsService', () => {
     expect(refreshes()).toHaveLength(1);
   });
 
+  it('a scan of a visit is silent, and Refresh toasts its result', async () => {
+    const load = service.load();
+    http.expectOne(LOAD_URL).flush(snapshot(1, null));
+    await load;
+    service.scanOnVisit(board(1));
+    refreshes()[0].flush(snapshot(1, [item('camera', 'c1')]));
+    await tick();
+    expect(service.snapshot()?.scan_id).toBe('7:1');
+    expect(toasts.status).not.toHaveBeenCalled();
+
+    void service.refresh();
+    refreshes()[0].flush(snapshot(1, [item('camera', 'c1')]));
+    await tick();
+    expect(toasts.status).toHaveBeenCalledExactlyOnceWith(
+      'Scan complete: 1 camera, 0 microphones on sima@192.168.2.2.',
+    );
+  });
+
   // Review Focus 1: a scan can take half a minute, and the board can change meanwhile.
-  it("a scan for a board the user has left is never applied and does not use up the new board's first scan", async () => {
+  it("a scan for a board the user has left is never applied and does not hold up the new board's scan", async () => {
     boardGeneration.set(3);
     const first = service.load();
     http.expectOne(LOAD_URL).flush(snapshot(3, null));
@@ -277,9 +295,7 @@ describe('PeripheralsService', () => {
     await tick();
     expect(service.snapshot()?.generation).toBe(4);
     expect(service.snapshot()?.scan_id).toBe('7:4');
-    expect(toasts.status).toHaveBeenCalledExactlyOnceWith(
-      'Scan complete: 1 camera, 0 microphones on sima@192.168.2.9.',
-    );
+    expect(toasts.status).not.toHaveBeenCalled();
   });
 
   it("a scan failure is the scanned board's: not reported for another, and gone once another board's snapshot is in", async () => {
@@ -345,9 +361,7 @@ describe('PeripheralsService', () => {
     refreshes()[0].flush(snapshot(1, [item('microphone', 'm1')]));
     await tick();
     expect(service.snapshot()?.scan_id).toBe('7:1');
-    expect(toasts.status).toHaveBeenCalledExactlyOnceWith(
-      'Scan complete: 0 cameras, 1 microphone on sima@192.168.2.2.',
-    );
+    expect(toasts.status).not.toHaveBeenCalled();
   });
 
   it('a scan queued for a board the user has left again is skipped: two switches scan the last board once', async () => {
@@ -382,7 +396,7 @@ describe('PeripheralsService', () => {
     expect(refreshes()).toHaveLength(0);
     expect(service.snapshot()?.scan_id).toBe('7:5');
     expect(service.scanError()).toBeNull();
-    expect(toasts.status).toHaveBeenCalledTimes(1);
+    expect(toasts.status).not.toHaveBeenCalled();
   });
 
   // A board change waits for the scan running on the board (the backend's board lock), so a scan

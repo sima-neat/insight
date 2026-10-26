@@ -82,12 +82,10 @@ for (const { name, size } of VIEWPORTS) {
     await page.setViewportSize(size);
     await page.goto('/peripherals');
 
-    // The page scans the board as it opens; then the list is grouped, with a muted heading for
-    // the kind that has no devices.
-    await expect(
-      toast(page, 'Scan complete: 2 cameras, 1 microphone on sima@192.168.100.200.'),
-    ).toBeVisible();
+    // The page scans the board as it opens, without a toast; then the list is grouped, with a
+    // muted heading for the kind that has no devices.
     await expect(devices(page).getByRole('group', { name: 'Cameras · 2' })).toBeVisible();
+    await expect(toast(page, 'Scan complete')).toHaveCount(0);
     await expect(devices(page).getByRole('group', { name: 'Microphones · 1' })).toBeVisible();
     await expect(devices(page).getByRole('group', { name: 'LiDAR · none found' })).toBeVisible();
     // Each row: name, connection and state chip. Beside the side panel on a tablet the list is
@@ -271,6 +269,24 @@ for (const { name, size } of VIEWPORTS) {
     await expect(devices(page)).toBeFocused();
   });
 }
+
+// A scan makes the backend stop the running preview, so a visit never scans over one; Refresh does.
+test('a visit does not scan while a preview is running, and shows it', async ({ page }) => {
+  const backend = new FakePeripheralsBackend();
+  await backend.install(page);
+  await page.goto('/peripherals');
+  await expect(devices(page).getByRole('group', { name: 'Cameras · 2' })).toBeVisible();
+  expect(backend.posted(REFRESH_URL)).toHaveLength(1);
+
+  // Another tab (or a client of the API) starts a preview while this tab is on another page.
+  await rail(page, 'Streaming').click();
+  await expect(page).toHaveTitle('Neat Insight · Streaming');
+  backend.startElsewhere(C270, { format: 'MJPG', width: 1280, height: 720, fps: 30 }, true);
+  await rail(page, 'Peripherals').click();
+  await expect(device(page, C270.name)).toContainText('Previewing');
+  await expect(panelTitle(page)).toHaveText(C270.name);
+  expect(backend.posted(REFRESH_URL)).toHaveLength(1);
+});
 
 // Final review I-1 (Review Focus 3): a Start refused because another camera's preview runs takes
 // that preview up, its camera selected, rather than stopping it or ending idle.

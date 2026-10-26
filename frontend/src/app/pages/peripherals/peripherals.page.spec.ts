@@ -160,7 +160,6 @@ describe('PeripheralsPage', () => {
     await settle();
     answer('GET', BOARD_URL, devkit);
     await settle();
-    toasts.status.mockClear();
   }
 
   async function leave(): Promise<void> {
@@ -355,6 +354,23 @@ describe('PeripheralsPage', () => {
     expect(posts(REFRESH_URL)).toHaveLength(1);
   });
 
+  it("a visit's scan is silent when it succeeds, and says so when it fails", async () => {
+    await visit({ snapshot: peripheralSnapshot(null) });
+    await endScan(peripheralSnapshot([imx477]));
+    expect(toasts.status).not.toHaveBeenCalled();
+    expect(toasts.error).not.toHaveBeenCalled();
+    expect(rowOf(imx477.name)).toBeDefined();
+
+    await leave();
+    await visit();
+    posts(REFRESH_URL)[0].flush(unreachable, badGateway);
+    await settle();
+    answer('GET', BOARD_URL, devkit);
+    await settle();
+    expect(calloutHeadings()).toContain('Scan failed: Could not connect to sima@192.168.1.20.');
+    expect(toasts.status).not.toHaveBeenCalled();
+  });
+
   it('scans nothing on a visit without a board target', async () => {
     await visit({ board: boardState({ generation: 3 }) });
     expect(posts(REFRESH_URL)).toHaveLength(0);
@@ -384,6 +400,22 @@ describe('PeripheralsPage', () => {
     expect(chipOf(imx477.name)).toBe('Previewing');
     await leave();
     answer('POST', stopUrl(live30.id), { session: null });
+  });
+
+  it("the preview the last visit left running is not started after a visit's scan that failed", async () => {
+    TestBed.inject(PeripheralsSession).resume = {
+      cameraId: imx477.id,
+      mode: mode30,
+      generation: 3,
+    };
+    await visit({ snapshot: peripheralSnapshot([usb, imx477]) });
+    posts(REFRESH_URL)[0].flush(unreachable, badGateway);
+    await settle();
+    answer('GET', BOARD_URL, devkit);
+    await settle();
+    expect(calloutHeadings()).toContain('Scan failed: Could not connect to sima@192.168.1.20.');
+    expect(posts(START_URL)).toHaveLength(0);
+    expect(pageInjector().get(CameraPreview).state().status).toBe('idle');
   });
 
   it("a preview the user starts during the visit's scan is not started again afterwards", async () => {
@@ -607,16 +639,19 @@ describe('PeripheralsPage', () => {
     expect(pageInjector().get(CameraPreview).state().status).toBe('live');
     expect(posts(START_URL)).toHaveLength(0);
     expect(TestBed.inject(PeripheralsSession).resume).toBeNull();
+    // The scan would make the backend stop the preview just taken up: a visit never does that.
+    expect(posts(REFRESH_URL)).toHaveLength(0);
   });
 
   it('a preview running at entry opens the side panel it shows in, rather than being stopped', async () => {
     storage.values.set('neat-insight:peripherals:aside', 'closed');
     await visit({ preview: live30 });
-    expect(
-      aside()?.querySelector('app-camera-panel app-preview-frame img')?.getAttribute('src'),
-    ).toBe(live30.stream_url);
+    expect(aside()?.querySelector('app-camera-panel app-preview-frame img')?.getAttribute('src')).toBe(
+      live30.stream_url,
+    );
     expect(storage.values.get('neat-insight:peripherals:aside')).toBe('open');
     expect(posts(stopUrl(live30.id))).toHaveLength(0);
+    expect(posts(REFRESH_URL)).toHaveLength(0);
     expect(pageInjector().get(CameraPreview).state().status).toBe('live');
     await leave();
     answer('POST', stopUrl(live30.id), { session: null });
