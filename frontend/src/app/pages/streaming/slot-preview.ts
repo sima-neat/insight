@@ -20,7 +20,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { NeatButton } from '@sima/neat-ui';
+import { NeatButton, NeatLiveDot } from '@sima/neat-ui';
 import { NeatProgress } from '@sima/neat-ui/progress';
 import {
   catchError,
@@ -54,6 +54,9 @@ export const PREVIEW_RETRIES = 3;
 export const PREVIEW_RETRY_MS = 1000;
 /** How long an image must stay up after its first frame to count as a stream that works. */
 export const PREVIEW_STABLE_MS = 5000;
+
+/** The badge ids of the previews on the page, so each frame's description names its own. */
+let badgeIds = 0;
 
 /** Why the live preview failed: the server's cap on previews open at once (429), or anything else. */
 export type PreviewFailure = 'busy' | 'failed';
@@ -110,10 +113,17 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
  * stream that fails, before its first frame or after some, for a reason other than the cap on
  * previews, is asked for again by itself a few times before it is reported (`PREVIEW_RETRIES`),
  * while "Connecting…" stays up.
+ *
+ * A badge in the frame's top left says what the picture is (spec, "Top bar, rail and preview
+ * badge"): "Live" whenever the slot is live, whatever its source and however its preview is doing
+ * (connecting, retrying or failed: the slot is live, and the message says the rest), and otherwise
+ * what is shown instead: "File preview", "Camera preview", or "Not live" for a pull that waits or
+ * fails. A frame that shows nothing else has none. The badge text is the frame's accessible
+ * description.
  */
 @Component({
   selector: 'app-slot-preview',
-  imports: [EndsStream, NeatButton, NeatProgress, PreviewFrame],
+  imports: [EndsStream, NeatButton, NeatLiveDot, NeatProgress, PreviewFrame],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './slot-preview.html',
   styleUrl: './slot-preview.css',
@@ -208,6 +218,30 @@ export class SlotPreview {
     if (slot.type === 'webcam') return 'Start this source to preview the live webcam.';
     return slot.file ? '' : 'Assign a media file to preview.';
   });
+
+  /**
+   * What the picture is, from the slot and not from the preview: `isLive` is the one rule for
+   * "Live" (a stream that is connecting or failing is the slot's problem to show, not a reason
+   * to stop calling the slot live), so the badge can never claim it for a slot that is not.
+   */
+  protected readonly badge = computed(
+    (): { readonly label: string; readonly live: boolean } | null => {
+      const slot = this.slot();
+      if (isLive(slot)) return { label: 'Live', live: true };
+      if (this.file()) return { label: 'File preview', live: false };
+      if (this.camera()) return { label: 'Camera preview', live: false };
+      if (slot.state === 'pulled') return { label: 'Not live', live: false };
+      return null;
+    },
+  );
+  /** Whether the frame shows a picture behind the badge, which then reads on a dark pill. */
+  protected readonly onPicture = computed(
+    () =>
+      this.file() !== null ||
+      this.camera() !== null ||
+      (this.liveImages().length > 0 && !this.connecting()),
+  );
+  protected readonly badgeId = `slot-preview-badge-${badgeIds++}`;
 
   private readonly liveImage = viewChild<ElementRef<HTMLImageElement>>('live');
   private readonly cameraVideo = viewChild<ElementRef<HTMLVideoElement>>('camera');

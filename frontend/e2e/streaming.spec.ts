@@ -86,7 +86,13 @@ SLOTS[6] = slot(7, {
   pull: pull({ status: 'auth_failed', error: 'The camera rejected the username or password' }),
 });
 SLOTS[7] = slot(8, { state: 'pulled', codec: 'none', pull: pull({ status: 'connecting' }) });
-SLOTS[8] = slot(9, { file: 'idle.mp4', codec: 'h264', transport: 'rtsp', native_fps: 30 });
+SLOTS[8] = slot(9, {
+  file: 'idle.mp4',
+  codec: 'h264',
+  transport: 'rtsp',
+  native_fps: 30,
+  allowed_transports: ['rtsp'],
+});
 
 /** What the server knows of a file once it is assigned: the codec probe's result and its rate. */
 const PROBED = {
@@ -441,6 +447,40 @@ test.describe('Streaming with mocked slots', () => {
     await row(page, 'src1').click();
     await expect(panel(page).getByRole('img', { name: 'Live preview of src1' })).toBeVisible();
     await expect(panel(page)).not.toContainText('Connecting to src1');
+  });
+
+  test('the preview’s badge says what each kind of slot shows, through a start and a stop', async ({
+    page,
+  }) => {
+    await withMockedSlots(page);
+    await page.setViewportSize(LAPTOP);
+    await page.goto('/streaming');
+    await expect(rows(page)).toHaveCount(48);
+
+    const preview = (name: string) =>
+      panel(page).getByRole('group', { name: `Preview of ${name}` });
+
+    // Live whatever the source: a playing file, an external publisher and a pull that receives.
+    for (const name of ['src1', 'src4', 'src5']) {
+      await row(page, name).click();
+      await expect(preview(name)).toHaveAccessibleDescription('Live');
+    }
+    // A pull that waits or fails is not live, over its waiting text.
+    for (const name of ['src6', 'src7', 'src8']) {
+      await row(page, name).click();
+      await expect(preview(name)).toHaveAccessibleDescription('Not live');
+    }
+    // Nothing to show, nothing to say.
+    await row(page, 'src3').click();
+    await expect(preview('src3')).not.toHaveAccessibleDescription(/\S/);
+
+    // A stopped file is its file; started it is live, and stopped it is the file again.
+    await row(page, 'src9').click();
+    await expect(preview('src9')).toHaveAccessibleDescription('File preview');
+    await panel(page).getByRole('button', { name: 'Start', exact: true }).click();
+    await expect(preview('src9')).toHaveAccessibleDescription('Live');
+    await panel(page).getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(preview('src9')).toHaveAccessibleDescription('File preview');
   });
 
   test('the side panel keeps the width it was dragged to across a reload, and ArrowLeft widens it', async ({

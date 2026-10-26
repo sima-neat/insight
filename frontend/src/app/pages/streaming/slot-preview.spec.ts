@@ -87,6 +87,8 @@ describe('SlotPreview', () => {
   const root = (): HTMLElement => fixture.nativeElement;
   const text = () => root().textContent!.replace(/\s+/g, ' ').trim();
   const image = () => root().querySelector('img');
+  /** What the frame says where there is nothing to show (its badge is separate). */
+  const message = () => root().querySelector('.message')?.textContent?.replace(/\s+/g, ' ').trim();
   const video = () => root().querySelector('video');
   const button = (label: string) =>
     [...root().querySelectorAll('button')].find((b) => b.textContent?.trim() === label)!;
@@ -479,7 +481,7 @@ describe('SlotPreview', () => {
       }),
     );
     await fixture.whenStable();
-    expect(text()).toBe('Waiting for the camera… (connection refused)');
+    expect(message()).toBe('Waiting for the camera… (connection refused)');
 
     host.slot.set(
       slot(1, {
@@ -491,7 +493,7 @@ describe('SlotPreview', () => {
       }),
     );
     await fixture.whenStable();
-    expect(text()).toBe('The camera rejected the username or password');
+    expect(message()).toBe('The camera rejected the username or password');
     expect(image()).toBeNull();
   });
 
@@ -562,6 +564,218 @@ describe('SlotPreview', () => {
     host.shown.set(false);
     await fixture.whenStable();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  describe('badge', () => {
+    const badge = () => root().querySelector<HTMLElement>('.badge');
+    const badgeText = () => badge()?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
+    /** A live badge has the kit's pulsing dot; any other has the grey one. */
+    const liveDot = () => badge()?.querySelector('neat-live-dot .beat') ?? null;
+    const greyDot = () => badge()?.querySelector('.idle') ?? null;
+
+    function expectLive(): void {
+      expect(badgeText()).toBe('Live');
+      expect(liveDot()).not.toBeNull();
+      expect(greyDot()).toBeNull();
+    }
+
+    function expectNotLive(label: string): void {
+      expect(badgeText()).toBe(label);
+      expect(liveDot()).toBeNull();
+      expect(greyDot()).not.toBeNull();
+    }
+
+    it('says File preview with a grey dot for a stopped file slot, in place of a caption', async () => {
+      await show(slot(1, { file: 'people/walk 1.mp4', codec: 'h264' }));
+      expectNotLive('File preview');
+      expect(root().querySelector('.caption')).toBeNull();
+      expect(text().match(/File preview/g)).toHaveLength(1);
+    });
+
+    it('says Live when the file slot starts and File preview again when it stops', async () => {
+      await show(slot(1, { file: 'cars.mp4', codec: 'h264' }));
+      expectNotLive('File preview');
+
+      host.slot.set(slot(1, { file: 'cars.mp4', codec: 'h264', state: 'playing' }));
+      await fixture.whenStable();
+      expectLive();
+
+      host.slot.set(slot(1, { file: 'cars.mp4', codec: 'h264' }));
+      await fixture.whenStable();
+      expectNotLive('File preview');
+    });
+
+    it('says Live for a publisher that holds the slot', async () => {
+      await show(slot(2, { state: 'external' }));
+      expectLive();
+    });
+
+    it('says Live on a slot that is connecting, retrying or whose preview failed: the slot is live', async () => {
+      await show(slot(1, { state: 'playing', file: 'cars.mp4', codec: 'h264' }));
+      expect(text()).toContain('Connecting to src1…');
+      expectLive();
+
+      // A failed attempt waits to be tried again, still connecting.
+      await failEarly();
+      expect(text()).toContain('Connecting to src1…');
+      expectLive();
+
+      // Out of retries: the message and Retry, the slot still live.
+      await waitForRetry();
+      await retriesThrough(PREVIEW_RETRIES - 1);
+      await expectGivesUp();
+      expectLive();
+
+      // The server's cap on previews says the same.
+      host.slot.set(slot(2, { state: 'playing', file: 'cars.mp4', codec: 'h264' }));
+      await fixture.whenStable();
+      await failEarly((probe) =>
+        probe.flush({ error: 'Too many previews' }, { status: 429, statusText: 'Too Many' }),
+      );
+      expect(text()).toContain('Preview unavailable: too many previews open');
+      expectLive();
+    });
+
+    it('says Camera preview over the local camera and nothing once it is gone', async () => {
+      const stream = {} as MediaStream;
+      await show(slot(3, { type: 'webcam' }), stream);
+      expect(video()).not.toBeNull();
+      expectNotLive('Camera preview');
+
+      host.stream.set(null);
+      await fixture.whenStable();
+      expect(text()).toBe('Start this source to preview the live webcam.');
+      expect(badge()).toBeNull();
+    });
+
+    it('follows a webcam from camera preview to live, through a camera swap, and back', async () => {
+      const stream = {} as MediaStream;
+      await show(slot(3, { type: 'webcam' }), stream);
+      expectNotLive('Camera preview');
+
+      host.slot.set(slot(3, { type: 'webcam', state: 'playing' }));
+      await fixture.whenStable();
+      expectLive();
+
+      // A camera swap of a live slot is a new publisher session; the slot never stops being live.
+      host.slot.set(
+        slot(3, {
+          type: 'webcam',
+          state: 'external',
+          external: { since: '2026-10-26T09:00:00Z' } as Slot['external'],
+        }),
+      );
+      await fixture.whenStable();
+      expectLive();
+
+      host.slot.set(slot(3, { type: 'webcam' }));
+      await fixture.whenStable();
+      expectNotLive('Camera preview');
+    });
+
+    it('has no badge where the frame shows nothing else', async () => {
+      await show(slot(1));
+      expect(text()).toBe('Assign a media file to preview.');
+      expect(badge()).toBeNull();
+
+      host.slot.set(slot(1, { type: 'webcam' }));
+      await fixture.whenStable();
+      expect(badge()).toBeNull();
+    });
+
+    it('says Not live over the waiting text of a pull that waits or fails, and Live when it pulls', async () => {
+      await show(slot(2, { state: 'pulled', pull: pull({ status: 'connecting', since: null }) }));
+      expectNotLive('Not live');
+      expect(text()).toContain('Waiting for the camera…');
+
+      host.slot.set(
+        slot(2, {
+          state: 'pulled',
+          pull: pull({ status: 'unreachable', error: 'connection refused', since: null }),
+        }),
+      );
+      await fixture.whenStable();
+      expectNotLive('Not live');
+
+      host.slot.set(
+        slot(2, {
+          state: 'pulled',
+          pull: pull({ status: 'auth_failed', error: 'Wrong password' }),
+        }),
+      );
+      await fixture.whenStable();
+      expectNotLive('Not live');
+      expect(text()).toContain('Wrong password');
+    });
+
+    it('follows a pull as it goes live and drops', async () => {
+      await show(slot(2, { state: 'pulled', pull: pull({ status: 'connecting', since: null }) }));
+      expectNotLive('Not live');
+      expect(image()).toBeNull();
+
+      host.slot.set(slot(2, { state: 'pulled', pull: pull() }));
+      await fixture.whenStable();
+      expectLive();
+      expect(image()).not.toBeNull();
+
+      host.slot.set(
+        slot(2, { state: 'pulled', pull: pull({ status: 'unreachable', error: 'timeout' }) }),
+      );
+      await fixture.whenStable();
+      expectNotLive('Not live');
+      expect(image()).toBeNull();
+
+      host.slot.set(slot(2, { state: 'pulled', pull: pull({ since: '2026-10-26T09:00:00Z' }) }));
+      await fixture.whenStable();
+      expectLive();
+    });
+
+    it('is a dark pill over a picture and a muted one over an empty frame', async () => {
+      const onPicture = () => badge()!.classList.contains('on-picture');
+
+      await show(slot(1, { file: 'cars.mp4', codec: 'h264' }));
+      expect(onPicture()).toBe(true);
+
+      // A live slot has no picture until its first frame.
+      host.slot.set(slot(1, { state: 'playing', file: 'cars.mp4', codec: 'h264' }));
+      await fixture.whenStable();
+      expect(onPicture()).toBe(false);
+      decodeFirstFrame(image()!);
+      vi.advanceTimersByTime(100);
+      await fixture.whenStable();
+      expect(onPicture()).toBe(true);
+
+      host.slot.set(
+        slot(2, { state: 'pulled', pull: pull({ status: 'unreachable', since: null }) }),
+      );
+      await fixture.whenStable();
+      expect(onPicture()).toBe(false);
+
+      host.slot.set(slot(3, { type: 'webcam' }));
+      host.stream.set({} as MediaStream);
+      await fixture.whenStable();
+      expect(onPicture()).toBe(true);
+    });
+
+    it('is part of the frame’s accessible description, which a changed badge keeps up with', async () => {
+      await show(slot(1, { file: 'cars.mp4', codec: 'h264' }));
+      const frame = root().querySelector('app-preview-frame')!;
+      const described = () => {
+        const id = frame.getAttribute('aria-describedby');
+        return id === null ? null : root().querySelector(`#${id}`)?.textContent?.trim();
+      };
+      expect(frame.getAttribute('role')).toBe('group');
+      expect(frame.getAttribute('aria-label')).toBe('Preview of src1');
+      expect(described()).toBe('File preview');
+
+      host.slot.set(slot(1, { state: 'playing', file: 'cars.mp4', codec: 'h264' }));
+      await fixture.whenStable();
+      expect(described()).toBe('Live');
+
+      host.slot.set(slot(1));
+      await fixture.whenStable();
+      expect(frame.hasAttribute('aria-describedby')).toBe(false);
+    });
   });
 });
 

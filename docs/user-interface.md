@@ -85,6 +85,8 @@ This view is useful when you need repeatable input streams for an object detecti
 
 The Streaming Sources view lets you assign media files to source slots, start or stop streams, copy the active stream URL, and preview the selected source before wiring it into an application.
 
+A badge in the top left corner of the preview says what you are looking at. **Live** with a pulsing dot means the slot is live, whatever its source (a file Insight streams, a webcam, an external publisher, a pulled stream), and it stays while the preview connects, retries or fails: the message in the frame then says what is wrong with the preview, not with the stream. When the slot is not live, a grey dot and a label say what the frame shows instead: **File preview** for the file of a stopped slot, **Camera preview** for your local camera before the webcam streams, and **Not live** over the waiting text of a pulled stream that has not connected yet or has failed. A frame that shows nothing else has no badge.
+
 ### Use a webcam as a source
 
 A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first.
@@ -96,7 +98,7 @@ A webcam attached to the computer running your browser can be used as a live sou
 
 The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
 
-The preview beside the source list shows your local camera feed while capture is active. It is not the video the board received, and it does not show the delay that a receiving application sees; if publishing fails, capture stops and the preview clears.
+The preview beside the source list shows your local camera feed while capture is active. It is not the video the board received, and it does not show the delay that a receiving application sees; if publishing fails, capture stops and the preview clears. Its badge says **Camera preview** until the slot is live, and then **Live**, when the preview switches to the stream the board received.
 
 Selecting **Stop**, unplugging the camera, or closing the browser tab ends the stream and returns the slot to `Idle`. **Stop All**, **Reset** and **Auto Assign** also release every webcam, because each of them takes those slots away: Reset and Auto Assign clear the camera selection as well, so pick the camera again afterwards. The browser tab must stay open while the webcam is publishing: it is the component sending video to Insight. For the same reason, a webcam source is never restored as `Live` after Insight restarts — reselect the camera and start it again.
 

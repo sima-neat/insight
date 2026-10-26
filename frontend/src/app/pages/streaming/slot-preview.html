@@ -1,4 +1,9 @@
-<app-preview-frame [file]="file()">
+<app-preview-frame
+  role="group"
+  [attr.aria-label]="'Preview of src' + slot().index"
+  [attr.aria-describedby]="badge() ? badgeId : null"
+  [file]="file()"
+>
   @for (image of liveImages(); track image.src) {
     <img
       #live
@@ -35,7 +40,14 @@
       <span>Connecting to src{{ slot().index }}…</span>
     }
   </div>
+  @if (badge(); as badge) {
+    <span class="badge" [id]="badgeId" [class.on-picture]="onPicture()">
+      @if (badge.live) {
+        <neat-live-dot pulse />
+      } @else {
+        <span class="idle" aria-hidden="true"></span>
+      }
+      {{ badge.label }}
+    </span>
+  }
 </app-preview-frame>
-@if (file()) {
-  <p class="caption">File preview</p>
-}
