@@ -100,15 +100,7 @@ The preview beside the source list shows your local camera feed while capture is
 
 Selecting **Stop**, unplugging the camera, or closing the browser tab ends the stream and returns the slot to `Idle`. **Stop All**, **Reset** and **Auto Assign** also release every webcam, because each of them takes those slots away: Reset and Auto Assign clear the camera selection as well, so pick the camera again afterwards. The browser tab must stay open while the webcam is publishing: it is the component sending video to Insight. For the same reason, a webcam source is never restored as `Live` after Insight restarts — reselect the camera and start it again.
 
-Reloading the page is different: the tab remembers which camera each slot used and whether it was
-sending. After a reload it assigns those cameras again and starts again what was sending, provided
-camera access is still allowed, the camera is still connected, and the slot is still a stopped
-webcam source that nothing else publishes to. Right after a reload the board may still show the slot
-live, because it has not yet noticed the old browser session end; the tab then waits for that, so a
-resume may take up to about 25 seconds. Acting on the slot meanwhile (Stop, Stop All, Reset, Auto
-Assign, a file, another camera or source) ends the wait and is not overridden. The row says **Starting…**
-until the stream is confirmed. Other tabs do not share what a tab remembers, and reopening a closed
-tab or returning to Insight through the browser's history starts no camera.
+Reloading the page ends the stream as well, and the tab forgets its cameras: the slot stays a webcam source, but has no camera until you pick one again.
 
 If starting a webcam fails, the message names the cause:
 

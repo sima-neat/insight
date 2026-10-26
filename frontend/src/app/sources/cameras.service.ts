@@ -19,7 +19,6 @@ import {
   type Camera,
   type DisconnectWatcher,
 } from './webcam-publishing';
-import { readResume, writeResume, type ResumeEntry } from './webcam-resume';
 
 /**
  * Where the browser's permission to use cameras stands, as far as this tab has found out.
@@ -33,43 +32,6 @@ const NO_CAMERA_TEXT = 'Select a webcam for this source before starting it.';
 const NO_PUBLISH_URL_TEXT = 'No publish URL for this source; reassign the webcam and try again.';
 /** What a slot's camera is called when the camera is gone from the list by the time it is assigned. */
 const UNKNOWN_CAMERA_LABEL = 'Webcam';
-
-/**
- * How often a resume reads the slots again while the server still shows a slot live, and for how
- * long it does. After a reload MediaMTX keeps the old WHIP session for a few seconds, and the
- * server demotes the slot to stopped only on a read after the path is gone. MediaMTX holds the
- * old path for up to 15-20 s, so 25 s covers that with room to spare, and a slot still live after
- * it is not ours.
- */
-const RESUME_POLL_MS = 1000;
-const RESUME_WAIT_MS = 25000;
-
-/** A slot and the camera this tab remembers for it. */
-type RememberedWebcam = [slot: number, entry: ResumeEntry];
-
-/** What a resume does with one remembered slot, given the slots as last read. */
-type ResumeVerdict =
-  /** Put the camera back (and publish it, if it was sending). */
-  | 'start'
-  /** The slot still reads live: the old browser session may yet end. */
-  | 'wait'
-  /** Not ours any more (taken, gone, its camera unplugged): forget the entry. */
-  | 'drop'
-  /** The user acted on the slot, so the entry now says what they want: leave it. */
-  | 'leave';
-
-/** Resolves after `ms`, or at once when `signal` aborts, so a wait never outlives its owner. */
-function pause(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', done);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    signal.addEventListener('abort', done);
-  });
-}
 
 /** A webcam this tab publishes to a slot: everything that has to be closed to end it. */
 interface WebcamSession {
@@ -115,14 +77,6 @@ function releaseClaim(session: WebcamSession | null | undefined): PublisherRelea
  *   send an unbound stop, which the server carries out by kicking whichever publisher holds the
  *   slot, perhaps a replacement another tab just started.
  *
- * **After a reload.** This tab remembers, in `sessionStorage` (`webcam-resume.ts`), which camera
- * each slot used and whether it was sending. The entry follows the slot's camera: written when a
- * camera is assigned, `sending` once a publish is confirmed live, not sending when the publish
- * ends, gone when the camera is cleared. `pagehide` writes nothing: the reload has to find the
- * camera still sending. `resume()` then puts back only what this tab had running (see there).
- * Any other load (a restored tab, a return through history) forgets the entries at start-up
- * (`resumeWebcams` in `app.config.ts`), since the user ended those cameras by leaving.
- *
  * **Errors.** An action the user takes rejects with a message to show. A session that ends on its
  * own (a lost connection, a removed camera) has no action to reject, so its failures are an error
  * toast. The slots are fetched again after each change, as `SlotsService` does for its own.
@@ -152,8 +106,7 @@ export class CamerasService {
   private readonly assignmentsState = signal<ReadonlyMap<number, Camera>>(new Map());
   /**
    * The camera each slot is set to publish (picked with `assign`). Only this tab knows it: after a
-   * reload `resume()` puts back the cameras this tab remembers; a slot it did not, has none until
-   * one is picked again.
+   * reload a webcam slot has no camera until one is picked again.
    */
   readonly assignments = this.assignmentsState.asReadonly();
 
@@ -171,28 +124,15 @@ export class CamerasService {
    */
   readonly anyChanging = computed(() => this.changeCounts().size > 0);
 
-  private readonly publishingState = signal<ReadonlySet<number>>(new Set());
-  /**
-   * Slots whose publish is in flight, from opening the camera to the server's confirmation (up to
-   * 20 s): the Streaming page says Starting… for them, as for a start it made, since a resume
-   * after a reload publishes without one.
-   */
-  readonly publishingSlots = this.publishingState.asReadonly();
-
   private readonly sessions = new Map<number, WebcamSession>();
   private readonly generations = new Map<number, number>();
   private readonly latestListing = new LatestOnly();
-  /** Aborted when the service is destroyed: ends a resume that is waiting for the slots. */
-  private readonly lifetime = new AbortController();
 
   constructor() {
     if (!this.media.canCapture) return;
     const destroyRef = inject(DestroyRef);
-    destroyRef.onDestroy(() => this.lifetime.abort());
 
-    // The first listing says which cameras the browser lets this page use, which is what a resume
-    // needs to know; later device changes only refresh the list.
-    void this.refreshCameras().then(() => this.resume());
+    void this.refreshCameras();
     destroyRef.onDestroy(this.media.onDeviceChange(() => void this.refreshCameras()));
 
     // A reload or close does not run any teardown, and MediaMTX would hold the path another 15-20 s,
@@ -313,21 +253,7 @@ export class CamerasService {
     const whipUrl = this.slots.slots()?.find((s) => s.index === slot)?.urls.whip;
     if (!whipUrl) throw new Error(NO_PUBLISH_URL_TEXT);
 
-    this.setPublishing(slot, true);
-    try {
-      await this.whileChanging(slot, () => this.start(slot, camera, whipUrl));
-    } finally {
-      this.setPublishing(slot, false);
-    }
-  }
-
-  private setPublishing(slot: number, publishing: boolean): void {
-    this.publishingState.update((all) => {
-      const next = new Set(all);
-      if (publishing) next.add(slot);
-      else next.delete(slot);
-      return next;
-    });
+    await this.whileChanging(slot, () => this.start(slot, camera, whipUrl));
   }
 
   /**
@@ -337,10 +263,6 @@ export class CamerasService {
    * assigned still. Rejects with the server's message; this tab's session is over either way.
    */
   async release(slot: number): Promise<void> {
-    // After a reload the panel offers Stop while a resume still waits for the slot: the entry it
-    // waits on must say the user stopped, or its next read would publish behind the stop.
-    const entry = readResume().get(slot);
-    if (entry) this.rememberStopped(slot, entry);
     await this.stopBound(slot, this.sessions.get(slot) ?? null);
   }
 
@@ -364,145 +286,8 @@ export class CamerasService {
     // every slot that has ever started one: a stale generation is harmless, a missed one is not.
     for (const slot of this.generations.keys()) this.invalidate(slot);
     this.closeAllSessions();
-    // Also the entries a resume has not put back yet: it must not start a camera after a stop.
-    for (const [slot, entry] of readResume()) this.rememberStopped(slot, entry);
-    if (clearAssignments) {
-      this.assignmentsState.set(new Map());
-      // Also what a resume has not put back yet: the slots are file slots again.
-      for (const slot of readResume().keys()) writeResume(slot, null);
-    }
+    if (clearAssignments) this.assignmentsState.set(new Map());
     return claims;
-  }
-
-  /**
-   * Puts back the webcams this tab had before it was reloaded, once, after the first camera
-   * listing. It starts a camera only when the user had it running in this tab and nothing else has
-   * the slot, so it never fights another tab or publisher for one:
-   * - an entry resumes only when the camera is in the list (which holds ids only once the browser
-   *   granted permission, so no prompt appears here) and the slot, as the server reports it, is a
-   *   webcam that is stopped: not held by an external publisher or a pull.
-   * - a slot that reads live is waited for: the server keeps a reloaded tab's slot live until it
-   *   notices the old WHIP session gone, which takes MediaMTX up to 15-20 s. The slots are read
-   *   again every `RESUME_POLL_MS` (one read for all the slots waited for) for up to
-   *   `RESUME_WAIT_MS` (25 s); a slot still live after that is someone else's, and its entry goes.
-   *   The first read failing ends the resume (no word from the server at all); a later one
-   *   failing is tried again at the next tick.
-   * - the camera is assigned locally (the server already holds the slot as a webcam) and, if it
-   *   was sending, published.
-   * An entry that does not qualify, or whose camera fails to start, is dropped, and a failure is
-   * toasted as it happens (each distinct message once). A slot the user acted on meanwhile (Stop,
-   * Stop all, Reset, Auto assign, a file or another camera, the source switch) is theirs: left
-   * alone, and the wait for it ends. So does the whole wait when the service is destroyed. Never
-   * rejects.
-   */
-  async resume(): Promise<void> {
-    const { signal } = this.lifetime;
-    let waiting: RememberedWebcam[] = [...readResume()];
-    if (waiting.length === 0) return;
-    const deadline = Date.now() + RESUME_WAIT_MS;
-    const shown = new Set<string>();
-    const starts: Promise<void>[] = [];
-
-    for (let firstRead = true; waiting.length > 0; firstRead = false) {
-      let read = true;
-      try {
-        await this.slots.refresh();
-      } catch {
-        // Without the server's word at all nothing may be started, and nothing says when it will
-        // answer, so the entries go rather than wait. No toast: the page already shows the server
-        // unreachable. Once it has answered, a failed read is a blip: the slots are read again
-        // at the next tick, until the deadline.
-        if (firstRead) {
-          this.forgetUnlessActed(waiting);
-          break;
-        }
-        read = false;
-      }
-      if (signal.aborted) break;
-
-      if (read) {
-        // Judged and started in one synchronous pass, so nothing can change a slot in between.
-        const stillLive: RememberedWebcam[] = [];
-        for (const [slot, entry] of waiting) {
-          const verdict = this.resumeVerdict(slot, entry);
-          if (verdict === 'wait') stillLive.push([slot, entry]);
-          else if (verdict === 'drop') writeResume(slot, null);
-          else if (verdict === 'start') {
-            starts.push(
-              this.resumeSlot(slot, entry).catch((failure: unknown) => {
-                // At once: the wait for another slot may take 25 s. Each message once.
-                const message = messageOf(failure);
-                if (shown.has(message)) return;
-                shown.add(message);
-                this.toasts.error(message);
-              }),
-            );
-          }
-        }
-        waiting = stillLive;
-      } else {
-        waiting = this.stillWaiting(waiting);
-      }
-
-      if (waiting.length > 0 && Date.now() >= deadline) {
-        this.forgetUnlessActed(waiting);
-        break;
-      }
-      if (waiting.length === 0) break;
-      await pause(RESUME_POLL_MS, signal);
-      if (signal.aborted) break;
-      // The user may have acted while it slept; the next read is then for the others only.
-      waiting = this.stillWaiting(waiting);
-    }
-
-    await Promise.all(starts);
-  }
-
-  /**
-   * Rewrites the slot's entry for a stop by the user. An entry that was not sending and is not
-   * assigned yet would be indistinguishable from before once rewritten, so a waiting resume could
-   * not tell that the user stopped and would assign its camera afterwards: it goes. Any other
-   * entry stays, as not sending.
-   */
-  private rememberStopped(slot: number, entry: ResumeEntry): void {
-    if (!entry.sending && !this.assignments().has(slot)) writeResume(slot, null);
-    else writeResume(slot, { deviceId: entry.deviceId, sending: false });
-  }
-
-  /** The entries the user has not acted on since they were remembered. */
-  private stillWaiting(waiting: RememberedWebcam[]): RememberedWebcam[] {
-    return waiting.filter(([slot, entry]) => this.resumeVerdict(slot, entry) !== 'leave');
-  }
-
-  /** Forgets the entries, except any the user rewrote since: that is theirs, not a leftover. */
-  private forgetUnlessActed(waiting: RememberedWebcam[]): void {
-    for (const [slot] of this.stillWaiting(waiting)) writeResume(slot, null);
-  }
-
-  private resumeVerdict(slot: number, entry: ResumeEntry): ResumeVerdict {
-    if (this.assignments().has(slot) || this.changingSlots().has(slot)) return 'leave';
-    // The entry was read before the slots were: a Stop all, a Reset or a file assignment made
-    // meanwhile rewrote or dropped it, and that is the user's word over the one remembered.
-    const current = readResume().get(slot);
-    if (current?.deviceId !== entry.deviceId || current.sending !== entry.sending) return 'leave';
-    if (!this.cameras().some((c) => c.deviceId === entry.deviceId)) return 'drop';
-    const held = this.slots.slots()?.find((s) => s.index === slot);
-    if (held?.type === 'webcam' && held.state === 'playing') return 'wait';
-    return held?.type === 'webcam' && held.state === 'stopped' ? 'start' : 'drop';
-  }
-
-  private async resumeSlot(slot: number, entry: ResumeEntry): Promise<void> {
-    const camera = this.cameras().find((c) => c.deviceId === entry.deviceId);
-    if (!camera) return;
-    this.setCamera(slot, camera, entry.sending);
-    if (!entry.sending) return;
-    try {
-      await this.publish(slot);
-    } catch (failure) {
-      // The camera stays assigned, so the entry stays too, but nothing is sending.
-      writeResume(slot, { deviceId: entry.deviceId, sending: false });
-      throw failure;
-    }
   }
 
   private async start(slot: number, camera: Camera, whipUrl: string): Promise<void> {
@@ -587,7 +372,6 @@ export class CamerasService {
             (error instanceof ApiRequestError && (error.status === 410 || error.status === 502)),
         },
       );
-      writeResume(slot, { deviceId: camera.deviceId, sending: true });
       // The loop does not settle per attempt (that would delay each 250 ms step by two refetches);
       // the server now says playing, so fetch the slots once.
       await this.slots.settleChange();
@@ -663,8 +447,6 @@ export class CamerasService {
     session.watcher.cancel();
     closeWebcamSession(session);
     this.setStream(slot, null);
-    const camera = this.assignments().get(slot);
-    if (camera) writeResume(slot, { deviceId: camera.deviceId, sending: false });
   }
 
   private closeAllSessions(): void {
@@ -698,9 +480,7 @@ export class CamerasService {
     });
   }
 
-  /** Sets or clears the slot's camera, and what this tab remembers of it for a reload. */
-  private setCamera(slot: number, camera: Camera | null, sending = false): void {
-    writeResume(slot, camera && { deviceId: camera.deviceId, sending });
+  private setCamera(slot: number, camera: Camera | null): void {
     this.assignmentsState.update((all) => {
       if (camera === null && !all.has(slot)) return all;
       const next = new Map(all);

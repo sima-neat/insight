@@ -92,18 +92,6 @@ merging.
   A new page needs both, and `navigation.spec.ts` checks that they agree. The old app's paths keep
   working: `/rtsp` and `/visualizer` redirect to their pages, and `/` and unknown paths (old
   `/workspace` and `/genai` bookmarks) land on Streaming.
-- **Start-up.** `app.config.ts` has one app initializer, `resumeWebcams`: after a reload that left
-  webcams to resume (`webcam-resume.ts`) it builds `CamerasService`, which resumes them on whichever
-  page the app lands, and after any other load it forgets them. It imports the service only then: a
-  static import would put the camera code (22 kB) in every visit's initial bundle.
-  A resume waits for a slot the server still shows live (the old browser session, which MediaMTX
-  holds for 15-20 s): `resume()` re-reads the slots every `RESUME_POLL_MS` for up to
-  `RESUME_WAIT_MS` (~25 s) and drops the entry only after that. Only the first slot read's failure
-  ends a resume; later failed reads are retried until the deadline. The wait ends when the user
-  acts on the slot (Stop on the slot included: `release` and `releaseAll` rewrite the entry by one
-  rule, so it no longer equals what was remembered; or the slot has a camera or is changing) and
-  when the service is destroyed. A start that fails is toasted when it fails, not when the wait
-  ends.
 - **Side panels.** Viewer, Streaming, Media, Peripherals and Stats open their side panel with the
   kit's `neat-aside-toggle` ("Side panel") and build it from the kit's aside parts
   (`neatAsidePanel`, `neatAsideTitle`, `neatAsideHeading`, `neatAsideActions`, `neatCode`). Whether
@@ -248,12 +236,11 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns at
-  600 kB. The initial bundle measures 579.3 kB raw with kit 0.17.0 (the shared chunk 461 kB, main
-  23 kB, styles 95 kB, 1.6 kB more for the kit's menu rows, divider and spinner; 577.7 kB with kit
-  0.16.2, 3 kB less since the kit dropped its unused toggle code; 580.9 kB with kit 0.16.1;
-  580.4 kB with kit 0.16.0; 580.2 kB before the board's check on load; 579.0 kB before
-  Stats' recording dots, whose `neat-live-dot` is in the primary entry; 578.1 kB before the start
-  hook that resumes the tab's webcams, whose camera service stays in a lazy chunk; 571.6 kB with kit
+  600 kB. The initial bundle measures 578.2 kB raw with kit 0.17.0 (the shared chunk 462 kB, main
+  21 kB, styles 95 kB; 579.3 kB while a start-up hook resumed the tab's webcams after a reload;
+  577.7 kB with kit 0.16.2, 3 kB less since the kit dropped its unused toggle code; 580.9 kB with
+  kit 0.16.1; 580.4 kB with kit 0.16.0; 580.2 kB before the board's check on load; 579.0 kB before
+  Stats' recording dots, whose `neat-live-dot` is in the primary entry; 571.6 kB with kit
   0.15.1; 571.4 kB with kit 0.14.1; 571.3 kB with kit 0.14.0; 569.7 kB with kit 0.13.0; 569.4 kB
   with kit 0.12.2; 569.1 kB with kit 0.12.1; 568.8 kB with kit 0.12.0; 691.9 kB with kit 0.11.3 and
   0.11.2, before the icons became plain Lucide drawings; 691.7 kB with kit 0.11.1; 691.5 kB with kit

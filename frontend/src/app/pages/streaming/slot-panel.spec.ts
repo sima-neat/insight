@@ -135,8 +135,6 @@ class FakeCameras {
   readonly assignments = signal<ReadonlyMap<number, Camera>>(new Map());
   readonly localStreams = signal<ReadonlyMap<number, MediaStream>>(new Map());
   readonly changingSlots = signal<ReadonlySet<number>>(new Set());
-  /** Webcams the service publishes on its own, as after a reload. */
-  readonly publishingSlots = signal<ReadonlySet<number>>(new Set());
   readonly anyChanging = computed(() => this.changingSlots().size > 0);
   readonly assign = vi.fn<(slot: number, deviceId: string | null) => Promise<void>>(
     async (slot, deviceId) => {
@@ -1172,25 +1170,6 @@ describe('SlotPanel', () => {
     // Stop is not a start that waits: it keeps its own glyph.
     expect(iconOf(button('Stop')!)).toBe('stop');
     expect(button('Stop')!.hasAttribute('aria-busy')).toBe(false);
-  });
-
-  it('Start also spins for a webcam the camera service publishes on its own, as after a reload', async () => {
-    slots.slots.set([
-      slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp', allowed_transports: ['rtsp'] }),
-    ]);
-    cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
-    await open(3);
-    expect(iconOf(button('Start')!)).toBe('play');
-
-    cameras.publishingSlots.set(new Set([3]));
-    await settle();
-    expect(iconOf(button('Start')!)).toBe('spinner');
-    expect(button('Start')!.getAttribute('aria-busy')).toBe('true');
-
-    cameras.publishingSlots.set(new Set());
-    await settle();
-    expect(iconOf(button('Start')!)).toBe('play');
-    expect(button('Start')!.hasAttribute('aria-busy')).toBe(false);
   });
 
   it('the main action is a medium button on a row of its own, in the look of what it does', async () => {

@@ -217,14 +217,8 @@ export class SlotPanel {
   protected readonly busy = computed(
     () => this.control.busy().has(this.index()) || this.cameras.changingSlots().has(this.index()),
   );
-  /**
-   * A start of this slot is in flight, or this browser is publishing its webcam without one of
-   * the panel's (as after a reload): the slot's state says Starting… (the page ORs the same two).
-   */
-  private readonly starting = computed(
-    () =>
-      this.control.starting().has(this.index()) || this.cameras.publishingSlots().has(this.index()),
-  );
+  /** A start of this slot is in flight: the slot's state says Starting…. */
+  private readonly starting = computed(() => this.control.starting().has(this.index()));
   protected readonly encode = computed(() => this.slots.encodes().get(this.index()) ?? null);
   protected readonly preparing = computed(() => this.control.preparing().has(this.index()));
   protected readonly localStream = computed(
