@@ -7,7 +7,13 @@ import {
 import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import type { Slot, SlotPull } from '../../sources/api';
-import { PREVIEW_RETRIES, PREVIEW_RETRY_MS, previewFailure, SlotPreview } from './slot-preview';
+import {
+  PREVIEW_RETRIES,
+  PREVIEW_RETRY_MS,
+  PREVIEW_STABLE_MS,
+  previewFailure,
+  SlotPreview,
+} from './slot-preview';
 
 function slot(index: number, overrides: Partial<Slot> = {}): Slot {
   return {
@@ -255,30 +261,56 @@ describe('SlotPreview', () => {
     await expectGivesUp();
   });
 
-  it('a stream that dropped after showing frames while the slot stays live is retried, with a fresh budget', async () => {
-    await show(slot(1, { state: 'external' }));
-    await retriesThrough(PREVIEW_RETRIES - 1);
-    // A camera swap on a live slot: the image showed frames, then the stream is gone for a moment.
-    const live = image()!;
-    decodeFirstFrame(live);
+  /** The image shows its first frame and stays up for `ms`. */
+  async function showsFrameFor(ms: number): Promise<void> {
+    decodeFirstFrame(image()!);
     vi.advanceTimersByTime(100);
     await fixture.whenStable();
     expect(text()).not.toContain('Connecting');
+    vi.advanceTimersByTime(ms);
+    await fixture.whenStable();
+  }
+
+  it('a stream that stayed up for a while before it dropped is retried, with a fresh budget', async () => {
+    await show(slot(1, { state: 'external' }));
+    await retriesThrough(PREVIEW_RETRIES - 1);
+    // A camera swap on a live slot: the image showed frames for a good while, then the stream is
+    // gone for a moment.
+    const live = image()!;
+    await showsFrameFor(PREVIEW_STABLE_MS);
     live.dispatchEvent(new Event('error'));
     await fixture.whenStable();
     const probe = http.expectOne((request) => request.url.startsWith('/stream/preview/'));
     probe.flush({ error: 'Source is not live' }, { status: 409, statusText: 'Conflict' });
     await fixture.whenStable();
     await waitForRetry();
-    // It shows again, and a stream that keeps failing gets all its retries once more.
-    const again = image()!;
-    expect(again).not.toBe(live);
-    decodeFirstFrame(again);
-    vi.advanceTimersByTime(100);
-    await fixture.whenStable();
+    // It shows again; the drop took the first of a whole budget, so two more retries are left.
+    expect(image()).not.toBe(live);
     expect(text()).not.toContain('Preview unavailable');
-    expect(text()).not.toContain('Connecting');
-    await retriesThrough(PREVIEW_RETRIES);
+    await retriesThrough(PREVIEW_RETRIES - 1);
+    await expectGivesUp();
+  });
+
+  it('a drop soon after a frame spends from the same budget, so a stream that flaps gives up', async () => {
+    await show(slot(1, { state: 'external' }));
+    // Each attempt shows a frame, 1 s of video, and drops: the frame does not give the retries back.
+    for (let attempt = 0; attempt < PREVIEW_RETRIES; attempt++) {
+      await showsFrameFor(1000);
+      await failEarly();
+      expect(text(), `retry ${attempt + 1} is on its way`).not.toContain('Preview unavailable');
+      await waitForRetry();
+    }
+    await showsFrameFor(1000);
+    await expectGivesUp();
+  });
+
+  it('a drop just short of the stable time still spends a retry, and the time counts from the frame', async () => {
+    await show(slot(1, { state: 'external' }));
+    await retriesThrough(PREVIEW_RETRIES - 1);
+    await showsFrameFor(PREVIEW_STABLE_MS - 1);
+    // One retry is left, and this drop uses it.
+    await failEarly();
+    await waitForRetry();
     await expectGivesUp();
   });
 
@@ -311,6 +343,26 @@ describe('SlotPreview', () => {
     expect(image()).not.toBeNull();
     await retriesThrough(PREVIEW_RETRIES);
     await expectGivesUp();
+  });
+
+  it('a stream stopped and started again is a new request that connects before it shows', async () => {
+    const playing = () => slot(1, { file: 'cars.mp4', codec: 'h264', state: 'playing' });
+    await show(playing());
+    const first = image()!.getAttribute('src');
+    await showsFrameFor(0);
+
+    host.slot.set(slot(1, { file: 'cars.mp4', codec: 'h264', state: 'stopped' }));
+    await fixture.whenStable();
+    vi.setSystemTime(1_737_000_009_000);
+    host.slot.set(playing());
+    await fixture.whenStable();
+
+    // Not the URL the browser may still hold a stale image for, and not shown as connected.
+    const again = image()!;
+    expect(again.getAttribute('src')).toBe('/stream/preview/src1.mjpg?t=1737000009000');
+    expect(again.getAttribute('src')).not.toBe(first);
+    expect(text()).toContain('Connecting to src1…');
+    await showsFrameFor(0);
   });
 
   it('a publisher’s new session after the retries were used up gets all of them again', async () => {

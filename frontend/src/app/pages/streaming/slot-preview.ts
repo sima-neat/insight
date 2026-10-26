@@ -46,11 +46,14 @@ const PROBE_TIMEOUT_MS = 3000;
  * How many times a preview that failed is retried by itself, and the pause before each. A stream
  * asked for the moment its slot went live often is not ready yet and a second try works; one that
  * is really broken must not be asked for forever, so after the last try the user is offered Retry
- * as for any failure. A frame shown, a restarted stream or the user's Retry each start the count
- * again.
+ * as for any failure. A restarted stream or the user's Retry starts the count again, and so does
+ * an image that has stayed up for `PREVIEW_STABLE_MS`: a stream that shows one frame and drops,
+ * over and over, is as broken as one that never shows any, so a frame alone gives nothing back.
  */
 export const PREVIEW_RETRIES = 3;
 export const PREVIEW_RETRY_MS = 1000;
+/** How long an image must stay up after its first frame to count as a stream that works. */
+export const PREVIEW_STABLE_MS = 5000;
 
 /** Why the live preview failed: the server's cap on previews open at once (429), or anything else. */
 export type PreviewFailure = 'busy' | 'failed';
@@ -128,14 +131,11 @@ export class SlotPreview {
 
   private readonly index = computed(() => this.slot().index);
   /**
-   * A new one for each slot, and for each retry. A linkedSignal reruns whenever its source's
-   * inputs change, even to an equal value, so the source must be a computed of the value: the
-   * poll's new slot object would otherwise reload the preview every time.
+   * A new one for each stream (set in the constructor, where the stream's key is watched) and for
+   * each retry, so a restarted stream never asks for the URL of the one before: the browser might
+   * show that one's last image in its place, and the image would count as connected already.
    */
-  private readonly token = linkedSignal({
-    source: this.index,
-    computation: () => Date.now(),
-  });
+  private readonly token = signal(Date.now());
   /** The publisher's session, which a reconnect between two polls changes. */
   private readonly since = computed(() => {
     const slot = this.slot();
@@ -167,9 +167,9 @@ export class SlotPreview {
     isLive(this.slot()) ? `${this.index()}|${this.since()}` : null,
   );
   /**
-   * The automatic retries made on this stream, since a frame was shown or the user asked again.
-   * Each stream gets the whole budget, so a restarted one is not reported on its first failure
-   * because an earlier one used the retries up (reset in the constructor).
+   * The automatic retries made on this stream, since its image last stayed up or the user asked
+   * again. Each stream gets the whole budget, so a restarted one is not reported on its first
+   * failure because an earlier one used the retries up (reset in the constructor).
    */
   private readonly autoRetries = signal(0);
   private readonly shownSrc = signal<string | null>(null);
@@ -217,22 +217,29 @@ export class SlotPreview {
     // stopped and started between two reads would look like the one before.
     effect(() => {
       this.stream();
-      untracked(() => this.autoRetries.set(0));
+      untracked(() => {
+        this.autoRetries.set(0);
+        this.token.set(Date.now());
+      });
     });
     // One watch per live image, ended when the image changes (another slot, a retry, an error)
-    // or the preview goes.
+    // or the preview goes. A drop ends the image before the stable time is up, so it spends a
+    // retry; one that comes later finds the budget whole.
     effect((onCleanup) => {
       const src = this.liveImages()[0]?.src;
       if (src === undefined) return;
-      onCleanup(
-        watchFirstFrame(
-          () => this.liveImage()?.nativeElement,
-          () => {
-            this.shownSrc.set(src);
-            this.autoRetries.set(0);
-          },
-        ),
+      let stable: Subscription | undefined;
+      const stopWatching = watchFirstFrame(
+        () => this.liveImage()?.nativeElement,
+        () => {
+          this.shownSrc.set(src);
+          stable = timer(PREVIEW_STABLE_MS).subscribe(() => this.autoRetries.set(0));
+        },
       );
+      onCleanup(() => {
+        stopWatching();
+        stable?.unsubscribe();
+      });
     });
     // A media stream is a property, not an attribute: it cannot be bound in the template.
     effect(() => {
