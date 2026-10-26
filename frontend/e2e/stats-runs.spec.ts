@@ -10,7 +10,17 @@ import {
   VIEWPORTS,
 } from './layout';
 import { STATS_BOARD } from './stats-mocks';
-import { advance, openStats, POLL_MS, SETTLE_MS, toast, toolButton, tools } from './stats-page';
+import {
+  advance,
+  openStats,
+  POLL_MS,
+  SETTLE_MS,
+  toast,
+  toolButton,
+  tools,
+  viewTab,
+  viewTabs,
+} from './stats-page';
 
 // Stats' Record, Runs and Compare against a fake board and Sentinel (`FakeStatsBackend`, whose
 // runs are `runs.testing.ts`' fixtures) at a laptop's size, and their layout at every viewport.
@@ -20,7 +30,6 @@ const GENERATION = String(STATS_BOARD.generation);
 const TES3 = '20260924T175231.958Z-tes3';
 const HW = '20260923T152712.952Z-insight-hw-1790177227';
 
-const viewSwitch = (page: Page) => page.getByRole('radiogroup', { name: 'Stats view' });
 const runList = (page: Page) => page.getByRole('listbox', { name: 'Runs' });
 const runRows = (page: Page) => runList(page).getByRole('option');
 /** A run's row, by the name its first cell shows. */
@@ -86,7 +95,7 @@ test('Runs lists the board’s runs, the recording one without a box, and a run 
   page,
 }) => {
   await openStats(page, LAPTOP, (fake) => fake.recording(), '/stats/runs');
-  await expect(viewSwitch(page).getByRole('radio', { name: 'Runs' })).toBeChecked();
+  await expect(viewTab(page, 'Runs')).toHaveAttribute('aria-current', 'page');
   await expect(runRows(page)).toHaveCount(5);
   await expect(runRows(page).locator('.name')).toHaveText([
     'compiler-v2-bench',
@@ -147,7 +156,7 @@ test('Compare opens the ticked runs, follows a new baseline, filters the per-met
   // The first run ticked is the baseline, and Sentinel is asked for it first.
   await expect(page).toHaveURL(/\/stats\/compare\?/);
   expect(compareParams(page)).toEqual({ runs: `${TES3},${HW}`, baseline: TES3 });
-  await expect(viewSwitch(page).getByRole('radio', { name: 'Compare' })).toBeChecked();
+  await expect(viewTab(page, 'Compare')).toHaveAttribute('aria-current', 'page');
   await expect(compareView(page).getByRole('heading', { name: 'Comparison' })).toBeVisible();
   await expect(chips(page)).toHaveCount(2);
   await expect(chips(page).first()).toContainText('tes3');
@@ -228,7 +237,7 @@ test('the metrics are not polled while Runs shows, and are again on Live', async
   await advance(page, POLL_MS);
   await expect.poll(() => backend.polls).toBe(2);
 
-  await viewSwitch(page).getByRole('radio', { name: 'Runs' }).click();
+  await viewTab(page, 'Runs').click();
   await expect(page).toHaveURL(/\/stats\/runs$/);
   await expect(runRows(page)).toHaveCount(4);
   // A poll that left before the switch may still land.
@@ -237,7 +246,7 @@ test('the metrics are not polled while Runs shows, and are again on Live', async
   await advance(page, 10_000, 5);
   expect(backend.polls).toBe(polled);
 
-  await viewSwitch(page).getByRole('radio', { name: 'Live' }).click();
+  await viewTab(page, 'Live').click();
   await expect(page).toHaveURL(/\/stats$/);
   await expect
     .poll(async () => {
@@ -245,6 +254,59 @@ test('the metrics are not polled while Runs shows, and are again on Live', async
       return backend.polls;
     })
     .toBeGreaterThan(polled);
+});
+
+test('the tabs switch the views, Compare is a tab only while it is open, and back and forward keep the open tab right', async ({
+  page,
+}) => {
+  await openStats(page, LAPTOP);
+  await expect(page.locator('main neat-chart-card[data-selectable]')).toHaveCount(6);
+  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs']);
+  await expect(viewTab(page, 'Live')).toHaveAttribute('aria-current', 'page');
+  await expect(viewTab(page, 'Runs')).not.toHaveAttribute('aria-current');
+
+  await viewTab(page, 'Runs').click();
+  await expect(page).toHaveURL(/\/stats\/runs$/);
+  await expect(viewTab(page, 'Runs')).toHaveAttribute('aria-current', 'page');
+  await expect(viewTab(page, 'Live')).not.toHaveAttribute('aria-current');
+
+  await checkBox(runRow(page, 'tes3')).click();
+  await checkBox(runRow(page, 'insight-hw-1790177227')).click();
+  await selectionBar(page).getByRole('button', { name: 'Compare' }).click();
+  await expect(page).toHaveURL(/\/stats\/compare\?/);
+  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs', 'Compare']);
+  await expect(viewTab(page, 'Compare')).toHaveAttribute('aria-current', 'page');
+  await expect(viewTab(page, 'Runs')).not.toHaveAttribute('aria-current');
+  // The tab leads to the comparison it stands for, with its runs and baseline.
+  await expect(viewTab(page, 'Compare')).toHaveAttribute(
+    'href',
+    compareAddress([TES3, HW], TES3),
+  );
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/stats\/runs$/);
+  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs']);
+  await expect(viewTab(page, 'Runs')).toHaveAttribute('aria-current', 'page');
+  await page.goBack();
+  await expect(page).toHaveURL(/\/stats$/);
+  await expect(viewTab(page, 'Live')).toHaveAttribute('aria-current', 'page');
+  await expect(viewTab(page, 'Runs')).not.toHaveAttribute('aria-current');
+
+  await page.goForward();
+  await page.goForward();
+  await expect(page).toHaveURL(/\/stats\/compare\?/);
+  await expect(viewTab(page, 'Compare')).toHaveAttribute('aria-current', 'page');
+});
+
+test('a compare address opened directly opens on the Compare tab, and Runs leads back to the list', async ({
+  page,
+}) => {
+  await openStats(page, LAPTOP, undefined, compareAddress([TES3, HW], TES3));
+  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs', 'Compare']);
+  await expect(viewTab(page, 'Compare')).toHaveAttribute('aria-current', 'page');
+  await viewTab(page, 'Runs').click();
+  await expect(page).toHaveURL(/\/stats\/runs$/);
+  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs']);
 });
 
 for (const { name, size } of VIEWPORTS) {

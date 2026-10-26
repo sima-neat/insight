@@ -11,7 +11,13 @@ import {
   untracked,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { NavigationEnd, PRIMARY_OUTLET, Router, type UrlTree } from '@angular/router';
+import {
+  NavigationEnd,
+  PRIMARY_OUTLET,
+  Router,
+  RouterLink,
+  type UrlTree,
+} from '@angular/router';
 import {
   NeatAsidePanel,
   NeatAsideToggle,
@@ -19,6 +25,8 @@ import {
   NeatIcon,
   NeatNote,
   NeatPage,
+  NeatPageTab,
+  NeatPageTabs,
   NeatPageToolbar,
   type NeatTone,
   NeatTooltip,
@@ -32,7 +40,6 @@ import {
   NeatPopoverItem,
   NeatPopoverTrigger,
 } from '@sima/neat-ui/popover';
-import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { filter, map } from 'rxjs';
 import { Announcement } from '../../announcement';
@@ -76,26 +83,6 @@ function statsView(url: UrlTree): StatsView {
   const view = url.root.children[PRIMARY_OUTLET]?.segments[1]?.path;
   return view === 'runs' || view === 'compare' ? view : 'live';
 }
-
-/**
- * The switch offers Live and Runs, and Compare while a comparison is open: a comparison is opened
- * from Runs, and Runs then leads back to the list.
- */
-const VIEW_OPTIONS: NeatSegmentedOption<StatsView>[] = [
-  { value: 'live', label: 'Live' },
-  { value: 'runs', label: 'Runs' },
-];
-const COMPARE_OPTIONS: NeatSegmentedOption<StatsView>[] = [
-  ...VIEW_OPTIONS,
-  { value: 'compare', label: 'Compare' },
-];
-
-/** Where the switch takes each view it offers; Compare is only ever the one already open. */
-const VIEW_URLS: Record<StatsView, string | null> = {
-  live: '/stats',
-  runs: '/stats/runs',
-  compare: null,
-};
 
 const UPDATE_CHIPS: Record<TelemetryUpdate, { label: string; tone: NeatTone }> = {
   live: { label: 'Live', tone: 'success' },
@@ -171,17 +158,19 @@ function notReadyHeading(
     NeatIcon,
     NeatNote,
     NeatPage,
+    NeatPageTab,
+    NeatPageTabs,
     NeatPageToolbar,
     NeatPopover,
     NeatPopoverContent,
     NeatPopoverItem,
     NeatPopoverTrigger,
-    NeatSegmented,
     NeatStatusChip,
     NeatTooltip,
     NgTemplateOutlet,
     RecordTrace,
     RunPanel,
+    RouterLink,
     RunsView,
     SentinelFailureCallout,
     StatsAreaPanel,
@@ -214,9 +203,6 @@ export class StatsPage {
       map(() => statsView(this.router.parseUrl(this.router.url))),
     ),
     { initialValue: statsView(this.router.parseUrl(this.router.url)) },
-  );
-  protected readonly viewOptions = computed(() =>
-    this.view() === 'compare' ? COMPARE_OPTIONS : VIEW_OPTIONS,
   );
 
   protected readonly moreOpen = signal(false);
@@ -439,12 +425,6 @@ export class StatsPage {
       const generation = this.board.generation();
       if (generation !== null) untracked(() => this.session.followBoard(generation));
     });
-  }
-
-  /** The switch's choice, as its address: the router then moves the view. */
-  protected openView(view: StatsView): void {
-    const url = VIEW_URLS[view];
-    if (url) void this.router.navigateByUrl(url);
   }
 
   protected openBoard(): void {

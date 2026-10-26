@@ -116,8 +116,9 @@ describe('the rail on the Stats views', () => {
     await TestBed.inject(Router).navigateByUrl(path);
     await fixture.whenStable();
 
+    // The rail only: the page's own tabs (Stats' views) are `aria-current` links too.
     const current = (fixture.nativeElement as HTMLElement).querySelectorAll(
-      'nav a[aria-current="page"]',
+      'nav[aria-label="Main"] a[aria-current="page"]',
     );
     expect(Array.from(current, (link) => link.textContent?.trim())).toEqual(['Stats']);
   });

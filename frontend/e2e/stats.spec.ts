@@ -1,6 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { pageOverflow, sidewaysOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { pageOverflow, PHONE, sidewaysOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
 import { NO_BOARD, SENTINEL_FAILED, STATS_BOARD } from './stats-mocks';
 import {
   advance,
@@ -11,6 +11,7 @@ import {
   toast,
   toolButton,
   tools,
+  viewTab,
 } from './stats-page';
 
 // Stats' Live view against a fake board and Sentinel (`FakeStatsBackend`), at every viewport,
@@ -329,3 +330,42 @@ for (const { name, size } of VIEWPORTS) {
     }
   });
 }
+
+test('on a phone the tabs are one row under the top bar and the floating side panel opens below them', async ({
+  page,
+}) => {
+  await openStats(page, PHONE);
+  await expect(viewTab(page, 'Live')).toBeVisible();
+  await expect(viewTab(page, 'Runs')).toBeVisible();
+  // The panel starts closed on a phone; the toggle opens it over the page.
+  await expect(panel(page)).toBeHidden();
+  await page.getByRole('button', { name: 'Side panel' }).click();
+  await expect(panel(page)).toBeVisible();
+
+  const boxes = await page.evaluate(() => {
+    const box = (element: Element) => element.getBoundingClientRect().toJSON();
+    const tabs = document.querySelector('nav[aria-label="Stats views"]')!;
+    return {
+      tabs: box(tabs),
+      links: [...tabs.querySelectorAll('a')].map(box),
+      aside: box(document.querySelector('aside')!),
+      header: box(document.querySelector('header')!),
+      main: box(document.querySelector('main')!),
+    };
+  });
+  // Full width, directly under the top bar, one line.
+  expect(boxes.tabs.top).toBeGreaterThanOrEqual(boxes.header.bottom - 0.5);
+  expect(boxes.tabs.left).toBeCloseTo(boxes.main.left, 0);
+  expect(boxes.tabs.width).toBeCloseTo(boxes.main.width, 0);
+  expect(new Set(boxes.links.map((link) => link.top)).size).toBe(1);
+  // The floating panel starts at the tabs' lower edge, so that the tabs stay reachable.
+  expect(boxes.aside.top).toBeGreaterThanOrEqual(boxes.tabs.bottom - 0.5);
+  expect(await pageOverflow(page)).toEqual([
+    { horizontal: 0, vertical: 0 },
+    { horizontal: 0, vertical: 0 },
+  ]);
+
+  await viewTab(page, 'Runs').click();
+  await expect(page).toHaveURL(/\/stats\/runs$/);
+  await expect(viewTab(page, 'Runs')).toHaveAttribute('aria-current', 'page');
+});

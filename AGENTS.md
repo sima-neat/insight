@@ -204,8 +204,9 @@ merging.
   (`/stats`), Runs (`/stats/runs`) and Compare (`/stats/compare?runs=<a>,<b>[,…]&baseline=<a>`,
   runs named by id). They are child routes without components of their own (`app.routes.ts`), so
   the page stays one instance across them, its services keep what they read, and it draws the
-  view its address names; the view switch (`neat-segmented`, "Stats view") only navigates, and
-  offers Compare while one is open. Their shared parts are listed above (`app-stats-chart`, with
+  view its address names; the views are the page's tabs (`nav[neatPageTabs]` "Stats views", links
+  and not an ARIA tab list), which only navigate, and offer Compare, to the runs and baseline it is
+  open on, while one is open. Their shared parts are listed above (`app-stats-chart`, with
   Compare's elapsed axis, `app-sentinel-failure`, the kit's table). The page splits its state by
   how long it lives, as Peripherals does. `SentinelTelemetry` and `SentinelRuns` are provided by
   the page, so they live exactly as long as it: leaving Stats stops every request to the board
@@ -236,8 +237,9 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns at
-  600 kB. The initial bundle measures 579.2 kB raw with kit 0.18.0 (the shared chunk 462 kB, main
-  21 kB, styles 96 kB; 578.2 kB with kit 0.17.0; 579.3 kB while a start-up hook resumed the tab's
+  600 kB. The initial bundle measures 580.8 kB raw with kit 0.18.0 (the shared chunk 464 kB, main
+  21 kB, styles 96 kB; 579.2 kB before Stats used the kit's page tabs, whose directives are in the
+  primary entry and so in the shared chunk; 578.2 kB with kit 0.17.0; 579.3 kB while a start-up hook resumed the tab's
   webcams after a reload;
   577.7 kB with kit 0.16.2, 3 kB less since the kit dropped its unused toggle code; 580.9 kB with
   kit 0.16.1; 580.4 kB with kit 0.16.0; 580.2 kB before the board's check on load; 579.0 kB before

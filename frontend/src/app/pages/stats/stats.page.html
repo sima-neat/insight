@@ -1,15 +1,8 @@
 <!--
-  Left to right: the view switch, the view's own state and actions, Record (on every view while
-  Sentinel answers), then Live's ⋯ menu and the side panel's toggle.
+  Left to right: the view's own state and actions, Record (on every view while Sentinel answers),
+  then Live's ⋯ menu and the side panel's toggle. The views themselves are the page's tabs, below.
 -->
 <ng-container *neatPageToolbar>
-  <neat-segmented
-    label="Stats view"
-    [options]="viewOptions()"
-    [value]="view()"
-    (valueChange)="openView($event)"
-  />
-
   @if (body() === 'ready' && view() === 'live') {
     <neat-status-chip [tone]="updateChip().tone">{{ updateChip().label }}</neat-status-chip>
     @switch (updateAction()) {
@@ -87,6 +80,18 @@
   [asideWidth]="asides.width('stats')"
   (asideWidthChange)="asides.setWidth('stats', $event)"
 >
+  <!--
+    The views are addresses (the router follows them), so they are links. Compare is offered while
+    one is open, to the same runs and baseline: its address says which.
+  -->
+  <nav neatPageTabs aria-label="Stats views">
+    <a neatPageTab routerLink="/stats">Live</a>
+    <a neatPageTab routerLink="/stats/runs">Runs</a>
+    @if (view() === 'compare') {
+      <a neatPageTab routerLink="/stats/compare" queryParamsHandling="preserve">Compare</a>
+    }
+  </nav>
+
   <app-announcement>{{ announcement() }}</app-announcement>
 
   @switch (body()) {
