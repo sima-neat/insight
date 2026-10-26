@@ -7,6 +7,7 @@ import { CamerasService } from './cameras.service';
 import { FakeCameraMedia, FakeCameraStream, FakePeer } from './cameras.testing';
 import { SlotsService } from './slots.service';
 import { ApiRequestError } from './stream-lines';
+import { readResume, writeResume } from './webcam-resume';
 
 const DESK = { kind: 'videoinput', deviceId: 'cam-desk', label: 'Desk camera' };
 const LAPTOP = { kind: 'videoinput', deviceId: 'cam-laptop', label: 'Laptop camera' };
@@ -48,6 +49,7 @@ describe('CamerasService', () => {
     confirmWebcamStart: vi.fn(),
     stop: vi.fn(),
     settleChange: vi.fn(),
+    refresh: vi.fn(),
   };
   const toasts = { error: vi.fn() };
   /** Every `fetch` the service made on its own (WHIP and MediaMTX's session, the exit stop). */
@@ -67,6 +69,8 @@ describe('CamerasService', () => {
     slotsFake.confirmWebcamStart.mockReset().mockResolvedValue({ success: true });
     slotsFake.stop.mockReset().mockResolvedValue({ success: true });
     slotsFake.settleChange.mockReset().mockResolvedValue(undefined);
+    slotsFake.refresh.mockReset().mockResolvedValue(undefined);
+    sessionStorage.clear();
     toasts.error.mockReset();
 
     fetched = [];
@@ -103,6 +107,7 @@ describe('CamerasService', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    sessionStorage.clear();
   });
 
   /** Creates the service and lets its first camera listing land. */
@@ -958,6 +963,336 @@ describe('CamerasService', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(toasts.error).toHaveBeenCalledWith('MediaMTX is unreachable.');
+    });
+  });
+
+  describe('remembering the tab’s webcams for a reload', () => {
+    const entry = (slot: number) => readResume().get(slot);
+    const pagehide = (persisted: boolean) =>
+      window.dispatchEvent(Object.assign(new Event('pagehide'), { persisted }));
+
+    it('assigning a camera remembers it as not sending; assigning none, or a refused one, forgets it', async () => {
+      const service = await create();
+
+      await service.assign(2, 'cam-laptop');
+      expect(entry(2)).toEqual({ deviceId: 'cam-laptop', sending: false });
+
+      await service.assign(2, null);
+      expect(entry(2)).toBeUndefined();
+
+      await service.assign(2, 'cam-desk');
+      slotsFake.assignWebcam.mockRejectedValueOnce(new ApiRequestError(409, 'In use.', null));
+      await expect(service.assign(2, 'cam-laptop')).rejects.toThrow('In use.');
+      expect(entry(2)).toBeUndefined();
+    });
+
+    it('a publish remembers the camera as sending only once the server confirmed the slot live', async () => {
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      const answer = deferred<{ success: true }>();
+      slotsFake.confirmWebcamStart.mockReturnValueOnce(answer.promise);
+
+      const publishing = service.publish(1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(entry(1)).toEqual({ deviceId: 'cam-desk', sending: false });
+
+      answer.resolve({ success: true });
+      await publishing;
+      expect(entry(1)).toEqual({ deviceId: 'cam-desk', sending: true });
+    });
+
+    it('a publish that fails, or is replaced before it is confirmed, is not remembered as sending', async () => {
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      media.openFailure = new DOMException('busy', 'NotReadableError');
+      await expect(service.publish(1)).rejects.toThrow();
+      expect(entry(1)).toEqual({ deviceId: 'cam-desk', sending: false });
+
+      const gate = deferred();
+      media.gate = gate.promise;
+      const publishing = service.publish(1);
+      await service.release(1);
+      gate.resolve();
+      await publishing;
+      expect(entry(1)).toEqual({ deviceId: 'cam-desk', sending: false });
+    });
+
+    it('switching cameras on a live webcam remembers the new camera, sending once it is live', async () => {
+      const service = await create();
+      await publishDesk(service);
+
+      await service.assign(1, 'cam-laptop');
+      expect(entry(1)).toEqual({ deviceId: 'cam-laptop', sending: false });
+
+      await service.publish(1);
+      expect(entry(1)).toEqual({ deviceId: 'cam-laptop', sending: true });
+    });
+
+    it('stopping, or losing the connection, keeps the camera and remembers it as not sending', async () => {
+      const service = await create();
+      await publishDesk(service);
+      await service.release(1);
+      expect(entry(1)).toEqual({ deviceId: 'cam-desk', sending: false });
+
+      await service.publish(1);
+      expect(entry(1)?.sending).toBe(true);
+      peerOf(1).changeConnectionState('failed');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(entry(1)).toEqual({ deviceId: 'cam-desk', sending: false });
+    });
+
+    it('clearing the slot, or a camera that is gone, forgets it', async () => {
+      const service = await create();
+      await publishDesk(service, 1);
+      await service.assign(2, 'cam-laptop');
+
+      await service.assignFile({ index: 1, file: '' });
+      expect(entry(1)).toBeUndefined();
+
+      media.changeDevices([DESK]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(entry(2)).toBeUndefined();
+    });
+
+    it('a bulk stop remembers every camera as not sending; one that rewrites the slots forgets them', async () => {
+      const service = await create();
+      await publishDesk(service, 1);
+      await service.assign(2, 'cam-laptop');
+      expect(entry(1)?.sending).toBe(true);
+
+      service.releaseAll();
+      expect(entry(1)).toEqual({ deviceId: 'cam-desk', sending: false });
+      expect(entry(2)).toEqual({ deviceId: 'cam-laptop', sending: false });
+
+      service.releaseAll({ clearAssignments: true });
+      expect(readResume().size).toBe(0);
+    });
+
+    it('leaving the page writes nothing, so a reload finds the camera still sending', async () => {
+      const service = await create();
+      await publishDesk(service);
+
+      pagehide(false);
+      expect(service.localStreams().size).toBe(0);
+      expect(entry(1)).toEqual({ deviceId: 'cam-desk', sending: true });
+
+      TestBed.resetTestingModule();
+      expect(entry(1)).toEqual({ deviceId: 'cam-desk', sending: true });
+    });
+  });
+
+  describe('resuming after a reload', () => {
+    const remember = (slot: number, deviceId: string, sending: boolean) =>
+      writeResume(slot, { deviceId, sending });
+    const serverHolds = (...slots: Slot[]) =>
+      slotList.update((all) => (all ?? []).map((s) => slots.find((o) => o.index === s.index) ?? s));
+    const entries = () => [...readResume()];
+
+    it('reassigns a sending camera without asking the server, and starts it again', async () => {
+      remember(1, 'cam-desk', true);
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(1);
+      expect(slotsFake.assignWebcam).not.toHaveBeenCalled();
+      expect(service.assignments().get(1)).toEqual({ deviceId: 'cam-desk', label: 'Desk camera' });
+      expect(media.opened[0].constraints).toEqual({ video: { deviceId: { exact: 'cam-desk' } } });
+      expect(posts('/whip')).toHaveLength(1);
+      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledWith(1);
+      expect(service.localStreams().has(1)).toBe(true);
+      expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: true }]]);
+      expect(toasts.error).not.toHaveBeenCalled();
+    });
+
+    it('resumes each slot on its own camera', async () => {
+      remember(1, 'cam-desk', true);
+      remember(3, 'cam-laptop', true);
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(service.assignments().get(1)?.deviceId).toBe('cam-desk');
+      expect(service.assignments().get(3)?.deviceId).toBe('cam-laptop');
+      expect(posts('/whip').map((call) => call.url)).toEqual([whipUrl(1), whipUrl(3)]);
+    });
+
+    it('reassigns a camera that was not sending and never starts it', async () => {
+      remember(1, 'cam-desk', false);
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(service.assignments().get(1)?.deviceId).toBe('cam-desk');
+      expect(media.opened).toEqual([]);
+      expect(posts('/whip')).toEqual([]);
+      expect(slotsFake.confirmWebcamStart).not.toHaveBeenCalled();
+      expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: false }]]);
+    });
+
+    it('reads nothing from the server when there is nothing to resume', async () => {
+      await create();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(slotsFake.refresh).not.toHaveBeenCalled();
+    });
+
+    it('resumes once, not on every device change', async () => {
+      remember(1, 'cam-desk', false);
+      await create();
+      await vi.advanceTimersByTimeAsync(0);
+      remember(2, 'cam-laptop', true);
+
+      media.changeDevices([DESK, LAPTOP]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(1);
+      expect(media.opened).toEqual([]);
+    });
+
+    it('drops an entry whose camera is no longer there, and starts nothing', async () => {
+      remember(1, 'cam-unplugged', true);
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(entries()).toEqual([]);
+      expect(service.assignments().size).toBe(0);
+      expect(media.opened).toEqual([]);
+      expect(toasts.error).not.toHaveBeenCalled();
+    });
+
+    it('drops the entries when the camera permission is not granted (the browser lists no ids)', async () => {
+      media.devices = [{ kind: 'videoinput', deviceId: '', label: '' }];
+      remember(1, 'cam-desk', true);
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(service.cameras()).toEqual([]);
+      expect(entries()).toEqual([]);
+      expect(service.assignments().size).toBe(0);
+      expect(media.opened).toEqual([]);
+      expect(toasts.error).not.toHaveBeenCalled();
+    });
+
+    const taken: [string, Slot][] = [
+      ['live', { ...webcamSlot(1), state: 'playing' }],
+      [
+        'held by an external publisher',
+        {
+          ...webcamSlot(1),
+          state: 'external',
+          external: { source: 'ffmpeg', reader_count: 0 } as unknown as Slot['external'],
+        },
+      ],
+      ['pulled', { ...webcamSlot(1), state: 'pulled' }],
+      ['no longer a webcam', { ...webcamSlot(1), type: 'file', file: 'a.mp4' }],
+    ];
+    it.each(taken)(
+      'leaves a slot that is %s to whoever has it: drops the entry, starts nothing',
+      async (_why, slot) => {
+        serverHolds(slot);
+        remember(1, 'cam-desk', true);
+        const service = await create();
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(entries()).toEqual([]);
+        expect(service.assignments().size).toBe(0);
+        expect(media.opened).toEqual([]);
+        expect(posts('/whip')).toEqual([]);
+        expect(slotsFake.assignWebcam).not.toHaveBeenCalled();
+        expect(toasts.error).not.toHaveBeenCalled();
+      },
+    );
+
+    it('drops an entry for a slot the server does not list', async () => {
+      slotList.set([]);
+      remember(1, 'cam-desk', true);
+      await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(entries()).toEqual([]);
+      expect(media.opened).toEqual([]);
+    });
+
+    it('skips a slot that is taken while leaving the others to resume', async () => {
+      serverHolds({ ...webcamSlot(1), state: 'playing' });
+      remember(1, 'cam-desk', true);
+      remember(2, 'cam-laptop', true);
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(entries()).toEqual([[2, { deviceId: 'cam-laptop', sending: true }]]);
+      expect(service.assignments().has(1)).toBe(false);
+      expect(posts('/whip').map((call) => call.url)).toEqual([whipUrl(2)]);
+    });
+
+    it('starts nothing when the slots cannot be read, and drops the entries without a toast', async () => {
+      slotsFake.refresh.mockRejectedValue(new ApiRequestError(0, 'Unreachable.', null));
+      remember(1, 'cam-desk', true);
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(entries()).toEqual([]);
+      expect(service.assignments().size).toBe(0);
+      expect(media.opened).toEqual([]);
+      expect(toasts.error).not.toHaveBeenCalled();
+    });
+
+    it('leaves a slot alone that the user picked a camera for while the slots were being read', async () => {
+      const read = deferred();
+      slotsFake.refresh.mockReturnValue(read.promise);
+      remember(1, 'cam-desk', true);
+      const service = await create();
+      await service.assign(1, 'cam-laptop');
+
+      read.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(service.assignments().get(1)?.deviceId).toBe('cam-laptop');
+      expect(entries()).toEqual([[1, { deviceId: 'cam-laptop', sending: false }]]);
+      expect(media.opened).toEqual([]);
+    });
+
+    it('drops the entry and tells the user once when the camera will not start', async () => {
+      media.openFailure = new DOMException('busy', 'NotReadableError');
+      remember(1, 'cam-desk', true);
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(toasts.error).toHaveBeenCalledTimes(1);
+      expect(toasts.error).toHaveBeenCalledWith(expect.stringMatching(/in use by another/));
+      expect(entries()).toEqual([]);
+      expect(service.localStreams().size).toBe(0);
+      expect(posts('/whip')).toEqual([]);
+    });
+
+    it('says the same failure once even when several slots meet it, and resumes the others', async () => {
+      whip = { status: 500, sessionId: null };
+      remember(1, 'cam-desk', true);
+      remember(2, 'cam-laptop', true);
+      await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(entries()).toEqual([]);
+      expect(toasts.error).toHaveBeenCalledTimes(1);
+    });
+
+    it('does nothing, and says nothing, where session storage is unusable', async () => {
+      vi.stubGlobal('sessionStorage', {
+        getItem: () => {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        },
+        setItem: () => {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        },
+        removeItem: () => {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        },
+      });
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(slotsFake.refresh).not.toHaveBeenCalled();
+      expect(media.opened).toEqual([]);
+      expect(toasts.error).not.toHaveBeenCalled();
+      await service.assign(1, 'cam-desk'); // and the service still works without it
+      expect(service.assignments().get(1)?.deviceId).toBe('cam-desk');
     });
   });
 

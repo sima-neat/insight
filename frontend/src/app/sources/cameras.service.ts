@@ -19,6 +19,7 @@ import {
   type Camera,
   type DisconnectWatcher,
 } from './webcam-publishing';
+import { readResume, writeResume, type ResumeEntry } from './webcam-resume';
 
 /**
  * Where the browser's permission to use cameras stands, as far as this tab has found out.
@@ -77,6 +78,12 @@ function releaseClaim(session: WebcamSession | null | undefined): PublisherRelea
  *   send an unbound stop, which the server carries out by kicking whichever publisher holds the
  *   slot, perhaps a replacement another tab just started.
  *
+ * **After a reload.** This tab remembers, in `sessionStorage` (`webcam-resume.ts`), which camera
+ * each slot used and whether it was sending. The entry follows the slot's camera: written when a
+ * camera is assigned, `sending` once a publish is confirmed live, not sending when the publish
+ * ends, gone when the camera is cleared. `pagehide` writes nothing: the reload has to find the
+ * camera still sending. `resume()` then puts back only what this tab had running (see there).
+ *
  * **Errors.** An action the user takes rejects with a message to show. A session that ends on its
  * own (a lost connection, a removed camera) has no action to reject, so its failures are an error
  * toast. The slots are fetched again after each change, as `SlotsService` does for its own.
@@ -106,7 +113,8 @@ export class CamerasService {
   private readonly assignmentsState = signal<ReadonlyMap<number, Camera>>(new Map());
   /**
    * The camera each slot is set to publish (picked with `assign`). Only this tab knows it: after a
-   * reload a webcam slot has no camera until one is picked again.
+   * reload `resume()` puts back the cameras this tab remembers; a slot it did not, has none until
+   * one is picked again.
    */
   readonly assignments = this.assignmentsState.asReadonly();
 
@@ -132,7 +140,9 @@ export class CamerasService {
     if (!this.media.canCapture) return;
     const destroyRef = inject(DestroyRef);
 
-    void this.refreshCameras();
+    // The first listing says which cameras the browser lets this page use, which is what a resume
+    // needs to know; later device changes only refresh the list.
+    void this.refreshCameras().then(() => this.resume());
     destroyRef.onDestroy(this.media.onDeviceChange(() => void this.refreshCameras()));
 
     // A reload or close does not run any teardown, and MediaMTX would hold the path another 15-20 s,
@@ -286,8 +296,69 @@ export class CamerasService {
     // every slot that has ever started one: a stale generation is harmless, a missed one is not.
     for (const slot of this.generations.keys()) this.invalidate(slot);
     this.closeAllSessions();
-    if (clearAssignments) this.assignmentsState.set(new Map());
+    for (const [slot, camera] of this.assignments()) {
+      writeResume(slot, { deviceId: camera.deviceId, sending: false });
+    }
+    if (clearAssignments) {
+      this.assignmentsState.set(new Map());
+      // Also what a resume has not put back yet: the slots are file slots again.
+      for (const slot of readResume().keys()) writeResume(slot, null);
+    }
     return claims;
+  }
+
+  /**
+   * Puts back the webcams this tab had before it was reloaded, once, after the first camera
+   * listing. It starts a camera only when the user had it running in this tab and nothing else has
+   * the slot, so it never fights another tab or publisher for one:
+   * - an entry resumes only when the camera is in the list (which holds ids only once the browser
+   *   granted permission, so no prompt appears here) and the slot, read once from the server, is a
+   *   webcam that is stopped: not live and not held by an external publisher or a pull. The server
+   *   keeps a reloaded tab's slot live until it notices the path gone, so a read right after the
+   *   reload can still show it live; that slot is skipped, never retried.
+   * - the camera is assigned locally (the server already holds the slot as a webcam) and, if it
+   *   was sending, published.
+   * An entry that does not qualify, or whose camera fails to start, is dropped, and a failure is
+   * toasted (each distinct message once). A slot the user acted on meanwhile is theirs: left alone.
+   * Never rejects.
+   */
+  async resume(): Promise<void> {
+    const remembered = readResume();
+    if (remembered.size === 0) return;
+    try {
+      await this.slots.refresh();
+    } catch {
+      // Without the server's word nothing may be started; the page says the server is unreachable.
+      for (const slot of remembered.keys()) writeResume(slot, null);
+      return;
+    }
+    const failures = new Set<string>();
+    await Promise.all(
+      [...remembered].map(([slot, entry]) =>
+        this.resumeSlot(slot, entry).catch((failure: unknown) => {
+          failures.add(messageOf(failure));
+        }),
+      ),
+    );
+    for (const message of failures) this.toasts.error(message);
+  }
+
+  private async resumeSlot(slot: number, entry: ResumeEntry): Promise<void> {
+    if (this.assignments().has(slot) || this.changingSlots().has(slot)) return;
+    const camera = this.cameras().find((c) => c.deviceId === entry.deviceId);
+    const held = this.slots.slots()?.find((s) => s.index === slot);
+    if (!camera || held?.type !== 'webcam' || held.state !== 'stopped') {
+      writeResume(slot, null);
+      return;
+    }
+    this.setCamera(slot, camera, entry.sending);
+    if (!entry.sending) return;
+    try {
+      await this.publish(slot);
+    } catch (failure) {
+      writeResume(slot, null);
+      throw failure;
+    }
   }
 
   private async start(slot: number, camera: Camera, whipUrl: string): Promise<void> {
@@ -372,6 +443,7 @@ export class CamerasService {
             (error instanceof ApiRequestError && (error.status === 410 || error.status === 502)),
         },
       );
+      writeResume(slot, { deviceId: camera.deviceId, sending: true });
       // The loop does not settle per attempt (that would delay each 250 ms step by two refetches);
       // the server now says playing, so fetch the slots once.
       await this.slots.settleChange();
@@ -447,6 +519,8 @@ export class CamerasService {
     session.watcher.cancel();
     closeWebcamSession(session);
     this.setStream(slot, null);
+    const camera = this.assignments().get(slot);
+    if (camera) writeResume(slot, { deviceId: camera.deviceId, sending: false });
   }
 
   private closeAllSessions(): void {
@@ -480,7 +554,9 @@ export class CamerasService {
     });
   }
 
-  private setCamera(slot: number, camera: Camera | null): void {
+  /** Sets or clears the slot's camera, and what this tab remembers of it for a reload. */
+  private setCamera(slot: number, camera: Camera | null, sending = false): void {
+    writeResume(slot, camera && { deviceId: camera.deviceId, sending });
     this.assignmentsState.update((all) => {
       if (camera === null && !all.has(slot)) return all;
       const next = new Map(all);
