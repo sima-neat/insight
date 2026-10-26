@@ -255,20 +255,103 @@ describe('SlotPreview', () => {
     await expectGivesUp();
   });
 
-  it('a stream that dropped after showing frames is not retried by itself', async () => {
+  it('a stream that dropped after showing frames while the slot stays live is retried, with a fresh budget', async () => {
     await show(slot(1, { state: 'external' }));
-    await failEarly();
-    await waitForRetry();
+    await retriesThrough(PREVIEW_RETRIES - 1);
+    // A camera swap on a live slot: the image showed frames, then the stream is gone for a moment.
     const live = image()!;
     decodeFirstFrame(live);
     vi.advanceTimersByTime(100);
     await fixture.whenStable();
+    expect(text()).not.toContain('Connecting');
     live.dispatchEvent(new Event('error'));
     await fixture.whenStable();
+    const probe = http.expectOne((request) => request.url.startsWith('/stream/preview/'));
+    probe.flush({ error: 'Source is not live' }, { status: 409, statusText: 'Conflict' });
+    await fixture.whenStable();
+    await waitForRetry();
+    // It shows again, and a stream that keeps failing gets all its retries once more.
+    const again = image()!;
+    expect(again).not.toBe(live);
+    decodeFirstFrame(again);
+    vi.advanceTimersByTime(100);
+    await fixture.whenStable();
+    expect(text()).not.toContain('Preview unavailable');
+    expect(text()).not.toContain('Connecting');
+    await retriesThrough(PREVIEW_RETRIES);
+    await expectGivesUp();
+  });
+
+  it('a drop after frames that meets the cap on previews is reported at once', async () => {
+    await show(slot(1, { state: 'external' }));
+    const live = image()!;
+    decodeFirstFrame(live);
+    vi.advanceTimersByTime(100);
+    await fixture.whenStable();
+    await failEarly((probe) =>
+      probe.flush({ error: 'Too many previews open' }, { status: 429, statusText: 'x' }),
+    );
+    expect(text()).toContain('too many previews open');
     vi.advanceTimersByTime(10 * PREVIEW_RETRY_MS);
     await fixture.whenStable();
-    http.expectNone((request) => request.url.startsWith('/stream/preview/'));
-    expect(text()).toContain('Preview unavailable.');
+    expect(image()).toBeNull();
+  });
+
+  it('a stream restarted after the retries were used up gets all of them again', async () => {
+    const playing = () => slot(1, { file: 'cars.mp4', codec: 'h264', state: 'playing' });
+    await show(playing());
+    await retriesThrough(PREVIEW_RETRIES);
+    await expectGivesUp();
+
+    // Stopped, then started again: another stream, not a retry of the one that failed.
+    host.slot.set(slot(1, { file: 'cars.mp4', codec: 'h264', state: 'stopped' }));
+    await fixture.whenStable();
+    host.slot.set(playing());
+    await fixture.whenStable();
+    expect(image()).not.toBeNull();
+    await retriesThrough(PREVIEW_RETRIES);
+    await expectGivesUp();
+  });
+
+  it('a publisher’s new session after the retries were used up gets all of them again', async () => {
+    await show(slot(1, { state: 'pulled', pull: pull() }));
+    await retriesThrough(PREVIEW_RETRIES);
+    await expectGivesUp();
+
+    // A camera swap on a live slot: the publisher connects again under a new session.
+    host.slot.set(slot(1, { state: 'pulled', pull: pull({ since: '2026-10-24T09:00:00Z' }) }));
+    await fixture.whenStable();
+    await retriesThrough(PREVIEW_RETRIES);
+    await expectGivesUp();
+  });
+
+  it('keeps saying Connecting through the check of a failure and the pause before the retry', async () => {
+    await show(slot(1, { state: 'external' }));
+    expect(text()).toContain('Connecting to src1…');
+    const status = () => root().querySelector('[role="status"]')!;
+    for (let attempt = 0; attempt < PREVIEW_RETRIES; attempt++) {
+      image()!.dispatchEvent(new Event('error'));
+      await fixture.whenStable();
+      // The probe is out.
+      expect(image()).toBeNull();
+      expect(text()).toContain('Connecting to src1…');
+      http
+        .expectOne((request) => request.url.startsWith('/stream/preview/'))
+        .flush(null, { status: 409, statusText: 'Conflict' });
+      await fixture.whenStable();
+      // The pause.
+      expect(image()).toBeNull();
+      expect(text()).toContain('Connecting to src1…');
+      expect(root().querySelector('neat-progress')).not.toBeNull();
+      const announced = status().firstElementChild;
+      await waitForRetry();
+      expect(text()).toContain('Connecting to src1…');
+      // The same announcement element throughout: it is not said again for each attempt.
+      expect(status().firstElementChild).toBe(announced);
+    }
+    // Reported at the end: nothing to wait for any more.
+    await expectGivesUp();
+    expect(text()).not.toContain('Connecting');
   });
 
   it('another slot and Retry each start the count again', async () => {
@@ -391,19 +474,6 @@ describe('SlotPreview', () => {
     host.shown.set(false);
     await fixture.whenStable();
     expect(file.hasAttribute('src')).toBe(false);
-  });
-
-  it('a stream that failed after showing frames is unavailable without asking again: the cap only refuses a new one', async () => {
-    await show(slot(1, { state: 'external' }));
-    const live = image()!;
-    decodeFirstFrame(live);
-    vi.advanceTimersByTime(100);
-    await fixture.whenStable();
-    live.dispatchEvent(new Event('error'));
-    await fixture.whenStable();
-    http.expectNone((request) => request.url.startsWith('/stream/preview/'));
-    expect(text()).toContain('Preview unavailable.');
-    expect(text()).not.toContain('too many');
   });
 
   it('keeps the same live image when a poll brings an equal playing slot', async () => {

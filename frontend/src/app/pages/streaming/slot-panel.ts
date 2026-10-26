@@ -88,7 +88,10 @@ interface PrimaryAction {
   readonly kind: 'start' | 'stop' | 'cancel' | 'takeOver' | 'stopPulling';
   readonly label: string;
   readonly variant: NeatButtonVariant;
-  /** The glyph before the label, for the actions that start or end a stream; a start waiting spins. */
+  /**
+   * The glyph before the label, for the actions that start or end a stream; a start that waits
+   * spins.
+   */
   readonly icon: NeatIconName | null;
   /** Why the action cannot be taken at all; the button is then disabled. */
   readonly blocker: string | null;
@@ -713,7 +716,9 @@ export class SlotPanel {
     }
   }
 
-  /** Runs an action and shows a refusal as the server words it; resolves whether it went through. */
+  /**
+   * Runs an action and shows a refusal as the server words it; resolves whether it went through.
+   */
   private async act(action: () => Promise<unknown>): Promise<boolean> {
     try {
       await action();
