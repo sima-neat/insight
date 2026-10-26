@@ -8,6 +8,12 @@ sidebar_position: 3
 
 Insight is organized around the development tasks you perform while validating a vision application: inspect files, prepare media, start sources, view output, and watch runtime health.
 
+On a wide screen, a view's side panel can be made wider or narrower: drag its edge, or focus the
+edge and use the arrow keys (Home and End jump to the narrowest and widest), and double-click the
+edge to return to the default width. The panel is at least 18rem wide and at most 48rem or 60% of
+the page, whichever is less. Each view remembers its own width in this browser. On a phone the
+panel floats over the view instead and cannot be resized.
+
 ## Workspace
 
 The Workspace view lets you browse the project files visible to Insight. In the Neat Development Environment, this is normally `/workspace`; outside the SDK, Insight falls back to the current working directory.
@@ -38,6 +44,12 @@ Supported video formats include common container formats such as `mp4`, `mov`, `
 After importing media, you can filter the file list, preview a selected file, inspect its basic metadata, or delete files that are no longer needed. Use Media Sources before configuring streaming sources so you know which files are available, which codec Insight detected, and whether they are readable.
 
 The library is shown as folders. Folder rows open the folder and list its subfolders and videos. Each folder row shows how many streamable videos it holds, its subfolders included, and the line under the breadcrumb counts the same for the folder you are in. The breadcrumb shows where you are; click any part of it, **Media Root** included, to go back up to that level. The filter searches the current folder and everything beneath it and shows matches with their path relative to the current folder. Files Insight cannot stream are listed greyed with a **Not streamable** tag so you can still preview or delete them; the assign dialog in Streaming Sources hides them and greys out folders without a streamable video. Folder names are ordinary labels you choose, for example `30FPS/` or `120FPS-720p-h264/`; Insight never reads video settings from them. In the Neat SDK the library lives at `/workspace/.insight-media/`, so it survives SDK restarts. Uploads always land at the top of the library.
+
+Tick files to delete several at once. Lists with tick boxes, here and in Stats' **Runs**, take a
+file manager's gestures: clicking the selected row ticks or unticks it; Ctrl-click (Cmd-click on a
+Mac) ticks or unticks any row; Shift-click ticks every row from the one you last clicked to this
+one; and Ctrl+A (Cmd+A) ticks every row. Shift-click and Ctrl+A only tick: they skip rows that
+cannot be ticked and untick nothing. Dragging over rows does not tick them.
 
 ![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
 
@@ -85,6 +97,13 @@ The camera list updates as cameras are connected and disconnected. Webcam source
 The preview beside the source list shows your local camera feed while capture is active. It is not the video the board received, and it does not show the delay that a receiving application sees; if publishing fails, capture stops and the preview clears.
 
 Selecting **Stop**, unplugging the camera, or closing the browser tab ends the stream and returns the slot to `Idle`. **Stop All**, **Reset** and **Auto Assign** also release every webcam, because each of them takes those slots away: Reset and Auto Assign clear the camera selection as well, so pick the camera again afterwards. The browser tab must stay open while the webcam is publishing: it is the component sending video to Insight. For the same reason, a webcam source is never restored as `Live` after Insight restarts — reselect the camera and start it again.
+
+Reloading the page is different: the tab remembers which camera each slot used and whether it
+was sending. After a reload it assigns those cameras again and starts again what was sending,
+provided camera access is still allowed, the camera is still connected, and the slot is still a
+stopped webcam source that nothing else publishes to. The row says **Starting…** until the
+stream is confirmed. Other tabs do not share what a tab remembers, and reopening a closed tab or
+returning to Insight through the browser's history starts no camera.
 
 If starting a webcam fails, the message names the cause:
 
@@ -236,6 +255,11 @@ Peripherals lists the cameras and microphones connected to a board and shows wha
 
 Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals and Stats use this selection.
 
+When Insight opens with a board whose connection was never tested, it tests it once by itself, and
+the header says **Checking…** until the board answers, which can take until the connection times
+out when the board is unreachable. A board you change to in the board settings is not tested
+until you select **Check again**, so the header says **Not checked** until then.
+
 The board is chosen in this order:
 
 - **A board you entered**: open the board settings and give its address, SSH port, and user. **Use default** returns to the automatic choice.
@@ -246,7 +270,7 @@ Insight connects over SSH with the keys of the account that runs it. It never as
 
 ### Cameras and modes
 
-Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, and the pixel formats and resolutions the camera reports. No camera's resolutions show a frame rate: a MIPI camera's rate depends on the sensor mode it is running in, so it is not known before the camera runs, and the page treats every camera the same way. Insight does not set frame rates. Each mode is in one of three states, and the pixel format and resolution menus group their entries under them:
+Insight scans the board each time you open the page, unless a camera preview is running then, since a scan stops it; select **Refresh** to scan again at any time. A scan asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, and the pixel formats and resolutions the camera reports. No camera's resolutions show a frame rate: a MIPI camera's rate depends on the sensor mode it is running in, so it is not known before the camera runs, and the page treats every camera the same way. Insight does not set frame rates. Each mode is in one of three states, and the pixel format and resolution menus group their entries under them:
 
 | State | Meaning |
 | --- | --- |
@@ -268,11 +292,11 @@ While a preview runs, the mode beside it shows the camera's frame rate, which ca
 
 ### Camera setup
 
-A Sentinel that reads the board's device tree also reports how the board is set up for cameras. After a Refresh, the board settings show the board **Model** and a **Camera setup** line naming the overlays the board loads that configure a camera sensor. With an older Sentinel, these details do not appear.
+A Sentinel that reads the board's device tree also reports how the board is set up for cameras. After a scan, the board settings show the board **Model** and a **Camera setup** line naming the overlays the board loads that configure a camera sensor. With an older Sentinel, these details do not appear.
 
 ### Microphones
 
-Refresh also lists every ALSA capture device SiMa Sentinel reports, USB or on-board. For each microphone Insight shows its name, the ALSA device name to open it with (for example `hw:CARD=Nano,DEV=0`), and, for USB audio devices, the sample formats, channel counts, bit depths, and sample rates it captures. On-board sound cards do not report these, and the page says so.
+A scan also lists every ALSA capture device SiMa Sentinel reports, USB or on-board. For each microphone Insight shows its name, the ALSA device name to open it with (for example `hw:CARD=Nano,DEV=0`), and, for USB audio devices, the sample formats, channel counts, bit depths, and sample rates it captures. On-board sound cards do not report these, and the page says so.
 
 Discovery never opens a sound device: Sentinel reads `/proc/asound` and sysfs. A USB microphone keeps the same identity when it is unplugged and plugged back into the same port, even when its card number changes; in another port it is a different microphone.
 
@@ -314,7 +338,7 @@ A trace records every sample around a workload. Select **Record** in the toolbar
 
 **Runs** lists the runs saved on the board, newest first, with the one still recording at the top. Each row shows the run's name, whether it is complete or still recording, its duration, the energy Sentinel measured over the run, its sample count, and when it started. Runs survive a daemon restart. Select a run to see it in the side panel: its note and tags, then every metric it recorded under its group, with the mean, smallest and largest value over that run's samples, worded in the metric's unit. A metric whose largest value crossed its warning or critical threshold is marked. The run's metadata — its sample interval, Sentinel version, and the board it ran on — is folded below that. If the run is deleted on the board while you look at it, the panel says it is no longer there.
 
-Tick runs to act on several at once: a bar above the list says how many are selected, with **Compare**, **Delete** and **Clear**. The recording run cannot be ticked, and at most eight runs can: once eight are ticked, the count reads “8 selected, the most that can be compared”, and the others show a greyed box, which gives the reason when you point at it and which a screen reader reads out with the row. **Delete** asks first, then deletes the runs one at a time and says how many went. If some were not deleted, the page names them, with the board's reason where it gave one, and they stay ticked.
+Tick runs to act on several at once, with the same gestures as in Media Sources (Shift-click, Ctrl+A and the others): a bar above the list says how many are selected, with **Compare**, **Delete** and **Clear**. The recording run cannot be ticked, and at most eight runs can: once eight are ticked, the count reads “8 selected, the most that can be compared”, and the others show a greyed box, which gives the reason when you point at it and which a screen reader reads out with the row. **Delete** asks first, then deletes the runs one at a time and says how many went. If some were not deleted, the page names them, with the board's reason where it gave one, and they stay ticked.
 
 **Compare** opens the comparison of two to eight ticked runs, measured against the first one you ticked, the baseline; choose another baseline in the comparison's header. Each run has its colour, and the baseline is marked “B”. Pick a series — total power, thermal maximum, CPU usage, CPU load, RAM, MLA memory, or EV74 CMA, whichever every run recorded in one unit — and the chart overlays it for every run, from each run's start, over the time they all cover. Beneath it, a summary gives each run's sample count, minimum, mean, median, P95 and maximum of that series, its mean's change against the baseline, and the run's energy. A run that took no reading of the series says “No samples” there rather than leaving the chart without it.
 

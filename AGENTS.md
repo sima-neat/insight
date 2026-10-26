@@ -92,6 +92,10 @@ merging.
   A new page needs both, and `navigation.spec.ts` checks that they agree. The old app's paths keep
   working: `/rtsp` and `/visualizer` redirect to their pages, and `/` and unknown paths (old
   `/workspace` and `/genai` bookmarks) land on Streaming.
+- **Start-up.** `app.config.ts` has one app initializer, `resumeWebcams`: after a reload that left
+  webcams to resume (`webcam-resume.ts`) it builds `CamerasService`, which resumes them on whichever
+  page the app lands, and after any other load it forgets them. It imports the service only then: a
+  static import would put the camera code (22 kB) in every visit's initial bundle.
 - **Side panels.** Viewer, Streaming, Media, Peripherals and Stats open their side panel with the
   kit's `neat-aside-toggle` ("Side panel") and build it from the kit's aside parts
   (`neatAsidePanel`, `neatAsideTitle`, `neatAsideHeading`, `neatAsideActions`, `neatCode`). Whether
@@ -99,15 +103,14 @@ merging.
   (`LayoutPrefs`), Streaming, Media, Peripherals and Stats in `AsidePrefs`
   (`neat-insight:<page>:aside`). That is the wide-screen choice. The width the user dragged the
   panel to (the kit's `asideWidth`, bound on each page's `neat-page`) is remembered per page too:
-  `AsidePrefs.width` as `neat-insight:<page>:aside-width`, the Viewer's
-  `LayoutPrefs.inspectorWidth` as `neat-insight:viewer:aside-width`; no value is the kit's
-  default. On a narrow screen (below 48rem)
-  the kit floats the panel over the page, so it starts closed there and opening or closing it is
-  not remembered: each page keeps its state through the kit's `neatAsideOpen` (`AsidePrefs` for
+  `AsidePrefs.width` as `neat-insight:<page>:aside-width`, the Viewer's `LayoutPrefs.inspectorWidth`
+  as `neat-insight:viewer:aside-width`; no value is the kit's default. On a narrow screen (below
+  48rem) the kit floats the panel over the page, so it starts closed there and opening or closing it
+  is not remembered: each page keeps its state through the kit's `neatAsideOpen` (`AsidePrefs` for
   four pages, the Viewer's `inspector` for the fifth), and a phone never overwrites what a wide
-  screen chose. The two differ in how long a phone's choice lives: on Streaming, Media,
-  Peripherals and Stats an opened panel is kept for the session (`AsidePrefs` is root-provided),
-  while the Viewer's inspector, owned by the page, starts closed on each visit. The panel is still
+  screen chose. The two differ in how long a phone's choice lives: on Streaming, Media, Peripherals
+  and Stats an opened panel is kept for the session (`AsidePrefs` is root-provided), while the
+  Viewer's inspector, owned by the page, starts closed on each visit. The panel is still
   `neat-aside-toggle`'s to close. Where the user was on a page (Viewer position, Streaming's slot
   and the source form its empty slots were left on, Media's folder and selection, Peripherals'
   device and modes, Stats' card, thermal group and runs) lives in memory for the next visit
@@ -175,16 +178,17 @@ merging.
   bundle on every page, and the dialogs, with the kit entries only they use, would cost every first
   paint for something most visits never open.
 - **The board** has one reader and writer, `BoardService` (root-provided): the pill, the board
-  dialog, Peripherals and Stats read its state, and its actions (select, Check again,
-  trust a host key) answer with the fresh state; page code never fetches `/api/board` itself. It is
-  re-read when the window regains focus and after every action, never polled on a timer:
-  `GET /api/board` does not connect to the board, and the pages' own board traffic keeps its
-  status current. The one connection check of its own is on load: the first answered read of an
-  app load runs `test()` when a board is selected and its state is unknown, silently (a failure
-  only lands in the state, so the pill shows Error; an answer for another generation than the
-  state's, after a board change, is dropped). Answers arrive out of order, so a stale one
-  is dropped; every response that describes the board carries its `generation`, and an answer for
-  another generation is never applied.
+  dialog, Peripherals and Stats read its state, and its actions (select, Check again, trust a host
+  key) answer with the fresh state; page code never fetches `/api/board` itself. It is re-read when
+  the window regains focus and after every action, never polled on a timer: `GET /api/board` does
+  not connect to the board, and the pages' own board traffic keeps its status current. The one
+  connection check of its own is on load: the first answered read of an app load runs `test()` when
+  a board is selected and its state is unknown, silently (a failure only lands in the state, so the
+  pill shows Error; an answer for another generation than the state's, after a board change, is
+  dropped). While a check is out (`checking`, Check again's too) the pill says Checking… where it
+  would say Not checked. Answers arrive out of order, so a stale one is dropped; every response that
+  describes the board carries its `generation`, and an answer for another generation is never
+  applied.
 - **Peripherals** splits its state by how long it lives. `PeripheralsService` (root) holds the
   board's scan: the snapshot read from `GET /api/peripherals`, Refresh, and the scan of each visit
   (`scanOnVisit`: whenever the page is entered with a board target, unless a camera preview is
@@ -233,40 +237,38 @@ merging.
   where Flask (`_resolve_frontend_dist`) and `build.sh` look for it. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
-  `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns
-  at 600 kB. The initial bundle measures 580.9 kB raw with kit 0.16.1 (the shared chunk 461 kB,
-  main 23 kB, styles 97 kB; 580.4 kB with kit 0.16.0; 580.2 kB before the board's check on
-  load; 579.0 kB before Stats'
-  recording dots, whose `neat-live-dot` is in the primary entry; 578.1 kB before the start hook
-  that resumes the tab's webcams, whose camera service stays in a lazy chunk; 571.6 kB with kit
+  `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns at
+  600 kB. The initial bundle measures 577.7 kB raw with kit 0.16.2 (the shared chunk 461 kB, main
+  23 kB, styles 94 kB, 3 kB less since the kit dropped its unused toggle code; 580.9 kB with kit
+  0.16.1; 580.4 kB with kit 0.16.0; 580.2 kB before the board's check on load; 579.0 kB before
+  Stats' recording dots, whose `neat-live-dot` is in the primary entry; 578.1 kB before the start
+  hook that resumes the tab's webcams, whose camera service stays in a lazy chunk; 571.6 kB with kit
   0.15.1; 571.4 kB with kit 0.14.1; 571.3 kB with kit 0.14.0; 569.7 kB with kit 0.13.0; 569.4 kB
-  with kit 0.12.2; 569.1 kB with kit 0.12.1; 568.8 kB with kit 0.12.0; 691.9 kB with kit 0.11.3
-  and 0.11.2, before the icons became plain Lucide drawings; 691.7 kB with kit 0.11.1;
-  691.5 kB with kit 0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the board pill
-  and System Info's button; 650 kB with kit 0.9.0;
-  694 kB with kit 0.5.3, before the kit split into per-component entries), most of it the kit's
-  shell, the toast host (rendered in the app root, so it is in main on purpose) and Angular with
-  its router, plus the XHR backend (`withXhr()`, 4 kB: only XHR reports the upload progress of
-  imports); the warning sits about 20 kB above that, so growth shows up early, and the 1 MB error
-  ceiling stays. (`angular.json` cannot hold comments, so the reason lives here.) The kit's video
-  code is imported from `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and
-  stays out of the initial bundle. Streaming, Media, Peripherals and Stats are lazy routes too, and
-  so are the kit entries only they use (`/file-browser`, `/select-list`, `/dialog`, Peripherals'
-  `/level-meter` and the charts entry, `/charts`, which only Stats draws with and which brings d3's
-  scale and shape modules: nothing outside Stats imports it, and a type-only import is erased). The
-  top bar's board and System Info dialogs are imported on their first open (`TopBarDialogs`), with
-  the kit entries they bring (`/collapsible`, `/callout`, which Peripherals and the Viewer use
-  too).
-  `npm run check:bundle` (after a build, and in CI) fails if any of that leaks into the initial
-  bundle, or goes missing from the build: its markers are the selectors of the Viewer's video tile,
-  the four lazy pages (`app-streaming-page`, `app-media-page`, `app-peripherals-page`,
-  `app-stats-page`), the parts only Stats uses (`app-stats-runs`, `app-stats-compare`,
-  `app-run-panel`, `app-record-trace`, `app-sentinel-failure`), the two dialogs
+  with kit 0.12.2; 569.1 kB with kit 0.12.1; 568.8 kB with kit 0.12.0; 691.9 kB with kit 0.11.3 and
+  0.11.2, before the icons became plain Lucide drawings; 691.7 kB with kit 0.11.1; 691.5 kB with kit
+  0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the board pill and System Info's
+  button; 650 kB with kit 0.9.0; 694 kB with kit 0.5.3, before the kit split into per-component
+  entries), most of it the kit's shell, the toast host (rendered in the app root, so it is in main
+  on purpose) and Angular with its router, plus the XHR backend (`withXhr()`, 4 kB: only XHR reports
+  the upload progress of imports); the warning sits about 20 kB above that, so growth shows up
+  early, and the 1 MB error ceiling stays. (`angular.json` cannot hold comments, so the reason lives
+  here.) The kit's video code is imported from `@sima/neat-ui/video`, only by the Viewer, so it
+  loads with that route and stays out of the initial bundle. Streaming, Media, Peripherals and Stats
+  are lazy routes too, and so are the kit entries only they use (`/file-browser`, `/select-list`,
+  `/dialog`, Peripherals' `/level-meter` and the charts entry, `/charts`, which only Stats draws
+  with and which brings d3's scale and shape modules: nothing outside Stats imports it, and a
+  type-only import is erased). The top bar's board and System Info dialogs are imported on their
+  first open (`TopBarDialogs`), with the kit entries they bring (`/collapsible`, `/callout`, which
+  Peripherals and the Viewer use too). `npm run check:bundle` (after a build, and in CI) fails if
+  any of that leaks into the initial bundle, or goes missing from the build: its markers are the
+  selectors of the Viewer's video tile, the four lazy pages (`app-streaming-page`, `app-media-page`,
+  `app-peripherals-page`, `app-stats-page`), the parts only Stats uses (`app-stats-runs`,
+  `app-stats-compare`, `app-run-panel`, `app-record-trace`, `app-sentinel-failure`), the two dialogs
   (`app-board-dialog`, `app-system-info-dialog`) and those kit entries, the charts entry's among
   them (`neat-time-chart`, `neat-stacked-chart`, `neat-heatmap`, `neat-sparkline`,
   `neat-chart-card`). The toast host and the status chip are the kit entries that are there on
-  purpose: the app root renders the toast host, and the board pill shows its state in a status
-  chip on every page. A new lazy page or dialog adds its selector.
+  purpose: the app root renders the toast host, and the board pill shows its state in a status chip
+  on every page. A new lazy page or dialog adds its selector.
 - **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`; the
   video part is its `@sima/neat-ui/video` entry point) draws and knows nothing of vf:
   `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the matching frames;
