@@ -149,11 +149,13 @@ export class StreamingPage {
     const cameras = this.cameras.assignments();
     const encodes = this.slots.encodes();
     const starting = this.control.starting();
+    // A resume after a reload publishes a webcam without a start of this page's.
+    const publishing = this.cameras.publishingSlots();
     return (this.slots.slots() ?? []).map((slot) =>
       slotRow(slot, {
         camera: cameras.get(slot.index),
         encode: encodes.get(slot.index),
-        starting: starting.has(slot.index),
+        starting: starting.has(slot.index) || publishing.has(slot.index),
       }),
     );
   });

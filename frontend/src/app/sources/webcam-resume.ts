@@ -26,6 +26,25 @@ export function readResume(): ReadonlyMap<number, ResumeEntry> {
   return entries;
 }
 
+/**
+ * Whether this page load is a reload of the tab, the only load that may resume its webcams.
+ * Session storage also comes back with "Reopen closed tab", a restored session and a return
+ * through history, after the user ended the cameras by leaving the page; those must stay ended.
+ */
+export function loadedByReload(): boolean {
+  const [navigation] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+  return navigation?.type === 'reload';
+}
+
+/** Forgets every slot's entry. Never throws. */
+export function forgetResume(): void {
+  try {
+    sessionStorage.removeItem(KEY);
+  } catch {
+    // No storage: there is nothing to forget.
+  }
+}
+
 /** Remembers `entry` for the slot, or forgets the slot's with null. Never throws. */
 export function writeResume(slot: number, entry: ResumeEntry | null): void {
   const all = readAll();

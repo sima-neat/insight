@@ -83,6 +83,8 @@ function releaseClaim(session: WebcamSession | null | undefined): PublisherRelea
  * camera is assigned, `sending` once a publish is confirmed live, not sending when the publish
  * ends, gone when the camera is cleared. `pagehide` writes nothing: the reload has to find the
  * camera still sending. `resume()` then puts back only what this tab had running (see there).
+ * Any other load (a restored tab, a return through history) forgets the entries at start-up
+ * (`resumeWebcams` in `app.config.ts`), since the user ended those cameras by leaving.
  *
  * **Errors.** An action the user takes rejects with a message to show. A session that ends on its
  * own (a lost connection, a removed camera) has no action to reject, so its failures are an error
@@ -131,6 +133,14 @@ export class CamerasService {
    * answers after the bulk action cleared its slot and would register the slot as a webcam again.
    */
   readonly anyChanging = computed(() => this.changeCounts().size > 0);
+
+  private readonly publishingState = signal<ReadonlySet<number>>(new Set());
+  /**
+   * Slots whose publish is in flight, from opening the camera to the server's confirmation (up to
+   * 20 s): the Streaming page says Starting… for them, as for a start it made, since a resume
+   * after a reload publishes without one.
+   */
+  readonly publishingSlots = this.publishingState.asReadonly();
 
   private readonly sessions = new Map<number, WebcamSession>();
   private readonly generations = new Map<number, number>();
@@ -263,7 +273,21 @@ export class CamerasService {
     const whipUrl = this.slots.slots()?.find((s) => s.index === slot)?.urls.whip;
     if (!whipUrl) throw new Error(NO_PUBLISH_URL_TEXT);
 
-    await this.whileChanging(slot, () => this.start(slot, camera, whipUrl));
+    this.setPublishing(slot, true);
+    try {
+      await this.whileChanging(slot, () => this.start(slot, camera, whipUrl));
+    } finally {
+      this.setPublishing(slot, false);
+    }
+  }
+
+  private setPublishing(slot: number, publishing: boolean): void {
+    this.publishingState.update((all) => {
+      const next = new Set(all);
+      if (publishing) next.add(slot);
+      else next.delete(slot);
+      return next;
+    });
   }
 
   /**

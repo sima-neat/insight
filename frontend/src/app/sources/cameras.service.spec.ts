@@ -407,6 +407,26 @@ describe('CamerasService', () => {
       expect(service.changingSlots().has(1)).toBe(false);
     });
 
+    it('marks the slot as publishing from the first step until the server confirms it, or it fails', async () => {
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      expect(service.publishingSlots().size).toBe(0);
+      const gate = deferred();
+      media.gate = gate.promise;
+
+      const publishing = service.publish(1);
+      expect([...service.publishingSlots()]).toEqual([1]);
+      gate.resolve();
+      await publishing;
+      expect(service.publishingSlots().size).toBe(0);
+
+      media.openFailure = new DOMException('busy', 'NotReadableError');
+      const failing = service.publish(1).catch(() => undefined);
+      expect([...service.publishingSlots()]).toEqual([1]);
+      await failing;
+      expect(service.publishingSlots().size).toBe(0);
+    });
+
     it('keeps asking the server until MediaMTX reports the path, every 250 ms', async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
@@ -1102,6 +1122,20 @@ describe('CamerasService', () => {
       expect(service.localStreams().has(1)).toBe(true);
       expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: true }]]);
       expect(toasts.error).not.toHaveBeenCalled();
+    });
+
+    it('marks a resumed slot as publishing until the server confirms it', async () => {
+      const gate = deferred();
+      whipGates.push(gate.promise);
+      remember(1, 'cam-desk', true);
+      const service = await create();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect([...service.publishingSlots()]).toEqual([1]);
+      gate.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledWith(1);
+      expect(service.publishingSlots().size).toBe(0);
     });
 
     it('resumes each slot on its own camera', async () => {

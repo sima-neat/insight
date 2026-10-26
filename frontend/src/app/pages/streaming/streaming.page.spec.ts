@@ -158,6 +158,7 @@ class FakeCameras {
   readonly error = signal<string | null>(null);
   readonly localStreams = signal<ReadonlyMap<number, MediaStream>>(new Map());
   readonly changingSlots = computed<ReadonlySet<number>>(() => new Set());
+  readonly publishingSlots = signal<ReadonlySet<number>>(new Set());
   readonly releaseAll = vi.fn((options?: { clearAssignments?: boolean }) => {
     void options;
     return RELEASED;
@@ -639,6 +640,23 @@ describe('StreamingPage', () => {
     started({ success: true });
     await settleOverlay();
     expect([read(rowChip()), read(panelChip())]).toEqual(['Idle neutral', 'Idle neutral']);
+  });
+
+  it('a webcam the camera service is starting on its own, as after a reload, reads Starting… too', async () => {
+    await open();
+    await click(rowOf('src3'));
+    const rowChip = () => rowOf('src3').querySelector('neat-status-chip')!;
+    const panelChip = () => aside()!.querySelector('app-panel-title neat-status-chip')!;
+    const read = (chip: Element) => `${chip.textContent!.trim()} ${toneOf(chip)}`;
+    const before = [read(rowChip()), read(panelChip())];
+
+    cameras.publishingSlots.set(new Set([3]));
+    await settle();
+    expect([read(rowChip()), read(panelChip())]).toEqual(['Starting… info', 'Starting… info']);
+
+    cameras.publishingSlots.set(new Set());
+    await settle();
+    expect([read(rowChip()), read(panelChip())]).toEqual(before);
   });
 
   it('Start… cancelled starts nothing', async () => {
