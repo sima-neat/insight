@@ -63,11 +63,8 @@
         }
         <!-- The item's tooltip opens to the left, where it covers no other item. -->
         <button
-          neatButton
-          neatPopoverItem
           type="button"
-          variant="text"
-          size="small"
+          neatPopoverItem
           [neatTooltip]="exportTooltip()"
           neatTooltipPosition="left"
           [disabled]="!canExport()"

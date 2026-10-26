@@ -899,8 +899,8 @@ describe('StatsPage', () => {
       )!;
     expect(notes()).toEqual(['Sentinel main:80ab7de4da31', 'Session started 30 min ago']);
     expect(exportButton().disabled).toBe(true);
-    // A ⋯ menu's item hugs its text at the panel's start (the kit's `neatPopoverItem`).
-    expect(exportButton().classList).toContain('self-start');
+    // A ⋯ menu's item is the kit's menu row alone: a button's classes would fight the row look.
+    expect(exportButton().getAttribute('data-slot')).toBeNull();
 
     // The facts age (in a hidden tab, so that nothing is read meanwhile).
     await click(toolbarButton('More actions')!);

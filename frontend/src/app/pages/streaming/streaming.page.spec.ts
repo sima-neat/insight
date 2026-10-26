@@ -832,11 +832,11 @@ describe('StreamingPage', () => {
     );
   });
 
-  it('the ⋯ menu’s items hug their text at the panel’s start (the kit’s neatPopoverItem)', async () => {
+  it('the ⋯ menu’s items are the kit’s menu rows alone: a button’s classes would fight the row look', async () => {
     await open();
     await openMore();
     for (const label of ['Reset', 'Clear renditions']) {
-      expect(menuItem(label).classList, label).toContain('self-start');
+      expect(menuItem(label).getAttribute('data-slot'), label).toBeNull();
     }
   });
 

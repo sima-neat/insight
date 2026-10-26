@@ -10,8 +10,8 @@ Insight is organized around the development tasks you perform while validating a
 
 On a wide screen, a view's side panel can be made wider or narrower: drag its edge, or focus the
 edge and use the arrow keys (Home and End jump to the narrowest and widest), and double-click the
-edge to return to the default width. The panel is at least 18rem wide and at most 48rem or 60% of
-the page, whichever is less. Each view remembers its own width in this browser. On a phone the
+edge to return to the default width. The panel is at least 18rem wide and at most as wide as leaves
+20rem for the rest of the view. Each view remembers its own width in this browser. On a phone the
 panel floats over the view instead and cannot be resized.
 
 ## Workspace

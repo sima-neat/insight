@@ -160,8 +160,10 @@ merging.
   - `app/hold-focus.ts` (`holdFocus`) keeps the keyboard in place when a click removed the
     button it was on: after the next render, a focus that fell to the body moves to the element
     named (Media's panel, Stats' Runs view and Record).
-  - A ⋯ menu's items are the kit's `neatPopoverItem` on a `neatButton` (Streaming's and Stats'
-    menus), inside a `neat-popover`; there is no app component for them.
+  - A ⋯ menu's rows are plain `<button type="button" neatPopoverItem>`s, with a
+    `hr[neatPopoverDivider]` between groups (Streaming's and Stats' menus), inside a
+    `neat-popover`; there is no app component for them. They carry no `neatButton`: its classes
+    fight the row look.
 - **Key/value lists** use the kit's `neatDetails`. Lists that should start their values in one
   column but cannot share a grid (System Info's sections open and close on their own) set the
   kit's `--neat-details-term-width` on a common ancestor rather than restyling the list's grid
@@ -243,9 +245,10 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns at
-  600 kB. The initial bundle measures 577.7 kB raw with kit 0.16.2 (the shared chunk 461 kB, main
-  23 kB, styles 94 kB, 3 kB less since the kit dropped its unused toggle code; 580.9 kB with kit
-  0.16.1; 580.4 kB with kit 0.16.0; 580.2 kB before the board's check on load; 579.0 kB before
+  600 kB. The initial bundle measures 579.3 kB raw with kit 0.17.0 (the shared chunk 461 kB, main
+  23 kB, styles 95 kB, 1.6 kB more for the kit's menu rows, divider and spinner; 577.7 kB with kit
+  0.16.2, 3 kB less since the kit dropped its unused toggle code; 580.9 kB with kit 0.16.1;
+  580.4 kB with kit 0.16.0; 580.2 kB before the board's check on load; 579.0 kB before
   Stats' recording dots, whose `neat-live-dot` is in the primary entry; 578.1 kB before the start
   hook that resumes the tab's webcams, whose camera service stays in a lazy chunk; 571.6 kB with kit
   0.15.1; 571.4 kB with kit 0.14.1; 571.3 kB with kit 0.14.0; 569.7 kB with kit 0.13.0; 569.4 kB
