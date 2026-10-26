@@ -1205,7 +1205,6 @@ describe('CamerasService', () => {
     });
 
     const taken: [string, Slot][] = [
-      ['live', { ...webcamSlot(1), state: 'playing' }],
       [
         'held by an external publisher',
         {
@@ -1234,6 +1233,212 @@ describe('CamerasService', () => {
       },
     );
 
+    describe('while the server still holds the slot live (the old browser session)', () => {
+      const live = () => serverHolds({ ...webcamSlot(1), state: 'playing' });
+      const stopped = () => serverHolds(webcamSlot(1));
+      /** Starts a resume of 'cam-desk' on slot 1 that finds the slot live on its first read. */
+      async function resumeWhileLive(): Promise<CamerasService> {
+        live();
+        remember(1, 'cam-desk', true);
+        return create();
+      }
+
+      it('re-reads the slots every second and resumes once the slot reads stopped', async () => {
+        slotsFake.refresh.mockImplementation(async () => {
+          if (slotsFake.refresh.mock.calls.length === 3) stopped();
+        });
+        const service = await resumeWhileLive();
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(1);
+        expect(media.opened).toEqual([]);
+
+        await vi.advanceTimersByTimeAsync(999);
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
+        expect(media.opened).toEqual([]);
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(3);
+        expect(service.assignments().get(1)?.deviceId).toBe('cam-desk');
+        expect(posts('/whip').map((call) => call.url)).toEqual([whipUrl(1)]);
+        expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: true }]]);
+
+        await vi.advanceTimersByTimeAsync(20_000); // and then reads no more
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(3);
+        expect(toasts.error).not.toHaveBeenCalled();
+      });
+
+      it('shows Starting… only from the moment it starts, not while it waits', async () => {
+        const service = await resumeWhileLive();
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(service.publishingSlots().size).toBe(0);
+        expect(service.assignments().size).toBe(0);
+      });
+
+      it('gives up when the slot is live for the whole wait: nothing starts and the entry goes', async () => {
+        const service = await resumeWhileLive();
+
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: true }]]);
+        await vi.advanceTimersByTimeAsync(1);
+
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(16); // the first read, then 15 s of seconds
+        expect(entries()).toEqual([]);
+        expect(service.assignments().size).toBe(0);
+        expect(media.opened).toEqual([]);
+        expect(posts('/whip')).toEqual([]);
+        expect(toasts.error).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(16);
+      });
+
+      it('reads the slots once a second for all the slots it waits for, not once each', async () => {
+        live();
+        serverHolds({ ...webcamSlot(2), state: 'playing' });
+        remember(1, 'cam-desk', true);
+        remember(2, 'cam-laptop', true);
+        await create();
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
+      });
+
+      it('resumes the slot that is free at once and keeps waiting for the other', async () => {
+        live();
+        remember(1, 'cam-desk', true);
+        remember(2, 'cam-laptop', true);
+        await create();
+
+        expect(posts('/whip').map((call) => call.url)).toEqual([whipUrl(2)]);
+        stopped();
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(posts('/whip').map((call) => call.url)).toEqual([whipUrl(2), whipUrl(1)]);
+      });
+
+      it('stops waiting at once for a slot that turns out to be someone else’s', async () => {
+        await resumeWhileLive();
+        serverHolds({
+          ...webcamSlot(1),
+          state: 'external',
+          external: { source: 'ffmpeg', reader_count: 0 } as unknown as Slot['external'],
+        });
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(entries()).toEqual([]);
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
+        expect(media.opened).toEqual([]);
+      });
+
+      it('drops the entry, without waiting, when the slots cannot be read meanwhile', async () => {
+        await resumeWhileLive();
+        slotsFake.refresh.mockRejectedValue(new ApiRequestError(0, 'Unreachable.', null));
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(entries()).toEqual([]);
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
+        expect(toasts.error).not.toHaveBeenCalled();
+      });
+
+      describe('when the user acts on the slot during the wait', () => {
+        /** Lets the wait run a few seconds, then `act`, then frees the slot and waits out the rest. */
+        async function actDuringWait(
+          act: (service: CamerasService) => unknown,
+        ): Promise<CamerasService> {
+          const service = await resumeWhileLive();
+          await vi.advanceTimersByTimeAsync(3_000);
+          await act(service);
+          stopped();
+          const reads = slotsFake.refresh.mock.calls.length;
+          await vi.advanceTimersByTimeAsync(20_000);
+          expect(slotsFake.refresh.mock.calls.length).toBe(reads); // the wait is over
+          return service;
+        }
+
+        it('Stop all is honoured: no publish, remembered as not sending', async () => {
+          const service = await actDuringWait((s) => s.releaseAll());
+
+          expect(media.opened).toEqual([]);
+          expect(posts('/whip')).toEqual([]);
+          expect(service.assignments().size).toBe(0);
+          expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: false }]]);
+        });
+
+        it('Reset or Auto assign is honoured: no publish, nothing remembered', async () => {
+          const service = await actDuringWait((s) => s.releaseAll({ clearAssignments: true }));
+
+          expect(media.opened).toEqual([]);
+          expect(service.assignments().size).toBe(0);
+          expect(entries()).toEqual([]);
+        });
+
+        it('a file assigned to the slot is honoured: no publish, no camera', async () => {
+          const service = await actDuringWait((s) => s.assignFile({ index: 1, file: 'a.mp4' }));
+
+          expect(media.opened).toEqual([]);
+          expect(service.assignments().size).toBe(0);
+          expect(entries()).toEqual([]);
+          expect(toasts.error).not.toHaveBeenCalled();
+        });
+
+        it('the source switch to Camera (no camera yet) is honoured: no publish', async () => {
+          const service = await actDuringWait((s) => s.assign(1, null));
+
+          expect(media.opened).toEqual([]);
+          expect(service.assignments().size).toBe(0);
+          expect(entries()).toEqual([]);
+        });
+
+        it('picking another camera is honoured: that camera is the slot’s and is not started', async () => {
+          const service = await actDuringWait((s) => s.assign(1, 'cam-laptop'));
+
+          expect(media.opened).toEqual([]);
+          expect(service.assignments().get(1)?.deviceId).toBe('cam-laptop');
+          expect(entries()).toEqual([[1, { deviceId: 'cam-laptop', sending: false }]]);
+        });
+
+        it('picking the same camera is honoured too: it is not started behind the user', async () => {
+          const service = await actDuringWait((s) => s.assign(1, 'cam-desk'));
+
+          expect(media.opened).toEqual([]);
+          expect(service.assignments().get(1)?.deviceId).toBe('cam-desk');
+          expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: false }]]);
+        });
+      });
+
+      it('stops reading when the page goes, and keeps the entry for the next load', async () => {
+        await resumeWhileLive();
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(3);
+
+        TestBed.resetTestingModule();
+        stopped();
+        await vi.advanceTimersByTimeAsync(20_000);
+
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(3);
+        expect(media.opened).toEqual([]);
+        expect(posts('/whip')).toEqual([]);
+        expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: true }]]);
+      });
+
+      it('does not start a camera when the page goes while a read is out', async () => {
+        await resumeWhileLive();
+        const read = deferred();
+        slotsFake.refresh.mockReturnValue(read.promise);
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        TestBed.resetTestingModule();
+        stopped();
+        read.resolve();
+        await vi.advanceTimersByTimeAsync(20_000);
+
+        expect(media.opened).toEqual([]);
+        expect(posts('/whip')).toEqual([]);
+      });
+    });
+
     it('drops an entry for a slot the server does not list', async () => {
       slotList.set([]);
       remember(1, 'cam-desk', true);
@@ -1245,7 +1450,7 @@ describe('CamerasService', () => {
     });
 
     it('skips a slot that is taken while leaving the others to resume', async () => {
-      serverHolds({ ...webcamSlot(1), state: 'playing' });
+      serverHolds({ ...webcamSlot(1), state: 'pulled' });
       remember(1, 'cam-desk', true);
       remember(2, 'cam-laptop', true);
       const service = await create();

@@ -101,8 +101,11 @@ Selecting **Stop**, unplugging the camera, or closing the browser tab ends the s
 Reloading the page is different: the tab remembers which camera each slot used and whether it
 was sending. After a reload it assigns those cameras again and starts again what was sending,
 provided camera access is still allowed, the camera is still connected, and the slot is still a
-stopped webcam source that nothing else publishes to. The row says **Starting…** until the
-stream is confirmed. Other tabs do not share what a tab remembers, and reopening a closed tab or
+stopped webcam source that nothing else publishes to. Right after a reload the board may still
+show the slot live, because it has not yet noticed the old browser session end; the tab then
+waits for that, so a resume may take up to about 15 seconds. Acting on the slot meanwhile (Stop
+All, Reset, Auto Assign, a file, another camera or source) ends the wait and is not overridden.
+The row says **Starting…** until the stream is confirmed. Other tabs do not share what a tab remembers, and reopening a closed tab or
 returning to Insight through the browser's history starts no camera.
 
 If starting a webcam fails, the message names the cause:

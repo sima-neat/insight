@@ -96,6 +96,11 @@ merging.
   webcams to resume (`webcam-resume.ts`) it builds `CamerasService`, which resumes them on whichever
   page the app lands, and after any other load it forgets them. It imports the service only then: a
   static import would put the camera code (22 kB) in every visit's initial bundle.
+  A resume waits for a slot the server still shows live (the old browser session, which MediaMTX
+  holds for up to 15 s): `resume()` re-reads the slots every `RESUME_POLL_MS` for up to
+  `RESUME_WAIT_MS` and drops the entry only after that. The wait ends when the user acts on the
+  slot (the entry then no longer equals what was remembered, or the slot has a camera or is
+  changing) and when the service is destroyed.
 - **Side panels.** Viewer, Streaming, Media, Peripherals and Stats open their side panel with the
   kit's `neat-aside-toggle` ("Side panel") and build it from the kit's aside parts
   (`neatAsidePanel`, `neatAsideTitle`, `neatAsideHeading`, `neatAsideActions`, `neatCode`). Whether
