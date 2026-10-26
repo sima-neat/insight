@@ -39,6 +39,7 @@ import {
   sessionCsvFilename,
   thermalMaxChart,
 } from '../../stats/telemetry';
+import { radioLabel } from '../../radio-label.testing';
 import { TopBarDialogs } from '../../top-bar-dialogs';
 import { StatsPage } from './stats.page';
 
@@ -959,9 +960,9 @@ describe('StatsPage', () => {
       toolbar().querySelector('[role="radiogroup"][aria-label="Stats view"]')!;
     const viewOption = (label: string): HTMLButtonElement =>
       [...viewSwitch().querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
-        (option) => text(option) === label,
+        (option) => radioLabel(option) === label,
       )!;
-    const checkedView = (): string => text(viewSwitch().querySelector('[aria-checked="true"]'));
+    const checkedView = (): string => radioLabel(viewSwitch().querySelector('[aria-checked="true"]'));
     const telemetryOf = (): SentinelTelemetry =>
       fixture.debugElement.query(By.directive(StatsPage)).injector.get(SentinelTelemetry);
     const runsRead = (): TestRequest => http.expectOne((request) => request.url === RUNS_URL);
@@ -984,7 +985,7 @@ describe('StatsPage', () => {
     });
 
     it('while a comparison is open the switch offers Compare as well, and Runs goes back to the list', async () => {
-      const options = () => [...viewSwitch().querySelectorAll('[role="radio"]')].map(text);
+      const options = () => [...viewSwitch().querySelectorAll('[role="radio"]')].map(radioLabel);
       await visit();
       expect(options()).toEqual(['Live', 'Runs']);
 

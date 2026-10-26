@@ -29,6 +29,7 @@ import type { SlotRow } from '../../sources/slot-row';
 import { SlotsService } from '../../sources/slots.service';
 import { ApiRequestError } from '../../sources/stream-lines';
 import type { Camera } from '../../sources/webcam-publishing';
+import { radioLabel } from '../../radio-label.testing';
 import { FakeLocalStorage } from '../../fake-storage.testing';
 import { StreamingPage } from './streaming.page';
 
@@ -268,7 +269,7 @@ describe('StreamingPage', () => {
     )!;
   const filter = (label: string): HTMLButtonElement =>
     [...toolbar().querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((radio) =>
-      radio.textContent?.trim().startsWith(label),
+      radioLabel(radio).startsWith(label),
     )!;
   const listbox = (): HTMLElement => root().querySelector('[role="listbox"]')!;
   const rows = (): HTMLElement[] => [...listbox().querySelectorAll<HTMLElement>('[role="option"]')];
@@ -452,8 +453,8 @@ describe('StreamingPage', () => {
 
   it('In use shows assigned, external and pulled slots only', async () => {
     await open();
-    expect(filter('All').textContent?.trim()).toBe('All 48');
-    expect(filter('In use').textContent?.trim()).toBe('In use 7');
+    expect(radioLabel(filter('All'))).toBe('All 48');
+    expect(radioLabel(filter('In use'))).toBe('In use 7');
 
     await click(filter('In use'));
 
@@ -590,7 +591,7 @@ describe('StreamingPage', () => {
     await click(rowOf('src7'));
     const kind = (label: string) =>
       [...aside()!.querySelectorAll<HTMLElement>('[role="radio"]')].find(
-        (radio) => radio.textContent?.trim() === label,
+        (radio) => radioLabel(radio) === label,
       )!;
     await click(kind('Stream URL'));
     const password = aside()!.querySelector<HTMLInputElement>('input[type="password"]')!;

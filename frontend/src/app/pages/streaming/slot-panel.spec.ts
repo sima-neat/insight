@@ -23,6 +23,7 @@ import type { Progress } from '../../sources/progress-lines';
 import { SlotsService } from '../../sources/slots.service';
 import { ApiRequestError, type StreamEvent } from '../../sources/stream-lines';
 import type { Camera } from '../../sources/webcam-publishing';
+import { radioLabel } from '../../radio-label.testing';
 import { SlotPanel } from './slot-panel';
 import { slotRow } from '../../sources/slot-row';
 
@@ -239,7 +240,7 @@ describe('SlotPanel', () => {
   const button = (label: string) => buttonIn(root(), label);
   const sourceKind = (label: string) =>
     [...root().querySelectorAll<HTMLElement>('[role="radio"]')].find(
-      (radio) => radio.textContent?.trim() === label,
+      (radio) => radioLabel(radio) === label,
     )!;
   const field = (label: string) =>
     [...root().querySelectorAll<HTMLInputElement>('input')].find(

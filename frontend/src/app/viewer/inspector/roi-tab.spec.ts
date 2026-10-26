@@ -4,6 +4,7 @@ import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { type NeatRoiDrawMode, type NeatRoiPolygon, NeatRoiSwatch } from '@sima/neat-ui/video';
 import { By } from '@angular/platform-browser';
 import { FakeLocalStorage } from '../../fake-storage.testing';
+import { radioLabel } from '../../radio-label.testing';
 import { RoiStore } from '../settings/roi-store';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
 import { RoiTab } from './roi-tab';
@@ -98,7 +99,7 @@ describe('RoiTab', () => {
       (element) => (element.getAttribute('aria-label') ?? flat(element)) === name,
     ) ?? null;
   const radios = () => [...root().querySelectorAll<HTMLButtonElement>('[role="radio"]')];
-  const radio = (label: string) => radios().find((element) => flat(element) === label)!;
+  const radio = (label: string) => radios().find((element) => radioLabel(element) === label)!;
   const hint = () => flat(root().querySelector('.hint'));
   /** The region list's lines, as they read. */
   const lines = () => [...root().querySelectorAll('.regions li')].map((line) => flat(line));
@@ -140,7 +141,7 @@ describe('RoiTab', () => {
   it('the hint and list copy match the spec, and No regions. shows for an empty list', async () => {
     await render('global');
 
-    expect(flat(root().querySelector('[role="radiogroup"]'))).toBe('Off Inclusion Exclusion');
+    expect(radios().map(radioLabel)).toEqual(['Off', 'Inclusion', 'Exclusion']);
     expect(root().querySelector('[role="radiogroup"]')!.getAttribute('aria-label')).toBe('Draw');
     expect(radio('Off').getAttribute('aria-checked')).toBe('true');
     expect(hint()).toBe(
@@ -433,7 +434,7 @@ describe('RoiTab', () => {
   it('a channel has the Draw control and its list, but no Draw on channel field and no list of channels', async () => {
     await render(1, { 'roi:channel:2': stored([SQUARE]) });
 
-    expect(radios().map((element) => flat(element))).toEqual(['Off', 'Inclusion', 'Exclusion']);
+    expect(radios().map(radioLabel)).toEqual(['Off', 'Inclusion', 'Exclusion']);
     expect(flat(root().querySelector('.empty'))).toBe('No regions.');
     expect(backdropField()).toBeNull();
     expect(root().querySelector('.owners')).toBeNull();

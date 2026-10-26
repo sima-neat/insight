@@ -22,6 +22,7 @@ import { FakeLocalStorage } from '../../fake-storage.testing';
 import { LayoutPrefs } from '../settings/layout-prefs';
 import { RoiStore } from '../settings/roi-store';
 import { VfConnections } from '../vf/vf-connections';
+import { radioLabel } from '../../radio-label.testing';
 import { ViewerTile } from '../viewer-tile';
 import { ViewerInspector } from './inspector';
 
@@ -74,7 +75,7 @@ describe('ViewerInspector', () => {
     element?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
   const tab = (label: string): HTMLElement =>
     [...inspector().querySelectorAll<HTMLElement>('[role="tab"]')].find(
-      (element) => element.textContent?.trim() === label,
+      (element) => radioLabel(element) === label,
     )!;
   const headings = () =>
     [...inspector().querySelectorAll('h3')].map((heading) => heading.textContent?.trim());
@@ -663,7 +664,7 @@ describe('ViewerInspector', () => {
     /** The radio of the ROI tab's Draw control labelled `label`. */
     const drawRadio = (label: string): HTMLButtonElement =>
       [...inspector().querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
-        (element) => element.textContent?.trim() === label,
+        (element) => radioLabel(element) === label,
       )!;
     const editor = (): NeatRoiEditor | null =>
       fixture.debugElement.query(By.directive(NeatRoiEditor))?.componentInstance ?? null;
@@ -946,7 +947,7 @@ describe('ViewerInspector', () => {
     const editorElement = (): HTMLElement => inspector().querySelector('neat-roi-editor')!;
     const drawRadio = (label: string): HTMLButtonElement =>
       [...inspector().querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
-        (element) => element.textContent?.trim() === label,
+        (element) => radioLabel(element) === label,
       )!;
     const lines = () => [...inspector().querySelectorAll('.regions li')].map((line) => flat(line));
 
