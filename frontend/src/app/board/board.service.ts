@@ -24,7 +24,9 @@ const SHELL_URL = '/api/devkit-shell';
  * **The check on load.** A read never connects, so a board never connected to would stay "Not
  * checked". The first read of an app load that gets an answer therefore runs `test()` when a board
  * is selected and its state is unknown, silently: a failure only lands in the state (the pill
- * shows Error). Later reads, focus included, never check; "Check again" is the user's.
+ * shows Error). Later reads, focus included, never check; "Check again" is the user's. While a
+ * check is out, `checking` says so, and the pill reads Checking… rather than Not checked: over
+ * SSH a check takes seconds, and a full timeout when the board is unreachable.
  *
  * **Actions.** Select, Check again and Trust each answer with the fresh board state, which wins
  * over every read still out. A failed action reloads the state (it may have recorded the failure)
@@ -48,6 +50,13 @@ export class BoardService {
 
   /** The board generation of `state`; answers that name another one are about another board. */
   readonly generation = computed(() => this.state()?.generation ?? null);
+
+  private readonly checksOut = signal(0);
+  /**
+   * A connection check (`test()`: the load's or Check again) is out, until its answer is applied
+   * or, after a failure, the state it recorded is re-read.
+   */
+  readonly checking = computed(() => this.checksOut() > 0);
 
   private readonly latest = new LatestOnly();
   /** Reads sent and not settled yet. */
@@ -100,12 +109,17 @@ export class BoardService {
   }
 
   /** Connects to the board over SSH and reads its identity ("Check again"). */
-  test(): Promise<BoardState> {
-    // A board changed while the check was out (Select answered meanwhile) is not the one checked.
-    return this.act(
-      this.http.post<BoardState>(`${BOARD_URL}/test`, {}),
-      (state) => this.generation() === null || state.generation === this.generation(),
-    );
+  async test(): Promise<BoardState> {
+    this.checksOut.update((count) => count + 1);
+    try {
+      // A board changed while the check was out (Select answered meanwhile) is not the one checked.
+      return await this.act(
+        this.http.post<BoardState>(`${BOARD_URL}/test`, {}),
+        (state) => this.generation() === null || state.generation === this.generation(),
+      );
+    } finally {
+      this.checksOut.update((count) => count - 1);
+    }
   }
 
   /** Trusts the host key a reflashed board presented; `fingerprint` must be the presented one. */

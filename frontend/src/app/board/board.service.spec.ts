@@ -224,6 +224,30 @@ describe('BoardService', () => {
       expect(service.generation()).toBe(2);
     });
 
+    it('says a check is out until its answer is applied, or its failure re-read', async () => {
+      const service = await started(board('sima@192.168.2.2', 1, unchecked));
+      expect(service.checking()).toBe(true);
+      testRequests()[0].flush(boardA);
+      await tick();
+      expect(service.checking()).toBe(false);
+
+      const again = service.test().catch(() => undefined);
+      expect(service.checking()).toBe(true);
+      testRequests()[0].flush({ error: 'Unreachable.', code: 'unreachable', hint: '' }, badGateway);
+      await tick();
+      // Still checking while the failure is re-read: the pill goes from Checking… to its result.
+      expect(service.checking()).toBe(true);
+      http.expectOne(BOARD_URL).flush(boardA);
+      await again;
+      expect(service.checking()).toBe(false);
+    });
+
+    it('says no check is out when none was needed', async () => {
+      const service = await started(boardA);
+      expect(testRequests()).toHaveLength(0);
+      expect(service.checking()).toBe(false);
+    });
+
     it('a failed check lands in the state only: the board is re-read, and nothing is toasted or thrown', async () => {
       const service = await started(board('sima@192.168.2.2', 1, unchecked));
       testRequests()[0].flush(

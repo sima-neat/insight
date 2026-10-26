@@ -48,6 +48,7 @@ export function shellInfo(overrides: Partial<ShellInfo> = {}): ShellInfo {
 export class FakeBoard {
   readonly state = signal<BoardState | null>(null);
   readonly error = signal<BoardProblem | null>(null);
+  readonly checking = signal(false);
   readonly generation = computed(() => this.state()?.generation ?? null);
   readonly reload = vi.fn(async () => undefined);
   readonly select = vi.fn<() => Promise<BoardState>>();

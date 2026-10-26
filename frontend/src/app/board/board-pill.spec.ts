@@ -97,6 +97,25 @@ describe('BoardPill', () => {
     expect(chip(button).textContent?.trim()).toBe('Not checked');
   });
 
+  it('the pill says Checking… while the connection check is out, then its result', async () => {
+    board.state.set(boardState({ target: DEVKIT }));
+    board.checking.set(true);
+    const button = await render();
+
+    expect(chip(button).textContent?.trim()).toBe('Checking…');
+    expect(tone(button)).toBe('neutral');
+    expect(await tooltip(button)).toBe(
+      'sima@192.168.1.20 — Checking the connection. Open board settings.',
+    );
+
+    board.state.set(
+      boardState({ target: DEVKIT, status: { state: 'connected', checked_at: null, error: null } }),
+    );
+    board.checking.set(false);
+    await fixture.whenStable();
+    expect(chip(button).textContent?.trim()).toBe('Connected');
+  });
+
   it('a narrow screen hides the label from the eye and keeps it in the button name', async () => {
     board.state.set(boardState({ target: DEVKIT }));
     narrow.set(true);

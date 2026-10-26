@@ -42,7 +42,7 @@ export class BoardPill {
 
   protected readonly narrow = inject(NeatViewport).narrow;
   protected readonly indicator = computed(() =>
-    boardIndicator(this.board.state(), this.board.error()),
+    boardIndicator(this.board.state(), this.board.error(), this.board.checking()),
   );
 
   protected open(): void {

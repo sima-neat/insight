@@ -110,6 +110,25 @@ describe('boardIndicator', () => {
     });
   });
 
+  it('says Checking… in place of Not checked while a connection check is out, and only there', () => {
+    expect(boardIndicator(board({ target: localTarget }), null, true)).toEqual({
+      label: 'This board',
+      chip: { label: 'Checking…', tone: 'neutral' },
+      tooltip: 'This board — Checking the connection. Open board settings.',
+    });
+    // A known state, no board, or a failed read keeps its own words while a check runs.
+    const connected = { state: 'connected', checked_at: null, error: null } as const;
+    expect(
+      boardIndicator(board({ target: localTarget, status: connected }), null, true).chip.label,
+    ).toBe('Connected');
+    expect(boardIndicator(board(), null, true).chip.label).toBe('Not selected');
+    expect(boardIndicator(null, null, true).chip.label).toBe('Loading…');
+    const unreachable = new BoardProblem('Could not reach the Insight server.', 'network', '', {});
+    expect(boardIndicator(board({ target: localTarget }), unreachable, true).chip.label).toBe(
+      'Error',
+    );
+  });
+
   it('boardIndicator shows Error with the reason when the board could not be read, not Loading…', () => {
     const unreachable = new BoardProblem(
       'Could not reach the Insight server.',

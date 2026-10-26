@@ -1,4 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
+// Types only, erased at run time.
+import type { BoardState } from '../src/app/board/api';
 import { LAPTOP, topBarSpill } from './layout';
 import { answerSlots, answerTopBar, answerViewer, LONG_BOARD, LONG_HOST } from './top-bar';
 
@@ -23,20 +25,31 @@ const PAGES = [
   { path: '/streaming', answer: (page: Page) => answerSlots(page, 48) },
 ];
 
+/**
+ * The long-named board with the widest chip a board with a target shows, "Not checked" (as after
+ * Change board, where nothing checks), so the layout checks see the pill at its widest. A board in
+ * that state is checked as the app loads; the check answers it unchanged, so the chip stays.
+ */
+const UNCHECKED_LONG_BOARD: BoardState = {
+  ...LONG_BOARD,
+  status: { state: 'unknown', checked_at: null, error: null },
+};
+
 for (const { path, answer } of PAGES) {
   test(`on ${path} at 1366×768, a board name at the pill's cap is cut and the top bar holds System Info`, async ({
     page,
   }) => {
     await answerTopBar(page);
     await page.route(
-      (url) => url.pathname === '/api/board',
-      (route) => route.fulfill({ json: LONG_BOARD }),
+      (url) => url.pathname === '/api/board' || url.pathname === '/api/board/test',
+      (route) => route.fulfill({ json: UNCHECKED_LONG_BOARD }),
     );
     await answer(page);
     await page.setViewportSize(LAPTOP);
     await page.goto(path);
     await expect(page.getByRole('group', { name: 'Page tools' })).toBeVisible();
     await expect(pill(page)).toContainText('Board: devkit-lab');
+    await expect(pill(page)).toContainText('Not checked');
 
     // The name is cut at the cap…
     const label = pill(page).locator('.label');
@@ -45,7 +58,7 @@ for (const { path, answer } of PAGES) {
     // …and the tooltip names the board in full.
     await pill(page).hover();
     await expect(page.getByRole('tooltip')).toHaveText(
-      `sima@${LONG_HOST} — Connected. Open board settings.`,
+      `sima@${LONG_HOST} — Not checked. Open board settings.`,
     );
 
     // System Info's button sits whole in the bar, after the pill, and the page tools keep their

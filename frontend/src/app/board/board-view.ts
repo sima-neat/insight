@@ -46,11 +46,13 @@ export function connectionState(status: BoardStatus): ConnectionState {
  * The pill's words. The state is the last good answer; `error` the last read failure, which wins
  * over it so that a board Insight can no longer read never looks fine (Inv-PB §6.1): the pill
  * keeps naming the last known board and says why it could not be read. Loading is only the
- * moment before the first answer, when there is neither.
+ * moment before the first answer, when there is neither. `checking` (a connection check is out)
+ * turns Not checked into Checking…; a known state keeps its words until the check answers.
  */
 export function boardIndicator(
   state: BoardState | null,
   error: BoardProblem | null,
+  checking = false,
 ): BoardIndicator {
   if (error) {
     // The last known board is named in full, as in every other state: the label may be cut.
@@ -74,6 +76,13 @@ export function boardIndicator(
       label: targetName(target),
       chip: { label: 'Not selected', tone: 'warning' },
       tooltip: 'No board is selected. Open board settings to choose one.',
+    };
+  }
+  if (checking && state.status.state === 'unknown') {
+    return {
+      label: targetName(target),
+      chip: { label: 'Checking…', tone: 'neutral' },
+      tooltip: `${target.label} — Checking the connection. Open board settings.`,
     };
   }
   const connection = connectionState(state.status);

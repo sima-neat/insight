@@ -170,13 +170,25 @@ test('a read that fails after a good one keeps the board named, with Error and t
 });
 
 // "Not checked" goes: a board never connected to is checked once when the app loads.
-test('a board that was never checked is checked once as the app loads, and the pill shows the result', async ({
+test('a board that was never checked is checked once as the app loads, Checking… meanwhile, and the pill shows the result', async ({
   page,
 }) => {
   const backend = new FakePeripheralsBackend();
   backend.board = UNCHECKED_BOARD;
   await backend.install(page);
+  // The check is held open, as a slow SSH connection would: the pill says it is checking.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => url.pathname === '/api/board/test',
+    async (route) => {
+      await held;
+      await route.fallback();
+    },
+  );
   await page.goto('/streaming');
+  await expect(pill(page)).toContainText('Checking…');
+  release();
   await expect(pill(page)).toContainText('Connected');
   expect(backend.posted('/api/board/test')).toEqual([{}]);
 });
