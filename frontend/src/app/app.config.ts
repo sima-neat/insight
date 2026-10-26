@@ -26,11 +26,23 @@ export const appConfig: ApplicationConfig = {
     // than on the first visit to Streaming. Without, it stays out of the initial bundle (it
     // would add 22 kB) and is built on that visit, as before.
     provideAppInitializer(() => {
-      if (readResume().size === 0) return;
-      const injector = inject(EnvironmentInjector);
-      void import('./sources/cameras.service').then(({ CamerasService }) =>
-        injector.get(CamerasService),
-      );
+      void resumeWebcams(inject(EnvironmentInjector));
     }),
   ],
 };
+
+/**
+ * Builds the camera service, which resumes the tab's webcams as it starts, when there are any to
+ * resume; resolves once it is built. Returns null, importing nothing, when there are none.
+ */
+export function resumeWebcams(injector: EnvironmentInjector): Promise<void> | null {
+  if (readResume().size === 0) return null;
+  return import('./sources/cameras.service')
+    .then(({ CamerasService }) => {
+      injector.get(CamerasService);
+    })
+    .catch(() => {
+      // Resuming is best effort: the chunk can fail to load (a redeploy replaced it), and the
+      // page must start all the same. The service is then built on the first visit to Streaming.
+    });
+}

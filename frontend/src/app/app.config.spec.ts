@@ -1,6 +1,7 @@
 import { HttpBackend, HttpXhrBackend } from '@angular/common/http';
+import { EnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { appConfig } from './app.config';
+import { appConfig, resumeWebcams } from './app.config';
 import { CAMERA_MEDIA } from './sources/camera-media';
 import { FakeCameraMedia } from './sources/cameras.testing';
 import { writeResume } from './sources/webcam-resume';
@@ -32,10 +33,15 @@ describe('appConfig', () => {
       await vi.waitFor(() => expect(media.listening).toBe(true));
     });
 
-    it('waits for its first visit to Streaming otherwise, keeping it out of the initial bundle', async () => {
-      TestBed.inject(HttpBackend);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+    it('is not built otherwise, and nothing is imported, keeping it out of the initial bundle', () => {
+      expect(resumeWebcams(TestBed.inject(EnvironmentInjector))).toBeNull();
       expect(media.listening).toBe(false);
+    });
+
+    it('resolves once the service is built', async () => {
+      writeResume(1, { deviceId: 'cam-desk', sending: true });
+      await resumeWebcams(TestBed.inject(EnvironmentInjector));
+      expect(media.listening).toBe(true);
     });
   });
 });

@@ -296,8 +296,9 @@ export class CamerasService {
     // every slot that has ever started one: a stale generation is harmless, a missed one is not.
     for (const slot of this.generations.keys()) this.invalidate(slot);
     this.closeAllSessions();
-    for (const [slot, camera] of this.assignments()) {
-      writeResume(slot, { deviceId: camera.deviceId, sending: false });
+    // Also the entries a resume has not put back yet: it must not start a camera after a stop.
+    for (const [slot, entry] of readResume()) {
+      writeResume(slot, { deviceId: entry.deviceId, sending: false });
     }
     if (clearAssignments) {
       this.assignmentsState.set(new Map());
@@ -328,7 +329,8 @@ export class CamerasService {
     try {
       await this.slots.refresh();
     } catch {
-      // Without the server's word nothing may be started; the page says the server is unreachable.
+      // Without the server's word nothing may be started, and nothing says when it will answer, so
+      // the entries go rather than wait. No toast: the page already shows the server unreachable.
       for (const slot of remembered.keys()) writeResume(slot, null);
       return;
     }
@@ -345,6 +347,10 @@ export class CamerasService {
 
   private async resumeSlot(slot: number, entry: ResumeEntry): Promise<void> {
     if (this.assignments().has(slot) || this.changingSlots().has(slot)) return;
+    // The entry was read before the slots were: a Stop all, a Reset or a file assignment made
+    // meanwhile rewrote or dropped it, and that is the user's word over the one remembered.
+    const current = readResume().get(slot);
+    if (current?.deviceId !== entry.deviceId || current.sending !== entry.sending) return;
     const camera = this.cameras().find((c) => c.deviceId === entry.deviceId);
     const held = this.slots.slots()?.find((s) => s.index === slot);
     if (!camera || held?.type !== 'webcam' || held.state !== 'stopped') {
@@ -356,7 +362,8 @@ export class CamerasService {
     try {
       await this.publish(slot);
     } catch (failure) {
-      writeResume(slot, null);
+      // The camera stays assigned, so the entry stays too, but nothing is sending.
+      writeResume(slot, { deviceId: entry.deviceId, sending: false });
       throw failure;
     }
   }

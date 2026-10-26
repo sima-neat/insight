@@ -1249,7 +1249,51 @@ describe('CamerasService', () => {
       expect(media.opened).toEqual([]);
     });
 
-    it('drops the entry and tells the user once when the camera will not start', async () => {
+    describe('when the user stops, resets or rewrites the slot while the slots are being read', () => {
+      /** Resumes camera 'cam-desk' on slot 1 with the slot read held open, then lets `act` happen. */
+      async function actDuringRead(
+        act: (service: CamerasService) => unknown,
+      ): Promise<CamerasService> {
+        const read = deferred();
+        slotsFake.refresh.mockReturnValue(read.promise);
+        remember(1, 'cam-desk', true);
+        const service = await create();
+        await act(service);
+        read.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        return service;
+      }
+
+      it('Stop all is honoured: the camera never starts and is remembered as not sending', async () => {
+        const service = await actDuringRead((s) => s.releaseAll());
+
+        expect(media.opened).toEqual([]);
+        expect(posts('/whip')).toEqual([]);
+        expect(service.localStreams().size).toBe(0);
+        expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: false }]]);
+      });
+
+      it('Reset or Auto assign is honoured: nothing is assigned or started, and nothing is remembered', async () => {
+        const service = await actDuringRead((s) => s.releaseAll({ clearAssignments: true }));
+
+        expect(media.opened).toEqual([]);
+        expect(service.assignments().size).toBe(0);
+        expect(entries()).toEqual([]);
+        expect(toasts.error).not.toHaveBeenCalled();
+      });
+
+      it('a file assigned to the slot is honoured: no camera opens and no error shows', async () => {
+        const service = await actDuringRead((s) => s.assignFile({ index: 1, file: 'a.mp4' }));
+
+        expect(media.opened).toEqual([]);
+        expect(service.assignments().size).toBe(0);
+        expect(entries()).toEqual([]);
+        expect(slotsFake.confirmWebcamStart).not.toHaveBeenCalled();
+        expect(toasts.error).not.toHaveBeenCalled();
+      });
+    });
+
+    it('keeps the entry as not sending and tells the user once when the camera will not start', async () => {
       media.openFailure = new DOMException('busy', 'NotReadableError');
       remember(1, 'cam-desk', true);
       const service = await create();
@@ -1257,19 +1301,23 @@ describe('CamerasService', () => {
 
       expect(toasts.error).toHaveBeenCalledTimes(1);
       expect(toasts.error).toHaveBeenCalledWith(expect.stringMatching(/in use by another/));
-      expect(entries()).toEqual([]);
+      expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: false }]]);
+      expect(service.assignments().get(1)?.deviceId).toBe('cam-desk');
       expect(service.localStreams().size).toBe(0);
       expect(posts('/whip')).toEqual([]);
     });
 
-    it('says the same failure once even when several slots meet it, and resumes the others', async () => {
+    it('says the same failure once even when several slots meet it', async () => {
       whip = { status: 500, sessionId: null };
       remember(1, 'cam-desk', true);
       remember(2, 'cam-laptop', true);
       await create();
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(entries()).toEqual([]);
+      expect(entries()).toEqual([
+        [1, { deviceId: 'cam-desk', sending: false }],
+        [2, { deviceId: 'cam-laptop', sending: false }],
+      ]);
       expect(toasts.error).toHaveBeenCalledTimes(1);
     });
 
