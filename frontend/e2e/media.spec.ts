@@ -311,6 +311,36 @@ test.describe('Media with mocked APIs', () => {
     });
   }
 
+  test('Shift-click ticks a range from the selected row and Ctrl+A ticks every file, never a folder', async ({
+    page,
+  }) => {
+    await withMockedMedia(page);
+    await page.goto('/media');
+    await expect(rows(page)).toHaveCount(3);
+    const ticked = (name: string) => row(page, name).getAttribute('aria-selected');
+
+    // The folder is selected, not opened; the range from it to notes.txt skips it.
+    await listbox(page).focus();
+    await page.keyboard.press('ArrowDown');
+    await row(page, 'notes.txt').click({ modifiers: ['Shift'] });
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('2 selected');
+    // A folder has no box to tick: it is not selected for deleting, so it has no state to say.
+    expect([await ticked('people'), await ticked('cars.mp4'), await ticked('notes.txt')]).toEqual([
+      null,
+      'true',
+      'true',
+    ]);
+
+    await panel(page).getByRole('button', { name: 'Clear' }).click();
+    await expect(panel(page).getByRole('heading', { level: 2 })).not.toHaveText('2 selected');
+    expect([await ticked('cars.mp4'), await ticked('notes.txt')]).toEqual(['false', 'false']);
+
+    await listbox(page).focus();
+    await page.keyboard.press('Control+A');
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('2 selected');
+    expect(await ticked('people')).toBeNull();
+  });
+
   test('a failing slot poll says so', async ({ page }) => {
     const mocked = await withMockedMedia(page);
     await page.goto('/media');

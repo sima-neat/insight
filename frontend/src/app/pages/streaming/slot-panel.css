@@ -1,3 +1,8 @@
+/* The main action fills its row of the panel, which the flex-wrapped actions row gives it alone. */
+.main-action {
+  inline-size: 100%;
+}
+
 .text {
   margin: 0;
   font-size: var(--neat-text-sm);

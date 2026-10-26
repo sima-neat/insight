@@ -209,6 +209,52 @@ describe('SlotControl', () => {
     expect(slots.start).not.toHaveBeenCalled();
   });
 
+  it('starting marks the slot from the click until its start settles, whatever the outcome', async () => {
+    expect(control.starting().has(2)).toBe(false);
+
+    const accepted = deferred<SuccessResponse>();
+    slots.start.mockReturnValueOnce(accepted.promise);
+    const started = control.start(2);
+    await flush();
+    expect(control.starting().has(2)).toBe(true);
+    // Only the slot being started.
+    expect(control.starting().has(7)).toBe(false);
+    accepted.resolve(OK);
+    await expect(started).resolves.toBe('started');
+    expect(control.starting().has(2)).toBe(false);
+
+    const refused = deferred<SuccessResponse>();
+    slots.start.mockReturnValueOnce(refused.promise);
+    const failed = control.start(2);
+    await flush();
+    expect(control.starting().has(2)).toBe(true);
+    refused.reject(new ApiRequestError(409, 'src2 changed.', null));
+    await expect(failed).rejects.toThrow('src2 changed.');
+    expect(control.starting().has(2)).toBe(false);
+  });
+
+  it('a start is starting while it waits for a rate commit, and while a webcam publishes', async () => {
+    const assigned = deferred<SuccessResponse>();
+    slots.assign.mockReturnValueOnce(assigned.promise);
+    void control.commitFps(slot(2), 30);
+    const started = control.start(2);
+    await flush();
+    expect(control.starting().has(2)).toBe(true);
+    assigned.resolve(OK);
+    await started;
+    expect(control.starting().has(2)).toBe(false);
+
+    slots.slots.set([slot(3, { type: 'webcam', file: '' })]);
+    const publishing = deferred<undefined>();
+    cameras.publish.mockReturnValueOnce(publishing.promise);
+    const published = control.start(3);
+    await flush();
+    expect(control.starting().has(3)).toBe(true);
+    publishing.resolve(undefined);
+    await published;
+    expect(control.starting().has(3)).toBe(false);
+  });
+
   it('commitsSettled waits for every pending commit, and says whether all of them landed', async () => {
     await expect(control.commitsSettled()).resolves.toBe(true);
 

@@ -19,6 +19,7 @@ import type {
   RenditionUsage,
   ResetResult,
   Slot,
+  StartRequest,
   StopAllResult,
   SuccessResponse,
 } from '../../sources/api';
@@ -140,6 +141,8 @@ class FakeSlots {
   readonly reset = vi.fn<(released: readonly ReleasedWebcam[]) => Promise<ResetResult>>();
   readonly autoAssign = vi.fn<(released: readonly ReleasedWebcam[]) => Promise<AutoAssignResult>>();
   readonly clearRenditions = vi.fn<() => Promise<RenditionsCleared>>();
+  /** What the side panel starts a slot with. */
+  readonly start = vi.fn<(request: StartRequest) => Promise<SuccessResponse>>();
   /** What the side panel commits a frame rate with. */
   readonly assign = vi.fn<(request: AssignRequest) => Promise<SuccessResponse>>(async () => ({
     success: true,
@@ -288,6 +291,10 @@ describe('StreamingPage', () => {
       .find((debug) => debug.nativeElement === chip)!
       .componentInstance.tone();
   const aside = (): HTMLElement | null => root().querySelector('aside');
+  const asideButton = (label: string): HTMLButtonElement =>
+    [...aside()!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === label,
+    )!;
   const asideHeading = () => aside()?.querySelector('h2')?.textContent?.trim();
   const notice = () => root().querySelector('[role="status"]')?.textContent?.trim() ?? '';
   const morePanel = () => document.querySelector('[role="dialog"][aria-label="More actions"]');
@@ -605,6 +612,31 @@ describe('StreamingPage', () => {
     expect(kind('File').getAttribute('aria-checked')).toBe('true');
     await click(kind('Stream URL'));
     expect(aside()!.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe('');
+  });
+
+  it('a slot with a start in flight reads Starting… in its row and its panel, then its server state again', async () => {
+    let started!: (answer: SuccessResponse) => void;
+    slots.start.mockReturnValueOnce(new Promise((resolve) => (started = resolve)));
+    await open(
+      mixedSlots().map((one) =>
+        one.index === 7 ? { ...one, allowed_transports: ['rtsp' as const] } : one,
+      ),
+    );
+    await click(rowOf('src7'));
+    const rowChip = () => rowOf('src7').querySelector('neat-status-chip')!;
+    const panelChip = () => aside()!.querySelector('app-panel-title neat-status-chip')!;
+    const read = (chip: Element) => `${chip.textContent!.trim()} ${toneOf(chip)}`;
+    expect([read(rowChip()), read(panelChip())]).toEqual(['Idle neutral', 'Idle neutral']);
+
+    await click(asideButton('Start'));
+    expect(slots.start).toHaveBeenCalledWith({ index: 7 });
+    expect([read(rowChip()), read(panelChip())]).toEqual(['Starting… info', 'Starting… info']);
+    // Only the slot being started.
+    expect(cells(rowOf('src8'))[3]).toBe('Idle');
+
+    started({ success: true });
+    await settleOverlay();
+    expect([read(rowChip()), read(panelChip())]).toEqual(['Idle neutral', 'Idle neutral']);
   });
 
   it('Start… cancelled starts nothing', async () => {

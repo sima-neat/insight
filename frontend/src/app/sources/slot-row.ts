@@ -40,6 +40,8 @@ export interface SlotLocal {
   readonly camera?: Camera;
   /** The rendition `SlotsService.prepare` is encoding for the slot's start. */
   readonly encode?: Progress;
+  /** A start of the slot is in flight: from the click until the server has answered. */
+  readonly starting?: boolean;
 }
 
 /*
@@ -49,6 +51,7 @@ export interface SlotLocal {
 const IDLE: SlotStateView = { label: 'Idle', tone: 'neutral' };
 const LIVE: SlotStateView = { label: 'Live', tone: 'success' };
 const ENCODING: SlotStateView = { label: 'Encoding', tone: 'info' };
+const STARTING: SlotStateView = { label: 'Starting…', tone: 'info' };
 const EXTERNAL: SlotStateView = { label: 'External', tone: 'highlight' };
 const PULL_STATES: Record<SlotPullStatus, SlotStateView> = {
   connecting: { label: 'Connecting…', tone: 'info' },
@@ -109,11 +112,16 @@ export function slotKind(slot: Slot): SlotKind {
   return slot.file ? 'VID' : '';
 }
 
-export function slotState(slot: Slot, encode?: Progress): SlotStateView {
+/**
+ * A start in flight reads Starting… until the server says the slot is live; the encode before it
+ * keeps its own word, and a publisher or a pull holds the slot whatever is being started.
+ */
+export function slotState(slot: Slot, encode?: Progress, starting = false): SlotStateView {
   if (slot.state === 'external') return EXTERNAL;
   if (slot.state === 'pulled') return PULL_STATES[slot.pull?.status ?? 'connecting'];
   if (encode) return ENCODING;
-  return slot.state === 'playing' ? LIVE : IDLE;
+  if (slot.state === 'playing') return LIVE;
+  return starting ? STARTING : IDLE;
 }
 
 export function slotSource(slot: Slot, camera?: Camera): string {
@@ -308,7 +316,7 @@ export function slotRow(slot: Slot, local: SlotLocal = {}): SlotRow {
     name: slotName(slot),
     kind: slotKind(slot),
     source: slotSource(slot, local.camera),
-    state: slotState(slot, local.encode),
+    state: slotState(slot, local.encode, local.starting),
     rate: slotRate(slot, local.encode),
     codec: slotCodec(slot),
     codecWarning: codecWarning(slot),

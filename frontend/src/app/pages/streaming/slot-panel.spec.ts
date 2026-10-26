@@ -3,6 +3,7 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component, computed, inject, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { NeatButton, NeatIcon, type NeatButtonVariant, type NeatIconName } from '@sima/neat-ui';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { Observable, Subject } from 'rxjs';
@@ -24,6 +25,7 @@ import { SlotsService } from '../../sources/slots.service';
 import { ApiRequestError, type StreamEvent } from '../../sources/stream-lines';
 import type { Camera } from '../../sources/webcam-publishing';
 import { radioLabel } from '../../radio-label.testing';
+import { SlotControl } from './slot-control';
 import { SlotPanel } from './slot-panel';
 import { slotRow } from '../../sources/slot-row';
 
@@ -150,12 +152,14 @@ class FakeLibrary {
 class Host {
   private readonly slots = inject(SlotsService);
   private readonly cameras = inject(CamerasService);
+  private readonly control = inject(SlotControl);
   readonly index = signal(2);
   readonly row = computed(() => {
     const slot = this.slots.slots()!.find((one) => one.index === this.index())!;
     return slotRow(slot, {
       camera: this.cameras.assignments().get(slot.index),
       encode: this.slots.encodes().get(slot.index),
+      starting: this.control.starting().has(slot.index),
     });
   });
 }
@@ -714,6 +718,84 @@ describe('SlotPanel', () => {
     expect(button('Start')).toBeUndefined();
     await click(button('Stop pulling'));
     expect(slots.stop).toHaveBeenLastCalledWith({ index: 5 });
+  });
+
+  /** The kit button on `element`: what the panel gave it, whatever classes that makes. */
+  const kitButton = (element: HTMLElement): NeatButton =>
+    fixture.debugElement
+      .queryAll(By.directive(NeatButton))
+      .find((debug) => debug.nativeElement === element)!
+      .injector.get(NeatButton);
+  /** The name of the icon drawn in `element`, or null when it has none. */
+  const iconOf = (element: HTMLElement): NeatIconName | null =>
+    fixture.debugElement
+      .queryAll(By.directive(NeatIcon))
+      .find((debug) => element.contains(debug.nativeElement))
+      ?.injector.get(NeatIcon)
+      .name() ?? null;
+
+  it('the main action is a medium button on a row of its own, in the look of what it does', async () => {
+    const pulled = slot(5, {
+      state: 'pulled',
+      pull: {
+        status: 'live',
+        scheme: 'rtsp',
+        host: '10.0.0.7:554',
+        path: '/stream1',
+        error: null,
+        since: '2026-10-24T08:00:00Z',
+        codec_supported: true,
+        width: 1920,
+        height: 1080,
+        fps: 25,
+        bitrate_bps: 4_000_000,
+      },
+    });
+    const external = slot(4, {
+      state: 'external',
+      codec: 'h264',
+      external: {
+        protocol: 'rtsp',
+        address: '192.168.1.20:41234',
+        since: '2026-10-24T08:00:00Z',
+        codec_supported: true,
+        width: 1280,
+        height: 720,
+        fps: 30,
+        bitrate_bps: 2_000_000,
+      },
+    });
+    slots.slots.set([
+      fileSlot(2),
+      fileSlot(3, { state: 'playing' }),
+      external,
+      pulled,
+      fileSlot(6, { fps: 15 }),
+    ]);
+    const looks: Record<string, [string, NeatButtonVariant, NeatIconName | null]> = {};
+    for (const index of [2, 3, 4, 5]) {
+      await open(index);
+      const main = fixture.debugElement.query(By.css('[neatAsideActions] button')).nativeElement;
+      const kit = kitButton(main);
+      expect(kit.size(), `src${index}`).toBe('medium');
+      // The row is its own and the button fills it: the panel's one rule for it.
+      expect(getComputedStyle(main).inlineSize, `src${index}`).toBe('100%');
+      looks[text(main)] = [text(main), kit.variant(), iconOf(main)];
+      fixture.destroy();
+    }
+    // Encoding: Cancel encoding, outlined, no icon.
+    slots.encodes.set(new Map([[6, { title: 'Preparing rendition…', detail: '', percent: null }]]));
+    await open(6);
+    const cancel = button('Cancel encoding')!;
+    looks['Cancel encoding'] = ['Cancel encoding', kitButton(cancel).variant(), iconOf(cancel)];
+
+    expect(looks).toEqual({
+      Start: ['Start', 'success', 'play'],
+      Stop: ['Stop', 'danger', 'stop'],
+      'Take over…': ['Take over…', 'danger', null],
+      'Stop pulling': ['Stop pulling', 'danger', 'stop'],
+      'Cancel encoding': ['Cancel encoding', 'outlined', null],
+    });
   });
 
   it('a webcam slot without a camera picked in this browser cannot start', async () => {

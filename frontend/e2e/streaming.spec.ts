@@ -386,6 +386,17 @@ test.describe('Streaming with mocked slots', () => {
           return copy.left >= url.right && copy.top < url.bottom && copy.bottom > url.top;
         });
 
+    /** Whether the main action fills the row it is alone on, the panel's width. */
+    const mainActionFillsPanel = () =>
+      panel(page)
+        .locator('[neatAsideActions]')
+        .first()
+        .evaluate((actions) => {
+          const row = actions.getBoundingClientRect();
+          const button = actions.querySelector('button')!.getBoundingClientRect();
+          return actions.children.length === 1 && Math.abs(button.width - row.width) < 1;
+        });
+
     for (const { size } of VIEWPORTS) {
       await page.setViewportSize(size);
       // A playing file, a file at its own rate, an external publisher and a pull.
@@ -400,6 +411,7 @@ test.describe('Streaming with mocked slots', () => {
             { horizontal: 0, vertical: 0 },
           ]);
         await expect.poll(copyBesideUrl).toBe(true);
+        await expect.poll(mainActionFillsPanel).toBe(true);
       }
     }
 
@@ -421,7 +433,10 @@ test.describe('Streaming with mocked slots', () => {
       // The page opens on src1, as #170 did.
       await listbox(page).focus();
       await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
-      // From the list into the panel: the main action, the source switch, then Change….
+      // From the list into the panel: the panel's resize handle, the main action, the source
+      // switch, then Change….
+      await page.keyboard.press('Tab');
+      await expect(page.getByRole('separator', { name: 'Resize side panel' })).toBeFocused();
       await page.keyboard.press('Tab');
       await expect(panel(page).getByRole('button', { name: 'Stop', exact: true })).toBeFocused();
       await page.keyboard.press('Tab');

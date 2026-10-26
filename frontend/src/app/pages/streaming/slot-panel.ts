@@ -19,10 +19,12 @@ import {
   NeatAsidePanel,
   NeatButton,
   NeatCode,
+  NeatIcon,
   NeatInlineButton,
   NeatNote,
   NeatTooltip,
   type NeatButtonVariant,
+  type NeatIconName,
 } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatDetails } from '@sima/neat-ui/details';
@@ -85,6 +87,8 @@ interface PrimaryAction {
   readonly kind: 'start' | 'stop' | 'cancel' | 'takeOver' | 'stopPulling';
   readonly label: string;
   readonly variant: NeatButtonVariant;
+  /** The glyph before the label, for the actions that start or end a stream. */
+  readonly icon: NeatIconName | null;
   /** Why the action cannot be taken at all; the button is then disabled. */
   readonly blocker: string | null;
   /** The action waits for something in flight: the button stays focusable, and a press does nothing. */
@@ -133,6 +137,7 @@ function formFor(slot: Slot): SourceForm {
     NeatDetails,
     NeatErrorNote,
     NeatField,
+    NeatIcon,
     NeatInlineButton,
     NeatInput,
     NeatNote,
@@ -237,9 +242,15 @@ export class SlotPanel {
     const plain = { blocker: null, waiting: this.busy(), tooltip: null };
     switch (this.slot().state) {
       case 'external':
-        return { ...plain, kind: 'takeOver', label: 'Take over…', variant: 'danger' };
+        return { ...plain, kind: 'takeOver', label: 'Take over…', variant: 'danger', icon: null };
       case 'pulled':
-        return { ...plain, kind: 'stopPulling', label: 'Stop pulling', variant: 'outlined' };
+        return {
+          ...plain,
+          kind: 'stopPulling',
+          label: 'Stop pulling',
+          variant: 'danger',
+          icon: 'stop',
+        };
     }
     if (this.encode()) {
       // Once the encode is over the start that follows it cannot be cancelled.
@@ -248,14 +259,18 @@ export class SlotPanel {
         kind: 'cancel',
         label: 'Cancel encoding',
         variant: 'outlined',
+        icon: null,
         waiting: !this.preparing(),
       };
     }
-    if (this.playing()) return { ...plain, kind: 'stop', label: 'Stop', variant: 'outlined' };
+    if (this.playing()) {
+      return { ...plain, kind: 'stop', label: 'Stop', variant: 'danger', icon: 'stop' };
+    }
     return {
       kind: 'start',
       label: 'Start',
-      variant: 'primary',
+      variant: 'success',
+      icon: 'play',
       blocker: this.startBlocker(),
       waiting: this.busy(),
       tooltip: this.startTooltip(),

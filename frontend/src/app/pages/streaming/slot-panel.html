@@ -5,20 +5,25 @@
 <!--
   One element for the slot's main action, whatever it is now (Start, Stop, Cancel encoding, Take
   over…, Stop pulling): a press changes the action, and the focus stays on the button. While the
-  slot is busy it waits with aria-disabled rather than disabled, which would drop the focus.
+  slot is busy it waits with aria-disabled rather than disabled, which would drop the focus. It is
+  the panel's main control, so it is a medium button on a row of its own, not a small one among
+  the source's.
 -->
 <div neatAsideActions>
   <button
     #primary
+    class="main-action"
     neatButton
     type="button"
-    size="small"
     [variant]="action().variant"
     [neatTooltip]="action().tooltip"
     [disabled]="action().blocker !== null"
     [attr.aria-disabled]="action().waiting || null"
     (click)="runAction()"
   >
+    @if (action().icon; as icon) {
+      <neat-icon [name]="icon" />
+    }
     {{ action().label }}
   </button>
 </div>

@@ -9,6 +9,7 @@ import {
   pullSourceText,
   readersText,
   slotOutput,
+  type SlotRow,
   slotRow,
   streamUrl,
 } from './slot-row';
@@ -127,6 +128,25 @@ describe('slotRow', () => {
     expect(
       slotRow(file, { encode: { title: 'Preparing rendition…', detail: '', percent: null } }).rate,
     ).toBe('encoding');
+  });
+
+  it('a slot whose start is in flight is Starting… until it is live; other states keep their own', () => {
+    const idle = slot(4, { file: 'a.mp4', codec: 'h264' });
+    const label = (row: SlotRow) => `${row.state.label} (${row.state.tone})`;
+    expect(label(slotRow(idle, { starting: true }))).toBe('Starting… (info)');
+    expect(label(slotRow(idle, { starting: false }))).toBe('Idle (neutral)');
+    expect(label(slotRow(idle))).toBe('Idle (neutral)');
+
+    // Live already: the start has landed and only its bookkeeping is still running.
+    expect(label(slotRow({ ...idle, state: 'playing' }, { starting: true }))).toBe(
+      'Live (success)',
+    );
+    // The encode before the start is Encoding, and a publisher or a pull is what holds the slot.
+    const encode = { title: 'Encoding…', detail: '', percent: 10 };
+    expect(label(slotRow(idle, { starting: true, encode }))).toBe('Encoding (info)');
+    expect(label(slotRow({ ...idle, state: 'external' }, { starting: true }))).toBe(
+      'External (highlight)',
+    );
   });
 
   it('a webcam slot: CAM and the camera this browser picked, else "Select a camera"', () => {

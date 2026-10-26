@@ -15,6 +15,14 @@ import { messageOf } from '../../sources/stream-lines';
 /** How a start ended: started, cancelled while encoding, or skipped because its rate commit failed. */
 export type StartOutcome = 'started' | 'cancelled' | 'skipped';
 
+/** The set with `index` in it or out of it, as a new set. */
+function withMember(all: ReadonlySet<number>, index: number, member: boolean): ReadonlySet<number> {
+  const next = new Set(all);
+  if (member) next.add(index);
+  else next.delete(index);
+  return next;
+}
+
 /**
  * The Streaming side panel's work on a slot that has to outlive the panel: the panel shows one
  * slot and is built afresh for each, while a frame-rate commit, an encode or a start goes on when
@@ -48,6 +56,13 @@ export class SlotControl {
   private readonly preparingState = signal<ReadonlySet<number>>(new Set());
   /** Slots whose start is encoding a rendition, which Cancel encoding can stop. */
   readonly preparing = this.preparingState.asReadonly();
+
+  private readonly startingState = signal<ReadonlySet<number>>(new Set());
+  /**
+   * Slots with a start in flight, from the click to its answer: the list and the panel say
+   * Starting… for them. Not `busy`, which every action of the panel marks.
+   */
+  readonly starting = this.startingState.asReadonly();
 
   private readonly commits = new Map<number, Promise<CommitResult>>();
   /** How to cancel each running encode: it ends the request and settles its start as cancelled. */
@@ -89,25 +104,30 @@ export class SlotControl {
    * browser's camera, a file at its own rate directly, at another rate after encoding the
    * rendition. Rejects with a message to show.
    */
-  start(index: number): Promise<StartOutcome> {
+  async start(index: number): Promise<StartOutcome> {
     // Taken before `run`, which waits for it too and by then the commit is no longer pending.
     const pending = this.commits.get(index);
-    return this.run(index, async () => {
-      const current = this.slots.slots()?.find((slot) => slot.index === index);
-      const slot = withCommittedFps(current, pending ? await pending : undefined);
-      if (!slot) return 'skipped';
-      if (slot.type === 'webcam') {
-        await this.cameras.publish(index);
+    this.setStarting(index, true);
+    try {
+      return await this.run(index, async () => {
+        const current = this.slots.slots()?.find((slot) => slot.index === index);
+        const slot = withCommittedFps(current, pending ? await pending : undefined);
+        if (!slot) return 'skipped';
+        if (slot.type === 'webcam') {
+          await this.cameras.publish(index);
+          return 'started';
+        }
+        if (!needsRendition(slot)) {
+          await this.slots.start({ index });
+          return 'started';
+        }
+        if ((await this.prepare(index, slot.fps!)) === 'cancelled') return 'cancelled';
+        await this.slots.startAfterPrepare(index);
         return 'started';
-      }
-      if (!needsRendition(slot)) {
-        await this.slots.start({ index });
-        return 'started';
-      }
-      if ((await this.prepare(index, slot.fps!)) === 'cancelled') return 'cancelled';
-      await this.slots.startAfterPrepare(index);
-      return 'started';
-    });
+      });
+    } finally {
+      this.setStarting(index, false);
+    }
   }
 
   /** Stops the slot's encode; its start then ends as cancelled. Does nothing when none runs. */
@@ -173,12 +193,11 @@ export class SlotControl {
   }
 
   private setPreparing(index: number, preparing: boolean): void {
-    this.preparingState.update((all) => {
-      const next = new Set(all);
-      if (preparing) next.add(index);
-      else next.delete(index);
-      return next;
-    });
+    this.preparingState.update((all) => withMember(all, index, preparing));
+  }
+
+  private setStarting(index: number, starting: boolean): void {
+    this.startingState.update((all) => withMember(all, index, starting));
   }
 
   private adjustBusy(index: number, by: 1 | -1): void {

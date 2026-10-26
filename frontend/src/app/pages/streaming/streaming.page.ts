@@ -148,8 +148,13 @@ export class StreamingPage {
   private readonly allRows = computed(() => {
     const cameras = this.cameras.assignments();
     const encodes = this.slots.encodes();
+    const starting = this.control.starting();
     return (this.slots.slots() ?? []).map((slot) =>
-      slotRow(slot, { camera: cameras.get(slot.index), encode: encodes.get(slot.index) }),
+      slotRow(slot, {
+        camera: cameras.get(slot.index),
+        encode: encodes.get(slot.index),
+        starting: starting.has(slot.index),
+      }),
     );
   });
   private readonly inUseRows = computed(() => this.allRows().filter((row) => isInUse(row.slot)));
