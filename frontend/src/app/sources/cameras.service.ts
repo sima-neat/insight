@@ -37,11 +37,12 @@ const UNKNOWN_CAMERA_LABEL = 'Webcam';
 /**
  * How often a resume reads the slots again while the server still shows a slot live, and for how
  * long it does. After a reload MediaMTX keeps the old WHIP session for a few seconds, and the
- * server demotes the slot to stopped only on a read after the path is gone; 15 s covers that
- * (MediaMTX's own timeout) with room to spare, and a slot still live after it is not ours.
+ * server demotes the slot to stopped only on a read after the path is gone. MediaMTX holds the
+ * old path for up to 15-20 s, so 25 s covers that with room to spare, and a slot still live after
+ * it is not ours.
  */
 const RESUME_POLL_MS = 1000;
-const RESUME_WAIT_MS = 15000;
+const RESUME_WAIT_MS = 25000;
 
 /** A slot and the camera this tab remembers for it. */
 type RememberedWebcam = [slot: number, entry: ResumeEntry];
@@ -336,6 +337,10 @@ export class CamerasService {
    * assigned still. Rejects with the server's message; this tab's session is over either way.
    */
   async release(slot: number): Promise<void> {
+    // After a reload the panel offers Stop while a resume still waits for the slot: the entry it
+    // waits on must say the user stopped, or its next read would publish behind the stop.
+    const entry = readResume().get(slot);
+    if (entry) this.rememberStopped(slot, entry);
     await this.stopBound(slot, this.sessions.get(slot) ?? null);
   }
 
@@ -360,13 +365,7 @@ export class CamerasService {
     for (const slot of this.generations.keys()) this.invalidate(slot);
     this.closeAllSessions();
     // Also the entries a resume has not put back yet: it must not start a camera after a stop.
-    for (const [slot, entry] of readResume()) {
-      // An entry that was not sending and is not assigned yet would be indistinguishable from
-      // before once rewritten, so a waiting resume could not tell that the user stopped everything
-      // and would assign its camera afterwards: it goes.
-      if (!entry.sending && !this.assignments().has(slot)) writeResume(slot, null);
-      else writeResume(slot, { deviceId: entry.deviceId, sending: false });
-    }
+    for (const [slot, entry] of readResume()) this.rememberStopped(slot, entry);
     if (clearAssignments) {
       this.assignmentsState.set(new Map());
       // Also what a resume has not put back yet: the slots are file slots again.
@@ -383,24 +382,25 @@ export class CamerasService {
    *   granted permission, so no prompt appears here) and the slot, as the server reports it, is a
    *   webcam that is stopped: not held by an external publisher or a pull.
    * - a slot that reads live is waited for: the server keeps a reloaded tab's slot live until it
-   *   notices the old WHIP session gone, which takes MediaMTX up to 15 s. The slots are read again
-   *   every `RESUME_POLL_MS` (one read for all the slots waited for) for up to `RESUME_WAIT_MS`; a
-   *   slot still live after that is someone else's, and its entry goes.
+   *   notices the old WHIP session gone, which takes MediaMTX up to 15-20 s. The slots are read
+   *   again every `RESUME_POLL_MS` (one read for all the slots waited for) for up to
+   *   `RESUME_WAIT_MS` (25 s); a slot still live after that is someone else's, and its entry goes.
    *   The first read failing ends the resume (no word from the server at all); a later one
    *   failing is tried again at the next tick.
    * - the camera is assigned locally (the server already holds the slot as a webcam) and, if it
    *   was sending, published.
    * An entry that does not qualify, or whose camera fails to start, is dropped, and a failure is
-   * toasted (each distinct message once). A slot the user acted on meanwhile (Stop all, Reset,
-   * Auto assign, a file or another camera, the source switch) is theirs: left alone, and the wait
-   * for it ends. So does the whole wait when the service is destroyed. Never rejects.
+   * toasted as it happens (each distinct message once). A slot the user acted on meanwhile (Stop,
+   * Stop all, Reset, Auto assign, a file or another camera, the source switch) is theirs: left
+   * alone, and the wait for it ends. So does the whole wait when the service is destroyed. Never
+   * rejects.
    */
   async resume(): Promise<void> {
     const { signal } = this.lifetime;
     let waiting: RememberedWebcam[] = [...readResume()];
     if (waiting.length === 0) return;
     const deadline = Date.now() + RESUME_WAIT_MS;
-    const failures = new Set<string>();
+    const shown = new Set<string>();
     const starts: Promise<void>[] = [];
 
     for (let firstRead = true; waiting.length > 0; firstRead = false) {
@@ -430,7 +430,11 @@ export class CamerasService {
           else if (verdict === 'start') {
             starts.push(
               this.resumeSlot(slot, entry).catch((failure: unknown) => {
-                failures.add(messageOf(failure));
+                // At once: the wait for another slot may take 25 s. Each message once.
+                const message = messageOf(failure);
+                if (shown.has(message)) return;
+                shown.add(message);
+                this.toasts.error(message);
               }),
             );
           }
@@ -452,7 +456,17 @@ export class CamerasService {
     }
 
     await Promise.all(starts);
-    for (const message of failures) this.toasts.error(message);
+  }
+
+  /**
+   * Rewrites the slot's entry for a stop by the user. An entry that was not sending and is not
+   * assigned yet would be indistinguishable from before once rewritten, so a waiting resume could
+   * not tell that the user stopped and would assign its camera afterwards: it goes. Any other
+   * entry stays, as not sending.
+   */
+  private rememberStopped(slot: number, entry: ResumeEntry): void {
+    if (!entry.sending && !this.assignments().has(slot)) writeResume(slot, null);
+    else writeResume(slot, { deviceId: entry.deviceId, sending: false });
   }
 
   /** The entries the user has not acted on since they were remembered. */

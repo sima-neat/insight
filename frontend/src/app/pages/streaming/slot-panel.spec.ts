@@ -596,7 +596,8 @@ describe('SlotPanel', () => {
       expect(sourceKind('File').hasAttribute('disabled')).toBe(false);
       expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
 
-      // Another action of the panel in flight ignores a click the same way, and shows the slot's form.
+      // Another action of the panel in flight ignores a click the same way, and shows the slot's
+      // form.
       slots.slots.set([fileSlot(2)]);
       await settle();
       let started!: (answer: SuccessResponse) => void;
