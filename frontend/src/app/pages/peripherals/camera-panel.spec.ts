@@ -436,6 +436,24 @@ describe('CameraPanel', () => {
     await settle();
   });
 
+  it('keeps the start time while the preview stays starting across new states', async () => {
+    await settle();
+    await startPreview();
+    const start = http.expectOne({ method: 'POST', url: START_URL });
+    vi.advanceTimersByTime(3000);
+    await settle();
+    expect(statusLine()).toBe('Starting the camera on the board… 3 s');
+
+    // Another starting state, as a new object, is not another start.
+    (preview as unknown as { dispatch(event: { type: 'start' }): void }).dispatch({
+      type: 'start',
+    });
+    await settle();
+    expect(statusLine()).toBe('Starting the camera on the board… 3 s');
+    start.flush({ session: previewSession() });
+    await settle();
+  });
+
   it("another camera's retained preview is not shown as this camera's video", async () => {
     await settle();
     preview.adopt(previewSession());

@@ -249,6 +249,26 @@ describe('SlotPreview', () => {
     expect(text()).not.toContain('too many');
   });
 
+  it('keeps the same live image when a poll brings an equal playing slot', async () => {
+    const playing = () => slot(1, { file: 'cars.mp4', codec: 'h264', state: 'playing' });
+    await show(playing());
+    const live = image()!;
+    const src = live.getAttribute('src');
+    decodeFirstFrame(live);
+    vi.advanceTimersByTime(100);
+    await fixture.whenStable();
+    expect(text()).not.toContain('Connecting');
+
+    // The 2 s poll parses a new object for a slot that did not change.
+    vi.setSystemTime(1_737_000_002_000);
+    host.slot.set(playing());
+    await fixture.whenStable();
+    expect(image()).toBe(live);
+    expect(live.getAttribute('src')).toBe(src);
+    expect(src).toContain('t=1737000000000');
+    expect(text()).not.toContain('Connecting');
+  });
+
   it('stops looking for the first frame when the slot changes or the preview goes', async () => {
     await show(slot(1, { state: 'external' }));
     expect(vi.getTimerCount()).toBe(1);

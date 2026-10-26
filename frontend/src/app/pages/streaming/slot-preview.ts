@@ -109,9 +109,14 @@ export class SlotPreview {
   private readonly destroyRef = inject(DestroyRef);
   private probe: Subscription | null = null;
 
-  /** A new one for each slot, and for each retry. */
+  private readonly index = computed(() => this.slot().index);
+  /**
+   * A new one for each slot, and for each retry. A linkedSignal reruns whenever its source's
+   * inputs change, even to an equal value, so the source must be a computed of the value: the
+   * poll's new slot object would otherwise reload the preview every time.
+   */
   private readonly token = linkedSignal({
-    source: () => this.slot().index,
+    source: this.index,
     computation: () => Date.now(),
   });
   /** The publisher's session, which a reconnect between two polls changes. */

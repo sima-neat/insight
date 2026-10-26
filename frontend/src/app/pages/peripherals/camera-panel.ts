@@ -178,9 +178,14 @@ export class CameraPanel {
     const src = this.streamUrl();
     return src ? { src, alt: `Live preview of ${this.camera().name}` } : null;
   });
-  /** When the board began starting the camera; null while it is not starting. */
+  private readonly starting = computed(() => this.view().status === 'starting');
+  /**
+   * When the board began starting the camera; null while it is not starting. A linkedSignal reruns
+   * whenever its source's inputs change, even to an equal value, so the source must be a computed
+   * of the value: a new starting state would otherwise restart the count.
+   */
   private readonly startedAt = linkedSignal<boolean, number | null>({
-    source: () => this.view().status === 'starting',
+    source: this.starting,
     computation: (starting) => (starting ? Date.now() : null),
   });
 
