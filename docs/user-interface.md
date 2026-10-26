@@ -77,7 +77,7 @@ A webcam attached to the computer running your browser can be used as a live sou
 
 1. Select a source slot and switch its **Source** to **Camera**. The slot becomes a webcam source (its row shows `[CAM]`) at once, with no camera chosen yet.
 2. Select **Enable camera access**, there or under **Local cameras** in Media Sources. The browser asks for camera permission; Insight cannot grant it for you. After you allow access, your cameras are listed in the tab.
-3. Select a camera in the list: it is assigned to the slot as soon as you select it, and the list marks it. Then select **Start**. The browser publishes the camera to Insight, and the slot reports `Live`. Select another camera to replace it, or **Clear** to make the slot an empty file slot again.
+3. Click a camera in the list (or move to it with the arrow keys and press Enter): it is assigned to the slot at once, and the list marks it. Then select **Start**. The browser publishes the camera to Insight, and the slot reports `Live`. Choose another camera to replace it: on a live slot the stream continues on the new camera after a brief gap. To drop the camera, switch the slot's **Source** to **File** or **Stream URL**.
 4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
 
 The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.

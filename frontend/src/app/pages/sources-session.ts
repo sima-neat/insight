@@ -16,7 +16,7 @@ export interface MediaVisit {
   readonly checked: readonly string[];
 }
 
-/** The forms the source switch can show for an empty slot: a camera registers the slot as a webcam. */
+/** The source forms an empty slot can show: a camera would make the slot a webcam. */
 export type EmptySourceForm = 'file' | 'url';
 
 /**

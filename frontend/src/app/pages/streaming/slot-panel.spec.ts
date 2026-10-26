@@ -26,6 +26,7 @@ import { ApiRequestError, type StreamEvent } from '../../sources/stream-lines';
 import type { Camera } from '../../sources/webcam-publishing';
 import { radioLabel } from '../../radio-label.testing';
 import { SlotControl } from './slot-control';
+import { SourcesSession } from '../sources-session';
 import { SlotPanel } from './slot-panel';
 import { slotRow } from '../../sources/slot-row';
 
@@ -431,6 +432,19 @@ describe('SlotPanel', () => {
       expect(text()).toContain('File: people/walk.mp4');
     });
 
+    it('remembers the empty slot’s form only once the change took', async () => {
+      const session = TestBed.inject(SourcesSession);
+      cameras.assignFile.mockRejectedValueOnce(new Error('src2 is held by another browser'));
+      await open();
+      await click(sourceKind('Stream URL'));
+      expect(toasts.error).toHaveBeenCalledWith('src2 is held by another browser');
+      expect(session.emptyForm(2)).toBeUndefined();
+      expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+
+      await click(sourceKind('Stream URL'));
+      expect(session.emptyForm(2)).toBe('url');
+    });
+
     it('remembers the form left on an empty slot, for the session', async () => {
       slots.slots.set([slot(3), fileSlot(2)]);
       await open(3);
@@ -485,6 +499,30 @@ describe('SlotPanel', () => {
       await click(buttonIn(confirmDialog()!, 'Cancel'));
       sentNothing();
       expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('changes nothing when the slot changed while the question was open', async () => {
+      slots.slots.set([fileSlot(2, { state: 'playing' })]);
+      await open();
+      await click(sourceKind('Camera'));
+      expect(confirmDialog()).not.toBeNull();
+
+      // Another tab stopped it and gave it a webcam meanwhile.
+      slots.update(2, { state: 'stopped', type: 'webcam', file: '' });
+      await settle();
+      await click(buttonIn(confirmDialog()!, 'Stop and switch'));
+      sentNothing();
+      expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
+
+      // Or a pull took it: the switch is hidden, and nothing was stopped or switched.
+      slots.slots.set([fileSlot(2, { state: 'playing' })]);
+      await settle();
+      await click(sourceKind('File'));
+      await click(sourceKind('Stream URL'));
+      slots.update(2, { state: 'pulled' });
+      await settle();
+      await click(buttonIn(confirmDialog()!, 'Stop and switch'));
+      sentNothing();
     });
 
     it('stops a live file slot, then switches, once the question is confirmed', async () => {
@@ -579,6 +617,74 @@ describe('SlotPanel', () => {
       expect(cameras.assign).toHaveBeenCalledOnce();
     });
 
+    it('moves the cursor with the arrow keys and assigns only on Enter', async () => {
+      slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      cameras.cameras.set(CAMERAS);
+      cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+      await open(3);
+      const press = async (key: string) => {
+        cameraList().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+        await settle();
+      };
+
+      await press('ArrowDown');
+      expect(options()[1].getAttribute('aria-selected')).toBe('true');
+      expect(cameras.assign).not.toHaveBeenCalled();
+      await press('ArrowUp');
+      await press('End');
+      expect(cameras.assign).not.toHaveBeenCalled();
+
+      await press('Enter');
+      expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(3, 'd2');
+    });
+
+    it('puts the assigned camera back in the list when the focus leaves it', async () => {
+      slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      cameras.cameras.set(CAMERAS);
+      cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+      await open(3);
+      cameraList().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await settle();
+      expect(options()[1].getAttribute('aria-selected')).toBe('true');
+
+      // Focus moving within the list keeps the cursor; leaving it ends the browsing.
+      cameraList().dispatchEvent(
+        new FocusEvent('focusout', { bubbles: true, relatedTarget: options()[0] }),
+      );
+      await settle();
+      expect(options()[1].getAttribute('aria-selected')).toBe('true');
+      cameraList().dispatchEvent(
+        new FocusEvent('focusout', { bubbles: true, relatedTarget: button('Refresh cameras') }),
+      );
+      await settle();
+      expect(options()[0].getAttribute('aria-selected')).toBe('true');
+      expect(cameras.assign).not.toHaveBeenCalled();
+    });
+
+    it('keeps a live webcam live on the camera activated: the publish ends, the new camera is assigned and published', async () => {
+      slots.slots.set([
+        slot(3, { type: 'webcam', state: 'playing', codec: 'h264', transport: 'rtsp' }),
+      ]);
+      cameras.cameras.set(CAMERAS);
+      cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+      await open(3);
+
+      await click(options()[1]);
+      expect(confirmDialog()).toBeNull();
+      expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(3, 'd2');
+      expect(cameras.publish).toHaveBeenCalledExactlyOnceWith(3);
+      expect(cameras.assign.mock.invocationCallOrder[0]).toBeLessThan(
+        cameras.publish.mock.invocationCallOrder[0],
+      );
+      expect(options()[1].getAttribute('aria-selected')).toBe('true');
+
+      // A stopped webcam is only assigned: starting it is the user's.
+      cameras.publish.mockClear();
+      await click(options()[0]);
+      expect(cameras.assign).toHaveBeenLastCalledWith(3, 'd1');
+      expect(cameras.publish).not.toHaveBeenCalled();
+    });
+
     it('shows the assigned camera as selected, and a refused assignment puts the selection back', async () => {
       slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
       cameras.cameras.set(CAMERAS);
@@ -644,13 +750,12 @@ describe('SlotPanel', () => {
       'Camera permission was denied.',
     );
 
-    // A webcam slot can be cleared from its own form; the empty slot is then a file slot.
-    await click(button('Clear'));
-    expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 3, file: '' });
-    expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
+    // The camera form has no Clear: switching away clears the webcam.
+    expect(button('Clear')).toBeUndefined();
 
     // The switch cleared what stood in the way of a pull, so nothing tells the user to clear it.
     await click(sourceKind('Stream URL'));
+    expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 3, file: '' });
     expect(text()).not.toContain('Clear it on the Camera tab');
     await type(field('Stream URL'), 'rtsp://10.0.0.7/stream1');
     expect(button('Pull')!.disabled).toBe(false);

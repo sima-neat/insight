@@ -79,7 +79,8 @@
             [items]="cameras.cameras()"
             [trackBy]="cameraKey"
             [selected]="assignedCamera()"
-            (selectedChange)="selectCamera($event)"
+            (activated)="activateCamera($event)"
+            (focusout)="leaveCameras($event)"
           >
             <ng-template neatColumn="camera" let-camera>{{ camera.label }}</ng-template>
           </neat-select-list>
@@ -104,18 +105,6 @@
         >
           {{ accessLabel() }}
         </button>
-        @if (isWebcam()) {
-          <button
-            neatButton
-            type="button"
-            variant="text"
-            size="small"
-            [disabled]="busy()"
-            (click)="clear()"
-          >
-            Clear
-          </button>
-        }
       </div>
     }
     @case ('url') {

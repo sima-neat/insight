@@ -513,8 +513,8 @@ export class SlotPanel {
   }
 
   /**
-   * Unassigns the slot (`file: ''`), ending this browser's webcam on it first. There is nothing to
-   * clear afterwards, so the focus goes on to Change… (or, from the camera form, the main action).
+   * Unassigns the file (`file: ''`). There is nothing to clear afterwards, so the focus goes on to
+   * Change….
    */
   protected async clear(): Promise<void> {
     const index = this.index();
@@ -523,7 +523,7 @@ export class SlotPanel {
     const cleared = await this.act(() =>
       this.control.run(index, () => this.cameras.assignFile({ index, file: '' })),
     );
-    if (cleared) this.focusAfterRender(() => this.changeButton() ?? this.primaryButton());
+    if (cleared) this.focusAfterRender(() => this.changeButton());
   }
 
   protected async requestCameraAccess(): Promise<void> {
@@ -537,23 +537,35 @@ export class SlotPanel {
    */
   protected async switchSource(target: SourceForm): Promise<void> {
     const from = this.slotForm();
-    const slot = this.slot();
+    const asked = this.slot();
     this.showForm(target);
     if (target === from) return;
     try {
-      if (isLive(slot) && !(await this.confirmStop(slot, target))) return this.showForm(from);
-      if (target !== 'camera') this.session.rememberEmptyForm(slot.index, target);
+      if (isLive(asked)) {
+        const confirmed = await this.confirmStop(asked, target);
+        // The slot may have changed while the question was open (stopped, taken over, switched by
+        // another tab); the answer was about the slot as it was, so it then changes nothing.
+        if (!confirmed || this.slotChangedSince(asked, from)) return this.showForm(this.slotForm());
+      }
+      const slot = this.slot();
       const switched = await this.act(() =>
         this.control.run(slot.index, async () => {
           if (isLive(slot)) await this.endStream(slot);
           await this.applyForm(slot, target);
         }),
       );
-      if (!switched) this.showForm(this.slotForm());
+      if (!switched) return this.showForm(this.slotForm());
+      // Remembered once it took, so that a refusal leaves what the empty slot was left on.
+      if (target !== 'camera') this.session.rememberEmptyForm(slot.index, target);
     } finally {
       // The switch was disabled while the change ran, which drops the focus it had.
       holdFocus(this.injector, () => this.sourceSwitch());
     }
+  }
+
+  /** Whether the slot is another one, or shows another form or a hold, than when asked about. */
+  private slotChangedSince(asked: Slot, form: SourceForm): boolean {
+    return this.slot().index !== asked.index || this.slotForm() !== form || this.held();
   }
 
   /**
@@ -569,9 +581,10 @@ export class SlotPanel {
   private confirmStop(slot: Slot, target: SourceForm): Promise<boolean> {
     const name = `src${slot.index}`;
     const label = SOURCE_FORMS.find((option) => option.value === target)!.label;
+    const lost = slot.type === 'webcam' ? 'camera' : slot.file;
     return this.confirm.ask({
       title: `Stop ${name}?`,
-      message: `Switching to ${label} stops ${name} and removes its ${slot.type === 'webcam' ? 'camera' : slot.file}.`,
+      message: `Switching to ${label} stops ${name} and removes its ${lost}.`,
       confirmLabel: 'Stop and switch',
       tone: 'danger',
     });
@@ -597,19 +610,36 @@ export class SlotPanel {
     }
   }
 
-  /** A click on a camera assigns it. The list waits for an assignment, so a click then is undone. */
-  protected async selectCamera(camera: Camera | null): Promise<void> {
+  /**
+   * A camera activated (a click, or Enter) is assigned; the arrow keys only move the list's cursor.
+   * On a live webcam the stream goes on with the new camera: the old publish ends with the
+   * assignment, and the slot is started again. The list waits for a change, so an activation then
+   * is undone.
+   */
+  protected async activateCamera(camera: Camera): Promise<void> {
     const assigned = this.assignedCamera();
-    if (camera?.deviceId === assigned?.deviceId) return;
-    if (camera === null || this.busy()) return this.cameraList()?.selected.set(assigned);
+    if (camera.deviceId === assigned?.deviceId) return;
+    if (this.busy()) return this.cameraList()?.selected.set(assigned);
     const index = this.index();
+    const live = this.isWebcam() && this.playing();
     const done = await this.act(() =>
-      this.control.run(index, () => this.cameras.assign(index, camera.deviceId)),
+      this.control.run(index, async () => {
+        await this.cameras.assign(index, camera.deviceId);
+        if (live) await this.control.start(index);
+      }),
     );
     // A refusal leaves the camera the slot had; the list goes back to it.
     this.cameraList()?.selected.set(this.assignedCamera());
-    // What comes next for a camera picked is starting it.
+    // What comes next for a camera picked is starting it (a live slot already runs).
     if (done) this.focusAfterRender(() => this.primaryButton());
+  }
+
+  /** Arrowing moves the list's selection; leaving the list puts the assigned camera back. */
+  protected leaveCameras(event: FocusEvent): void {
+    const list = event.currentTarget as HTMLElement;
+    if (!list.contains(event.relatedTarget as Node | null)) {
+      this.cameraList()?.selected.set(this.assignedCamera());
+    }
   }
 
   protected async pull(): Promise<void> {
