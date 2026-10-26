@@ -54,6 +54,57 @@ describe('LayoutPrefs', () => {
     expect(reloaded.tileWidthFor(16)).toBe(240);
   });
 
+  describe('inspector width', () => {
+    it('is the default (null) until the user resizes the inspector', () => {
+      expect(open().inspectorWidth()).toBeNull();
+    });
+
+    it('is kept in pixels under its own viewer key, and survives a reload', () => {
+      const prefs = open();
+      prefs.setInspectorWidth(432);
+
+      expect(prefs.inspectorWidth()).toBe(432);
+      expect(fake.readRaw('aside-width')).toBe('432');
+      expect(fake.readRaw('layout')).toBeNull();
+      expect(reload().inspectorWidth()).toBe(432);
+    });
+
+    it('does not disturb the layout, which another write rewrites whole', () => {
+      const prefs = open();
+      prefs.setInspectorWidth(432);
+      prefs.setInspector(true);
+      prefs.rememberTileWidth(16, 240);
+
+      expect(prefs.inspectorWidth()).toBe(432);
+      expect(fake.readStored('layout')).toMatchObject({ inspector: true, tileWidths: { 16: 240 } });
+    });
+
+    it('goes back to the default by removing the stored value', () => {
+      const prefs = open();
+      prefs.setInspectorWidth(432);
+
+      prefs.setInspectorWidth(null);
+
+      expect(prefs.inspectorWidth()).toBeNull();
+      expect(fake.readRaw('aside-width')).toBeNull();
+    });
+
+    it.each(['', 'wide', '0', '-20', 'Infinity'])('ignores %j in storage', (stored) => {
+      fake.seed({ 'aside-width': stored });
+      expect(open().inspectorWidth()).toBeNull();
+    });
+
+    it('writes nothing when the width is already the remembered one', () => {
+      const prefs = open();
+      prefs.setInspectorWidth(400);
+      fake.writes.length = 0;
+
+      prefs.setInspectorWidth(400);
+
+      expect(fake.writes).toEqual([]);
+    });
+  });
+
   it('tileWidthFor(count) returns what rememberTileWidth stored for that count and null otherwise', () => {
     const prefs = open();
     expect(prefs.tileWidthFor(16)).toBeNull();

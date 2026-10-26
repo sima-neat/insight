@@ -6,7 +6,12 @@
   <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('media', $event)" />
 </ng-container>
 
-<neat-page scroll="none" [aside]="asideOpen() ? 'open' : 'closed'">
+<neat-page
+  scroll="none"
+  [aside]="asideOpen() ? 'open' : 'closed'"
+  [asideWidth]="asides.width('media')"
+  (asideWidthChange)="asides.setWidth('media', $event)"
+>
   <app-slots-column>
     @if (loading()) {
       <p neatNote>Loading media…</p>

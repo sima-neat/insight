@@ -90,7 +90,12 @@
   <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('streaming', $event)" />
 </ng-container>
 
-<neat-page scroll="none" [aside]="asideOpen() ? 'open' : 'closed'">
+<neat-page
+  scroll="none"
+  [aside]="asideOpen() ? 'open' : 'closed'"
+  [asideWidth]="asides.width('streaming')"
+  (asideWidthChange)="asides.setWidth('streaming', $event)"
+>
   <app-slots-column>
     <!--
       Where the list is narrow (a tablet beside the side panel) the slot, the start of its source

@@ -1,8 +1,11 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { NEAT_MIN_TILE_WIDTH } from '@sima/neat-ui/video';
+import { storedAsideWidth, storeAsideWidth } from '../../aside-width';
 import { ViewerStorage } from './storage';
 
 const LAYOUT = 'layout';
+/** The inspector's width apart from the layout, which every layout write stores whole. */
+const INSPECTOR_WIDTH = 'aside-width';
 
 interface Layout {
   readonly bars: boolean;
@@ -78,10 +81,14 @@ export class LayoutPrefs {
   private readonly layout = signal(parseLayout(this.storage.get(LAYOUT)));
   private readonly tileWidths = computed(() => this.layout().tileWidths);
   private readonly fits = computed(() => this.layout().fits);
+  private readonly width = signal(storedAsideWidth(this.storage, INSPECTOR_WIDTH));
 
   readonly bars = computed(() => this.layout().bars);
   readonly hideEmpty = computed(() => this.layout().hideEmpty);
   readonly inspector = computed(() => this.layout().inspector);
+
+  /** The width the inspector was dragged to, in pixels, or null for the kit's default. */
+  readonly inspectorWidth = this.width.asReadonly();
 
   setBars(bars: boolean): void {
     this.choose('bars', bars);
@@ -93,6 +100,13 @@ export class LayoutPrefs {
 
   setInspector(inspector: boolean): void {
     this.choose('inspector', inspector);
+  }
+
+  /** Remembers the inspector's width; null, the default, forgets it. */
+  setInspectorWidth(width: number | null): void {
+    if (this.width() === width) return;
+    this.width.set(width);
+    storeAsideWidth(this.storage, INSPECTOR_WIDTH, width);
   }
 
   /** The width remembered for `count` displayed channels, or null when the user never chose one. */

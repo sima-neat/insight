@@ -128,7 +128,13 @@
   <neat-aside-toggle [open]="inspector.open()" (openChange)="inspector.set($event)" />
 </ng-container>
 
-<neat-page scroll="none" padding="none" [aside]="inspector.open() ? 'open' : 'closed'">
+<neat-page
+  scroll="none"
+  padding="none"
+  [aside]="inspector.open() ? 'open' : 'closed'"
+  [asideWidth]="prefs.inspectorWidth()"
+  (asideWidthChange)="prefs.setInspectorWidth($event)"
+>
   <div class="grid-area">
     <p class="notice" role="status">
       @if (liveUnknown()) {

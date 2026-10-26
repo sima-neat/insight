@@ -1,5 +1,5 @@
 import { expect, Page, Request, test } from '@playwright/test';
-import { LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
+import { DESKTOP, LAPTOP, pageOverflow, TABLET, topBarSpill, VIEWPORTS } from './layout';
 import { answerTopBar } from './top-bar';
 
 // The top bar's pill reads the board on every page.
@@ -436,6 +436,47 @@ test.describe('Streaming with mocked slots', () => {
     await row(page, 'src1').click();
     await expect(panel(page).getByRole('img', { name: 'Live preview of src1' })).toBeVisible();
     await expect(panel(page)).not.toContainText('Connecting to src1');
+  });
+
+  test('the side panel keeps the width it was dragged to across a reload, and ArrowLeft widens it', async ({
+    page,
+  }) => {
+    await withMockedSlots(page);
+    await page.setViewportSize(DESKTOP);
+    await page.goto('/streaming');
+    await expect(rows(page)).toHaveCount(48);
+    const asideWidth = () =>
+      page.locator('aside').evaluate((aside) => aside.getBoundingClientRect().width);
+    const separator = page.getByRole('separator', { name: 'Resize side panel' });
+    const stored = () =>
+      page.evaluate(() => localStorage.getItem('neat-insight:streaming:aside-width'));
+    const initial = await asideWidth();
+    expect(await stored()).toBeNull();
+
+    // The separator is the panel's inline-start edge: dragging it left widens the panel.
+    const box = (await separator.boundingBox())!;
+    const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 120, y, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(asideWidth).toBeCloseTo(initial + 120, -1);
+    const dragged = await asideWidth();
+    expect(Number(await stored())).toBeCloseTo(dragged, -1);
+
+    await page.reload();
+    await expect(rows(page)).toHaveCount(48);
+    await expect.poll(asideWidth).toBe(dragged);
+
+    await separator.focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect.poll(asideWidth).toBe(dragged + 16);
+    expect(Number(await stored())).toBeCloseTo(dragged + 16, -1);
+
+    // A double click is back to the default, which is no stored width.
+    await separator.dblclick();
+    await expect.poll(asideWidth).toBe(initial);
+    expect(await stored()).toBeNull();
   });
 
   for (const { name, size } of VIEWPORTS) {

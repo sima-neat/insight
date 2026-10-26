@@ -97,7 +97,11 @@ merging.
   (`neatAsidePanel`, `neatAsideTitle`, `neatAsideHeading`, `neatAsideActions`, `neatCode`). Whether
   a page's panel is open is remembered per page in storage: the Viewer in its layout
   (`LayoutPrefs`), Streaming, Media, Peripherals and Stats in `AsidePrefs`
-  (`neat-insight:<page>:aside`). That is the wide-screen choice. On a narrow screen (below 48rem)
+  (`neat-insight:<page>:aside`). That is the wide-screen choice. The width the user dragged the
+  panel to (the kit's `asideWidth`, bound on each page's `neat-page`) is remembered per page too:
+  `AsidePrefs.width` as `neat-insight:<page>:aside-width`, the Viewer's
+  `LayoutPrefs.inspectorWidth` as `neat-insight:viewer:aside-width`; no value is the kit's
+  default. On a narrow screen (below 48rem)
   the kit floats the panel over the page, so it starts closed there and opening or closing it is
   not remembered: each page keeps its state through the kit's `neatAsideOpen` (`AsidePrefs` for
   four pages, the Viewer's `inspector` for the fifth), and a phone never overwrites what a wide

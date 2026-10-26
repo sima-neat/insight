@@ -4,7 +4,7 @@ import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { NeatViewport } from '@sima/neat-ui';
+import { NeatPage, NeatViewport } from '@sima/neat-ui';
 import { NeatNumberField } from '@sima/neat-ui/number-field';
 import { type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { FakeConnections } from '../../viewer/fake-connections.testing';
@@ -1009,6 +1009,20 @@ describe('ViewerPage', () => {
     // Neither opening nor closing wrote anything: the layout still says what a wide screen chose.
     expect(storage.writes).toHaveLength(writes);
     expect(storage.readStored('layout')).toMatchObject({ inspector: true });
+  });
+
+  it('gives the page its remembered inspector width, and remembers a new one', async () => {
+    storage.seed({ 'aside-width': '420' });
+    await open('/viewer');
+    const neatPage = fixture.debugElement.query(By.directive(NeatPage))
+      .componentInstance as NeatPage;
+    expect(neatPage.asideWidth()).toBe(420);
+
+    neatPage.asideWidth.set(380);
+    expect(storage.readRaw('aside-width')).toBe('380');
+
+    neatPage.asideWidth.set(null);
+    expect(storage.readRaw('aside-width')).toBeNull();
   });
 
   it('has no tile shape control', async () => {

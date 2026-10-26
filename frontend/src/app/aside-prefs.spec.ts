@@ -65,6 +65,78 @@ describe('AsidePrefs', () => {
     expect(prefs.open('streaming')).toBe(false);
   });
 
+  describe('width', () => {
+    it('is the default (null) until the user drags the panel, and is kept per page', () => {
+      const prefs = TestBed.inject(AsidePrefs);
+      expect(prefs.width('streaming')).toBeNull();
+
+      prefs.setWidth('streaming', 420);
+      prefs.setWidth('stats', 360.5);
+
+      expect(prefs.width('streaming')).toBe(420);
+      expect(prefs.width('stats')).toBe(360.5);
+      expect(prefs.width('media')).toBeNull();
+      expect(storage.values.get('neat-insight:streaming:aside-width')).toBe('420');
+      expect(storage.values.get('neat-insight:stats:aside-width')).toBe('360.5');
+      expect(storage.values.has('neat-insight:media:aside-width')).toBe(false);
+    });
+
+    it('goes back to the default by removing the stored value', () => {
+      const prefs = TestBed.inject(AsidePrefs);
+      prefs.setWidth('peripherals', 400);
+
+      prefs.setWidth('peripherals', null);
+
+      expect(prefs.width('peripherals')).toBeNull();
+      expect(storage.values.has('neat-insight:peripherals:aside-width')).toBe(false);
+    });
+
+    it('is read from an earlier session, as after a reload', () => {
+      storage.values.set('neat-insight:media:aside-width', '480');
+      expect(TestBed.inject(AsidePrefs).width('media')).toBe(480);
+    });
+
+    it.each(['', 'wide', '0', '-20', 'Infinity', 'NaN'])(
+      'ignores %j in storage: the default applies',
+      (stored) => {
+        storage.values.set('neat-insight:media:aside-width', stored);
+        expect(TestBed.inject(AsidePrefs).width('media')).toBeNull();
+      },
+    );
+
+    it('writes nothing when the width is already the remembered one', () => {
+      const prefs = TestBed.inject(AsidePrefs);
+      prefs.setWidth('stats', 400);
+      prefs.setWidth('media', null);
+      storage.writes.length = 0;
+
+      prefs.setWidth('stats', 400);
+      prefs.setWidth('media', null);
+
+      expect(storage.writes).toEqual([]);
+    });
+
+    it('stays independent of the open state, and of a narrow screen', () => {
+      storage.values.set('neat-insight:stats:aside-width', '400');
+      narrow.set(true);
+      const prefs = TestBed.inject(AsidePrefs);
+
+      expect(prefs.open('stats')).toBe(false);
+      expect(prefs.width('stats')).toBe(400);
+      prefs.setOpen('stats', false);
+      expect(prefs.width('stats')).toBe(400);
+    });
+
+    it('runs on memory when storage refuses it', () => {
+      storage.unavailable = true;
+      const prefs = TestBed.inject(AsidePrefs);
+      prefs.setWidth('streaming', 450);
+      expect(prefs.width('streaming')).toBe(450);
+      prefs.setWidth('streaming', null);
+      expect(prefs.width('streaming')).toBeNull();
+    });
+  });
+
   describe('on a narrow screen', () => {
     const PAGES: AsidePage[] = ['streaming', 'media', 'peripherals', 'stats'];
     beforeEach(() => narrow.set(true));

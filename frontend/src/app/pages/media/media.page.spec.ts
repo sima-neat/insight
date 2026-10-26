@@ -1,7 +1,8 @@
 import { Component, computed, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
-import { NeatShell } from '@sima/neat-ui';
+import { NeatPage, NeatShell } from '@sima/neat-ui';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { MediaInfo, MediaNode, Slot } from '../../sources/api';
 import { ImportDialogs } from '../../sources/import-dialog';
@@ -180,6 +181,20 @@ describe('MediaPage', () => {
     );
     expect(rowOf('cars.mp4').getAttribute('aria-selected')).toBe('false');
     expect(rowOf('people').hasAttribute('aria-selected')).toBe(false);
+  });
+
+  it('gives the page its remembered side panel width, and remembers a new one', async () => {
+    localStorage.setItem('neat-insight:media:aside-width', '420');
+    await open();
+    const neatPage = fixture.debugElement.query(By.directive(NeatPage))
+      .componentInstance as NeatPage;
+    expect(neatPage.asideWidth()).toBe(420);
+
+    neatPage.asideWidth.set(380);
+    expect(localStorage.getItem('neat-insight:media:aside-width')).toBe('380');
+
+    neatPage.asideWidth.set(null);
+    expect(localStorage.getItem('neat-insight:media:aside-width')).toBeNull();
   });
 
   it('fetches the library as it opens and polls the slots while it is shown', async () => {

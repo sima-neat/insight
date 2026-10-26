@@ -84,7 +84,12 @@
   }
 </ng-container>
 
-<neat-page [scroll]="listShown() ? 'none' : 'body'" [aside]="asideShown() ? 'open' : 'closed'">
+<neat-page
+  [scroll]="listShown() ? 'none' : 'body'"
+  [aside]="asideShown() ? 'open' : 'closed'"
+  [asideWidth]="asides.width('stats')"
+  (asideWidthChange)="asides.setWidth('stats', $event)"
+>
   <app-announcement>{{ announcement() }}</app-announcement>
 
   @switch (body()) {

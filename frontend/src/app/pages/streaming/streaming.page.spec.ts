@@ -4,7 +4,7 @@ import { Component, computed, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
-import { NeatShell, type NeatTone } from '@sima/neat-ui';
+import { NeatPage, NeatShell, type NeatTone } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
@@ -886,6 +886,20 @@ describe('StreamingPage', () => {
     await settle();
     expect(rowOf('src48').getAttribute('aria-selected')).toBe('true');
     expect(asideHeading()).toBe('src48');
+  });
+
+  it('gives the page its remembered side panel width, and remembers a new one', async () => {
+    localStorage.setItem('neat-insight:streaming:aside-width', '420');
+    await open();
+    const neatPage = fixture.debugElement.query(By.directive(NeatPage))
+      .componentInstance as NeatPage;
+    expect(neatPage.asideWidth()).toBe(420);
+
+    neatPage.asideWidth.set(380);
+    expect(localStorage.getItem('neat-insight:streaming:aside-width')).toBe('380');
+
+    neatPage.asideWidth.set(null);
+    expect(localStorage.getItem('neat-insight:streaming:aside-width')).toBeNull();
   });
 
   it('the side-panel toggle closes and opens the panel; Enter on a row opens it', async () => {

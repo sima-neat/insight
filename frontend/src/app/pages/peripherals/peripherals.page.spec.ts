@@ -4,7 +4,7 @@ import { Component } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
-import { NeatIcon, NeatShell, type NeatTone } from '@sima/neat-ui';
+import { NeatIcon, NeatPage, NeatShell, type NeatTone } from '@sima/neat-ui';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { BoardState } from '../../board/api';
@@ -229,6 +229,20 @@ describe('PeripheralsPage', () => {
     [...root().querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent?.trim() === label,
     );
+
+  it('gives the page its remembered side panel width, and remembers a new one', async () => {
+    localStorage.setItem('neat-insight:peripherals:aside-width', '420');
+    await visit();
+    const neatPage = fixture.debugElement.query(By.directive(NeatPage))
+      .componentInstance as NeatPage;
+    expect(neatPage.asideWidth()).toBe(420);
+
+    neatPage.asideWidth.set(380);
+    expect(localStorage.getItem('neat-insight:peripherals:aside-width')).toBe('380');
+
+    neatPage.asideWidth.set(null);
+    expect(localStorage.getItem('neat-insight:peripherals:aside-width')).toBeNull();
+  });
 
   it('lists devices under Cameras · N, Microphones · N and LiDAR · none found, with icon, name, connection and chip', async () => {
     await visit();

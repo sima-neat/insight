@@ -1,19 +1,24 @@
 import { Injectable, signal, type WritableSignal } from '@angular/core';
 import { type NeatAsideOpen, neatAsideOpen } from '@sima/neat-ui';
+import { storedAsideWidth, storeAsideWidth } from './aside-width';
 import { PrefixedStorage } from './prefixed-storage';
 
-/** The pages whose side panel is remembered here; the Viewer keeps its own in its layout. */
+/** The pages whose side panel is remembered here; the Viewer keeps its own with its layout. */
 export type AsidePage = 'streaming' | 'media' | 'peripherals' | 'stats';
 
 const OPEN = 'open';
 const CLOSED = 'closed';
 
+const widthName = (page: AsidePage) => `${page}:aside-width`;
+
 /**
  * Whether Streaming's, Media's, Peripherals' and Stats' side panels are open: remembered per page,
  * across visits and reloads, as the Viewer remembers its own (`LayoutPrefs.inspector`). The rule
  * for when a panel is open is the same on all five pages; only how long a phone's choice lives
- * differs, as the last sentence says.
- * Stored as `neat-insight:<page>:aside`; on a wide screen a panel is open until the user closes it,
+ * differs, as the last sentence says. The width the user dragged a panel to is remembered the same
+ * way, as `neat-insight:<page>:aside-width` (`width`), and the Viewer keeps its own beside its
+ * layout (`LayoutPrefs.inspectorWidth`).
+ * Open is stored as `neat-insight:<page>:aside`; on a wide screen a panel is open until the user closes it,
  * as it was before anything was remembered. A narrow screen floats the panel over the page, so
  * there it starts closed and opening or closing it is not remembered (`neatAsideOpen`): a phone
  * must not overwrite what was chosen on a wide screen. That choice lives as long as this root
@@ -29,6 +34,13 @@ export class AsidePrefs {
     media: signal(this.read('media')),
     peripherals: signal(this.read('peripherals')),
     stats: signal(this.read('stats')),
+  };
+  /** The width each page's panel was dragged to, in pixels; null is the kit's default. */
+  private readonly widths: Record<AsidePage, WritableSignal<number | null>> = {
+    streaming: signal(this.readWidth('streaming')),
+    media: signal(this.readWidth('media')),
+    peripherals: signal(this.readWidth('peripherals')),
+    stats: signal(this.readWidth('stats')),
   };
   private readonly panels: Record<AsidePage, NeatAsideOpen> = {
     streaming: neatAsideOpen(this.state.streaming, (open) => this.remember('streaming', open)),
@@ -48,6 +60,22 @@ export class AsidePrefs {
     this.panels[page].set(open);
   }
 
+  /**
+   * The width `page`'s panel was given, in pixels, or null for the default. It is the wide-screen
+   * panel's: the kit gives a narrow screen's floating panel no separator, so no narrow screen
+   * writes it.
+   */
+  width(page: AsidePage): number | null {
+    return this.widths[page]();
+  }
+
+  /** Remembers `page`'s panel width; null, the default, forgets it. */
+  setWidth(page: AsidePage, width: number | null): void {
+    if (this.widths[page]() === width) return;
+    this.widths[page].set(width);
+    storeAsideWidth(this.storage, widthName(page), width);
+  }
+
   private remember(page: AsidePage, open: boolean): void {
     if (this.state[page]() === open) return;
     this.state[page].set(open);
@@ -56,5 +84,9 @@ export class AsidePrefs {
 
   private read(page: AsidePage): boolean {
     return this.storage.get(`${page}:aside`) !== CLOSED;
+  }
+
+  private readWidth(page: AsidePage): number | null {
+    return storedAsideWidth(this.storage, widthName(page));
   }
 }

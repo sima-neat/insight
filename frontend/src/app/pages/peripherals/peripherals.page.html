@@ -23,7 +23,12 @@
   <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('peripherals', $event)" />
 </ng-container>
 
-<neat-page scroll="none" [aside]="asideOpen() ? 'open' : 'closed'">
+<neat-page
+  scroll="none"
+  [aside]="asideOpen() ? 'open' : 'closed'"
+  [asideWidth]="asides.width('peripherals')"
+  (asideWidthChange)="asides.setWidth('peripherals', $event)"
+>
   <app-list-column [attr.aria-busy]="scanning() || null">
     <app-announcement>{{ scanStatus() }}</app-announcement>
     <app-peripherals-banners [loadError]="loadError()" (refresh)="refresh()" />

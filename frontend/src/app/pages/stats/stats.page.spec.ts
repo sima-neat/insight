@@ -8,7 +8,7 @@ import { Component } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
-import { NeatIcon, NeatShell, type NeatTone } from '@sima/neat-ui';
+import { NeatIcon, NeatPage, NeatShell, type NeatTone } from '@sima/neat-ui';
 import { NeatTimeChart } from '@sima/neat-ui/charts';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
@@ -336,6 +336,20 @@ describe('StatsPage', () => {
     element.click();
     await settle();
   }
+
+  it('gives the page its remembered side panel width, and remembers a new one', async () => {
+    localStorage.setItem('neat-insight:stats:aside-width', '420');
+    await visit();
+    const neatPage = fixture.debugElement.query(By.directive(NeatPage))
+      .componentInstance as NeatPage;
+    expect(neatPage.asideWidth()).toBe(420);
+
+    neatPage.asideWidth.set(380);
+    expect(localStorage.getItem('neat-insight:stats:aside-width')).toBe('380');
+
+    neatPage.asideWidth.set(null);
+    expect(localStorage.getItem('neat-insight:stats:aside-width')).toBeNull();
+  });
 
   it('shows the six overview cards with their values, units and charts for the live board', async () => {
     await visit();
