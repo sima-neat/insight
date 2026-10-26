@@ -1331,15 +1331,76 @@ describe('CamerasService', () => {
         expect(media.opened).toEqual([]);
       });
 
-      it('drops the entry, without waiting, when the slots cannot be read meanwhile', async () => {
+      it('keeps waiting through a failed read, and resumes when a later read succeeds', async () => {
+        const read = vi.fn<() => Promise<void>>();
+        read.mockRejectedValueOnce(new ApiRequestError(0, 'Unreachable.', null));
+        read.mockImplementation(async () => stopped());
+        await resumeWhileLive();
+        slotsFake.refresh.mockImplementation(read);
+
+        await vi.advanceTimersByTimeAsync(1_000); // the read fails
+        expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: true }]]);
+        expect(media.opened).toEqual([]);
+        await vi.advanceTimersByTimeAsync(1_000); // the next one answers: stopped
+
+        expect(posts('/whip').map((call) => call.url)).toEqual([whipUrl(1)]);
+        expect(toasts.error).not.toHaveBeenCalled();
+      });
+
+      it('gives up at the deadline when every read fails, and says nothing', async () => {
         await resumeWhileLive();
         slotsFake.refresh.mockRejectedValue(new ApiRequestError(0, 'Unreachable.', null));
-        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.advanceTimersByTimeAsync(15_000);
 
         expect(entries()).toEqual([]);
-        await vi.advanceTimersByTimeAsync(20_000);
-        expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
+        expect(media.opened).toEqual([]);
         expect(toasts.error).not.toHaveBeenCalled();
+        const reads = slotsFake.refresh.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(slotsFake.refresh.mock.calls.length).toBe(reads);
+      });
+
+      it.each([
+        [
+          'picks another camera',
+          (s: CamerasService) => s.assign(1, 'cam-laptop'),
+          [[1, { deviceId: 'cam-laptop', sending: false }]],
+        ],
+        [
+          'stops everything',
+          (s: CamerasService) => s.releaseAll(),
+          [[1, { deviceId: 'cam-desk', sending: false }]],
+        ],
+        ['resets', (s: CamerasService) => s.releaseAll({ clearAssignments: true }), []],
+      ])(
+        'keeps what the user wrote while a read was failing: the user %s',
+        async (_what, act, kept) => {
+          await resumeWhileLive();
+          const read = deferred();
+          slotsFake.refresh.mockReturnValue(read.promise);
+          await vi.advanceTimersByTimeAsync(1_000); // a read is out
+          await act(TestBed.inject(CamerasService));
+          read.reject(new ApiRequestError(0, 'Unreachable.', null));
+          await vi.advanceTimersByTimeAsync(0);
+
+          expect(entries()).toEqual(kept);
+          stopped();
+          slotsFake.refresh.mockResolvedValue(undefined);
+          await vi.advanceTimersByTimeAsync(20_000);
+          expect(entries()).toEqual(kept);
+          expect(media.opened).toEqual([]);
+        },
+      );
+
+      it('the first read failing is final: no word from the server, the entries go', async () => {
+        slotsFake.refresh.mockRejectedValue(new ApiRequestError(0, 'Unreachable.', null));
+        live();
+        remember(1, 'cam-desk', true);
+        await create();
+        await vi.advanceTimersByTimeAsync(20_000);
+
+        expect(entries()).toEqual([]);
+        expect(slotsFake.refresh).toHaveBeenCalledTimes(1);
       });
 
       describe('when the user acts on the slot during the wait', () => {
@@ -1364,6 +1425,20 @@ describe('CamerasService', () => {
           expect(posts('/whip')).toEqual([]);
           expect(service.assignments().size).toBe(0);
           expect(entries()).toEqual([[1, { deviceId: 'cam-desk', sending: false }]]);
+        });
+
+        it('Stop all is honoured for a camera that was not sending either: it is not assigned', async () => {
+          live();
+          remember(1, 'cam-desk', false);
+          const service = await create();
+          await vi.advanceTimersByTimeAsync(3_000);
+          service.releaseAll();
+          stopped();
+          await vi.advanceTimersByTimeAsync(20_000);
+
+          expect(service.assignments().size).toBe(0);
+          expect(entries()).toEqual([]);
+          expect(media.opened).toEqual([]);
         });
 
         it('Reset or Auto assign is honoured: no publish, nothing remembered', async () => {

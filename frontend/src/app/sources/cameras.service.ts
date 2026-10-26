@@ -43,6 +43,9 @@ const UNKNOWN_CAMERA_LABEL = 'Webcam';
 const RESUME_POLL_MS = 1000;
 const RESUME_WAIT_MS = 15000;
 
+/** A slot and the camera this tab remembers for it. */
+type RememberedWebcam = [slot: number, entry: ResumeEntry];
+
 /** What a resume does with one remembered slot, given the slots as last read. */
 type ResumeVerdict =
   /** Put the camera back (and publish it, if it was sending). */
@@ -358,7 +361,11 @@ export class CamerasService {
     this.closeAllSessions();
     // Also the entries a resume has not put back yet: it must not start a camera after a stop.
     for (const [slot, entry] of readResume()) {
-      writeResume(slot, { deviceId: entry.deviceId, sending: false });
+      // An entry that was not sending and is not assigned yet would be indistinguishable from
+      // before once rewritten, so a waiting resume could not tell that the user stopped everything
+      // and would assign its camera afterwards: it goes.
+      if (!entry.sending && !this.assignments().has(slot)) writeResume(slot, null);
+      else writeResume(slot, { deviceId: entry.deviceId, sending: false });
     }
     if (clearAssignments) {
       this.assignmentsState.set(new Map());
@@ -379,6 +386,8 @@ export class CamerasService {
    *   notices the old WHIP session gone, which takes MediaMTX up to 15 s. The slots are read again
    *   every `RESUME_POLL_MS` (one read for all the slots waited for) for up to `RESUME_WAIT_MS`; a
    *   slot still live after that is someone else's, and its entry goes.
+   *   The first read failing ends the resume (no word from the server at all); a later one
+   *   failing is tried again at the next tick.
    * - the camera is assigned locally (the server already holds the slot as a webcam) and, if it
    *   was sending, published.
    * An entry that does not qualify, or whose camera fails to start, is dropped, and a failure is
@@ -388,53 +397,72 @@ export class CamerasService {
    */
   async resume(): Promise<void> {
     const { signal } = this.lifetime;
-    let waiting = [...readResume()];
+    let waiting: RememberedWebcam[] = [...readResume()];
     if (waiting.length === 0) return;
     const deadline = Date.now() + RESUME_WAIT_MS;
     const failures = new Set<string>();
     const starts: Promise<void>[] = [];
 
-    while (waiting.length > 0) {
+    for (let firstRead = true; waiting.length > 0; firstRead = false) {
+      let read = true;
       try {
         await this.slots.refresh();
       } catch {
-        // Without the server's word nothing may be started, and nothing says when it will answer,
-        // so the entries go rather than wait. No toast: the page already shows the server
-        // unreachable.
-        for (const [slot] of waiting) writeResume(slot, null);
-        break;
+        // Without the server's word at all nothing may be started, and nothing says when it will
+        // answer, so the entries go rather than wait. No toast: the page already shows the server
+        // unreachable. Once it has answered, a failed read is a blip: the slots are read again
+        // at the next tick, until the deadline.
+        if (firstRead) {
+          this.forgetUnlessActed(waiting);
+          break;
+        }
+        read = false;
       }
       if (signal.aborted) break;
 
-      // Judged and started in one synchronous pass, so nothing can change a slot in between.
-      const stillLive: typeof waiting = [];
-      for (const [slot, entry] of waiting) {
-        const verdict = this.resumeVerdict(slot, entry);
-        if (verdict === 'wait') stillLive.push([slot, entry]);
-        else if (verdict === 'drop') writeResume(slot, null);
-        else if (verdict === 'start') {
-          starts.push(
-            this.resumeSlot(slot, entry).catch((failure: unknown) => {
-              failures.add(messageOf(failure));
-            }),
-          );
+      if (read) {
+        // Judged and started in one synchronous pass, so nothing can change a slot in between.
+        const stillLive: RememberedWebcam[] = [];
+        for (const [slot, entry] of waiting) {
+          const verdict = this.resumeVerdict(slot, entry);
+          if (verdict === 'wait') stillLive.push([slot, entry]);
+          else if (verdict === 'drop') writeResume(slot, null);
+          else if (verdict === 'start') {
+            starts.push(
+              this.resumeSlot(slot, entry).catch((failure: unknown) => {
+                failures.add(messageOf(failure));
+              }),
+            );
+          }
         }
+        waiting = stillLive;
+      } else {
+        waiting = this.stillWaiting(waiting);
       }
-      waiting = stillLive;
 
       if (waiting.length > 0 && Date.now() >= deadline) {
-        for (const [slot] of waiting) writeResume(slot, null);
+        this.forgetUnlessActed(waiting);
         break;
       }
       if (waiting.length === 0) break;
       await pause(RESUME_POLL_MS, signal);
       if (signal.aborted) break;
       // The user may have acted while it slept; the next read is then for the others only.
-      waiting = waiting.filter(([slot, entry]) => this.resumeVerdict(slot, entry) !== 'leave');
+      waiting = this.stillWaiting(waiting);
     }
 
     await Promise.all(starts);
     for (const message of failures) this.toasts.error(message);
+  }
+
+  /** The entries the user has not acted on since they were remembered. */
+  private stillWaiting(waiting: RememberedWebcam[]): RememberedWebcam[] {
+    return waiting.filter(([slot, entry]) => this.resumeVerdict(slot, entry) !== 'leave');
+  }
+
+  /** Forgets the entries, except any the user rewrote since: that is theirs, not a leftover. */
+  private forgetUnlessActed(waiting: RememberedWebcam[]): void {
+    for (const [slot] of this.stillWaiting(waiting)) writeResume(slot, null);
   }
 
   private resumeVerdict(slot: number, entry: ResumeEntry): ResumeVerdict {
