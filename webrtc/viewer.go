@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ type Channel struct {
 	Port          int
 	Media         atomic.Pointer[channelMedia]
 	MetadataPeers metadataPeerRegistry
+	FramePeers    metadataPeerRegistry
 	MetadataSync  *metadataTimestampCorrelator
 	MetadataReady *metadataForwardQueue
 	Stats         *IngestStats
@@ -142,9 +144,11 @@ const (
 	videoCodecUnknown videoCodec = iota
 	videoCodecH264
 	videoCodecH265
+	videoCodecJPEG
 )
 
 const (
+	jpegRTPPayloadType = 26
 	h264RTPPayloadType = 96
 	h265RTPPayloadType = 98
 )
@@ -155,6 +159,8 @@ func videoCodecForPayloadType(payloadType uint8) videoCodec {
 		return videoCodecH264
 	case h265RTPPayloadType:
 		return videoCodecH265
+	case jpegRTPPayloadType:
+		return videoCodecJPEG
 	default:
 		return videoCodecUnknown
 	}
@@ -172,6 +178,12 @@ func newChannelMedia(codec videoCodec) (*channelMedia, error) {
 	case videoCodecH265:
 		parameters.MimeType = webrtc.MimeTypeH265
 		parameters.PayloadType = h265RTPPayloadType
+	case videoCodecJPEG:
+		// Browsers have no RTP/JPEG decoder, so JPEG has no track: whole frames
+		// go to the viewer over its "jpeg" DataChannel instead.
+		parameters.MimeType = "video/jpeg"
+		parameters.PayloadType = jpegRTPPayloadType
+		return &channelMedia{codec: codec, parameters: parameters}, nil
 	default:
 		return nil, fmt.Errorf("unsupported video codec %d", codec)
 	}
@@ -371,9 +383,10 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 }
 
 // Reports whether pkt opens an access unit, and whether that unit is a random
-// access point. Both codecs need the start flag: an access unit whose opening
+// access point. Every codec needs the start flag: an access unit whose opening
 // fragment was lost must not be forwarded, because rtpPacketRewriter renumbers
-// the outgoing sequence space and would leave the browser unable to see the gap.
+// the outgoing sequence space and would leave the browser unable to see the gap,
+// and a JPEG frame cannot be rebuilt without its first fragment's tables.
 // Random access is reported for H.265 alone, being consumed only by the recovery
 // gate in accept, which withholds delta units until an IRAP restores the stream.
 func rtpPacketState(pkt *rtp.Packet) (startsAccessUnit bool, randomAccess bool) {
@@ -390,6 +403,8 @@ func rtpPacketState(pkt *rtp.Packet) (startsAccessUnit bool, randomAccess bool) 
 	case videoCodecH264:
 		observations := parseH264NALObservations(pkt.Payload)
 		return len(observations) > 0 && observations[0].Start, false
+	case videoCodecJPEG:
+		return len(pkt.Payload) >= 8 && pkt.Payload[1]|pkt.Payload[2]|pkt.Payload[3] == 0, false
 	default:
 		return true, false
 	}
@@ -402,8 +417,20 @@ func newRTPForwarder() *rtpForwarder {
 	}
 }
 
+// hasViewers reports whether any viewer can take media's frames: a bound track,
+// or for JPEG an open "jpeg" DataChannel.
+func (ch *Channel) hasViewers(media *channelMedia) bool {
+	if media.track == nil {
+		return ch.FramePeers.len() > 0
+	}
+	return media.track.bindingCount.Load() > 0
+}
+
 func (f *rtpForwarder) forward(ch *Channel, media *channelMedia, pkt *rtp.Packet, raw []byte, remoteAddr net.Addr) {
-	idleEpoch := media.track.idleEpoch.Load()
+	var idleEpoch uint64
+	if media.track != nil {
+		idleEpoch = media.track.idleEpoch.Load()
+	}
 	if media != f.media {
 		f.accessUnitBuffer = newRTPAccessUnitBuffer()
 		f.media = media
@@ -419,7 +446,7 @@ func (f *rtpForwarder) forward(ch *Channel, media *channelMedia, pkt *rtp.Packet
 	// random-access points, and those never reach a completion the loop below
 	// could count. Accounting only for completed units undercounts the
 	// discarded traffic by most of the stream.
-	if media.track.bindingCount.Load() == 0 {
+	if !ch.hasViewers(media) {
 		ch.Stats.RecordDroppedNoTrack()
 		if ready {
 			f.accessUnitBuffer.resetH265Recovery()
@@ -427,28 +454,47 @@ func (f *rtpForwarder) forward(ch *Channel, media *channelMedia, pkt *rtp.Packet
 		return
 	}
 	if !ready {
+		// For JPEG, a marker that completes no frame means accept() discarded it.
+		if media.codec == videoCodecJPEG && pkt.Marker {
+			ch.Stats.RecordJPEGFrameIncomplete(errors.New("frame lost a fragment"))
+		}
 		return
 	}
 
+	var jpegFrame []byte
+	if media.codec == videoCodecJPEG {
+		var err error
+		if jpegFrame, err = assembleJPEG(accessUnit.packets); err != nil {
+			ch.Stats.RecordJPEGFrameIncomplete(err)
+			return
+		}
+	}
 	frameAt := time.Now()
 	frameTimestamp := f.timestampRewriter.timestampForSourceFrame(
 		accessUnit.timestamp, accessUnit.ssrc, accessUnit.afterSequenceBreak, frameAt,
 	)
 	frameForwarded := false
-	for _, rawPacket := range accessUnit.packets {
-		packetToWrite, err := f.packetRewriter.rewrite(rawPacket, frameTimestamp)
-		if err != nil {
-			ch.Stats.RecordMalformedPacket(len(rawPacket), remoteAddr, err)
-			log.Println("❌ RTP packet rewrite error:", err)
-			continue
+	if jpegFrame != nil {
+		frameForwarded = sendJPEGFrame(ch, frameTimestamp, jpegFrame)
+		if frameForwarded {
+			ch.Stats.RecordJPEGFrameForwarded(len(accessUnit.packets), len(jpegFrame))
 		}
-		if _, err := media.track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
-			ch.Stats.RecordWriteError(err)
-			log.Println("❌ Write error:", err)
-			continue
+	} else {
+		for _, rawPacket := range accessUnit.packets {
+			packetToWrite, err := f.packetRewriter.rewrite(rawPacket, frameTimestamp)
+			if err != nil {
+				ch.Stats.RecordMalformedPacket(len(rawPacket), remoteAddr, err)
+				log.Println("❌ RTP packet rewrite error:", err)
+				continue
+			}
+			if _, err := media.track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
+				ch.Stats.RecordWriteError(err)
+				log.Println("❌ Write error:", err)
+				continue
+			}
+			ch.Stats.RecordForwarded(len(packetToWrite))
+			frameForwarded = true
 		}
-		ch.Stats.RecordForwarded(len(packetToWrite))
-		frameForwarded = true
 	}
 	if frameForwarded {
 		for _, metadata := range ch.MetadataSync.addVideoFrame(
@@ -642,18 +688,33 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parameters := media.parameters
+	// A JPEG channel has no track, so it needs no browser decoder: frames travel
+	// over the "jpeg" DataChannel.
+	jpeg := media.track == nil
 	// Rejected before anything is allocated. A browser with no decoder for this
 	// channel's codec can never negotiate, so the answer must say so with a
 	// status the viewer treats as permanent. Letting Pion fail instead would
 	// return 500, which the viewer retries, and every attempt would register
 	// peer records for a connection that cannot succeed.
-	if !offerAdvertisesCodec(offer, parameters.MimeType) {
+	if !jpeg && !offerAdvertisesCodec(offer, parameters.MimeType) {
 		http.Error(w, "Browser does not support the channel codec", http.StatusUnsupportedMediaType)
 		return
 	}
 
 	m := webrtc.MediaEngine{}
-	m.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo)
+	if !jpeg {
+		m.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo)
+	} else {
+		// Codecs every browser offers, only so the video m-line is answered
+		// inactive rather than rejected: Pion writes the answer's ICE candidates
+		// into the first m-line, and a browser ignores them on a rejected one.
+		for i, mimeType := range []string{webrtc.MimeTypeVP8, webrtc.MimeTypeH264} {
+			m.RegisterCodec(webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: mimeType, ClockRate: videoRTPClockRate},
+				PayloadType:        webrtc.PayloadType(96 + i),
+			}, webrtc.RTPCodecTypeVideo)
+		}
+	}
 
 	// === Add NAT and Port Range logic ===
 	s := webrtc.SettingEngine{}
@@ -734,15 +795,18 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, message, http.StatusInternalServerError)
 	}
 
-	sender, err := pc.AddTrack(media.track)
-	if err != nil {
-		respondNegotiationError("AddTrack failed", err)
-		return
+	var sender *webrtc.RTPSender
+	if !jpeg {
+		if sender, err = pc.AddTrack(media.track); err != nil {
+			respondNegotiationError("AddTrack failed", err)
+			return
+		}
 	}
 
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		log.Printf("[Channel %d] Incoming DataChannel: %s", idx, dc.Label())
-		if dc.Label() == "metadata" {
+		switch dc.Label() {
+		case "metadata":
 			ch.Egress.UpdateDataChannelState(egressPeerID, "connecting")
 			dc.OnOpen(func() {
 				log.Printf("[Channel %d] DataChannel open", idx)
@@ -756,6 +820,20 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 			})
 			dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 				ch.Egress.RecordBrowserReport(egressPeerID, msg.Data)
+			})
+		case "jpeg":
+			// The viewer opens it on every channel; only a JPEG channel uses it.
+			if !jpeg {
+				return
+			}
+			ch.Egress.UpdateJPEGState(egressPeerID, "connecting")
+			dc.OnOpen(func() {
+				ch.FramePeers.add(egressPeerID, dc)
+				ch.Egress.UpdateJPEGState(egressPeerID, "open")
+			})
+			dc.OnClose(func() {
+				ch.FramePeers.remove(egressPeerID, dc)
+				ch.Egress.UpdateJPEGState(egressPeerID, "closed")
 			})
 		}
 	})
@@ -772,8 +850,10 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		respondNegotiationError("SetLocalDescription failed", err)
 		return
 	}
-	go readSenderRTCP(sender, ch.Egress, egressPeerID)
-	go sendRTCP(pc)
+	if sender != nil {
+		go readSenderRTCP(sender, ch.Egress, egressPeerID)
+		go sendRTCP(pc)
+	}
 	<-webrtc.GatheringCompletePromise(pc)
 	if media.peers.isRetired() {
 		http.Error(w, "Video codec changed", http.StatusServiceUnavailable)
@@ -934,7 +1014,7 @@ func handleIngestStats(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		media := ch.Media.Load()
-		trackAttached := media != nil && media.track.bindingCount.Load() > 0
+		trackAttached := media != nil && ch.hasViewers(media)
 		snapshot := ch.Stats.Snapshot(includeVerbose, trackAttached, now)
 		snapshot.Metadata.MetadataCorrelationSnapshot = ch.MetadataSync.pruneAndSnapshot(now)
 		if !includeAll && !snapshot.Active {
