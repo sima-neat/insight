@@ -74,6 +74,8 @@ For example:
 
 Keep the channel number consistent between video and metadata. If your application sends video to channel `3`, send corresponding metadata to the metadata port for channel `3`.
 
+The video port accepts RTP H.264 (payload type `96`), H.265 (`98`), or JPEG (`26`, RFC 2435 as GStreamer `rtpjpegpay` sends it). Keep every RTP packet at or below 4096 bytes; for JPEG, set `rtpjpegpay mtu=` to 4096 or less. JPEG frames reach the browser over the same WebRTC connection as metadata, so they need no additional port.
+
 ## SDK port mapping
 
 In the Neat Development Environment, ports may be remapped by the SDK container. Insight reads the SDK port-map configuration when available so UI links point to the browser-reachable host port.
