@@ -301,6 +301,16 @@ neat_insight/tools/multisrc-harness.sh start --count 16 --meta-types object-dete
 
 The metadata sender targets UDP `9100+channel` by default and emits JSON compatible with Insight's metadata overlays. It supports `object-detection`, `classification`, `pose-estimation`, and `segmentation`.
 
+## Object Detection Metadata
+
+`type: "object-detection"` carries `data.objects[]`, one entry per detection with `label`, `confidence`, and `bbox` as `[x, y, width, height]` in frame pixels.
+
+A rotated detection adds `oriented_bbox` as `[cx, cy, width, height, angle]`: the box center and size in frame pixels, and its rotation in radians, where a positive angle turns the box clockwise on screen. The viewer then draws the rotated box instead of `bbox`. Keep `bbox` as the upright extent of the rotated box: it still places the label and drives ROI filtering, and viewers without `oriented_bbox` support draw it. A malformed `oriented_bbox`, anything other than five finite numbers, falls back to `bbox`.
+
+```json
+{"label": "ship", "confidence": 0.91, "bbox": [558, 300, 164, 121], "oriented_bbox": [640, 360, 160, 50, 0.5]}
+```
+
 ## Segmentation Metadata
 
 `type: "segmentation"` carries `data.segments[]`, one entry per instance with `label`, `confidence`, `bbox` in frame pixels, `mask_format`, `mask`, and optional `show_rectangle`.
