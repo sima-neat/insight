@@ -119,6 +119,20 @@ class ApiDocumentationTests(unittest.TestCase):
                 self.assertTrue(ref.startswith("#/"))
                 self.assertIsNotNone(_follow_json_pointer(self.spec, ref))
 
+    def test_every_tag_belongs_to_a_tag_group(self):
+        # Core's docs site builds the Insight API sidebar from x-tagGroups; a tag
+        # outside every group gets a page with no sidebar, which fails that build.
+        grouped = {tag for group in self.spec["x-tagGroups"] for tag in group["tags"]}
+        tags = {tag["name"] for tag in self.spec["tags"]} | {
+            tag
+            for path_item in self.spec["paths"].values()
+            for method, operation in path_item.items()
+            if method in HTTP_METHODS
+            for tag in operation.get("tags", [])
+        }
+
+        self.assertEqual(tags - grouped, set())
+
     def test_board_error_schema_includes_sentinel_runtime_codes(self):
         codes = set(self.spec["components"]["schemas"]["BoardError"]["properties"]["code"]["enum"])
         self.assertTrue({

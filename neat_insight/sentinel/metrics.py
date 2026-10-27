@@ -17,7 +17,7 @@ HIGHLIGHT_KEYS = (
     "cpu_usage_pct",
     "linux_mem_used_pct",
     "mla_mem_allocated_mb",
-    "ev74_cma_used_mb",
+    "ev74_mem_allocated_mb",
 )
 TEMPERATURE_UNIT = "C"
 

@@ -38,7 +38,7 @@
     },
     {
       "name": "Board and peripherals",
-      "tags": ["Board", "Peripherals", "Sentinel"]
+      "tags": ["Board", "Peripherals", "Sentinel", "GenAI Studio"]
     },
     {
       "name": "Automate Insight",
@@ -2179,7 +2179,7 @@
           "sampled_at": {"type": ["string", "null"], "format": "date-time", "description": "Timestamp of the sample the values come from."},
           "version": {"type": ["string", "null"]},
           "counts": {"type": "object", "properties": {"total": {"type": "integer"}, "unavailable": {"type": "integer"}, "warn": {"type": "integer"}, "critical": {"type": "integer"}}},
-          "highlights": {"type": "array", "items": {"type": "string"}, "description": "Keys the Stats page leads with: board power, CPU, Linux memory, MLA allocated memory, EV74 CMA memory, and the hottest temperature sensor the board reports."},
+          "highlights": {"type": "array", "items": {"type": "string"}, "description": "Keys the Stats page leads with: board power, CPU, Linux memory, MLA allocated memory, EV74 memory, and the hottest temperature sensor the board reports."},
           "groups": {"type": "array", "items": {"type": "object", "required": ["name", "metrics"], "properties": {"name": {"type": "string"}, "metrics": {"type": "array", "items": {"$ref": "#/components/schemas/SentinelMetric"}}}}},
           "order": {"type": "array", "items": {"type": "string"}, "description": "Every metric key in Sentinel's own order, the order its ops view lists them in. A group's sensors are not always adjacent, so this is not the order of `groups`."},
           "history": {

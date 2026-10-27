@@ -7528,3 +7528,37 @@ button:disabled {
   font-size: 10px;
   letter-spacing: 0.04em;
 }
+
+/* GenAI: choose which loaded models to unload so another can load. */
+.genai-unload-card h3 {
+  margin: 0 0 6px;
+}
+
+.genai-unload-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.genai-unload-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.genai-unload-list input[type="checkbox"] {
+  flex: none;
+  width: auto;
+  margin: 0;
+}
+
+.genai-unload-list label span:first-of-type {
+  flex: 1;
+}
+
+.genai-unload-list .hint {
+  margin-left: auto;
+}

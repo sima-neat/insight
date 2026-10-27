@@ -280,7 +280,6 @@ function SystemView({ model }) {
   const cores = metricsMatching(model, /^cpu_core_\d+_usage_pct$/)
   const load = metricByKey(model, 'cpu_load_1')
   const memMb = metricByKey(model, 'linux_mem_used_mb')
-  const cmaTotal = metricByKey(model, 'ev74_cma_total_mb')
   const loadPct = metricByKey(model, 'cpu_load_1_pct')
   const memPct = metricByKey(model, 'linux_mem_used_pct')
   // Per-core CPU is its own view: sixteen rows beside five charts was more than one glance holds.
@@ -319,7 +318,7 @@ function SystemView({ model }) {
               headline={memMb && memPct ? `${formatValue(memPct.value, '%')} (${formatValue(memMb.value, 'MB')})` : undefined}
             />
             <MetricChart model={model} metricKey="mla_mem_allocated_mb" title="MLA memory" />
-            <MetricChart model={model} metricKey="ev74_cma_used_mb" title="EV74 CMA used" ceiling={cmaTotal?.value} />
+            <MetricChart model={model} metricKey="ev74_mem_allocated_mb" title="EV74 memory" />
           </div>
         )}
       </div>
