@@ -73,18 +73,30 @@ export function reconcileAuxiliaryPanelMode(currentMode, settings, hasExplicitSe
 
 // Moves the edges named by `handle` ("n", "se", ...) by (dx, dy); the other edges stay put.
 // Rects are { left, top, width, height } in the tile's pixels; `bounds` limits the
-// right/bottom edges and `margin` the left/top edges.
+// right/bottom edges and `margin` the left/top edges. The tile limits win over `minSize`,
+// so a panel with no room for the minimum stays inside the tile instead.
 export function resizeAuxiliaryPanelRect(start, handle, dx, dy, bounds, minSize, margin) {
-  const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
   let left = start.left;
   let top = start.top;
   let right = start.left + start.width;
   let bottom = start.top + start.height;
-  if (handle.includes("w")) left = clamp(left + dx, margin, right - minSize);
-  else if (handle.includes("e")) right = clamp(right + dx, left + minSize, bounds.right);
-  if (handle.includes("n")) top = clamp(top + dy, margin, bottom - minSize);
-  else if (handle.includes("s")) bottom = clamp(bottom + dy, top + minSize, bounds.bottom);
+  if (handle.includes("w")) left = Math.max(Math.min(left + dx, right - minSize), margin);
+  else if (handle.includes("e")) right = Math.min(Math.max(right + dx, left + minSize), bounds.right);
+  if (handle.includes("n")) top = Math.max(Math.min(top + dy, bottom - minSize), margin);
+  else if (handle.includes("s")) bottom = Math.min(Math.max(bottom + dy, top + minSize), bounds.bottom);
   return { left, top, width: right - left, height: bottom - top };
+}
+
+// Inline insets for a resized panel: each edge keeps its share of the tile, so the panel
+// follows grid reflows, but never comes closer to the tile edge than its pixel margin.
+export function auxiliaryPanelInsets(rect, tile, margin, bottomMargin) {
+  const inset = (gap, size, floor) => `max(${floor}px, ${(gap / size) * 100}%)`;
+  return {
+    left: inset(rect.left, tile.width, margin),
+    top: inset(rect.top, tile.height, margin),
+    right: inset(tile.width - rect.left - rect.width, tile.width, margin),
+    bottom: inset(tile.height - rect.top - rect.height, tile.height, bottomMargin),
+  };
 }
 
 export function routeAuxiliarySettingsEvent(

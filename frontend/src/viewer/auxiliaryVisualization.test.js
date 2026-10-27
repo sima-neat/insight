@@ -7,6 +7,7 @@ import {
   initialAuxiliarySessionSettings,
   nextAuxiliaryPreview,
   partitionFrameMetadata,
+  auxiliaryPanelInsets,
   reconcileAuxiliaryPanelMode,
   resizeAuxiliaryPanelRect,
   restoreAuxiliaryViewPreference,
@@ -284,4 +285,27 @@ test("panel resize moves only the dragged edges and stays in the tile", () => {
   assert.deepEqual(resize("s", -100, 50), { left: 300, top: 8, width: 200, height: 250 });
   assert.deepEqual(resize("e", 500, 50), { left: 300, top: 8, width: 292, height: 200 });
   assert.deepEqual(resize("n", 50, 500), { left: 300, top: 88, width: 200, height: 120 });
+});
+
+test("panel resize stays in the tile when there is no room for the minimum size", () => {
+  // A compact panel in a dense grid can start smaller than the 120 px minimum.
+  const start = { left: 295, top: 8, width: 96, height: 96 };
+  const bounds = { right: 391, bottom: 112 };
+  const resize = (handle, dx, dy) => resizeAuxiliaryPanelRect(start, handle, dx, dy, bounds, 120, 8);
+
+  assert.deepEqual(resize("n", 0, 1), { left: 295, top: 8, width: 96, height: 96 });
+  assert.deepEqual(resize("s", 0, -1), { left: 295, top: 8, width: 96, height: 104 });
+  assert.deepEqual(resize("w", 1, 0), { left: 271, top: 8, width: 120, height: 96 });
+  assert.deepEqual(resize("nw", 500, 500), { left: 271, top: 8, width: 120, height: 96 });
+});
+
+test("panel insets scale with the tile but keep their pixel margins", () => {
+  const insets = auxiliaryPanelInsets({ left: 8, top: 8, width: 784, height: 354 }, { width: 800, height: 400 }, 8, 38);
+
+  assert.deepEqual(insets, {
+    left: "max(8px, 1%)",
+    top: "max(8px, 2%)",
+    right: "max(8px, 1%)",
+    bottom: "max(38px, 9.5%)",
+  });
 });

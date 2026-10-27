@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import {
+  auxiliaryPanelInsets,
   auxiliaryRendererRegistry,
   createAuxiliaryViewPreference,
   initialAuxiliarySessionSettings,
@@ -504,13 +505,12 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
       MIN_PANEL_SIZE,
       PANEL_MARGIN,
     );
-    // Percentages keep the chosen size inside the tile when the grid reflows.
-    setPanelRect({
-      left: `${(rect.left / drag.tileWidth) * 100}%`,
-      top: `${(rect.top / drag.tileHeight) * 100}%`,
-      width: `${(rect.width / drag.tileWidth) * 100}%`,
-      height: `${(rect.height / drag.tileHeight) * 100}%`,
-    });
+    setPanelRect(auxiliaryPanelInsets(
+      rect,
+      { width: drag.tileWidth, height: drag.tileHeight },
+      PANEL_MARGIN,
+      PANEL_BOTTOM_MARGIN,
+    ));
   };
   const endResize = (event) => {
     resizeRef.current = null;

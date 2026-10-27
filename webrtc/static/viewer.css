@@ -202,7 +202,8 @@ body {
 }
 
 .auxiliary-panel-resized {
-  right: auto;
+  width: auto;
+  height: auto;
   max-width: none;
   aspect-ratio: auto;
   box-sizing: border-box;
