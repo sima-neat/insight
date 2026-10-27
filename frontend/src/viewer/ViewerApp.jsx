@@ -291,8 +291,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
       });
       jpegChannel.binaryType = "arraybuffer";
       // vf closes the channel when a send fails; reconnect instead of freezing.
+      // Deliberate closes clear jpegChannel first, so they never reconnect.
+      const liveJpegChannel = jpegChannel;
       jpegChannel.onclose = () => {
-        if (!mounted || sessionId !== currentSession) return;
+        if (!mounted || sessionId !== currentSession || jpegChannel !== liveJpegChannel) return;
         debugLog("jpeg channel closed; reconnecting channel");
         scheduleReconnect();
       };
