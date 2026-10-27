@@ -103,7 +103,7 @@ _CAUSES = (
 WARNING_LIMIT = 6
 _WARNINGS = (
     (
-        r"Cannot compile .?Python\.h",
+        r"Cannot compile .?Python\.h|Has header .?Python\.h.? with dependency python: NO",
         "The board has no Python headers (python3-dev), so packages that build from source could not be "
         "installed.",
         "Install them with `sudo apt-get install python3-dev` in a shell on the board, then press Run setup again.",

@@ -5139,9 +5139,10 @@ button:disabled {
   color: var(--ink);
 }
 
+/* Warnings and quiet-step notes stay in the panel's own blue, a shade lighter. */
 .genai-setup-help-warn {
-  border-color: #e7c873;
-  background: #fff9e8;
+  border-color: rgba(14, 90, 184, 0.25);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
 }
 
 .genai-setup-help-title {

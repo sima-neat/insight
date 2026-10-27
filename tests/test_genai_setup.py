@@ -29,6 +29,7 @@ printf '\033[1mInstalling voices\033[0m\n'
 if [ -n "${FAKE_SETUP_FAIL:-}" ]; then echo "$FAKE_SETUP_FAIL" >&2; exit 1; fi
 if [ -n "${FAKE_SETUP_WAIT:-}" ]; then touch "$dir/setup.waiting"; while :; do sleep 0.1; done; fi
 if [ -n "${FAKE_SETUP_WARN:-}" ]; then
+  echo 'Has header "Python.h" with dependency python: NO'
   echo "      ../meson.build:44:2: ERROR: Problem encountered: Cannot compile \`Python.h\`. Perhaps you need to install python-dev"
   printf '\033[33m⚠ Supertonic requirements failed to install; Supertonic TTS skipped.\033[0m\n'
 fi
