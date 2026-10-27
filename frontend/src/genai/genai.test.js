@@ -426,7 +426,8 @@ test('the setup button says what is left to do, and offers Retry after a failure
   assert.equal(setupAction({ ...status('done', 'running', 'queued'), active: true }), null, 'a job runs')
   assert.equal(setupAction(null), null)
   assert.equal(setupStoppable({ ...status('done', 'running', 'queued'), active: true }), true)
-  // Once every step is done the job only keeps GenAI Studio running: Stop is not offered.
+  // Once GenAI Studio is starting or running, Stop GenAI Studio takes over.
+  assert.equal(setupStoppable({ ...status('done', 'done', 'running'), active: true }), false)
   assert.equal(setupStoppable({ ...status('done', 'done', 'done'), active: true }), false)
   assert.equal(setupStoppable(status('done', 'failed', 'pending')), false)
   assert.equal(lastLine('Downloading\nInstalling voices\n\n'), 'Installing voices')
@@ -445,7 +446,8 @@ test('steps show a check, a spinner or a grey circle, and setup runs again only 
   const steps = (prepare, start = 'done') => [{ id: 'install', state: 'done' }, prepare, { id: 'start', state: start }]
   assert.equal(canRunSetupAgain({ active: true, steps: steps(warned) }), true, 'the job only keeps GenAI Studio running')
   assert.equal(canRunSetupAgain({ active: false, steps: steps({ ...warned, warnings: [] }) }), false, 'nothing to fix')
-  assert.equal(canRunSetupAgain({ active: true, steps: steps(warned, 'running') }), false, 'a step is still running')
+  assert.equal(canRunSetupAgain({ active: true, steps: steps(warned, 'running') }), true, 'GenAI Studio still loading: it is stopped first')
+  assert.equal(canRunSetupAgain({ active: true, steps: steps(warned, 'queued') }), false, 'a job is about to start it')
   assert.equal(canRunSetupAgain(null), false)
 })
 
@@ -453,7 +455,7 @@ test('GenAI Studio can be stopped once it runs and no setup step is in progress'
   const steps = (start, prepare = 'done') => [{ id: 'install', state: 'done' }, { id: 'prepare', state: prepare }, { id: 'start', state: start }]
   assert.equal(canStopStudio({ active: true, steps: steps('done') }), true, 'the setup job keeps it running')
   assert.equal(canStopStudio({ active: false, steps: steps('done') }), true, 'started from a shell on the board')
-  assert.equal(canStopStudio({ active: true, steps: steps('running') }), false, 'still starting: Stop ends that')
+  assert.equal(canStopStudio({ active: true, steps: steps('running') }), true, 'still loading its voices')
   assert.equal(canStopStudio({ active: false, steps: steps('running') }), true, 'started from a shell, still loading')
   assert.equal(setupAction({ active: false, steps: steps('running') }), null, 'nothing to start while it loads')
   assert.equal(canStopStudio({ active: true, steps: steps('queued', 'running') }), false, 'setup.sh is running')

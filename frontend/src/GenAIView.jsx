@@ -1743,14 +1743,6 @@ export default function GenAIView({ onError, onStatus }) {
                         busy={setupBusy !== null}
                       />
                     )}
-                    {item.id === 'start' && canStopStudio(setupStatus) && (
-                      <div className="genai-actions">
-                        <button type="button" className="btn-ghost genai-small" disabled={setupBusy !== null} onClick={() => setupRequest('stop-studio', stopStudio, SLOW_STOP_MS)}>
-                          {setupBusy === 'stop-studio' ? 'Stopping…' : 'Stop GenAI Studio'}
-                        </button>
-                        <span className="hint">Ends GenAI Studio on the board. Start GenAI Studio runs it again.</span>
-                      </div>
-                    )}
                   </div>
                 </li>
               ))}
@@ -1778,6 +1770,11 @@ export default function GenAIView({ onError, onStatus }) {
             {setupNext && (
               <button type="button" className="btn-tonal" disabled={setupBusy !== null} onClick={() => setupRequest('run', () => runSetup())}>
                 {setupBusy === 'run' ? 'Starting…' : setupNext.label}
+              </button>
+            )}
+            {!setupNext && canStopStudio(setupStatus) && (
+              <button type="button" className="btn-tonal" disabled={setupBusy !== null} onClick={() => setupRequest('stop-studio', stopStudio, SLOW_STOP_MS)}>
+                {setupBusy === 'stop-studio' ? 'Stopping…' : 'Stop GenAI Studio'}
               </button>
             )}
             {setupStoppable(setupStatus) && (

@@ -33,10 +33,11 @@ export function setupAction(status) {
   return { label: 'Start GenAI Studio' }
 }
 
-// Stop ends a step in progress. Once every step is done the job only keeps
-// GenAI Studio running, and stopping it is not part of setup.
+// Stop ends the install or prepare step in progress. Once GenAI Studio is starting,
+// the main button stops it instead (Stop GenAI Studio).
 export function setupStoppable(status) {
-  return Boolean(status && status.active && (status.steps || []).some((s) => s.state === 'running' || s.state === 'queued'))
+  return Boolean(status && status.active && (status.steps || []).some((s) =>
+    s.id === 'start' ? s.state === 'queued' : s.state === 'running' || s.state === 'queued'))
 }
 
 // The icon a step shows: a check when done, a spinner while running, a grey
@@ -55,8 +56,9 @@ export function connectIcon(backendState) {
   return 'waiting'
 }
 
-// GenAI Studio runs or is still loading, and no setup step is in progress, so it can
-// be stopped, whether setup or a shell on the board started it.
+// GenAI Studio runs or is still loading, and no setup step is in progress: the main
+// button, Start GenAI Studio when it is stopped, becomes Stop GenAI Studio. Works
+// whether setup or a shell on the board started it.
 export function canStopStudio(status) {
   const start = status && Array.isArray(status.steps) && status.steps.find((s) => s.id === 'start')
   return Boolean(start && (start.state === 'done' || start.state === 'running') && !setupStoppable(status))
