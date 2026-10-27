@@ -7,6 +7,8 @@ export const SETUP_STORAGE_KEY = 'neat-insight:genai-setup-open'
 
 // While a request to the board has not answered for this long, the panel says so.
 export const SLOW_REQUEST_MS = 15000
+// Stopping GenAI Studio (alone or before setup runs again) normally takes up to about 30 s.
+export const SLOW_STOP_MS = 45000
 
 export const STEP_LABELS = {
   done: 'Done',

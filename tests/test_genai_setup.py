@@ -27,7 +27,7 @@ dir=$(cd "$(dirname "$0")" && pwd)
 printf '\033[1mInstalling voices\033[0m\n'
 [ -t 0 ] && echo "asked for languages" >&2
 if [ -n "${FAKE_SETUP_FAIL:-}" ]; then echo "$FAKE_SETUP_FAIL" >&2; exit 1; fi
-if [ -n "${FAKE_SETUP_WAIT:-}" ]; then touch "$dir/setup.waiting"; while :; do sleep 0.1; done; fi
+if [ -n "${FAKE_SETUP_WAIT:-}" ]; then echo $$ > "$dir/setup.waiting"; while :; do sleep 0.1; done; fi
 if [ -n "${FAKE_SETUP_WARN:-}" ]; then
   echo 'Has header "Python.h" with dependency python: NO'
   echo "      ../meson.build:44:2: ERROR: Problem encountered: Cannot compile \`Python.h\`. Perhaps you need to install python-dev"
@@ -48,8 +48,9 @@ echo "Neat GenAI Studio is starting up."
 echo "2026-10-27 19:31:45,294 - root - WARNING - No server TTS voice installed for language: ja"
 echo "2026-10-27 19:31:46,001 - root - WARNING - No server TTS voice installed for language: ja"
 echo "2026-10-27 19:31:46,002 - werkzeug - INFO - GET /health 200"
+echo "2026-10-27 19:31:46,003 - werkzeug - WARNING - WARNING: This is a development server. Do not use it in a production deployment."
 echo $$ > "$pidf"
-trap 'rm -f "$pidf"; exit 0' TERM INT
+trap 'rm -f "$pidf"; exit 143' TERM INT
 while :; do sleep 0.1; done
 """
 
@@ -120,6 +121,16 @@ class BoardScriptTests(unittest.TestCase):
         self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
         genai_setup.stop_studio(self.session)
 
+    def wait_until_ended(self, pid, timeout=10):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.1)
+        self.fail("process {} is still running after Stop".format(pid))
+
     def wait_for(self, check, timeout=15):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -154,7 +165,9 @@ class BoardScriptTests(unittest.TestCase):
         self.assertEqual(self.states(), ["done", "done", "done"])
         status = genai_setup.stop(self.session)
         self.assertFalse(status["active"])
-        self.wait_for(lambda s: s["steps"][2]["state"] != "done")
+        # run.sh exits 143 when stopped: the step waits to start again, it did not fail.
+        status = self.wait_for(lambda s: s["steps"][2]["state"] == "pending")
+        self.assertIsNone(status["steps"][2]["problem"])
 
     def test_stopping_studio_leaves_the_start_step_ready_to_run_again(self):
         genai_setup.run(self.session)
@@ -175,13 +188,13 @@ class BoardScriptTests(unittest.TestCase):
         self.assertFalse(self.status()["active"], "no setup job runs it")
         status = genai_setup.stop_studio(self.session)
         self.assertEqual(self.states(status), ["done", "done", "pending"])
-        self.assertEqual(studio.wait(timeout=10), 0)
+        self.assertEqual(studio.wait(timeout=10), 143)
 
     def test_setup_runs_again_after_stopping_a_studio_started_from_a_shell(self):
         self.install_and_prepare()
         studio = self.start_by_hand()
         genai_setup.run(self.session, redo="prepare")
-        self.assertEqual(studio.wait(timeout=10), 0, "the hand-started Studio was stopped before setup.sh ran")
+        self.assertEqual(studio.wait(timeout=10), 143, "the hand-started Studio was stopped before setup.sh ran")
         self.assertEqual(self.transport.commands[-2][4], "prepare start")
         self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
 
@@ -215,10 +228,24 @@ class BoardScriptTests(unittest.TestCase):
         genai_setup.run(self.session)
         self.wait_for(lambda s: (self.studio / "setup.waiting").exists())
         self.assertEqual(self.states(), ["done", "running", "queued"])
+        setup_pid = int((self.studio / "setup.waiting").read_text())
         status = genai_setup.stop(self.session)
         status = self.wait_for(lambda s: not s["active"])
         self.assertEqual(self.states(status), ["done", "failed", "pending"])
         self.assertEqual(status["steps"][1]["problem"]["message"], "The step was stopped before it finished.")
+        self.wait_until_ended(setup_pid)
+
+    def test_a_pid_left_from_an_old_job_is_not_taken_for_the_runner(self):
+        if not Path("/proc/self/cmdline").exists():
+            self.skipTest("needs /proc, as on the board")
+        jobs = self.home / ".neat-insight/genai-setup"
+        jobs.mkdir(parents=True)
+        (jobs / "runner.pid").write_text("{}\n".format(os.getpid()))
+        (jobs / "steps").write_text("prepare start\n")
+        (jobs / "step").write_text("prepare\n")
+        self.assertFalse(self.status()["active"])
+        genai_setup.stop(self.session)
+        self.assertEqual(genai_setup.run(self.session)["active"], True)
 
     def test_a_board_without_core_is_told_how_to_install_it_before_anything_runs(self):
         for path in (self.home / "pyneat/bin/python",):
@@ -259,7 +286,8 @@ class BoardScriptTests(unittest.TestCase):
             "The Supertonic voices were skipped.",
         ])
         self.assertIn("sudo apt-get install python3-dev", prepare["warnings"][0]["fix"])
-        # A warning logged again later, with another timestamp, is listed once.
+        # A warning logged again later, with another timestamp, is listed once, and Flask's
+        # development-server notice is not a warning.
         self.assertEqual(start["warnings"], [{"message": "No server TTS voice installed for language: ja",
                                               "fix": "Replies in this language can't be read aloud."}])
 
@@ -317,6 +345,16 @@ class DescribeTests(unittest.TestCase):
         fields = {"installed": "yes", "prepared": "yes", "running": "yes", "active": "yes", "steps": "start",
                   "step": "start"}
         self.assertEqual([s["state"] for s in self.describe(fields)["steps"]], ["done", "done", "done"])
+
+    def test_a_stopped_studio_waits_to_start_again_and_a_stopped_step_is_not_misdiagnosed(self):
+        fields = {"installed": "yes", "prepared": "yes"}
+        for code in ("143", "130", "stopped"):
+            start = self.describe(fields, {"start": {"exit": code, "mtime": "", "log": "bye", "warnings": []}})["steps"][2]
+            self.assertEqual((start["state"], start["problem"]), ("pending", None), code)
+        crashed = self.describe(fields, {"start": {"exit": "1", "mtime": "", "log": "Traceback", "warnings": []}})
+        self.assertEqual(crashed["steps"][2]["state"], "failed")
+        stopped = genai_setup.diagnose("prepare", "requests.exceptions.ConnectionError: Connection refused", "143")
+        self.assertEqual(stopped["message"], "The step was stopped before it finished.")
 
     def test_known_causes_are_named_and_unknown_ones_point_at_the_log(self):
         cases = {

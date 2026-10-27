@@ -863,7 +863,7 @@
       "post": {
         "tags": ["GenAI Studio"],
         "summary": "Stop the GenAI Studio setup job",
-        "description": "Ends the running setup step and the steps queued after it; the step is reported as stopped. During the start step this stops GenAI Studio with `run.sh stop`. Does nothing when no job runs.",
+        "description": "Ends the running setup step and the steps queued after it; the step is reported as failed with the message that it was stopped. During the start step this stops GenAI Studio with `run.sh stop`, and the start step waits to be run again. Does nothing when no job runs.",
         "operationId": "stopGenaiSetup",
         "responses": {
           "200": {"description": "Each setup step's state after stopping.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},

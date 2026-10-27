@@ -83,6 +83,7 @@ import { splitThinking } from './genai/streams.js'
 import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.js'
 import {
   SLOW_REQUEST_MS,
+  SLOW_STOP_MS,
   STEP_LABELS,
   bannerAction,
   canRunSetupAgain,
@@ -364,7 +365,8 @@ export default function GenAIView({ onError, onStatus }) {
   const [setupStatus, setSetupStatus] = useState(null)   // GET /api/genai-setup
   const [setupError, setSetupError] = useState(null)   // a Run or Stop that failed, as {message, fixes, detail}
   const [setupReadError, setSetupReadError] = useState(null)   // the last status read, when it failed
-  const [setupBusy, setSetupBusy] = useState(null)   // 'run' | 'stop' while that request is out
+  const [setupBusy, setSetupBusy] = useState(null)   // 'run' | 'stop' | 'stop-studio' while that request is out
+  const setupWrites = useRef(0)   // + 1 when a Run or Stop starts and ends: older status reads are dropped
   const [setupSlow, setSetupSlow] = useState(false)   // that request has not answered for a while
   const [streaming, setStreaming] = useState(false)
   const chatAbort = useRef(null)
@@ -621,19 +623,23 @@ export default function GenAIView({ onError, onStatus }) {
     }
   }, [backend.state, setupOpen])
 
-  // The setup panel follows the job on the board while it is open.
+  // The setup panel follows the job on the board while it is open: one read at a time, the
+  // next SETUP_POLL_MS after the last answered, and none that started before a Run or Stop ended.
   useEffect(() => {
     if (!setupOpen) return undefined
     let cancelled = false
-    const read = () => getSetup().then(
-      (body) => { if (!cancelled) { setSetupStatus(body); setSetupReadError(null) } },
-      (err) => { if (!cancelled) setSetupReadError(requestProblem(err)) }
-    )
+    let timer = null
+    const read = () => {
+      const writes = setupWrites.current
+      getSetup().then(
+        (body) => { if (!cancelled && writes === setupWrites.current) { setSetupStatus(body); setSetupReadError(null) } },
+        (err) => { if (!cancelled && writes === setupWrites.current) setSetupReadError(requestProblem(err)) }
+      ).finally(() => { if (!cancelled) timer = setTimeout(read, SETUP_POLL_MS) })
+    }
     read()
-    const timer = setInterval(read, SETUP_POLL_MS)
     return () => {
       cancelled = true
-      clearInterval(timer)
+      clearTimeout(timer)
     }
   }, [setupOpen])
 
@@ -1596,6 +1602,7 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   function openSetup() {
+    setSetupError(null)
     setTutorialStep(null)
     setSetupOpen(true)
     saveSetupOpen(window.localStorage, true)
@@ -1610,16 +1617,18 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   // Run or stop the job; a request the board is slow to answer says so.
-  async function setupRequest(kind, call) {
+  async function setupRequest(kind, call, slowAfter = SLOW_REQUEST_MS) {
     setSetupBusy(kind)
     setSetupError(null)
     setSetupSlow(false)
-    const slow = setTimeout(() => setSetupSlow(true), SLOW_REQUEST_MS)
+    setupWrites.current += 1
+    const slow = setTimeout(() => setSetupSlow(true), slowAfter)
     try {
       setSetupStatus(await call())
     } catch (err) {
       setSetupError(requestProblem(err))
     } finally {
+      setupWrites.current += 1
       clearTimeout(slow)
       setSetupSlow(false)
       setSetupBusy(null)
@@ -1633,9 +1642,13 @@ export default function GenAIView({ onError, onStatus }) {
   const setupNext = setupAction(setupStatus)
   const banner = bannerAction(setupStatus)
 
-  function startFromBanner() {
+  // One click starts an installed GenAI Studio, once a fresh read confirms only that is
+  // left (the board may have changed since the banner's button was labelled).
+  async function startFromBanner() {
     openSetup()
-    if (banner.runNow) setupRequest('run', () => runSetup())
+    if (!banner.runNow) return
+    const fresh = await getSetup().catch(() => null)
+    if (fresh && bannerAction(fresh).runNow) setupRequest('run', () => runSetup())
   }
 
   function tryTutorialAction(action) {
@@ -1726,13 +1739,13 @@ export default function GenAIView({ onError, onStatus }) {
                       <SetupWarnings
                         warnings={item.warnings}
                         finished={item.state === 'done'}
-                        onRunAgain={item.id === 'prepare' && canRunSetupAgain(setupStatus) ? () => setupRequest('run', () => runSetup('prepare')) : null}
+                        onRunAgain={item.id === 'prepare' && canRunSetupAgain(setupStatus) ? () => setupRequest('run', () => runSetup('prepare'), SLOW_STOP_MS) : null}
                         busy={setupBusy !== null}
                       />
                     )}
                     {item.id === 'start' && canStopStudio(setupStatus) && (
                       <div className="genai-actions">
-                        <button type="button" className="btn-ghost genai-small" disabled={setupBusy !== null} onClick={() => setupRequest('stop-studio', stopStudio)}>
+                        <button type="button" className="btn-ghost genai-small" disabled={setupBusy !== null} onClick={() => setupRequest('stop-studio', stopStudio, SLOW_STOP_MS)}>
                           {setupBusy === 'stop-studio' ? 'Stopping…' : 'Stop GenAI Studio'}
                         </button>
                         <span className="hint">Ends GenAI Studio on the board. Start GenAI Studio runs it again.</span>

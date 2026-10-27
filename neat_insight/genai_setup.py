@@ -27,6 +27,7 @@ STUDIO_DIR = "~/prebuilt-apps/examples/genai/neat-genai-studio"
 STATUS_TIMEOUT_SEC = 20.0
 LAUNCH_TIMEOUT_SEC = 20.0
 LOG_BYTES = 6000
+WARNING_BYTES = 2000000
 LOG_LINES = 30
 # A running step with no new output for this long may be stuck. setup.sh is quiet for
 # minutes while it builds the document database or downloads a large model.
@@ -133,8 +134,18 @@ _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 # ~/.bashrc adds it to PATH, so Insight's own PATH often lacks it.
 SIMA_CLI_PATHS = ("/data/sima-cli/.venv/bin/sima-cli", "$HOME/.sima-cli/.venv/bin/sima-cli")
 
+# Whether $1 is still the setup job's runner, not a later process that reused its pid
+# (after a reboot, say). The runner's command line ends with its name, genai-setup.
+_ALIVE = r"""
+alive() {
+  kill -0 "$1" 2>/dev/null || return 1
+  [ -r "/proc/$1/cmdline" ] || return 0
+  tr '\000' ' ' < "/proc/$1/cmdline" | grep -q 'genai-setup *$'
+}
+"""
+
 # Every line is key=value, except each step's record, which starts at `@@<step>`.
-_STATUS_SCRIPT = r"""
+_STATUS_SCRIPT = _ALIVE + r"""
 studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 jobs="$HOME/.neat-insight/genai-setup"
 cli=$(command -v sima-cli 2>/dev/null || true)
@@ -146,7 +157,7 @@ echo "sima_cli=$cli"
 pid=$(cat "$studio/.neat-genai-studio.pid" 2>/dev/null || true)
 [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo running=yes || echo running=no
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
-[ -n "$runner" ] && kill -0 "$runner" 2>/dev/null && echo active=yes || echo active=no
+alive "$runner" && echo active=yes || echo active=no
 echo "steps=$(cat "$jobs/steps" 2>/dev/null || true)"
 echo "step=$(cat "$jobs/step" 2>/dev/null || true)"
 echo "now=$(date +%s)"
@@ -155,16 +166,17 @@ for s in install prepare start; do
   echo "@@$s"
   echo "exit=$(cat "$jobs/$s.exit" 2>/dev/null || true)"
   echo "mtime=$(date -r "$jobs/$s.log" +%s 2>/dev/null || true)"
-  # Warnings from the whole log, without timestamps so a repeated one is listed once. The two
-  # lines dropped are this job's own choices, not problems.
-  grep -a -E '⚠|WARNING|Python\.h' "$jobs/$s.log" 2>/dev/null \
-    | grep -a -v -E 'SIMA_CLI_CHECK_FOR_UPDATE|Skipping Core and Insight dependency' \
+  # Warnings from the start of the log (start.log grows while GenAI Studio runs), without
+  # timestamps so a repeated one is listed once. Dropped: this job's own choices, and the
+  # notice Flask's built-in server prints every time it starts.
+  head -c WARNING_BYTES "$jobs/$s.log" 2>/dev/null | grep -a -E '⚠|WARNING|Python\.h' \
+    | grep -a -v -E 'SIMA_CLI_CHECK_FOR_UPDATE|Skipping Core and Insight dependency|development server|production deployment' \
     | sed -E 's/^[0-9-]+ [0-9:,.]+ - //' | awk '!seen[$0]++' | tail -n 20
   echo "@log"
   tail -c LOG_BYTES "$jobs/$s.log" 2>/dev/null || true
   echo
 done
-""".replace("LOG_BYTES", str(LOG_BYTES)).replace("SIMA_CLI_PATHS", " ".join('"{}"'.format(p) for p in SIMA_CLI_PATHS))
+""".replace("LOG_BYTES", str(LOG_BYTES)).replace("WARNING_BYTES", str(WARNING_BYTES)).replace("SIMA_CLI_PATHS", " ".join('"{}"'.format(p) for p in SIMA_CLI_PATHS))
 
 # Runs the steps named in $jobs/steps, in order, stopping at the first that fails.
 # run.sh keeps running in the foreground, so the job lives as long as GenAI Studio.
@@ -186,11 +198,11 @@ done
 
 # $1: the steps to run, $2: the sima-cli to install with. Detaches the runner from this
 # shell (setsid, where the system has it) so it outlives the SSH session that started it.
-_LAUNCH_SCRIPT = r"""
+_LAUNCH_SCRIPT = _ALIVE + r"""
 jobs="$HOME/.neat-insight/genai-setup"
 mkdir -p "$jobs" || exit 1
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
-if [ -n "$runner" ] && kill -0 "$runner" 2>/dev/null; then echo 'A setup job is already running.' >&2; exit 75; fi
+if alive "$runner"; then echo 'A setup job is already running.' >&2; exit 75; fi
 for s in $1; do rm -f "$jobs/$s.exit" "$jobs/$s.log"; done
 printf '%s\n' "$1" > "$jobs/steps"
 rm -f "$jobs/step"
@@ -200,33 +212,40 @@ SIMA_CLI="$2" nohup $detach sh -c RUNNER genai-setup >/dev/null 2>&1 </dev/null 
 printf '%s\n' "$!" > "$jobs/runner.pid"
 """
 
+# Ends the runner $1 and the step it runs, and waits up to 10 s for it: its process group
+# (setsid made one; dash's kill names it -PID and rejects `--`), or without setsid its
+# children, then the runner itself.
+_END_JOB = r"""
+end_job() {
+  kill -TERM "-$1" 2>/dev/null || { pkill -TERM -P "$1" 2>/dev/null; kill -TERM "$1" 2>/dev/null; }
+  i=0
+  while alive "$1" && [ "$i" -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+}
+"""
+
 # Ends the job: run.sh stops GenAI Studio and its model server itself; any other step
 # is ended with its whole process group. The step is recorded as stopped (143).
-_STOP_SCRIPT = r"""
+_STOP_SCRIPT = _ALIVE + _END_JOB + r"""
 jobs="$HOME/.neat-insight/genai-setup"
 studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 step=$(cat "$jobs/step" 2>/dev/null || true)
-[ -n "$runner" ] && kill -0 "$runner" 2>/dev/null || exit 0
+alive "$runner" || exit 0
 if [ "$step" = start ] && [ -x "$studio/run.sh" ]; then (cd "$studio" && ./run.sh stop) >/dev/null 2>&1; fi
-kill -TERM -- "-$runner" 2>/dev/null || kill -TERM "$runner" 2>/dev/null
-[ -z "$step" ] || [ -f "$jobs/$step.exit" ] || printf '143\n' > "$jobs/$step.exit"
+end_job "$runner"
+[ -z "$step" ] || [ -s "$jobs/$step.exit" ] || printf '143\n' > "$jobs/$step.exit"
 """
 
 # Stops GenAI Studio however it was started: run.sh stops it and its model server. A setup
 # job that only kept it running then ends, and the start step is recorded as stopped on
 # purpose, so it waits to be started again instead of reporting a failure.
-_STOP_STUDIO_SCRIPT = r"""
+_STOP_STUDIO_SCRIPT = _ALIVE + _END_JOB + r"""
 jobs="$HOME/.neat-insight/genai-setup"
 studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 step=$(cat "$jobs/step" 2>/dev/null || true)
 [ -x "$studio/run.sh" ] && (cd "$studio" && ./run.sh stop) >/dev/null 2>&1
-if [ "$step" = start ] && [ -n "$runner" ] && kill -0 "$runner" 2>/dev/null; then
-  kill -TERM -- "-$runner" 2>/dev/null || kill -TERM "$runner" 2>/dev/null
-  i=0
-  while kill -0 "$runner" 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
-fi
+if [ "$step" = start ] && alive "$runner"; then end_job "$runner"; fi
 [ -f "$jobs/start.log" ] && printf 'stopped\n' > "$jobs/start.exit"
 exit 0
 """
@@ -313,11 +332,12 @@ def clean_log(text: str) -> str:
 
 def diagnose(step: str, log: str, exit_code: str) -> dict:
     """Why a step failed and what to do about it, in plain words."""
+    # A stopped step's log ends wherever it was cut off, so it says nothing about a cause.
+    if exit_code == "143":
+        return _problem(step, "The step was stopped before it finished.", ["Press Retry to run it again."])
     for pattern, message, fixes in _CAUSES:
         if re.search(pattern, log, re.IGNORECASE):
             return _problem(step, message, fixes)
-    if exit_code == "143":
-        return _problem(step, "The step was stopped before it finished.", ["Press Retry to run it again."])
     return _problem(
         step,
         "{} stopped with exit code {}.".format(TITLES[step], exit_code or "unknown"),
@@ -393,8 +413,7 @@ def describe(parsed: dict) -> dict:
             entry["state"] = "queued"
         elif done[step]:
             entry["state"] = "done"
-        # "stopped": GenAI Studio was stopped on purpose, so its step waits to run again.
-        elif record["exit"] not in ("", "0", "stopped"):
+        elif record["exit"] not in ("", "0") and not _stopped_studio(step, record["exit"]):
             entry["state"] = "failed"
             entry["problem"] = diagnose(step, record["log"], record["exit"])
         else:
@@ -407,6 +426,12 @@ def describe(parsed: dict) -> dict:
             entry["warnings"] = record.get("warnings") or []
         steps.append(entry)
     return {"active": active, "steps": steps, "logDir": JOB_DIR}
+
+
+def _stopped_studio(step: str, exit_code: str) -> bool:
+    """GenAI Studio was stopped, not broken: from the tab ("stopped"), with `run.sh stop` or by its
+    own shutdown (run.sh exits 143), or with Ctrl+C (130). Its step waits to run again."""
+    return step == "start" and exit_code in ("stopped", "143", "130")
 
 
 def _int(value) -> int:
@@ -487,15 +512,15 @@ def run(session, redo=None) -> dict:
                                  hint="Press Install and start GenAI Studio instead.", step="install")
             if _step_in_progress(state):
                 raise _busy()
+            remaining = ["prepare", "start"]
+            for step in remaining:
+                blocked = _blocking_problem(step, {"core": "yes" if state.get("core") else "no",
+                                                   "sima_cli": state["simaCli"]})
+                if blocked:
+                    raise BoardError("setup_blocked", blocked["message"], hint=blocked["fixes"][0], step=step)
             if state["active"] or _studio_running(state):
                 state = _stop_studio(session)
-            remaining = [s for s in state["steps"] if s["id"] in ("prepare", "start")]
-            for step in remaining:
-                blocked = _blocking_problem(step["id"], {"core": "yes" if state.get("core") else "no",
-                                                         "sima_cli": state["simaCli"]})
-                if blocked:
-                    raise BoardError("setup_blocked", blocked["message"], hint=blocked["fixes"][0], step=step["id"])
-            return _launch(session, [s["id"] for s in remaining], state["simaCli"])
+            return _launch(session, remaining, state["simaCli"])
         if state["active"]:
             raise _busy()
         remaining = [s for s in state["steps"] if s["state"] != "done"]
