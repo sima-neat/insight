@@ -42,8 +42,10 @@
     videoSyncBufferMs: 300,
     metadataRetentionMs: 0,
     showRoi: true,
-    applyRoiFiltering: true
+    applyRoiFiltering: true,
+    orientation: "none"
   };
+  const ORIENTATIONS = new Set(["none", "mirror", "flip-vertical", "rotate-180"]);
   const AUXILIARY_DEFAULTS = {
     "blazepose-3d": {
       enabled: true,
@@ -124,6 +126,11 @@
     }
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "applyRoiFiltering")) {
       general.applyRoiFiltering = rawGeneral.applyRoiFiltering !== false;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawGeneral, "orientation")) {
+      general.orientation = ORIENTATIONS.has(rawGeneral.orientation)
+        ? rawGeneral.orientation
+        : GENERAL_DEFAULTS.orientation;
     }
     return general;
   }

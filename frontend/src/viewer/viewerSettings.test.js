@@ -35,8 +35,23 @@ test("viewer synchronization settings default to a 300 ms video buffer and unlim
       metadataRetentionMs: 0,
       showRoi: true,
       applyRoiFiltering: true,
+      orientation: "none",
     },
   );
+});
+
+test("orientation is validated and resolves channel over global", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({ version: 9, general: { orientation: "mirror" } }),
+    viewerSettings_channel_1: JSON.stringify({ version: 9, general: { orientation: "rotate-180" } }),
+    viewerSettings_channel_2: JSON.stringify({ version: 9, general: { orientation: "sideways" } }),
+  });
+
+  assert.equal(api.resolveTypeSettings(0).general.orientation, "mirror");
+  assert.equal(api.resolveTypeSettings(1).general.orientation, "rotate-180");
+  assert.equal(api.resolveTypeSettings(2).general.orientation, "none");
+  assert.equal(api.normalizeSettings({ version: 9, general: { orientation: 7 } }).general.orientation, "none");
+  assert.equal(api.normalizeSettings({ version: 9, general: {} }).general.orientation, "none");
 });
 
 test("viewer synchronization settings preserve configured values", () => {

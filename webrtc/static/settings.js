@@ -19,6 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const lostTrackTtlDisplay = document.getElementById("lostTrackTtlDisplay");
   const videoSyncBufferDisplay = document.getElementById("videoSyncBufferDisplay");
   const metadataRetentionDisplay = document.getElementById("metadataRetentionDisplay");
+  const orientationSelector = document.getElementById("orientationSelector");
   const tabButtons = document.querySelectorAll(".settings-tab-link");
   const tabSections = document.querySelectorAll(".settings-tab-section");
   const objectList = document.getElementById("viewerObjectList");
@@ -181,6 +182,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const settings = settingsForEditor();
     settings.general.videoSyncBufferMs = parseInt(videoSyncBufferSlider.value, 10);
     settings.general.metadataRetentionMs = parseInt(metadataRetentionSlider.value, 10);
+    settings.general.orientation = orientationSelector.value;
     settings.general.showRoi = roiToggle.checked;
     settings.general.applyRoiFiltering = roiFilteringToggle.checked;
     settings.types["object-detection"].confidenceThreshold = parseFloat(confidenceSlider.value);
@@ -496,6 +498,7 @@ document.addEventListener("DOMContentLoaded", () => {
     videoSyncBufferDisplay.textContent = videoSyncBufferSlider.value;
     metadataRetentionSlider.value = settings.general.metadataRetentionMs ?? 0;
     metadataRetentionDisplay.textContent = metadataRetentionSlider.value;
+    orientationSelector.value = settings.general.orientation || "none";
     roiToggle.checked = settings.general.showRoi !== false;
     roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
     trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;

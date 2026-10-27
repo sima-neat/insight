@@ -11,13 +11,20 @@ import {
 import AuxiliaryPanel from "./AuxiliaryPanel.jsx";
 import "./blazePose3DRenderer.js";
 import { partitionFrameMetadata } from "./auxiliaryVisualization.js";
-import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
+import { channelLabel, formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
+import {
+  acceptJpegChunk,
+  createJpegAssembler,
+  parseJpegChunk,
+  selectFrameToPresent,
+} from "./jpegFrames.js";
 import { drawMetadata, hasDrawableMetadata } from "./metadataDrawing.js";
 import {
   gridDimensions,
   normalizeMaxChannels,
   normalizeVisiblePerPage,
+  orientationTransform,
   pageSizePresetsForLimit,
   parseChannelIndices,
 } from "./viewerLayout.js";
@@ -32,6 +39,9 @@ const RECONNECT_DELAY_MS = 2000;
 // more expensive response.
 const DECODER_STALL_MS = 5000;
 const STREAM_STALE_MS = 1800;
+// Four seconds at 30 fps: the longest Video Sync Buffer. Only reached while the
+// tab is hidden and requestAnimationFrame stops presenting.
+const MAX_PENDING_JPEG_FRAMES = 120;
 const auxiliaryWarnings = new Set();
 
 function warnIgnoredAuxiliary(channelIndex, ignored) {
@@ -62,6 +72,34 @@ function getSynchronizationSettings(channelIndex) {
     metadataRetentionMs:
       typeof settings.general.metadataRetentionMs === "number" ? settings.general.metadataRetentionMs : 0,
   };
+}
+
+function getOrientation(channelIndex) {
+  return getResolvedViewerSettings(channelIndex).general.orientation;
+}
+
+function createJpegTileState() {
+  return {
+    active: false,
+    assembler: createJpegAssembler(),
+    pending: [],
+    next: null,
+    decoding: false,
+    width: 0,
+    height: 0,
+    framesReceived: 0,
+    framesDecoded: 0,
+    framesSkipped: 0,
+    bytesReceived: 0,
+    sample: null,
+  };
+}
+
+function fitCanvas(canvas) {
+  if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+  }
 }
 
 function applyLayout(count) {
@@ -106,12 +144,16 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const activeRef = useRef(false);
   const [banner, setBanner] = useState(`Channel ${index}`);
   const [active, setActive] = useState(false);
+  const [jpegMode, setJpegMode] = useState(false);
+  const [orientation, setOrientation] = useState(() => getOrientation(index));
 
   useEffect(() => {
     let mounted = true;
     let pc = null;
     let videoReceiver = null;
     let metadataChannel = null;
+    let jpegChannel = null;
+    let jpeg = createJpegTileState();
     let animationFrame = null;
     let videoFrameCallback = null;
     let statsInterval = null;
@@ -144,6 +186,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       const changedScope = event.detail?.scope;
       if (changedScope && changedScope !== "global" && changedScope !== `channel_${index}`) return;
       applySynchronizationSettings();
+      setOrientation(getOrientation(index));
       if (event.detail?.metadataType === "tracking") {
         trackHistoryRef.current.clear();
       }
@@ -178,6 +221,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
         metadataChannel.close();
         metadataChannel = null;
       }
+      if (jpegChannel) {
+        jpegChannel.close();
+        jpegChannel = null;
+      }
       if (pc) {
         // Avoid self-triggered reconnect from deliberate close.
         pc.onconnectionstatechange = null;
@@ -189,6 +236,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
       }
       setTileActive(false);
       setBanner(`Channel ${index}`);
+      setJpegMode(false);
+      jpeg = createJpegTileState();
       metadataQueueRef.current = createMetadataQueue();
       auxiliaryPanelRef.current?.reset();
       heldOverlaysRef.current.clear();
@@ -228,6 +277,35 @@ function ChannelTile({ index, onActiveChange, debug }) {
           rtcpRef.current.messageCount += 1;
         } catch (_err) {
           // Ignore malformed data channel payloads.
+        }
+      };
+
+      // A JPEG channel answers without video and sends whole frames here; the
+      // first one switches the tile from <video> to drawing on the canvas.
+      jpegChannel = pc.createDataChannel("jpeg", {
+        ordered: true,
+        maxRetransmits: 0,
+      });
+      jpegChannel.binaryType = "arraybuffer";
+      jpegChannel.onmessage = (event) => {
+        if (!mounted || sessionId !== currentSession) return;
+        const chunk = parseJpegChunk(event.data);
+        if (!chunk) return;
+        if (!jpeg.active) {
+          jpeg.active = true;
+          setJpegMode(true);
+          setBanner(channelLabel(index, "JPEG"));
+          debugLog("jpeg mode");
+          animationFrame = requestAnimationFrame(presentJpegFrames);
+        }
+        const frame = acceptJpegChunk(jpeg.assembler, chunk, performance.now());
+        if (!frame) return;
+        jpeg.framesReceived += 1;
+        jpeg.bytesReceived += frame.bytes;
+        jpeg.pending.push(frame);
+        if (jpeg.pending.length > MAX_PENDING_JPEG_FRAMES) {
+          jpeg.pending.shift();
+          jpeg.framesSkipped += 1;
         }
       };
 
@@ -279,6 +357,42 @@ function ChannelTile({ index, onActiveChange, debug }) {
         debugLog("iceGatheringState", pc.iceGatheringState);
       };
 
+      // Picks the frame's metadata and draws it over whatever the canvas holds.
+      // source is the <video>, or for JPEG an object with the frame's size.
+      const drawFrameMetadata = (ctx, canvas, source, rtpTimestamp, now) => {
+        const candidates = takeMetadataForFrame(
+          metadataQueueRef.current,
+          rtpTimestamp,
+          synchronizationSettingsRef.current.metadataRetentionMs,
+          now,
+        );
+        const { overlays, auxiliaryViews, ignoredAuxiliary } = partitionFrameMetadata(
+          candidates,
+          rtpTimestamp,
+        );
+        auxiliaryPanelRef.current?.showFrame(auxiliaryViews);
+        warnIgnoredAuxiliary(index, ignoredAuxiliary);
+        if (!ctx) return;
+        // Every type for this frame draws onto the same overlay.
+        const frameState = {};
+        for (const candidate of holdOverlays(heldOverlaysRef.current, overlays, now)) {
+          const metadataType = candidate.data?.type;
+          const resolvedSettings = getResolvedViewerSettings(index, metadataType);
+          if (
+            typeof metadataType !== "string"
+            || !hasDrawableMetadata(candidate.data, resolvedSettings)
+          ) continue;
+          const drawContext = {
+            settings: resolvedSettings,
+            trackHistory: trackHistoryRef.current,
+            now,
+            frameState,
+            held: candidate.held === true,
+          };
+          drawMetadata(ctx, canvas, candidate.data, source, index, drawContext);
+        }
+      };
+
       const drawFrame = (now, frameMetadata) => {
         if (!mounted || sessionId !== currentSession || !canvasRef.current || !videoRef.current) return;
         const canvas = canvasRef.current;
@@ -290,54 +404,74 @@ function ChannelTile({ index, onActiveChange, debug }) {
             playbackRef.current.lastFrameAt = Date.now();
             setTileActive(true);
           }
-
-          if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-            canvas.width = canvas.clientWidth;
-            canvas.height = canvas.clientHeight;
-          }
-
-          const candidates = takeMetadataForFrame(
-            metadataQueueRef.current,
-            frameMetadata?.rtpTimestamp,
-            synchronizationSettingsRef.current.metadataRetentionMs,
-            now,
-          );
-          const { overlays, auxiliaryViews, ignoredAuxiliary } = partitionFrameMetadata(
-            candidates,
-            frameMetadata?.rtpTimestamp,
-          );
-          auxiliaryPanelRef.current?.showFrame(auxiliaryViews);
-          warnIgnoredAuxiliary(index, ignoredAuxiliary);
-
-          if (ctx) {
-            // Always clear overlay to avoid stale masks/opaque leftovers.
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            // Every type for this frame draws onto the same overlay, already
-            // cleared above.
-            const frameState = {};
-            for (const candidate of holdOverlays(heldOverlaysRef.current, overlays, now)) {
-              const metadataType = candidate.data?.type;
-              const resolvedSettings = getResolvedViewerSettings(index, metadataType);
-              if (
-                typeof metadataType !== "string"
-                || !hasDrawableMetadata(candidate.data, resolvedSettings)
-              ) continue;
-              const drawContext = {
-                settings: resolvedSettings,
-                trackHistory: trackHistoryRef.current,
-                now,
-                frameState,
-                held: candidate.held === true,
-              };
-              drawMetadata(ctx, canvas, candidate.data, video, index, drawContext);
-            }
-          }
+          fitCanvas(canvas);
+          // Always clear overlay to avoid stale masks/opaque leftovers.
+          ctx?.clearRect(0, 0, canvas.width, canvas.height);
+          drawFrameMetadata(ctx, canvas, video, frameMetadata?.rtpTimestamp, now);
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           heldOverlaysRef.current.clear();
           trackHistoryRef.current.clear();
           auxiliaryPanelRef.current?.clearFrame();
         }
+      };
+
+      const drawJpegFrame = (bitmap, rtpTimestamp, now) => {
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext("2d");
+        if (!ctx) return;
+        fitCanvas(canvas);
+        jpeg.width = bitmap.width;
+        jpeg.height = bitmap.height;
+        const source = { videoWidth: bitmap.width, videoHeight: bitmap.height };
+        const { scaleX, scaleY, offsetX, offsetY } = window.computeScaleAndOffset(source, canvas);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bitmap, offsetX, offsetY, bitmap.width * scaleX, bitmap.height * scaleY);
+        playbackRef.current.lastFrameAt = Date.now();
+        setTileActive(true);
+        drawFrameMetadata(ctx, canvas, source, rtpTimestamp, now);
+      };
+
+      // One decode at a time; a frame selected meanwhile replaces the waiting one.
+      const decodeJpegFrame = () => {
+        if (jpeg.decoding || !jpeg.next) return;
+        const state = jpeg;
+        const frame = state.next;
+        state.next = null;
+        state.decoding = true;
+        createImageBitmap(new Blob(frame.parts, { type: "image/jpeg" })).then(
+          (bitmap) => {
+            state.decoding = false;
+            if (mounted && sessionId === currentSession) {
+              state.framesDecoded += 1;
+              drawJpegFrame(bitmap, frame.ts, performance.now());
+            }
+            bitmap.close();
+            if (mounted && sessionId === currentSession) decodeJpegFrame();
+          },
+          () => {
+            state.decoding = false;
+            state.framesSkipped += 1;
+            if (mounted && sessionId === currentSession) decodeJpegFrame();
+          },
+        );
+      };
+
+      const presentJpegFrames = (now) => {
+        if (!mounted || sessionId !== currentSession) return;
+        const selected = selectFrameToPresent(
+          jpeg.pending,
+          (ts) => metadataQueueRef.current.timestamped.has(ts),
+          synchronizationSettingsRef.current.videoSyncBufferMs,
+          now,
+        );
+        if (selected) {
+          jpeg.framesSkipped += selected.dropped + (jpeg.next ? 1 : 0);
+          jpeg.pending = selected.remaining;
+          jpeg.next = selected.frame;
+          decodeJpegFrame();
+        }
+        animationFrame = requestAnimationFrame(presentJpegFrames);
       };
 
       const startVideoFrameLoop = () => {
@@ -356,8 +490,115 @@ function ChannelTile({ index, onActiveChange, debug }) {
         });
       };
 
+      const clearStaleTile = () => {
+        if (playbackRef.current.lastFrameAt <= 0 || Date.now() - playbackRef.current.lastFrameAt <= STREAM_STALE_MS) {
+          return;
+        }
+        setTileActive(false);
+        const canvas = canvasRef.current;
+        canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+        heldOverlaysRef.current.clear();
+        trackHistoryRef.current.clear();
+        auxiliaryPanelRef.current?.clearFrame();
+      };
+
+      const sendBrowserReport = (inboundRtp, videoState) => {
+        if (metadataChannel?.readyState !== "open") return;
+        const metadataSync = metadataQueueSnapshot(metadataQueueRef.current);
+        const videoSync = videoSyncStatusRef.current;
+        const lastFrameAgeMs =
+          playbackRef.current.lastFrameAt > 0 ? Date.now() - playbackRef.current.lastFrameAt : undefined;
+        metadataChannel.send(
+          JSON.stringify({
+            type: "browser_egress_stats",
+            channel: index,
+            time: new Date().toISOString(),
+            connection: {
+              connection_state: pc.connectionState,
+              ice_connection_state: pc.iceConnectionState,
+              ice_gathering_state: pc.iceGatheringState,
+              signaling_state: pc.signalingState,
+            },
+            inbound_rtp: inboundRtp,
+            video: {
+              ...videoState,
+              last_frame_age_ms: lastFrameAgeMs,
+              active: activeRef.current,
+            },
+            data_channel: {
+              state: metadataChannel.readyState,
+              metadata_messages_per_sec: rtcpRef.current.lastCount,
+            },
+            synchronization: {
+              video_sync_buffer_ms: synchronizationSettingsRef.current.videoSyncBufferMs,
+              metadata_retention_ms: synchronizationSettingsRef.current.metadataRetentionMs,
+              jitter_buffer_target_supported: videoSync.supported,
+              jitter_buffer_target_applied: videoSync.applied,
+              jitter_buffer_target_ms: videoSync.targetMs,
+              timestamp_matches: metadataSync.timestampMatches,
+              arrival_fallbacks: metadataSync.arrivalFallbacks,
+              frame_misses: metadataSync.frameMisses,
+              metadata_expired: metadataSync.expired,
+              metadata_evicted: metadataSync.evicted,
+              untimestamped_metadata_received: metadataSync.untimestampedReceived,
+              timestamped_metadata_pending: metadataSync.timestampedPending,
+              arrival_metadata_pending: metadataSync.arrivalPending,
+            },
+          })
+        );
+      };
+
+      // JPEG has no inbound-rtp video report; the tile's own counters stand in.
+      const reportJpegStats = () => {
+        const tracker = rtcpRef.current;
+        const now = performance.now();
+        const previous = jpeg.sample;
+        const seconds = previous ? (now - previous.at) / 1000 : 0;
+        const fps = seconds > 0 ? (jpeg.framesDecoded - previous.framesDecoded) / seconds : 0;
+        const bitrateBps = seconds > 0 ? ((jpeg.bytesReceived - previous.bytesReceived) * 8) / seconds : 0;
+        jpeg.sample = { at: now, framesDecoded: jpeg.framesDecoded, bytesReceived: jpeg.bytesReceived };
+        clearStaleTile();
+        setBanner(
+          formatChannelStatus({
+            index,
+            codec: "JPEG",
+            width: jpeg.width || "?",
+            height: jpeg.height || "?",
+            fps: fps.toFixed(1),
+            bitrate: (bitrateBps / 1000).toFixed(1),
+            messageRate: tracker.lastCount,
+          })
+        );
+        sendBrowserReport(
+          {
+            bytes_received: jpeg.bytesReceived,
+            frames_received: jpeg.framesReceived,
+            frames_decoded: jpeg.framesDecoded,
+            frames_dropped: jpeg.assembler.incomplete + jpeg.framesSkipped,
+            frames_per_second: Number(fps.toFixed(1)),
+            frame_width: jpeg.width,
+            frame_height: jpeg.height,
+            bitrate_bps: Number(bitrateBps.toFixed(1)),
+          },
+          // The canvas stands in for <video>: HAVE_ENOUGH_DATA once a frame is drawn.
+          {
+            ready_state: jpeg.framesDecoded > 0 ? 4 : 0,
+            paused: false,
+            current_time: 0,
+            video_width: jpeg.width,
+            video_height: jpeg.height,
+          },
+        );
+        tracker.lastCount = tracker.messageCount;
+        tracker.messageCount = 0;
+      };
+
       statsInterval = window.setInterval(async () => {
         if (!mounted || !pc || pc.connectionState !== "connected") return;
+        if (jpeg.active) {
+          reportJpegStats();
+          return;
+        }
         try {
           const stats = await pc.getStats();
           let decoderStalled = false;
@@ -393,17 +634,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               setTileActive(true);
             }
             decoderStalled ||= tracker.decoderHealth.stalled;
-            if (
-              playbackRef.current.lastFrameAt > 0 &&
-              Date.now() - playbackRef.current.lastFrameAt > STREAM_STALE_MS
-            ) {
-              setTileActive(false);
-              const canvas = canvasRef.current;
-              canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-              heldOverlaysRef.current.clear();
-              trackHistoryRef.current.clear();
-              auxiliaryPanelRef.current?.clearFrame();
-            }
+            clearStaleTile();
             setBanner(
               formatChannelStatus({
                 index,
@@ -428,71 +659,33 @@ function ChannelTile({ index, onActiveChange, debug }) {
               currentTime: videoRef.current?.currentTime,
             });
 
-            if (metadataChannel?.readyState === "open") {
-              const video = videoRef.current;
-              const metadataSync = metadataQueueSnapshot(metadataQueueRef.current);
-              const videoSync = videoSyncStatusRef.current;
-              const lastFrameAgeMs =
-                playbackRef.current.lastFrameAt > 0 ? Date.now() - playbackRef.current.lastFrameAt : undefined;
-              metadataChannel.send(
-                JSON.stringify({
-                  type: "browser_egress_stats",
-                  channel: index,
-                  time: new Date().toISOString(),
-                  connection: {
-                    connection_state: pc.connectionState,
-                    ice_connection_state: pc.iceConnectionState,
-                    ice_gathering_state: pc.iceGatheringState,
-                    signaling_state: pc.signalingState,
-                  },
-                  inbound_rtp: {
-                    bytes_received: report.bytesReceived,
-                    packets_received: report.packetsReceived,
-                    packets_lost: report.packetsLost,
-                    frames_received: report.framesReceived,
-                    frames_decoded: report.framesDecoded,
-                    frames_dropped: report.framesDropped,
-                    frames_per_second: report.framesPerSecond,
-                    decoder_implementation: report.decoderImplementation,
-                    power_efficient_decoder: report.powerEfficientDecoder,
-                    frame_width: report.frameWidth,
-                    frame_height: report.frameHeight,
-                    freeze_count: report.freezeCount,
-                    pause_count: report.pauseCount,
-                    bitrate_bps: Number(bitrateBps.toFixed(1)),
-                    average_jitter_buffer_delay_ms: Number(jitterBufferDelayMs.toFixed(1)),
-                  },
-                  video: {
-                    ready_state: video?.readyState ?? 0,
-                    paused: video?.paused ?? true,
-                    current_time: video?.currentTime ?? 0,
-                    video_width: video?.videoWidth,
-                    video_height: video?.videoHeight,
-                    last_frame_age_ms: lastFrameAgeMs,
-                    active: activeRef.current,
-                  },
-                  data_channel: {
-                    state: metadataChannel.readyState,
-                    metadata_messages_per_sec: tracker.lastCount,
-                  },
-                  synchronization: {
-                    video_sync_buffer_ms: synchronizationSettingsRef.current.videoSyncBufferMs,
-                    metadata_retention_ms: synchronizationSettingsRef.current.metadataRetentionMs,
-                    jitter_buffer_target_supported: videoSync.supported,
-                    jitter_buffer_target_applied: videoSync.applied,
-                    jitter_buffer_target_ms: videoSync.targetMs,
-                    timestamp_matches: metadataSync.timestampMatches,
-                    arrival_fallbacks: metadataSync.arrivalFallbacks,
-                    frame_misses: metadataSync.frameMisses,
-                    metadata_expired: metadataSync.expired,
-                    metadata_evicted: metadataSync.evicted,
-                    untimestamped_metadata_received: metadataSync.untimestampedReceived,
-                    timestamped_metadata_pending: metadataSync.timestampedPending,
-                    arrival_metadata_pending: metadataSync.arrivalPending,
-                  },
-                })
-              );
-            }
+            const video = videoRef.current;
+            sendBrowserReport(
+              {
+                bytes_received: report.bytesReceived,
+                packets_received: report.packetsReceived,
+                packets_lost: report.packetsLost,
+                frames_received: report.framesReceived,
+                frames_decoded: report.framesDecoded,
+                frames_dropped: report.framesDropped,
+                frames_per_second: report.framesPerSecond,
+                decoder_implementation: report.decoderImplementation,
+                power_efficient_decoder: report.powerEfficientDecoder,
+                frame_width: report.frameWidth,
+                frame_height: report.frameHeight,
+                freeze_count: report.freezeCount,
+                pause_count: report.pauseCount,
+                bitrate_bps: Number(bitrateBps.toFixed(1)),
+                average_jitter_buffer_delay_ms: Number(jitterBufferDelayMs.toFixed(1)),
+              },
+              {
+                ready_state: video?.readyState ?? 0,
+                paused: video?.paused ?? true,
+                current_time: video?.currentTime ?? 0,
+                video_width: video?.videoWidth,
+                video_height: video?.videoHeight,
+              },
+            );
 
             tracker.lastBytes = report.bytesReceived;
             tracker.lastTs = report.timestamp;
@@ -524,6 +717,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
           metadataChannel.close();
           metadataChannel = null;
         }
+        if (jpegChannel) {
+          jpegChannel.close();
+          jpegChannel = null;
+        }
         if (pc) {
           pc.onconnectionstatechange = null;
           pc.close();
@@ -553,12 +750,16 @@ function ChannelTile({ index, onActiveChange, debug }) {
       if (metadataChannel && metadataChannel.readyState === "open") {
         metadataChannel.close();
       }
+      if (jpegChannel && jpegChannel.readyState === "open") {
+        jpegChannel.close();
+      }
       if (pc) pc.close();
       auxiliaryPanelRef.current?.reset();
       setTileActive(false);
     };
   }, [index, onActiveChange]);
 
+  const transform = orientationTransform(orientation);
   const openScopeSettings = () => {
     if (typeof window.openSettingsForScope === "function") {
       window.openSettingsForScope(`channel_${index}`);
@@ -567,8 +768,14 @@ function ChannelTile({ index, onActiveChange, debug }) {
 
   return (
     <div className="video-tile" style={{ position: "relative" }} data-active={active ? "1" : "0"}>
-      <video ref={videoRef} autoPlay playsInline muted />
-      <canvas ref={canvasRef} />
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{ transform: transform || undefined, visibility: jpegMode ? "hidden" : undefined }}
+      />
+      <canvas ref={canvasRef} style={{ transform: transform || undefined }} />
       <AuxiliaryPanel ref={auxiliaryPanelRef} channelIndex={index} />
       {!active && <div className="tile-no-video">No active video received</div>}
       <div className="tile-banner-wrapper">
