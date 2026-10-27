@@ -11,6 +11,7 @@ import {
   formatBytes,
   formatDuration,
   friendlyModelName,
+  offersSetup,
   supportsThinking,
   thinkingModelOnBoard,
   voiceEngineWarnings,
@@ -19,9 +20,10 @@ import {
   speechModels
 } from './backendState.js'
 import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } from './tutorial.js'
+import { SETUP_STORAGE_KEY, lastLine, requestProblem, saveSetupOpen, setupAction, setupOpenSaved, setupStoppable } from './setup.js'
 import { languageNames, latinLanguage, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
-import { REPLY_CUT_OFF, boardCameraSnapshot, chatRequestBody, downloadModel, errorMessage, probeHealth, streamChat } from './client.js'
+import { GenaiError, REPLY_CUT_OFF, boardCameraSnapshot, chatRequestBody, downloadModel, errorMessage, probeHealth, streamChat } from './client.js'
 import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
 import { createSentenceSplitter, speakablePieces } from './sentences.js'
 import {
@@ -388,6 +390,63 @@ test('the tutorial is remembered once seen, and not forced on every visit when s
   const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } }
   assert.equal(tutorialSeen(broken), true)
   assert.doesNotThrow(() => markTutorialSeen(broken))
+})
+
+test('first-time setup is offered only while nothing answers at the board address', () => {
+  const down = deriveBackendState({ health: { httpStatus: 502, body: { reason: 'unreachable' } } })
+  assert.equal(offersSetup(down.state), true)
+  assert.match(down.detail, /First time\? Set up GenAI Studio installs and starts it/)
+  const none = deriveBackendState({ health: { httpStatus: 503, body: { reason: 'not-configured' } } })
+  assert.equal(offersSetup(none.state), true)
+  for (const state of ['ready', 'failed', 'busy', 'starting', 'error', 'incompatible']) {
+    assert.equal(offersSetup(state), false, state)
+  }
+})
+
+test('the setup button says what is left to do, and offers Retry after a failure', () => {
+  const status = (...states) => ({ active: false, steps: ['install', 'prepare', 'start'].map((id, i) => ({ id, state: states[i] })) })
+  assert.equal(setupAction(status('pending', 'pending', 'pending')).label, 'Install and start GenAI Studio')
+  assert.equal(setupAction(status('done', 'pending', 'pending')).label, 'Prepare and start GenAI Studio')
+  assert.equal(setupAction(status('done', 'done', 'pending')).label, 'Start GenAI Studio')
+  assert.equal(setupAction(status('done', 'failed', 'pending')).label, 'Retry')
+  assert.equal(setupAction(status('pending', 'blocked', 'pending')).label, 'Retry')
+  assert.equal(setupAction(status('done', 'done', 'done')), null, 'nothing left')
+  assert.equal(setupAction({ ...status('done', 'running', 'queued'), active: true }), null, 'a job runs')
+  assert.equal(setupAction(null), null)
+  assert.equal(setupStoppable({ ...status('done', 'running', 'queued'), active: true }), true)
+  // Once every step is done the job only keeps GenAI Studio running: Stop is not offered.
+  assert.equal(setupStoppable({ ...status('done', 'done', 'done'), active: true }), false)
+  assert.equal(setupStoppable(status('done', 'failed', 'pending')), false)
+  assert.equal(lastLine('Downloading\nInstalling voices\n\n'), 'Installing voices')
+  assert.equal(lastLine(''), '')
+})
+
+test('a failed setup request says what happened and what to do', () => {
+  const offline = requestProblem(new GenaiError('Insight could not be reached: Failed to fetch'))
+  assert.equal(offline.message, 'Insight could not be reached: Failed to fetch')
+  assert.match(offline.fixes[0], /Insight is still running/)
+  const board = requestProblem(new GenaiError('No board is selected.', {
+    status: 409,
+    body: { error: 'No board is selected.', code: 'no_target', hint: "Enter the board's address." }
+  }))
+  assert.deepEqual(board, { message: 'No board is selected.', fixes: ["Enter the board's address."], detail: '' })
+  const launch = requestProblem(new GenaiError('x', { status: 502, body: { error: 'Could not start.', detail: 'mkdir: Permission denied' } }))
+  assert.deepEqual(launch.fixes, [])
+  assert.equal(launch.detail, 'mkdir: Permission denied')
+})
+
+test('a reload reopens the setup panel, and storage failures only lose that', () => {
+  const store = new Map()
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) }
+  assert.equal(setupOpenSaved(storage), false)
+  saveSetupOpen(storage, true)
+  assert.equal(store.get(SETUP_STORAGE_KEY), '1')
+  assert.equal(setupOpenSaved(storage), true)
+  saveSetupOpen(storage, false)
+  assert.equal(store.has(SETUP_STORAGE_KEY), false)
+  const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') }, removeItem: () => { throw new Error('denied') } }
+  assert.equal(setupOpenSaved(broken), false)
+  assert.doesNotThrow(() => saveSetupOpen(broken, true))
 })
 
 test('voice engines that failed to load become plain warnings', () => {

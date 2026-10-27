@@ -257,12 +257,14 @@ Start the backend on the board first, from the GenAI Studio application director
 ./run.sh
 ```
 
+The first time, GenAI Studio has to be installed on the board. While the tab can't reach it, the **Tutorial** asks whether this is your first time, and **Set up GenAI Studio** in the banner opens the same panel. Its button installs Apps (`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`, which keeps the installed Core and Insight), prepares GenAI Studio once with `setup.sh` (about 15 minutes, with internet access on the board) and starts it with `./run.sh`, on the board Insight is connected to. The steps run on the board as one job that keeps going when you close the page; its logs are in `~/.neat-insight/genai-setup/`. A step that fails says why, what to do and what it printed last, next to **Retry** and the command to run by hand. A step with no new output for several minutes says so, and **Stop** ends it.
+
 The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud**, **Think first** (greyed out for models that always answer directly) and **Use my documents**, and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Benchmark** (the gauge), **Tutorial**, **Settings** and **Full screen**.
 
 The status label, and a banner when something needs attention, show the backend's state and what to do next:
 
 - **Not set up**: no board is selected, and the settings open. Enter the board's address, such as `https://192.168.1.20:5000`. On a board, Insight defaults to the local backend; in the Neat Development Environment it defaults to the paired DevKit.
-- **Not running**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address.
+- **Not running**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address. The first time, **Set up GenAI Studio** installs and starts it.
 - **Error**: the board answered with an error, or the address is not GenAI Studio. The banner shows the board's message.
 - **Starting**: the backend answers but its model server is not ready yet.
 - **Busy**: a model is loading. Chat and speech wait until it finishes.

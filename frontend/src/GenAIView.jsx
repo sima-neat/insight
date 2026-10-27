@@ -12,6 +12,7 @@ import {
   formatBytes,
   formatDuration,
   friendlyModelName,
+  offersSetup,
   speechModels,
   supportsThinking,
   thinkingModelOnBoard,
@@ -27,10 +28,13 @@ import {
   followLoadProgress,
   getJson,
   getSettings,
+  getSetup,
   postJson,
   probeHealth,
+  runSetup,
   saveSettings,
   speak,
+  stopSetup,
   streamChat,
   transcribe
 } from './genai/client.js'
@@ -76,10 +80,13 @@ import { VISION_PRESETS, createVisionLoop } from './genai/visionLoop.js'
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
 import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.js'
+import { SLOW_REQUEST_MS, STEP_LABELS, lastLine, requestProblem, saveSetupOpen, setupAction, setupOpenSaved, setupStoppable } from './genai/setup.js'
+import { copyText } from './peripherals/api.js'
 
 const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
 
 const POLL_MS = 5000
+const SETUP_POLL_MS = 3000   // the setup panel, while open
 // The id the vision view's answers are read aloud under (chat replies use their own).
 const VISION_READING = 'vision'
 // A short silent WAV: played on the click itself so the browser lets the same
@@ -180,6 +187,34 @@ function WithCode({ text }) {
   return codeParts(text).map((part, i) => (typeof part === 'string' ? part : <code key={i}>{part.code}</code>))
 }
 
+// Why a setup step or request failed, or why a step has gone quiet: the
+// message, what to do, its last output and the command to run by hand.
+function SetupHelp({ problem, log = '', warn = false, onCopy }) {
+  return (
+    <div className={`genai-setup-help${warn ? ' genai-setup-help-warn' : ''}`} role={warn ? 'status' : 'alert'}>
+      <p className="genai-setup-help-title">{problem.message}</p>
+      {problem.fixes?.length > 0 && (
+        <ul>{problem.fixes.map((fix) => <li key={fix}><WithCode text={fix} /></li>)}</ul>
+      )}
+      {log && (
+        <details>
+          <summary>Last output</summary>
+          <pre>{log}</pre>
+        </details>
+      )}
+      {problem.command && (
+        <div className="genai-setup-manual">
+          <span>Or run it yourself in a shell on the board:</span>
+          <div className="genai-tutorial-commands">
+            <pre><code>{problem.command}</code></pre>
+            <button type="button" className="btn-ghost genai-small" onClick={() => onCopy(problem.command)}>Copy</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // A Settings card: an icon, the title, and one line about how it is set now.
 function SettingsCard({ id, icon, title, summary, wide, children }) {
   return (
@@ -275,6 +310,12 @@ export default function GenAIView({ onError, onStatus }) {
   const [docsViewOpen, setDocsViewOpen] = useState(false)   // View documents: what the database holds
   const docInput = useRef(null)
   const [tutorialStep, setTutorialStep] = useState(null)
+  const [setupOpen, setSetupOpen] = useState(false)   // the setup panel, shown instead of the tour
+  const [setupStatus, setSetupStatus] = useState(null)   // GET /api/genai-setup
+  const [setupError, setSetupError] = useState(null)   // a Run or Stop that failed, as {message, fixes, detail}
+  const [setupReadError, setSetupReadError] = useState(null)   // the last status read, when it failed
+  const [setupBusy, setSetupBusy] = useState(null)   // 'run' | 'stop' while that request is out
+  const [setupSlow, setSetupSlow] = useState(false)   // that request has not answered for a while
   const [streaming, setStreaming] = useState(false)
   const chatAbort = useRef(null)
   const boardGeneration = useRef(0)   // + 1 on every board switch
@@ -514,10 +555,27 @@ export default function GenAIView({ onError, onStatus }) {
     }
   }, [])
 
-  // First visit: start the tutorial.
+  // First visit: start the tutorial. A reload during setup reopens its panel.
   useEffect(() => {
-    if (!tutorialSeen(window.localStorage)) setTutorialStep(0)
+    if (setupOpenSaved(window.localStorage)) setSetupOpen(true)
+    else if (!tutorialSeen(window.localStorage)) setTutorialStep(0)
   }, [])
+
+  // The setup panel follows the job on the board while it is open.
+  useEffect(() => {
+    if (!setupOpen) return undefined
+    let cancelled = false
+    const read = () => getSetup().then(
+      (body) => { if (!cancelled) { setSetupStatus(body); setSetupReadError(null) } },
+      (err) => { if (!cancelled) setSetupReadError(requestProblem(err)) }
+    )
+    read()
+    const timer = setInterval(read, SETUP_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [setupOpen])
 
   function onTranscriptScroll() {
     const box = transcriptBox.current
@@ -1477,6 +1535,43 @@ export default function GenAIView({ onError, onStatus }) {
     setTutorialStep(null)
   }
 
+  function openSetup() {
+    setTutorialStep(null)
+    setSetupOpen(true)
+    saveSetupOpen(window.localStorage, true)
+  }
+
+  // Leaving setup for the tour (at `tourStep`), or closing both.
+  function leaveSetup(tourStep = null) {
+    saveSetupOpen(window.localStorage, false)
+    setSetupOpen(false)
+    if (tourStep === null) markTutorialSeen(window.localStorage)
+    setTutorialStep(tourStep)
+  }
+
+  // Run or stop the job; a request the board is slow to answer says so.
+  async function setupRequest(kind, call) {
+    setSetupBusy(kind)
+    setSetupError(null)
+    setSetupSlow(false)
+    const slow = setTimeout(() => setSetupSlow(true), SLOW_REQUEST_MS)
+    try {
+      setSetupStatus(await call())
+    } catch (err) {
+      setSetupError(requestProblem(err))
+    } finally {
+      clearTimeout(slow)
+      setSetupSlow(false)
+      setSetupBusy(null)
+    }
+  }
+
+  function copyCommand(command) {
+    copyText(command).then(() => onStatus?.('Copied. Paste it into a shell on the board.'), (err) => onError?.(err.message))
+  }
+
+  const setupNext = setupAction(setupStatus)
+
   function tryTutorialAction(action) {
     if (action === 'example-question') tryPrompt('Explain what an AI accelerator does, in simple terms.')
     else if (action === 'example-translate') tryPrompt("Translate 'good morning, how are you?' into Spanish.")
@@ -1508,6 +1603,11 @@ export default function GenAIView({ onError, onStatus }) {
           <p className="genai-tutorial-eyebrow">Tutorial · step {tutorialStep + 1} of {steps.length}</p>
           <p className="genai-tutorial-title">{step.title}</p>
           <p className="genai-tutorial-body">{step.body}</p>
+          {step.id === 'intro' && offersSetup(backend.state) && (
+            <p className="genai-tutorial-body genai-tutorial-question">
+              GenAI Studio isn't answering at the board address yet. Is this your first time using it on this board?
+            </p>
+          )}
           <div className="genai-actions">
             {step.action && ((step.action !== 'camera' && step.action !== 'vision') || allowed.attachPicture) && (
               <button
@@ -1522,10 +1622,81 @@ export default function GenAIView({ onError, onStatus }) {
             <span className="genai-tutorial-spacer" />
             <button type="button" className="btn-ghost" onClick={closeTutorial}>Skip tutorial</button>
             <button type="button" className="btn-ghost" disabled={tutorialStep === 0} onClick={() => setTutorialStep((i) => Math.max(0, i - 1))}>Back</button>
-            {tutorialStep < steps.length - 1 ? (
+            {step.id === 'intro' && offersSetup(backend.state) ? (
+              <>
+                <button type="button" className="btn-tonal" onClick={openSetup}>Yes, set it up</button>
+                <button type="button" className="btn-ghost" onClick={() => setTutorialStep((i) => i + 1)}>No, show me around</button>
+              </>
+            ) : tutorialStep < steps.length - 1 ? (
               <button type="button" className="btn-tonal" onClick={() => setTutorialStep((i) => i + 1)}>Next</button>
             ) : (
               <button type="button" className="btn-tonal" onClick={closeTutorial}>Start chatting</button>
+            )}
+          </div>
+        </section>
+      )}
+
+      {setupOpen && (
+        <section className="panel genai-tutorial genai-setup" aria-label="Set up GenAI Studio" aria-live="polite">
+          <p className="genai-tutorial-eyebrow">Set up GenAI Studio{setupStatus?.board?.label ? ` · ${setupStatus.board.label}` : ''}</p>
+          <p className="genai-tutorial-title">Install and start GenAI Studio on the board</p>
+          <p className="genai-tutorial-body">
+            Insight runs each step on the board for you. The first time takes about 20 minutes and needs internet
+            access on the board; the steps keep running if you close this page.
+          </p>
+          {!setupStatus && !setupReadError && <p className="hint">Checking the board…</p>}
+          {setupStatus && (
+            <ol className="genai-setup-steps">
+              {setupStatus.steps.map((item) => (
+                <li key={item.id} className={`genai-setup-step genai-setup-${item.state}`}>
+                  <span className={`genai-pill genai-setup-pill-${item.state}`}>{STEP_LABELS[item.state] || item.state}</span>
+                  <div className="genai-setup-step-body">
+                    <p className="genai-setup-step-title">{item.title}</p>
+                    <p className="hint">{item.description}</p>
+                    {item.state === 'running' && lastLine(item.log) && <p className="genai-setup-last"><code>{lastLine(item.log)}</code></p>}
+                    {item.stall && <SetupHelp problem={item.stall} warn onCopy={copyCommand} />}
+                    {item.problem && <SetupHelp problem={item.problem} log={item.log} onCopy={copyCommand} />}
+                  </div>
+                </li>
+              ))}
+              <li className={`genai-setup-step genai-setup-${backend.state === 'ready' ? 'done' : 'pending'}`}>
+                <StatusChip state={backend.state} />
+                <div className="genai-setup-step-body">
+                  <p className="genai-setup-step-title">Connect this tab</p>
+                  <p className="hint">
+                    {backend.state === 'ready'
+                      ? 'GenAI Studio answers. Show me around starts with loading your first model.'
+                      : `This tab connects to ${settings?.url || 'the board address in Settings'} once GenAI Studio is running. If it is running and this still says ${STATE_LABELS[backend.state] || backend.state}, check the address in Settings.`}
+                  </p>
+                </div>
+              </li>
+            </ol>
+          )}
+          {setupReadError && <SetupHelp problem={setupReadError} log={setupReadError.detail} onCopy={copyCommand} />}
+          {setupError && <SetupHelp problem={setupError} log={setupError.detail} onCopy={copyCommand} />}
+          {setupSlow && (
+            <p className="hint genai-setup-slow">
+              The board has not answered yet. If this lasts, check that the board is on and reachable: the Board menu at the top shows its connection.
+            </p>
+          )}
+          <div className="genai-actions">
+            {setupNext && (
+              <button type="button" className="btn-tonal" disabled={setupBusy !== null} onClick={() => setupRequest('run', runSetup)}>
+                {setupBusy === 'run' ? 'Starting…' : setupNext.label}
+              </button>
+            )}
+            {setupStoppable(setupStatus) && (
+              <button type="button" className="btn-ghost" disabled={setupBusy !== null} onClick={() => setupRequest('stop', stopSetup)}>
+                {setupBusy === 'stop' ? 'Stopping…' : 'Stop'}
+              </button>
+            )}
+            {!settingsOpen && (
+              <button type="button" className="btn-ghost" onClick={() => setSettingsOpen(true)}>Open Settings</button>
+            )}
+            <span className="genai-tutorial-spacer" />
+            <button type="button" className="btn-ghost" onClick={() => leaveSetup()}>Close</button>
+            {backend.state === 'ready' && (
+              <button type="button" className="btn-tonal" onClick={() => leaveSetup(1)}>Show me around</button>
             )}
           </div>
         </section>
@@ -1586,7 +1757,7 @@ export default function GenAIView({ onError, onStatus }) {
           <button type="button" className={`btn-ghost genai-tool${spot('benchmark')}`} onClick={() => { if (allowed.openBenchmark) setBenchOpen(true) }} disabled={!allowed.openBenchmark} aria-label="Benchmark" title={!usable ? backend.title : bench.available ? 'Benchmark: first token time and tokens per second for the board\'s models' : bench.reason}>
             <Icon d={ICONS.gauge} />
           </button>
-          <button type="button" className="btn-ghost genai-tool" onClick={() => setTutorialStep(0)} aria-pressed={step !== null} aria-label="Tutorial" title="Tutorial">
+          <button type="button" className="btn-ghost genai-tool" onClick={() => { saveSetupOpen(window.localStorage, false); setSetupOpen(false); setTutorialStep(0) }} aria-pressed={step !== null || setupOpen} aria-label="Tutorial" title="Tutorial">
             <Icon d={ICONS.help} />
           </button>
           <button type="button" className={settingsOpen ? 'btn-tonal genai-tool' : 'btn-ghost genai-tool'} aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)} aria-label="Settings" title="Settings">
@@ -1605,8 +1776,11 @@ export default function GenAIView({ onError, onStatus }) {
           {voiceWarnings.map((w) => <p key={w.key} className="section-note genai-voice-warning">{w.message}</p>)}
           {backend.state === 'busy' && <ProgressBar pct={loadProgress ? loadProgress.pct : null} label={backend.title} />}
           <div className="genai-actions">
+            {offersSetup(backend.state) && !setupOpen && (
+              <button type="button" className="btn-tonal" onClick={openSetup}>Set up GenAI Studio</button>
+            )}
             {backend.action === 'start-command' && (
-              <button type="button" className="btn-ghost" onClick={() => navigator.clipboard?.writeText(START_COMMAND).then(() => onStatus?.('Start command copied.'))}>
+              <button type="button" className="btn-ghost" onClick={() => copyText(START_COMMAND).then(() => onStatus?.('Start command copied.'), (err) => onError?.(err.message))}>
                 Copy start command
               </button>
             )}

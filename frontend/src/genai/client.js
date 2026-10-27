@@ -80,6 +80,26 @@ export async function probeHealth(signal) {
   }
 }
 
+// Setup goes to Insight's own /api/genai-setup, not through the relay: Insight
+// runs the steps on the selected board itself.
+export const SETUP = '/api/genai-setup'
+
+async function setupRequest(path, method = 'GET') {
+  let response
+  try {
+    response = await fetch(`${SETUP}${path}`, { method, cache: 'no-store' })
+  } catch (error) {
+    throw new GenaiError(`Insight could not be reached: ${error.message}`)
+  }
+  const body = await readJson(response)
+  if (!response.ok) throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
+  return body
+}
+
+export const getSetup = () => setupRequest('')
+export const runSetup = () => setupRequest('/run', 'POST')
+export const stopSetup = () => setupRequest('/stop', 'POST')
+
 export async function getSettings() {
   const response = await fetch(`${RELAY}/settings`)
   return readJson(response)

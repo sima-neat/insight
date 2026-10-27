@@ -257,12 +257,14 @@ GenAI Studio 뷰는 보드에서 언어, 비전, 음성 모델을 실행합니�
 ./run.sh
 ```
 
+처음에는 보드에 GenAI Studio를 설치해야 합니다. 탭이 GenAI Studio에 연결할 수 없는 동안 **Tutorial**은 처음 사용하는지 묻고, 배너의 **Set up GenAI Studio**도 같은 패널을 엽니다. 패널의 버튼은 Insight가 연결된 보드에서 Apps를 설치하고(`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`, 설치된 Core와 Insight는 그대로 유지), `setup.sh`로 GenAI Studio를 한 번 준비한 다음(보드의 인터넷 연결 필요, 약 15분), `./run.sh`로 시작합니다. 각 단계는 보드에서 하나의 작업으로 실행되며 페이지를 닫아도 계속 진행됩니다. 로그는 `~/.neat-insight/genai-setup/`에 있습니다. 실패한 단계는 원인, 해결 방법, 마지막 출력을 **Retry** 및 직접 실행할 명령과 함께 보여 줍니다. 몇 분 동안 새 출력이 없는 단계는 그 사실을 알려 주며, **Stop**으로 중단할 수 있습니다.
+
 처음 방문하면 페이지 상단에 각 기능을 안내하는 짧은 **Tutorial**이 열립니다. 헤더의 **Tutorial**로 언제든 다시 볼 수 있습니다. 헤더에는 상태 표시, **Model** 선택기와 그 옆의 **New chat**(연필), **Read replies aloud**, **Think first**(항상 바로 답하는 모델에서는 비활성화), **Use my documents**가 있습니다. 도구 모음에는 **Export chat**, **SiMaSentry Solutions**(방패), **Benchmark**(계기), **Tutorial**, **Settings**, **Full screen**이 있습니다.
 
 상태 표시와 주의가 필요할 때 나타나는 배너는 백엔드 상태와 다음에 할 일을 알려 줍니다.
 
 - **Not set up**: 선택한 보드가 없으며 설정이 열립니다. `https://192.168.1.20:5000` 같은 보드 주소를 입력하십시오. 보드에서 실행되는 Insight는 기본적으로 로컬 백엔드를 사용하고, Neat Development Environment에서는 페어링된 DevKit을 사용합니다.
-- **Not running**: 보드가 응답하지 않습니다. 위 명령으로 백엔드를 시작하거나(**Copy start command**로 복사) 주소를 확인하십시오.
+- **Not running**: 보드가 응답하지 않습니다. 위 명령으로 백엔드를 시작하거나(**Copy start command**로 복사) 주소를 확인하십시오. 처음이라면 **Set up GenAI Studio**가 설치하고 시작합니다.
 - **Error**: 보드가 오류를 반환했거나 주소가 GenAI Studio를 가리키지 않습니다. 배너에 보드의 메시지가 표시됩니다.
 - **Starting**: 백엔드는 응답하지만 모델 서버가 아직 준비되지 않았습니다.
 - **Busy**: 모델을 불러오는 중입니다. 채팅과 음성은 완료될 때까지 기다립니다.

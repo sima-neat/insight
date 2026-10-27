@@ -257,12 +257,14 @@ GenAI Studio 檢視可在開發板上執行語言、視覺和語音模型。它�
 ./run.sh
 ```
 
+第一次使用時，需要先在開發板上安裝 GenAI Studio。當分頁無法連線到 GenAI Studio 時，**Tutorial** 會詢問您是否第一次使用，橫幅中的 **Set up GenAI Studio** 也會開啟相同的面板。面板上的按鈕會在 Insight 連線的開發板上安裝 Apps（`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`，保留已安裝的 Core 和 Insight）、以 `setup.sh` 準備 GenAI Studio 一次（開發板需要網際網路連線，約 15 分鐘），再以 `./run.sh` 啟動。這些步驟在開發板上以單一工作執行，關閉頁面後仍會繼續；記錄檔位於 `~/.neat-insight/genai-setup/`。失敗的步驟會說明原因、處理方式和最後的輸出，旁邊附有 **Retry** 和可手動執行的指令。數分鐘沒有新輸出的步驟會提示此情況，並可用 **Stop** 停止。
+
 第一次開啟時，頁面頂端會顯示簡短的 **Tutorial**，逐一介紹各項功能；隨時可用頁首的 **Tutorial** 再次觀看。頁首包含狀態標籤、**Model** 選擇器及旁邊的 **New chat**（鉛筆）、**Read replies aloud**、**Think first**（對一律直接回答的模型停用）和 **Use my documents**。工具列包含 **Export chat**、**SiMaSentry Solutions**（盾牌）、**Benchmark**（儀表）、**Tutorial**、**Settings** 和 **Full screen**。
 
 狀態標籤以及需要處理時出現的橫幅，會顯示後端狀態和接下來應採取的動作：
 
 - **Not set up**：尚未選取開發板，設定會開啟。請輸入開發板位址，例如 `https://192.168.1.20:5000`。在開發板上，Insight 預設使用本機後端；在 Neat Development Environment 中則預設使用已配對的 DevKit。
-- **Not running**：開發板沒有回應。請使用上述指令啟動後端（**Copy start command** 可複製指令），或檢查位址。
+- **Not running**：開發板沒有回應。請使用上述指令啟動後端（**Copy start command** 可複製指令），或檢查位址。第一次使用時，**Set up GenAI Studio** 會安裝並啟動它。
 - **Error**：開發板傳回錯誤，或該位址不是 GenAI Studio。橫幅會顯示開發板的訊息。
 - **Starting**：後端有回應，但模型伺服器尚未就緒。
 - **Busy**：正在載入模型。聊天與語音會等待載入完成。
