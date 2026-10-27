@@ -43,15 +43,14 @@ export function acceptJpegChunk(assembler, chunk, receivedAt) {
   };
 }
 
-// Picks the newest pending frame that is ready: its metadata is queued, or it
-// has waited the Video Sync Buffer for metadata that may still come. Older
-// frames are dropped so the picture never falls behind. Returns null while no
-// frame is ready.
-export function selectFrameToPresent(pending, hasMetadata, videoSyncBufferMs, now) {
+// Like the H.264 jitter buffer, every frame waits the Video Sync Buffer so all
+// of its metadata types can arrive. Picks the newest frame that has waited;
+// older waited frames are dropped only when presentation fell behind. Returns
+// null while no frame is ready.
+export function selectFrameToPresent(pending, videoSyncBufferMs, now) {
   for (let index = pending.length - 1; index >= 0; index -= 1) {
-    const frame = pending[index];
-    if (hasMetadata(frame.ts) || now - frame.receivedAt >= videoSyncBufferMs) {
-      return { frame, dropped: index, remaining: pending.slice(index + 1) };
+    if (now - pending[index].receivedAt >= videoSyncBufferMs) {
+      return { frame: pending[index], dropped: index, remaining: pending.slice(index + 1) };
     }
   }
   return null;

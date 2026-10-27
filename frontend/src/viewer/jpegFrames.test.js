@@ -60,22 +60,40 @@ test("a repeated chunk does not complete a frame", () => {
   assert.equal(acceptJpegChunk(assembler, parseJpegChunk(chunk(90, 0, 2, [1])), 0), null);
 });
 
-test("the newest frame with queued metadata is presented and older ones dropped", () => {
+test("every frame waits the video sync buffer", () => {
+  const pending = [{ ts: 1, receivedAt: 100 }];
+  assert.equal(selectFrameToPresent(pending, 300, 399), null);
+  assert.equal(selectFrameToPresent(pending, 300, 400).frame.ts, 1);
+  assert.equal(selectFrameToPresent(pending, 0, 100).frame.ts, 1);
+  assert.equal(selectFrameToPresent([], 300, 400), null);
+});
+
+test("frames are presented in order at the camera rate", () => {
+  // 30 fps for 1 s, presented on every 60 Hz animation frame: none dropped.
+  let pending = [];
+  let presented = 0;
+  for (let now = 0; now <= 1400; now += 1000 / 60) {
+    while (pending.length + presented < 30 && (pending.length + presented) * 33.3 <= now) {
+      pending.push({ ts: pending.length + presented, receivedAt: (pending.length + presented) * 33.3 });
+    }
+    const selected = selectFrameToPresent(pending, 300, now);
+    if (!selected) continue;
+    assert.equal(selected.dropped, 0);
+    assert.equal(selected.frame.ts, presented);
+    presented += 1;
+    pending = selected.remaining;
+  }
+  assert.equal(presented, 30);
+});
+
+test("only frames presentation fell behind on are dropped", () => {
   const pending = [
     { ts: 1, receivedAt: 100 },
     { ts: 2, receivedAt: 133 },
     { ts: 3, receivedAt: 166 },
   ];
-  const selected = selectFrameToPresent(pending, (ts) => ts === 2, 300, 170);
+  const selected = selectFrameToPresent(pending, 300, 440);
   assert.equal(selected.frame.ts, 2);
   assert.equal(selected.dropped, 1);
   assert.deepEqual(selected.remaining, [{ ts: 3, receivedAt: 166 }]);
-});
-
-test("a frame without metadata waits the video sync buffer", () => {
-  const pending = [{ ts: 1, receivedAt: 100 }];
-  assert.equal(selectFrameToPresent(pending, () => false, 300, 399), null);
-  assert.equal(selectFrameToPresent(pending, () => false, 300, 400).frame.ts, 1);
-  assert.equal(selectFrameToPresent(pending, () => false, 0, 100).frame.ts, 1);
-  assert.equal(selectFrameToPresent([], () => true, 300, 400), null);
 });

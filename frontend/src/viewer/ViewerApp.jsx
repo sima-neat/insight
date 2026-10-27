@@ -39,9 +39,10 @@ const RECONNECT_DELAY_MS = 2000;
 // more expensive response.
 const DECODER_STALL_MS = 5000;
 const STREAM_STALE_MS = 1800;
-// Four seconds at 30 fps: the longest Video Sync Buffer. Only reached while the
-// tab is hidden and requestAnimationFrame stops presenting.
-const MAX_PENDING_JPEG_FRAMES = 120;
+// A JPEG frame still pending this long after the Video Sync Buffer would have
+// been presented already; it only stays while the tab is hidden and
+// requestAnimationFrame stops presenting, so it is dropped to bound memory.
+const JPEG_PENDING_GRACE_MS = 1000;
 const auxiliaryWarnings = new Set();
 
 function warnIgnoredAuxiliary(channelIndex, ignored) {
@@ -298,12 +299,14 @@ function ChannelTile({ index, onActiveChange, debug }) {
           debugLog("jpeg mode");
           animationFrame = requestAnimationFrame(presentJpegFrames);
         }
-        const frame = acceptJpegChunk(jpeg.assembler, chunk, performance.now());
+        const now = performance.now();
+        const frame = acceptJpegChunk(jpeg.assembler, chunk, now);
         if (!frame) return;
         jpeg.framesReceived += 1;
         jpeg.bytesReceived += frame.bytes;
         jpeg.pending.push(frame);
-        if (jpeg.pending.length > MAX_PENDING_JPEG_FRAMES) {
+        const maxAgeMs = synchronizationSettingsRef.current.videoSyncBufferMs + JPEG_PENDING_GRACE_MS;
+        while (now - jpeg.pending[0].receivedAt > maxAgeMs) {
           jpeg.pending.shift();
           jpeg.framesSkipped += 1;
         }
@@ -461,7 +464,6 @@ function ChannelTile({ index, onActiveChange, debug }) {
         if (!mounted || sessionId !== currentSession) return;
         const selected = selectFrameToPresent(
           jpeg.pending,
-          (ts) => metadataQueueRef.current.timestamped.has(ts),
           synchronizationSettingsRef.current.videoSyncBufferMs,
           now,
         );
