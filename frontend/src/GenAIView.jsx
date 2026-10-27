@@ -1877,8 +1877,13 @@ export default function GenAIView({ onError, onStatus }) {
             </form>
             {!allowed.changeBoard && <p className="hint">The address can be changed once the current reply, recording, model operation or download finishes.</p>}
             {addressError && <p id="genai-address-error" className="genai-field-error" role="alert">{addressError}</p>}
+            <div className="genai-actions">
+              <button type="button" className="btn-ghost genai-small" onClick={() => { setSettingsOpen(false); openSetup() }} disabled={setupOpen}>
+                Open GenAI Studio setup
+              </button>
+            </div>
             <p className="hint">
-              Set up GenAI Studio, in the banner, installs and starts it on the board Insight is connected to. Leave the address empty to use {settings?.defaultUrl || 'the paired DevKit'}.
+              GenAI Studio setup installs, prepares and starts it on the board Insight is connected to, and lists each step's warnings. Leave the address empty to use {settings?.defaultUrl || 'the paired DevKit'}.
             </p>
           </SettingsCard>
 
