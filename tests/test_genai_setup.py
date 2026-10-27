@@ -92,6 +92,7 @@ class BoardScriptTests(unittest.TestCase):
         self.session = session_for(self.transport)
         # Whatever a test leaves running on the fake board is stopped.
         self.addCleanup(lambda: subprocess.run(genai_setup.stop_command(), env=self.env, capture_output=True, timeout=20))
+        self.addCleanup(lambda: subprocess.run(genai_setup.stop_studio_command(), env=self.env, capture_output=True, timeout=20))
 
     def add_core(self):
         python = self.home / "pyneat/bin/python"
@@ -104,6 +105,19 @@ class BoardScriptTests(unittest.TestCase):
 
     def states(self, status=None):
         return [step["state"] for step in (status or self.status())["steps"]]
+
+    def start_by_hand(self):
+        """Start GenAI Studio the way a shell on the board would, outside any setup job."""
+        studio = subprocess.Popen(["./run.sh"], cwd=self.studio, env=self.env, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL, start_new_session=True)
+        self.addCleanup(lambda: studio.poll() is None and studio.kill())
+        self.wait_for(lambda s: s["steps"][2]["state"] == "done")
+        return studio
+
+    def install_and_prepare(self):
+        genai_setup.run(self.session)
+        self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+        genai_setup.stop_studio(self.session)
 
     def wait_for(self, check, timeout=15):
         deadline = time.monotonic() + timeout
@@ -140,6 +154,43 @@ class BoardScriptTests(unittest.TestCase):
         status = genai_setup.stop(self.session)
         self.assertFalse(status["active"])
         self.wait_for(lambda s: s["steps"][2]["state"] != "done")
+
+    def test_stopping_studio_leaves_the_start_step_ready_to_run_again(self):
+        genai_setup.run(self.session)
+        self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+        status = genai_setup.stop_studio(self.session)
+        self.assertEqual((status["active"], self.states(status)), (False, ["done", "done", "pending"]))
+        self.assertIsNone(status["steps"][2]["problem"], "a stop on purpose is not a failure")
+        self.assertFalse((self.studio / ".neat-genai-studio.pid").exists())
+        # Stopping again does nothing, and Start runs only the start step.
+        self.assertEqual(self.states(genai_setup.stop_studio(self.session)), ["done", "done", "pending"])
+        genai_setup.run(self.session)
+        self.assertEqual(self.transport.commands[-2][4], "start")
+        self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+
+    def test_studio_started_from_a_shell_on_the_board_can_be_stopped_from_the_tab(self):
+        self.install_and_prepare()
+        studio = self.start_by_hand()
+        self.assertFalse(self.status()["active"], "no setup job runs it")
+        status = genai_setup.stop_studio(self.session)
+        self.assertEqual(self.states(status), ["done", "done", "pending"])
+        self.assertEqual(studio.wait(timeout=10), 0)
+
+    def test_setup_runs_again_after_stopping_a_studio_started_from_a_shell(self):
+        self.install_and_prepare()
+        studio = self.start_by_hand()
+        genai_setup.run(self.session, redo="prepare")
+        self.assertEqual(studio.wait(timeout=10), 0, "the hand-started Studio was stopped before setup.sh ran")
+        self.assertEqual(self.transport.commands[-2][4], "prepare start")
+        self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+
+    def test_studio_is_not_stopped_while_a_setup_step_runs(self):
+        self.env["FAKE_SETUP_WAIT"] = "1"
+        genai_setup.run(self.session)
+        self.wait_for(lambda s: (self.studio / "setup.waiting").exists())
+        with self.assertRaises(BoardError) as refused:
+            genai_setup.stop_studio(self.session)
+        self.assertEqual(refused.exception.code, "setup_running")
 
     def test_a_failed_step_says_why_and_a_retry_runs_only_what_is_left(self):
         self.env["FAKE_SETUP_FAIL"] = "OSError: Could not resolve host: huggingface.co"
@@ -380,6 +431,17 @@ class ApiTests(unittest.TestCase):
         self.answer(self.status(installed="yes"))
         body = self.client.post("/api/genai-setup/run", json={"redo": "start"}).get_json()
         self.assertEqual(body["code"], "invalid_request")
+
+    def test_stop_studio_runs_run_sh_stop_and_reports_the_start_step_waiting(self):
+        up = self.status(installed="yes", prepared="yes", running="yes")
+        down = ExecResult(0, up.stdout.replace(b"running=yes", b"running=no") + b"\n@@start\nexit=stopped\nmtime=\n@log\n", b"")
+        transport = self.answer(up, ExecResult(0, b"", b""), down)
+        body = self.client.post("/api/genai-setup/stop-studio").get_json()
+        self.assertIn("./run.sh stop", transport.commands[1][2])
+        self.assertEqual([s["state"] for s in body["steps"]], ["done", "done", "pending"])
+        self.assertEqual(body["generation"], 4)
+        self.answer(self.status(installed="yes", active="yes", steps="prepare start", step="prepare"))
+        self.assertEqual(self.client.post("/api/genai-setup/stop-studio").get_json()["code"], "setup_running")
 
     def test_without_a_board_the_tab_is_told_how_to_choose_one(self):
         self.manager.error = BoardError("no_target", "No board is selected.", hint="Enter the board's address.")

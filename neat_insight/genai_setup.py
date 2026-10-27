@@ -213,6 +213,24 @@ kill -TERM -- "-$runner" 2>/dev/null || kill -TERM "$runner" 2>/dev/null
 [ -z "$step" ] || [ -f "$jobs/$step.exit" ] || printf '143\n' > "$jobs/$step.exit"
 """
 
+# Stops GenAI Studio however it was started: run.sh stops it and its model server. A setup
+# job that only kept it running then ends, and the start step is recorded as stopped on
+# purpose, so it waits to be started again instead of reporting a failure.
+_STOP_STUDIO_SCRIPT = r"""
+jobs="$HOME/.neat-insight/genai-setup"
+studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
+runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
+step=$(cat "$jobs/step" 2>/dev/null || true)
+[ -x "$studio/run.sh" ] && (cd "$studio" && ./run.sh stop) >/dev/null 2>&1
+if [ "$step" = start ] && [ -n "$runner" ] && kill -0 "$runner" 2>/dev/null; then
+  kill -TERM -- "-$runner" 2>/dev/null || kill -TERM "$runner" 2>/dev/null
+  i=0
+  while kill -0 "$runner" 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+fi
+[ -f "$jobs/start.log" ] && printf 'stopped\n' > "$jobs/start.exit"
+exit 0
+"""
+
 
 def _quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
@@ -230,6 +248,10 @@ def status_command() -> list:
 
 def stop_command() -> list:
     return ["sh", "-c", _STOP_SCRIPT]
+
+
+def stop_studio_command() -> list:
+    return ["sh", "-c", _STOP_STUDIO_SCRIPT]
 
 
 def parse_status(text: str) -> dict:
@@ -371,7 +393,8 @@ def describe(parsed: dict) -> dict:
             entry["state"] = "queued"
         elif done[step]:
             entry["state"] = "done"
-        elif record["exit"] not in ("", "0"):
+        # "stopped": GenAI Studio was stopped on purpose, so its step waits to run again.
+        elif record["exit"] not in ("", "0", "stopped"):
             entry["state"] = "failed"
             entry["problem"] = diagnose(step, record["log"], record["exit"])
         else:
@@ -417,19 +440,37 @@ def _busy() -> BoardError:
                       hint="Wait for the running step to finish, or press Stop first.")
 
 
+def _studio_running(state: dict) -> bool:
+    return state["steps"][2]["state"] == "done"
+
+
+def _step_in_progress(state: dict) -> bool:
+    return any(s["state"] in ("running", "queued") for s in state["steps"])
+
+
 def _stop_studio(session) -> dict:
-    """Stop the job that only keeps GenAI Studio running, and wait until it has ended."""
-    session.transport.exec(stop_command(), timeout=STATUS_TIMEOUT_SEC)
+    """Stop GenAI Studio, whether this tab or a shell on the board started it, and wait until it has ended."""
+    session.transport.exec(stop_studio_command(), timeout=STATUS_TIMEOUT_SEC + STOP_WAIT_SEC)
     deadline = time.monotonic() + STOP_WAIT_SEC
     while True:
         state = read_status(session)
-        if not state["active"]:
+        if not state["active"] and not _studio_running(state):
             return state
         if time.monotonic() > deadline:
-            raise BoardError("timeout", "GenAI Studio did not stop within {:g} s, so setup did not run again.".format(
-                STOP_WAIT_SEC), hint="Stop it on the board with `{}/run.sh stop`, then press Run setup again.".format(
-                STUDIO_DIR))
+            raise BoardError("timeout", "GenAI Studio did not stop within {:g} s.".format(STOP_WAIT_SEC),
+                             hint="Stop it in a shell on the board: `cd {} && ./run.sh stop`.".format(STUDIO_DIR))
         time.sleep(0.5)
+
+
+def stop_studio(session) -> dict:
+    """Stop a running GenAI Studio; refuse while a setup step is in progress (Stop ends that)."""
+    with _LAUNCH_LOCK:
+        state = read_status(session)
+        if _step_in_progress(state):
+            raise _busy()
+        if not _studio_running(state):
+            return state
+        return _stop_studio(session)
 
 
 def run(session, redo=None) -> dict:
@@ -444,9 +485,9 @@ def run(session, redo=None) -> dict:
             if state["steps"][0]["state"] != "done":
                 raise BoardError("setup_blocked", "Neat Apps is not installed on this board yet.",
                                  hint="Press Install and start GenAI Studio instead.", step="install")
-            if state["active"]:
-                if any(s["state"] in ("running", "queued") for s in state["steps"]):
-                    raise _busy()
+            if _step_in_progress(state):
+                raise _busy()
+            if state["active"] or _studio_running(state):
                 state = _stop_studio(session)
             remaining = [s for s in state["steps"] if s["id"] in ("prepare", "start")]
             for step in remaining:
@@ -509,6 +550,14 @@ def setup_run():
     redo = body.get("redo") if isinstance(body, dict) else None
     session = get_board_manager().session()
     return jsonify(_payload(session, run(session, redo)))
+
+
+# API: stop GenAI Studio on the board.
+@genai_setup_bp.post("/api/genai-setup/stop-studio")
+def setup_stop_studio():
+    """Stop GenAI Studio, whether the setup job or a shell on the board started it."""
+    session = get_board_manager().session()
+    return jsonify(_payload(session, stop_studio(session)))
 
 
 # API: stop the setup job.

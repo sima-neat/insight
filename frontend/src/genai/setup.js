@@ -51,6 +51,13 @@ export function connectIcon(backendState) {
   return 'waiting'
 }
 
+// GenAI Studio is running and no setup step is in progress, so it can be stopped,
+// whether setup or a shell on the board started it.
+export function canStopStudio(status) {
+  const start = status && Array.isArray(status.steps) && status.steps.find((s) => s.id === 'start')
+  return Boolean(start && start.state === 'done' && !setupStoppable(status))
+}
+
 // Setup runs again (and restarts GenAI Studio) once a finished step's warnings are fixed.
 export function canRunSetupAgain(status) {
   const prepare = status && Array.isArray(status.steps) && status.steps.find((s) => s.id === 'prepare')

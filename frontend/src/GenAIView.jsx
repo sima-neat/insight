@@ -35,6 +35,7 @@ import {
   saveSettings,
   speak,
   stopSetup,
+  stopStudio,
   streamChat,
   transcribe
 } from './genai/client.js'
@@ -85,6 +86,7 @@ import {
   STEP_LABELS,
   bannerAction,
   canRunSetupAgain,
+  canStopStudio,
   connectIcon,
   lastLine,
   requestProblem,
@@ -1727,6 +1729,14 @@ export default function GenAIView({ onError, onStatus }) {
                         onRunAgain={item.id === 'prepare' && canRunSetupAgain(setupStatus) ? () => setupRequest('run', () => runSetup('prepare')) : null}
                         busy={setupBusy !== null}
                       />
+                    )}
+                    {item.id === 'start' && canStopStudio(setupStatus) && (
+                      <div className="genai-actions">
+                        <button type="button" className="btn-ghost genai-small" disabled={setupBusy !== null} onClick={() => setupRequest('stop-studio', stopStudio)}>
+                          {setupBusy === 'stop-studio' ? 'Stopping…' : 'Stop GenAI Studio'}
+                        </button>
+                        <span className="hint">Ends GenAI Studio on the board. Start GenAI Studio runs it again.</span>
+                      </div>
                     )}
                   </div>
                 </li>

@@ -105,6 +105,8 @@ export const getSetup = () => setupRequest('')
 // redo: 'prepare' runs setup.sh again and restarts GenAI Studio.
 export const runSetup = (redo) => setupRequest('/run', 'POST', redo ? { redo } : undefined)
 export const stopSetup = () => setupRequest('/stop', 'POST')
+// Stops GenAI Studio however it was started; its start step then waits to run again.
+export const stopStudio = () => setupRequest('/stop-studio', 'POST')
 
 export async function getSettings() {
   const response = await fetch(`${RELAY}/settings`)

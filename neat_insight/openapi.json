@@ -873,6 +873,20 @@
         }
       }
     },
+    "/api/genai-setup/stop-studio": {
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Stop GenAI Studio on the board",
+        "description": "Stops GenAI Studio with `run.sh stop`, whether the setup job or a shell on the board started it, and waits until it has ended. The start step then waits to be run again. Refused with `setup_running` while a setup step is in progress; does nothing when GenAI Studio is not running.",
+        "operationId": "stopGenaiStudio",
+        "responses": {
+          "200": {"description": "Each setup step's state after stopping.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
     "/api/board": {
       "get": {
         "tags": ["Board"],

@@ -24,6 +24,7 @@ import {
   SETUP_STORAGE_KEY,
   bannerAction,
   canRunSetupAgain,
+  canStopStudio,
   connectIcon,
   lastLine,
   requestProblem,
@@ -446,6 +447,16 @@ test('steps show a check, a spinner or a grey circle, and setup runs again only 
   assert.equal(canRunSetupAgain({ active: false, steps: steps({ ...warned, warnings: [] }) }), false, 'nothing to fix')
   assert.equal(canRunSetupAgain({ active: true, steps: steps(warned, 'running') }), false, 'a step is still running')
   assert.equal(canRunSetupAgain(null), false)
+})
+
+test('GenAI Studio can be stopped once it runs and no setup step is in progress', () => {
+  const steps = (start, prepare = 'done') => [{ id: 'install', state: 'done' }, { id: 'prepare', state: prepare }, { id: 'start', state: start }]
+  assert.equal(canStopStudio({ active: true, steps: steps('done') }), true, 'the setup job keeps it running')
+  assert.equal(canStopStudio({ active: false, steps: steps('done') }), true, 'started from a shell on the board')
+  assert.equal(canStopStudio({ active: true, steps: steps('running') }), false, 'still starting: Stop ends that')
+  assert.equal(canStopStudio({ active: true, steps: steps('queued', 'running') }), false, 'setup.sh is running')
+  assert.equal(canStopStudio({ active: false, steps: steps('pending') }), false, 'not running')
+  assert.equal(canStopStudio(null), false)
 })
 
 test('a failed setup request says what happened and what to do', () => {
