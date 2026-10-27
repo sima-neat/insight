@@ -12,8 +12,9 @@ Apps with its dependencies itself.
 """
 import re
 import threading
+import time
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from neat_insight.board.errors import BoardError
 from neat_insight.board.manager import board_summary, get_board_manager
@@ -96,6 +97,35 @@ _CAUSES = (
     ),
 )
 
+# Warnings a step printed on its way to finishing: setup.sh marks its own with ⚠, GenAI
+# Studio's log with WARNING. Each known one gets a plain message and the fix: (pattern,
+# message or None to keep the line, fix).
+WARNING_LIMIT = 6
+_WARNINGS = (
+    (
+        r"Cannot compile .?Python\.h",
+        "The board has no Python headers (python3-dev), so packages that build from source could not be "
+        "installed.",
+        "Install them with `sudo apt-get install python3-dev` in a shell on the board, then press Run setup again.",
+    ),
+    (
+        r"Supertonic (requirements failed|TTS skipped)",
+        "The Supertonic voices were skipped.",
+        "Read aloud uses the other voices. Fix the cause above, then press Run setup again.",
+    ),
+    (
+        r"Could not verify .*accelerator busy",
+        None,
+        "Another application was using the accelerator during setup. If speech-to-text fails, stop that "
+        "application and restart GenAI Studio.",
+    ),
+    (
+        r"No server TTS voice installed for language: ?(\w+)",
+        None,
+        "Replies in this language can't be read aloud.",
+    ),
+)
+
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
@@ -125,6 +155,12 @@ for s in install prepare start; do
   echo "@@$s"
   echo "exit=$(cat "$jobs/$s.exit" 2>/dev/null || true)"
   echo "mtime=$(date -r "$jobs/$s.log" +%s 2>/dev/null || true)"
+  # Warnings from the whole log, without timestamps so a repeated one is listed once. The two
+  # lines dropped are this job's own choices, not problems.
+  grep -a -E '⚠|WARNING|Python\.h' "$jobs/$s.log" 2>/dev/null \
+    | grep -a -v -E 'SIMA_CLI_CHECK_FOR_UPDATE|Skipping Core and Insight dependency' \
+    | sed -E 's/^[0-9-]+ [0-9:,.]+ - //' | awk '!seen[$0]++' | tail -n 20
+  echo "@log"
   tail -c LOG_BYTES "$jobs/$s.log" 2>/dev/null || true
   echo
 done
@@ -201,21 +237,46 @@ def parse_status(text: str) -> dict:
     fields, records, current = {}, {}, None
     for line in text.split("\n"):
         if line.startswith("@@") and line[2:] in STEPS:
-            current = records[line[2:]] = {"exit": None, "mtime": None, "log": []}
+            current = records[line[2:]] = {"exit": None, "mtime": None, "warnings": [], "log": None}
         elif current is None:
             key, sep, value = line.partition("=")
             if sep:
                 fields[key.strip()] = value.strip()
-        # A record's first two lines are always exit= and mtime=; the log follows.
+        # A record is exit=, mtime=, its warning lines up to @log, then the log's tail.
         elif current["exit"] is None:
             current["exit"] = line.partition("=")[2].strip()
         elif current["mtime"] is None:
             current["mtime"] = line.partition("=")[2].strip()
+        elif current["log"] is None:
+            if line == "@log":
+                current["log"] = []
+            else:
+                current["warnings"].append(line)
         else:
             current["log"].append(line)
     for record in records.values():
-        record["log"] = clean_log("\n".join(record["log"]))
+        record["log"] = clean_log("\n".join(record["log"] or []))
+        record["warnings"] = describe_warnings(record["warnings"])
     return {"fields": fields, "records": records}
+
+
+def describe_warnings(lines) -> list:
+    """A step's warning lines as [{message, fix}], known ones in plain words, each listed once."""
+    found = []
+    for raw in lines:
+        line = _ANSI.sub("", raw).split("\r")[-1].strip()
+        line = re.sub(r"^.*?\bWARNING\b\s*[-:]\s*", "", line)
+        line = line.lstrip("⚠️ ").strip()
+        if not line:
+            continue
+        message, fix = line[:300], None
+        for pattern, known, known_fix in _WARNINGS:
+            if re.search(pattern, line, re.IGNORECASE):
+                message, fix = known or message, known_fix
+                break
+        if all(w["message"] != message for w in found):
+            found.append({"message": message, "fix": fix})
+    return found[:WARNING_LIMIT]
 
 
 def clean_log(text: str) -> str:
@@ -287,27 +348,29 @@ def describe(parsed: dict) -> dict:
     """Each step's state for the GenAI tab: done, running, queued, failed, blocked or pending."""
     fields, records = parsed["fields"], parsed["records"]
     active = fields.get("active") == "yes"
-    queued = fields.get("steps", "").split() if active else []
     current = fields.get("step", "") if active else ""
+    planned = fields.get("steps", "").split() if active else []
+    # The job's steps still ahead of the one running: they run again even if done before.
+    queued = planned[planned.index(current) + 1:] if current in planned else planned
     done = {"install": fields.get("installed") == "yes", "prepare": fields.get("prepared") == "yes",
             "start": fields.get("running") == "yes"}
     now = _int(fields.get("now"))
     steps = []
     for step in STEPS:
-        record = records.get(step) or {"exit": "", "mtime": "", "log": ""}
+        record = records.get(step) or {"exit": "", "mtime": "", "log": "", "warnings": []}
         record = dict(record, exit=record["exit"] or "")
         entry = {"id": step, "title": TITLES[step], "description": DESCRIPTIONS[step], "log": record["log"],
-                 "problem": None, "stall": None}
+                 "problem": None, "stall": None, "warnings": []}
         if step == current and not (step == "start" and done["start"]):
             entry["state"] = "running"
             mtime = _int(record["mtime"])
             idle = max(0, now - mtime) if now and mtime else 0
             if idle >= STALL_AFTER_SEC[step]:
                 entry["stall"] = _stall(step, idle)
-        elif done[step]:
-            entry["state"] = "done"
         elif step in queued:
             entry["state"] = "queued"
+        elif done[step]:
+            entry["state"] = "done"
         elif record["exit"] not in ("", "0"):
             entry["state"] = "failed"
             entry["problem"] = diagnose(step, record["log"], record["exit"])
@@ -317,6 +380,8 @@ def describe(parsed: dict) -> dict:
             blocked = _blocking_problem(step, fields)
             if blocked:
                 entry["state"], entry["problem"] = "blocked", blocked
+        if entry["state"] in ("done", "running", "failed"):
+            entry["warnings"] = record.get("warnings") or []
         steps.append(entry)
     return {"active": active, "steps": steps, "logDir": JOB_DIR}
 
@@ -337,20 +402,61 @@ def read_status(session) -> dict:
             hint="Check that the board's shell works over SSH, then reload this page.",
         )
     parsed = parse_status(result.stdout.decode("utf-8", errors="replace"))
-    return dict(describe(parsed), simaCli=parsed["fields"].get("sima_cli") or None)
+    return dict(describe(parsed), simaCli=parsed["fields"].get("sima_cli") or None,
+                core=parsed["fields"].get("core") == "yes")
 
 
 # One launch at a time per Insight; the board refuses a second job too (exit 75).
 _LAUNCH_LOCK = threading.Lock()
+# How long a redo waits for the running GenAI Studio to stop before setup runs again.
+STOP_WAIT_SEC = 30.0
 
 
-def run(session) -> dict:
-    """Start a job running every step that is not done yet; refuse while one runs or one is blocked."""
+def _busy() -> BoardError:
+    return BoardError("setup_running", "GenAI Studio is already being set up on this board.",
+                      hint="Wait for the running step to finish, or press Stop first.")
+
+
+def _stop_studio(session) -> dict:
+    """Stop the job that only keeps GenAI Studio running, and wait until it has ended."""
+    session.transport.exec(stop_command(), timeout=STATUS_TIMEOUT_SEC)
+    deadline = time.monotonic() + STOP_WAIT_SEC
+    while True:
+        state = read_status(session)
+        if not state["active"]:
+            return state
+        if time.monotonic() > deadline:
+            raise BoardError("timeout", "GenAI Studio did not stop within {:g} s, so setup did not run again.".format(
+                STOP_WAIT_SEC), hint="Stop it on the board with `{}/run.sh stop`, then press Run setup again.".format(
+                STUDIO_DIR))
+        time.sleep(0.5)
+
+
+def run(session, redo=None) -> dict:
+    """Start a job running every step that is not done yet; refuse while one runs or one is blocked.
+
+    ``redo="prepare"`` runs setup.sh again and restarts GenAI Studio, after fixing what it warned about."""
+    if redo not in (None, "prepare"):
+        raise BoardError("invalid_request", "Only the prepare step can be run again.", hint='Send {"redo": "prepare"}.')
     with _LAUNCH_LOCK:
         state = read_status(session)
+        if redo:
+            if state["steps"][0]["state"] != "done":
+                raise BoardError("setup_blocked", "Neat Apps is not installed on this board yet.",
+                                 hint="Press Install and start GenAI Studio instead.", step="install")
+            if state["active"]:
+                if any(s["state"] in ("running", "queued") for s in state["steps"]):
+                    raise _busy()
+                state = _stop_studio(session)
+            remaining = [s for s in state["steps"] if s["id"] in ("prepare", "start")]
+            for step in remaining:
+                blocked = _blocking_problem(step["id"], {"core": "yes" if state.get("core") else "no",
+                                                         "sima_cli": state["simaCli"]})
+                if blocked:
+                    raise BoardError("setup_blocked", blocked["message"], hint=blocked["fixes"][0], step=step["id"])
+            return _launch(session, [s["id"] for s in remaining], state["simaCli"])
         if state["active"]:
-            raise BoardError("setup_running", "GenAI Studio is already being set up on this board.",
-                             hint="Wait for the running step to finish, or press Stop first.")
+            raise _busy()
         remaining = [s for s in state["steps"] if s["state"] != "done"]
         if not remaining:
             raise BoardError("setup_done", "GenAI Studio is already installed and running on this board.",
@@ -360,19 +466,22 @@ def run(session) -> dict:
             problem = blocked["problem"]
             raise BoardError("setup_blocked", problem["message"], hint=" ".join(problem["fixes"][:1]),
                              step=blocked["id"])
-        result = session.transport.exec(launch_command([s["id"] for s in remaining], state["simaCli"]),
-                                        timeout=LAUNCH_TIMEOUT_SEC)
-        if result.exit_code == 75:
-            raise BoardError("setup_running", "GenAI Studio is already being set up on this board.",
-                             hint="Wait for the running step to finish, or press Stop first.")
-        if result.exit_code != 0:
-            raise BoardError(
-                "command_failed",
-                "The setup job could not be started on the board (exit {}).".format(result.exit_code),
-                hint="Check that {} on the board is writable, then retry.".format(JOB_DIR),
-                detail=result.stderr.decode("utf-8", errors="replace").strip()[-2000:],
-            )
-        return read_status(session)
+        return _launch(session, [s["id"] for s in remaining], state["simaCli"])
+
+
+def _launch(session, steps, sima_cli) -> dict:
+    """Start the detached job running ``steps`` on the board."""
+    result = session.transport.exec(launch_command(steps, sima_cli), timeout=LAUNCH_TIMEOUT_SEC)
+    if result.exit_code == 75:
+        raise _busy()
+    if result.exit_code != 0:
+        raise BoardError(
+            "command_failed",
+            "The setup job could not be started on the board (exit {}).".format(result.exit_code),
+            hint="Check that {} on the board is writable, then retry.".format(JOB_DIR),
+            detail=result.stderr.decode("utf-8", errors="replace").strip()[-2000:],
+        )
+    return read_status(session)
 
 
 def stop(session) -> dict:
@@ -395,9 +504,11 @@ def setup_status():
 # API: install, prepare and start GenAI Studio on the board, as far as it still needs.
 @genai_setup_bp.post("/api/genai-setup/run")
 def setup_run():
-    """Start a detached job on the board running every step that is not done yet."""
+    """Start a detached job on the board running every step that is not done yet, or {"redo": "prepare"}."""
+    body = request.get_json(silent=True)
+    redo = body.get("redo") if isinstance(body, dict) else None
     session = get_board_manager().session()
-    return jsonify(_payload(session, run(session)))
+    return jsonify(_payload(session, run(session, redo)))
 
 
 # API: stop the setup job.

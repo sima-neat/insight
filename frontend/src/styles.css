@@ -5048,11 +5048,6 @@ button:disabled {
   min-width: 0;
 }
 
-.genai-setup-step .genai-pill {
-  min-width: 92px;
-  text-align: center;
-}
-
 .genai-setup-step-body {
   display: grid;
   gap: 4px;
@@ -5070,24 +5065,57 @@ button:disabled {
   color: var(--ink);
 }
 
-.genai-setup-pill-done {
-  background: var(--ok-soft);
-  border-color: rgba(25, 113, 62, 0.35);
-  color: var(--ok);
+.genai-step-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
 }
 
-.genai-setup-pill-running,
-.genai-setup-pill-queued {
-  background: var(--accent-soft);
-  border-color: rgba(14, 90, 184, 0.35);
-  color: var(--accent-strong);
+.genai-step-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.genai-setup-pill-failed,
-.genai-setup-pill-blocked {
-  background: var(--danger-soft);
-  border-color: #edb1be;
-  color: #8f2f45;
+.genai-step-icon-done {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.genai-step-icon-running {
+  border-color: rgba(25, 113, 62, 0.25);
+  border-top-color: var(--ok);
+  animation: genai-step-spin 0.9s linear infinite;
+}
+
+.genai-step-icon-failed {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+@keyframes genai-step-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genai-step-icon-running {
+    animation-duration: 2.4s;
+  }
+}
+
+.genai-setup-fix {
+  color: var(--ink-soft);
 }
 
 .genai-setup-last {
@@ -5154,13 +5182,6 @@ button:disabled {
 .genai-setup-manual .genai-tutorial-commands pre {
   margin: 0;
   white-space: pre;
-}
-
-@media (max-width: 560px) {
-  .genai-setup-step {
-    flex-direction: column;
-    gap: 4px;
-  }
 }
 
 .genai-spotlight {

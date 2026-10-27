@@ -847,10 +847,12 @@
       "post": {
         "tags": ["GenAI Studio"],
         "summary": "Install, prepare and start GenAI Studio on the selected board",
-        "description": "Starts one detached job on the board running every step that is not done yet, in order: `NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps` in the home directory (the running Insight is never reinstalled), `setup.sh` without a terminal (default voice languages), then `run.sh`, which keeps running. The job outlives the request, the SSH session and Insight; its logs are in `~/.neat-insight/genai-setup/` on the board. Refuses while a job runs (`setup_running`), when everything is done (`setup_done`), or when a step's prerequisite is missing (`setup_blocked`, with the step and the fix).",
+        "description": "Starts one detached job on the board running every step that is not done yet, in order: `NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps` in the home directory (the running Insight is never reinstalled), `setup.sh` without a terminal (default voice languages), then `run.sh`, which keeps running. The job outlives the request, the SSH session and Insight; its logs are in `~/.neat-insight/genai-setup/` on the board. Refuses while a job runs (`setup_running`), when everything is done (`setup_done`), or when a step's prerequisite is missing (`setup_blocked`, with the step and the fix). `{\"redo\": \"prepare\"}` runs `setup.sh` again and restarts GenAI Studio, for example after fixing what it warned about; GenAI Studio is stopped first.",
         "operationId": "runGenaiSetup",
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"redo": {"type": "string", "enum": ["prepare"], "description": "Run this step again, and the ones after it, even though it is done."}}}, "example": {"redo": "prepare"}}}},
         "responses": {
           "200": {"description": "The job started; each step's state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},
           "504": {"$ref": "#/components/responses/BoardErrorResponse"}
@@ -1495,13 +1497,14 @@
           "generation": {"type": "integer", "description": "The board selection this state was read from."},
           "active": {"type": "boolean", "description": "Whether a setup job is running on the board."},
           "simaCli": {"type": ["string", "null"], "description": "The `sima-cli` found on the board, or null."},
+          "core": {"type": "boolean", "description": "Whether the Neat Library's Python environment (`~/pyneat`) is on the board."},
           "logDir": {"type": "string", "description": "Where the job keeps its logs on the board."},
           "steps": {"type": "array", "items": {"$ref": "#/components/schemas/GenaiSetupStep"}}
         }
       },
       "GenaiSetupStep": {
         "type": "object",
-        "required": ["id", "title", "description", "state", "log", "problem", "stall"],
+        "required": ["id", "title", "description", "state", "log", "problem", "stall", "warnings"],
         "properties": {
           "id": {"type": "string", "enum": ["install", "prepare", "start"]},
           "title": {"type": "string"},
@@ -1509,7 +1512,8 @@
           "state": {"type": "string", "enum": ["done", "running", "queued", "failed", "blocked", "pending"], "description": "`blocked`: a prerequisite is missing, and `problem` says which."},
           "log": {"type": "string", "description": "The last lines of the step's output, without colours."},
           "problem": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "Why a failed or blocked step can't finish."},
-          "stall": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "A running step with no new output for a while: what may be happening and what to do."}
+          "stall": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "A running step with no new output for a while: what may be happening and what to do."},
+          "warnings": {"type": "array", "description": "What a done, running or failed step warned about (setup.sh's ⚠ lines, GenAI Studio's WARNING log lines), each listed once; known ones in plain words with the fix.", "items": {"type": "object", "required": ["message", "fix"], "properties": {"message": {"type": "string"}, "fix": {"type": ["string", "null"]}}}}
         }
       },
       "GenaiSetupProblem": {

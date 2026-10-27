@@ -35,6 +35,36 @@ export function setupStoppable(status) {
   return Boolean(status && status.active && (status.steps || []).some((s) => s.state === 'running' || s.state === 'queued'))
 }
 
+// The icon a step shows: a check when done, a spinner while running, a grey
+// circle for steps still to come, a warning sign when it failed or can't start.
+export function stepIcon(state) {
+  if (state === 'done') return 'done'
+  if (state === 'running') return 'running'
+  if (state === 'failed' || state === 'blocked') return 'failed'
+  return 'waiting'
+}
+
+// The last row, Connect this tab, from the tab's own backend state.
+export function connectIcon(backendState) {
+  if (backendState === 'ready' || backendState === 'failed') return 'done'
+  if (backendState === 'busy') return 'running'
+  return 'waiting'
+}
+
+// Setup runs again (and restarts GenAI Studio) once a finished step's warnings are fixed.
+export function canRunSetupAgain(status) {
+  const prepare = status && Array.isArray(status.steps) && status.steps.find((s) => s.id === 'prepare')
+  return Boolean(prepare && prepare.state === 'done' && (prepare.warnings || []).length && !setupStoppable(status))
+}
+
+// The banner's button while GenAI Studio doesn't answer: one click starts an
+// installed Studio; anything more opens the panel first.
+export function bannerAction(status) {
+  const next = setupAction(status)
+  if (next && next.label === 'Start GenAI Studio') return { label: 'Start GenAI Studio', runNow: true }
+  return { label: 'Set up GenAI Studio', runNow: false }
+}
+
 // The last line a running step printed, to show what it is doing now.
 export function lastLine(log) {
   const lines = String(log || '').split('\n').filter((line) => line.trim())

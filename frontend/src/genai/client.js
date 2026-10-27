@@ -84,10 +84,15 @@ export async function probeHealth(signal) {
 // runs the steps on the selected board itself.
 export const SETUP = '/api/genai-setup'
 
-async function setupRequest(path, method = 'GET') {
+async function setupRequest(path, method = 'GET', json) {
+  const init = { method, cache: 'no-store' }
+  if (json !== undefined) {
+    init.headers = { 'Content-Type': 'application/json' }
+    init.body = JSON.stringify(json)
+  }
   let response
   try {
-    response = await fetch(`${SETUP}${path}`, { method, cache: 'no-store' })
+    response = await fetch(`${SETUP}${path}`, init)
   } catch (error) {
     throw new GenaiError(`Insight could not be reached: ${error.message}`)
   }
@@ -97,7 +102,8 @@ async function setupRequest(path, method = 'GET') {
 }
 
 export const getSetup = () => setupRequest('')
-export const runSetup = () => setupRequest('/run', 'POST')
+// redo: 'prepare' runs setup.sh again and restarts GenAI Studio.
+export const runSetup = (redo) => setupRequest('/run', 'POST', redo ? { redo } : undefined)
 export const stopSetup = () => setupRequest('/stop', 'POST')
 
 export async function getSettings() {

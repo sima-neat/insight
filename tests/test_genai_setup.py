@@ -28,6 +28,10 @@ printf '\033[1mInstalling voices\033[0m\n'
 [ -t 0 ] && echo "asked for languages" >&2
 if [ -n "${FAKE_SETUP_FAIL:-}" ]; then echo "$FAKE_SETUP_FAIL" >&2; exit 1; fi
 if [ -n "${FAKE_SETUP_WAIT:-}" ]; then touch "$dir/setup.waiting"; while :; do sleep 0.1; done; fi
+if [ -n "${FAKE_SETUP_WARN:-}" ]; then
+  echo "      ../meson.build:44:2: ERROR: Problem encountered: Cannot compile \`Python.h\`. Perhaps you need to install python-dev"
+  printf '\033[33m⚠ Supertonic requirements failed to install; Supertonic TTS skipped.\033[0m\n'
+fi
 mkdir -p "$dir/.venv/bin"
 printf '#!/bin/sh\n' > "$dir/.venv/bin/python"
 chmod +x "$dir/.venv/bin/python"
@@ -40,6 +44,9 @@ dir=$(cd "$(dirname "$0")" && pwd)
 pidf="$dir/.neat-genai-studio.pid"
 if [ "${1:-}" = stop ]; then kill "$(cat "$pidf")" 2>/dev/null; exit 0; fi
 echo "Neat GenAI Studio is starting up."
+echo "2026-10-27 19:31:45,294 - root - WARNING - No server TTS voice installed for language: ja"
+echo "2026-10-27 19:31:46,001 - root - WARNING - No server TTS voice installed for language: ja"
+echo "2026-10-27 19:31:46,002 - werkzeug - INFO - GET /health 200"
 echo $$ > "$pidf"
 trap 'rm -f "$pidf"; exit 0' TERM INT
 while :; do sleep 0.1; done
@@ -188,6 +195,41 @@ class BoardScriptTests(unittest.TestCase):
         # A DevKit's copy lives under /data, outside HOME.
         self.assertIn('"/data/sima-cli/.venv/bin/sima-cli"', genai_setup.status_command()[2])
 
+    def test_warnings_show_under_a_finished_step_and_setup_can_run_again_after_the_fix(self):
+        self.env["FAKE_SETUP_WARN"] = "1"
+        genai_setup.run(self.session)
+        status = self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+        install, prepare, start = status["steps"]
+        # The install job's own choices (no update check, dependencies skipped) are not warnings.
+        self.assertEqual(install["warnings"], [])
+        self.assertEqual([w["message"] for w in prepare["warnings"]], [
+            "The board has no Python headers (python3-dev), so packages that build from source could not be installed.",
+            "The Supertonic voices were skipped.",
+        ])
+        self.assertIn("sudo apt-get install python3-dev", prepare["warnings"][0]["fix"])
+        # A warning logged again later, with another timestamp, is listed once.
+        self.assertEqual(start["warnings"], [{"message": "No server TTS voice installed for language: ja",
+                                              "fix": "Replies in this language can't be read aloud."}])
+
+        del self.env["FAKE_SETUP_WARN"]
+        old_pid = (self.studio / ".neat-genai-studio.pid").read_text()
+        status = genai_setup.run(self.session, redo="prepare")
+        self.assertEqual(self.transport.commands[-2][4], "prepare start")
+        status = self.wait_for(lambda s: self.states(s) == ["done", "done", "done"] and (self.studio / ".neat-genai-studio.pid").exists()
+                               and (self.studio / ".neat-genai-studio.pid").read_text() != old_pid)
+        self.assertEqual(status["steps"][1]["warnings"], [])
+
+    def test_setup_is_not_run_again_while_a_step_is_running(self):
+        self.env["FAKE_SETUP_WAIT"] = "1"
+        genai_setup.run(self.session)
+        self.wait_for(lambda s: (self.studio / "setup.waiting").exists())
+        with self.assertRaises(BoardError) as refused:
+            genai_setup.run(self.session, redo="prepare")
+        self.assertEqual(refused.exception.code, "setup_running")
+        with self.assertRaises(BoardError) as invalid:
+            genai_setup.run(self.session, redo="install")
+        self.assertEqual(invalid.exception.code, "invalid_request")
+
     def test_a_second_job_is_refused_by_the_board_too(self):
         self.env["FAKE_SETUP_WAIT"] = "1"
         genai_setup.run(self.session)
@@ -210,6 +252,14 @@ class DescribeTests(unittest.TestCase):
         self.assertIn("press Stop, then Retry", prepare["stall"]["fixes"][1])
         quiet = dict(record, mtime=str(1000 - 120))
         self.assertIsNone(self.describe(fields, {"prepare": quiet})["steps"][1]["stall"])
+
+    def test_steps_a_job_runs_again_are_queued_even_when_done_before(self):
+        fields = {"installed": "yes", "prepared": "yes", "active": "yes", "steps": "prepare start", "step": ""}
+        self.assertEqual([s["state"] for s in self.describe(fields)["steps"]], ["done", "queued", "queued"])
+        fields = dict(fields, step="prepare")
+        self.assertEqual([s["state"] for s in self.describe(fields)["steps"]], ["done", "running", "queued"])
+        fields = {"installed": "yes", "prepared": "yes", "active": "yes", "steps": "install prepare start", "step": "start"}
+        self.assertEqual([s["state"] for s in self.describe(fields)["steps"]][:2], ["done", "done"])
 
     def test_studio_answering_finishes_the_start_step_while_its_job_still_runs(self):
         fields = {"installed": "yes", "prepared": "yes", "running": "yes", "active": "yes", "steps": "start",
@@ -243,11 +293,17 @@ class DescribeTests(unittest.TestCase):
         self.assertNotIn("55%", genai_setup.clean_log(text.split("\nline 0")[0]))
 
     def test_the_status_output_is_parsed_with_each_steps_record(self):
-        text = "sima_cli=/usr/bin/sima-cli\ncore=yes\nactive=no\n@@install\nexit=0\nmtime=900\nInstalled\n@@prepare\nexit=1\nmtime=\nboom\n"
+        text = ("sima_cli=/usr/bin/sima-cli\ncore=yes\nactive=no\n@@install\nexit=0\nmtime=900\n@log\nInstalled\n"
+                "@@prepare\nexit=1\nmtime=\n\x1b[33m⚠ Could not verify whisper (accelerator busy or no runtime)\x1b[0m\n"
+                "root - WARNING - something odd\n@log\nboom\n")
         parsed = genai_setup.parse_status(text)
         self.assertEqual(parsed["fields"]["sima_cli"], "/usr/bin/sima-cli")
-        self.assertEqual(parsed["records"]["install"], {"exit": "0", "mtime": "900", "log": "Installed"})
+        self.assertEqual(parsed["records"]["install"], {"exit": "0", "mtime": "900", "warnings": [], "log": "Installed"})
         self.assertEqual(parsed["records"]["prepare"]["log"], "boom")
+        warnings = parsed["records"]["prepare"]["warnings"]
+        self.assertEqual(warnings[0]["message"], "Could not verify whisper (accelerator busy or no runtime)")
+        self.assertIn("Another application was using the accelerator", warnings[0]["fix"])
+        self.assertEqual(warnings[1], {"message": "something odd", "fix": None})
 
 
 class FakeManager:
@@ -319,6 +375,11 @@ class ApiTests(unittest.TestCase):
         body = self.client.post("/api/genai-setup/run").get_json()
         self.assertEqual(body["code"], "command_failed")
         self.assertIn("Permission denied", body["detail"])
+
+    def test_run_again_takes_only_the_prepare_step(self):
+        self.answer(self.status(installed="yes"))
+        body = self.client.post("/api/genai-setup/run", json={"redo": "start"}).get_json()
+        self.assertEqual(body["code"], "invalid_request")
 
     def test_without_a_board_the_tab_is_told_how_to_choose_one(self):
         self.manager.error = BoardError("no_target", "No board is selected.", hint="Enter the board's address.")
