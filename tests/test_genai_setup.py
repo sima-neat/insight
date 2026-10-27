@@ -53,9 +53,14 @@ echo "2026-10-27 19:31:45,294 - root - WARNING - No server TTS voice installed f
 echo "2026-10-27 19:31:46,001 - root - WARNING - No server TTS voice installed for language: ja"
 echo "2026-10-27 19:31:46,002 - werkzeug - INFO - GET /health 200"
 echo "2026-10-27 19:31:46,003 - werkzeug - WARNING - WARNING: This is a development server. Do not use it in a production deployment."
-[ -n "${FAKE_RUN_URL:-}" ] && echo "$FAKE_RUN_URL" > "$dir/.neat-genai-studio.url"
+trap 'rm -f "$pidf" "$dir/.neat-genai-studio.mode" "$dir/.neat-genai-studio.url"; exit 143' TERM INT
 echo $$ > "$pidf"
-trap 'rm -f "$pidf" "$dir/.neat-genai-studio.url"; exit 143' TERM INT
+# Like run.sh: the pid, the mode, then a moment later the URL it serves.
+if [ -n "${FAKE_RUN_URL:-}" ]; then
+  echo web > "$dir/.neat-genai-studio.mode"
+  sleep 1
+  echo "$FAKE_RUN_URL" > "$dir/.neat-genai-studio.url"
+fi
 while :; do sleep 0.1; done
 """
 
@@ -211,10 +216,17 @@ class BoardScriptTests(unittest.TestCase):
         port = self.free_port()
         self.env["FAKE_RUN_URL"] = "http://127.0.0.1:{}".format(port)
         genai_setup.run(self.session)
-        self.wait_for(lambda s: (self.studio / ".neat-genai-studio.pid").exists())
-        time.sleep(0.5)
-        status = self.status()
-        self.assertEqual((status["active"], self.states(status)), (True, ["done", "done", "running"]))
+        url_file = self.studio / ".neat-genai-studio.url"
+        # Before run.sh records its URL, and after, until the web server answers: still starting.
+        seen = []
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not (url_file.exists() and len(seen) > 3):
+            if (self.studio / ".neat-genai-studio.pid").exists():
+                seen.append((url_file.exists(), self.states()[2]))
+            time.sleep(0.05)
+        self.assertIn((False, "running"), seen, "polled before the URL was recorded")
+        self.assertNotIn("done", [state for _, state in seen])
+        self.assertEqual(self.states(), ["done", "done", "running"])
         self.serve_health(port)
         self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
 

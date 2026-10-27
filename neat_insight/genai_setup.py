@@ -157,15 +157,19 @@ echo "sima_cli=$cli"
 [ -x "$studio/.venv/bin/python" ] && [ -f "$studio/config.local.yaml" ] && echo prepared=yes || echo prepared=no
 pid=$(cat "$studio/.neat-genai-studio.pid" 2>/dev/null || true)
 # Running once run.sh is; answering once its web server is up, after the voices load.
-# Without the URL run.sh records, or without curl, a running Studio counts as answering.
+# run.sh writes its pid, then its mode, then (a moment later) the URL it serves: a web
+# or backend-only mode without the URL yet is still starting. Without a mode (an older
+# run.sh), in --cli mode or without curl, a running Studio counts as answering.
 if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
   echo running=yes
   url=$(cat "$studio/.neat-genai-studio.url" 2>/dev/null || true)
-  code=000
+  mode=$(cat "$studio/.neat-genai-studio.mode" 2>/dev/null || true)
   if [ -n "$url" ] && command -v curl >/dev/null 2>&1; then
     code=$(curl -sk -m 2 -o /dev/null -w '%{http_code}' "$url/health" 2>/dev/null || true)
-  else
+  elif [ -z "$mode" ] || [ "$mode" = cli ] || ! command -v curl >/dev/null 2>&1; then
     code=any
+  else
+    code=000
   fi
   [ "${code:-000}" != 000 ] && echo answering=yes || echo answering=no
 else
