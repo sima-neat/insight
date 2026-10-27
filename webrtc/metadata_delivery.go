@@ -153,8 +153,9 @@ func forwardMetadata(ch *Channel, metadata correlatedMetadata) {
 
 const (
 	jpegChunkBytes = 60000
-	// About two 1080p frames. A viewer further behind than this skips frames
-	// rather than queueing them, so its picture stays current.
+	// One to three 1080p webcam frames (150-400 KB each). A viewer further
+	// behind than this skips frames rather than queueing them, so its picture
+	// stays current.
 	jpegMaxBufferedBytes = 512 << 10
 )
 

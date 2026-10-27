@@ -62,6 +62,9 @@ func parseJPEGPayload(payload []byte) (jpegMainHeader, []byte, error) {
 }
 
 func assembleJPEG(packets [][]byte) ([]byte, error) {
+	if len(packets) == 0 {
+		return nil, errors.New("jpeg frame has no packets")
+	}
 	var first jpegMainHeader
 	var tables [][]byte
 	var scan []byte
@@ -93,9 +96,6 @@ func assembleJPEG(packets [][]byte) ([]byte, error) {
 			return nil, fmt.Errorf("jpeg frame exceeds %d bytes", maxJPEGFrameBytes)
 		}
 		scan = append(scan, body...)
-	}
-	if len(packets) == 0 {
-		return nil, errors.New("jpeg frame has no packets")
 	}
 	return jpegImage(first, tables, scan), nil
 }
