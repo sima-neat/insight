@@ -99,12 +99,16 @@ _CAUSES = (
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
-# `sima-cli` is often absent from a non-login PATH, so the user's own copy is checked too.
+# Where sima-cli's installer puts it: /data/sima-cli on a DevKit, ~/.sima-cli elsewhere. Only
+# ~/.bashrc adds it to PATH, so Insight's own PATH often lacks it.
+SIMA_CLI_PATHS = ("/data/sima-cli/.venv/bin/sima-cli", "$HOME/.sima-cli/.venv/bin/sima-cli")
+
 # Every line is key=value, except each step's record, which starts at `@@<step>`.
 _STATUS_SCRIPT = r"""
 studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 jobs="$HOME/.neat-insight/genai-setup"
-cli=$(command -v sima-cli 2>/dev/null || { [ -x "$HOME/.sima-cli/.venv/bin/sima-cli" ] && echo "$HOME/.sima-cli/.venv/bin/sima-cli"; } || true)
+cli=$(command -v sima-cli 2>/dev/null || true)
+for c in SIMA_CLI_PATHS; do [ -n "$cli" ] || { [ -x "$c" ] && cli=$c; }; done
 echo "sima_cli=$cli"
 [ -x "$HOME/pyneat/bin/python" ] && echo core=yes || echo core=no
 [ -x "$studio/run.sh" ] && echo installed=yes || echo installed=no
@@ -124,7 +128,7 @@ for s in install prepare start; do
   tail -c LOG_BYTES "$jobs/$s.log" 2>/dev/null || true
   echo
 done
-""".replace("LOG_BYTES", str(LOG_BYTES))
+""".replace("LOG_BYTES", str(LOG_BYTES)).replace("SIMA_CLI_PATHS", " ".join('"{}"'.format(p) for p in SIMA_CLI_PATHS))
 
 # Runs the steps named in $jobs/steps, in order, stopping at the first that fails.
 # run.sh keeps running in the foreground, so the job lives as long as GenAI Studio.

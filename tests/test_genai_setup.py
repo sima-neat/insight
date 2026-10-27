@@ -178,6 +178,16 @@ class BoardScriptTests(unittest.TestCase):
         self.assertEqual(status["steps"][0]["state"], "blocked")
         self.assertIn("sima-cli", status["steps"][0]["problem"]["message"])
 
+    def test_sima_cli_is_found_where_its_installer_puts_it_when_it_is_not_on_path(self):
+        installed = self.home / ".sima-cli/.venv/bin/sima-cli"
+        installed.parent.mkdir(parents=True)
+        installed.write_text("#!/bin/sh\n")
+        installed.chmod(0o755)
+        self.env["PATH"] = "/usr/bin:/bin"
+        self.assertEqual(self.status()["simaCli"], str(installed))
+        # A DevKit's copy lives under /data, outside HOME.
+        self.assertIn('"/data/sima-cli/.venv/bin/sima-cli"', genai_setup.status_command()[2])
+
     def test_a_second_job_is_refused_by_the_board_too(self):
         self.env["FAKE_SETUP_WAIT"] = "1"
         genai_setup.run(self.session)
