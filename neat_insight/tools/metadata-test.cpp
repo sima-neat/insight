@@ -50,6 +50,14 @@ json generate_object_detection() {
                     {"label", "person"},
                     {"confidence", std::round(conf_person(rng) * 100) / 100},
                     {"bbox", person_box}
+                },
+                {
+                    {"id", "obj_3"},
+                    {"label", "ship"},
+                    {"confidence", std::round(conf_car(rng) * 100) / 100},
+                    // A box turned 0.5 rad clockwise; bbox is the upright extent of its corners.
+                    {"bbox", {558, 300, 164, 121}},
+                    {"oriented_bbox", {640, 360, 160, 50, 0.5}}
                 }
             }}
         }}
