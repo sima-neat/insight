@@ -98,7 +98,16 @@ func TestAssembleJPEGEmitsRestartInterval(t *testing.T) {
 		return payload
 	})
 	if _, err := assembleJPEG(changed); err == nil {
-		t.Fatal("accepted a restart header that changed within a frame")
+		t.Fatal("accepted a restart interval that changed within a frame")
+	}
+	// Senders that align packets to restart intervals vary F, L and the count.
+	aligned := append([][]byte(nil), packets...)
+	aligned[1] = rewriteJPEGPayload(t, aligned[1], func(payload []byte) []byte {
+		payload[10], payload[11] = 0x80, 0x01
+		return payload
+	})
+	if _, err := assembleJPEG(aligned); err != nil {
+		t.Fatalf("rejected per-packet restart flags and count: %v", err)
 	}
 }
 

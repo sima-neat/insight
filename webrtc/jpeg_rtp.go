@@ -20,7 +20,6 @@ type jpegMainHeader struct {
 	typ, q          uint8
 	width, height   int
 	restartInterval uint16
-	restartHeader   uint32
 }
 
 // parseJPEGPayload reads the main header, and the restart header for types
@@ -51,8 +50,9 @@ func parseJPEGPayload(payload []byte) (jpegMainHeader, []byte, error) {
 		if len(body) < 4 {
 			return h, nil, errors.New("jpeg payload shorter than its restart header")
 		}
-		h.restartHeader = binary.BigEndian.Uint32(body)
-		h.restartInterval = uint16(h.restartHeader >> 16)
+		// The F, L and restart count bits after the interval may differ per
+		// packet (RFC 2435 3.1.7); only the interval describes the image.
+		h.restartInterval = binary.BigEndian.Uint16(body)
 		if h.restartInterval == 0 {
 			return h, nil, errors.New("jpeg restart interval is zero")
 		}
@@ -86,7 +86,7 @@ func assembleJPEG(packets [][]byte) ([]byte, error) {
 				return nil, err
 			}
 		} else if h.typ != first.typ || h.q != first.q || h.width != first.width ||
-			h.height != first.height || h.restartHeader != first.restartHeader {
+			h.height != first.height || h.restartInterval != first.restartInterval {
 			return nil, errors.New("jpeg header changed within a frame")
 		}
 		if h.offset != uint32(len(scan)) {
