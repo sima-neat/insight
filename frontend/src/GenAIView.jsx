@@ -1738,7 +1738,7 @@ export default function GenAIView({ onError, onStatus }) {
                   <p className="hint">
                     {backend.state === 'ready'
                       ? 'GenAI Studio answers. Show me around starts with loading your first model.'
-                      : `This tab connects to ${settings?.url || 'the board address in Settings'} once GenAI Studio is running. If it is running and this still says ${STATE_LABELS[backend.state] || backend.state}, check the address in Settings.`}
+                      : `This tab connects to ${settings?.url || 'the board address in Settings'} once GenAI Studio is running. If GenAI Studio is running but this step doesn't get a check, check the board address in Settings.`}
                   </p>
                 </div>
               </li>
