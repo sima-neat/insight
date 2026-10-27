@@ -137,4 +137,5 @@ neat_insight/tools/multisrc-harness.sh start --count 16
 Notes:
 - Default destination is `127.0.0.1`, starting at UDP port `9100`.
 - Supported metadata types are `object-detection`, `classification`, `pose-estimation`, `segmentation`, and `tracking`.
+- An `object-detection` object may carry `oriented_bbox` (`[cx, cy, width, height, angle]`, angle in radians, clockwise on screen) to draw a rotated box; `bbox` stays required as its upright extent. The test sender includes one rotated `ship`.
 - `neat_insight/tools/metadata-test.py` remains as a compatibility wrapper, but the packaged CLI is the preferred entry point.
