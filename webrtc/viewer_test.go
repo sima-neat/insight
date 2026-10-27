@@ -1301,6 +1301,38 @@ func TestHandleOfferAnswersJPEGChannelWithoutVideo(t *testing.T) {
 	}
 }
 
+func TestHandleOfferRejectsVideoOnlyOfferOnJPEGChannel(t *testing.T) {
+	const channelIndex = 73
+	previous := channels[channelIndex]
+	channel := &Channel{
+		Stats:  NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		Egress: NewEgressStats(channelIndex),
+	}
+	channel.Media.Store(mustNewChannelMedia(t, videoCodecJPEG))
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+
+	// The ROI editor preview offers video only, with no DataChannel for frames.
+	browser, offer := newReceiveOnlyOffer(t, webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: videoRTPClockRate},
+		PayloadType:        96,
+	})
+	t.Cleanup(func() { _ = browser.Close() })
+	body, err := json.Marshal(offer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handleOffer(response, httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/offer?channel=%d", channelIndex), bytes.NewReader(body)))
+
+	// 4xx so the preview reports it instead of waiting on a stream that never comes.
+	if response.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected HTTP %d, got %d: %s",
+			http.StatusUnsupportedMediaType, response.Code, response.Body.String())
+	}
+}
+
 type jpegTestViewer struct {
 	pc       *webrtc.PeerConnection
 	frames   chan []byte

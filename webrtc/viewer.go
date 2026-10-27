@@ -668,6 +668,21 @@ func offerAdvertisesCodec(offer webrtc.SessionDescription, mimeType string) bool
 	return false
 }
 
+// offerHasDataChannels reports whether the offer can carry the "jpeg"
+// DataChannel. A malformed offer is treated as able to, like the codec check.
+func offerHasDataChannels(offer webrtc.SessionDescription) bool {
+	parsed, err := offer.Unmarshal()
+	if err != nil {
+		return true
+	}
+	for _, media := range parsed.MediaDescriptions {
+		if media.MediaName.Media == "application" {
+			return true
+		}
+	}
+	return false
+}
+
 func handleOffer(w http.ResponseWriter, r *http.Request) {
 	channelIdxStr := r.URL.Query().Get("channel")
 	idx, err := strconv.Atoi(channelIdxStr)
@@ -698,6 +713,12 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 	// peer records for a connection that cannot succeed.
 	if !jpeg && !offerAdvertisesCodec(offer, parameters.MimeType) {
 		http.Error(w, "Browser does not support the channel codec", http.StatusUnsupportedMediaType)
+		return
+	}
+	// A video-only offer, such as the ROI editor preview's, cannot receive JPEG
+	// frames and would otherwise connect and wait forever.
+	if jpeg && !offerHasDataChannels(offer) {
+		http.Error(w, "JPEG channels can be viewed only in the Video Viewer", http.StatusUnsupportedMediaType)
 		return
 	}
 
