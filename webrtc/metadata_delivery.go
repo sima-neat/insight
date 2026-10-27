@@ -198,6 +198,8 @@ func sendJPEGFrame(ch *Channel, timestamp uint32, jpeg []byte) bool {
 			ch.Stats.RecordJPEGSendError(sendErr)
 			ch.Egress.RecordJPEGSendError(peer.id, sendErr)
 			ch.FramePeers.remove(peer.id, peer.channel)
+			// Closing tells the browser to reconnect instead of waiting on a silent channel.
+			_ = peer.channel.Close()
 			ch.Egress.UpdateJPEGState(peer.id, "failed")
 			log.Printf("[Channel %d] jpeg send failed for peer %d: %v", ch.Port-9000, peer.id, sendErr)
 			continue

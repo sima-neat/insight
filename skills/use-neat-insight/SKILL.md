@@ -425,7 +425,7 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 | `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
 | `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
 | `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the HTTPS vf viewer URL using the mapped `videoUI` port when the SDK port map is available. |
-| `POST` | `/offer?channel=<N>` | Negotiate a vf viewer connection; returns 503 until supported RTP identifies the channel codec, or 415 when the browser cannot decode an H.264 or H.265 channel. JPEG channels never return 415. |
+| `POST` | `/offer?channel=<N>` | Negotiate a vf viewer connection; returns 503 until supported RTP identifies the channel codec, or 415 when the browser cannot decode an H.264 or H.265 channel. A JPEG channel returns 415 only for a video-only offer (such as the ROI editor preview), which has no DataChannel to deliver its frames. |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
@@ -487,7 +487,7 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `500` for local processing or stream startup failures.
 - `502` for unreachable or unreadable remote devkit build information, or an unreachable GenAI Studio board.
 - GenAI Studio relay errors carry a `reason`: `400 bad-request` for an invalid board address, `404 not-relayed`, `502 unreachable`, `503 not-configured` or `invalid-address`, and `500 cfg-unreadable` or `cfg-unwritable` when Insight's `cfg.json` cannot be read (nothing is changed or relayed) or saved.
-- `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it. JPEG channels are delivered over a DataChannel and never return 415.
+- `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it. JPEG channels are delivered over a DataChannel and return 415 only for a video-only offer, such as the ROI editor preview.
 - `503` from vf `/offer` until RTP payload type 96 (H.264), 98 (H.265), or 26 (JPEG) identifies the channel codec; viewers should retry this response.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.

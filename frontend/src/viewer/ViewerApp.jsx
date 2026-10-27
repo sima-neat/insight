@@ -283,11 +283,19 @@ function ChannelTile({ index, onActiveChange, debug }) {
 
       // A JPEG channel answers without video and sends whole frames here; the
       // first one switches the tile from <video> to drawing on the canvas.
+      // A frame spans hundreds of SCTP chunks, so losing one without a retry
+      // drops the whole frame; retry for about the default Video Sync Buffer.
       jpegChannel = pc.createDataChannel("jpeg", {
         ordered: true,
-        maxRetransmits: 0,
+        maxPacketLifeTime: 300,
       });
       jpegChannel.binaryType = "arraybuffer";
+      // vf closes the channel when a send fails; reconnect instead of freezing.
+      jpegChannel.onclose = () => {
+        if (!mounted || sessionId !== currentSession) return;
+        debugLog("jpeg channel closed; reconnecting channel");
+        scheduleReconnect();
+      };
       jpegChannel.onmessage = (event) => {
         if (!mounted || sessionId !== currentSession) return;
         const chunk = parseJpegChunk(event.data);
