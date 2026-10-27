@@ -22,6 +22,8 @@ export const STEP_LABELS = {
 // What the panel's main button does now, or null while a job runs or nothing is left.
 export function setupAction(status) {
   if (!status || status.active || !Array.isArray(status.steps)) return null
+  // A GenAI Studio started from a shell may still be loading, with no setup job.
+  if (status.steps.some((s) => s.state === 'running' || s.state === 'queued')) return null
   const left = status.steps.filter((s) => s.state !== 'done')
   if (!left.length) return null
   if (left.some((s) => s.state === 'failed' || s.state === 'blocked')) return { label: 'Retry' }
@@ -53,11 +55,11 @@ export function connectIcon(backendState) {
   return 'waiting'
 }
 
-// GenAI Studio is running and no setup step is in progress, so it can be stopped,
-// whether setup or a shell on the board started it.
+// GenAI Studio runs or is still loading, and no setup step is in progress, so it can
+// be stopped, whether setup or a shell on the board started it.
 export function canStopStudio(status) {
   const start = status && Array.isArray(status.steps) && status.steps.find((s) => s.id === 'start')
-  return Boolean(start && start.state === 'done' && !setupStoppable(status))
+  return Boolean(start && (start.state === 'done' || start.state === 'running') && !setupStoppable(status))
 }
 
 // Setup runs again (and restarts GenAI Studio) once a finished step's warnings are fixed.

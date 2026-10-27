@@ -1523,7 +1523,7 @@
           "id": {"type": "string", "enum": ["install", "prepare", "start"]},
           "title": {"type": "string"},
           "description": {"type": "string"},
-          "state": {"type": "string", "enum": ["done", "running", "queued", "failed", "blocked", "pending"], "description": "`blocked`: a prerequisite is missing, and `problem` says which."},
+          "state": {"type": "string", "enum": ["done", "running", "queued", "failed", "blocked", "pending"], "description": "`blocked`: a prerequisite is missing, and `problem` says which. The start step is `running` while GenAI Studio runs but does not answer yet (it loads its voices first), and `done` once it answers."},
           "log": {"type": "string", "description": "The last lines of the step's output, without colours."},
           "problem": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "Why a failed or blocked step can't finish."},
           "stall": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "A running step with no new output for a while: what may be happening and what to do."},

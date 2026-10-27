@@ -454,6 +454,8 @@ test('GenAI Studio can be stopped once it runs and no setup step is in progress'
   assert.equal(canStopStudio({ active: true, steps: steps('done') }), true, 'the setup job keeps it running')
   assert.equal(canStopStudio({ active: false, steps: steps('done') }), true, 'started from a shell on the board')
   assert.equal(canStopStudio({ active: true, steps: steps('running') }), false, 'still starting: Stop ends that')
+  assert.equal(canStopStudio({ active: false, steps: steps('running') }), true, 'started from a shell, still loading')
+  assert.equal(setupAction({ active: false, steps: steps('running') }), null, 'nothing to start while it loads')
   assert.equal(canStopStudio({ active: true, steps: steps('queued', 'running') }), false, 'setup.sh is running')
   assert.equal(canStopStudio({ active: false, steps: steps('pending') }), false, 'not running')
   assert.equal(canStopStudio(null), false)

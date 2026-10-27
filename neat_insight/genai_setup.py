@@ -42,7 +42,8 @@ DESCRIPTIONS = {
     "install": "Downloads Neat Apps, which includes GenAI Studio, into ~/prebuilt-apps. Takes a few minutes.",
     "prepare": "Runs setup.sh once: the speech model, the voices and document search. Needs internet access "
     "on the board and takes about 15 minutes.",
-    "start": "Runs GenAI Studio in the background. It keeps running after you close this page.",
+    "start": "Runs GenAI Studio in the background. It loads its voices first, which takes a few minutes, and keeps "
+    "running after you close this page.",
 }
 # What to run in a shell on the board instead, the last resort a failure offers.
 MANUAL_COMMANDS = {
@@ -155,7 +156,21 @@ echo "sima_cli=$cli"
 [ -x "$studio/run.sh" ] && echo installed=yes || echo installed=no
 [ -x "$studio/.venv/bin/python" ] && [ -f "$studio/config.local.yaml" ] && echo prepared=yes || echo prepared=no
 pid=$(cat "$studio/.neat-genai-studio.pid" 2>/dev/null || true)
-[ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo running=yes || echo running=no
+# Running once run.sh is; answering once its web server is up, after the voices load.
+# Without the URL run.sh records, or without curl, a running Studio counts as answering.
+if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+  echo running=yes
+  url=$(cat "$studio/.neat-genai-studio.url" 2>/dev/null || true)
+  code=000
+  if [ -n "$url" ] && command -v curl >/dev/null 2>&1; then
+    code=$(curl -sk -m 2 -o /dev/null -w '%{http_code}' "$url/health" 2>/dev/null || true)
+  else
+    code=any
+  fi
+  [ "${code:-000}" != 000 ] && echo answering=yes || echo answering=no
+else
+  echo running=no
+fi
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 alive "$runner" && echo active=yes || echo active=no
 echo "steps=$(cat "$jobs/steps" 2>/dev/null || true)"
@@ -394,8 +409,11 @@ def describe(parsed: dict) -> dict:
     planned = fields.get("steps", "").split() if active else []
     # The job's steps still ahead of the one running: they run again even if done before.
     queued = planned[planned.index(current) + 1:] if current in planned else planned
+    running = fields.get("running") == "yes"
+    # GenAI Studio is started once it answers; until then it is still loading its voices.
+    loading = running and fields.get("answering", "yes") != "yes"
     done = {"install": fields.get("installed") == "yes", "prepare": fields.get("prepared") == "yes",
-            "start": fields.get("running") == "yes"}
+            "start": running and not loading}
     now = _int(fields.get("now"))
     steps = []
     for step in STEPS:
@@ -409,6 +427,9 @@ def describe(parsed: dict) -> dict:
             idle = max(0, now - mtime) if now and mtime else 0
             if idle >= STALL_AFTER_SEC[step]:
                 entry["stall"] = _stall(step, idle)
+        elif step == "start" and loading:
+            # Started from a shell on the board: still loading, and the job's log is an old one.
+            entry["state"], entry["log"] = "running", ""
         elif step in queued:
             entry["state"] = "queued"
         elif done[step]:
@@ -466,11 +487,13 @@ def _busy() -> BoardError:
 
 
 def _studio_running(state: dict) -> bool:
-    return state["steps"][2]["state"] == "done"
+    """GenAI Studio runs: it answers, or it is still starting."""
+    return state["steps"][2]["state"] in ("done", "running")
 
 
 def _step_in_progress(state: dict) -> bool:
-    return any(s["state"] in ("running", "queued") for s in state["steps"])
+    """Install or prepare runs or waits to; a starting GenAI Studio is stopped like a running one."""
+    return any(s["state"] in ("running", "queued") for s in state["steps"][:2]) or state["steps"][2]["state"] == "queued"
 
 
 def _stop_studio(session) -> dict:
@@ -521,7 +544,7 @@ def run(session, redo=None) -> dict:
             if state["active"] or _studio_running(state):
                 state = _stop_studio(session)
             return _launch(session, remaining, state["simaCli"])
-        if state["active"]:
+        if state["active"] or state["steps"][2]["state"] == "running":
             raise _busy()
         remaining = [s for s in state["steps"] if s["state"] != "done"]
         if not remaining:

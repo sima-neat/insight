@@ -1,10 +1,14 @@
 import os
+import socket
 import subprocess
+import threading
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from flask import Flask
 
@@ -49,8 +53,9 @@ echo "2026-10-27 19:31:45,294 - root - WARNING - No server TTS voice installed f
 echo "2026-10-27 19:31:46,001 - root - WARNING - No server TTS voice installed for language: ja"
 echo "2026-10-27 19:31:46,002 - werkzeug - INFO - GET /health 200"
 echo "2026-10-27 19:31:46,003 - werkzeug - WARNING - WARNING: This is a development server. Do not use it in a production deployment."
+[ -n "${FAKE_RUN_URL:-}" ] && echo "$FAKE_RUN_URL" > "$dir/.neat-genai-studio.url"
 echo $$ > "$pidf"
-trap 'rm -f "$pidf"; exit 143' TERM INT
+trap 'rm -f "$pidf" "$dir/.neat-genai-studio.url"; exit 143' TERM INT
 while :; do sleep 0.1; done
 """
 
@@ -181,6 +186,52 @@ class BoardScriptTests(unittest.TestCase):
         genai_setup.run(self.session)
         self.assertEqual(self.transport.commands[-2][4], "start")
         self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+
+    def free_port(self):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            return sock.getsockname()[1]
+
+    def serve_health(self, port):
+        """GenAI Studio's web server coming up, once its voices have loaded."""
+        class Health(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", port), Health)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+    def test_the_start_step_runs_until_studio_answers(self):
+        port = self.free_port()
+        self.env["FAKE_RUN_URL"] = "http://127.0.0.1:{}".format(port)
+        genai_setup.run(self.session)
+        self.wait_for(lambda s: (self.studio / ".neat-genai-studio.pid").exists())
+        time.sleep(0.5)
+        status = self.status()
+        self.assertEqual((status["active"], self.states(status)), (True, ["done", "done", "running"]))
+        self.serve_health(port)
+        self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+
+    def test_a_loading_studio_started_from_a_shell_is_not_started_twice_and_can_be_stopped(self):
+        self.install_and_prepare()
+        self.env["FAKE_RUN_URL"] = "http://127.0.0.1:{}".format(self.free_port())
+        studio = subprocess.Popen(["./run.sh"], cwd=self.studio, env=self.env, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL, start_new_session=True)
+        self.addCleanup(lambda: studio.poll() is None and studio.kill())
+        status = self.wait_for(lambda s: s["steps"][2]["state"] == "running")
+        self.assertEqual((status["active"], status["steps"][2]["log"]), (False, ""))
+        with self.assertRaises(BoardError) as refused:
+            genai_setup.run(self.session)
+        self.assertEqual(refused.exception.code, "setup_running")
+        status = genai_setup.stop_studio(self.session)
+        self.assertEqual(self.states(status), ["done", "done", "pending"])
+        self.assertEqual(studio.wait(timeout=10), 143)
 
     def test_studio_started_from_a_shell_on_the_board_can_be_stopped_from_the_tab(self):
         self.install_and_prepare()
@@ -345,6 +396,9 @@ class DescribeTests(unittest.TestCase):
         fields = {"installed": "yes", "prepared": "yes", "running": "yes", "active": "yes", "steps": "start",
                   "step": "start"}
         self.assertEqual([s["state"] for s in self.describe(fields)["steps"]], ["done", "done", "done"])
+        loading = dict(fields, answering="no")
+        self.assertEqual([s["state"] for s in self.describe(loading)["steps"]], ["done", "done", "running"])
+        self.assertEqual(self.describe(dict(loading, active="no", steps="", step=""))["steps"][2]["state"], "running")
 
     def test_a_stopped_studio_waits_to_start_again_and_a_stopped_step_is_not_misdiagnosed(self):
         fields = {"installed": "yes", "prepared": "yes"}
