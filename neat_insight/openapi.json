@@ -1539,7 +1539,7 @@
         "properties": {
           "message": {"type": "string", "description": "What went wrong, in plain words."},
           "fixes": {"type": "array", "items": {"type": "string"}, "description": "What to do about it, in order."},
-          "command": {"type": "string", "description": "The step's command, to run in a shell on the board instead."}
+          "command": {"type": "string", "description": "The step's command, to run in a shell on the board instead, with the board's `sima-cli`. For install and prepare it also records the step's success, so the step shows done afterwards."}
         }
       },
       "GenaiSettings": {

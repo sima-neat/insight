@@ -279,13 +279,25 @@ class BoardScriptTests(unittest.TestCase):
         self.assertEqual(problem["message"], "The board could not download what this step needs.")
         self.assertTrue(any("huggingface.co" in fix for fix in problem["fixes"]))
         self.assertIn("~/.neat-insight/genai-setup/prepare.log", problem["fixes"][-1])
-        self.assertEqual(problem["command"], genai_setup.MANUAL_COMMANDS["prepare"])
+        self.assertEqual(problem["command"], genai_setup.manual_command("prepare"))
         self.assertIn("Could not resolve host", status["steps"][1]["log"])
 
         del self.env["FAKE_SETUP_FAIL"]
         genai_setup.run(self.session)
         self.assertEqual(self.transport.commands[-2][4], "prepare start")
         self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+
+    def test_running_the_offered_command_by_hand_clears_the_failure(self):
+        self.env["FAKE_SETUP_FAIL"] = "OSError: Could not resolve host: huggingface.co"
+        genai_setup.run(self.session)
+        status = self.wait_for(lambda s: not s["active"])
+        self.assertEqual(self.states(status), ["done", "failed", "pending"])
+        del self.env["FAKE_SETUP_FAIL"]
+        # The user fixes the network and pastes the panel's command into a shell on the board.
+        done = subprocess.run(["bash", "-c", status["steps"][1]["problem"]["command"].replace("~", str(self.home))],
+                              env=self.env, capture_output=True, timeout=20)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.states(), ["done", "done", "pending"])
 
     def test_stop_ends_a_step_and_marks_it_stopped(self):
         self.env["FAKE_SETUP_WAIT"] = "1"
@@ -493,6 +505,13 @@ class DescribeTests(unittest.TestCase):
         records = {"prepare": {"exit": "0", "mtime": "", "log": "", "warnings": []},
                    "start": {"exit": "", "mtime": "", "log": "Loaded Piper model", "warnings": []}}
         self.assertEqual([s["state"] for s in self.describe(fields, records)["steps"]], ["done", "done", "pending"])
+
+    def test_the_install_command_offered_uses_the_sima_cli_the_board_has(self):
+        fields = {"sima_cli": "/data/sima-cli/.venv/bin/sima-cli"}
+        records = {"install": {"exit": "1", "mtime": "", "log": "boom", "warnings": []}}
+        command = self.describe(fields, records)["steps"][0]["problem"]["command"]
+        self.assertEqual(command, "cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 /data/sima-cli/.venv/bin/sima-cli neat install apps "
+                                  "&& echo 0 > ~/.neat-insight/genai-setup/install.exit")
 
     def test_known_causes_are_named_and_unknown_ones_point_at_the_log(self):
         cases = {

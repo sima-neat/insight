@@ -45,12 +45,18 @@ DESCRIPTIONS = {
     "start": "Runs GenAI Studio in the background. It loads its voices first, which takes a few minutes, and keeps "
     "running after you close this page.",
 }
-# What to run in a shell on the board instead, the last resort a failure offers.
+# What to run in a shell on the board instead, the last resort a failure offers. An install
+# or prepare run this way records its success, so the panel shows the step done instead of
+# the earlier failure. {sima_cli} is the sima-cli the board has.
 MANUAL_COMMANDS = {
-    "install": "cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps",
-    "prepare": "cd {} && ./setup.sh".format(STUDIO_DIR),
-    "start": "cd {} && ./run.sh".format(STUDIO_DIR),
+    "install": "cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 {sima_cli} neat install apps && echo 0 > " + JOB_DIR + "/install.exit",
+    "prepare": "cd " + STUDIO_DIR + " && ./setup.sh && echo 0 > " + JOB_DIR + "/prepare.exit",
+    "start": "cd " + STUDIO_DIR + " && ./run.sh",
 }
+
+
+def manual_command(step: str, sima_cli=None) -> str:
+    return MANUAL_COMMANDS[step].format(sima_cli=sima_cli or "sima-cli")
 
 _HOSTS = (
     "pypi.org, files.pythonhosted.org, download.pytorch.org, huggingface.co, raw.githubusercontent.com "
@@ -373,7 +379,7 @@ def _problem(step: str, message: str, fixes) -> dict:
         "fixes": list(fixes) + [
             "The full log is on the board in `{}/{}.log`.".format(JOB_DIR, step),
         ],
-        "command": MANUAL_COMMANDS[step],
+        "command": manual_command(step),
     }
 
 
@@ -461,6 +467,8 @@ def describe(parsed: dict) -> dict:
             blocked = _blocking_problem(step, fields)
             if blocked:
                 entry["state"], entry["problem"] = "blocked", blocked
+        if entry["problem"]:
+            entry["problem"]["command"] = manual_command(step, fields.get("sima_cli"))
         if entry["state"] in ("done", "running", "failed"):
             entry["warnings"] = record.get("warnings") or []
         steps.append(entry)
