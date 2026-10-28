@@ -164,9 +164,10 @@ class BoardScriptTests(unittest.TestCase):
         self.assertIn("Installing voices", status["steps"][1]["log"])
         self.assertNotIn("\x1b", status["steps"][1]["log"])
         self.assertTrue((self.studio / ".neat-genai-studio.pid").exists())
+        # The job now only keeps GenAI Studio running: nothing is left to set up.
         with self.assertRaises(BoardError) as refused:
             genai_setup.run(self.session)
-        self.assertEqual(refused.exception.code, "setup_running")
+        self.assertEqual(refused.exception.code, "setup_done")
 
     def test_studio_keeps_running_after_the_command_that_started_it_returns(self):
         genai_setup.run(self.session)
@@ -376,7 +377,11 @@ class BoardScriptTests(unittest.TestCase):
         self.assertEqual(status["steps"][1]["problem"]["message"], "The step was stopped before it finished.")
         del self.env["FAKE_SETUP_WAIT"]
         (self.studio / "setup.waiting").unlink()
+        # GenAI Studio running again before the Retry: Retry stops it, reruns prepare, starts it.
+        studio = self.start_by_hand()
+        self.assertEqual(self.states(), ["done", "failed", "done"])
         genai_setup.run(self.session)
+        self.assertEqual(studio.wait(timeout=10), 143)
         self.assertEqual(self.transport.commands[-2][4], "prepare start")
         self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
 

@@ -554,7 +554,7 @@ def run(session, redo=None) -> dict:
             if state["active"] or _studio_running(state):
                 state = _stop_studio(session)
             return _launch(session, remaining, state["simaCli"])
-        if state["active"] or state["steps"][2]["state"] == "running":
+        if _step_in_progress(state) or state["steps"][2]["state"] == "running":
             raise _busy()
         remaining = [s for s in state["steps"] if s["state"] != "done"]
         if not remaining:
@@ -565,6 +565,11 @@ def run(session, redo=None) -> dict:
             problem = blocked["problem"]
             raise BoardError("setup_blocked", problem["message"], hint=" ".join(problem["fixes"][:1]),
                              step=blocked["id"])
+        # GenAI Studio still runs although an earlier step failed or was stopped (a Retry
+        # after a stopped Run setup again): stop it, and start it again after that step.
+        if state["active"] or _studio_running(state):
+            state = _stop_studio(session)
+            remaining = [s for s in state["steps"] if s["state"] != "done"]
         return _launch(session, [s["id"] for s in remaining], state["simaCli"])
 
 

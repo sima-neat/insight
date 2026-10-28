@@ -424,6 +424,7 @@ test('the setup button says what is left to do, and offers Retry after a failure
   assert.equal(setupAction(status('pending', 'blocked', 'pending')).label, 'Retry')
   assert.equal(setupAction(status('done', 'done', 'done')), null, 'nothing left')
   assert.equal(setupAction({ ...status('done', 'running', 'queued'), active: true }), null, 'a job runs')
+  assert.equal(setupAction({ ...status('done', 'failed', 'done'), active: true }).label, 'Retry', 'the job only keeps GenAI Studio running')
   assert.equal(setupAction(null), null)
   assert.equal(setupStoppable({ ...status('done', 'running', 'queued'), active: true }), true)
   // Once GenAI Studio is starting or running, Stop GenAI Studio takes over.

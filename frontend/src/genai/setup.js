@@ -19,10 +19,11 @@ export const STEP_LABELS = {
   pending: 'To do'
 }
 
-// What the panel's main button does now, or null while a job runs or nothing is left.
+// What the panel's main button does now, or null while a step runs or nothing is left.
 export function setupAction(status) {
-  if (!status || status.active || !Array.isArray(status.steps)) return null
-  // A GenAI Studio started from a shell may still be loading, with no setup job.
+  if (!status || !Array.isArray(status.steps)) return null
+  // Nothing while a step runs or waits to, including a GenAI Studio still loading. A job
+  // that only keeps GenAI Studio running doesn't count: Retry stops it first.
   if (status.steps.some((s) => s.state === 'running' || s.state === 'queued')) return null
   const left = status.steps.filter((s) => s.state !== 'done')
   if (!left.length) return null
