@@ -65,6 +65,7 @@ from neat_insight.mediasrc import (
 from neat_insight import board
 from neat_insight.api_docs import api_docs_bp
 from neat_insight.genai_relay import genai_bp
+from neat_insight.genai_setup import genai_setup_bp
 from neat_insight.board.target import sdk_env_target
 from neat_insight.peripherals import peripherals_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
@@ -175,6 +176,7 @@ app.register_blueprint(api_docs_bp)
 app.register_blueprint(workspace_bp)
 app.register_blueprint(genai_bp)
 board.init_app(app, env["NEAT_INSIGHT_DATA"], on_board=is_sima_board())
+app.register_blueprint(genai_setup_bp)
 app.register_blueprint(peripherals_bp)
 app.register_blueprint(sentinel_bp)
 neat_metrics_broker = NeatMetricsBroker()

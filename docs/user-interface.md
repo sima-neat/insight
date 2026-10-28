@@ -251,18 +251,20 @@ Last on the tab, the profiling timeline plots numeric fields from the profiling 
 
 The GenAI Studio view runs language, vision and speech models on a board. It talks to GenAI Studio from Neat Apps, which runs on the board in backend-only mode; Insight relays every call, so the browser never connects to the board directly.
 
-Start the backend on the board first, from the GenAI Studio application directory:
+GenAI Studio runs on the board. The tab can install, prepare and start it, as described below; to start it from a shell on the board instead, run this in the GenAI Studio application directory:
 
 ```bash
 ./run.sh
 ```
+
+The first time, GenAI Studio has to be installed on the board. While the tab can't reach it, the **Tutorial** asks whether this is your first time, and the banner's button opens the same panel: **Set up GenAI Studio**, or **Start GenAI Studio**, which starts an installed one in one click when the tab's address points at the board Insight is connected to. **Open GenAI Studio setup** in the **Board** settings opens it at any time, also while GenAI Studio is running. The panel installs Apps (`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`, which keeps the installed Core and Insight), prepares GenAI Studio once with `setup.sh` (about 15 minutes, with internet access on the board) and starts it with `./run.sh`, on the board Insight is connected to. Each step shows a check when done, a spinner while running and a grey circle until its turn. The steps run on the board as one job that keeps going when you close the page; its logs are in `~/.neat-insight/genai-setup/`. A step that fails says why, what to do and what it printed last, next to **Retry** and the command to run by hand. A step that finished with warnings lists them with their fixes; after fixing setup's, **Run setup again** runs `setup.sh` again and restarts GenAI Studio. Once it runs, the panel's **Start GenAI Studio** button becomes **Stop GenAI Studio**, which stops it on the board, also when it was started from a shell. A step with no new output for several minutes says so, and **Stop** (**Stop GenAI Studio** for the start step) ends it.
 
 The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud**, **Think first** (greyed out for models that always answer directly) and **Use my documents**, and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Benchmark** (the gauge), **Tutorial**, **Settings** and **Full screen**.
 
 The status label, and a banner when something needs attention, show the backend's state and what to do next:
 
 - **Not set up**: no board is selected, and the settings open. Enter the board's address, such as `https://192.168.1.20:5000`. On a board, Insight defaults to the local backend; in the Neat Development Environment it defaults to the paired DevKit.
-- **Not running**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address.
+- **Not running**: the board does not answer. **Start GenAI Studio** in the banner starts it (**Set up GenAI Studio** the first time), or check the address.
 - **Error**: the board answered with an error, or the address is not GenAI Studio. The banner shows the board's message.
 - **Starting**: the backend answers but its model server is not ready yet.
 - **Busy**: a model is loading. Chat and speech wait until it finishes.
