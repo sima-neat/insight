@@ -255,18 +255,20 @@ DevKit 檢視的版面與 Sentinel 本身的終端機儀表板（`simaai-sentine
 
 GenAI Studio 檢視可在開發板上執行語言、視覺和語音模型。它會與 Neat Apps 的 GenAI Studio 通訊，後者在開發板上以僅後端模式執行；Insight 會轉送所有呼叫，因此瀏覽器不會直接連線到開發板。
 
-請先在開發板的 GenAI Studio 應用程式目錄中啟動後端：
+GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、準備並啟動它；若要從開發板的 shell 啟動，請在 GenAI Studio 應用程式目錄中執行：
 
 ```bash
 ./run.sh
 ```
+
+第一次使用時，需要先在開發板上安裝 GenAI Studio。當分頁無法連線到 GenAI Studio 時，**Tutorial** 會詢問您是否第一次使用，橫幅中的按鈕也會開啟相同的面板：**Set up GenAI Studio**，或在已安裝時一鍵啟動的 **Start GenAI Studio**（當分頁的位址指向 Insight 連線的開發板時）。在 **Board** 設定中按 **Open GenAI Studio setup**，即使 GenAI Studio 正在執行，也能隨時開啟此面板。面板會在 Insight 連線的開發板上安裝 Apps（`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`，保留已安裝的 Core 和 Insight）、以 `setup.sh` 準備 GenAI Studio 一次（開發板需要網際網路連線，約 15 分鐘），再以 `./run.sh` 啟動。每個步驟完成時顯示勾號，執行中顯示旋轉圖示，輪到之前顯示灰色圓圈。這些步驟在開發板上以單一工作執行，關閉頁面後仍會繼續；記錄檔位於 `~/.neat-insight/genai-setup/`。失敗的步驟會說明原因、處理方式和最後的輸出，旁邊附有 **Retry** 和可手動執行的指令。帶有警告完成的步驟會列出警告及處理方式；修正設定的警告後，**Run setup again** 會重新執行 `setup.sh` 並重新啟動 GenAI Studio。執行期間，面板的 **Start GenAI Studio** 按鈕會變成 **Stop GenAI Studio**，可在開發板上停止 GenAI Studio，從 shell 啟動的也一樣。數分鐘沒有新輸出的步驟會提示此情況，並可用 **Stop**（啟動步驟為 **Stop GenAI Studio**）停止。
 
 第一次開啟時，頁面頂端會顯示簡短的 **Tutorial**，逐一介紹各項功能；隨時可用頁首的 **Tutorial** 再次觀看。頁首包含狀態標籤、**Model** 選擇器及旁邊的 **New chat**（鉛筆）、**Read replies aloud**、**Think first**（對一律直接回答的模型停用）和 **Use my documents**。工具列包含 **Export chat**、**SiMaSentry Solutions**（盾牌）、**Benchmark**（儀表）、**Tutorial**、**Settings** 和 **Full screen**。
 
 狀態標籤以及需要處理時出現的橫幅，會顯示後端狀態和接下來應採取的動作：
 
 - **Not set up**：尚未選取開發板，設定會開啟。請輸入開發板位址，例如 `https://192.168.1.20:5000`。在開發板上，Insight 預設使用本機後端；在 Neat Development Environment 中則預設使用已配對的 DevKit。
-- **Not running**：開發板沒有回應。請使用上述指令啟動後端（**Copy start command** 可複製指令），或檢查位址。
+- **Not running**：開發板沒有回應。請用橫幅中的 **Start GenAI Studio** 啟動（第一次使用時為 **Set up GenAI Studio**），或檢查位址。
 - **Error**：開發板傳回錯誤，或該位址不是 GenAI Studio。橫幅會顯示開發板的訊息。
 - **Starting**：後端有回應，但模型伺服器尚未就緒。
 - **Busy**：正在載入模型。聊天與語音會等待載入完成。

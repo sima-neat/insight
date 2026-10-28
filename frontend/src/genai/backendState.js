@@ -58,8 +58,8 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'unavailable',
       title: 'GenAI Studio is not running on the board',
-      detail: `Start it on the board from the Studio's directory with ${START_COMMAND}, or check the board address.`,
-      action: 'start-command'
+      detail: 'Insight can start it on the board, and install it there the first time. Or check the board address.',
+      action: 'setup'
     }
   }
   // Something answered, so it is running; it just isn't a healthy GenAI Studio.
@@ -130,6 +130,12 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
   }
 
   return { state: 'ready', title: 'Connected to GenAI Studio on the board', detail: '', action: null }
+}
+
+// The tab offers the first-time setup steps while nothing answers at the board
+// address, or no board is selected.
+export function offersSetup(state) {
+  return state === 'unavailable' || state === 'unconfigured'
 }
 
 // Chat and speech run only when the backend is ready (a failed operation still
