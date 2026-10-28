@@ -48,9 +48,12 @@ DESCRIPTIONS = {
 # What to run in a shell on the board instead, the last resort a failure offers. An install
 # or prepare run this way records its success, so the panel shows the step done instead of
 # the earlier failure. {sima_cli} is the sima-cli the board has.
+# Its success replaces the failed run's log, whose warnings no longer apply.
 MANUAL_COMMANDS = {
-    "install": "cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 {sima_cli} neat install apps && echo 0 > " + JOB_DIR + "/install.exit",
-    "prepare": "cd " + STUDIO_DIR + " && ./setup.sh && echo 0 > " + JOB_DIR + "/prepare.exit",
+    "install": "cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 {sima_cli} neat install apps && mkdir -p " + JOB_DIR
+    + " && rm -f " + JOB_DIR + "/install.log && echo 0 > " + JOB_DIR + "/install.exit",
+    "prepare": "cd " + STUDIO_DIR + " && ./setup.sh && mkdir -p " + JOB_DIR + " && rm -f " + JOB_DIR
+    + "/prepare.log && echo 0 > " + JOB_DIR + "/prepare.exit",
     "start": "cd " + STUDIO_DIR + " && ./run.sh",
 }
 
@@ -95,7 +98,7 @@ _CAUSES = (
         r"\b40[34]\b.*(latest\.tag|neat-apps)|(latest\.tag|neat-apps).*\b40[34]\b",
         "The Neat Apps package could not be downloaded.",
         ["Check the board's internet access, then press Retry.",
-         "Run `sima-cli neat install apps` in a shell on the board to see the installer's full message."],
+         "Or run the command below in a shell on the board to see the installer's full message."],
     ),
     (
         r"dispatcher_unavailable|accelerator runtime is not available",
@@ -401,7 +404,11 @@ def diagnose(step: str, log: str, exit_code: str) -> dict:
     )
 
 
-def _problem(step: str, message: str, fixes) -> dict:
+def _problem(step: str, message: str, fixes, ran: bool = True) -> dict:
+    """A step's problem. One that never ran (a missing prerequisite) has no log, and no
+    command to run instead, since the prerequisite is missing there too."""
+    if not ran:
+        return {"message": message, "fixes": list(fixes), "command": None}
     return {
         "message": message,
         "fixes": list(fixes) + [
@@ -419,9 +426,11 @@ def _blocking_problem(step: str, fields: dict):
             "`sima-cli` was not found on the board, so Neat Apps cannot be installed from here.",
             ["Install sima-cli on the board (https://developer.sima.ai/software/tools/sima-cli/), then press "
              "Retry."],
+            ran=False,
         )
     if step == "prepare" and fields.get("core") != "yes":
-        return _problem(step, "The Neat Library (Core) is not installed on the board.", [_INSTALL_CORE, "Then press Retry."])
+        return _problem(step, "The Neat Library (Core) is not installed on the board.", [_INSTALL_CORE, "Then press Retry."],
+                        ran=False)
     return None
 
 
@@ -432,11 +441,13 @@ def _stall(step: str, idle: int) -> dict:
         "prepare": "setup.sh prints nothing while it builds the document database or downloads a large model.",
         "start": "GenAI Studio prints nothing while its model server loads.",
     }[step]
+    again = ("If nothing changes, press Stop GenAI Studio, then Start GenAI Studio." if step == "start"
+             else "If nothing changes, press Stop, then Retry. Files already downloaded are kept.")
     return {
         "message": "No new output for {} minute{}.".format(minutes, "" if minutes == 1 else "s"),
         "fixes": [
             why + " Give it a few more minutes.",
-            "If nothing changes, press Stop, then Retry. Files already downloaded are kept.",
+            again,
             "The full log is on the board in `{}/{}.log`.".format(JOB_DIR, step),
         ],
     }
@@ -475,8 +486,7 @@ def describe(parsed: dict) -> dict:
             if idle >= STALL_AFTER_SEC[step]:
                 entry["stall"] = _stall(step, idle)
         elif step == "start" and loading:
-            # Started from a shell on the board: still loading, and the job's log is an old one.
-            entry["state"], entry["log"] = "running", ""
+            entry["state"] = "running"
         elif step in queued:
             entry["state"] = "queued"
         # A failed or stopped install or prepare counts even when an earlier run left its
@@ -495,10 +505,14 @@ def describe(parsed: dict) -> dict:
             blocked = _blocking_problem(step, fields)
             if blocked:
                 entry["state"], entry["problem"] = "blocked", blocked
-        if entry["problem"]:
+        if entry["problem"] and entry["problem"]["command"]:
             entry["problem"]["command"] = manual_command(step, fields.get("sima_cli"))
         if entry["state"] in ("done", "running", "failed"):
             entry["warnings"] = record.get("warnings") or []
+        # A GenAI Studio this job isn't running was started from a shell: the job's start log
+        # and its warnings are an old run's.
+        if step == "start" and entry["state"] in ("done", "running") and not (active and current == "start"):
+            entry["log"], entry["warnings"] = "", []
         steps.append(entry)
     return {"active": active, "steps": steps, "logDir": JOB_DIR}
 
@@ -531,7 +545,7 @@ def read_status(session) -> dict:
         )
     parsed = parse_status(result.stdout.decode("utf-8", errors="replace"))
     return dict(describe(parsed), simaCli=parsed["fields"].get("sima_cli") or None,
-                core=parsed["fields"].get("core") == "yes")
+                core=parsed["fields"].get("core") == "yes", installed=parsed["fields"].get("installed") == "yes")
 
 
 # One launch at a time per Insight; the board refuses a second job too (exit 75).
@@ -589,7 +603,7 @@ def run(session, redo=None) -> dict:
     with _LAUNCH_LOCK:
         state = read_status(session)
         if redo:
-            if state["steps"][0]["state"] != "done":
+            if not state["installed"]:
                 raise BoardError("setup_blocked", "Neat Apps is not installed on this board yet.",
                                  hint="Press Install and start GenAI Studio instead.", step="install")
             if _step_in_progress(state):

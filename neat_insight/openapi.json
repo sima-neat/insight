@@ -1515,6 +1515,8 @@
           "active": {"type": "boolean", "description": "Whether a setup job is running on the board."},
           "simaCli": {"type": ["string", "null"], "description": "The `sima-cli` found on the board, or null."},
           "core": {"type": "boolean", "description": "Whether the Neat Library's Python environment (`~/pyneat`) is on the board."},
+          "installed": {"type": "boolean", "description": "Whether Neat Apps' GenAI Studio is on the board (its `run.sh`), whatever the install step's last record says."},
+          "target": {"type": "object", "description": "How Insight reaches the board the steps run on, so a client can tell whether it is the board its GenAI Studio address points at.", "properties": {"mode": {"type": ["string", "null"], "enum": ["local", "ssh", null]}, "host": {"type": ["string", "null"], "description": "The SSH host; null for the board Insight runs on."}}},
           "logDir": {"type": "string", "description": "Where the job keeps its logs on the board."},
           "steps": {"type": "array", "items": {"$ref": "#/components/schemas/GenaiSetupStep"}}
         }
@@ -1539,7 +1541,7 @@
         "properties": {
           "message": {"type": "string", "description": "What went wrong, in plain words."},
           "fixes": {"type": "array", "items": {"type": "string"}, "description": "What to do about it, in order."},
-          "command": {"type": "string", "description": "The step's command, to run in a shell on the board instead, with the board's `sima-cli`. For install and prepare it also records the step's success, so the step shows done afterwards."}
+          "command": {"type": ["string", "null"], "description": "The step's command, to run in a shell on the board instead, with the board's `sima-cli`. For install and prepare it also records the step's success (and drops the failed run's log), so the step shows done afterwards. Null for a blocked step, whose prerequisite is missing."}
         }
       },
       "GenaiSettings": {

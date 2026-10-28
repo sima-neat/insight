@@ -33,7 +33,8 @@ dir=$(cd "$(dirname "$0")" && pwd)
 printf '\033[1mInstalling voices\033[0m\n'
 [ -t 0 ] && echo "asked for languages" >&2
 if [ -n "${FAKE_SETUP_FAIL:-}" ]; then echo "$FAKE_SETUP_FAIL" >&2; exit 1; fi
-if [ -n "${FAKE_SETUP_WAIT:-}" ]; then echo $$ > "$dir/setup.waiting"; while :; do sleep 0.1; done; fi
+# Waits until stopped, or until the test's temporary board is deleted, so none outlives a test.
+if [ -n "${FAKE_SETUP_WAIT:-}" ]; then echo $$ > "$dir/setup.waiting"; while [ -d "$dir" ]; do sleep 0.1; done; exit 1; fi
 if [ -n "${FAKE_SETUP_WARN:-}" ]; then
   echo 'Has header "Python.h" with dependency python: NO'
   echo "      ../meson.build:44:2: ERROR: Problem encountered: Cannot compile \`Python.h\`. Perhaps you need to install python-dev"
@@ -251,7 +252,10 @@ class BoardScriptTests(unittest.TestCase):
     def test_studio_started_from_a_shell_on_the_board_can_be_stopped_from_the_tab(self):
         self.install_and_prepare()
         studio = self.start_by_hand()
-        self.assertFalse(self.status()["active"], "no setup job runs it")
+        status = self.status()
+        self.assertFalse(status["active"], "no setup job runs it")
+        # The earlier job's start log and its warnings are not this Studio's.
+        self.assertEqual((status["steps"][2]["log"], status["steps"][2]["warnings"]), ("", []))
         status = genai_setup.stop_studio(self.session)
         self.assertEqual(self.states(status), ["done", "done", "pending"])
         self.assertEqual(studio.wait(timeout=10), 143)
@@ -299,7 +303,25 @@ class BoardScriptTests(unittest.TestCase):
         done = subprocess.run(["bash", "-c", status["steps"][1]["problem"]["command"].replace("~", str(self.home))],
                               env=self.env, capture_output=True, timeout=20)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(self.states(), ["done", "done", "pending"])
+        status = self.status()
+        self.assertEqual(self.states(status), ["done", "done", "pending"])
+        # The failed run's log is gone with it: no stale output or warnings under a done step.
+        self.assertEqual((status["steps"][1]["log"], status["steps"][1]["warnings"]), ("", []))
+
+    def test_the_offered_install_command_works_on_a_board_setup_never_ran_on(self):
+        command = genai_setup.manual_command("install", str(self.home.parent / "bin/sima-cli"))
+        done = subprocess.run(["bash", "-c", command.replace("~", str(self.home))], env=self.env, capture_output=True, timeout=20)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.states(), ["done", "pending", "pending"])
+
+    def test_run_setup_again_needs_neat_apps_installed_not_a_clean_install_record(self):
+        self.install_and_prepare()
+        # Installed by hand with plain sima-cli after a failed install: the old record stays.
+        (self.home / ".neat-insight/genai-setup/install.exit").write_text("1\n")
+        self.assertEqual(self.states()[0], "failed")
+        genai_setup.run(self.session, redo="prepare")
+        self.assertEqual(self.transport.commands[-2][4], "prepare start")
+        self.wait_for(lambda s: s["steps"][2]["state"] == "done")
 
     def test_stop_ends_a_step_and_marks_it_stopped(self):
         self.env["FAKE_SETUP_WAIT"] = "1"
@@ -495,6 +517,9 @@ class DescribeTests(unittest.TestCase):
         self.assertEqual(prepare["state"], "running")
         self.assertEqual(prepare["stall"]["message"], "No new output for 10 minutes.")
         self.assertIn("press Stop, then Retry", prepare["stall"]["fixes"][1])
+        start = self.describe(dict(fields, prepared="yes", running="yes", answering="no", steps="start", step="start"),
+                              {"start": dict(record, mtime=str(1000 - 200))})["steps"][2]
+        self.assertIn("press Stop GenAI Studio, then Start GenAI Studio", start["stall"]["fixes"][1])
         quiet = dict(record, mtime=str(1000 - 120))
         self.assertIsNone(self.describe(fields, {"prepare": quiet})["steps"][1]["stall"])
 
@@ -547,8 +572,14 @@ class DescribeTests(unittest.TestCase):
         fields = {"sima_cli": "/data/sima-cli/.venv/bin/sima-cli"}
         records = {"install": {"exit": "1", "mtime": "", "log": "boom", "warnings": []}}
         command = self.describe(fields, records)["steps"][0]["problem"]["command"]
-        self.assertEqual(command, "cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 /data/sima-cli/.venv/bin/sima-cli neat install apps "
-                                  "&& echo 0 > ~/.neat-insight/genai-setup/install.exit")
+        self.assertTrue(command.startswith("cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 /data/sima-cli/.venv/bin/sima-cli neat install apps && "))
+        self.assertTrue(command.endswith("echo 0 > ~/.neat-insight/genai-setup/install.exit"))
+        # A blocked step never ran: no log to read, and no command that could work instead.
+        blocked = self.describe({"sima_cli": "", "core": "no"})["steps"]
+        self.assertEqual([s["state"] for s in blocked], ["blocked", "blocked", "pending"])
+        for step in blocked[:2]:
+            self.assertIsNone(step["problem"]["command"])
+            self.assertFalse(any(".log" in fix for fix in step["problem"]["fixes"]))
 
     def test_known_causes_are_named_and_unknown_ones_point_at_the_log(self):
         cases = {
