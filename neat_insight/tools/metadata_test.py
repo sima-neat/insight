@@ -33,6 +33,15 @@ def generate_object_detection():
                     "bbox": [bbox[0] + random.randint(-6, 6), bbox[1] + random.randint(-6, 6), bbox[2], bbox[3]],
                 }
                 for object_id, label, bbox, confidence_range in detections
+            ] + [
+                {
+                    "id": "obj_5",
+                    "label": "ship",
+                    "confidence": round(random.uniform(0.7, 0.99), 2),
+                    # A box turned 0.5 rad clockwise; bbox is the upright extent of its corners.
+                    "bbox": [558, 300, 164, 121],
+                    "oriented_bbox": [640, 360, 160, 50, 0.5],
+                },
             ]
         },
     }

@@ -201,6 +201,80 @@ body {
   box-shadow: none;
 }
 
+.auxiliary-panel-resized {
+  width: auto;
+  height: auto;
+  max-width: none;
+  aspect-ratio: auto;
+  box-sizing: border-box;
+}
+
+.auxiliary-resize-handle {
+  position: absolute;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  touch-action: none;
+}
+
+.auxiliary-resize-n,
+.auxiliary-resize-s {
+  right: 10px;
+  left: 10px;
+  width: auto;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.auxiliary-resize-n {
+  top: 0;
+}
+
+.auxiliary-resize-s {
+  bottom: 0;
+}
+
+.auxiliary-resize-e,
+.auxiliary-resize-w {
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  height: auto;
+  cursor: ew-resize;
+}
+
+.auxiliary-resize-e {
+  right: 0;
+}
+
+.auxiliary-resize-w {
+  left: 0;
+}
+
+.auxiliary-resize-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.auxiliary-resize-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.auxiliary-resize-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.auxiliary-resize-se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+
 .auxiliary-panel-header {
   display: flex;
   flex: 0 0 auto;
@@ -223,6 +297,8 @@ body {
 }
 
 .auxiliary-panel-actions {
+  position: relative;
+  z-index: 2;
   display: inline-flex;
   flex: 0 0 auto;
   gap: 1px;

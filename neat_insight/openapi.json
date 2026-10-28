@@ -26,7 +26,7 @@
     {"name": "Viewer", "description": "Generate a vf viewer URL that is reachable from the current browser and bounded to the configured channel capacity. Viewer channel indexes are zero-based even though media-source slots are one-based."},
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
-    {"name": "GenAI Studio", "description": "Reach the GenAI Studio backend running on a board (`run.sh`, port 5000 by default) through Insight, so the browser never calls the board directly. Configure the board address once, then call the Studio's own API under `/api/genai/`."},
+    {"name": "GenAI Studio", "description": "Reach the GenAI Studio backend running on a board (`run.sh`, port 5000 by default) through Insight, so the browser never calls the board directly. Configure the board address once, then call the Studio's own API under `/api/genai/`. `/api/genai-setup` installs, prepares and starts GenAI Studio on the selected board."},
     {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
     {"name": "Peripherals", "description": "List the MIPI and USB cameras and ALSA microphones SiMa Sentinel reports on the selected board, preview a camera, and test a microphone. Sentinel discovers the devices and Insight reads its catalog. Discovery never captures frames or audio, opens a sound device, changes sensor controls, or publishes streams; only a camera preview or a microphone test, started explicitly, captures, and only while it runs. Each camera mode is Available or Unsupported, decided from Sentinel's report: its sensor is in the board's camera overlays, the ISP outputs its size, and its format is NV12 (a fixed fact about Neat's `CameraInput`, not queried from the board). Core has no audio input node, so microphones carry no verdict."},
     {"name": "Sentinel", "description": "Read SiMa Sentinel telemetry from the selected board and control its traces. Sentinel serves its API on a unix socket that is never exposed over the network, so Insight reaches it from the board itself: in process when Insight runs on the board, and otherwise by running a small client there over SSH. Metric values are `null` when the board cannot measure them, never zero."}
@@ -972,6 +972,67 @@
         }
       }
     },
+    "/api/genai-setup": {
+      "get": {
+        "tags": ["GenAI Studio"],
+        "summary": "Get GenAI Studio's setup state on the selected board",
+        "description": "Reads, on the board Insight is connected to, whether GenAI Studio is installed (`~/prebuilt-apps/examples/genai/neat-genai-studio`), prepared (`setup.sh` has run) and running, and the progress of a setup job started with `POST /api/genai-setup/run`. A failed step carries the cause, the fixes and the command to run by hand; a running step with no new output for a while carries a `stall` note.",
+        "operationId": "getGenaiSetup",
+        "responses": {
+          "200": {"description": "Each setup step's state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/genai-setup/run": {
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Install, prepare and start GenAI Studio on the selected board",
+        "description": "Starts one detached job on the board running every step that is not done yet, in order: `NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps` in the home directory (the running Insight is never reinstalled), `setup.sh` without a terminal (default voice languages), then `run.sh`, which keeps running. The job outlives the request, the SSH session and Insight; its logs are in `~/.neat-insight/genai-setup/` on the board. Refuses while a step runs or GenAI Studio is still starting (`setup_running`), when everything is done (`setup_done`), or when a step's prerequisite is missing (`setup_blocked`, with the step and the fix). `{\"redo\": \"prepare\"}` runs `setup.sh` again and restarts GenAI Studio, for example after fixing what it warned about; GenAI Studio is stopped first. A GenAI Studio still running while an earlier step failed or was stopped is also stopped first, and started again after that step.",
+        "operationId": "runGenaiSetup",
+        "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"redo": {"type": "string", "enum": ["prepare"], "description": "Run this step again, and the ones after it, even though it is done."}}}, "example": {"redo": "prepare"}}}},
+        "responses": {
+          "200": {"description": "The job started; each step's state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/genai-setup/stop": {
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Stop the GenAI Studio setup job",
+        "description": "Ends the running setup step and the steps queued after it; the step is reported as failed with the message that it was stopped. During the start step this stops GenAI Studio with `run.sh stop`, and the start step waits to be run again. Does nothing when no job runs.",
+        "operationId": "stopGenaiSetup",
+        "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
+        "responses": {
+          "200": {"description": "Each setup step's state after stopping.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/genai-setup/stop-studio": {
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Stop GenAI Studio on the board",
+        "description": "Stops GenAI Studio with `run.sh stop`, whether the setup job or a shell on the board started it, and waits until it has ended. The start step then waits to be run again. Refused with `setup_running` while a setup step is in progress; does nothing when GenAI Studio is not running.",
+        "operationId": "stopGenaiStudio",
+        "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
+        "responses": {
+          "200": {"description": "Each setup step's state after stopping.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
     "/api/board": {
       "get": {
         "tags": ["Board"],
@@ -1585,6 +1646,45 @@
         "properties": {"error": {"type": "string"}, "reason": {"type": "string", "enum": ["not-relayed", "not-configured", "invalid-address", "unreachable", "bad-request", "cfg-unreadable", "cfg-unwritable"]}},
         "example": {"error": "GenAI Studio backend unreachable at https://192.168.2.3:5000: [Errno 61] Connection refused", "reason": "unreachable"}
       },
+      "GenaiSetupStatus": {
+        "type": "object",
+        "description": "GenAI Studio's setup steps on the selected board.",
+        "required": ["board", "generation", "active", "steps", "logDir"],
+        "properties": {
+          "board": {"type": "object", "description": "The board the steps run on: its `label` and where it was selected (`source`).", "additionalProperties": true},
+          "generation": {"type": "integer", "description": "The board selection this state was read from."},
+          "active": {"type": "boolean", "description": "Whether a setup job is running on the board."},
+          "simaCli": {"type": ["string", "null"], "description": "The `sima-cli` found on the board, or null."},
+          "core": {"type": "boolean", "description": "Whether the Neat Library's Python environment (`~/pyneat`) is on the board."},
+          "installed": {"type": "boolean", "description": "Whether Neat Apps' GenAI Studio is on the board (its `run.sh`), whatever the install step's last record says."},
+          "target": {"type": "object", "description": "How Insight reaches the board the steps run on, so a client can tell whether it is the board its GenAI Studio address points at.", "properties": {"mode": {"type": ["string", "null"], "enum": ["local", "ssh", null]}, "host": {"type": ["string", "null"], "description": "The SSH host; null for the board Insight runs on."}}},
+          "logDir": {"type": "string", "description": "Where the job keeps its logs on the board."},
+          "steps": {"type": "array", "items": {"$ref": "#/components/schemas/GenaiSetupStep"}}
+        }
+      },
+      "GenaiSetupStep": {
+        "type": "object",
+        "required": ["id", "title", "description", "state", "log", "problem", "stall", "warnings"],
+        "properties": {
+          "id": {"type": "string", "enum": ["install", "prepare", "start"]},
+          "title": {"type": "string"},
+          "description": {"type": "string"},
+          "state": {"type": "string", "enum": ["done", "running", "queued", "failed", "blocked", "pending"], "description": "`blocked`: a prerequisite is missing, and `problem` says which. The start step is `running` while GenAI Studio runs but does not answer yet (it loads its voices first), and `done` once it answers."},
+          "log": {"type": "string", "description": "The last lines of the step's output, without colours."},
+          "problem": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "Why a failed or blocked step can't finish."},
+          "stall": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "A running step with no new output for a while: what may be happening and what to do."},
+          "warnings": {"type": "array", "description": "What a done, running or failed step warned about (setup.sh's ⚠ lines, GenAI Studio's WARNING log lines), each listed once; known ones in plain words with the fix.", "items": {"type": "object", "required": ["message", "fix"], "properties": {"message": {"type": "string"}, "fix": {"type": ["string", "null"]}}}}
+        }
+      },
+      "GenaiSetupProblem": {
+        "type": "object",
+        "required": ["message", "fixes"],
+        "properties": {
+          "message": {"type": "string", "description": "What went wrong, in plain words."},
+          "fixes": {"type": "array", "items": {"type": "string"}, "description": "What to do about it, in order."},
+          "command": {"type": ["string", "null"], "description": "The step's command, to run in a shell on the board instead, with the board's `sima-cli`. For install and prepare it also records the step's success (and drops the failed run's log), so the step shows done afterwards. Null for a blocked step, whose prerequisite is missing."}
+        }
+      },
       "GenaiSettings": {
         "type": "object",
         "description": "Board address Insight relays GenAI calls to, and stored settings.",
@@ -1926,11 +2026,12 @@
         "required": ["error", "code"],
         "properties": {
           "error": {"type": "string", "description": "Human-readable failure reason."},
-          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "mode_adjusted", "preview_active", "unreachable", "auth_failed", "tool_missing", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version", "microphone_in_use", "test_running", "stopped_early", "trace_conflict", "already_installed", "request_too_large", "sentinel_missing", "sentinel_stopped", "sentinel_denied", "sentinel_schema", "sentinel_failed", "response_too_large"]},
+          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "mode_adjusted", "preview_active", "unreachable", "auth_failed", "tool_missing", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version", "microphone_in_use", "test_running", "stopped_early", "trace_conflict", "already_installed", "request_too_large", "sentinel_missing", "sentinel_stopped", "sentinel_denied", "sentinel_schema", "sentinel_failed", "response_too_large", "setup_running", "setup_done", "setup_blocked"]},
           "generation": {"type": "integer", "description": "Sentinel endpoints only: the board `generation` that answered with the failure, present once the selected board is known, so a client can discard a failure from a board other than the one it asked."},
           "hint": {"type": ["string", "null"], "description": "Concrete recovery step, such as the `ssh-copy-id` command to run."},
           "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
           "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},
+          "step": {"type": "string", "description": "`setup_blocked` only: the GenAI Studio setup step whose prerequisite is missing."},
           "detail": {"type": "string", "description": "The underlying error text, such as SiMa Sentinel's answer or the socket failure."},
           "host": {"type": "string", "description": "`host_key_changed` only: the known_hosts name of the board."},
           "expected_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint Insight trusted."},

@@ -5324,6 +5324,184 @@ button:disabled {
   flex: 1;
 }
 
+.genai-tutorial-question {
+  font-weight: 600;
+}
+
+.genai-tutorial-commands {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 72ch;
+}
+
+.genai-tutorial-commands pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.genai-setup-steps {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  max-width: 80ch;
+}
+
+.genai-setup-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.genai-setup-step-body {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.genai-setup-step-body .hint {
+  margin: 0;
+}
+
+.genai-setup-step-title {
+  margin: 0;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.genai-step-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+}
+
+.genai-step-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.genai-step-icon-done {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.genai-step-icon-running {
+  border-color: rgba(25, 113, 62, 0.25);
+  border-top-color: var(--ok);
+  animation: genai-step-spin 0.9s linear infinite;
+}
+
+.genai-step-icon-failed {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+@keyframes genai-step-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genai-step-icon-running {
+    animation-duration: 2.4s;
+  }
+}
+
+.genai-setup-fix {
+  color: var(--ink-soft);
+}
+
+.genai-setup-last {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.genai-setup-help {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #edb1be;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+/* Warnings and quiet-step notes stay in the panel's own blue, a shade lighter. */
+.genai-setup-help-warn {
+  border-color: rgba(14, 90, 184, 0.25);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+}
+
+.genai-setup-help-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.genai-setup-help ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 2px;
+}
+
+.genai-setup-help pre {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.genai-setup-help summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.genai-setup-manual {
+  display: grid;
+  gap: 4px;
+}
+
+.genai-setup-manual .genai-tutorial-commands pre {
+  margin: 0;
+  white-space: pre;
+}
+
 .genai-spotlight {
   outline: 3px solid var(--accent);
   outline-offset: 3px;

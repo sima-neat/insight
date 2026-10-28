@@ -80,6 +80,37 @@ export async function probeHealth(signal) {
   }
 }
 
+// Setup goes to Insight's own /api/genai-setup, not through the relay: Insight
+// runs the steps on the selected board itself.
+export const SETUP = '/api/genai-setup'
+
+async function setupRequest(path, method = 'GET', json) {
+  const init = { method, cache: 'no-store' }
+  if (json !== undefined) {
+    init.headers = { 'Content-Type': 'application/json' }
+    init.body = JSON.stringify(json)
+  }
+  let response
+  try {
+    response = await fetch(`${SETUP}${path}`, init)
+  } catch (error) {
+    throw new GenaiError(`Insight could not be reached: ${error.message}`)
+  }
+  const body = await readJson(response)
+  if (!response.ok) throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
+  return body
+}
+
+export const getSetup = () => setupRequest('')
+// `generation` is the board the panel showed: Insight refuses the action once another
+// board is selected (409 stale_snapshot).
+const forBoard = (path, generation) => (generation == null ? path : `${path}?generation=${encodeURIComponent(generation)}`)
+// redo: 'prepare' runs setup.sh again and restarts GenAI Studio.
+export const runSetup = (redo, generation) => setupRequest(forBoard('/run', generation), 'POST', redo ? { redo } : undefined)
+export const stopSetup = (generation) => setupRequest(forBoard('/stop', generation), 'POST')
+// Stops GenAI Studio however it was started; its start step then waits to run again.
+export const stopStudio = (generation) => setupRequest(forBoard('/stop-studio', generation), 'POST')
+
 export async function getSettings() {
   const response = await fetch(`${RELAY}/settings`)
   return readJson(response)

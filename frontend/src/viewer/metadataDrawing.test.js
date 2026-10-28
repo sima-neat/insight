@@ -37,16 +37,17 @@ function recordingContext() {
     strokeAlphas: [],
     fills: [],
     boxes: [],
+    path: [],
     texts: [],
     save() { stack.push({ lineDash: [...this.lineDash], globalAlpha: this.globalAlpha }); },
     restore() { Object.assign(this, stack.pop()); },
     setLineDash(value) { this.lineDash = [...value]; },
     strokeRect(...box) { this.strokes.push([...this.lineDash]); this.boxes.push(box); },
     stroke() { this.strokes.push([...this.lineDash]); this.strokeAlphas.push(this.globalAlpha); },
-    beginPath() {},
+    beginPath() { this.path = []; },
     closePath() {},
-    moveTo() {},
-    lineTo() {},
+    moveTo(x, y) { this.path.push([x, y]); },
+    lineTo(x, y) { this.path.push([x, y]); },
     arc() {},
     fill() { this.fills.push(this.fillStyle); },
     fillRect() {},
@@ -267,6 +268,31 @@ test("shared ROI is drawn once in any metadata order and filtering still applies
     }
     assert.equal(ctx.fills.filter(color => color === "rgba(0,255,0,0.1)").length - before, 1);
     assert.equal(ctx.boxes.length - boxesBefore, 3);
+  }
+});
+
+test("oriented boxes draw their rotated corners and fall back to bbox when malformed", (t) => {
+  const strategies = loadStrategies(t);
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+  const settings = { general: { showRoi: false }, type: {} };
+  const object = { label: "plane", confidence: 0.9, bbox: [45, 40, 10, 20] };
+
+  // A quarter turn clockwise stands a 20x10 box upright around its center.
+  const rotated = recordingContext();
+  const oriented_bbox = [50, 50, 20, 10, Math.PI / 2];
+  strategies["object-detection"](rotated, canvas, { objects: [{ ...object, oriented_bbox }] }, video, 0, { settings });
+  assert.deepEqual(
+    rotated.path.map(([x, y]) => [Math.round(x), Math.round(y)]),
+    [[45, 60], [55, 60], [55, 40], [45, 40]],
+  );
+  assert.deepEqual(rotated.boxes, []);
+  assert.deepEqual(rotated.texts, ["plane (90%)"]);
+
+  for (const malformed of [[50, 50, 20, 10], [50, 50, 20, 10, "0"], [50, 50, 20, NaN, 0]]) {
+    const ctx = recordingContext();
+    strategies["object-detection"](ctx, canvas, { objects: [{ ...object, oriented_bbox: malformed }] }, video, 0, { settings });
+    assert.deepEqual(ctx.boxes, [object.bbox], JSON.stringify(malformed));
   }
 });
 

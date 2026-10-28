@@ -271,6 +271,26 @@ function updateTrackHistory(trackHistory, channelIndex, tracks, now, historySett
   });
 }
 
+// An oriented box is [cx, cy, width, height, angle] in frame pixels and radians; a positive
+// angle turns the box clockwise on screen. Returns its corners in drawing order, or null when
+// the value is not five finite numbers.
+function orientedBoxCorners(orientedBox) {
+  if (!Array.isArray(orientedBox) || orientedBox.length !== 5 || !orientedBox.every(Number.isFinite)) {
+    return null;
+  }
+  const [cx, cy, width, height, angle] = orientedBox;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const [wx, wy] = [width / 2 * cos, width / 2 * sin];
+  const [hx, hy] = [-height / 2 * sin, height / 2 * cos];
+  return [
+    [cx + wx + hx, cy + wy + hy],
+    [cx + wx - hx, cy + wy - hy],
+    [cx - wx - hx, cy - wy - hy],
+    [cx - wx + hx, cy - wy + hy],
+  ];
+}
+
 function deriveBboxFromPolygon(points) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   points.forEach(([px, py]) => {
@@ -378,7 +398,15 @@ window.drawStrategies = {
       ctx.font = "14px sans-serif";
       ctx.fillStyle = color;
 
-      ctx.strokeRect(x * scaleX + offsetX, y * scaleY + offsetY, w * scaleX, h * scaleY);
+      const corners = orientedBoxCorners(obj.oriented_bbox);
+      if (corners) {
+        ctx.beginPath();
+        corners.forEach(([px, py]) => ctx.lineTo(px * scaleX + offsetX, py * scaleY + offsetY));
+        ctx.closePath();
+        ctx.stroke();
+      } else {
+        ctx.strokeRect(x * scaleX + offsetX, y * scaleY + offsetY, w * scaleX, h * scaleY);
+      }
       const label = `${obj.label} (${Math.round(obj.confidence * 100)}%)`;
       ctx.fillText(label, (x + 2) * scaleX + offsetX, (y - 6) * scaleY + offsetY);
     });
