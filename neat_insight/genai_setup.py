@@ -155,6 +155,13 @@ studio_alive() {
   [ -r "/proc/$1/cmdline" ] || return 0
   tr '\000' ' ' < "/proc/$1/cmdline" | grep -q 'run\.sh'
 }
+# Stops wait (up to 15 s) for a launch in progress, also from another Insight, so they
+# see the runner it starts. run.sh stop is run without the lock's descriptor.
+wait_for_launch() {
+  [ -d "$1" ] && command -v flock >/dev/null 2>&1 || return 0
+  exec 9>"$1/launch.lock"
+  flock -w 15 9 || true
+}
 # Before `run.sh stop`: drop a pid file whose process is no longer run.sh, so run.sh
 # signals nothing else.
 forget_stale_studio() {
@@ -271,10 +278,11 @@ end_job() {
 _STOP_SCRIPT = _ALIVE + _END_JOB + r"""
 jobs="$HOME/.neat-insight/genai-setup"
 studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
+wait_for_launch "$jobs"
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 step=$(cat "$jobs/step" 2>/dev/null || true)
 alive "$runner" || exit 0
-if [ "$step" = start ] && [ -x "$studio/run.sh" ]; then forget_stale_studio "$studio"; (cd "$studio" && ./run.sh stop) >/dev/null 2>&1; fi
+if [ "$step" = start ] && [ -x "$studio/run.sh" ]; then forget_stale_studio "$studio"; (cd "$studio" && ./run.sh stop) >/dev/null 2>&1 9>&-; fi
 end_job "$runner"
 [ -z "$step" ] || [ -s "$jobs/$step.exit" ] || printf '143\n' > "$jobs/$step.exit"
 """
@@ -285,10 +293,11 @@ end_job "$runner"
 _STOP_STUDIO_SCRIPT = _ALIVE + _END_JOB + r"""
 jobs="$HOME/.neat-insight/genai-setup"
 studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
+wait_for_launch "$jobs"
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 step=$(cat "$jobs/step" 2>/dev/null || true)
 forget_stale_studio "$studio"
-[ -x "$studio/run.sh" ] && (cd "$studio" && ./run.sh stop) >/dev/null 2>&1
+[ -x "$studio/run.sh" ] && (cd "$studio" && ./run.sh stop) >/dev/null 2>&1 9>&-
 if [ "$step" = start ] && alive "$runner"; then end_job "$runner"; fi
 [ -f "$jobs/start.log" ] && printf 'stopped\n' > "$jobs/start.exit"
 exit 0
@@ -636,7 +645,10 @@ def stop(session) -> dict:
 
 
 def _payload(session, state: dict) -> dict:
-    return dict(state, board=board_summary(session), generation=session.generation)
+    # `target`: how Insight reaches the board setup acts on, so the tab can tell whether it is
+    # the board its GenAI Studio address points at.
+    target = {"mode": getattr(session.target, "mode", None), "host": getattr(session.target, "host", None)}
+    return dict(state, board=board_summary(session), target=target, generation=session.generation)
 
 
 # API: what is installed, prepared and running on the board, and the setup job's progress.

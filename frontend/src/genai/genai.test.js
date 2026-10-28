@@ -25,6 +25,7 @@ import {
   bannerAction,
   canRunSetupAgain,
   canStopStudio,
+  relayOnSetupBoard,
   connectIcon,
   lastLine,
   requestProblem,
@@ -432,7 +433,10 @@ test('the setup button says what is left to do, and offers Retry after a failure
   assert.equal(setupStoppable({ ...status('done', 'done', 'done'), active: true }), false)
   assert.equal(setupStoppable(status('done', 'failed', 'pending')), false)
   assert.equal(lastLine('Downloading\nInstalling voices\n\n'), 'Installing voices')
-  assert.deepEqual(bannerAction(status('done', 'done', 'pending')), { label: 'Start GenAI Studio', runNow: true })
+  const local = { ...status('done', 'done', 'pending'), target: { mode: 'local', host: null } }
+  assert.deepEqual(bannerAction(local, 'https://127.0.0.1:5000'), { label: 'Start GenAI Studio', runNow: true })
+  assert.deepEqual(bannerAction(local, 'https://192.168.2.9:5000'), { label: 'Start GenAI Studio', runNow: false }, 'the tab points at another board')
+  assert.deepEqual(bannerAction(status('done', 'done', 'pending'), 'https://127.0.0.1:5000'), { label: 'Start GenAI Studio', runNow: false }, 'board unknown')
   assert.deepEqual(bannerAction(status('pending', 'pending', 'pending')), { label: 'Set up GenAI Studio', runNow: false })
   assert.deepEqual(bannerAction(status('done', 'failed', 'pending')), { label: 'Set up GenAI Studio', runNow: false }, 'a failure is shown first')
   assert.deepEqual(bannerAction(null), { label: 'Set up GenAI Studio', runNow: false })
@@ -462,6 +466,17 @@ test('GenAI Studio can be stopped once it runs and no setup step is in progress'
   assert.equal(canStopStudio({ active: true, steps: steps('queued', 'running') }), false, 'setup.sh is running')
   assert.equal(canStopStudio({ active: false, steps: steps('pending') }), false, 'not running')
   assert.equal(canStopStudio(null), false)
+})
+
+test('the one-click start only acts on the board the tab connects to', () => {
+  const ssh = { target: { mode: 'ssh', host: '192.168.2.3' } }
+  assert.equal(relayOnSetupBoard('https://192.168.2.3:5000', ssh), true)
+  assert.equal(relayOnSetupBoard('https://192.168.2.4:5000', ssh), false)
+  assert.equal(relayOnSetupBoard('https://localhost:5000', { target: { mode: 'local', host: null } }), true)
+  assert.equal(relayOnSetupBoard('https://[::1]:5000', { target: { mode: 'local', host: null } }), true)
+  assert.equal(relayOnSetupBoard('not a url', ssh), false)
+  assert.equal(relayOnSetupBoard('', ssh), false)
+  assert.equal(relayOnSetupBoard('https://192.168.2.3:5000', {}), false)
 })
 
 test('a failed setup request says what happened and what to do', () => {

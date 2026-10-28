@@ -71,11 +71,28 @@ export function canRunSetupAgain(status) {
   return Boolean(prepare && prepare.state === 'done' && (prepare.warnings || []).length && !setupStoppable(status))
 }
 
-// The banner's button while GenAI Studio doesn't answer: one click starts an
-// installed Studio; anything more opens the panel first.
-export function bannerAction(status) {
+// Whether the GenAI Studio address the tab uses (`relayUrl`, from Settings) points at the
+// board setup acts on (`status.target`: Insight's selected board). Unknown counts as no.
+export function relayOnSetupBoard(relayUrl, status) {
+  const target = status && status.target
+  if (!target || !relayUrl) return false
+  let host
+  try {
+    host = new URL(relayUrl).hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return false
+  }
+  if (target.mode === 'local') return ['127.0.0.1', 'localhost', '::1'].includes(host)
+  return Boolean(target.host) && host === target.host
+}
+
+// The banner's button while GenAI Studio doesn't answer: one click starts an installed
+// Studio on the board the tab's address points at; anything more opens the panel first.
+export function bannerAction(status, relayUrl) {
   const next = setupAction(status)
-  if (next && next.label === 'Start GenAI Studio') return { label: 'Start GenAI Studio', runNow: true }
+  if (next && next.label === 'Start GenAI Studio') {
+    return { label: 'Start GenAI Studio', runNow: relayOnSetupBoard(relayUrl, status) }
+  }
   return { label: 'Set up GenAI Studio', runNow: false }
 }
 

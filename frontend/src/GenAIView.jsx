@@ -88,6 +88,7 @@ import {
   bannerAction,
   canRunSetupAgain,
   canStopStudio,
+  relayOnSetupBoard,
   connectIcon,
   lastLine,
   requestProblem,
@@ -1640,7 +1641,7 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   const setupNext = setupAction(setupStatus)
-  const banner = bannerAction(setupStatus)
+  const banner = bannerAction(setupStatus, settings?.url)
 
   // One click starts an installed GenAI Studio, once a fresh read confirms only that is
   // left (the board may have changed since the banner's button was labelled).
@@ -1648,7 +1649,7 @@ export default function GenAIView({ onError, onStatus }) {
     openSetup()
     if (!banner.runNow) return
     const fresh = await getSetup().catch(() => null)
-    if (fresh && bannerAction(fresh).runNow) setupRequest('run', () => runSetup(undefined, fresh.generation))
+    if (fresh && bannerAction(fresh, settings?.url).runNow) setupRequest('run', () => runSetup(undefined, fresh.generation))
   }
 
   function tryTutorialAction(action) {
@@ -1724,6 +1725,12 @@ export default function GenAIView({ onError, onStatus }) {
             access on the board; the steps keep running if you close this page.
           </p>
           {!setupStatus && !setupReadError && <p className="hint">Checking the board…</p>}
+          {setupStatus && settings?.url && !relayOnSetupBoard(settings.url, setupStatus) && (
+            <p className="hint genai-setup-slow">
+              These steps run on {setupStatus.board?.label || 'the board Insight is connected to'}, but this tab connects to {settings.url}.
+              If that is not the same board, change the board address in Settings or select the board in the Board menu.
+            </p>
+          )}
           {setupStatus && (
             <ol className="genai-setup-steps">
               {setupStatus.steps.map((item) => (

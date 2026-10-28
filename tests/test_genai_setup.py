@@ -440,6 +440,18 @@ class BoardScriptTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 75)
         self.assertFalse((jobs / "runner.pid").exists())
 
+    def test_stop_waits_for_a_launch_from_another_insight(self):
+        if not shutil.which("flock"):
+            self.skipTest("needs flock, as on the board")
+        jobs = self.home / ".neat-insight/genai-setup"
+        jobs.mkdir(parents=True)
+        with open(jobs / "launch.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            stop = subprocess.Popen(genai_setup.stop_studio_command(), env=self.env)
+            time.sleep(0.5)
+            self.assertIsNone(stop.poll(), "Stop read the job before the launch finished")
+        self.assertEqual(stop.wait(timeout=10), 0)
+
     def test_stop_waits_for_a_launch_in_progress(self):
         genai_setup._LAUNCH_LOCK.acquire()
         try:
@@ -621,6 +633,7 @@ class ApiTests(unittest.TestCase):
         self.answer(self.status(installed="yes"))
         body = self.client.get("/api/genai-setup").get_json()
         self.assertEqual(body["board"]["label"], "sima@192.168.2.2")
+        self.assertEqual(body["target"], {"mode": "ssh", "host": None})
         self.assertEqual(body["generation"], 4)
         self.assertEqual([s["id"] for s in body["steps"]], ["install", "prepare", "start"])
         self.assertEqual([s["state"] for s in body["steps"]], ["done", "pending", "pending"])
