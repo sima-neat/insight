@@ -354,6 +354,9 @@ def diagnose(step: str, log: str, exit_code: str) -> dict:
     # A stopped step's log ends wherever it was cut off, so it says nothing about a cause.
     if exit_code == "143":
         return _problem(step, "The step was stopped before it finished.", ["Press Retry to run it again."])
+    if exit_code == INTERRUPTED:
+        return _problem(step, "The step was cut off before it finished, for example by a board restart.",
+                        ["Press Retry to run it again."])
     for pattern, message, fixes in _CAUSES:
         if re.search(pattern, log, re.IGNORECASE):
             return _problem(step, message, fixes)
@@ -423,6 +426,11 @@ def describe(parsed: dict) -> dict:
     for step in STEPS:
         record = records.get(step) or {"exit": "", "mtime": "", "log": "", "warnings": []}
         record = dict(record, exit=record["exit"] or "")
+        # The job is gone, but this install or prepare was its step and never recorded an
+        # exit code: it was cut off. (An ended start step is just a stopped Studio.)
+        if (not active and step != "start" and step in records and not record["exit"]
+                and fields.get("step") == step):
+            record["exit"] = INTERRUPTED
         failed = record["exit"] not in ("", "0") and not _stopped_studio(step, record["exit"])
         entry = {"id": step, "title": TITLES[step], "description": DESCRIPTIONS[step], "log": record["log"],
                  "problem": None, "stall": None, "warnings": []}
@@ -457,6 +465,11 @@ def describe(parsed: dict) -> dict:
             entry["warnings"] = record.get("warnings") or []
         steps.append(entry)
     return {"active": active, "steps": steps, "logDir": JOB_DIR}
+
+
+# A step the job was running when it ended without recording an exit code (the board
+# restarted, or the job was killed).
+INTERRUPTED = "interrupted"
 
 
 def _stopped_studio(step: str, exit_code: str) -> bool:
@@ -589,8 +602,10 @@ def _launch(session, steps, sima_cli) -> dict:
 
 
 def stop(session) -> dict:
-    session.transport.exec(stop_command(), timeout=STATUS_TIMEOUT_SEC)
-    return read_status(session)
+    # Under the launch lock, so a Stop can't run between another request's check and its launch.
+    with _LAUNCH_LOCK:
+        session.transport.exec(stop_command(), timeout=STATUS_TIMEOUT_SEC)
+        return read_status(session)
 
 
 def _payload(session, state: dict) -> dict:

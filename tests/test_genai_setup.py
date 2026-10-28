@@ -385,6 +385,36 @@ class BoardScriptTests(unittest.TestCase):
         self.assertEqual(self.transport.commands[-2][4], "prepare start")
         self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
 
+    def test_a_step_cut_off_without_an_exit_code_is_reported_and_retried(self):
+        self.install_and_prepare()
+        self.env["FAKE_SETUP_WAIT"] = "1"
+        genai_setup.run(self.session, redo="prepare")
+        self.wait_for(lambda s: (self.studio / "setup.waiting").exists())
+        # As a board restart would: the runner and setup.sh die, and no exit code is written.
+        jobs = self.home / ".neat-insight/genai-setup"
+        for pid in (int((jobs / "runner.pid").read_text()), int((self.studio / "setup.waiting").read_text())):
+            os.kill(pid, 9)
+        status = self.wait_for(lambda s: not s["active"])
+        self.assertFalse((jobs / "prepare.exit").exists())
+        self.assertEqual(self.states(status), ["done", "failed", "pending"])
+        self.assertIn("cut off before it finished", status["steps"][1]["problem"]["message"])
+        del self.env["FAKE_SETUP_WAIT"]
+        genai_setup.run(self.session)
+        self.assertEqual(self.transport.commands[-2][4], "prepare start")
+        self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+
+    def test_stop_waits_for_a_launch_in_progress(self):
+        genai_setup._LAUNCH_LOCK.acquire()
+        try:
+            stopper = threading.Thread(target=genai_setup.stop, args=(self.session,))
+            stopper.start()
+            stopper.join(0.5)
+            self.assertTrue(stopper.is_alive(), "Stop ran while a launch held the lock")
+        finally:
+            genai_setup._LAUNCH_LOCK.release()
+        stopper.join(10)
+        self.assertFalse(stopper.is_alive())
+
     def test_setup_is_not_run_again_while_a_step_is_running(self):
         self.env["FAKE_SETUP_WAIT"] = "1"
         genai_setup.run(self.session)
@@ -454,6 +484,15 @@ class DescribeTests(unittest.TestCase):
         # A running GenAI Studio is what counts for the start step.
         self.assertEqual([s["state"] for s in steps], ["failed", "failed", "done"])
         self.assertEqual(steps[1]["problem"]["message"], "The step was stopped before it finished.")
+
+    def test_an_ended_job_leaves_its_cut_off_step_failed_but_a_cut_off_studio_just_stopped(self):
+        fields = {"installed": "yes", "prepared": "yes", "steps": "prepare start", "step": "prepare"}
+        records = {"prepare": {"exit": "", "mtime": "", "log": "Installing voices", "warnings": []}}
+        self.assertEqual([s["state"] for s in self.describe(fields, records)["steps"]], ["done", "failed", "pending"])
+        fields = dict(fields, step="start")
+        records = {"prepare": {"exit": "0", "mtime": "", "log": "", "warnings": []},
+                   "start": {"exit": "", "mtime": "", "log": "Loaded Piper model", "warnings": []}}
+        self.assertEqual([s["state"] for s in self.describe(fields, records)["steps"]], ["done", "done", "pending"])
 
     def test_known_causes_are_named_and_unknown_ones_point_at_the_log(self):
         cases = {
