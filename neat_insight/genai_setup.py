@@ -149,6 +149,18 @@ alive() {
   [ -r "/proc/$1/cmdline" ] || return 0
   tr '\000' ' ' < "/proc/$1/cmdline" | grep -q 'genai-setup *$'
 }
+# The same for GenAI Studio's pid file, which a reboot can leave behind: still run.sh?
+studio_alive() {
+  kill -0 "$1" 2>/dev/null || return 1
+  [ -r "/proc/$1/cmdline" ] || return 0
+  tr '\000' ' ' < "/proc/$1/cmdline" | grep -q 'run\.sh'
+}
+# Before `run.sh stop`: drop a pid file whose process is no longer run.sh, so run.sh
+# signals nothing else.
+forget_stale_studio() {
+  _pid=$(cat "$1/.neat-genai-studio.pid" 2>/dev/null || true)
+  [ -z "$_pid" ] || studio_alive "$_pid" || rm -f "$1/.neat-genai-studio.pid"
+}
 """
 
 # Every line is key=value, except each step's record, which starts at `@@<step>`.
@@ -166,7 +178,7 @@ pid=$(cat "$studio/.neat-genai-studio.pid" 2>/dev/null || true)
 # run.sh writes its pid, then its mode, then (a moment later) the URL it serves: a web
 # or backend-only mode without the URL yet is still starting. Without a mode (an older
 # run.sh), in --cli mode or without curl, a running Studio counts as answering.
-if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+if [ -n "$pid" ] && studio_alive "$pid"; then
   echo running=yes
   url=$(cat "$studio/.neat-genai-studio.url" 2>/dev/null || true)
   mode=$(cat "$studio/.neat-genai-studio.mode" 2>/dev/null || true)
@@ -226,6 +238,12 @@ done
 _LAUNCH_SCRIPT = _ALIVE + r"""
 jobs="$HOME/.neat-insight/genai-setup"
 mkdir -p "$jobs" || exit 1
+# One launch at a time on the board, also from another Insight: the lock is held until
+# this script ends, by when the new runner's pid is recorded.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$jobs/launch.lock"
+  flock -n 9 || { echo 'A setup job is being started.' >&2; exit 75; }
+fi
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 if alive "$runner"; then echo 'A setup job is already running.' >&2; exit 75; fi
 for s in $1; do rm -f "$jobs/$s.exit" "$jobs/$s.log"; done
@@ -233,7 +251,7 @@ printf '%s\n' "$1" > "$jobs/steps"
 rm -f "$jobs/step"
 detach=
 command -v setsid >/dev/null 2>&1 && detach=setsid
-SIMA_CLI="$2" nohup $detach sh -c RUNNER genai-setup >/dev/null 2>&1 </dev/null &
+SIMA_CLI="$2" nohup $detach sh -c RUNNER genai-setup >/dev/null 2>&1 </dev/null 9>&- &
 printf '%s\n' "$!" > "$jobs/runner.pid"
 """
 
@@ -256,7 +274,7 @@ studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 step=$(cat "$jobs/step" 2>/dev/null || true)
 alive "$runner" || exit 0
-if [ "$step" = start ] && [ -x "$studio/run.sh" ]; then (cd "$studio" && ./run.sh stop) >/dev/null 2>&1; fi
+if [ "$step" = start ] && [ -x "$studio/run.sh" ]; then forget_stale_studio "$studio"; (cd "$studio" && ./run.sh stop) >/dev/null 2>&1; fi
 end_job "$runner"
 [ -z "$step" ] || [ -s "$jobs/$step.exit" ] || printf '143\n' > "$jobs/$step.exit"
 """
@@ -269,6 +287,7 @@ jobs="$HOME/.neat-insight/genai-setup"
 studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 step=$(cat "$jobs/step" 2>/dev/null || true)
+forget_stale_studio "$studio"
 [ -x "$studio/run.sh" ] && (cd "$studio" && ./run.sh stop) >/dev/null 2>&1
 if [ "$step" = start ] && alive "$runner"; then end_job "$runner"; fi
 [ -f "$jobs/start.log" ] && printf 'stopped\n' > "$jobs/start.exit"

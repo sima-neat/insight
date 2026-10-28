@@ -1,4 +1,6 @@
+import fcntl
 import os
+import shutil
 import socket
 import subprocess
 import threading
@@ -414,6 +416,29 @@ class BoardScriptTests(unittest.TestCase):
         genai_setup.run(self.session)
         self.assertEqual(self.transport.commands[-2][4], "prepare start")
         self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+
+    def test_a_studio_pid_left_by_a_reboot_is_not_taken_for_studio(self):
+        if not Path("/proc/self/cmdline").exists():
+            self.skipTest("needs /proc, as on the board")
+        self.install_and_prepare()
+        pid_file = self.studio / ".neat-genai-studio.pid"
+        pid_file.write_text("{}\n".format(os.getpid()))   # reused by a process that isn't run.sh
+        self.assertEqual(self.states(), ["done", "done", "pending"])
+        genai_setup.stop_studio(self.session)
+        self.assertEqual(self.states(), ["done", "done", "pending"])
+        subprocess.run(genai_setup.stop_studio_command(), env=self.env, capture_output=True, timeout=20)
+        self.assertFalse(pid_file.exists(), "the stale pid file is dropped before run.sh stop")
+
+    def test_a_launch_from_another_insight_at_the_same_moment_is_refused(self):
+        if not shutil.which("flock"):
+            self.skipTest("needs flock, as on the board")
+        jobs = self.home / ".neat-insight/genai-setup"
+        jobs.mkdir(parents=True)
+        with open(jobs / "launch.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = self.transport.exec(genai_setup.launch_command(["install"], "sima-cli"), timeout=20)
+        self.assertEqual(result.exit_code, 75)
+        self.assertFalse((jobs / "runner.pid").exists())
 
     def test_stop_waits_for_a_launch_in_progress(self):
         genai_setup._LAUNCH_LOCK.acquire()
