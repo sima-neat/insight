@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,5 +178,64 @@ func TestIngestStatsBoundsRetiredPeers(t *testing.T) {
 	}
 	if webrtcSnapshot.PeerCount != 1 || webrtcSnapshot.ConnectionStates["connected"] != 1 {
 		t.Fatalf("live peer lost to eviction: %#v", webrtcSnapshot)
+	}
+}
+
+func browserSynchronizationFromReport(t *testing.T, raw string) BrowserSynchronizationStats {
+	t.Helper()
+	stats := NewEgressStats(1)
+	peerID := stats.RegisterPeer()
+	if !stats.RecordBrowserReport(peerID, []byte(raw)) {
+		t.Fatalf("expected browser report to be accepted: %s", raw)
+	}
+	snapshot, ok := stats.Snapshot(true, false, time.Now())
+	if !ok || snapshot.Peers[0].Browser == nil {
+		t.Fatalf("expected a browser report in the snapshot")
+	}
+	return snapshot.Peers[0].Browser.Synchronization
+}
+
+func TestEgressStatsReportsLateMetadata(t *testing.T) {
+	synchronization := browserSynchronizationFromReport(t, `{
+		"type": "browser_egress_stats",
+		"channel": 1,
+		"synchronization": {
+			"video_sync_buffer_ms": 350,
+			"metadata_late": 184,
+			"metadata_lateness_recent_median_ms": 153.4,
+			"metadata_lateness_recent_max_ms": 212
+		}
+	}`)
+
+	if synchronization.MetadataLate != 184 {
+		t.Fatalf("expected 184 late messages, got %d", synchronization.MetadataLate)
+	}
+	if synchronization.MetadataLatenessRecentMedianMS == nil || *synchronization.MetadataLatenessRecentMedianMS != 153.4 {
+		t.Fatalf("unexpected median lateness: %v", synchronization.MetadataLatenessRecentMedianMS)
+	}
+	if synchronization.MetadataLatenessRecentMaxMS == nil || *synchronization.MetadataLatenessRecentMaxMS != 212 {
+		t.Fatalf("unexpected maximum lateness: %v", synchronization.MetadataLatenessRecentMaxMS)
+	}
+}
+
+func TestEgressStatsOmitsLatenessWithoutSamples(t *testing.T) {
+	synchronization := browserSynchronizationFromReport(t, `{
+		"type": "browser_egress_stats",
+		"channel": 1,
+		"synchronization": {"video_sync_buffer_ms": 350, "metadata_late": 0}
+	}`)
+
+	if synchronization.MetadataLatenessRecentMedianMS != nil || synchronization.MetadataLatenessRecentMaxMS != nil {
+		t.Fatalf("expected no lateness without samples: %#v", synchronization)
+	}
+	encoded, err := json.Marshal(synchronization)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "metadata_lateness_recent") {
+		t.Fatalf("expected lateness fields to be omitted: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"metadata_late":0`) {
+		t.Fatalf("expected the late counter to be reported at zero: %s", encoded)
 	}
 }
