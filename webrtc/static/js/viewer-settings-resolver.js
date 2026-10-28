@@ -1,8 +1,13 @@
 (() => {
-  const SETTINGS_VERSION = 9;
-  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, 6, 7, 8, SETTINGS_VERSION]);
+  const SETTINGS_VERSION = 10;
+  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, 6, 7, 8, 9, SETTINGS_VERSION]);
+  const VIDEO_SYNC_DEFAULT_CHANGED_VERSION = 9;
+  const AUTO_COLORS_VERSION = 10;
   const PREVIOUS_VIDEO_SYNC_DEFAULT_MS = 350;
-  const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
+  // Unlisted classes are colored automatically (see metadata-colors.js), so the
+  // defaults hold no entries. A user-added `default` entry overrides all unlisted classes.
+  const DEFAULT_OBJECTS = [];
+  const LEGACY_DEFAULT_COLOR = "#00ff00";
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
     { value: "tracking", label: "Tracking" },
@@ -43,6 +48,9 @@
     metadataRetentionMs: 0,
     showRoi: true,
     applyRoiFiltering: true,
+    // Width in px of every overlay line (boxes, segment outlines, tracks, poses); a class
+    // row's own width still wins for that class.
+    lineWidth: 3,
     orientation: "none"
   };
   const ORIENTATIONS = new Set(["none", "mirror", "flip-vertical", "rotate-180"]);
@@ -57,6 +65,142 @@
     }
   };
   const PANEL_MODES = new Set(["compact", "collapsed", "expanded"]);
+
+  // The one table that drives every own-value function: an id is the setting's
+  // path in the stored scope, split for the generic path helpers below.
+  const SCALAR_SETTINGS = [
+    { id: "general.videoSyncBufferMs", tab: "General", metadataType: null, path: ["general", "videoSyncBufferMs"] },
+    { id: "general.metadataRetentionMs", tab: "General", metadataType: null, path: ["general", "metadataRetentionMs"] },
+    { id: "general.lineWidth", tab: "General", metadataType: null, path: ["general", "lineWidth"] },
+    { id: "general.orientation", tab: "General", metadataType: null, path: ["general", "orientation"] },
+    { id: "general.showRoi", tab: "ROI", metadataType: null, path: ["general", "showRoi"] },
+    { id: "general.applyRoiFiltering", tab: "ROI", metadataType: null, path: ["general", "applyRoiFiltering"] },
+    {
+      id: "types.object-detection.confidenceThreshold",
+      tab: "Metadata",
+      metadataType: "object-detection",
+      path: ["types", "object-detection", "confidenceThreshold"]
+    },
+    {
+      id: "types.segmentation.confidenceThreshold",
+      tab: "Metadata",
+      metadataType: "segmentation",
+      path: ["types", "segmentation", "confidenceThreshold"]
+    },
+    {
+      id: "types.segmentation.maskOpacity",
+      tab: "Metadata",
+      metadataType: "segmentation",
+      path: ["types", "segmentation", "maskOpacity"]
+    },
+    {
+      id: "types.tracking.confidenceThreshold",
+      tab: "Metadata",
+      metadataType: "tracking",
+      path: ["types", "tracking", "confidenceThreshold"]
+    },
+    {
+      id: "types.tracking.history.enabled",
+      tab: "Metadata",
+      metadataType: "tracking",
+      path: ["types", "tracking", "history", "enabled"]
+    },
+    {
+      id: "types.tracking.history.trailLength",
+      tab: "Metadata",
+      metadataType: "tracking",
+      path: ["types", "tracking", "history", "trailLength"]
+    },
+    {
+      id: "types.tracking.history.lostTrackTtlMs",
+      tab: "Metadata",
+      metadataType: "tracking",
+      path: ["types", "tracking", "history", "lostTrackTtlMs"]
+    },
+    {
+      id: "types.object-detection.visible",
+      tab: "Metadata",
+      metadataType: "object-detection",
+      path: ["types", "object-detection", "visible"]
+    },
+    {
+      id: "types.segmentation.visible",
+      tab: "Metadata",
+      metadataType: "segmentation",
+      path: ["types", "segmentation", "visible"]
+    },
+    {
+      id: "types.tracking.visible",
+      tab: "Metadata",
+      metadataType: "tracking",
+      path: ["types", "tracking", "visible"]
+    },
+    {
+      id: "types.pose-estimation.visible",
+      tab: "Metadata",
+      metadataType: "pose-estimation",
+      path: ["types", "pose-estimation", "visible"]
+    },
+    {
+      id: "types.classification.visible",
+      tab: "Metadata",
+      metadataType: "classification",
+      path: ["types", "classification", "visible"]
+    },
+    {
+      id: "types.pose-estimation.showKeypoints",
+      tab: "Metadata",
+      metadataType: "pose-estimation",
+      path: ["types", "pose-estimation", "showKeypoints"]
+    },
+    {
+      id: "types.pose-estimation.showKeypointLabels",
+      tab: "Metadata",
+      metadataType: "pose-estimation",
+      path: ["types", "pose-estimation", "showKeypointLabels"]
+    },
+    {
+      id: "auxiliary.blazepose-3d.enabled",
+      tab: "3D Pose",
+      metadataType: null,
+      path: ["auxiliary", "blazepose-3d", "enabled"]
+    },
+    {
+      id: "auxiliary.blazepose-3d.panelMode",
+      tab: "3D Pose",
+      metadataType: null,
+      path: ["auxiliary", "blazepose-3d", "panelMode"]
+    },
+    {
+      id: "auxiliary.blazepose-3d.backgroundTransparency",
+      tab: "3D Pose",
+      metadataType: null,
+      path: ["auxiliary", "blazepose-3d", "backgroundTransparency"]
+    },
+    {
+      id: "auxiliary.blazepose-3d.yawDegrees",
+      tab: "3D Pose",
+      metadataType: null,
+      path: ["auxiliary", "blazepose-3d", "yawDegrees"]
+    },
+    {
+      id: "auxiliary.blazepose-3d.pitchDegrees",
+      tab: "3D Pose",
+      metadataType: null,
+      path: ["auxiliary", "blazepose-3d", "pitchDegrees"]
+    },
+    {
+      id: "auxiliary.blazepose-3d.showReferenceBox",
+      tab: "3D Pose",
+      metadataType: null,
+      path: ["auxiliary", "blazepose-3d", "showReferenceBox"]
+    }
+  ];
+
+  // What a scalar setting is worth with nothing stored anywhere: the same shape
+  // ({ general, types, auxiliary }) as the overrides a scope reads, so the generic
+  // path helpers work on either one.
+  const DEFAULTS_ROOT = { general: GENERAL_DEFAULTS, types: TYPE_DEFAULTS, auxiliary: AUXILIARY_DEFAULTS };
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -87,10 +231,19 @@
     };
   }
 
-  function normalizeObjects(objects, fallback = DEFAULT_OBJECTS) {
-    if (!Array.isArray(objects)) return clone(fallback);
+  // Before version 10 every list carried an injected `default` entry in the stock
+  // green. Dropping it lets the automatic colors take over; a recolored default is
+  // a deliberate user override and stays.
+  function dropStockDefault(entries) {
+    return entries.filter(
+      (entry) => !(entry.label === "default" && entry.color.toLowerCase() === LEGACY_DEFAULT_COLOR)
+    );
+  }
+
+  function normalizeObjects(objects, { legacy = false } = {}) {
+    if (!Array.isArray(objects)) return [];
     const normalized = objects.map(normalizeObjectEntry).filter(Boolean);
-    return normalized.length ? normalized : clone(fallback);
+    return legacy ? dropStockDefault(normalized) : normalized;
   }
 
   function mergeObjectStyles(...objectLists) {
@@ -99,9 +252,6 @@
       const normalized = normalizeObjectEntry(entry);
       if (normalized) byLabel.set(normalized.label, normalized);
     });
-    if (!byLabel.has("default")) {
-      byLabel.set("default", clone(DEFAULT_OBJECTS[0]));
-    }
     return Array.from(byLabel.values());
   }
 
@@ -111,7 +261,7 @@
       const configuredBufferMs = Math.round(
         clampNumber(rawGeneral.videoSyncBufferMs, 0, 4000, GENERAL_DEFAULTS.videoSyncBufferMs)
       );
-      general.videoSyncBufferMs = sourceVersion < SETTINGS_VERSION
+      general.videoSyncBufferMs = sourceVersion < VIDEO_SYNC_DEFAULT_CHANGED_VERSION
         && configuredBufferMs === PREVIOUS_VIDEO_SYNC_DEFAULT_MS
         ? GENERAL_DEFAULTS.videoSyncBufferMs
         : configuredBufferMs;
@@ -120,6 +270,9 @@
       general.metadataRetentionMs = Math.round(
         clampNumber(rawGeneral.metadataRetentionMs, 0, 30000, GENERAL_DEFAULTS.metadataRetentionMs)
       );
+    }
+    if (Object.prototype.hasOwnProperty.call(rawGeneral, "lineWidth")) {
+      general.lineWidth = Math.round(clampNumber(rawGeneral.lineWidth, 1, 10, GENERAL_DEFAULTS.lineWidth));
     }
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "showRoi")) {
       general.showRoi = rawGeneral.showRoi !== false;
@@ -152,14 +305,14 @@
     return history;
   }
 
-  function normalizeTypeSettings(metadataType, rawType = {}, fillDefaults = true) {
+  function normalizeTypeSettings(metadataType, rawType = {}, fillDefaults = true, { legacy = false } = {}) {
     const type = fillDefaults ? clone(TYPE_DEFAULTS[metadataType] || {}) : {};
     if (metadataType === "object-detection" || metadataType === "segmentation") {
       if (Object.prototype.hasOwnProperty.call(rawType, "confidenceThreshold")) {
         type.confidenceThreshold = clampNumber(rawType.confidenceThreshold, 0, 1, 0);
       }
       if (Object.prototype.hasOwnProperty.call(rawType, "objects")) {
-        type.objects = normalizeObjects(rawType.objects);
+        type.objects = normalizeObjects(rawType.objects, { legacy });
       }
       if (metadataType === "segmentation" && Object.prototype.hasOwnProperty.call(rawType, "maskOpacity")) {
         type.maskOpacity = clampNumber(rawType.maskOpacity, 0, 1, TYPE_DEFAULTS.segmentation.maskOpacity);
@@ -236,9 +389,71 @@
       ...Object.keys(rawAuxiliary && typeof rawAuxiliary === "object" ? rawAuxiliary : {})
     ]);
     renderers.forEach((renderer) => {
-      auxiliary[renderer] = normalizeAuxiliarySettings(renderer, rawAuxiliary?.[renderer], fillDefaults);
+      const settings = normalizeAuxiliarySettings(renderer, rawAuxiliary?.[renderer], fillDefaults);
+      // A scope's own values hold a renderer only while it has a value of its own,
+      // so clearing a channel's last 3D setting leaves no explicit panel settings.
+      if (fillDefaults || Object.keys(settings).length > 0) auxiliary[renderer] = settings;
     });
     return auxiliary;
+  }
+
+  function findScalarSetting(id) {
+    return SCALAR_SETTINGS.find((setting) => setting.id === id) || null;
+  }
+
+  // Reads a scalar setting's value out of a { general, types } shaped object
+  // (overrides or DEFAULTS_ROOT) by its id's path; undefined when absent.
+  function scalarValueAt(root, path) {
+    let node = root;
+    for (const key of path) {
+      if (node == null || typeof node !== "object") return undefined;
+      node = node[key];
+    }
+    return node;
+  }
+
+  // Writes a scalar setting's value into a { general, types } shaped object,
+  // creating the intermediate objects (e.g. types.tracking.history) as needed.
+  function setScalarValueAt(root, path, value) {
+    let node = root;
+    for (let i = 0; i < path.length - 1; i++) {
+      const key = path[i];
+      if (!node[key] || typeof node[key] !== "object") node[key] = {};
+      node = node[key];
+    }
+    node[path[path.length - 1]] = value;
+  }
+
+  // The inverse of setScalarValueAt: removes one leaf, leaving its siblings (and
+  // any other setting under a different path) untouched.
+  function deleteScalarValueAt(root, path) {
+    let node = root;
+    for (let i = 0; i < path.length - 1; i++) {
+      node = node && node[path[i]];
+      if (node == null || typeof node !== "object") return;
+    }
+    if (node && typeof node === "object") delete node[path[path.length - 1]];
+  }
+
+  // Normalizes one raw value the way the dialog's own control would, reusing the
+  // file's existing normalizers so clamping and rounding match exactly. The
+  // setting's path shape says which normalizer applies: general.<key>,
+  // auxiliary.<renderer>.<key>, types.<type>.<key>, or the nested
+  // types.tracking.history.<key>.
+  function normalizeScalarValue(setting, rawValue) {
+    const path = setting.path;
+    if (path[0] === "general") {
+      return normalizeGeneral({ [path[1]]: rawValue }, false)[path[1]];
+    }
+    if (path[0] === "auxiliary") {
+      return normalizeAuxiliarySettings(path[1], { [path[2]]: rawValue }, false)[path[2]];
+    }
+    const metadataType = path[1];
+    if (path.length === 3) {
+      return normalizeTypeSettings(metadataType, { [path[2]]: rawValue }, false)[path[2]];
+    }
+    const key = path[3];
+    return normalizeTypeSettings(metadataType, { history: { [key]: rawValue } }, false).history[key];
   }
 
   function readRawSettings(scope) {
@@ -264,9 +479,10 @@
     if (!rawSettings || typeof rawSettings !== "object") return settings;
 
     if (SUPPORTED_SETTINGS_VERSIONS.has(rawSettings.version)) {
+      const legacy = rawSettings.version < AUTO_COLORS_VERSION;
       settings.general = normalizeGeneral(rawSettings.general, true, rawSettings.version);
       METADATA_TYPES.forEach((type) => {
-        settings.types[type.value] = normalizeTypeSettings(type.value, rawSettings.types?.[type.value]);
+        settings.types[type.value] = normalizeTypeSettings(type.value, rawSettings.types?.[type.value], true, { legacy });
       });
       settings.auxiliary = normalizeAuxiliaryMap(rawSettings.auxiliary);
       return settings;
@@ -279,7 +495,7 @@
     settings.types["object-detection"] = normalizeTypeSettings("object-detection", {
       confidenceThreshold: rawSettings.confidenceThreshold,
       objects: rawSettings.objects
-    });
+    }, true, { legacy: true });
     settings.types.tracking = normalizeTypeSettings("tracking", {
       confidenceThreshold: rawSettings.trackingConfidenceThreshold,
       showTrackHistory: rawSettings.showTrackHistory,
@@ -297,11 +513,12 @@
     if (!rawSettings || typeof rawSettings !== "object") return overrides;
 
     if (SUPPORTED_SETTINGS_VERSIONS.has(rawSettings.version)) {
+      const legacy = rawSettings.version < AUTO_COLORS_VERSION;
       overrides.general = normalizeGeneral(rawSettings.general, false, rawSettings.version);
       METADATA_TYPES.forEach((type) => {
         const rawType = rawSettings.types?.[type.value];
         if (rawType && typeof rawType === "object") {
-          overrides.types[type.value] = normalizeTypeSettings(type.value, rawType, false);
+          overrides.types[type.value] = normalizeTypeSettings(type.value, rawType, false, { legacy });
         }
       });
       overrides.auxiliary = normalizeAuxiliaryMap(rawSettings.auxiliary, false);
@@ -327,7 +544,8 @@
     overrides.types["object-detection"] = normalizeTypeSettings(
       "object-detection",
       legacyObjectDetection,
-      false
+      false,
+      { legacy: true }
     );
 
     const legacyTracking = {};
@@ -416,10 +634,355 @@
     return normalizeSettings(readRawSettings(scope));
   }
 
-  function writeScopeSettings(scope, settings) {
+  function writeScopeSettings(scope, settings, options = {}) {
     const normalized = normalizeSettings(settings);
-    window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(normalized));
-    return normalized;
+    if (!options.generalKeys) {
+      window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(normalized));
+      return normalized;
+    }
+    // A settings dialog only owns some of the general keys (see spec addendum B); the
+    // rest keeps following the global scope and the defaults, so only the listed keys
+    // are carried over from the freshly normalized values.
+    const general = {};
+    options.generalKeys.forEach((key) => {
+      general[key] = normalized.general[key];
+    });
+    const stored = {
+      version: SETTINGS_VERSION,
+      general,
+      types: normalized.types,
+      auxiliary: normalized.auxiliary
+    };
+    window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(stored));
+    return stored;
+  }
+
+  // Shared by every function that stores a scope's own values in the
+  // { version, general, types, auxiliary } shape, so a storage failure is handled once.
+  function storeScopeOverrides(scope, general, types, auxiliary = {}) {
+    const stored = {
+      version: SETTINGS_VERSION,
+      general,
+      types,
+      // A renderer whose last own value was cleared is dropped here.
+      auxiliary: normalizeAuxiliaryMap(auxiliary, false)
+    };
+    try {
+      window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(stored));
+    } catch (_err) {
+      return null;
+    }
+    return stored;
+  }
+
+  // writeScopeSettings stores every default, which turns a whole scope into
+  // overrides. This stores only what the scope already overrode plus one key, so
+  // the rest keeps following the global scope and the defaults.
+  function writeScopeGeneralOverride(scope, key, value) {
+    const overrides = settingsOverrides(readRawSettings(scope));
+    const general = { ...overrides.general, ...normalizeGeneral({ [key]: value }, false) };
+    return storeScopeOverrides(scope, general, overrides.types, overrides.auxiliary);
+  }
+
+  // The scope's own values, with no defaults filled in: what the tile button and
+  // the dialogs need to show what a channel or the global scope actually set.
+  function readScopeOverrides(scope) {
+    return settingsOverrides(readRawSettings(scope));
+  }
+
+  // The inverse of writeScopeGeneralOverride: drops one key so the scope goes back
+  // to following the global scope (or the default) for it, keeping everything else.
+  // A scope without its own value for `key` is left unwritten, so clearing never
+  // creates an empty scope entry; the unchanged overrides still signal success.
+  // When the key was the scope's last own value, the scope's storage entry is
+  // removed instead of storing an empty one.
+  function clearScopeGeneralOverride(scope, key) {
+    const overrides = settingsOverrides(readRawSettings(scope));
+    if (!Object.prototype.hasOwnProperty.call(overrides.general, key)) return overrides;
+    const general = { ...overrides.general };
+    delete general[key];
+    return storeOrRemoveScopeOverrides(scope, general, overrides.types, overrides.auxiliary);
+  }
+
+  // What a channel gets for a general key when it has no value of its own: the
+  // global scope's own value, otherwise the default. An unknown key yields null.
+  function followedGeneralValue(key) {
+    const globalOwn = readScopeOverrides("global").general;
+    if (Object.prototype.hasOwnProperty.call(globalOwn, key)) return globalOwn[key];
+    return Object.prototype.hasOwnProperty.call(GENERAL_DEFAULTS, key) ? GENERAL_DEFAULTS[key] : null;
+  }
+
+  // A channel dialog's save stores a general key as the channel's own if the channel
+  // had its own value at load, or if the control now holds something else than the
+  // dialog loaded into it. Values compare strictly (numbers for spinners, booleans
+  // for toggles). Each key appears once, in order of first appearance.
+  function generalKeysToStore(ownKeys, loadedValues, currentValues) {
+    const keys = [];
+    const add = (key) => {
+      if (!keys.includes(key)) keys.push(key);
+    };
+    Array.from(ownKeys || []).forEach(add);
+    const loaded = loadedValues || {};
+    Object.keys(currentValues || {}).forEach((key) => {
+      if (currentValues[key] !== loaded[key]) add(key);
+    });
+    return keys;
+  }
+
+  // The panel's global action: the channel gives up its own value and follows the
+  // global one, which is raised to `value` if it is below it, never lowered. Either
+  // everything is stored or the global scope is put back as it was (null result).
+  function applyGlobalGeneral(channelScope, key, value) {
+    const normalized = normalizeGeneral({ [key]: value }, false)[key];
+    if (normalized === undefined) return null;
+    const globalStorageKey = "viewerSettings_global";
+    let previousGlobal;
+    try {
+      previousGlobal = window.localStorage.getItem(globalStorageKey);
+    } catch (_err) {
+      return null;
+    }
+    const followed = followedGeneralValue(key);
+    const raise = followed < normalized;
+    if (raise && !writeScopeGeneralOverride("global", key, normalized)) return null;
+    if (!clearScopeGeneralOverride(channelScope, key)) {
+      if (raise) {
+        try {
+          if (previousGlobal == null) {
+            window.localStorage.removeItem(globalStorageKey);
+          } else {
+            window.localStorage.setItem(globalStorageKey, previousGlobal);
+          }
+        } catch (_err) {
+          // Nothing more can be done; the caller still learns that the action failed.
+        }
+      }
+      return null;
+    }
+    return { applied: raise ? normalized : followed, raised: raise };
+  }
+
+  // Every channel scope in storage that has its own value for `key`, for the global
+  // dialog's "Channel N uses its own value" lines. Storage access itself can throw
+  // (e.g. a disabled localStorage), so the whole scan is guarded.
+  function listChannelGeneralOverrides(key) {
+    const found = [];
+    try {
+      const total = window.localStorage.length;
+      for (let i = 0; i < total; i++) {
+        const storageKey = window.localStorage.key(i);
+        const match = typeof storageKey === "string" && storageKey.match(/^viewerSettings_channel_(\d+)$/);
+        if (!match) continue;
+        const channel = Number(match[1]);
+        const overrides = readScopeOverrides(`channel_${channel}`);
+        if (Object.prototype.hasOwnProperty.call(overrides.general, key)) {
+          found.push({ channel, value: overrides.general[key] });
+        }
+      }
+    } catch (_err) {
+      return [];
+    }
+    return found.sort((a, b) => a.channel - b.channel);
+  }
+
+  // The scalar settings the dialog's switches cover, for building their
+  // controls without a second, hand-kept list.
+  function scalarSettings() {
+    return SCALAR_SETTINGS.map(({ id, tab, metadataType }) => ({ id, tab, metadataType }));
+  }
+
+  // What a channel gets for a scalar setting when it has no value of its own: the
+  // global scope's own value, otherwise the default. An unknown id yields null.
+  function followedValue(id) {
+    const setting = findScalarSetting(id);
+    if (!setting) return null;
+    const globalOwn = scalarValueAt(readScopeOverrides("global"), setting.path);
+    if (globalOwn !== undefined) return globalOwn;
+    const fallback = scalarValueAt(DEFAULTS_ROOT, setting.path);
+    return fallback !== undefined ? fallback : null;
+  }
+
+  // The scope's own scalar values, nested ones included, keyed by id. Presence,
+  // not equality with the followed value, is what makes a value "own" (see
+  // applyGlobalGeneral's channel scopes, which can equal the global one).
+  function readScopeOwnValues(scope) {
+    const overrides = readScopeOverrides(scope);
+    const values = {};
+    SCALAR_SETTINGS.forEach((setting) => {
+      const value = scalarValueAt(overrides, setting.path);
+      if (value !== undefined) values[setting.id] = value;
+    });
+    return values;
+  }
+
+  // What it takes for a scope's own values to be worth keeping stored: at least
+  // one scalar value (what readScopeOwnValues reports) or at least one class
+  // colour entry in any metadata type. An empty object, a `history: {}` or an
+  // `objects: []` left behind by clearing the last value hold nothing, so a scope
+  // reduced to those is removed rather than stored, defined once here for every
+  // caller (clearScopeGeneralOverride, clearScopeOwnValue, countChannelScopes).
+  function overridesHoldSomething(overrides) {
+    const hasScalarValue = SCALAR_SETTINGS.some(
+      (setting) => scalarValueAt(overrides, setting.path) !== undefined
+    );
+    if (hasScalarValue) return true;
+    return Object.values(overrides.types || {}).some(
+      (type) => Array.isArray(type?.objects) && type.objects.length > 0
+    );
+  }
+
+  // Stores the overrides if they still hold something, otherwise removes the
+  // scope's storage entry so an empty scope is never left behind. Either way
+  // returns an object (the overrides as they are after the change) on success,
+  // or null when storage failed, matching storeScopeOverrides' contract.
+  function storeOrRemoveScopeOverrides(scope, general, types, auxiliary = {}) {
+    if (overridesHoldSomething({ general, types, auxiliary })) {
+      return storeScopeOverrides(scope, general, types, auxiliary);
+    }
+    try {
+      window.localStorage.removeItem(`viewerSettings_${scope}`);
+    } catch (_err) {
+      return null;
+    }
+    return { general: {}, types: {}, auxiliary: {} };
+  }
+
+  // Every channel scope in storage that has its own value for `id`, generalizing
+  // listChannelGeneralOverrides to any scalar id, nested ones included.
+  function listChannelOverrides(id) {
+    const setting = findScalarSetting(id);
+    if (!setting) return [];
+    const found = [];
+    try {
+      const total = window.localStorage.length;
+      for (let i = 0; i < total; i++) {
+        const storageKey = window.localStorage.key(i);
+        const match = typeof storageKey === "string" && storageKey.match(/^viewerSettings_channel_(\d+)$/);
+        if (!match) continue;
+        const channel = Number(match[1]);
+        const value = scalarValueAt(readScopeOverrides(`channel_${channel}`), setting.path);
+        if (value !== undefined) found.push({ channel, value });
+      }
+    } catch (_err) {
+      return [];
+    }
+    return found.sort((a, b) => a.channel - b.channel);
+  }
+
+  // The global scope's own class colour entries for a metadata type, for the
+  // channel dialog's inherited, greyed-out list.
+  function inheritedObjects(metadataType) {
+    const type = metadataTypeOrDefault(metadataType);
+    const globalType = readScopeOverrides("global").types[type];
+    return globalType && Array.isArray(globalType.objects) ? globalType.objects : [];
+  }
+
+  // Stores exactly the given scalar values and class colour entries as the
+  // scope's own, replacing whatever it had before. What is not given is not
+  // stored; a scope left with nothing at all is removed instead of holding an
+  // empty stub.
+  function writeScopeOwnSettings(scope, ownValues, ownObjects) {
+    const own = { general: {}, types: {}, auxiliary: {} };
+    const { general, types, auxiliary } = own;
+    Object.entries(ownValues || {}).forEach(([id, value]) => {
+      const setting = findScalarSetting(id);
+      if (!setting) return;
+      const normalized = normalizeScalarValue(setting, value);
+      setScalarValueAt(own, setting.path, normalized);
+    });
+    Object.entries(ownObjects || {}).forEach(([metadataType, entries]) => {
+      if (!METADATA_TYPES.some((type) => type.value === metadataType)) return;
+      const normalized = normalizeObjects(entries);
+      if (normalized.length === 0) return;
+      if (!types[metadataType]) types[metadataType] = {};
+      types[metadataType].objects = normalized;
+    });
+
+    if ([general, types, auxiliary].every((part) => Object.keys(part).length === 0)) {
+      try {
+        window.localStorage.removeItem(`viewerSettings_${scope}`);
+      } catch (_err) {
+        return null;
+      }
+      return { version: SETTINGS_VERSION, general: {}, types: {}, auxiliary: {} };
+    }
+    return storeScopeOverrides(scope, general, types, auxiliary);
+  }
+
+  // The inverse of one writeScopeOwnSettings value: drops one id so the scope
+  // goes back to following the global scope (or the default) for it, keeping its
+  // other own values and class colour entries. A scope without an own value for
+  // `id`, or an unknown id, is left unwritten; the unchanged overrides still
+  // signal success, as clearScopeGeneralOverride's do. When the id was the
+  // scope's last own value, the scope's storage entry is removed instead of
+  // storing an empty one.
+  function clearScopeOwnValue(scope, id) {
+    const setting = findScalarSetting(id);
+    const overrides = readScopeOverrides(scope);
+    if (!setting) return overrides;
+    if (scalarValueAt(overrides, setting.path) === undefined) return overrides;
+    deleteScalarValueAt(overrides, setting.path);
+    return storeOrRemoveScopeOverrides(scope, overrides.general, overrides.types, overrides.auxiliary);
+  }
+
+  // The number of stored channel scopes that hold something of their own, for
+  // the global dialog's reset link (which the dialog hides when this is zero).
+  // A channel scope left holding nothing (see overridesHoldSomething), e.g. one
+  // stored by an earlier build of this branch, does not count.
+  function countChannelScopes() {
+    try {
+      let count = 0;
+      const total = window.localStorage.length;
+      for (let i = 0; i < total; i++) {
+        const key = window.localStorage.key(i);
+        const match = typeof key === "string" && key.match(/^viewerSettings_channel_(\d+)$/);
+        if (!match) continue;
+        if (overridesHoldSomething(readScopeOverrides(`channel_${match[1]}`))) count++;
+      }
+      return count;
+    } catch (_err) {
+      return 0;
+    }
+  }
+
+  // The reset action: removes every channel's own values, leaving the global
+  // scope and the drawn regions (viewerROI_*) alone. This is destructive and
+  // user-triggered on purpose, so it is all-or-nothing, the way applyGlobalGeneral
+  // already is for the global scope: the raw string of every entry is read before
+  // any is removed (so nothing has changed yet if that fails), and a removal that
+  // throws partway through is rolled back by restoring every entry already
+  // removed, byte for byte.
+  function clearAllChannelScopes() {
+    let entries;
+    try {
+      entries = new Map();
+      const total = window.localStorage.length;
+      for (let i = 0; i < total; i++) {
+        const key = window.localStorage.key(i);
+        if (typeof key === "string" && /^viewerSettings_channel_\d+$/.test(key)) {
+          entries.set(key, window.localStorage.getItem(key));
+        }
+      }
+    } catch (_err) {
+      return null;
+    }
+    const removedKeys = [];
+    try {
+      entries.forEach((_raw, key) => {
+        window.localStorage.removeItem(key);
+        removedKeys.push(key);
+      });
+    } catch (_err) {
+      removedKeys.forEach((key) => {
+        try {
+          window.localStorage.setItem(key, entries.get(key));
+        } catch (_restoreErr) {
+          // Nothing more can be done; the caller still learns that the action failed.
+        }
+      });
+      return null;
+    }
+    return entries.size;
   }
 
   function scopeSettingsForMutation(raw) {
@@ -456,26 +1019,6 @@
     return Boolean(raw?.auxiliary?.[renderer] && typeof raw.auxiliary[renderer] === "object");
   }
 
-  function clearScopeAuxiliarySettings(scope, renderer) {
-    const raw = readRawSettings(scope);
-    if (!raw || typeof raw !== "object") return;
-    const next = scopeSettingsForMutation(raw);
-    if (!next.auxiliary || typeof next.auxiliary !== "object") return;
-    delete next.auxiliary[renderer];
-    next.version = SETTINGS_VERSION;
-    window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(next));
-  }
-
-  function clearAllChannelSettings() {
-    const keys = [];
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (/^viewerSettings_channel_\d+$/.test(key || "")) keys.push(key);
-    }
-    keys.forEach((key) => window.localStorage.removeItem(key));
-    return keys.length;
-  }
-
   window.viewerSettingsApi = {
     version: SETTINGS_VERSION,
     metadataTypes: METADATA_TYPES,
@@ -488,8 +1031,22 @@
     writeScopeSettings,
     writeScopeAuxiliarySettings,
     hasScopeAuxiliarySettings,
-    clearScopeAuxiliarySettings,
-    clearAllChannelSettings,
+    writeScopeGeneralOverride,
+    readScopeOverrides,
+    clearScopeGeneralOverride,
+    listChannelGeneralOverrides,
+    followedGeneralValue,
+    generalKeysToStore,
+    applyGlobalGeneral,
+    scalarSettings,
+    followedValue,
+    readScopeOwnValues,
+    listChannelOverrides,
+    inheritedObjects,
+    writeScopeOwnSettings,
+    clearScopeOwnValue,
+    countChannelScopes,
+    clearAllChannelScopes,
     normalizeSettings,
     resolveTypeSettings,
     resolveAuxiliarySettings

@@ -6,12 +6,15 @@ import {
   enqueueMetadata,
   holdOverlays,
   metadataQueueSnapshot,
+  resetLatenessWindow,
   takeMetadataForFrame,
 } from "./metadataSync.js";
 import AuxiliaryPanel from "./AuxiliaryPanel.jsx";
 import "./blazePose3DRenderer.js";
 import { partitionFrameMetadata } from "./auxiliaryVisualization.js";
-import { channelLabel, formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
+import { bufferSettleMs, lateNoticeDetails, nextWarningActive } from "./metadataLateness.js";
+import MetadataLateNotice from "./MetadataLateNotice.jsx";
+import { channelLabel, formatChannelStatus, resolveCodecLabel, tileState } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
 import {
   acceptJpegChunk,
@@ -129,6 +132,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const videoSyncStatusRef = useRef({ supported: false, applied: false, targetMs: null });
   const heldOverlaysRef = useRef(new Map());
   const trackHistoryRef = useRef(new Map());
+  const colorAllocatorRef = useRef(null);
+  if (colorAllocatorRef.current === null) {
+    colorAllocatorRef.current = window.metadataColors?.createColorAllocator() ?? null;
+  }
   const rtcpRef = useRef({
     lastBytes: null,
     lastTs: null,
@@ -143,10 +150,18 @@ function ChannelTile({ index, onActiveChange, debug }) {
   });
   const playbackRef = useRef({ lastFrameAt: 0 });
   const activeRef = useRef(false);
+  const lateWarningActiveRef = useRef(false);
+  const lateSettleUntilRef = useRef(0);
+  const settingsButtonRef = useRef(null);
+  const [lateNotice, setLateNotice] = useState(null);
   const [banner, setBanner] = useState(`Channel ${index}`);
   const [active, setActive] = useState(false);
   const [jpegMode, setJpegMode] = useState(false);
   const [orientation, setOrientation] = useState(() => getOrientation(index));
+  // Whether the video element holds a frame of this connection. It tells a stream
+  // that stopped, whose last frame is still there, from a tile that never played.
+  const hasShownFrameRef = useRef(false);
+  const [hasShownFrame, setHasShownFrame] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -175,6 +190,12 @@ function ChannelTile({ index, onActiveChange, debug }) {
       debugLog("active", nextActive);
     };
 
+    const setFrameShown = (shown) => {
+      if (hasShownFrameRef.current === shown) return;
+      hasShownFrameRef.current = shown;
+      setHasShownFrame(shown);
+    };
+
     const applySynchronizationSettings = () => {
       synchronizationSettingsRef.current = getSynchronizationSettings(index);
       videoSyncStatusRef.current = applyVideoSyncBuffer(
@@ -186,8 +207,17 @@ function ChannelTile({ index, onActiveChange, debug }) {
     const onViewerSettingsChanged = (event) => {
       const changedScope = event.detail?.scope;
       if (changedScope && changedScope !== "global" && changedScope !== `channel_${index}`) return;
+      const previousBufferMs = synchronizationSettingsRef.current.videoSyncBufferMs;
       applySynchronizationSettings();
       setOrientation(getOrientation(index));
+      const nextBufferMs = synchronizationSettingsRef.current.videoSyncBufferMs;
+      if (nextBufferMs !== previousBufferMs) {
+        // What was measured belongs to the old buffer; the chip must reflect the new one only.
+        resetLatenessWindow(metadataQueueRef.current);
+        lateWarningActiveRef.current = false;
+        setLateNotice(null);
+        lateSettleUntilRef.current = performance.now() + bufferSettleMs(previousBufferMs, nextBufferMs);
+      }
       if (event.detail?.metadataType === "tracking") {
         trackHistoryRef.current.clear();
       }
@@ -235,6 +265,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
+      setFrameShown(false);
       setTileActive(false);
       setBanner(`Channel ${index}`);
       setJpegMode(false);
@@ -242,7 +273,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
       metadataQueueRef.current = createMetadataQueue();
       auxiliaryPanelRef.current?.reset();
       heldOverlaysRef.current.clear();
+      lateWarningActiveRef.current = false;
+      lateSettleUntilRef.current = 0;
+      setLateNotice(null);
       trackHistoryRef.current.clear();
+      colorAllocatorRef.current?.clear();
       rtcpRef.current = {
         lastBytes: null,
         lastTs: null,
@@ -398,6 +433,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
           const drawContext = {
             settings: resolvedSettings,
             trackHistory: trackHistoryRef.current,
+            colorAllocator: colorAllocatorRef.current ?? undefined,
             now,
             frameState,
             held: candidate.held === true,
@@ -415,6 +451,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         if (video.readyState >= 2) {
           if (frameMetadata) {
             playbackRef.current.lastFrameAt = Date.now();
+            setFrameShown(true);
             setTileActive(true);
           }
           fitCanvas(canvas);
@@ -426,6 +463,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
           heldOverlaysRef.current.clear();
           trackHistoryRef.current.clear();
           auxiliaryPanelRef.current?.clearFrame();
+          colorAllocatorRef.current?.clear();
         }
       };
 
@@ -441,6 +479,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(bitmap, offsetX, offsetY, bitmap.width * scaleX, bitmap.height * scaleY);
         playbackRef.current.lastFrameAt = Date.now();
+        setFrameShown(true);
         setTileActive(true);
         drawFrameMetadata(ctx, canvas, source, rtpTimestamp, now);
       };
@@ -512,11 +551,39 @@ function ChannelTile({ index, onActiveChange, debug }) {
         heldOverlaysRef.current.clear();
         trackHistoryRef.current.clear();
         auxiliaryPanelRef.current?.clearFrame();
+        colorAllocatorRef.current?.clear();
       };
 
-      const sendBrowserReport = (inboundRtp, videoState) => {
-        if (metadataChannel?.readyState !== "open") return;
+      // Updates the metadata lateness notice once per stats tick, on video and
+      // JPEG channels alike, and returns the snapshot it was judged on.
+      const updateLateNotice = () => {
         const metadataSync = metadataQueueSnapshot(metadataQueueRef.current);
+        if (performance.now() < lateSettleUntilRef.current) {
+          resetLatenessWindow(metadataQueueRef.current);
+          lateWarningActiveRef.current = false;
+          setLateNotice(null);
+          return metadataSync;
+        }
+        lateWarningActiveRef.current = nextWarningActive(
+          lateWarningActiveRef.current,
+          metadataSync.recentLateShare,
+        );
+        setLateNotice(
+          lateWarningActiveRef.current
+            ? lateNoticeDetails(
+                metadataSync,
+                synchronizationSettingsRef.current.videoSyncBufferMs,
+                videoSyncStatusRef.current.supported,
+                // Read every second: the global value can change in another dialog.
+                window.viewerSettingsApi?.followedGeneralValue?.("videoSyncBufferMs"),
+              )
+            : null,
+        );
+        return metadataSync;
+      };
+
+      const sendBrowserReport = (inboundRtp, videoState, metadataSync) => {
+        if (metadataChannel?.readyState !== "open") return;
         const videoSync = videoSyncStatusRef.current;
         const lastFrameAgeMs =
           playbackRef.current.lastFrameAt > 0 ? Date.now() - playbackRef.current.lastFrameAt : undefined;
@@ -552,6 +619,9 @@ function ChannelTile({ index, onActiveChange, debug }) {
               frame_misses: metadataSync.frameMisses,
               metadata_expired: metadataSync.expired,
               metadata_evicted: metadataSync.evicted,
+              metadata_late: metadataSync.late,
+              metadata_lateness_recent_median_ms: metadataSync.recentLatenessMedianMs ?? undefined,
+              metadata_lateness_recent_max_ms: metadataSync.recentLatenessMaxMs ?? undefined,
               untimestamped_metadata_received: metadataSync.untimestampedReceived,
               timestamped_metadata_pending: metadataSync.timestampedPending,
               arrival_metadata_pending: metadataSync.arrivalPending,
@@ -570,6 +640,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         const bitrateBps = seconds > 0 ? ((jpeg.bytesReceived - previous.bytesReceived) * 8) / seconds : 0;
         jpeg.sample = { at: now, framesDecoded: jpeg.framesDecoded, bytesReceived: jpeg.bytesReceived };
         clearStaleTile();
+        const metadataSync = updateLateNotice();
         setBanner(
           formatChannelStatus({
             index,
@@ -600,6 +671,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
             video_width: jpeg.width,
             video_height: jpeg.height,
           },
+          metadataSync,
         );
         tracker.lastCount = tracker.messageCount;
         tracker.messageCount = 0;
@@ -643,6 +715,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
             );
             if (tracker.decoderHealth.decodedAdvanced) {
               playbackRef.current.lastFrameAt = Date.now();
+              setFrameShown(true);
               setTileActive(true);
             }
             decoderStalled ||= tracker.decoderHealth.stalled;
@@ -671,6 +744,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               currentTime: videoRef.current?.currentTime,
             });
 
+            const metadataSync = updateLateNotice();
             const video = videoRef.current;
             sendBrowserReport(
               {
@@ -697,6 +771,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
                 video_width: video?.videoWidth,
                 video_height: video?.videoHeight,
               },
+              metadataSync,
             );
 
             tracker.lastBytes = report.bytesReceived;
@@ -778,8 +853,41 @@ function ChannelTile({ index, onActiveChange, debug }) {
     }
   };
 
+  const raiseVideoSyncBuffer = (targetMs, target) => {
+    if (target === "channel") {
+      const scope = `channel_${index}`;
+      const stored = window.viewerSettingsApi?.writeScopeGeneralOverride?.(scope, "videoSyncBufferMs", targetMs);
+      if (!stored) return false;
+      // The chip and its panel are about to disappear; leave focus on the tile.
+      settingsButtonRef.current?.focus();
+      window.dispatchEvent(new CustomEvent("viewer-settings-changed", { detail: { scope } }));
+      return true;
+    }
+    if (target === "global") {
+      // One resolver call that stores everything or nothing; it never lowers the
+      // global value. Without it (an older cached resolver) the action fails closed.
+      const channelScope = `channel_${index}`;
+      const result = window.viewerSettingsApi?.applyGlobalGeneral?.(channelScope, "videoSyncBufferMs", targetMs);
+      if (!result) return false;
+      // The chip and its panel are about to disappear; leave focus on the tile.
+      settingsButtonRef.current?.focus();
+      window.dispatchEvent(
+        new CustomEvent("viewer-settings-changed", { detail: { scope: result.raised ? "global" : channelScope } }),
+      );
+      return true;
+    }
+    return false;
+  };
+
+  const state = tileState(active, hasShownFrame);
+
   return (
-    <div className="video-tile" style={{ position: "relative" }} data-active={active ? "1" : "0"}>
+    <div
+      className="video-tile"
+      style={{ position: "relative" }}
+      data-active={active ? "1" : "0"}
+      data-state={state}
+    >
       <video
         ref={videoRef}
         autoPlay
@@ -789,11 +897,22 @@ function ChannelTile({ index, onActiveChange, debug }) {
       />
       <canvas ref={canvasRef} style={{ transform: transform || undefined }} />
       <AuxiliaryPanel ref={auxiliaryPanelRef} channelIndex={index} />
-      {!active && <div className="tile-no-video">No active video received</div>}
+      {state !== "playing" && (
+        <div className="tile-no-video">
+          <span className="tile-no-video-text">No active video received</span>
+        </div>
+      )}
       <div className="tile-banner-wrapper">
         <div className="tile-banner-text">{banner}</div>
-        <button className="channel-menu-button" title="Settings" onClick={openScopeSettings} type="button">
-          <img src="/static/icons/menu.png" alt="Settings" className="channel-menu-icon" />
+        <MetadataLateNotice details={active ? lateNotice : null} onRaise={raiseVideoSyncBuffer} />
+        <button
+          ref={settingsButtonRef}
+          className="channel-menu-button"
+          title={`Settings for channel ${index}`}
+          onClick={openScopeSettings}
+          type="button"
+        >
+          <img src="/static/icons/menu.png" alt={`Settings for channel ${index}`} className="channel-menu-icon" />
         </button>
       </div>
     </div>
