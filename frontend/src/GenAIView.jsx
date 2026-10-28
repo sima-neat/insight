@@ -1648,7 +1648,7 @@ export default function GenAIView({ onError, onStatus }) {
     openSetup()
     if (!banner.runNow) return
     const fresh = await getSetup().catch(() => null)
-    if (fresh && bannerAction(fresh).runNow) setupRequest('run', () => runSetup())
+    if (fresh && bannerAction(fresh).runNow) setupRequest('run', () => runSetup(undefined, fresh.generation))
   }
 
   function tryTutorialAction(action) {
@@ -1739,7 +1739,7 @@ export default function GenAIView({ onError, onStatus }) {
                       <SetupWarnings
                         warnings={item.warnings}
                         finished={item.state === 'done'}
-                        onRunAgain={item.id === 'prepare' && canRunSetupAgain(setupStatus) ? () => setupRequest('run', () => runSetup('prepare'), SLOW_STOP_MS) : null}
+                        onRunAgain={item.id === 'prepare' && canRunSetupAgain(setupStatus) ? () => setupRequest('run', () => runSetup('prepare', setupStatus?.generation), SLOW_STOP_MS) : null}
                         busy={setupBusy !== null}
                       />
                     )}
@@ -1768,17 +1768,17 @@ export default function GenAIView({ onError, onStatus }) {
           )}
           <div className="genai-actions">
             {setupNext && (
-              <button type="button" className="btn-tonal" disabled={setupBusy !== null} onClick={() => setupRequest('run', () => runSetup())}>
+              <button type="button" className="btn-tonal" disabled={setupBusy !== null} onClick={() => setupRequest('run', () => runSetup(undefined, setupStatus?.generation))}>
                 {setupBusy === 'run' ? 'Starting…' : setupNext.label}
               </button>
             )}
             {!setupNext && canStopStudio(setupStatus) && (
-              <button type="button" className="btn-tonal" disabled={setupBusy !== null} onClick={() => setupRequest('stop-studio', stopStudio, SLOW_STOP_MS)}>
+              <button type="button" className="btn-tonal" disabled={setupBusy !== null} onClick={() => setupRequest('stop-studio', () => stopStudio(setupStatus?.generation), SLOW_STOP_MS)}>
                 {setupBusy === 'stop-studio' ? 'Stopping…' : 'Stop GenAI Studio'}
               </button>
             )}
             {setupStoppable(setupStatus) && (
-              <button type="button" className="btn-ghost" disabled={setupBusy !== null} onClick={() => setupRequest('stop', stopSetup)}>
+              <button type="button" className="btn-ghost" disabled={setupBusy !== null} onClick={() => setupRequest('stop', () => stopSetup(setupStatus?.generation))}>
                 {setupBusy === 'stop' ? 'Stopping…' : 'Stop'}
               </button>
             )}

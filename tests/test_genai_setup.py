@@ -362,6 +362,24 @@ class BoardScriptTests(unittest.TestCase):
                                and (self.studio / ".neat-genai-studio.pid").read_text() != old_pid)
         self.assertEqual(status["steps"][1]["warnings"], [])
 
+    def test_a_rerun_stopped_midway_is_not_reported_done_and_retry_runs_it_again(self):
+        self.install_and_prepare()
+        # The first run left setup.sh's files, so only the stopped run's exit code says it didn't finish.
+        self.env["FAKE_SETUP_WAIT"] = "1"
+        genai_setup.run(self.session, redo="prepare")
+        self.wait_for(lambda s: (self.studio / "setup.waiting").exists())
+        setup_pid = int((self.studio / "setup.waiting").read_text())
+        status = genai_setup.stop(self.session)
+        self.wait_until_ended(setup_pid)
+        status = self.wait_for(lambda s: not s["active"])
+        self.assertEqual(self.states(status), ["done", "failed", "pending"])
+        self.assertEqual(status["steps"][1]["problem"]["message"], "The step was stopped before it finished.")
+        del self.env["FAKE_SETUP_WAIT"]
+        (self.studio / "setup.waiting").unlink()
+        genai_setup.run(self.session)
+        self.assertEqual(self.transport.commands[-2][4], "prepare start")
+        self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+
     def test_setup_is_not_run_again_while_a_step_is_running(self):
         self.env["FAKE_SETUP_WAIT"] = "1"
         genai_setup.run(self.session)
@@ -421,6 +439,16 @@ class DescribeTests(unittest.TestCase):
         self.assertEqual(crashed["steps"][2]["state"], "failed")
         stopped = genai_setup.diagnose("prepare", "requests.exceptions.ConnectionError: Connection refused", "143")
         self.assertEqual(stopped["message"], "The step was stopped before it finished.")
+
+    def test_a_failed_step_is_failed_even_when_an_earlier_run_left_its_files(self):
+        fields = {"installed": "yes", "prepared": "yes", "running": "yes"}
+        records = {"install": {"exit": "1", "mtime": "", "log": "boom", "warnings": []},
+                   "prepare": {"exit": "143", "mtime": "", "log": "Installing voices", "warnings": []},
+                   "start": {"exit": "1", "mtime": "", "log": "Traceback", "warnings": []}}
+        steps = self.describe(fields, records)["steps"]
+        # A running GenAI Studio is what counts for the start step.
+        self.assertEqual([s["state"] for s in steps], ["failed", "failed", "done"])
+        self.assertEqual(steps[1]["problem"]["message"], "The step was stopped before it finished.")
 
     def test_known_causes_are_named_and_unknown_ones_point_at_the_log(self):
         cases = {
@@ -547,6 +575,17 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["generation"], 4)
         self.answer(self.status(installed="yes", active="yes", steps="prepare start", step="prepare"))
         self.assertEqual(self.client.post("/api/genai-setup/stop-studio").get_json()["code"], "setup_running")
+
+    def test_an_action_for_a_board_that_is_no_longer_selected_is_refused(self):
+        transport = self.answer(self.status(installed="yes"), ExecResult(0, b"", b""),
+                                self.status(installed="yes", active="yes", steps="prepare start", step="prepare"))
+        for path in ("/api/genai-setup/run", "/api/genai-setup/stop", "/api/genai-setup/stop-studio"):
+            response = self.client.post(path + "?generation=3")
+            body = response.get_json()
+            self.assertEqual((response.status_code, body["code"], body["current_generation"]), (409, "stale_snapshot", 4), path)
+        self.assertEqual(transport.commands, [], "nothing ran on the board")
+        self.assertEqual(self.client.post("/api/genai-setup/run?generation=x").get_json()["code"], "invalid_request")
+        self.assertEqual(self.client.post("/api/genai-setup/run?generation=4").status_code, 200)
 
     def test_without_a_board_the_tab_is_told_how_to_choose_one(self):
         self.manager.error = BoardError("no_target", "No board is selected.", hint="Enter the board's address.")

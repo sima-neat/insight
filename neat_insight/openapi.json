@@ -849,6 +849,7 @@
         "summary": "Install, prepare and start GenAI Studio on the selected board",
         "description": "Starts one detached job on the board running every step that is not done yet, in order: `NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps` in the home directory (the running Insight is never reinstalled), `setup.sh` without a terminal (default voice languages), then `run.sh`, which keeps running. The job outlives the request, the SSH session and Insight; its logs are in `~/.neat-insight/genai-setup/` on the board. Refuses while a job runs (`setup_running`), when everything is done (`setup_done`), or when a step's prerequisite is missing (`setup_blocked`, with the step and the fix). `{\"redo\": \"prepare\"}` runs `setup.sh` again and restarts GenAI Studio, for example after fixing what it warned about; GenAI Studio is stopped first.",
         "operationId": "runGenaiSetup",
+        "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
         "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"redo": {"type": "string", "enum": ["prepare"], "description": "Run this step again, and the ones after it, even though it is done."}}}, "example": {"redo": "prepare"}}}},
         "responses": {
           "200": {"description": "The job started; each step's state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
@@ -865,6 +866,7 @@
         "summary": "Stop the GenAI Studio setup job",
         "description": "Ends the running setup step and the steps queued after it; the step is reported as failed with the message that it was stopped. During the start step this stops GenAI Studio with `run.sh stop`, and the start step waits to be run again. Does nothing when no job runs.",
         "operationId": "stopGenaiSetup",
+        "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
         "responses": {
           "200": {"description": "Each setup step's state after stopping.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
@@ -879,6 +881,7 @@
         "summary": "Stop GenAI Studio on the board",
         "description": "Stops GenAI Studio with `run.sh stop`, whether the setup job or a shell on the board started it, and waits until it has ended. The start step then waits to be run again. Refused with `setup_running` while a setup step is in progress; does nothing when GenAI Studio is not running.",
         "operationId": "stopGenaiStudio",
+        "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
         "responses": {
           "200": {"description": "Each setup step's state after stopping.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},

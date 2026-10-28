@@ -423,6 +423,7 @@ def describe(parsed: dict) -> dict:
     for step in STEPS:
         record = records.get(step) or {"exit": "", "mtime": "", "log": "", "warnings": []}
         record = dict(record, exit=record["exit"] or "")
+        failed = record["exit"] not in ("", "0") and not _stopped_studio(step, record["exit"])
         entry = {"id": step, "title": TITLES[step], "description": DESCRIPTIONS[step], "log": record["log"],
                  "problem": None, "stall": None, "warnings": []}
         if step == current and not (step == "start" and done["start"]):
@@ -436,9 +437,14 @@ def describe(parsed: dict) -> dict:
             entry["state"], entry["log"] = "running", ""
         elif step in queued:
             entry["state"] = "queued"
+        # A failed or stopped install or prepare counts even when an earlier run left its
+        # files: the step did not finish, so Retry runs it again. A running Studio is done.
+        elif failed and step != "start":
+            entry["state"] = "failed"
+            entry["problem"] = diagnose(step, record["log"], record["exit"])
         elif done[step]:
             entry["state"] = "done"
-        elif record["exit"] not in ("", "0") and not _stopped_studio(step, record["exit"]):
+        elif failed:
             entry["state"] = "failed"
             entry["problem"] = diagnose(step, record["log"], record["exit"])
         else:
@@ -594,21 +600,40 @@ def setup_status():
     return jsonify(_payload(session, read_status(session)))
 
 
+def _action_session():
+    """The selected board's session and the request body. A request naming the board
+    `generation` its panel showed is refused once another board is selected, so a click
+    never acts on a board the panel does not show."""
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    raw = request.args.get("generation")
+    session = get_board_manager().session()
+    if raw not in (None, ""):
+        try:
+            expected = int(raw)
+        except ValueError:
+            raise BoardError("invalid_request", "`generation` must be the whole-number board generation.",
+                             hint="Send the `generation` of the setup state the panel shows, or omit it.") from None
+        if expected != session.generation:
+            raise BoardError("stale_snapshot", "The selected board changed since this panel was shown, so nothing was done.",
+                             hint="The panel now shows the selected board: check it, then press the button again.",
+                             expected_generation=expected, current_generation=session.generation)
+    return session, body
+
+
 # API: install, prepare and start GenAI Studio on the board, as far as it still needs.
 @genai_setup_bp.post("/api/genai-setup/run")
 def setup_run():
     """Start a detached job on the board running every step that is not done yet, or {"redo": "prepare"}."""
-    body = request.get_json(silent=True)
-    redo = body.get("redo") if isinstance(body, dict) else None
-    session = get_board_manager().session()
-    return jsonify(_payload(session, run(session, redo)))
+    session, body = _action_session()
+    return jsonify(_payload(session, run(session, body.get("redo"))))
 
 
 # API: stop GenAI Studio on the board.
 @genai_setup_bp.post("/api/genai-setup/stop-studio")
 def setup_stop_studio():
     """Stop GenAI Studio, whether the setup job or a shell on the board started it."""
-    session = get_board_manager().session()
+    session, _ = _action_session()
     return jsonify(_payload(session, stop_studio(session)))
 
 
@@ -616,5 +641,5 @@ def setup_stop_studio():
 @genai_setup_bp.post("/api/genai-setup/stop")
 def setup_stop():
     """Stop the running setup step; during the start step this stops GenAI Studio."""
-    session = get_board_manager().session()
+    session, _ = _action_session()
     return jsonify(_payload(session, stop(session)))
