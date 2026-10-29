@@ -260,6 +260,8 @@ Insight は、自身を実行しているアカウントのキーを使用して
 
 各モードの状態は SiMa Sentinel が判定し、その理由も示します。Insight はその判定を表示します。判定を行えないほど古い Sentinel の場合、Insight は Sentinel のカタログにある MIPI カメラのモードに同じ規則を適用します。USB カメラを確認するのは、USB カメラのドライバーを報告する Sentinel だけです。それより古い Sentinel では、MIPI モードを判定するものも含め、Sentinel を更新するまですべての USB モードが Unsupported（サポート対象外）になります。オーバーレイのチェックでは、ボードのデバイスツリーで Sentinel がカメラに関連付けたセンサーを、`/boot` 以下にインストールされたオーバーレイがサポートするセンサーと照合します。NV12 の条件は、Neat の `CameraInput` が NV12 を出力するという固定の事実に基づくもので、Insight がボード上の Neat に問い合わせることはありません。検出されたすべてのカメラには **Connected**（接続済み）のピルと状態が表示されます。いずれかのモードが Available（利用可能）であれば **Available**、そうでなくいずれかのモードが Unverified（未検証）であれば **Unverified**（未検証）、それ以外は **Unsupported**（サポート対象外）となり、Unverified または Unsupported のカメラではその理由がカメラのパネルに表示されます。Insight は、別のプログラムがカメラを使用中かどうかを示しません。
 
+カメラ名の横にある **Camera ID**（カメラ ID）を開くと、Neat アプリケーションがカメラを開くときに使う ID を確認してコピーできます（MIPI では `CameraInput`、USB では `UsbCameraInput`）。
+
 ### カメラをプレビューする
 
 **Start preview**（プレビューを開始）を選択すると、カメラが捉えている映像を確認できます。Insight は、既存の接続を介してボード上で GStreamer パイプラインを実行します。選択したモードをキャプチャし（MIPI カメラでは `libcamerasrc`、USB カメラでは `v4l2src`）、最大 15 fps、最大幅 640 ピクセルに縮小して JPEG フレームを送り返し、ページは届いたフレームを順に表示します。ボードには GStreamer 本体以外に何も必要ありません。`gst-launch-1.0` がない場合は、インストールすべきパッケージがプレビューに表示されます（`gstreamer1.0-tools`、`gstreamer1.0-plugins-base`、`gstreamer1.0-plugins-good`、および MIPI カメラ向けの `gstreamer1.0-libcamera`）。

@@ -260,6 +260,8 @@ Insight는 자신을 실행하는 계정의 키로 SSH에 연결합니다. 비�
 
 각 모드의 상태는 SiMa Sentinel이 판단하고 그 이유를 함께 제공하며, Insight는 그 답을 표시합니다. 판단을 제공하지 못하는 오래된 Sentinel의 경우 Insight가 Sentinel 카탈로그의 MIPI 카메라 모드에 같은 규칙을 적용합니다. USB 카메라는 USB 카메라의 드라이버를 보고하는 Sentinel만 확인합니다. 그보다 오래된 Sentinel을 사용하면 MIPI 모드를 판단하는 Sentinel이라도 업데이트할 때까지 모든 USB 모드가 Unsupported(지원되지 않음)입니다. 오버레이 검사는 보드의 장치 트리에서 Sentinel이 카메라에 연결한 센서를 `/boot` 아래에 설치된 오버레이가 지원하는 센서와 대조합니다. NV12 조건은 NV12를 출력하는 Neat의 `CameraInput`에 관한 고정된 사실이며, Insight는 보드의 Neat에 질의하지 않습니다. 감지된 모든 카메라에는 **Connected**(연결됨) 배지와 상태가 표시됩니다. 모드 중 하나라도 Available(사용 가능)이면 **Available**, 그렇지 않고 모드 중 하나라도 Unverified(검증되지 않음)이면 **Unverified**(검증되지 않음), 그 외에는 **Unsupported**(지원되지 않음)이며, Unverified 또는 Unsupported 카메라는 그 이유가 카메라 패널에 표시됩니다. Insight는 다른 프로그램이 카메라를 사용 중인지 알려 주지 않습니다.
 
+카메라 이름 옆의 **Camera ID**(카메라 ID)를 열면 Neat 애플리케이션이 카메라를 열 때 사용하는 ID를 확인하고 복사할 수 있습니다(MIPI는 `CameraInput`, USB는 `UsbCameraInput`).
+
 ### 카메라 미리보기
 
 **Start preview**(미리 보기 시작)를 선택하면 카메라가 보는 화면을 확인할 수 있습니다. Insight는 기존 연결을 통해 보드에서 GStreamer 파이프라인을 실행합니다. 선택한 모드를 캡처하고(MIPI 카메라는 `libcamerasrc`, USB 카메라는 `v4l2src`), 너비 최대 640픽셀, 최대 15 fps로 스케일링한 다음 JPEG 프레임을 돌려보내며, 페이지는 프레임이 도착하는 대로 표시합니다. 보드에는 GStreamer 자체 외에 다른 것이 필요하지 않습니다. `gst-launch-1.0`이 없으면 미리 보기에 설치할 패키지(`gstreamer1.0-tools`, `gstreamer1.0-plugins-base`, `gstreamer1.0-plugins-good`, 그리고 MIPI 카메라용 `gstreamer1.0-libcamera`)가 표시됩니다.

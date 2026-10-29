@@ -537,6 +537,7 @@ export default function PeripheralsView({
             onStopPreview={() => stopPreview()}
             onPreviewStreamError={streamEnded}
             onOpenBoardPanel={onOpenBoardPanel}
+            onStatus={onStatus}
           />
         ) : (
           <div className="periph-detail">

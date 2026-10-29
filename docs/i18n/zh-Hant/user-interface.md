@@ -260,6 +260,8 @@ Insight 會使用執行它之帳戶的金鑰透過 SSH 連線。它絕不會要�
 
 每個模式的狀態由 SiMa Sentinel 判定並附上原因；Insight 顯示該結果。若 Sentinel 版本過舊而無法判定，Insight 會對 Sentinel 目錄中 MIPI 相機的模式套用相同的規則。只有會回報 USB 相機驅動程式的 Sentinel 才會檢查 USB 相機；使用較舊的 Sentinel 時（包括會判定 MIPI 模式的版本），在您更新 Sentinel 之前，每個 USB 模式都會是 Unsupported（不支援）。overlay 檢查會將 Sentinel 在開發板裝置樹中連結到該相機的感測器，與安裝在 `/boot` 下的 overlay 所支援的感測器進行比對。NV12 條件是關於 Neat 的 `CameraInput` 的固定事實，它輸出 NV12；Insight 不會查詢開發板上的 Neat。每部偵測到的相機都會顯示 **Connected**（已連線）標籤及其狀態：只要有任一模式為 Available（可用）即為 **Available**，否則只要有任一模式為 Unverified（未驗證）即為 **Unverified**（未驗證），否則為 **Unsupported**（不支援）；Unverified 或 Unsupported 相機的面板會說明原因。Insight 不會指出是否有其他程式正在使用相機。
 
+展開相機名稱旁的 **Camera ID**（相機 ID），即可查看並複製 Neat 應用程式開啟相機時所用的 ID（MIPI 為 `CameraInput`，USB 為 `UsbCameraInput`）。
+
 ### 預覽相機
 
 選取 **Start preview**（開始預覽）即可看到相機所拍攝的畫面。Insight 會透過與開發板的現有連線，在開發板上執行 GStreamer 管線：它會擷取所選的模式（MIPI 相機使用 `libcamerasrc`，USB 相機使用 `v4l2src`），將其縮放至寬度最多 640 像素、最高 15 fps，並傳回 JPEG 影格，頁面會在影格抵達時加以顯示。除了 GStreamer 本身之外，開發板上不需要其他任何元件；若缺少 `gst-launch-1.0`，預覽會指出需要安裝的套件（`gstreamer1.0-tools`、`gstreamer1.0-plugins-base`、`gstreamer1.0-plugins-good`，MIPI 相機另需 `gstreamer1.0-libcamera`）。

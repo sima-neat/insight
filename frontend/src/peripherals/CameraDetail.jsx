@@ -1,4 +1,5 @@
 import PreviewPane from './PreviewPane.jsx'
+import { copyText } from './api.js'
 import {
   blockedFormatSummary,
   cameraSubtitle,
@@ -26,6 +27,23 @@ function BlockedFormats({ options }) {
           </li>
         ))}
       </ul>
+    </details>
+  )
+}
+
+// Folded beside the camera's name: the ID (`device.camera_name`) a Neat application opens this camera by.
+function NeatCameraName({ name, onStatus }) {
+  function copy() {
+    copyText(name).then(() => onStatus?.(`Copied the camera ID: ${name}`), (err) => onStatus?.(`${err.message} Camera ID: ${name}`))
+  }
+  return (
+    <details className="periph-blocked-disclosure periph-neat-name">
+      <summary>Camera ID</summary>
+      <div className="periph-command">
+        <p className="hint">The ID a Neat application opens this camera by.</p>
+        <pre className="periph-code" tabIndex={0} aria-label="Camera ID"><code>{name}</code></pre>
+        <button type="button" className="btn-ghost" onClick={copy}>Copy ID</button>
+      </div>
     </details>
   )
 }
@@ -98,7 +116,8 @@ export default function CameraDetail({
   onStartPreview,
   onStopPreview,
   onPreviewStreamError,
-  onOpenBoardPanel
+  onOpenBoardPanel,
+  onStatus
 }) {
   const summary = cameraSummaryLine(camera)
 
@@ -106,7 +125,10 @@ export default function CameraDetail({
     <section className="periph-detail" aria-labelledby="periph-detail-title">
       <div className="periph-detail-head">
         <div>
-          <h3 id="periph-detail-title">{camera.name}</h3>
+          <div className="periph-title-row">
+            <h3 id="periph-detail-title">{camera.name}</h3>
+            {camera.device?.camera_name && <NeatCameraName name={camera.device.camera_name} onStatus={onStatus} />}
+          </div>
           {cameraSubtitle(camera) && <p className="hint">{cameraSubtitle(camera)}</p>}
         </div>
 

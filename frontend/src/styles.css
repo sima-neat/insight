@@ -4352,6 +4352,38 @@ button:disabled {
   margin-top: 4px;
 }
 
+.periph-title-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.periph-title-row .periph-neat-name {
+  margin: 0;
+}
+
+/* Opened, the ID floats under the title row so the header keeps its height. */
+.periph-neat-name .periph-command {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  top: calc(100% + 6px);
+  width: min(460px, calc(100vw - 64px));
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  box-shadow: var(--shadow-md);
+  padding: 10px;
+}
+
+.periph-neat-name .periph-command .hint {
+  margin: 0;
+  font-family: inherit;
+}
+
 /* Camera preview */
 .periph-preview {
   margin: 12px 0 0;

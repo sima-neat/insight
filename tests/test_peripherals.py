@@ -672,9 +672,10 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(rates(camera, "MJPG", 1280, 720)[0], (30, "available", None))
         self.assertEqual(rates(camera, "YUYV", 640, 480)[0], (30, "unsupported", mjpeg_only))
         self.assertEqual(camera["default_selection"], {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
-        # Sentinel's `identity.camera_name` is not shown: the camera item never carries it.
-        self.assertNotIn("camera_name", camera["device"])
-        self.assertNotIn("/base/pci@7000000000-3.1:1.0-1a2b:3c4d", json.dumps(camera))
+        # Sentinel's `identity.camera_name` is the name UsbCameraInput opens the camera by; a camera without one has none.
+        self.assertEqual(camera["device"]["camera_name"], "/base/pci@7000000000-3.1:1.0-1a2b:3c4d")
+        del doc["identity"]["camera_name"]
+        self.assertNotIn("camera_name", scanned_camera(doc)["device"])
         # A node another driver serves: every mode is Unsupported with Sentinel's driver reason.
         driver = "This camera's driver is not uvcvideo."
         for mode in doc["modes"]:
