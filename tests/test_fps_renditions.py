@@ -636,6 +636,10 @@ class RenditionApiTestCase(unittest.TestCase):
     def tearDown(self):
         mediasrc.pipeline_registry.clear()
         app_module.MEDIA_DIR, app_module.MEDIA_SRC_DATA_FILE, app_module.RENDITIONS_INDEX_FILE = self.old
+        # A probe queued by assign writes the index in the background; let it land before the directory goes.
+        deadline = time.monotonic() + 10.0
+        while renditions._probe_pending and time.monotonic() < deadline:
+            time.sleep(0.02)
         self.tmpdir.cleanup()
 
     def assign(self, index=1, file="demo.mp4", **extra):
