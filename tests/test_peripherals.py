@@ -363,8 +363,9 @@ def scanned_camera(doc, board=None):
 
 class SnapshotTests(unittest.TestCase):
     def test_every_mode_keeps_sentinels_verdict_on_real_catalogs(self):
-        """Each mode Insight lists has the state and reason Sentinel gave it; the only exception is the IMX477's
-        sensor sizes wider than 4032, which libcamera streams at 4032 wide."""
+        """Each mode Insight lists has the state and reason Sentinel gave it; the exceptions are the IMX477's
+        sensor sizes wider than 4032, which libcamera streams at 4032 wide, and the USB cameras of these Sentinels,
+        which predate the USB camera check (no `identity.driver`) and judge them by the MIPI overlay rule."""
         for label, path in VERDICT_CATALOGS.items():
             doc = json.loads(path.read_text(encoding="utf-8"))
             snapshot = snapshot_of(doc)
@@ -374,8 +375,9 @@ class SnapshotTests(unittest.TestCase):
                     with self.subTest(label, camera=device["id"], mode=(mode["format"], mode["width"], mode["height"])):
                         capped = (mode["available"] and device["model"] == "imx477" and mode.get("sensor_mode") is True
                                   and mode["width"] > cameras.SENSOR_MAX_WIDTH["imx477"])
-                        tier = "available" if mode["available"] and not capped else "unsupported"
-                        reason = (cameras.MAX_WIDTH_REASON.format(width=4032) if capped
+                        old_usb = device["backend"] == "v4l2" and not (device.get("identity") or {}).get("driver")
+                        tier = "available" if mode["available"] and not capped and not old_usb else "unsupported"
+                        reason = (cameras.USB_REASON if old_usb else cameras.MAX_WIDTH_REASON.format(width=4032) if capped
                                   else None if mode["available"] else mode["reason"])
                         fps = size_of(fmt_of(camera, mode["format"]), mode["width"], mode["height"])["fps"]
                         self.assertTrue(fps)
@@ -629,14 +631,14 @@ class SnapshotTests(unittest.TestCase):
             for size in fmt["sizes"]:
                 self.assertEqual(states(size["fps"]), [(30, "unsupported", cameras.NO_BOARD_REASON)])
         self.assertIsNone(camera["default_selection"])
-        # A USB camera has no overlay whatever Sentinel reports, so it keeps its own reason.
+        # A USB camera needs no overlay; a Sentinel that gives its modes no verdict is too old to check it.
         self.assertEqual(item(snapshot, C920)["support"]["reason"], cameras.USB_REASON)
         self.assertEqual(snapshot["issues"], [])
 
-    def test_usb_camera_is_unsupported_and_offers_every_advertised_rate(self):
+    def test_a_usb_camera_without_sentinels_verdict_is_unsupported_and_offers_every_advertised_rate(self):
         camera = scanned_camera(c920())
         self.assertEqual((camera["connection"], camera["name"]), ("usb", "HD Pro Webcam C920"))
-        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": "USB cameras have no camera overlay on this board."})
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": "Update SiMa Sentinel on the board to check USB cameras."})
         self.assertEqual(camera["device"], {
             "video_node": "/dev/video97",
             "by_id": C920_BY_ID,
@@ -651,6 +653,95 @@ class SnapshotTests(unittest.TestCase):
                          [(value, "unsupported", cameras.USB_REASON) for value in (30, 24, 20, 15, 10, 7.5, 5)])
         self.assertIsNone(camera["default_selection"])
         self.assertEqual(camera["notes"], [])
+
+    def test_a_usb_camera_follows_sentinels_verdict_for_each_mode(self):
+        """A Sentinel that checks USB cameras marks MJPEG modes on the uvcvideo driver Available and gives the
+        reason for every other mode; Insight passes both through, as it does for MIPI."""
+        mjpeg_only = "Neat's USB camera input reads MJPEG only."
+        doc = c920()
+        doc["identity"].update(camera_name="/base/pci@7000000000-3.1:1.0-046d:08e5", driver="uvcvideo")
+        for mode in doc["modes"]:
+            mode.update({"available": True} if mode["format"] == "MJPG" else {"available": False, "reason": mjpeg_only})
+        # A USB camera needs no camera overlay, so Sentinel's board block does not matter.
+        camera = item(snapshot_of(catalog(doc)), C920)
+        self.assertEqual(camera["support"], {"tier": "available", "reason": ""})
+        self.assertEqual([(f["format"], f["exportable"], f["support"]) for f in camera["formats"]], [
+            ("MJPG", True, {"tier": "available", "reason": ""}),
+            ("YUYV", False, {"tier": "unsupported", "reason": mjpeg_only}),
+        ])
+        self.assertEqual(rates(camera, "MJPG", 1280, 720)[0], (30, "available", None))
+        self.assertEqual(rates(camera, "YUYV", 640, 480)[0], (30, "unsupported", mjpeg_only))
+        self.assertEqual(camera["default_selection"], {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
+        # Sentinel's `identity.camera_name` is not shown: the camera item never carries it.
+        self.assertNotIn("camera_name", camera["device"])
+        self.assertNotIn("/base/pci@7000000000-3.1:1.0-046d:08e5", json.dumps(camera))
+        # A node another driver serves: every mode is Unsupported with Sentinel's driver reason.
+        driver = "This camera's driver is not uvcvideo."
+        for mode in doc["modes"]:
+            mode.update(available=False, reason=driver)
+        camera = scanned_camera(doc)
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": driver})
+        self.assertIsNone(camera["default_selection"])
+        # A camera with no modes says so, whichever Sentinel reported it.
+        doc["modes"] = []
+        self.assertEqual(scanned_camera(doc)["support"], {"tier": "unsupported", "reason": cameras.NO_MODES_REASON})
+
+    def test_a_usb_camera_with_every_mjpeg_mode_refused_gives_the_mjpeg_reason(self):
+        """The camera's reason comes from its MJPG modes, the format Neat's USB camera input reads, even when the
+        camera has more modes in another format (the C920 reports 17 MJPG and 18 YUYV modes)."""
+        no_name = "Neat's USB camera input cannot name this camera (no firmware node or USB ID)."
+        mjpeg_only = "Neat's USB camera input reads MJPEG only."
+        doc = c920()
+        doc["identity"]["driver"] = "uvcvideo"
+        doc["modes"] = (
+            [dict(usb_mode("MJPG", 160 + 16 * i, 120, [(1, 30)]), available=False, reason=no_name) for i in range(17)]
+            + [dict(usb_mode("YUYV", 160 + 16 * i, 120, [(1, 30)]), available=False, reason=mjpeg_only) for i in range(18)]
+        )
+        camera = scanned_camera(doc)
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": no_name})
+        self.assertEqual(fmt_of(camera, "YUYV")["support"], {"tier": "unsupported", "reason": mjpeg_only})
+
+    def test_a_usb_camera_mode_sentinel_gives_no_verdict_or_no_reason_is_unsupported_for_a_usb_reason(self):
+        """A Sentinel that checks USB cameras may leave a mode without a verdict, or refuse one without a reason;
+        neither falls through to the MIPI rule (an ISP size)."""
+        doc = c920()
+        doc["identity"]["driver"] = "uvcvideo"
+        doc["modes"][0]["available"] = True
+        doc["modes"][1]["available"] = False
+        camera = scanned_camera(doc)
+        self.assertEqual(camera["support"], {"tier": "available", "reason": ""})
+        self.assertEqual(rates(camera, "MJPG", 640, 480)[0], (30, "available", None))
+        self.assertEqual(rates(camera, "MJPG", 1280, 720)[0], (30, "unsupported", cameras.USB_MODE_REASON))
+        self.assertEqual(rates(camera, "YUYV", 640, 480)[0], (30, "unsupported", cameras.USB_UNKNOWN_REASON))
+        self.assertEqual(fmt_of(camera, "YUYV")["support"], {"tier": "unsupported", "reason": cameras.USB_UNKNOWN_REASON})
+        self.assertEqual(camera["default_selection"], {"format": "MJPG", "width": 640, "height": 480, "fps": 30})
+        # No verdict at all: the camera says Sentinel could not tell, not that it is too old.
+        for mode in doc["modes"]:
+            mode.pop("available", None)
+        self.assertEqual(scanned_camera(doc)["support"], {"tier": "unsupported", "reason": cameras.USB_UNKNOWN_REASON})
+
+    def test_a_usb_camera_from_a_sentinel_without_the_usb_check_says_to_update_sentinel(self):
+        """The released Sentinel gives USB modes the MIPI overlay verdict and no `identity.driver`; Insight ignores
+        that verdict, as it does a Sentinel that gives none, and says to update Sentinel."""
+        doc = c920()
+        for mode in doc["modes"]:
+            mode.update(available=False, reason="USB cameras have no camera overlay on this board.")
+        doc["modes"][0]["available"] = True
+        camera = scanned_camera(doc)
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.USB_REASON})
+        self.assertEqual({r for f in camera["formats"] for s in f["sizes"] for _, _, r in states(s["fps"])}, {cameras.USB_REASON})
+        self.assertIsNone(camera["default_selection"])
+
+    def test_sentinel_camera_identity_is_validated_before_it_is_mapped(self):
+        doc = c920()
+        doc["identity"].update(camera_name="/base/pci@7000000000-3.1:1.0-046d:08e5", driver="uvcvideo")
+        PeripheralClient(None)._validate_catalog(catalog(doc))
+        for key in ("camera_name", "driver"):
+            for value in (7, ["/base"], {"id": "/base"}):
+                bad = dict(doc, identity=dict(doc["identity"], **{key: value}))
+                with self.subTest(key, value=value), self.assertRaises(BoardError) as ctx:
+                    PeripheralClient(None)._validate_catalog(catalog(bad))
+                self.assertEqual(ctx.exception.code, "peripheral_response")
 
     def test_usb_identity_rows_degrade_when_sysfs_omits_them(self):
         doc = c920()

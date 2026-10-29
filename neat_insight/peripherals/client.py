@@ -295,7 +295,7 @@ class PeripheralClient(SentinelSocket):
                         identity.get(key) is not None and not isinstance(identity.get(key), str)
                         for key in (
                             "stable_key", "topology", "interface", "vendor_id", "product_id",
-                            "serial", "manufacturer", "speed",
+                            "serial", "manufacturer", "speed", "camera_name", "driver",
                         )
                     )
                     or (

@@ -82,7 +82,10 @@ import {
 
 const ISP_SIZE = 'The ISP cannot output this size.'
 const NOT_IN_OVERLAYS = "IMX568 is not in this board's camera overlays."
-const USB_REASON = 'USB cameras have no camera overlay on this board.'
+// A Sentinel that gives USB modes no verdict predates the USB camera check.
+const USB_REASON = 'Update SiMa Sentinel on the board to check USB cameras.'
+const MJPEG_ONLY = "Neat's USB camera input reads MJPEG only."
+const USB_CAMERA_NAME = '/base/pci@7000000000-3.1:1.0-046d:08e5'
 const NO_BOARD = "This board's SiMa Sentinel does not report camera overlays; update Sentinel."
 const support = (tier, reason = '') => ({ tier, reason })
 const rates = (...pairs) => pairs.map(([value, tier]) => ({ value, tier }))
@@ -168,6 +171,17 @@ const usb = {
   default_selection: null,
   notes: [],
   errors: []
+}
+
+// A UVC camera judged by a Sentinel that checks USB cameras: MJPEG Available, YUYV Unsupported.
+const usbMjpeg = {
+  ...usb,
+  support: support('available'),
+  formats: [
+    format('MJPG', 'Motion-JPEG', true, support('available'), [size(1280, 720, [30, 'available'])]),
+    format('YUYV', 'YUYV 4:2:2', false, support('unsupported', MJPEG_ONLY), [size(640, 480, [30, 'unsupported'])])
+  ],
+  default_selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 }
 }
 
 // The Blue Yeti Nano item exactly as the real DevKit scan returned it.
@@ -347,6 +361,8 @@ test('a subtitle never repeats what the name already says', () => {
   assert.equal(cameraSubtitle(imx477), '')
   // The USB camera reports its product string as both name and model, and its kernel path is not shown.
   assert.equal(cameraSubtitle(usb), '')
+  // Nor is a Neat camera name, even if one reaches the page.
+  assert.equal(cameraSubtitle({ ...usbMjpeg, device: { ...usb.device, camera_name: USB_CAMERA_NAME } }), '')
   assert.equal(cameraSubtitle({ name: 'C270', model: 'C270' }), '')
   assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')
 })
@@ -566,7 +582,10 @@ test('the detail pane shows one explanation line, chosen by priority', () => {
   // through untouched and never becomes a sentence; a preview that cannot open the camera says so.
   assert.equal(cameraSummaryLine(inUse), '')
   assert.equal(cameraSummaryLine({ ...imx477, availability: imx568.availability }), '')
-  assert.equal(cameraSummaryLine(usb), '', 'a USB camera is always Unsupported, so it gets no sentence')
+  // A USB camera follows its verdict like a MIPI camera.
+  assert.equal(cameraSummaryLine(usb), USB_REASON)
+  assert.equal(cameraSummaryLine(usbMjpeg), '')
+  assert.equal(cameraSummaryLine({ ...usb, support: support('unsupported', MJPEG_ONLY) }), MJPEG_ONLY)
   assert.equal(cameraSummaryLine({}), '')
 })
 
@@ -720,7 +739,9 @@ test('Start preview is blocked with the reason for every state that forbids it',
   // Codex 4264144158: a camera kept from a failed provider's last scan may be another device now.
   assert.match(block({ ...imx477, modes_source: 'previous-scan' }, mipiMode).reason, /last successful scan/)
 
-  // A USB camera has no camera overlay, so its modes are Unsupported, and it previews any listed mode.
+  // A USB camera previews any listed mode, Available or not.
+  assert.deepEqual(block(usbMjpeg, sel('MJPG', 1280, 720, 30)), open)
+  assert.deepEqual(block(usbMjpeg, sel('YUYV', 640, 480, 30)), open)
   assert.deepEqual(block(usb, sel('MJPG', 1280, 720, 30)), open)
   assert.match(block(usb, null).reason, /no mode Insight can start/)
   // A camera the scan says is in use is not blocked up front: the start reports a busy camera itself.
