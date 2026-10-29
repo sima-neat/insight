@@ -31,13 +31,35 @@ function BlockedFormats({ options }) {
   )
 }
 
+// The ID floats over the page like a menu, so it closes on a pointer anywhere outside it or on Escape,
+// and the listeners go away with it.
+function closeFromOutside(event) {
+  const details = event.currentTarget
+  if (!details.open) return
+  const onPointerDown = (pointer) => {
+    if (!details.contains(pointer.target)) details.open = false
+  }
+  const onKeyDown = (key) => {
+    if (key.key === 'Escape') details.open = false
+  }
+  const onToggle = () => {
+    if (details.open) return
+    document.removeEventListener('pointerdown', onPointerDown)
+    document.removeEventListener('keydown', onKeyDown)
+    details.removeEventListener('toggle', onToggle)
+  }
+  document.addEventListener('pointerdown', onPointerDown)
+  document.addEventListener('keydown', onKeyDown)
+  details.addEventListener('toggle', onToggle)
+}
+
 // Folded beside the camera's name: the ID (`device.camera_name`) a Neat application opens this camera by.
 function NeatCameraName({ name, onStatus }) {
   function copy() {
     copyText(name).then(() => onStatus?.(`Copied the camera ID: ${name}`), (err) => onStatus?.(`${err.message} Camera ID: ${name}`))
   }
   return (
-    <details className="periph-blocked-disclosure periph-neat-name">
+    <details className="periph-blocked-disclosure periph-neat-name" onToggle={closeFromOutside}>
       <summary>Camera ID</summary>
       <div className="periph-command">
         <p className="hint">The ID a Neat application opens this camera by.</p>

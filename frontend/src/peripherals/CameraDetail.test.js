@@ -55,6 +55,45 @@ test('a MIPI or USB camera folds its Camera ID beside its name, and Copy copies 
   }
 })
 
+// A `details` element and the document, with just the event wiring the disclosure uses.
+function fakeDetails() {
+  const listeners = { details: {}, document: {} }
+  const on = (store) => ({
+    addEventListener: (type, fn) => (store[type] = [...(store[type] || []), fn]),
+    removeEventListener: (type, fn) => (store[type] = (store[type] || []).filter((entry) => entry !== fn))
+  })
+  const inside = {}
+  const details = { open: true, contains: (target) => target === inside, ...on(listeners.details) }
+  const document = on(listeners.document)
+  const fire = (where, type, event) => (listeners[where][type] || []).slice().forEach((fn) => fn(event))
+  return { details, document, inside, fire, listening: () => Object.values(listeners.document).flat().length }
+}
+
+test('the open Camera ID closes on a pointer anywhere outside it or on Escape, and only then stops listening', (t) => {
+  const previous = globalThis.document
+  t.after(() => (previous === undefined ? delete globalThis.document : (globalThis.document = previous)))
+  for (const dismiss of [(fake) => fake.fire('document', 'pointerdown', { target: {} }), (fake) => fake.fire('document', 'keydown', { key: 'Escape' })]) {
+    const fake = fakeDetails()
+    globalThis.document = fake.document
+    const onToggle = disclosure(camera('usb', { camera_name: USB_NAME })).props.onToggle
+    onToggle({ currentTarget: fake.details })
+    assert.equal(fake.listening(), 2, 'listens while open')
+    fake.fire('document', 'pointerdown', { target: fake.inside })
+    fake.fire('document', 'keydown', { key: 'Enter' })
+    assert.equal(fake.details.open, true, 'a pointer inside or another key keeps it open')
+    dismiss(fake)
+    assert.equal(fake.details.open, false)
+    fake.fire('details', 'toggle')
+    assert.equal(fake.listening(), 0, 'the close toggle removes the listeners')
+  }
+  // Toggling closed by hand, with nothing open, adds no listeners.
+  const fake = fakeDetails()
+  globalThis.document = fake.document
+  fake.details.open = false
+  disclosure(camera('usb', { camera_name: USB_NAME })).props.onToggle({ currentTarget: fake.details })
+  assert.equal(fake.listening(), 0)
+})
+
 test('a camera without a camera ID shows no disclosure', () => {
   assert.equal(disclosure(camera('usb', { video_node: '/dev/video0' })), null)
   assert.equal(disclosure(camera('mipi', { camera_name: '' })), null)
