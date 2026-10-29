@@ -355,7 +355,7 @@ export function coreSummary(cores, series, timestamps = null) {
 
 /** Series offered by Sentinel Compare Runs; thermal maximum is derived per sample. */
 export const COMPARE_SERIES = [
-  { id: 'power', label: 'Total power', key: 'power_current_watts' },
+  { id: 'power', label: 'Total power (Estimated)', key: 'power_current_watts' },
   { id: 'thermal', label: 'Thermal maximum', thermal: true },
   { id: 'cpu', label: 'CPU utilization', key: 'cpu_usage_pct' },
   { id: 'load', label: 'CPU load', key: 'cpu_load_1' },

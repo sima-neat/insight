@@ -361,7 +361,7 @@ test('a subtitle never repeats what the name already says', () => {
   assert.equal(cameraSubtitle(imx477), '')
   // The USB camera reports its product string as both name and model, and its kernel path is not shown.
   assert.equal(cameraSubtitle(usb), '')
-  // Nor is a Neat camera name, even if one reaches the page.
+  // Nor is the camera ID, even if one reaches the page.
   assert.equal(cameraSubtitle({ ...usbMjpeg, device: { ...usb.device, camera_name: USB_CAMERA_NAME } }), '')
   assert.equal(cameraSubtitle({ name: 'C270', model: 'C270' }), '')
   assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')

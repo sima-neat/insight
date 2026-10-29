@@ -260,6 +260,8 @@ Insight 會使用執行它之帳戶的金鑰透過 SSH 連線。它絕不會要�
 
 每個模式的狀態由 SiMa Sentinel 判定並附上原因；Insight 顯示該結果。若 Sentinel 版本過舊而無法判定，Insight 會對 Sentinel 目錄中 MIPI 相機的模式套用相同的規則。只有會回報 USB 相機驅動程式的 Sentinel 才會檢查 USB 相機；使用較舊的 Sentinel 時（包括會判定 MIPI 模式的版本），在您更新 Sentinel 之前，每個 USB 模式都會是 Unsupported（不支援）。overlay 檢查會將 Sentinel 在開發板裝置樹中連結到該相機的感測器，與安裝在 `/boot` 下的 overlay 所支援的感測器進行比對。NV12 條件是關於 Neat 的 `CameraInput` 的固定事實，它輸出 NV12；Insight 不會查詢開發板上的 Neat。每部偵測到的相機都會顯示 **Connected**（已連線）標籤及其狀態：只要有任一模式為 Available（可用）即為 **Available**，否則只要有任一模式為 Unverified（未驗證）即為 **Unverified**（未驗證），否則為 **Unsupported**（不支援）；Unverified 或 Unsupported 相機的面板會說明原因。Insight 不會指出是否有其他程式正在使用相機。
 
+展開相機名稱旁的 **Camera ID**（相機 ID），即可查看並複製 Neat 應用程式開啟相機時所用的 ID（MIPI 為 `CameraInput`，USB 為 `UsbCameraInput`）。
+
 ### 預覽相機
 
 選取 **Start preview**（開始預覽）即可看到相機所拍攝的畫面。Insight 會透過與開發板的現有連線，在開發板上執行 GStreamer 管線：它會擷取所選的模式（MIPI 相機使用 `libcamerasrc`，USB 相機使用 `v4l2src`），將其縮放至寬度最多 640 像素、最高 15 fps，並傳回 JPEG 影格，頁面會在影格抵達時加以顯示。除了 GStreamer 本身之外，開發板上不需要其他任何元件；若缺少 `gst-launch-1.0`，預覽會指出需要安裝的套件（`gstreamer1.0-tools`、`gstreamer1.0-plugins-base`、`gstreamer1.0-plugins-good`，MIPI 相機另需 `gstreamer1.0-libcamera`）。
@@ -298,10 +300,10 @@ MIPI 相機可預覽其 Available（可用）與 Unverified（未驗證）模式
 
 DevKit 檢視的版面與 Sentinel 本身的終端機儀表板（`simaai-sentinel ops`）相同。狀態列會顯示讀數是否為即時，以及目前的 Sentinel 工作階段何時開始，也就是工作階段平均值與峰值所涵蓋的範圍。**Export CSV**（匯出 CSV）會下載 Sentinel 為此工作階段保留之每個樣本的所有指標（最近 240 個，約八分鐘；若需要更長時間，請在 **Runs**（執行記錄）下錄製追蹤），而 **Pause updates**（暫停更新）會停止輪詢。其下方有六個分頁：
 
-- **Overview**（概覽）：最熱溫度感測器、開發板功耗、CPU 使用率、Linux 記憶體、MLA 記憶體與網路流量的圖表，下方收合著 **All metrics**（所有指標），依 Sentinel 的順序列出每個指標。
+- **Overview**（概覽）：最熱溫度感測器、開發板功耗、CPU 使用率、Linux 記憶體、加速器記憶體（MLA 與 EV74 堆疊）與網路流量的圖表，下方收合著 **All metrics**（所有指標），依 Sentinel 的順序列出每個指標。
 - **Thermal**（溫度）：最熱感測器隨時間的變化，接著以小型圖表呈現各感測器群組（MLA、APU、CVU、TOP、Board）。
-- **Power**（功耗）：以數字呈現目前、工作階段平均與工作階段峰值功耗；呈現時間窗內的開發板功耗並標示工作階段平均值；以及堆疊的電源軌，讓頂端邊緣即為開發板總功耗。
-- **System**（系統）：**CPU & memory**（CPU 與記憶體）以圖表呈現 CPU 使用率、平均負載、Linux 記憶體、MLA 記憶體與 EV74 記憶體。**Per-core CPU**（各核心 CPU）是負載熱圖，每個核心一列、時間窗中每 10 秒一欄，使用單一藍色，並附上每個核心的一分鐘平均值與最忙碌的核心；平均值超出核心的限制時會轉為琥珀色或紅色。
+- **Power**（功耗）：以數字呈現目前、工作階段平均與工作階段峰值功耗；呈現時間窗內的開發板功耗並標示工作階段平均值；以及堆疊的電源軌，讓頂端邊緣即為開發板總功耗。開發板功耗與能量為估計值（SoM 穩壓器電源軌讀數的總和）。
+- **System**（系統）：**CPU & memory**（CPU 與記憶體）以圖表呈現 CPU 使用率、平均負載、Linux 記憶體、MLA 記憶體、EV74 記憶體，以及兩者堆疊的加速器記憶體。**Per-core CPU**（各核心 CPU）是負載熱圖，每個核心一列、時間窗中每 10 秒一欄，使用單一藍色，並附上每個核心的一分鐘平均值與最忙碌的核心；平均值超出核心的限制時會轉為琥珀色或紅色。
 - **Storage & Network**（儲存與網路）：eMMC 使用量、網路接收與傳送、eMMC 讀取與寫入，以及其指標。
 - **Runs**（執行記錄）：錄製追蹤，以及開啟、比較或刪除已儲存的執行記錄。比較功能會針對每筆選取的執行記錄，在它們共同涵蓋的時間範圍內疊加一個序列（總功耗、溫度最大值、CPU、負載、RAM、MLA 記憶體或 EV74 記憶體），並採用符合這些執行記錄的刻度，同時列出每筆執行記錄的最小值、平均值、中位數、P95、最大值、相對於基準的變化，以及能量；逐指標的比較則收合在其下方。
 

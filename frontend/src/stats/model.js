@@ -953,7 +953,7 @@ export const COMPARE_STATISTIC = 'mean'
 // this view reads a duration in; `scale` converts it once, here.
 const RUN_SCALARS = [
   { key: 'duration_ms', label: 'Duration', unit: 's', scale: 0.001 },
-  { key: 'energy_joules', label: 'Energy', unit: 'J', scale: 1 },
+  { key: 'energy_joules', label: 'Energy (Estimated)', unit: 'J', scale: 1 },
   { key: 'samples', label: 'Samples', unit: null, scale: 1 }
 ]
 

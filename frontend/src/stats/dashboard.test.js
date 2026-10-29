@@ -39,11 +39,11 @@ test('every live metric lands in exactly one of Power, Thermal and System, by th
   const sections = { power: [], thermal: [], system: [] }
   for (const group of model.groups) for (const metric of group.metrics) sections[metricSection(metric, group.name)].push(metric)
   const all = model.groups.flatMap((group) => group.metrics.map((metric) => metric.key))
-  assert.deepEqual([all.length, LIVE.counts.total], [59, 59])
+  assert.deepEqual([all.length, LIVE.counts.total], [60, 60])
   const placed = [...sections.power, ...sections.thermal, ...sections.system].map((metric) => metric.key)
   assert.deepEqual([...placed].sort(), [...all].sort())
   assert.equal(new Set(placed).size, placed.length)
-  assert.deepEqual([sections.power.length, sections.thermal.length, sections.system.length], [11, 17, 31])
+  assert.deepEqual([sections.power.length, sections.thermal.length, sections.system.length], [11, 17, 32])
   const groupsOf = (metrics) => [...new Set(metrics.map((metric) => metric.group))].sort()
   assert.deepEqual(groupsOf(sections.thermal), ['APU', 'Board', 'CVU', 'MLA', 'TOP'])
   assert.ok(sections.thermal.every((metric) => metric.unit === 'C' && isThermalMetric(metric)))
@@ -170,7 +170,7 @@ test('per-core heatmap: column means over the window, a one-minute average per c
 
 test('compare runs overlays one series per run over elapsed time, baseline first, summarised over the common window', () => {
   const overlay = compareOverlay(RAW, 'power')
-  assert.deepEqual([overlay.spec.label, overlay.unit], ['Total power', 'W'])
+  assert.deepEqual([overlay.spec.label, overlay.unit], ['Total power (Estimated)', 'W'])
   assert.deepEqual(overlay.lines.map((line) => [line.name, line.baseline]), [['tes3', true], ['insight-hw-1790177227', false]])
   assert.deepEqual(overlay.lines[0].points.map((point) => Math.round(point.t)), [0, 2, 4, 6], 'about two seconds apart, as recorded')
   assert.deepEqual(overlay.lines[1].points.map((point) => point.v), [8.53125, 8.53125, 8.53125, 8.875])
@@ -225,11 +225,11 @@ test('compare runs overlays one series per run over elapsed time, baseline first
 
 test('compare runs offers only the series the runs recorded, and derives the thermal maximum', () => {
   assert.deepEqual(compareSeriesAvailable(RAW).map((entry) => entry.label),
-    ['Total power', 'Thermal maximum', 'CPU utilization', 'CPU load', 'RAM used', 'MLA memory'])
-  // These runs predate Sentinel's EV74 memory; runs that define it offer it, and the CMA pool is never offered.
-  const withEv74 = structuredClone(RAW)
-  for (const run of withEv74.sentinel.runs) run.metrics.push({ key: 'ev74_mem_allocated_mb', label: 'EV74 memory allocated', unit: 'MB', group: 'EV74' })
-  assert.deepEqual(compareSeriesAvailable(withEv74).map((entry) => entry.key).slice(-2), ['mla_mem_allocated_mb', 'ev74_mem_allocated_mb'])
+    ['Total power (Estimated)', 'Thermal maximum', 'CPU utilization', 'CPU load', 'RAM used', 'MLA memory', 'EV74 memory'])
+  // Runs recorded before Sentinel reported EV74 memory do not offer it.
+  const older = structuredClone(RAW)
+  for (const run of older.sentinel.runs) run.metrics = run.metrics.filter((metric) => metric.key !== 'ev74_mem_allocated_mb')
+  assert.deepEqual(compareSeriesAvailable(older).map((entry) => entry.key).slice(-1), ['mla_mem_allocated_mb'])
   const thermal = compareOverlay(RAW, 'thermal')
   assert.equal(thermal.unit, 'C')
   const firstSample = RAW.sentinel.runs.find((run) => run.metadata.name === 'tes3').samples[0].values

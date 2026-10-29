@@ -1,6 +1,6 @@
 {
   "board": {"build_version": "2.1.3_master_B4837", "fingerprint": "89925fc8f0800d17", "hostname": "modalix", "label": "sima@192.168.2.2", "machine": "modalix", "source": "sdk-env"},
-  "counts": {"critical": 0, "total": 59, "unavailable": 0, "warn": 0},
+  "counts": {"critical": 0, "total": 60, "unavailable": 0, "warn": 0},
   "generation": 1,
   "groups": [
     {"name": "APU", "metrics": [
@@ -46,9 +46,7 @@
       {"critical": null, "group": "DiskIO", "key": "disk_emmc_write_mbps", "label": "eMMC write", "short": "eMMCW", "status": "ok", "unit": "MB/s", "value": 0.013671016439661066, "warn": null}
     ]},
     {"name": "EV74", "metrics": [
-      {"critical": null, "group": "EV74", "key": "ev74_cma_total_mb", "label": "EV74 CMA reserved", "short": "CMATotal", "status": "ok", "unit": "MB", "value": 1788.0, "warn": null},
-      {"critical": null, "group": "EV74", "key": "ev74_cma_free_mb", "label": "EV74 CMA free", "short": "CMAFree", "status": "ok", "unit": "MB", "value": 1267.3046875, "warn": null},
-      {"critical": null, "group": "EV74", "key": "ev74_cma_used_mb", "label": "EV74 CMA used", "short": "CMAUsed", "status": "ok", "unit": "MB", "value": 520.6953125, "warn": null}
+      {"critical": null, "group": "EV74", "key": "ev74_mem_allocated_mb", "label": "EV74 memory allocated", "short": "EV74MB", "status": "ok", "unit": "MB", "value": 23.28125, "warn": null}
     ]},
     {"name": "MLA", "metrics": [
       {"critical": 85.0, "group": "MLA", "key": "rtsn_0", "label": "MLA RTSN-0", "short": "MLA-0", "status": "ok", "unit": "C", "value": 65.25559082031248, "warn": 70.0},
@@ -63,7 +61,10 @@
     ]},
     {"name": "Memory", "metrics": [
       {"critical": 90.0, "group": "Memory", "key": "linux_mem_used_pct", "label": "Linux memory used", "short": "Mem%", "status": "ok", "unit": "%", "value": 21.291911183755214, "warn": 80.0},
-      {"critical": null, "group": "Memory", "key": "linux_mem_used_mb", "label": "Linux memory used MB", "short": "MemMB", "status": "ok", "unit": "MB", "value": 1255.84765625, "warn": null}
+      {"critical": null, "group": "Memory", "key": "linux_mem_used_mb", "label": "Linux memory used MB", "short": "MemMB", "status": "ok", "unit": "MB", "value": 1255.84765625, "warn": null},
+      {"critical": null, "group": "Memory", "key": "ev74_cma_total_mb", "label": "CMA reserved", "short": "CMATotal", "status": "ok", "unit": "MB", "value": 1788.0, "warn": null},
+      {"critical": null, "group": "Memory", "key": "ev74_cma_free_mb", "label": "CMA free", "short": "CMAFree", "status": "ok", "unit": "MB", "value": 1267.3046875, "warn": null},
+      {"critical": null, "group": "Memory", "key": "ev74_cma_used_mb", "label": "CMA used", "short": "CMAUsed", "status": "ok", "unit": "MB", "value": 520.6953125, "warn": null}
     ]},
     {"name": "Network", "metrics": [
       {"critical": null, "group": "Network", "key": "net_rx_mbps", "label": "Network RX", "short": "NetRX", "status": "ok", "unit": "MB/s", "value": 1.141349162777595, "warn": null},
@@ -89,7 +90,7 @@
       {"critical": 85.0, "group": "TOP", "key": "rtsn_13", "label": "TOP RTSN-13", "short": "TOP-13", "status": "ok", "unit": "C", "value": 65.25559082031248, "warn": 70.0}
     ]}
   ],
-  "highlights": ["power_current_watts", "cpu_usage_pct", "linux_mem_used_pct", "mla_mem_allocated_mb", "ev74_cma_used_mb", "lm96163_temp2"],
+  "highlights": ["power_current_watts", "cpu_usage_pct", "linux_mem_used_pct", "mla_mem_allocated_mb", "ev74_mem_allocated_mb", "lm96163_temp2"],
   "sampled_at": "2026-09-24T18:57:50.098080504Z",
   "version": "main:80ab7de4da31"
 }

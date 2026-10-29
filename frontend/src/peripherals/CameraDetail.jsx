@@ -1,4 +1,5 @@
 import PreviewPane from './PreviewPane.jsx'
+import { copyText } from './api.js'
 import {
   blockedFormatSummary,
   cameraSubtitle,
@@ -26,6 +27,45 @@ function BlockedFormats({ options }) {
           </li>
         ))}
       </ul>
+    </details>
+  )
+}
+
+// The ID floats over the page like a menu, so it closes on a pointer anywhere outside it or on Escape,
+// and the listeners go away with it.
+function closeFromOutside(event) {
+  const details = event.currentTarget
+  if (!details.open) return
+  const onPointerDown = (pointer) => {
+    if (!details.contains(pointer.target)) details.open = false
+  }
+  const onKeyDown = (key) => {
+    if (key.key === 'Escape') details.open = false
+  }
+  const onToggle = () => {
+    if (details.open) return
+    document.removeEventListener('pointerdown', onPointerDown)
+    document.removeEventListener('keydown', onKeyDown)
+    details.removeEventListener('toggle', onToggle)
+  }
+  document.addEventListener('pointerdown', onPointerDown)
+  document.addEventListener('keydown', onKeyDown)
+  details.addEventListener('toggle', onToggle)
+}
+
+// Folded beside the camera's name: the ID (`device.camera_name`) a Neat application opens this camera by.
+function NeatCameraName({ name, onStatus }) {
+  function copy() {
+    copyText(name).then(() => onStatus?.(`Copied the camera ID: ${name}`), (err) => onStatus?.(`${err.message} Camera ID: ${name}`))
+  }
+  return (
+    <details className="periph-blocked-disclosure periph-neat-name" onToggle={closeFromOutside}>
+      <summary>Camera ID</summary>
+      <div className="periph-command">
+        <p className="hint">The ID a Neat application opens this camera by.</p>
+        <pre className="periph-code" tabIndex={0} aria-label="Camera ID"><code>{name}</code></pre>
+        <button type="button" className="btn-ghost" onClick={copy}>Copy ID</button>
+      </div>
     </details>
   )
 }
@@ -98,7 +138,8 @@ export default function CameraDetail({
   onStartPreview,
   onStopPreview,
   onPreviewStreamError,
-  onOpenBoardPanel
+  onOpenBoardPanel,
+  onStatus
 }) {
   const summary = cameraSummaryLine(camera)
 
@@ -106,7 +147,10 @@ export default function CameraDetail({
     <section className="periph-detail" aria-labelledby="periph-detail-title">
       <div className="periph-detail-head">
         <div>
-          <h3 id="periph-detail-title">{camera.name}</h3>
+          <div className="periph-title-row">
+            <h3 id="periph-detail-title">{camera.name}</h3>
+            {camera.device?.camera_name && <NeatCameraName name={camera.device.camera_name} onStatus={onStatus} />}
+          </div>
           {cameraSubtitle(camera) && <p className="hint">{cameraSubtitle(camera)}</p>}
         </div>
 

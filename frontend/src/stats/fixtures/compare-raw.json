@@ -12,7 +12,7 @@
           {"key": "cpu_load_1", "label": "CPU load 1m", "unit": "load", "group": "CPU"},
           {"key": "linux_mem_used_mb", "label": "Linux memory used MB", "unit": "MB", "group": "Memory"},
           {"key": "mla_mem_allocated_mb", "label": "MLA memory allocated", "unit": "MB", "group": "MLA"},
-          {"key": "ev74_cma_used_mb", "label": "EV74 CMA used", "unit": "MB", "group": "EV74"},
+          {"key": "ev74_mem_allocated_mb", "label": "EV74 memory allocated", "unit": "MB", "group": "EV74"},
           {"key": "rtsn_0", "label": "MLA RTSN-0", "unit": "C", "group": "MLA"},
           {"key": "lm96163_temp2", "label": "LM96163 temp2", "unit": "C", "group": "Board"}
         ],
@@ -39,7 +39,7 @@
           {"key": "cpu_load_1", "label": "CPU load 1m", "unit": "load", "group": "CPU"},
           {"key": "linux_mem_used_mb", "label": "Linux memory used MB", "unit": "MB", "group": "Memory"},
           {"key": "mla_mem_allocated_mb", "label": "MLA memory allocated", "unit": "MB", "group": "MLA"},
-          {"key": "ev74_cma_used_mb", "label": "EV74 CMA used", "unit": "MB", "group": "EV74"},
+          {"key": "ev74_mem_allocated_mb", "label": "EV74 memory allocated", "unit": "MB", "group": "EV74"},
           {"key": "rtsn_0", "label": "MLA RTSN-0", "unit": "C", "group": "MLA"},
           {"key": "lm96163_temp2", "label": "LM96163 temp2", "unit": "C", "group": "Board"}
         ],

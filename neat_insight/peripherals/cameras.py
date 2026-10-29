@@ -251,6 +251,8 @@ def _item(camera: dict, modes: list, reason: str, retained: bool) -> dict:
             "speed_mbps": _speed_mbps(identity.get("speed")),
         }
         info = {"usb": {key: value for key, value in details.items() if value}}
+        if identity.get("camera_name"):
+            info["camera_name"] = identity["camera_name"]
         if camera.get("device_path"):
             info = {"video_node": camera["device_path"], **info}
         if camera.get("by_id_path"):

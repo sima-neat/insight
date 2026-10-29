@@ -246,7 +246,7 @@ test('the captured comparison is read as a table of metrics against the baseline
   assert.deepEqual(duration.cells.map((cell) => [cell.value, cell.deltaPct]), [[6.667, null], [34.379, null]])
   assert.equal(formatValue(duration.cells[1].value, duration.unit), '34.4 s')
   const energy = rowOf(table, 'energy_joules')
-  assert.equal(energy.label, 'Energy')
+  assert.equal(energy.label, 'Energy (Estimated)')
   assert.equal(formatValue(energy.cells[1].value, energy.unit), '275 J')
   const power = rowOf(table, 'power_current_watts')
   assert.equal(power.cells[0].value, COMPARE.summaries[COMPARE.baseline_id].metrics.power_current_watts.mean)
