@@ -29,7 +29,8 @@ function disclosure(shown, onStatus) {
 function withClipboard(t, clipboard) {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
   Object.defineProperty(globalThis, 'navigator', { value: { clipboard }, configurable: true, writable: true })
-  t.after(() => Object.defineProperty(globalThis, 'navigator', previous))
+  // Node 20 has no global navigator to restore.
+  t.after(() => (previous ? Object.defineProperty(globalThis, 'navigator', previous) : delete globalThis.navigator))
 }
 
 const text = (node) => find(node, (n) => n.type === 'code').props.children
