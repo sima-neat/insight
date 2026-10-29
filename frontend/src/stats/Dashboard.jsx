@@ -30,7 +30,7 @@ function toneColor(status) {
 
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)']
 const STORAGE_GROUP = /^(disk|diskio|network|storage|nvme)$/i
-const SYSTEM_KEYS = /^(cpu_|linux_mem|mla_mem|ev74_)/
+const SYSTEM_KEYS = /^(cpu_|linux_mem|mla_mem|ev74_mem)/
 
 function readTab() {
   try {
@@ -66,6 +66,27 @@ function MetricChart({ model, metricKey, title, ceiling, headline, height, compa
       tone={metric.status}
       height={height}
       compact={compact}
+    />
+  )
+}
+
+/** MLA and EV74 DMA-BUF memory stacked: Sentinel counts each buffer once, so the top edge is their sum. */
+function AcceleratorMemoryChart({ model, height }) {
+  const parts = [['mla_mem_allocated_mb', 'MLA'], ['ev74_mem_allocated_mb', 'EV74']]
+    .map(([key, label], index) => ({ metric: metricByKey(model, key), key, label, color: COLORS[index] }))
+    .filter((entry) => entry.metric)
+  if (!parts.length) return null
+  const series = parts.map(({ key, label, color }) => ({ key, label, values: seriesOf(model, key), color }))
+  const total = currentTotal(parts.map(({ metric }) => metric.value))
+  return (
+    <StackedChart
+      title="Accelerator memory"
+      headline={total === null ? '—' : formatValue(total, 'MB')}
+      series={series}
+      scale={scaleFor('MB', [stackTotals(series.map((item) => item.values))])}
+      unit="MB"
+      timestamps={model.timestamps}
+      height={height}
     />
   )
 }
@@ -184,7 +205,7 @@ function OverviewView({ model }) {
         <MetricChart model={model} metricKey="power_current_watts" title="Board power (Estimated)" ceiling={powerCeiling(model)} />
         <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU usage" />
         <MetricChart model={model} metricKey="linux_mem_used_pct" title="Linux memory" />
-        <MetricChart model={model} metricKey="mla_mem_allocated_mb" title="MLA memory" />
+        <AcceleratorMemoryChart model={model} height={96} />
         <PairChart model={model} keys={['net_rx_mbps', 'net_tx_mbps']} labels={['Receive', 'Transmit']} title="Network" />
       </div>
       <details className="dash-card dash-all">
@@ -319,6 +340,7 @@ function SystemView({ model }) {
             />
             <MetricChart model={model} metricKey="mla_mem_allocated_mb" title="MLA memory" />
             <MetricChart model={model} metricKey="ev74_mem_allocated_mb" title="EV74 memory" />
+            <AcceleratorMemoryChart model={model} height={96} />
           </div>
         )}
       </div>
