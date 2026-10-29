@@ -27,6 +27,10 @@ STOP_TIMEOUT_SEC = 15.0
 PID_TIMEOUT_SEC = 2.0
 # How long SiMa Sentinel gets to rescan a MIPI camera once its preview runs, for the camera's rate.
 CAMERA_FPS_TIMEOUT_SEC = 10.0
+# How long SiMa Sentinel gets to rescan before a USB camera without a by-id link is opened by its /dev/videoN.
+IDENTITY_TIMEOUT_SEC = 10.0
+# The SiMa Sentinel provider that reports USB cameras (see cameras.provider_of).
+USB_PROVIDER = "camera.v4l2"
 # How long a pipeline that exited gets to finish writing its error, which arrives apart from stdout.
 STDERR_WAIT_SEC = 2.0
 STREAM_PATH = "/api/peripherals/cameras/preview/{}/stream"
@@ -158,6 +162,7 @@ class PreviewManager:
     def _start(self, board_session, item: dict, mode: dict) -> dict:
         self._require_gstreamer(board_session)
         self._require_camera_free(board_session, item)
+        self._require_scanned_node(board_session, item)
         arguments = gst.pipeline(item["connection"], mode["source"], mode["format"], mode["width"], mode["height"], mode["rate"])
         stream = board_session.transport.stream(gst.board_command(arguments), timeout=START_TIMEOUT_SEC)
         parser = gst.FrameParser()
@@ -236,6 +241,39 @@ class PreviewManager:
                 hint=GST_INSTALL_HINT,
                 tool="gst-launch-1.0",
             )
+
+    @staticmethod
+    def _require_scanned_node(board_session, item: dict) -> None:
+        """Refuse a USB camera opened by its /dev/videoN (it has no by-id link) unless SiMa Sentinel still reports
+        that node as the scanned camera: Linux gives the number to whichever camera is plugged in next (#208)."""
+        device = item["device"]
+        if item["connection"] != "usb" or device.get("by_id"):
+            return
+        node = device.get("video_node")
+        try:
+            catalog = PeripheralClient(board_session).refresh(timeout=IDENTITY_TIMEOUT_SEC)
+        except BoardError as exc:
+            if exc.code == "stale_snapshot":  # The board was deselected meanwhile.
+                raise
+            raise BoardError(exc.code, f"{item['name']} has no /dev/v4l/by-id link, and SiMa Sentinel could not "
+                             f"confirm it is still the camera at {node}: {exc.message}", hint=exc.hint,
+                             **exc.extra) from exc
+        current = next((entry for entry in catalog["devices"] if entry["id"] == item["id"]), None)
+        failed = {error.get("provider") for error in catalog.get("errors") or []}
+        if USB_PROVIDER in failed:
+            # As for a camera kept from a failed provider's last scan (api.scanned_camera).
+            raise BoardError(
+                "peripheral_unavailable",
+                f"{item['name']} has no /dev/v4l/by-id link, and SiMa Sentinel's {USB_PROVIDER} provider failed "
+                f"while confirming it is still the camera at {node}.",
+                hint="Refresh again; if the provider keeps failing, check SiMa Sentinel on the board.",
+            )
+        identity, scanned = (current or {}).get("identity") or {}, device.get("usb") or {}
+        # The id is the port, interface and node index; the USB identity tells a camera from its replacement.
+        if (current is None or current.get("device_path") != node
+                or any((identity.get(key) or None) != scanned.get(key) for key in ("vendor_id", "product_id", "serial"))):
+            raise BoardError("stale_snapshot", f"{node} may no longer be {item['name']}: the camera was replugged or "
+                             "replaced since the scan.", hint="Refresh, then start the preview.")
 
     @staticmethod
     def _require_camera_free(board_session, item: dict) -> None:
