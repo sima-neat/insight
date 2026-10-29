@@ -85,7 +85,7 @@ const NOT_IN_OVERLAYS = "IMX568 is not in this board's camera overlays."
 // A Sentinel that gives USB modes no verdict predates the USB camera check.
 const USB_REASON = 'Update SiMa Sentinel on the board to check USB cameras.'
 const MJPEG_ONLY = "Neat's USB camera input reads MJPEG only."
-const USB_CAMERA_NAME = '/base/pci@7000000000-3.1:1.0-046d:08e5'
+const USB_CAMERA_NAME = '/base/pci@7000000000-3.1:1.0-1a2b:3c4d'
 const NO_BOARD = "This board's SiMa Sentinel does not report camera overlays; update Sentinel."
 const support = (tier, reason = '') => ({ tier, reason })
 const rates = (...pairs) => pairs.map(([value, tier]) => ({ value, tier }))

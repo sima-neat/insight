@@ -26,7 +26,7 @@ from neat_insight.peripherals import api as peripherals_api, cameras
 from neat_insight.peripherals.api import peripherals_bp
 from neat_insight.preview import api, gst, manager as preview
 from test_board import wait_until
-from test_peripherals import C920, C920_BY_ID, IMX477, board_block, c920, catalog, imx477, mipi_mode, usb_mode
+from test_peripherals import USB_CAMERA, USB_CAMERA_BY_ID, IMX477, board_block, usb_camera, catalog, imx477, mipi_mode, usb_mode
 
 MODE = {"format": "NV12", "width": 1920, "height": 1080, "fps": 30}
 PREVIEW = "/api/peripherals/cameras/preview"
@@ -85,7 +85,7 @@ class FakeStream:
 class FakeTransport:
     def __init__(self, gst_path=b"/usr/bin/gst-launch-1.0\n", users=None, stream=None):
         self.calls, self.streams, self.closed = [], [], False
-        report = {"users": {IMX477: users or [], C920: users or []}}
+        report = {"users": {IMX477: users or [], USB_CAMERA: users or []}}
         self.replies = {"command -v gst-launch-1.0": gst_path, '"cameras"': json.dumps(report).encode()}
         self.next_stream = stream
 
@@ -126,8 +126,8 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(shlex.split(command[2])[6:], arguments)
 
     def test_a_usb_mjpg_mode_is_decoded_and_reencoded_small(self):
-        arguments = gst.pipeline("usb", gst.quoted(C920_BY_ID), "MJPG", 1280, 720, Fraction(30))
-        self.assertEqual(arguments[:6], ["v4l2src", f'device="{C920_BY_ID}"', "!", "image/jpeg,width=1280,height=720,framerate=30/1", "!", "jpegdec"])
+        arguments = gst.pipeline("usb", gst.quoted(USB_CAMERA_BY_ID), "MJPG", 1280, 720, Fraction(30))
+        self.assertEqual(arguments[:6], ["v4l2src", f'device="{USB_CAMERA_BY_ID}"', "!", "image/jpeg,width=1280,height=720,framerate=30/1", "!", "jpegdec"])
         self.assertEqual(arguments[6:12], ["!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=15/1"])
 
     def test_a_usb_raw_mode_is_converted_and_a_slow_rate_is_not_raised(self):
@@ -222,9 +222,9 @@ class PreviewTests(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
         self.addCleanup(lambda: self.manager.stop_for_board_change())
-        self.snapshot = scanned(imx477(), c920())
+        self.snapshot = scanned(imx477(), usb_camera())
         self.imx477 = item_of(self.snapshot, IMX477)
-        self.c920 = item_of(self.snapshot, C920)
+        self.usb_camera = item_of(self.snapshot, USB_CAMERA)
 
     def start(self, session=None, item=None, mode=MODE):
         item = item or self.imx477
@@ -251,17 +251,17 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual({key: mode[key] for key in MODE}, MODE)
         self.assertEqual(api.previewable_mode(self.imx477, {})["fps"], 30)
         # A USB camera previews its modes even when they are Unsupported (here: a Sentinel without USB verdicts).
-        self.assertEqual(self.c920["formats"][0]["sizes"][0]["fps"][0]["tier"], "unsupported")
-        usb = api.previewable_mode(self.c920, {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
-        self.assertEqual((usb["rate"], usb["source"]), (Fraction(30), f'"{C920_BY_ID}"'))
-        self.assertEqual(api.previewable_mode(self.c920, {"format": "MJPG", "width": 640, "height": 480, "fps": 7.5})["rate"], Fraction(15, 2))
-        self.assertEqual(api.previewable_mode(self.c920, {"format": "YUYV", "width": 640, "height": 480, "fps": 5})["format"], "YUYV")
+        self.assertEqual(self.usb_camera["formats"][0]["sizes"][0]["fps"][0]["tier"], "unsupported")
+        usb = api.previewable_mode(self.usb_camera, {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
+        self.assertEqual((usb["rate"], usb["source"]), (Fraction(30), f'"{USB_CAMERA_BY_ID}"'))
+        self.assertEqual(api.previewable_mode(self.usb_camera, {"format": "MJPG", "width": 640, "height": 480, "fps": 7.5})["rate"], Fraction(15, 2))
+        self.assertEqual(api.previewable_mode(self.usb_camera, {"format": "YUYV", "width": 640, "height": 480, "fps": 5})["format"], "YUYV")
         cases = (
             (self.imx477, {**MODE, "format": "RGB3"}, "cannot be previewed: Neat's CameraInput outputs NV12 only."),
             (self.imx477, {**MODE, "format": "H264"}, "H264 is not a format this camera reported."),
             (self.imx477, {**MODE, "width": 1280, "height": 720}, "1280x720 is not a size"),
             (self.imx477, {**MODE, "fps": 60}, "Pick one of: 30."),
-            (self.c920, {}, "no default mode"),
+            (self.usb_camera, {}, "no default mode"),
         )
         for item, mode, reason in cases:
             with self.subTest(mode=mode), self.assertRaises(BoardError) as ctx:
@@ -270,10 +270,10 @@ class PreviewTests(unittest.TestCase):
             self.assertIn(reason, ctx.exception.message + (ctx.exception.hint or ""))
 
     def test_a_usb_camera_opens_its_stable_path_and_needs_a_format_gstreamer_reads(self):
-        doc = c920()
+        doc = usb_camera()
         del doc["by_id_path"]
         doc["modes"].append(dict(usb_mode("MJPG", 320, 240, [(1, 30)]), format="H264", format_description="H.264"))
-        item = item_of(scanned(doc), C920)
+        item = item_of(scanned(doc), USB_CAMERA)
         self.assertEqual(api.previewable_mode(item, {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})["source"], '"/dev/video97"')
         with self.assertRaises(BoardError) as ctx:
             api.previewable_mode(item, {"format": "H264", "width": 320, "height": 240, "fps": 30})
@@ -287,14 +287,14 @@ class PreviewTests(unittest.TestCase):
         """#208: without a by-id link, a replug can give the scanned /dev/videoN to another camera. Sentinel's
         rescan must still report the scanned camera at that node before the preview opens it."""
         mode = {"format": "MJPG", "width": 640, "height": 480, "fps": 30}
-        unstable = c920()
+        unstable = usb_camera()
         del unstable["by_id_path"]
-        item = item_of(scanned(unstable), C920)
-        other = dict(c920(), id="camera:v4l2:other")
+        item = item_of(scanned(unstable), USB_CAMERA)
+        other = dict(usb_camera(), id="camera:v4l2:other")
         replaced = {
             "another camera at the node": catalog(dict(other, by_id_path=None, device_path="/dev/video97")),
             "same port, another serial": catalog(dict(unstable, identity=dict(unstable["identity"], serial="0000"))),
-            "same port, another model": catalog(dict(unstable, identity=dict(unstable["identity"], product_id="0825"))),
+            "same port, another model": catalog(dict(unstable, identity=dict(unstable["identity"], product_id="3c4e"))),
             "renumbered node": catalog(dict(unstable, device_path="/dev/video98")),
         }
         for name, answer in replaced.items():
@@ -302,7 +302,7 @@ class PreviewTests(unittest.TestCase):
                     self.assertRaises(BoardError) as ctx:
                 self.start(item=item, mode=mode)
             self.assertEqual((ctx.exception.code, ctx.exception.hint), ("stale_snapshot", "Refresh, then start the preview."))
-            self.assertIn("/dev/video97 may no longer be HD Pro Webcam C920", ctx.exception.message)
+            self.assertIn(f"/dev/video97 may no longer be {unstable['model']}", ctx.exception.message)
             self.assertEqual(self.session.transport.streams, [], "nothing was captured")
         # The USB provider failed during the rescan: its camera is kept from the last scan, so nothing is confirmed.
         failed = catalog(unstable, errors=[{"provider": "camera.v4l2", "code": "io.read", "reason": "failed"}])
@@ -329,13 +329,13 @@ class PreviewTests(unittest.TestCase):
         for doc in (unstable, no_serial):
             sentinel = FakeSentinel(catalog(doc))
             with self.subTest(serial=doc["identity"].get("serial")), mock.patch.object(preview, "PeripheralClient", sentinel):
-                session = self.start(item=item_of(scanned(doc), C920), mode=mode)
-                self.assertEqual((session["camera_id"], len(sentinel.calls)), (C920, 1))
+                session = self.start(item=item_of(scanned(doc), USB_CAMERA), mode=mode)
+                self.assertEqual((session["camera_id"], len(sentinel.calls)), (USB_CAMERA, 1))
                 self.assertIn('device="/dev/video97"', self.session.transport.streams[-1][0][2])
                 self.manager.stop(self.session, session["id"])
         sentinel = FakeSentinel(RuntimeError("not called"))
         with mock.patch.object(preview, "PeripheralClient", sentinel):
-            self.manager.stop(self.session, self.start(item=self.c920, mode=mode)["id"])
+            self.manager.stop(self.session, self.start(item=self.usb_camera, mode=mode)["id"])
         self.assertEqual(sentinel.calls, [])
 
     def test_an_unsupported_mipi_mode_is_not_previewed(self):
@@ -426,7 +426,7 @@ class PreviewTests(unittest.TestCase):
         doc["isp"]["sizing"] = "runtime"
         doc["modes"] = [{"format": "NV12", "width": w, "height": h, "sensor_mode": True, "available": True}
                         for w, h in ((4032, 3040), (1920, 1080))]
-        imx477_30 = item_of(scanned(doc, c920()), IMX477)
+        imx477_30 = item_of(scanned(doc, usb_camera()), IMX477)
         mode = {"format": "NV12", "width": 4032, "height": 3040, "fps": 30}
 
         def start_logging(stderr):
@@ -505,7 +505,7 @@ class PreviewTests(unittest.TestCase):
         self.assertIsNone(self.manager.current(1))
 
     def test_a_camera_another_process_holds_now_is_refused_before_anything_is_launched(self):
-        for item, node in ((self.imx477, "/dev/media0"), (self.c920, "/dev/video97")):
+        for item, node in ((self.imx477, "/dev/media0"), (self.usb_camera, "/dev/video97")):
             session = fake_session(FakeTransport(users=[{"pid": 77, "command": "neat-app"}]))
             mode = MODE if item is self.imx477 else {"format": "MJPG", "width": 1280, "height": 720, "fps": 30}
             with self.subTest(item=item["id"]), self.assertRaises(BoardError) as ctx:
@@ -519,12 +519,12 @@ class PreviewTests(unittest.TestCase):
     def test_a_busy_usb_camera_without_a_by_id_link_is_refused_before_sentinel_is_asked(self):
         """The busy check runs before the /dev/videoN identity check (#208): a held camera is refused as in use,
         without a Sentinel rescan."""
-        unstable = c920()
+        unstable = usb_camera()
         del unstable["by_id_path"]
         session = fake_session(FakeTransport(users=[{"pid": 77, "command": "neat-app"}]))
         sentinel = FakeSentinel(RuntimeError("not called"))
         with mock.patch.object(preview, "PeripheralClient", sentinel), self.assertRaises(BoardError) as ctx:
-            self.start(session, item_of(scanned(unstable), C920), {"format": "MJPG", "width": 640, "height": 480, "fps": 30})
+            self.start(session, item_of(scanned(unstable), USB_CAMERA), {"format": "MJPG", "width": 640, "height": 480, "fps": 30})
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("camera_in_use", 409))
         self.assertEqual((sentinel.calls, session.transport.streams), ([], []))
 
@@ -612,7 +612,7 @@ class PreviewTests(unittest.TestCase):
         session = fake_session(FakeTransport(stream=Recording([multipart(JPEG), multipart(JPEG)])))
         mode = {"format": "MJPG", "width": 640, "height": 480, "fps": 0.05, "rate": Fraction(1, 20),
                 "source": '"/dev/null"'}
-        started = self.manager.start(session, self.c920, mode)
+        started = self.manager.start(session, self.usb_camera, mode)
         self.assertGreaterEqual(timeouts[0], 39)  # Two frame periods for the first frame, too.
         relay = self.manager.relay(session, started["id"])
         frames = iter(relay)
@@ -651,9 +651,9 @@ class PreviewTests(unittest.TestCase):
 
     def test_a_camera_kept_from_a_failed_providers_last_scan_is_not_previewed(self):
         # Codex 4264144158: a retained USB camera's /dev/videoN may be another device after a replug.
-        retained = item_of(peripherals_api.scans.snapshot(1), C920)
+        retained = item_of(peripherals_api.scans.snapshot(1), USB_CAMERA)
         retained["modes_source"] = "previous-scan"
-        response = self.client().post(PREVIEW, json={"id": C920, "format": "MJPG", "width": 1280, "height": 720, "fps": 30})
+        response = self.client().post(PREVIEW, json={"id": USB_CAMERA, "format": "MJPG", "width": 1280, "height": 720, "fps": 30})
         self.assertEqual((response.status_code, response.get_json()["code"]), (503, "peripheral_unavailable"))
         self.assertEqual(self.session.transport.streams, [])
         # Codex 4264471459: the documented 503 must be in the operation's responses.
@@ -752,7 +752,7 @@ class CameraFpsTests(unittest.TestCase):
         self.assertIs(peripherals_api.scans.snapshot(1), self.snapshot)
 
     def test_a_mipi_preview_reads_the_sensors_rate_from_one_sentinel_rescan_after_its_first_frame(self):
-        session, sentinel = self.start_with(catalog(dict(imx477(), max_fps=66.18), c920()))
+        session, sentinel = self.start_with(catalog(dict(imx477(), max_fps=66.18), usb_camera()))
         self.assertIsNone(session["camera_fps"], "unknown until Sentinel answers")
         self.assertEqual(sentinel.calls, [(self.session, preview.CAMERA_FPS_TIMEOUT_SEC)])
         self.assertEqual(self.manager.current(1)["camera_fps"], 66.18)
@@ -763,7 +763,7 @@ class CameraFpsTests(unittest.TestCase):
             "sentinel error": BoardError("timeout", "SiMa Sentinel did not answer."),
             "unexpected error": RuntimeError("boom"),
             "no max_fps": catalog(imx477()),
-            "camera gone": catalog(c920()),
+            "camera gone": catalog(usb_camera()),
             # Codex 4263972484: a failed provider's camera is kept from its last scan, whose rate may be stale.
             "provider failed": catalog(dict(imx477(), max_fps=66.18),
                                        errors=[{"provider": "camera.mipi", "code": "io.read", "message": "failed"}]),
@@ -813,7 +813,7 @@ class CameraFpsTests(unittest.TestCase):
         self.assertIsNone(self.manager.current(1))
 
     def test_a_usb_preview_reports_its_modes_rate_without_asking_sentinel(self):
-        session, sentinel = self.start_with(RuntimeError("not called"), item=self.c920,
+        session, sentinel = self.start_with(RuntimeError("not called"), item=self.usb_camera,
                                             mode={"format": "MJPG", "width": 640, "height": 480, "fps": 7.5})
         self.assertEqual(session["camera_fps"], 7.5)
         self.assertEqual(sentinel.calls, [])
