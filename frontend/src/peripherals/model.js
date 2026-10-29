@@ -1,5 +1,5 @@
-// Every camera mode is Available (the board's camera overlays support the sensor, the ISP outputs the size,
-// and the format is NV12), Unverified (a Platform 3.0 sensor size SiMa Sentinel cannot confirm libcamera
+// Every camera mode is Available (for MIPI: the board's camera overlays support the sensor, the ISP outputs the
+// size, and the format is NV12; for USB: SiMa Sentinel's verdict, MJPEG on the uvcvideo driver), Unverified (a Platform 3.0 sensor size SiMa Sentinel cannot confirm libcamera
 // streams exactly; it can be previewed to check) or Unsupported. A camera or format takes its best mode's tier.
 const TIERS = {
   available: { label: 'Available', tone: 'ok' },
@@ -455,8 +455,6 @@ export function groupOptions(options) {
 // One visible explanation line per camera state, chosen by priority, so the
 // detail pane never stacks four near-identical sentences.
 export function cameraSummaryLine(camera) {
-  // A USB camera is always Unsupported (no camera overlay), so a sentence saying so adds nothing.
-  if (camera?.connection === 'usb') return ''
   // An Unsupported camera's panel carries no pill, so it says why the camera cannot be used.
   if (camera?.support && tierOf(camera.support.tier) !== 'available') return camera.support.reason || 'Unsupported.'
   // An Available camera gets no sentence at all: every mode menu already labels each entry

@@ -15,7 +15,7 @@ const camera = (id) => ({
   availability: { state: 'free' },
   formats: [{ format: 'NV12', exportable: true, support: tier, sizes: [{ width: 1920, height: 1080, fps: [{ value: 30, tier: 'available' }] }] }]
 })
-const usbReason = { tier: 'unsupported', reason: 'USB cameras have no camera overlay on this board.' }
+const usbReason = { tier: 'unsupported', reason: 'Update SiMa Sentinel on the board to check USB cameras.' }
 const usbMode = { format: 'MJPG', width: 1280, height: 720, fps: 30 }
 const usbCamera = {
   id: 'camera:v4l2:c920',
