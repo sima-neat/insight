@@ -181,7 +181,7 @@ function OverviewView({ model }) {
     <>
       <div className="dash-grid three">
         <ThermalMaxChart model={model} />
-        <MetricChart model={model} metricKey="power_current_watts" title="Board power" ceiling={powerCeiling(model)} />
+        <MetricChart model={model} metricKey="power_current_watts" title="Board power (Estimated)" ceiling={powerCeiling(model)} />
         <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU usage" />
         <MetricChart model={model} metricKey="linux_mem_used_pct" title="Linux memory" />
         <MetricChart model={model} metricKey="mla_mem_allocated_mb" title="MLA memory" />
@@ -250,7 +250,7 @@ function PowerView({ model }) {
       <MetricChart
         model={model}
         metricKey="power_current_watts"
-        title="Board power"
+        title="Board power (Estimated)"
         headline=""
         ceiling={ceiling}
         height={150}

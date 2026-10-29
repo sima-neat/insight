@@ -38,7 +38,7 @@ export default function CompareOverlay({ payload }) {
               <th scope="col" className="stats-ops-num">P95</th>
               <th scope="col" className="stats-ops-num">Max</th>
               <th scope="col" className="stats-ops-num">vs. baseline</th>
-              <th scope="col" className="stats-ops-num">Energy</th>
+              <th scope="col" className="stats-ops-num">Energy (Estimated)</th>
             </tr>
           </thead>
           <tbody>

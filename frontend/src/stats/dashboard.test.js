@@ -170,7 +170,7 @@ test('per-core heatmap: column means over the window, a one-minute average per c
 
 test('compare runs overlays one series per run over elapsed time, baseline first, summarised over the common window', () => {
   const overlay = compareOverlay(RAW, 'power')
-  assert.deepEqual([overlay.spec.label, overlay.unit], ['Total power', 'W'])
+  assert.deepEqual([overlay.spec.label, overlay.unit], ['Total power (Estimated)', 'W'])
   assert.deepEqual(overlay.lines.map((line) => [line.name, line.baseline]), [['tes3', true], ['insight-hw-1790177227', false]])
   assert.deepEqual(overlay.lines[0].points.map((point) => Math.round(point.t)), [0, 2, 4, 6], 'about two seconds apart, as recorded')
   assert.deepEqual(overlay.lines[1].points.map((point) => point.v), [8.53125, 8.53125, 8.53125, 8.875])
@@ -225,7 +225,7 @@ test('compare runs overlays one series per run over elapsed time, baseline first
 
 test('compare runs offers only the series the runs recorded, and derives the thermal maximum', () => {
   assert.deepEqual(compareSeriesAvailable(RAW).map((entry) => entry.label),
-    ['Total power', 'Thermal maximum', 'CPU utilization', 'CPU load', 'RAM used', 'MLA memory'])
+    ['Total power (Estimated)', 'Thermal maximum', 'CPU utilization', 'CPU load', 'RAM used', 'MLA memory'])
   // These runs predate Sentinel's EV74 memory; runs that define it offer it, and the CMA pool is never offered.
   const withEv74 = structuredClone(RAW)
   for (const run of withEv74.sentinel.runs) run.metrics.push({ key: 'ev74_mem_allocated_mb', label: 'EV74 memory allocated', unit: 'MB', group: 'EV74' })
