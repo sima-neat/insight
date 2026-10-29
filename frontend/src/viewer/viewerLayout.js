@@ -50,3 +50,18 @@ export function normalizeVisiblePerPage(value, maxChannels = MAX_CHANNELS) {
     Math.abs(preset - requested) < Math.abs(closest - requested) ? preset : closest,
   );
 }
+
+// CSS transforms for the viewer's Orientation setting. The picture and its
+// overlay canvas get the same transform, so overlays stay aligned with it.
+const ORIENTATION_TRANSFORMS = {
+  none: "",
+  mirror: "scaleX(-1)",
+  "flip-vertical": "scaleY(-1)",
+  "rotate-180": "rotate(180deg)",
+};
+
+export function orientationTransform(orientation) {
+  return Object.prototype.hasOwnProperty.call(ORIENTATION_TRANSFORMS, orientation)
+    ? ORIENTATION_TRANSFORMS[orientation]
+    : "";
+}

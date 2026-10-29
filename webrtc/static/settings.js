@@ -13,6 +13,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const videoSyncBufferInput = document.getElementById("videoSyncBufferInput");
   const metadataRetentionInput = document.getElementById("metadataRetentionInput");
   const lineWidthInput = document.getElementById("lineWidthInput");
+  const orientationSelector = document.getElementById("orientationSelector");
   const tabButtons = document.querySelectorAll(".settings-tab-link");
   const tabSections = document.querySelectorAll(".settings-tab-section");
   const objectList = document.getElementById("viewerObjectList");
@@ -220,6 +221,7 @@ document.addEventListener("DOMContentLoaded", () => {
     settings.general.videoSyncBufferMs = parseInt(videoSyncBufferInput.value, 10);
     settings.general.metadataRetentionMs = parseInt(metadataRetentionInput.value, 10);
     settings.general.lineWidth = parseInt(lineWidthInput.value, 10);
+    settings.general.orientation = orientationSelector.value;
     settings.general.showRoi = roiToggle.checked;
     settings.general.applyRoiFiltering = roiFilteringToggle.checked;
     settings.types["object-detection"].confidenceThreshold = parseFloat(confidenceInput.value);
@@ -512,6 +514,7 @@ document.addEventListener("DOMContentLoaded", () => {
     videoSyncBufferInput.value = settings.general.videoSyncBufferMs ?? 300;
     metadataRetentionInput.value = settings.general.metadataRetentionMs ?? 0;
     lineWidthInput.value = settings.general.lineWidth ?? settingsApi.defaults.general.lineWidth;
+    orientationSelector.value = settings.general.orientation || "none";
     roiToggle.checked = settings.general.showRoi !== false;
     roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
     trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1259,4 +1261,314 @@ func testRTPPacketForCodec(t *testing.T, payloadType uint8, sequence uint16, tim
 		t.Fatal(err)
 	}
 	return testRTP{packet: packet, raw: raw}
+}
+
+func TestJPEGPayloadTypePublishesTracklessMedia(t *testing.T) {
+	channel := &Channel{}
+	media, err := channel.publishMediaForCodec(videoCodecForPayloadType(jpegRTPPayloadType))
+	if err != nil {
+		t.Fatalf("publish JPEG media: %v", err)
+	}
+	if media.codec != videoCodecJPEG || media.track != nil ||
+		media.parameters.MimeType != "video/jpeg" || media.parameters.PayloadType != jpegRTPPayloadType {
+		t.Fatalf("unexpected JPEG media: %#v", media)
+	}
+}
+
+func TestHandleOfferAnswersJPEGChannelWithoutVideo(t *testing.T) {
+	const channelIndex = 74
+	previous := channels[channelIndex]
+	channel := &Channel{
+		Stats:  NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		Egress: NewEgressStats(channelIndex),
+	}
+	media := mustNewChannelMedia(t, videoCodecJPEG)
+	channel.Media.Store(media)
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+	t.Cleanup(media.peers.retire)
+
+	// The browser offers only codecs it can decode, none of them JPEG.
+	viewer := newJPEGTestViewer(t)
+	if offerAdvertisesCodec(*viewer.pc.LocalDescription(), "video/jpeg") {
+		t.Fatal("test offer unexpectedly advertises JPEG")
+	}
+	answer := viewer.negotiate(t, channelIndex)
+	// Accepted, with no track behind it: a rejected (port 0) first m-line would
+	// carry the answer's candidates where browsers ignore them.
+	if strings.Contains(answer.SDP, "m=video 0 ") || strings.Contains(answer.SDP, "a=ssrc:") {
+		t.Fatalf("expected an accepted video m-line without a track: %s", answer.SDP)
+	}
+}
+
+func TestHandleOfferRejectsVideoOnlyOfferOnJPEGChannel(t *testing.T) {
+	const channelIndex = 73
+	previous := channels[channelIndex]
+	channel := &Channel{
+		Stats:  NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		Egress: NewEgressStats(channelIndex),
+	}
+	channel.Media.Store(mustNewChannelMedia(t, videoCodecJPEG))
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+
+	// The ROI editor preview offers video only, with no DataChannel for frames.
+	browser, offer := newReceiveOnlyOffer(t, webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: videoRTPClockRate},
+		PayloadType:        96,
+	})
+	t.Cleanup(func() { _ = browser.Close() })
+	body, err := json.Marshal(offer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handleOffer(response, httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/offer?channel=%d", channelIndex), bytes.NewReader(body)))
+
+	// 4xx so the preview reports it instead of waiting on a stream that never comes.
+	if response.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected HTTP %d, got %d: %s",
+			http.StatusUnsupportedMediaType, response.Code, response.Body.String())
+	}
+}
+
+type jpegTestViewer struct {
+	pc       *webrtc.PeerConnection
+	frames   chan []byte
+	metadata chan []byte
+}
+
+// newJPEGTestViewer offers what ViewerApp.jsx offers: a recvonly video
+// transceiver and the "jpeg" and "metadata" DataChannels.
+func newJPEGTestViewer(t *testing.T) *jpegTestViewer {
+	t.Helper()
+	mediaEngine := webrtc.MediaEngine{}
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: videoRTPClockRate},
+		PayloadType:        96,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine)).NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	viewer := &jpegTestViewer{pc: pc, frames: make(chan []byte, 16), metadata: make(chan []byte, 16)}
+	ordered, maxRetransmits := true, uint16(0)
+	for label, messages := range map[string]chan []byte{"jpeg": viewer.frames, "metadata": viewer.metadata} {
+		dc, err := pc.CreateDataChannel(label, &webrtc.DataChannelInit{Ordered: &ordered, MaxRetransmits: &maxRetransmits})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) { messages <- msg.Data })
+	}
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pc.SetLocalDescription(offer); err != nil {
+		t.Fatal(err)
+	}
+	<-webrtc.GatheringCompletePromise(pc)
+	return viewer
+}
+
+func (v *jpegTestViewer) negotiate(t *testing.T, channelIndex int) webrtc.SessionDescription {
+	t.Helper()
+	body, err := json.Marshal(v.pc.LocalDescription())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handleOffer(response, httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/offer?channel=%d", channelIndex), bytes.NewReader(body)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var answer webrtc.SessionDescription
+	if err := json.NewDecoder(response.Body).Decode(&answer); err != nil {
+		t.Fatalf("decode answer: %v", err)
+	}
+	if err := v.pc.SetRemoteDescription(answer); err != nil {
+		t.Fatalf("viewer rejected the answer: %v", err)
+	}
+	return answer
+}
+
+func TestRTPForwarderCountsJPEGDropsWithoutViewers(t *testing.T) {
+	channel := &Channel{Stats: NewIngestStats(0, 9000, 9100)}
+	media := mustNewChannelMedia(t, videoCodecJPEG)
+	forwarder := newRTPForwarder()
+	for _, pkt := range jpegFixtureFrame(t, fixtureI420, 10, 9000) {
+		forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+	}
+	snapshot := channel.Stats.Snapshot(false, false, time.Now())
+	if snapshot.Forwarding.PacketsDroppedNoTrack != uint64(len(fixtureI420)) ||
+		snapshot.Forwarding.FramesForwarded != 0 || snapshot.Forwarding.FramesDroppedIncomplete != 0 {
+		t.Fatalf("unexpected JPEG forwarding without a viewer: %#v", snapshot.Forwarding)
+	}
+}
+
+func TestRTPForwarderCountsIncompleteJPEGFrames(t *testing.T) {
+	channel := &Channel{Stats: NewIngestStats(0, 9000, 9100)}
+	channel.FramePeers.add(1, nil)
+	media := mustNewChannelMedia(t, videoCodecJPEG)
+	forwarder := newRTPForwarder()
+	frame := jpegFixtureFrame(t, fixtureI420, 10, 9000)
+	for _, pkt := range []testRTP{frame[0], frame[2]} {
+		forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+	}
+	snapshot := channel.Stats.Snapshot(true, false, time.Now())
+	if snapshot.Forwarding.FramesDroppedIncomplete != 1 || len(snapshot.Diagnostics.RecentErrors) != 1 {
+		t.Fatalf("lost fragment not reported: %#v %v", snapshot.Forwarding, snapshot.Diagnostics.RecentErrors)
+	}
+}
+
+func TestCodecTransitionBetweenH264AndJPEGRetiresPeers(t *testing.T) {
+	channel := &Channel{}
+	h264, err := channel.publishMediaForCodec(videoCodecH264)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jpegMedia, err := channel.publishMediaForCodec(videoCodecJPEG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !h264.peers.isRetired() || jpegMedia.peers.isRetired() || channel.Media.Load() != jpegMedia {
+		t.Fatal("switching H.264 to JPEG did not retire the H.264 generation")
+	}
+	if _, err := channel.publishMediaForCodec(videoCodecH264); err != nil {
+		t.Fatal(err)
+	}
+	if !jpegMedia.peers.isRetired() {
+		t.Fatal("switching JPEG to H.264 did not retire the JPEG generation")
+	}
+}
+
+// A pion client stands in for the browser: it opens the "jpeg" and "metadata"
+// DataChannels and checks that each frame's header timestamp is the value its
+// metadata carries as _insight.rtp_timestamp.
+func TestJPEGFramesAndMetadataShareTimestamps(t *testing.T) {
+	const channelIndex = 75
+	previous := channels[channelIndex]
+	channel := &Channel{
+		Stats:         NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		Egress:        NewEgressStats(channelIndex),
+		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
+		MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
+	}
+	media := mustNewChannelMedia(t, videoCodecJPEG)
+	channel.Media.Store(media)
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+	t.Cleanup(media.peers.retire)
+	go startMetadataForwarder(channel)
+
+	viewer := newJPEGTestViewer(t)
+	viewer.negotiate(t, channelIndex)
+	deadline := time.Now().Add(5 * time.Second)
+	for channel.FramePeers.len() == 0 || channel.MetadataPeers.len() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("DataChannels did not open")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	forwarder := newRTPForwarder()
+	sequence := uint16(100)
+	for i, pts := range []int64{1000, 1033, 1066, 1100} {
+		addMetadata := func() {
+			payload := fmt.Sprintf(`{"timestamp":%d,"type":"object-detection","data":{"objects":[]}}`, pts)
+			for _, ready := range channel.MetadataSync.addMetadata([]byte(payload), time.Now()) {
+				enqueueMetadata(channel, ready)
+			}
+		}
+		// Alternate which side arrives first; both must correlate.
+		if i%2 == 0 {
+			addMetadata()
+		}
+		for _, pkt := range jpegFixtureFrame(t, fixtureI420, sequence, uint32(pts*90)) {
+			channel.Stats.RecordRTPPacket(pkt.packet, len(pkt.raw), nil)
+			forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+			sequence++
+		}
+		if i%2 == 1 {
+			addMetadata()
+		}
+
+		var frameTimestamp uint32
+		select {
+		case message := <-viewer.frames:
+			frameTimestamp = binary.BigEndian.Uint32(message)
+			index, count := binary.BigEndian.Uint16(message[4:]), binary.BigEndian.Uint16(message[6:])
+			if index != 0 || count != 1 {
+				t.Fatalf("frame %d: unexpected chunk %d of %d", i, index, count)
+			}
+			if _, err := jpeg.Decode(bytes.NewReader(message[8:])); err != nil {
+				t.Fatalf("frame %d: received JPEG does not decode: %v", i, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("frame %d not received", i)
+		}
+		select {
+		case message := <-viewer.metadata:
+			var envelope struct {
+				Timestamp int64 `json:"timestamp"`
+				Insight   struct {
+					RTPTimestamp uint32 `json:"rtp_timestamp"`
+				} `json:"_insight"`
+			}
+			if err := json.Unmarshal(message, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Timestamp != pts || envelope.Insight.RTPTimestamp != frameTimestamp {
+				t.Fatalf("frame %d: metadata %s does not carry frame timestamp %d", i, message, frameTimestamp)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("metadata %d not received", i)
+		}
+	}
+
+	ingest := channel.Stats.Snapshot(false, true, time.Now())
+	if ingest.Media.Codec != "JPEG" || ingest.Media.Width != 64 || ingest.Media.Height != 48 ||
+		ingest.Media.JPEGType == nil || *ingest.Media.JPEGType != 1 || ingest.Media.JPEGQ != 255 ||
+		ingest.Forwarding.FramesForwarded != 4 || !ingest.Forwarding.WebRTCTrackAttached {
+		t.Fatalf("unexpected ingest stats: %#v %#v", ingest.Media, ingest.Forwarding)
+	}
+	egress, _ := channel.Egress.Snapshot(true, false, time.Now())
+	if len(egress.Peers) != 1 || egress.Peers[0].JPEG == nil ||
+		egress.Peers[0].JPEG.State != "open" || egress.Peers[0].JPEG.FramesSent != 4 {
+		t.Fatalf("unexpected egress stats: %#v", egress.Peers)
+	}
+
+	if err := viewer.pc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for channel.FramePeers.len() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("closed viewer stayed registered for JPEG frames")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func jpegFixtureFrame(t *testing.T, packets [][]byte, sequence uint16, timestamp uint32) []testRTP {
+	t.Helper()
+	frame := make([]testRTP, len(packets))
+	for i, raw := range packets {
+		var pkt rtp.Packet
+		if err := pkt.Unmarshal(raw); err != nil {
+			t.Fatal(err)
+		}
+		frame[i] = testRTPPacketForCodec(t, jpegRTPPayloadType, sequence+uint16(i), timestamp, pkt.Marker, pkt.Payload)
+	}
+	return frame
 }

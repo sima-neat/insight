@@ -59,6 +59,13 @@ type EgressPeerStats struct {
 	metadataBitrateBps     float64
 	metadataMessageRateMPS float64
 
+	jpegState                     string
+	jpegLastSentAt                time.Time
+	jpegFramesSent                uint64
+	jpegBytesSent                 uint64
+	jpegFramesDroppedBackpressure uint64
+	jpegSendErrors                uint64
+
 	recentErrors []string
 }
 
@@ -93,6 +100,7 @@ type EgressPeerSnapshot struct {
 	DataChannelState    string                 `json:"data_channel_state,omitempty"`
 	RTCP                RTCPEgressSnapshot     `json:"rtcp"`
 	Metadata            MetadataEgressSnapshot `json:"metadata"`
+	JPEG                *JPEGEgressSnapshot    `json:"jpeg,omitempty"`
 	Browser             *BrowserEgressReport   `json:"browser,omitempty"`
 	Diagnostics         *EgressDiagnostics     `json:"diagnostics,omitempty"`
 }
@@ -104,6 +112,17 @@ type MetadataEgressSnapshot struct {
 	MessageRateMPS float64 `json:"message_rate_mps"`
 	SendErrors     uint64  `json:"send_errors"`
 	LastSentAt     string  `json:"last_sent_at,omitempty"`
+}
+
+// JPEGEgressSnapshot describes frames sent over a peer's "jpeg" DataChannel;
+// only JPEG channels report it.
+type JPEGEgressSnapshot struct {
+	State                     string `json:"state"`
+	FramesSent                uint64 `json:"frames_sent"`
+	BytesSent                 uint64 `json:"bytes_sent"`
+	FramesDroppedBackpressure uint64 `json:"frames_dropped_backpressure"`
+	SendErrors                uint64 `json:"send_errors"`
+	LastSentAt                string `json:"last_sent_at,omitempty"`
 }
 
 type RTCPEgressSnapshot struct {
@@ -297,6 +316,39 @@ func (s *EgressStats) RecordMetadataSendError(peerID uint64, err error) {
 	}
 }
 
+func (s *EgressStats) UpdateJPEGState(peerID uint64, state string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	peer := s.ensurePeerLocked(peerID)
+	peer.LastUpdatedAt = time.Now()
+	peer.jpegState = state
+}
+
+func (s *EgressStats) RecordJPEGSent(peerID uint64, frameBytes int) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	peer := s.ensurePeerLocked(peerID)
+	peer.LastUpdatedAt = now
+	peer.jpegLastSentAt = now
+	peer.jpegFramesSent++
+	peer.jpegBytesSent += uint64(frameBytes)
+}
+
+func (s *EgressStats) RecordJPEGDroppedBackpressure(peerID uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensurePeerLocked(peerID).jpegFramesDroppedBackpressure++
+}
+
+func (s *EgressStats) RecordJPEGSendError(peerID uint64, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	peer := s.ensurePeerLocked(peerID)
+	peer.jpegSendErrors++
+	peer.addRecentErrorLocked("jpeg send failed: " + err.Error())
+}
+
 func (s *EgressStats) RecordMetadataDroppedNoDataChannel() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -448,6 +500,16 @@ func (p *EgressPeerStats) snapshot(active bool, includeVerbose bool) EgressPeerS
 			SendErrors:     p.metadataSendErrors,
 			LastSentAt:     formatTime(p.metadataLastSentAt),
 		},
+	}
+	if p.jpegState != "" {
+		snapshot.JPEG = &JPEGEgressSnapshot{
+			State:                     p.jpegState,
+			FramesSent:                p.jpegFramesSent,
+			BytesSent:                 p.jpegBytesSent,
+			FramesDroppedBackpressure: p.jpegFramesDroppedBackpressure,
+			SendErrors:                p.jpegSendErrors,
+			LastSentAt:                formatTime(p.jpegLastSentAt),
+		}
 	}
 	if includeVerbose {
 		snapshot.Diagnostics = &EgressDiagnostics{RecentErrors: append([]string(nil), p.recentErrors...)}

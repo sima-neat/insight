@@ -123,7 +123,7 @@ curl -k https://127.0.0.1:9900/api/system/tools
 
 ## Ingest Stats
 
-`/api/ingest/stats` proxies vf's non-decoding ingest stats for both video RTP (UDP `9000-9079`) and metadata JSON (UDP `9100-9179`). Use it to answer whether UDP is reaching vf, whether vf has a WebRTC track attached, whether H.264 or H.265 parameter sets and keyframes are present, and whether metadata is flowing to the viewer.
+`/api/ingest/stats` proxies vf's non-decoding ingest stats for both video RTP (UDP `9000-9079`) and metadata JSON (UDP `9100-9179`). Use it to answer whether UDP is reaching vf, whether vf has a WebRTC track attached (or, for JPEG, an open viewer DataChannel), whether H.264 or H.265 parameter sets and keyframes are present, and whether metadata is flowing to the viewer.
 
 | Query | Behavior |
 | --- | --- |
@@ -132,7 +132,7 @@ curl -k https://127.0.0.1:9900/api/system/tools
 | `verbose=1` | Include diagnostics such as NAL type counts, payload type history, estimated sequence gaps, jitter estimate, malformed packet count, and recent errors. |
 | `all=1&verbose=1` | Return the full diagnostic view for all vf channels. |
 
-Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H.264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. A healthy H.265 stream should also show `media.seen_vps` and periodic `media.keyframe_count` growth. Metadata should show increasing `metadata.messages_received`. If it grows while `metadata.messages_forwarded` stays flat, inspect the correlation outcomes below before moving to the DataChannel.
+Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H.264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. A healthy H.265 stream should also show `media.seen_vps` and periodic `media.keyframe_count` growth. A healthy JPEG stream (RTP payload type 26, RFC 2435) shows `media.codec` `JPEG` with `media.width`, `media.height`, `media.jpeg_type` and `media.jpeg_q` from each frame's first fragment, and, while a viewer is open, `forwarding.frames_forwarded` rising at the frame rate with `forwarding.frames_dropped_incomplete` flat; it has no parameter sets or keyframes. vf rebuilds each frame into a complete JPEG and sends it unchanged over the viewer's `jpeg` DataChannel (no host decode or encode), so `forwarding.packets_forwarded` counts the RTP packets of delivered frames, `frames_dropped_incomplete` counts frames that lost a packet or could not be rebuilt (reason in `diagnostics.recent_errors`), and `frames_dropped_backpressure` counts frames no viewer took because every viewer was behind. Metadata should show increasing `metadata.messages_received`. If it grows while `metadata.messages_forwarded` stays flat, inspect the correlation outcomes below before moving to the DataChannel.
 
 Examples:
 
@@ -250,7 +250,7 @@ Two properties to respect when reading:
 
 A peer is `active` when its connection is up. That is not a statement about how current its numbers are: a viewer whose tab is backgrounded stops reporting while staying connected, so its `browser` block can be minutes old and still appear under an active peer. Compare the peer's `last_browser_report_at` against the response's top-level `time` — both are server timestamps — before trusting `frames_decoded` or `frames_per_second`.
 
-Each channel includes a `metadata` summary with counts of metadata messages dropped due to having no open DataChannel. Each peer includes connection states, RTCP feedback, the latest browser report when the viewer is connected, and a `metadata` object that reflects vf's server-side metadata DataChannel sends (message/byte counters plus rate estimates and send errors). RTCP feedback can show receiver reports, PLI/FIR keyframe requests, NACKs, REMB bitrate estimates, loss, and jitter. Browser reports come from `RTCPeerConnection.getStats()` plus the video element state, including `frames_decoded`, `frames_dropped`, `frames_per_second`, `ready_state`, `current_time`, and `active`.
+Each channel includes a `metadata` summary with counts of metadata messages dropped due to having no open DataChannel. Each peer includes connection states, RTCP feedback, the latest browser report when the viewer is connected, and a `metadata` object that reflects vf's server-side metadata DataChannel sends (message/byte counters plus rate estimates and send errors). RTCP feedback can show receiver reports, PLI/FIR keyframe requests, NACKs, REMB bitrate estimates, loss, and jitter. A JPEG channel has no RTP track and so no RTCP; each of its peers instead has a `jpeg` object for the frame DataChannel: `state`, `frames_sent`, `bytes_sent`, `frames_dropped_backpressure` (frames skipped while more than 512 KiB was still buffered for that browser), `send_errors`, and `last_sent_at`. For a JPEG tile the browser report's `inbound_rtp` carries the tile's own counters (`frames_received`, `frames_decoded`, `frames_dropped`, `frames_per_second`, `bitrate_bps`, `frame_width`, `frame_height`), and `video` describes the canvas the frames are drawn on. Browser reports come from `RTCPeerConnection.getStats()` plus the video element state, including `frames_decoded`, `frames_dropped`, `frames_per_second`, `ready_state`, `current_time`, and `active`.
 
 Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms`, `inbound_rtp.decoder_implementation`, `inbound_rtp.power_efficient_decoder`, and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
 
@@ -296,6 +296,8 @@ Step 5 is where codec problems surface. If `frames_received` rises while
 `frames_decoded` stays flat and `frames_dropped` rises to match, the stream
 reached the browser intact and the decoder rejected it — vf and the application
 are both healthy and the fault is browser-side.
+
+For JPEG, read step 2 as `forwarding.frames_forwarded`, step 3 as an open `jpeg` DataChannel (`webrtc_track_attached`), and step 4 as the peer's `jpeg.frames_sent`; steps 5 and 6 use the tile counters above, and there is no decoder name.
 
 Two field notes that matter when reading this:
 
@@ -468,7 +470,7 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 | `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
 | `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
 | `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the HTTPS vf viewer URL using the mapped `videoUI` port when the SDK port map is available. |
-| `POST` | `/offer?channel=<N>` | Negotiate a vf viewer connection; returns 503 until supported RTP identifies the channel codec, or 415 when the browser cannot decode it. |
+| `POST` | `/offer?channel=<N>` | Negotiate a vf viewer connection; returns 503 until supported RTP identifies the channel codec, or 415 when the browser cannot decode an H.264 or H.265 channel. A JPEG channel returns 415 only for a video-only offer (such as the ROI editor preview), which has no DataChannel to deliver its frames. |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
@@ -530,8 +532,8 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `500` for local processing or stream startup failures.
 - `502` for unreachable or unreadable remote devkit build information, or an unreachable GenAI Studio board.
 - GenAI Studio relay errors carry a `reason`: `400 bad-request` for an invalid board address, `404 not-relayed`, `502 unreachable`, `503 not-configured` or `invalid-address`, and `500 cfg-unreadable` or `cfg-unwritable` when Insight's `cfg.json` cannot be read (nothing is changed or relayed) or saved.
-- `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
-- `503` from vf `/offer` until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
+- `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it. JPEG channels are delivered over a DataChannel and return 415 only for a video-only offer, such as the ROI editor preview.
+- `503` from vf `/offer` until RTP payload type 96 (H.264), 98 (H.265), or 26 (JPEG) identifies the channel codec; viewers should retry this response.
 - `502` from `/api/mediasrc/pull` when mediamtx refuses or cannot be reached while configuring the slot.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.

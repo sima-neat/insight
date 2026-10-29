@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"log"
 	"sync"
 
@@ -91,6 +92,12 @@ func (r *metadataPeerRegistry) snapshot() []metadataPeer {
 	return peers
 }
 
+func (r *metadataPeerRegistry) len() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.peers)
+}
+
 func enqueueMetadata(ch *Channel, metadata correlatedMetadata) {
 	if ch.MetadataReady.enqueue(metadata) {
 		ch.Stats.RecordMetadataDroppedQueueFull()
@@ -142,4 +149,66 @@ func forwardMetadata(ch *Channel, metadata correlatedMetadata) {
 	// exactly one outcome; send_errors stays the per-peer diagnostic.
 	ch.Stats.RecordMetadataDroppedNoDataChannel()
 	ch.Egress.RecordMetadataDroppedNoDataChannel()
+}
+
+const (
+	jpegChunkBytes = 60000
+	// One to three 1080p webcam frames (150-400 KB each). A viewer further
+	// behind than this skips frames rather than queueing them, so its picture
+	// stays current.
+	jpegMaxBufferedBytes = 512 << 10
+)
+
+// jpegFrameMessages splits a frame into DataChannel messages, each a header of
+// rtp_timestamp (u32, the value metadata carries as _insight.rtp_timestamp),
+// chunk_index (u16) and chunk_count (u16), all big-endian, then the chunk.
+func jpegFrameMessages(timestamp uint32, jpeg []byte) [][]byte {
+	count := (len(jpeg) + jpegChunkBytes - 1) / jpegChunkBytes
+	messages := make([][]byte, 0, count)
+	for index := 0; index < count; index++ {
+		chunk := jpeg[index*jpegChunkBytes : min((index+1)*jpegChunkBytes, len(jpeg))]
+		message := binary.BigEndian.AppendUint32(make([]byte, 0, 8+len(chunk)), timestamp)
+		message = binary.BigEndian.AppendUint16(message, uint16(index))
+		message = binary.BigEndian.AppendUint16(message, uint16(count))
+		messages = append(messages, append(message, chunk...))
+	}
+	return messages
+}
+
+// sendJPEGFrame reports whether any viewer took the frame.
+func sendJPEGFrame(ch *Channel, timestamp uint32, jpeg []byte) bool {
+	messages := jpegFrameMessages(timestamp, jpeg)
+	sent, backpressured := false, false
+	for _, peer := range ch.FramePeers.snapshot() {
+		if peer.channel.ReadyState() != webrtc.DataChannelStateOpen {
+			continue
+		}
+		if peer.channel.BufferedAmount() > jpegMaxBufferedBytes {
+			ch.Egress.RecordJPEGDroppedBackpressure(peer.id)
+			backpressured = true
+			continue
+		}
+		var sendErr error
+		for _, message := range messages {
+			if sendErr = peer.channel.Send(message); sendErr != nil {
+				break
+			}
+		}
+		if sendErr != nil {
+			ch.Stats.RecordJPEGSendError(sendErr)
+			ch.Egress.RecordJPEGSendError(peer.id, sendErr)
+			ch.FramePeers.remove(peer.id, peer.channel)
+			// Closing tells the browser to reconnect instead of waiting on a silent channel.
+			_ = peer.channel.Close()
+			ch.Egress.UpdateJPEGState(peer.id, "failed")
+			log.Printf("[Channel %d] jpeg send failed for peer %d: %v", ch.Port-9000, peer.id, sendErr)
+			continue
+		}
+		ch.Egress.RecordJPEGSent(peer.id, len(jpeg))
+		sent = true
+	}
+	if !sent && backpressured {
+		ch.Stats.RecordJPEGFrameDroppedBackpressure()
+	}
+	return sent
 }

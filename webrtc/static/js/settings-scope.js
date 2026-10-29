@@ -126,6 +126,17 @@
     return PANEL_SIZE_NAMES[value] || String(value);
   }
 
+  const ORIENTATION_NAMES = {
+    none: "None",
+    mirror: "Mirror",
+    "flip-vertical": "Flip Vertical",
+    "rotate-180": "Rotate 180\u00b0"
+  };
+
+  function describeOrientation(value) {
+    return ORIENTATION_NAMES[value] || String(value);
+  }
+
   const NUMBER = { write: writeNumber };
   const CHECKBOX = { read: readChecked, write: writeChecked };
   const SLIDER = { read: readInteger, write: writeAndAnnounce("input") };
@@ -202,6 +213,7 @@
       read: readInteger,
       describe: describePixels
     },
+    "general.orientation": { control: "orientationSelector", ...MENU, describe: describeOrientation },
     "general.showRoi": { control: "toggleRoiVisibility", ...CHECKBOX, describe: describeOnOff },
     "general.applyRoiFiltering": { control: "toggleRoiFiltering", ...CHECKBOX, describe: describeOnOff },
     "types.object-detection.confidenceThreshold": {

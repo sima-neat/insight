@@ -50,8 +50,10 @@
     applyRoiFiltering: true,
     // Width in px of every overlay line (boxes, segment outlines, tracks, poses); a class
     // row's own width still wins for that class.
-    lineWidth: 3
+    lineWidth: 3,
+    orientation: "none"
   };
+  const ORIENTATIONS = new Set(["none", "mirror", "flip-vertical", "rotate-180"]);
   const AUXILIARY_DEFAULTS = {
     "blazepose-3d": {
       enabled: true,
@@ -70,6 +72,7 @@
     { id: "general.videoSyncBufferMs", tab: "General", metadataType: null, path: ["general", "videoSyncBufferMs"] },
     { id: "general.metadataRetentionMs", tab: "General", metadataType: null, path: ["general", "metadataRetentionMs"] },
     { id: "general.lineWidth", tab: "General", metadataType: null, path: ["general", "lineWidth"] },
+    { id: "general.orientation", tab: "General", metadataType: null, path: ["general", "orientation"] },
     { id: "general.showRoi", tab: "ROI", metadataType: null, path: ["general", "showRoi"] },
     { id: "general.applyRoiFiltering", tab: "ROI", metadataType: null, path: ["general", "applyRoiFiltering"] },
     {
@@ -276,6 +279,11 @@
     }
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "applyRoiFiltering")) {
       general.applyRoiFiltering = rawGeneral.applyRoiFiltering !== false;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawGeneral, "orientation")) {
+      general.orientation = ORIENTATIONS.has(rawGeneral.orientation)
+        ? rawGeneral.orientation
+        : GENERAL_DEFAULTS.orientation;
     }
     return general;
   }

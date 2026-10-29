@@ -55,8 +55,23 @@ test("viewer synchronization settings default to a 300 ms video buffer and unlim
       showRoi: true,
       applyRoiFiltering: true,
       lineWidth: 3,
+      orientation: "none",
     },
   );
+});
+
+test("orientation is validated and resolves channel over global", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({ version: 9, general: { orientation: "mirror" } }),
+    viewerSettings_channel_1: JSON.stringify({ version: 9, general: { orientation: "rotate-180" } }),
+    viewerSettings_channel_2: JSON.stringify({ version: 9, general: { orientation: "sideways" } }),
+  });
+
+  assert.equal(api.resolveTypeSettings(0).general.orientation, "mirror");
+  assert.equal(api.resolveTypeSettings(1).general.orientation, "rotate-180");
+  assert.equal(api.resolveTypeSettings(2).general.orientation, "none");
+  assert.equal(api.normalizeSettings({ version: 9, general: { orientation: 7 } }).general.orientation, "none");
+  assert.equal(api.normalizeSettings({ version: 9, general: {} }).general.orientation, "none");
 });
 
 test("the global line width is a whole number of pixels from 1 to 10", () => {
@@ -582,6 +597,7 @@ test("saving without the option stores every general key as before", () => {
     "applyRoiFiltering",
     "lineWidth",
     "metadataRetentionMs",
+    "orientation",
     "showRoi",
     "videoSyncBufferMs"
   ]);
@@ -772,6 +788,7 @@ test("the scalar settings list has every switchable id, each with its tab and me
     { id: "general.videoSyncBufferMs", tab: "General", metadataType: null },
     { id: "general.metadataRetentionMs", tab: "General", metadataType: null },
     { id: "general.lineWidth", tab: "General", metadataType: null },
+    { id: "general.orientation", tab: "General", metadataType: null },
     { id: "general.showRoi", tab: "ROI", metadataType: null },
     { id: "general.applyRoiFiltering", tab: "ROI", metadataType: null },
     { id: "types.object-detection.confidenceThreshold", tab: "Metadata", metadataType: "object-detection" },

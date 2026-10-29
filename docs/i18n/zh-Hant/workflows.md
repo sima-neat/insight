@@ -149,6 +149,13 @@ Insight 在 SDK 內執行時，除了應用程式使用的 RTSP 連接埠，瀏�
 
 如果影片可以正常顯示，但疊加圖層卻不見了，請檢查中繼資料的路徑。如果疊加圖層出現延遲或不同步的情況，請調整播放器的中繼資料延遲設定。
 
+若是 JPEG 串流（RTP 酬載類型 `26`），也請檢查：
+
+- 每個 RTP 封包不超過 4096 位元組。請將 `rtpjpegpay mtu=` 設為 4096 或更小，例如 `1400`。
+- 酬載器以 `timestamp-offset=0` 執行，使其 90 kHz 的 RTP 時間戳與中繼資料所攜帶的 PTS 一致。否則疊加層永遠無法對應到其影格。
+- JPEG 為基線（baseline）格式，取樣為 4:2:0 或 4:2:2，且每邊不超過 2040 像素。檢視器無法使用的影格會計入 `/api/ingest/stats?verbose=1` 的 `forwarding.frames_dropped_incomplete`，原因則列於 `diagnostics.recent_errors`。
+- 在 `/api/egress/stats` 中，每個檢視器的 `jpeg.frames_dropped_backpressure` 會計算因該瀏覽器跟不上而略過的影格數；檢視器一律顯示最新的影格。
+
 ## 小技巧
 
 - 在建立新的應用程式迴圈時，請使用簡短的媒體片段。這樣可以加快原始素材的設定和重複驗證的速度。

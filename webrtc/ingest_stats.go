@@ -61,6 +61,10 @@ type IngestStats struct {
 	writeErrors      uint64
 	malformedPackets uint64
 
+	jpegFramesForwarded           uint64
+	jpegFramesDroppedIncomplete   uint64
+	jpegFramesDroppedBackpressure uint64
+
 	ssrc             uint32
 	payloadType      uint8
 	payloadTypesSeen map[uint8]uint64
@@ -115,6 +119,9 @@ type IngestStats struct {
 	lastKeyframeAt           time.Time
 	nalTypeCounts            map[uint8]uint64
 	packetizationModesSeen   map[string]uint64
+	// From the most recent first JPEG fragment.
+	jpegHeader     jpegMainHeader
+	haveJPEGHeader bool
 
 	peers      map[uint64]string
 	nextPeerID uint64
@@ -160,6 +167,11 @@ type ForwardingSnapshot struct {
 	BytesForwarded        uint64 `json:"bytes_forwarded"`
 	PacketsDroppedNoTrack uint64 `json:"packets_dropped_no_track"`
 	WriteErrors           uint64 `json:"write_errors"`
+
+	// JPEG channels relay whole frames, so their outcomes are counted per frame.
+	FramesForwarded           uint64 `json:"frames_forwarded,omitempty"`
+	FramesDroppedIncomplete   uint64 `json:"frames_dropped_incomplete,omitempty"`
+	FramesDroppedBackpressure uint64 `json:"frames_dropped_backpressure,omitempty"`
 }
 
 type MetadataSnapshot struct {
@@ -226,6 +238,11 @@ type MediaSnapshot struct {
 	KeyframeCount  uint64 `json:"keyframe_count,omitempty"`
 	LastVPSAt      string `json:"last_vps_at,omitempty"`
 	LastKeyframeAt string `json:"last_keyframe_at,omitempty"`
+
+	Width    int    `json:"width,omitempty"`
+	Height   int    `json:"height,omitempty"`
+	JPEGType *uint8 `json:"jpeg_type,omitempty"`
+	JPEGQ    uint8  `json:"jpeg_q,omitempty"`
 }
 
 type WebRTCSnapshot struct {
@@ -296,6 +313,10 @@ func (s *IngestStats) RecordRTPPacket(pkt *rtp.Packet, packetBytes int, remote n
 		s.updateH264Media(pkt.Payload, now)
 	case videoCodecH265:
 		s.updateH265Media(pkt.Payload, pkt.Timestamp, now)
+	case videoCodecJPEG:
+		if header, _, err := parseJPEGPayload(pkt.Payload); err == nil && header.offset == 0 {
+			s.jpegHeader, s.haveJPEGHeader = header, true
+		}
 	}
 	s.ssrc = pkt.SSRC
 	s.lastSequence = pkt.SequenceNumber
@@ -373,6 +394,34 @@ func (s *IngestStats) RecordForwarded(packetBytes int) {
 	s.bytesForwarded += uint64(packetBytes)
 }
 
+func (s *IngestStats) RecordJPEGFrameForwarded(packets, frameBytes int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jpegFramesForwarded++
+	s.packetsForwarded += uint64(packets)
+	s.bytesForwarded += uint64(frameBytes)
+}
+
+func (s *IngestStats) RecordJPEGFrameIncomplete(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jpegFramesDroppedIncomplete++
+	s.addRecentErrorLocked(fmt.Sprintf("jpeg frame dropped: %v", err))
+}
+
+func (s *IngestStats) RecordJPEGFrameDroppedBackpressure() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jpegFramesDroppedBackpressure++
+}
+
+func (s *IngestStats) RecordJPEGSendError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.writeErrors++
+	s.addRecentErrorLocked(fmt.Sprintf("jpeg datachannel send failed: %v", err))
+}
+
 func (s *IngestStats) RecordDroppedNoTrack() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -442,6 +491,8 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 		codecName = "H264"
 	} else if codec == videoCodecH265 {
 		codecName = "H265"
+	} else if codec == videoCodecJPEG {
+		codecName = "JPEG"
 	}
 	media := MediaSnapshot{
 		Kind:      "video",
@@ -459,6 +510,11 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 		media.KeyframeCount = s.keyframeCount
 		media.LastVPSAt = formatTime(s.lastVPSAt)
 		media.LastKeyframeAt = formatTime(s.lastKeyframeAt)
+	}
+	if codec == videoCodecJPEG && s.haveJPEGHeader {
+		jpegType := s.jpegHeader.typ
+		media.Width, media.Height = s.jpegHeader.width, s.jpegHeader.height
+		media.JPEGType, media.JPEGQ = &jpegType, s.jpegHeader.q
 	}
 
 	snapshot := ChannelIngestSnapshot{
@@ -485,6 +541,10 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 			BytesForwarded:        s.bytesForwarded,
 			PacketsDroppedNoTrack: s.droppedNoTrack,
 			WriteErrors:           s.writeErrors,
+
+			FramesForwarded:           s.jpegFramesForwarded,
+			FramesDroppedIncomplete:   s.jpegFramesDroppedIncomplete,
+			FramesDroppedBackpressure: s.jpegFramesDroppedBackpressure,
 		},
 		Media:  media,
 		WebRTC: s.snapshotWebRTC(),
@@ -662,6 +722,7 @@ func (s *IngestStats) resetMediaDiagnostics() {
 	s.lastVPSAt = time.Time{}
 	s.lastIDRAt = time.Time{}
 	s.lastKeyframeAt = time.Time{}
+	s.haveJPEGHeader = false
 	clear(s.nalTypeCounts)
 	clear(s.packetizationModesSeen)
 }

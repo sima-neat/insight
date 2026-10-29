@@ -149,6 +149,13 @@ Use this sequence to isolate the issue:
 
 If video is visible but overlays are missing, focus on the metadata path. If overlays are delayed or appear out of sync, tune the viewer metadata delay setting.
 
+For a JPEG stream (RTP payload type `26`), also check:
+
+- Every RTP packet is at most 4096 bytes. Set `rtpjpegpay mtu=` to 4096 or less, for example `1400`.
+- The payloader runs with `timestamp-offset=0`, so its 90 kHz RTP timestamps match the PTS that metadata carries. Otherwise overlays never match their frames.
+- The JPEG is baseline, 4:2:0 or 4:2:2, at most 2040 pixels on each side. `/api/ingest/stats?verbose=1` counts frames the viewer cannot use in `forwarding.frames_dropped_incomplete` and gives the reason in `diagnostics.recent_errors`.
+- In `/api/egress/stats`, each viewer's `jpeg.frames_dropped_backpressure` counts frames skipped because that browser fell behind; the viewer always shows the newest frame.
+
 ## Tips
 
 - Use short media clips when you are building a new app loop. They make source setup and repeated validation faster.
