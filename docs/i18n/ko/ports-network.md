@@ -132,6 +132,14 @@ metadata channel 3: <sdk-host-ip>:19103
 
 애플리케이션과 Insight가 동일한 SDK 컨테이너에서 실행되는 경우 기본 로컬 포트를 사용하세요.
 
+### SDK 직접 접속과 공유 프록시
+
+`/home/docker/.insight-config/url-routing`에서 URL 라우팅을 명시적으로 선택합니다. 한 줄에 `direct` 또는 `proxy`를 쓰고 변경 후 Insight를 다시 시작하세요. 비어 있거나 잘못된 값이면 시작에 실패합니다. 파일이 없으면 기존 호스팅 환경을 유지하기 위해 `proxy`를 사용합니다.
+
+`proxy` 모드에서는 포트 번호와 관계없이 `launch-url`이 뷰어, WHIP, HTTP MJPEG URL의 공유 오리진을 제공합니다. 프록시는 각 경로를 해당 서비스로 전달해야 합니다. `direct` 모드에서도 SDK 시작 기능은 `launch-url`을 사용할 수 있지만, Insight의 공개 오리진으로는 사용하지 않습니다. 생성된 URL은 요청 호스트 이름과 각 서비스에 설정된 포트를 사용합니다. 뷰어는 SDK 포트 맵의 `videoUI` 포트를 사용하고, 설정이 없으면 `8081`을 사용합니다. 브라우저 ICE 주소 설정은 이 설정과 독립적입니다.
+
+`https://127.0.0.1:9900/` 같은 시작 URL을 지정한 로컬 SDK에서는 `url-routing`을 `direct`로 설정하세요. 시작 URL 재정의가 필요 없다면 `launch-url`을 삭제해도 됩니다. `insight-admin restart`로 다시 시작하고 `/api/health`를 확인하세요. 직접 라우팅에서는 `network.public_origin: null`이 표시됩니다. 프록시 포트가 SDK의 `mainUI` 포트와 같아도 프록시 오리진은 변경되지 않습니다.
+
 ## 관련 도구
 
 - **Neat 개발 환경**은 컨테이너화된 빌드 및 실행 환경을 제공하며, 여기에서 Insight가 함께 제공됩니다.

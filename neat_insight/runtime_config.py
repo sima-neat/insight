@@ -13,6 +13,7 @@ from typing import Mapping, Optional
 INSIGHT_CONFIG_DIR = Path("/home/docker/.insight-config")
 BROWSER_ICE_ADDRESS_FILE = INSIGHT_CONFIG_DIR / "browser-ice-address"
 LAUNCH_URL_FILE = INSIGHT_CONFIG_DIR / "launch-url"
+URL_ROUTING_FILE = INSIGHT_CONFIG_DIR / "url-routing"
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,7 @@ def load_runtime_network_config(
     *,
     browser_ice_address_file: Path = BROWSER_ICE_ADDRESS_FILE,
     launch_url_file: Path = LAUNCH_URL_FILE,
+    url_routing_file: Path = URL_ROUTING_FILE,
     environ: Optional[Mapping[str, str]] = None,
 ) -> RuntimeNetworkConfig:
     """Resolve browser-facing configuration once for the lifetime of the process."""
@@ -146,8 +148,15 @@ def load_runtime_network_config(
         browser_ice_address = legacy.browser_ice_address
         browser_ice_address_source = legacy.browser_ice_address_source
 
+    # Existing hosted environments use launch-url as a shared proxy origin.
+    # Direct SDK launches can retain that file for launch surfaces while opting
+    # out of shared-origin routing for the viewer, WHIP, and MJPEG endpoints.
+    routing = _read_optional_single_value(url_routing_file) or "proxy"
+    if routing not in {"direct", "proxy"}:
+        raise RuntimeError(f"{url_routing_file} must contain 'direct' or 'proxy'")
+
     try:
-        launch_url_value = _read_optional_single_value(launch_url_file)
+        launch_url_value = _read_optional_single_value(launch_url_file) if routing == "proxy" else None
         public_origin = (
             _validated_public_origin(launch_url_value, source=str(launch_url_file))
             if launch_url_value is not None

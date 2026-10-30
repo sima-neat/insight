@@ -1,4 +1,6 @@
 import os
+import tempfile
+from pathlib import Path
 import unittest
 import unittest.mock as mock
 import urllib.parse
@@ -6,7 +8,7 @@ import urllib.parse
 os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55581")
 
 from neat_insight import app as app_module
-from neat_insight.runtime_config import RuntimeNetworkConfig
+from neat_insight.runtime_config import RuntimeNetworkConfig, load_runtime_network_config
 
 
 class RuntimePublicUrlTests(unittest.TestCase):
@@ -43,6 +45,32 @@ class RuntimePublicUrlTests(unittest.TestCase):
         self.assertEqual(f"{parsed.scheme}://{parsed.netloc}", "https://insight.example.com")
         self.assertEqual(parsed.path, "/static/viewer.html")
         self.assertEqual(urllib.parse.parse_qs(parsed.query)["src"], ["0,1"])
+
+    def test_routing_mode_controls_proxy_origin_independently_of_port_numbers(self):
+        ports = [{"name": "mainUI", "hostPortStart": 19900, "protocol": "tcp"},
+                 {"name": "videoUI", "hostPortStart": 18081, "protocol": "tcp"}]
+        for routing, launch, host, expected in [
+            ("direct", "https://127.0.0.1:9900/", "sdk.local:19900", "https://sdk.local:18081"),
+            ("direct", "https://sdk.example:19900/", "[::1]:19900", "https://[::1]:18081"),
+            ("proxy", "https://insight.example:19900/", "sdk.local:19900", "https://insight.example:19900"),
+            (None, "https://insight.example:19900/", "sdk.local:19900", "https://insight.example:19900"),
+        ]:
+            with self.subTest(routing=routing, launch=launch), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "launch-url").write_text(launch)
+                if routing:
+                    (root / "url-routing").write_text(routing)
+                config = load_runtime_network_config(browser_ice_address_file=root / "ice",
+                    launch_url_file=root / "launch-url", url_routing_file=root / "url-routing", environ={})
+                with mock.patch.object(app_module, "runtime_network_config", config), \
+                     mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports), \
+                     mock.patch.object(app_module, "_read_neat_port_map", return_value={"insightVideoChannels": 4}):
+                    response = self.client.get("/api/viewer-url?mode=light&src=0,1", headers={"Host": host})
+                url = urllib.parse.urlsplit(response.get_json()["url"])
+                self.assertEqual(f"{url.scheme}://{url.netloc}", expected)
+                self.assertEqual(url.path, "/static/viewer.html")
+                self.assertEqual(urllib.parse.parse_qs(url.query),
+                                 {"mode": ["light"], "src": ["0,1"], "max_channels": ["4"]})
 
     def test_whip_and_mjpeg_use_the_public_origin_but_rtsp_does_not(self):
         with mock.patch.object(app_module, "runtime_network_config", self.config), \

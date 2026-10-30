@@ -8,11 +8,14 @@ from neat_insight.runtime_config import RuntimeNetworkConfig, load_runtime_netwo
 
 
 class RuntimeNetworkConfigTests(unittest.TestCase):
-    def _load(self, *, ice=None, launch_url=None, environ=None):
+    def _load(self, *, ice=None, launch_url=None, routing=None, environ=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             ice_file = root / "browser-ice-address"
             launch_url_file = root / "launch-url"
+            routing_file = root / "url-routing"
+            if routing is not None:
+                routing_file.write_text(routing, encoding="utf-8")
             if ice is not None:
                 ice_file.write_text(ice, encoding="utf-8")
             if isinstance(launch_url, bytes):
@@ -22,6 +25,7 @@ class RuntimeNetworkConfigTests(unittest.TestCase):
             return load_runtime_network_config(
                 browser_ice_address_file=ice_file,
                 launch_url_file=launch_url_file,
+                url_routing_file=routing_file,
                 environ=environ or {},
             )
 
@@ -72,6 +76,21 @@ class RuntimeNetworkConfigTests(unittest.TestCase):
             )
         )
         self.assertEqual(config.public_origin, "https://insight.example.com:8443/")
+
+    def test_direct_routing_keeps_launch_override_out_of_public_origin(self):
+        config = self._load(launch_url="https://127.0.0.1:9900/?launch-source=host-override",
+                            routing="direct", environ={"CONTAINER_HOST_IP": "10.77.0.1"})
+        self.assertIsNone(config.public_origin)
+        self.assertEqual(config.browser_ice_address, "10.77.0.1")
+
+    def test_explicit_proxy_routing_preserves_launch_origin_on_any_port(self):
+        config = self._load(launch_url="https://insight.example.com:9900/", routing="proxy")
+        self.assertEqual(config.public_origin, "https://insight.example.com:9900/")
+
+    def test_invalid_routing_fails_configuration(self):
+        for value in ("", "automatic", "direct\nproxy"):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                self._load(routing=value)
 
     def test_present_invalid_browser_address_fails_startup_configuration(self):
         invalid_values = (

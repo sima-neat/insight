@@ -132,6 +132,27 @@ metadata channel 3: <sdk-host-ip>:19103
 
 If the application and Insight run in the same SDK container, use the default local ports instead.
 
+### Direct SDK launches and shared proxies
+
+`/home/docker/.insight-config/url-routing` explicitly selects URL routing. Write
+one line containing `direct` or `proxy`; restart Insight after changing it.
+Invalid or empty values fail startup. An absent file selects `proxy` to preserve
+existing hosted configurations.
+
+In `proxy` mode, `launch-url` supplies the shared origin for viewer, WHIP, and
+HTTP MJPEG URLs, regardless of its port number. The proxy must route those
+paths to their respective services. In `direct` mode, `launch-url` remains
+available to SDK launch surfaces but does not set Insight's public origin.
+Generated URLs use the request hostname and each service's configured port;
+the viewer uses the SDK port map's `videoUI` port, falling back to `8081`.
+Browser ICE address configuration is independent of this setting.
+
+For a local SDK with a launch override such as `https://127.0.0.1:9900/`, set
+`url-routing` to `direct`. Alternatively, remove `launch-url` if no launch override
+is needed. Restart with `insight-admin restart` and check `/api/health`: direct
+routing reports `network.public_origin: null`. A proxy origin remains unchanged
+even when its port happens to match the SDK's `mainUI` port.
+
 ## Related tools
 
 - **Neat Development Environment** provides the containerized build and run environment where Insight is bundled.
