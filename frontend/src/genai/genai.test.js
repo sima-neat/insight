@@ -421,6 +421,9 @@ test('the setup button says what is left to do, and offers Retry after a failure
   assert.equal(setupAction(status('pending', 'pending', 'pending')).label, 'Install and start GenAI Studio')
   assert.equal(setupAction(status('done', 'pending', 'pending')).label, 'Prepare and start GenAI Studio')
   assert.equal(setupAction(status('done', 'done', 'pending')).label, 'Start GenAI Studio')
+  // An outdated GenAI Studio, still running, is replaced.
+  assert.equal(setupAction({ ...status('pending', 'pending', 'done'), outdated: true }).label, 'Update and start GenAI Studio')
+  assert.equal(bannerAction({ ...status('pending', 'pending', 'pending'), outdated: true }, 'https://127.0.0.1:5000').label, 'Set up GenAI Studio')
   assert.equal(setupAction(status('done', 'failed', 'pending')).label, 'Retry')
   assert.equal(setupAction(status('pending', 'blocked', 'pending')).label, 'Retry')
   assert.equal(setupAction(status('done', 'done', 'done')), null, 'nothing left')
