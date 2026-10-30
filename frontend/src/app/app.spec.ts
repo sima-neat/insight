@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { App } from './app';
 import { appConfig } from './app.config';
-import { boardState, DEVKIT, railItemName, shellInfo } from './board/board.testing';
+import { boardState, DEVKIT, railItem, shellInfo } from './board/board.testing';
 
 /**
  * A routed page that does nothing of its own. The shell is what this spec is about; a real page
@@ -43,9 +43,6 @@ describe('App', () => {
     )!;
   const boardButton = (root: HTMLElement): HTMLButtonElement =>
     root.querySelector('app-board-rail button')!;
-
-  const boardLines = (button: HTMLElement) =>
-    [...button.querySelectorAll('.lines > span')].map((line) => line.textContent?.trim());
 
   /** Lets the promise chains behind an answered request run, then change detection. */
   async function settle(fixture: { whenStable(): Promise<unknown> }): Promise<void> {
@@ -98,8 +95,9 @@ describe('App', () => {
 
     const board = boardButton(root);
     expect(board.closest('header')).toBeNull();
-    expect(boardLines(board)).toEqual(['DevKit', '192.168.1.20']);
-    expect(railItemName(board)).toBe('DevKit — 192.168.1.20 — Connected');
+    expect(railItem(board).text()).toBe('DevKit');
+    expect(railItem(board).detail()).toBe('192.168.1.20');
+    expect(railItem(board).label()).toBe('DevKit — 192.168.1.20 — Connected');
     // The top bar is the page's: nothing of the app's but the kiosk button is left in it.
     expect(root.querySelector('header app-board-rail')).toBeNull();
     expect(root.querySelector('header [aria-label="System information"]')).toBeNull();
@@ -116,8 +114,9 @@ describe('App', () => {
     await settle(fixture);
 
     const board = boardButton(fixture.nativeElement);
-    expect(boardLines(board)).toEqual(['DevKit', 'Error']);
-    expect(board.getAttribute('data-tone')).toBe('danger');
+    expect(railItem(board).text()).toBe('DevKit');
+    expect(railItem(board).detail()).toBe('Error');
+    expect(railItem(board).tone()).toBe('danger');
   });
 
   it('reads the shell info when the dialog opens, never at app start', async () => {

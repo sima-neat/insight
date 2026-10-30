@@ -112,8 +112,8 @@ test('a connected board is quiet and has no outline; collapsed, its tooltip says
   await showLabels(page).click();
   // The pointer is off the rail's items, whose hover fill changes their text.
   await page.mouse.move(700, 400);
-  const detail = board(page).locator('.detail');
-  await expect(detail).toHaveText('192.168.100.200');
+  const detail = board(page).getByText('192.168.100.200', { exact: true });
+  await expect(detail).toBeVisible();
   const [detailColour, mutedColour] = await Promise.all([
     detail.evaluate((element) => getComputedStyle(element).color),
     page
@@ -133,12 +133,12 @@ test('an unreachable board says so in words and in the danger colour of its dot'
   await page.goto('/streaming');
   await showLabels(page).click();
 
-  await expect(board(page).locator('.detail')).toHaveText('Error');
+  const state = board(page).getByText('Error', { exact: true });
+  await expect(state).toBeVisible();
   await expect(board(page)).toHaveAccessibleName(`Board — ${LONG_HOST} — Connection failed`);
   const [text, dot] = await Promise.all([
-    board(page)
-      .locator('.detail')
-      .evaluate((element) => getComputedStyle(element).color),
+    state.evaluate((element) => getComputedStyle(element).color),
+    // The dot has no text to find it by: `.dot` is the kit's own markup.
     board(page)
       .locator('.dot')
       .evaluate((element) => getComputedStyle(element).backgroundColor),
@@ -156,14 +156,14 @@ test('in the expanded rail a long address is cut on its own line and the block s
   await page.goto('/streaming');
   await showLabels(page).click();
 
-  const detail = board(page).locator('.detail');
-  await expect(detail).toHaveText(LONG_HOST);
+  const detail = board(page).getByText(LONG_HOST, { exact: true });
+  await expect(detail).toBeVisible();
   // The rail widens over a transition: measure once it has settled.
   const cut = (line: Locator) =>
     line.evaluate((element) => element.scrollWidth > element.clientWidth);
   await expect.poll(() => cut(detail)).toBe(true);
   // The short name above it is whole, and nothing reaches past the block or the rail.
-  await expect.poll(() => cut(board(page).locator('.line').first())).toBe(false);
+  await expect.poll(() => cut(board(page).getByText('Board', { exact: true }))).toBe(false);
   await expect
     .poll(async () => {
       const [boardBox, mainBox, detailRight] = await Promise.all([

@@ -1,4 +1,5 @@
-import { computed, signal } from '@angular/core';
+import { computed, getDebugNode, signal } from '@angular/core';
+import { NeatRailItem } from '@sima/neat-ui';
 import type { PeripheralSnapshot } from '../peripherals/api';
 import type { BoardState, BoardTarget, ShellInfo } from './api';
 import type { BoardProblem } from './board-error';
@@ -82,12 +83,10 @@ export function deferred<T>(): {
 }
 
 /**
- * A rail item's accessible name as the kit gives it: the item's content less what is `aria-hidden`
- * (the lines the kit shows, whose full sentence is its visually hidden label). jsdom computes no
- * accessible names, so the specs read it the way the browser composes it.
+ * The kit's rail item behind a board block's button: what the app gave it through its inputs
+ * (`label`, `text`, `detail`, `tone`), which is the app's part. How the kit draws them is the
+ * kit's to test.
  */
-export function railItemName(item: HTMLElement): string {
-  const clone = item.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll('[aria-hidden="true"]').forEach((hidden) => hidden.remove());
-  return clone.textContent?.trim() ?? '';
+export function railItem(button: HTMLElement): NeatRailItem {
+  return getDebugNode(button)!.injector.get(NeatRailItem);
 }

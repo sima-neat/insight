@@ -8,7 +8,7 @@ import { TopBarDialogs } from '../top-bar-dialogs';
 import { BoardProblem } from './board-error';
 import { BoardRail } from './board-rail';
 import { BoardService } from './board.service';
-import { boardState, DEVKIT, FakeBoard, railItemName } from './board.testing';
+import { boardState, DEVKIT, FakeBoard, railItem } from './board.testing';
 
 /** The app frame: a rail item belongs in the shell's rail end, which gives it the rail's state. */
 @Component({
@@ -52,18 +52,11 @@ describe('BoardRail', () => {
     return fixture.nativeElement.querySelector('app-board-rail button');
   }
 
-  /** The rail's own control, which shows the labels. */
-  async function expand(): Promise<void> {
-    const control = [...fixture.nativeElement.querySelectorAll('button')].find(
-      (button: HTMLElement) => button.textContent?.trim() === 'Show labels',
-    ) as HTMLButtonElement;
-    control.click();
-    await fixture.whenStable();
-  }
-
-  const lines = (button: HTMLElement) =>
-    [...button.querySelectorAll('.lines > span')].map((line) => line.textContent?.trim());
-  const dot = (button: HTMLElement) => button.querySelector('.dot');
+  /** What the block gave the kit's rail item: the app's mapping, whatever the kit draws from it. */
+  const mapped = (button: HTMLElement) => {
+    const item = railItem(button);
+    return { text: item.text(), detail: item.detail(), tone: item.tone(), label: item.label() };
+  };
   const icon = (button: HTMLElement) =>
     (getDebugNode(button.querySelector('neat-icon'))!.componentInstance as NeatIcon).name();
 
@@ -79,18 +72,19 @@ describe('BoardRail', () => {
     return document.querySelector('[role="tooltip"]')?.textContent?.trim();
   }
 
-  it('a connected board is quiet: name and address, a success dot, the state in its name', async () => {
+  it('a connected board is quiet: name and address, a success tone, the state in its label', async () => {
     board.state.set(boardState({ target: DEVKIT, status: CONNECTED }));
     const button = await render();
-    await expand();
 
-    expect(lines(button)).toEqual(['DevKit', '192.168.1.20']);
-    expect(button.getAttribute('data-tone')).toBe('success');
-    expect(dot(button)).not.toBeNull();
+    // The state is in the label (the item's name and tooltip), not only in the tone's colour.
+    expect(mapped(button)).toEqual({
+      text: 'DevKit',
+      detail: '192.168.1.20',
+      tone: 'success',
+      label: 'DevKit — 192.168.1.20 — Connected',
+    });
     expect(icon(button)).toBe('board');
     expect(button.getAttribute('aria-haspopup')).toBe('dialog');
-    // The state is in the name, not only in the dot's colour.
-    expect(railItemName(button)).toBe('DevKit — 192.168.1.20 — Connected');
   });
 
   it('a board that is not connected says its state in words, in the state’s tone', async () => {
@@ -98,59 +92,67 @@ describe('BoardRail', () => {
       boardState({ target: DEVKIT, status: { state: 'error', checked_at: null, error: null } }),
     );
     const button = await render();
-    await expand();
 
-    expect(lines(button)).toEqual(['DevKit', 'Error']);
-    expect(button.getAttribute('data-tone')).toBe('danger');
-    expect(railItemName(button)).toBe('DevKit — 192.168.1.20 — Connection failed');
+    expect(mapped(button)).toEqual({
+      text: 'DevKit',
+      detail: 'Error',
+      tone: 'danger',
+      label: 'DevKit — 192.168.1.20 — Connection failed',
+    });
 
     board.state.set(boardState({ target: DEVKIT }));
     await fixture.whenStable();
-    expect(lines(button)).toEqual(['DevKit', 'Not checked']);
-    expect(button.getAttribute('data-tone')).toBe('neutral');
+    expect(mapped(button)).toMatchObject({
+      text: 'DevKit',
+      detail: 'Not checked',
+      tone: 'neutral',
+    });
 
     board.state.set(boardState({ target: null }));
     await fixture.whenStable();
-    expect(lines(button)).toEqual(['No board', 'Not selected']);
-    expect(button.getAttribute('data-tone')).toBe('neutral');
+    expect(mapped(button)).toMatchObject({
+      text: 'No board',
+      detail: 'Not selected',
+      tone: 'neutral',
+    });
   });
 
   it('says Checking… in the warning tone while the connection check is out, then its result', async () => {
     board.state.set(boardState({ target: DEVKIT }));
     board.checking.set(true);
     const button = await render();
-    await expand();
 
-    expect(lines(button)).toEqual(['DevKit', 'Checking…']);
-    expect(button.getAttribute('data-tone')).toBe('warning');
-    expect(railItemName(button)).toBe(
-      'DevKit — 192.168.1.20 — Checking the connection',
-    );
+    expect(mapped(button)).toEqual({
+      text: 'DevKit',
+      detail: 'Checking…',
+      tone: 'warning',
+      label: 'DevKit — 192.168.1.20 — Checking the connection',
+    });
 
     board.state.set(boardState({ target: DEVKIT, status: CONNECTED }));
     board.checking.set(false);
     await fixture.whenStable();
-    expect(lines(button)).toEqual(['DevKit', '192.168.1.20']);
+    expect(mapped(button)).toMatchObject({ detail: '192.168.1.20', tone: 'success' });
   });
 
   it('keeps naming the last known board when the board read fails, and says so', async () => {
     board.state.set(boardState({ target: DEVKIT, status: CONNECTED }));
     board.error.set(new BoardProblem('Could not reach the Insight server.', 'network', '', {}));
     const button = await render();
-    await expand();
 
-    expect(lines(button)).toEqual(['DevKit', 'Error']);
-    expect(button.getAttribute('data-tone')).toBe('danger');
-    expect(railItemName(button)).toBe(
-      'DevKit — 192.168.1.20 — Could not read the board: Could not reach the Insight server.',
-    );
+    expect(mapped(button)).toEqual({
+      text: 'DevKit',
+      detail: 'Error',
+      tone: 'danger',
+      label:
+        'DevKit — 192.168.1.20 — Could not read the board: Could not reach the Insight server.',
+    });
   });
 
-  it('collapsed, the lines are for screen readers only and the tooltip says it all', async () => {
+  it('the tooltip of the collapsed rail says it all', async () => {
     board.state.set(boardState({ target: DEVKIT, status: CONNECTED }));
     const button = await render();
 
-    expect(button.querySelector('.label.sr-only')).not.toBeNull();
     expect(await tooltip(button)).toBe('DevKit — 192.168.1.20 — Connected');
   });
 
