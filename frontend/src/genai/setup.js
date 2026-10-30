@@ -29,6 +29,8 @@ export function setupAction(status) {
   if (!left.length) return null
   if (left.some((s) => s.state === 'failed' || s.state === 'blocked')) return { label: 'Retry' }
   const ids = new Set(left.map((s) => s.id))
+  // An outdated GenAI Studio is replaced: the board reports why under the install step.
+  if (ids.has('install') && status.outdated) return { label: 'Update and start GenAI Studio' }
   if (ids.has('install')) return { label: 'Install and start GenAI Studio' }
   if (ids.has('prepare')) return { label: 'Prepare and start GenAI Studio' }
   return { label: 'Start GenAI Studio' }

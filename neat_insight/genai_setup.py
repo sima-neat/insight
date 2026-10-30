@@ -9,10 +9,17 @@ Apps is installed without its dependencies: the Insight running this already exi
 on the board, and reinstalling it here would replace the server that started the job.
 GenAI Studio needs the Neat Library (Core), so a board without it is told to install
 Apps with its dependencies itself.
+
+The Apps installed is the channel of this Insight (a develop build installs
+`apps@develop`, any other build `apps` from main), so the tab and GenAI Studio come
+from the same line. A GenAI Studio from another channel, or one built for an older
+Neat Library than the board has, counts as not installed: the install step offers to
+replace it, and the job stops GenAI Studio and installs, prepares and starts it again.
 """
 import re
 import threading
 import time
+from importlib import metadata
 
 from flask import Blueprint, jsonify, request
 
@@ -47,10 +54,10 @@ DESCRIPTIONS = {
 }
 # What to run in a shell on the board instead, the last resort a failure offers. An install
 # or prepare run this way records its success, so the panel shows the step done instead of
-# the earlier failure. {sima_cli} is the sima-cli the board has.
+# the earlier failure. {sima_cli} is the sima-cli the board has, {apps} the Apps target.
 # Its success replaces the failed run's log, whose warnings no longer apply.
 MANUAL_COMMANDS = {
-    "install": "cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 {sima_cli} neat install apps && mkdir -p " + JOB_DIR
+    "install": "cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 {sima_cli} neat install {apps} && mkdir -p " + JOB_DIR
     + " && rm -f " + JOB_DIR + "/install.log && echo 0 > " + JOB_DIR + "/install.exit",
     "prepare": "cd " + STUDIO_DIR + " && ./setup.sh && mkdir -p " + JOB_DIR + " && rm -f " + JOB_DIR
     + "/prepare.log && echo 0 > " + JOB_DIR + "/prepare.exit",
@@ -58,8 +65,24 @@ MANUAL_COMMANDS = {
 }
 
 
-def manual_command(step: str, sima_cli=None) -> str:
-    return MANUAL_COMMANDS[step].format(sima_cli=sima_cli or "sima-cli")
+def insight_channel() -> str:
+    """This Insight's channel from its package version: `0.0.0+develop.<sha>` is develop;
+    main, a release or an unknown build is main."""
+    try:
+        version = metadata.version("neat-insight")
+    except metadata.PackageNotFoundError:
+        return "main"
+    return "develop" if version.partition("+")[2].split(".")[0] == "develop" else "main"
+
+
+def apps_target(channel=None) -> str:
+    """The `sima-cli neat install` target for the Apps that matches ``channel``."""
+    channel = channel or insight_channel()
+    return "apps" if channel == "main" else "apps@" + channel
+
+
+def manual_command(step: str, sima_cli=None, channel=None) -> str:
+    return MANUAL_COMMANDS[step].format(sima_cli=sima_cli or "sima-cli", apps=apps_target(channel))
 
 _HOSTS = (
     "pypi.org, files.pythonhosted.org, download.pytorch.org, huggingface.co, raw.githubusercontent.com "
@@ -183,6 +206,14 @@ echo "sima_cli=$cli"
 [ -x "$HOME/pyneat/bin/python" ] && echo core=yes || echo core=no
 [ -x "$studio/run.sh" ] && echo installed=yes || echo installed=no
 [ -x "$studio/.venv/bin/python" ] && [ -f "$studio/config.local.yaml" ] && echo prepared=yes || echo prepared=no
+# Which Apps the installed GenAI Studio came from and the Core it was built for, and the
+# Core the board has (empty where a record or dpkg is missing).
+deps="$HOME/prebuilt-apps/deps"
+field() { sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" "$2" 2>/dev/null | head -n 1; }
+echo "apps_ref=$(field ref "$deps/neat-apps.json")"
+echo "apps_core_ref=$(field ref "$deps/neat-core.json")"
+echo "apps_core_spec=$(field spec "$deps/neat-core.json")"
+echo "core_version=$(dpkg-query -W -f '${Version}' sima-neat 2>/dev/null || true)"
 pid=$(cat "$studio/.neat-genai-studio.pid" 2>/dev/null || true)
 # Running once run.sh is; answering once its web server is up, after the voices load.
 # run.sh writes its pid, then its mode, then (a moment later) the URL it serves: a web
@@ -233,7 +264,8 @@ studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 for s in $(cat "$jobs/steps"); do
   printf '%s\n' "$s" > "$jobs/step"
   case "$s" in
-    install) cd "$HOME" && NEAT_APPS_SKIP_DEPENDENCIES=1 SIMA_CLI_CHECK_FOR_UPDATE=0 "$SIMA_CLI" neat install apps ;;
+    install) cd "$HOME" && NEAT_APPS_SKIP_DEPENDENCIES=1 NEAT_APPS_OVERWRITE=1 SIMA_CLI_CHECK_FOR_UPDATE=0 \
+      "$SIMA_CLI" neat install "$APPS_TARGET" ;;
     prepare) cd "$studio" && ./setup.sh ;;
     start) cd "$studio" && ./run.sh ;;
   esac >"$jobs/$s.log" 2>&1 </dev/null
@@ -243,8 +275,9 @@ for s in $(cat "$jobs/steps"); do
 done
 """
 
-# $1: the steps to run, $2: the sima-cli to install with. Detaches the runner from this
-# shell (setsid, where the system has it) so it outlives the SSH session that started it.
+# $1: the steps to run, $2: the sima-cli to install with, $3: the Apps target. Detaches the
+# runner from this shell (setsid, where the system has it) so it outlives the SSH session
+# that started it.
 _LAUNCH_SCRIPT = _ALIVE + r"""
 jobs="$HOME/.neat-insight/genai-setup"
 mkdir -p "$jobs" || exit 1
@@ -261,7 +294,7 @@ printf '%s\n' "$1" > "$jobs/steps"
 rm -f "$jobs/step"
 detach=
 command -v setsid >/dev/null 2>&1 && detach=setsid
-SIMA_CLI="$2" nohup $detach sh -c RUNNER genai-setup >/dev/null 2>&1 </dev/null 9>&- &
+SIMA_CLI="$2" APPS_TARGET="${3:-apps}" nohup $detach sh -c RUNNER genai-setup >/dev/null 2>&1 </dev/null 9>&- &
 printf '%s\n' "$!" > "$jobs/runner.pid"
 """
 
@@ -311,10 +344,10 @@ def _quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
-def launch_command(steps, sima_cli: str) -> list:
-    """The board command that starts a detached job running ``steps`` in order."""
+def launch_command(steps, sima_cli: str, apps: str = "apps") -> list:
+    """The board command that starts a detached job running ``steps`` in order, installing ``apps``."""
     script = _LAUNCH_SCRIPT.replace("RUNNER", _quote(_RUNNER_SCRIPT))
-    return ["sh", "-c", script, "genai-setup", " ".join(steps), sima_cli or "sima-cli"]
+    return ["sh", "-c", script, "genai-setup", " ".join(steps), sima_cli or "sima-cli", apps]
 
 
 def status_command() -> list:
@@ -453,9 +486,66 @@ def _stall(step: str, idle: int) -> dict:
     }
 
 
-def describe(parsed: dict) -> dict:
+def _release_line(version: str):
+    """(major, minor) of a Core version or release tag such as `0.6.0+develop.<sha>` or `v0.5.0`, or None."""
+    match = re.match(r"v?(\d+)\.(\d+)\.", version or "")
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def _core_matches(fields: dict) -> bool:
+    """The board's Core is the one the installed Apps was built for, or there is nothing to compare."""
+    core, ref, spec = fields.get("core_version", ""), fields.get("apps_core_ref", ""), fields.get("apps_core_spec", "")
+    if not core or not ref:
+        return True
+    if _release_line(ref):
+        return core.partition("+")[0] == ref.lstrip("v")
+    return not spec or spec in core
+
+
+def outdated_studio(fields: dict, channel: str):
+    """Why the installed GenAI Studio has to be replaced, or None: it comes from another
+    channel than this Insight, or was built for an older Neat Library line than the board has."""
+    if fields.get("installed") != "yes":
+        return None
+    ref = fields.get("apps_ref", "")
+    if ref and ref != channel:
+        return "GenAI Studio on the board comes from Neat Apps `{}`, but this Insight is a `{}` build.".format(ref, channel)
+    built_for = _release_line(fields.get("apps_core_ref", ""))
+    board = _release_line(fields.get("core_version", ""))
+    if built_for and board and built_for < board:
+        return "GenAI Studio on the board was built for Neat Library {}, but the board has Neat Library {}.".format(
+            fields["apps_core_ref"].lstrip("v"), fields["core_version"].partition("+")[0])
+    return None
+
+
+def _update_notice(reason: str, channel: str) -> dict:
+    return {
+        "message": reason,
+        "fixes": ["Press Update and start GenAI Studio. It stops GenAI Studio, installs Neat Apps "
+                  "(`sima-cli neat install {}`) and runs setup again, which takes about 15 minutes. Downloaded models "
+                  "are kept, and the previous files move to `~/.prebuilt-apps-backup`.".format(apps_target(channel))],
+        "command": None,
+    }
+
+
+def _core_warning(fields: dict, channel: str) -> dict:
+    built_for = fields.get("apps_core_ref", "")
+    if not _release_line(built_for):
+        built_for = "{} {}".format(built_for, fields.get("apps_core_spec", "")).strip()
+    return {
+        "message": "This Neat Apps was built for Neat Library {}, but the board has {}.".format(
+            built_for, fields.get("core_version", "")),
+        "fix": "If GenAI Studio fails, install Neat Apps with its dependencies in a shell on the board: "
+               "`sima-cli neat install {}`.".format(apps_target(channel)),
+    }
+
+
+def describe(parsed: dict, channel=None) -> dict:
     """Each step's state for the GenAI tab: done, running, queued, failed, blocked or pending."""
     fields, records = parsed["fields"], parsed["records"]
+    channel = channel or insight_channel()
+    # A GenAI Studio that has to be replaced: install and prepare run again.
+    outdated = outdated_studio(fields, channel)
     active = fields.get("active") == "yes"
     current = fields.get("step", "") if active else ""
     planned = fields.get("steps", "").split() if active else []
@@ -464,7 +554,8 @@ def describe(parsed: dict) -> dict:
     running = fields.get("running") == "yes"
     # GenAI Studio is started once it answers; until then it is still loading its voices.
     loading = running and fields.get("answering", "yes") != "yes"
-    done = {"install": fields.get("installed") == "yes", "prepare": fields.get("prepared") == "yes",
+    done = {"install": fields.get("installed") == "yes" and not outdated,
+            "prepare": fields.get("prepared") == "yes" and not outdated,
             "start": running and not loading}
     now = _int(fields.get("now"))
     steps = []
@@ -478,7 +569,7 @@ def describe(parsed: dict) -> dict:
             record["exit"] = INTERRUPTED
         failed = record["exit"] not in ("", "0") and not _stopped_studio(step, record["exit"])
         entry = {"id": step, "title": TITLES[step], "description": DESCRIPTIONS[step], "log": record["log"],
-                 "problem": None, "stall": None, "warnings": []}
+                 "problem": None, "stall": None, "warnings": [], "notice": None}
         if step == current and not (step == "start" and done["start"]):
             entry["state"] = "running"
             mtime = _int(record["mtime"])
@@ -506,15 +597,20 @@ def describe(parsed: dict) -> dict:
             if blocked:
                 entry["state"], entry["problem"] = "blocked", blocked
         if entry["problem"] and entry["problem"]["command"]:
-            entry["problem"]["command"] = manual_command(step, fields.get("sima_cli"))
+            entry["problem"]["command"] = manual_command(step, fields.get("sima_cli"), channel)
         if entry["state"] in ("done", "running", "failed"):
             entry["warnings"] = record.get("warnings") or []
+        if step == "install" and outdated and entry["state"] == "pending":
+            entry["notice"] = _update_notice(outdated, channel)
+        if step == "install" and entry["state"] == "done" and not _core_matches(fields):
+            entry["warnings"] = entry["warnings"] + [_core_warning(fields, channel)]
         # A GenAI Studio this job isn't running was started from a shell: the job's start log
         # and its warnings are an old run's.
         if step == "start" and entry["state"] in ("done", "running") and not (active and current == "start"):
             entry["log"], entry["warnings"] = "", []
         steps.append(entry)
-    return {"active": active, "steps": steps, "logDir": JOB_DIR}
+    return {"active": active, "steps": steps, "logDir": JOB_DIR, "apps": apps_target(channel),
+            "outdated": bool(outdated)}
 
 
 # A step the job was running when it ended without recording an exit code (the board
@@ -608,7 +704,8 @@ def run(session, redo=None) -> dict:
                                  hint="Press Install and start GenAI Studio instead.", step="install")
             if _step_in_progress(state):
                 raise _busy()
-            remaining = ["prepare", "start"]
+            # An outdated GenAI Studio is replaced, not prepared again.
+            remaining = ["install", "prepare", "start"] if state.get("outdated") else ["prepare", "start"]
             for step in remaining:
                 blocked = _blocking_problem(step, {"core": "yes" if state.get("core") else "no",
                                                    "sima_cli": state["simaCli"]})
@@ -638,7 +735,7 @@ def run(session, redo=None) -> dict:
 
 def _launch(session, steps, sima_cli) -> dict:
     """Start the detached job running ``steps`` on the board."""
-    result = session.transport.exec(launch_command(steps, sima_cli), timeout=LAUNCH_TIMEOUT_SEC)
+    result = session.transport.exec(launch_command(steps, sima_cli, apps_target()), timeout=LAUNCH_TIMEOUT_SEC)
     if result.exit_code == 75:
         raise _busy()
     if result.exit_code != 0:
