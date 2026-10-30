@@ -138,3 +138,9 @@ If the application and Insight run in the same SDK container, use the default lo
 - **Neat Library** provides the application APIs used to build and run vision workloads.
 - **sima-cli** installs and upgrades Insight packages and other Neat artifacts.
 - **Model Compiler and LLiMa** produce model artifacts that you can inspect through Workspace and validate through applications running beside Insight.
+
+A launch URL whose explicit port matches the SDK's mapped `mainUI` port
+(default `9900`) is direct access to the Insight backend. Generated viewer URLs
+retain that hostname and use the mapped `videoUI` port (default `8081`), because
+Flask does not serve the vf viewer assets. Other public origins retain shared
+proxy routing for the viewer.

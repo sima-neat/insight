@@ -44,6 +44,29 @@ class RuntimePublicUrlTests(unittest.TestCase):
         self.assertEqual(parsed.path, "/static/viewer.html")
         self.assertEqual(urllib.parse.parse_qs(parsed.query)["src"], ["0,1"])
 
+    def test_direct_sdk_launch_uses_the_mapped_viewer_port(self):
+        for origin, ports, expected in [
+            ("https://127.0.0.1:9900/", [], "https://127.0.0.1:8081"),
+            ("https://sdk.example:19900/", [
+                {"name": "mainUI", "hostPortStart": 19900, "protocol": "tcp"},
+                {"name": "videoUI", "hostPortStart": 18081, "protocol": "tcp"},
+            ], "https://sdk.example:18081"),
+            ("https://[::1]:9900/", [], "https://[::1]:8081"),
+            ("https://insight.example:8443/", [], "https://insight.example:8443"),
+        ]:
+            with self.subTest(origin=origin), \
+                 mock.patch.object(app_module, "runtime_network_config",
+                     RuntimeNetworkConfig(None, "none", origin)), \
+                 mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports), \
+                 mock.patch.object(app_module, "_read_neat_port_map", return_value={"insightVideoChannels": 4}):
+                response = self.client.get("/api/viewer-url?mode=light&src=0,1")
+            self.assertEqual(response.status_code, 200)
+            url = urllib.parse.urlsplit(response.get_json()["url"])
+            self.assertEqual(f"{url.scheme}://{url.netloc}", expected)
+            self.assertEqual(url.path, "/static/viewer.html")
+            self.assertEqual(urllib.parse.parse_qs(url.query),
+                             {"mode": ["light"], "src": ["0,1"], "max_channels": ["4"]})
+
     def test_whip_and_mjpeg_use_the_public_origin_but_rtsp_does_not(self):
         with mock.patch.object(app_module, "runtime_network_config", self.config), \
              mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=[]), \
