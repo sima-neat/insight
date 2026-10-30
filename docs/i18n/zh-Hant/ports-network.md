@@ -132,6 +132,14 @@ metadata channel 3: <sdk-host-ip>:19103
 
 如果應用程式和 Insight 在同一個 SDK 容器中執行，請改用預設的本機連接埠。
 
+### SDK 直接連線與共用 Proxy
+
+`/home/docker/.insight-config/url-routing` 可明確選擇 URL 路由方式。請以單行寫入 `direct` 或 `proxy`，變更後重新啟動 Insight。空白或無效的值會導致啟動失敗。若檔案不存在，則使用 `proxy`，以維持既有託管環境的行為。
+
+在 `proxy` 模式下，無論連接埠號碼為何，`launch-url` 都會提供檢視器、WHIP 及 HTTP MJPEG URL 的共用來源。Proxy 必須將各路徑轉送至對應服務。在 `direct` 模式下，SDK 啟動功能仍可使用 `launch-url`，但 Insight 不會將其當作公開來源。產生的 URL 會使用請求的主機名稱與各服務設定的連接埠；檢視器使用 SDK 連接埠對應中的 `videoUI`，未設定時則使用 `8081`。瀏覽器 ICE 位址設定與此設定互相獨立。
+
+若本機 SDK 覆寫了啟動 URL，例如 `https://127.0.0.1:9900/`，請將 `url-routing` 設為 `direct`。若不需要覆寫啟動 URL，也可移除 `launch-url`。執行 `insight-admin restart` 後，檢查 `/api/health`：直接路由會顯示 `network.public_origin: null`。即使 Proxy 的連接埠剛好與 SDK 的 `mainUI` 相同，Proxy 來源也不會被改寫。
+
 ## 相關工具
 
 - **Neat 開發環境** 提供容器化的建置和執行環境，其中包含 Insight。

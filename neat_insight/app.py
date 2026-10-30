@@ -4222,14 +4222,6 @@ def viewer_url():
     viewer_port = _resolve_video_ui_port()
     query = urllib.parse.urlencode({"mode": mode, "src": src, "max_channels": max_channels})
     public_url = _format_public_http_url("/static/viewer.html", query)
-    if public_url:
-        # A direct SDK launch URL addresses Flask, which does not serve vf's
-        # static assets. Keep its hostname, but use the mapped viewer port.
-        # Shared proxy origins on other ports keep their same-origin routing.
-        launch = urllib.parse.urlsplit(public_url)
-        main_ui_port = _find_exposed_port(_read_exposed_ports_from_port_map(), "mainUI", "tcp") or 9900
-        if launch.port == main_ui_port:
-            public_url = _format_browser_https_url(launch.hostname, viewer_port, "/static/viewer.html", query)
     return {
         "url": public_url or _format_browser_https_url(host_ip, viewer_port, "/static/viewer.html", query),
         "max_video_channels": max_channels,

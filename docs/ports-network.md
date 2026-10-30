@@ -132,15 +132,30 @@ metadata channel 3: <sdk-host-ip>:19103
 
 If the application and Insight run in the same SDK container, use the default local ports instead.
 
+### Direct SDK launches and shared proxies
+
+`/home/docker/.insight-config/url-routing` explicitly selects URL routing. Write
+one line containing `direct` or `proxy`; restart Insight after changing it.
+Invalid or empty values fail startup. An absent file selects `proxy` to preserve
+existing hosted configurations.
+
+In `proxy` mode, `launch-url` supplies the shared origin for viewer, WHIP, and
+HTTP MJPEG URLs, regardless of its port number. The proxy must route those
+paths to their respective services. In `direct` mode, `launch-url` remains
+available to SDK launch surfaces but does not set Insight's public origin.
+Generated URLs use the request hostname and each service's configured port;
+the viewer uses the SDK port map's `videoUI` port, falling back to `8081`.
+Browser ICE address configuration is independent of this setting.
+
+For a local SDK with a launch override such as `https://127.0.0.1:9900/`, set
+`url-routing` to `direct`. Alternatively, remove `launch-url` if no launch override
+is needed. Restart with `insight-admin restart` and check `/api/health`: direct
+routing reports `network.public_origin: null`. A proxy origin remains unchanged
+even when its port happens to match the SDK's `mainUI` port.
+
 ## Related tools
 
 - **Neat Development Environment** provides the containerized build and run environment where Insight is bundled.
 - **Neat Library** provides the application APIs used to build and run vision workloads.
 - **sima-cli** installs and upgrades Insight packages and other Neat artifacts.
 - **Model Compiler and LLiMa** produce model artifacts that you can inspect through Workspace and validate through applications running beside Insight.
-
-A launch URL whose explicit port matches the SDK's mapped `mainUI` port
-(default `9900`) is direct access to the Insight backend. Generated viewer URLs
-retain that hostname and use the mapped `videoUI` port (default `8081`), because
-Flask does not serve the vf viewer assets. Other public origins retain shared
-proxy routing for the viewer.

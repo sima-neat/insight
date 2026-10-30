@@ -1433,7 +1433,7 @@
       "get": {
         "tags": ["Viewer"],
         "summary": "Build a browser-reachable vf viewer URL",
-        "description": "Constructs the vf HTTPS viewer URL using the configured public origin when `/home/docker/.insight-config/launch-url` is present, otherwise the current request host and mapped `videoUI` port. A configured origin on the mapped `mainUI` port (default 9900) uses its hostname with the mapped viewer port instead, since the backend does not serve vf viewer assets. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
+        "description": "Constructs the vf HTTPS viewer URL using the configured public origin when `/home/docker/.insight-config/launch-url` is present, otherwise the current request host and mapped `videoUI` port. Setting `/home/docker/.insight-config/url-routing` to `direct` disables public-origin routing while preserving launch-url for SDK launch surfaces; `proxy` (the default) keeps shared-origin routing regardless of port numbers. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
         "operationId": "getViewerUrl",
         "parameters": [
           {"name": "mode", "in": "query", "description": "Viewer color mode.", "schema": {"type": "string", "default": "light", "enum": ["light", "dark"]}},
