@@ -615,8 +615,9 @@ export default function GenAIView({ onError, onStatus }) {
   }, [])
 
   // While GenAI Studio doesn't answer, the banner's button says whether one click starts it.
+  // Once it answers, the banner says whether it is out of date for this Insight.
   useEffect(() => {
-    if (setupOpen || !offersSetup(backend.state)) return undefined
+    if (setupOpen || !(offersSetup(backend.state) || backend.state === 'ready')) return undefined
     let cancelled = false
     getSetup().then((body) => { if (!cancelled) setSetupStatus(body) }, () => {})
     return () => {
@@ -1672,7 +1673,8 @@ export default function GenAIView({ onError, onStatus }) {
     return (found && found.voices) || []
   }, [engines, engine])
   const voiceWarnings = usable ? voiceEngineWarnings(health) : []
-  const needsAttention = backend.state !== 'ready' || voiceWarnings.length > 0
+  const studioOutdated = Boolean(setupStatus?.outdated) && !setupOpen
+  const needsAttention = backend.state !== 'ready' || voiceWarnings.length > 0 || studioOutdated
 
   // --- render -----------------------------------------------------------------
 
@@ -1740,6 +1742,7 @@ export default function GenAIView({ onError, onStatus }) {
                     <p className="genai-setup-step-title">{item.title}</p>
                     <p className="hint">{item.description}</p>
                     {item.state === 'running' && lastLine(item.log) && <p className="genai-setup-last"><code>{lastLine(item.log)}</code></p>}
+                    {item.notice && <SetupHelp problem={item.notice} warn onCopy={copyCommand} />}
                     {item.stall && <SetupHelp problem={item.stall} warn onCopy={copyCommand} />}
                     {item.problem && <SetupHelp problem={item.problem} log={item.log} onCopy={copyCommand} />}
                     {item.warnings?.length > 0 && (
@@ -1873,10 +1876,18 @@ export default function GenAIView({ onError, onStatus }) {
           {backend.state !== 'ready' && <p className="genai-banner-title">{backend.title}</p>}
           {backend.state !== 'ready' && backend.detail && <p className="section-note">{backend.detail}</p>}
           {voiceWarnings.map((w) => <p key={w.key} className="section-note genai-voice-warning">{w.message}</p>)}
+          {studioOutdated && (
+            <p className="section-note genai-voice-warning">
+              GenAI Studio on the board is out of date for this Insight. Update it to use everything this tab offers.
+            </p>
+          )}
           {backend.state === 'busy' && <ProgressBar pct={loadProgress ? loadProgress.pct : null} label={backend.title} />}
           <div className="genai-actions">
             {offersSetup(backend.state) && !setupOpen && (
               <button type="button" className="btn-tonal" onClick={startFromBanner}>{banner.label}</button>
+            )}
+            {studioOutdated && !offersSetup(backend.state) && (
+              <button type="button" className="btn-tonal" onClick={openSetup}>Update GenAI Studio</button>
             )}
             {(backend.action === 'settings' || backend.action === 'setup') && !settingsOpen && (
               <button type="button" className="btn-ghost" onClick={() => setSettingsOpen(true)}>Change board address</button>

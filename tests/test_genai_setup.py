@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 from types import SimpleNamespace
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,14 +19,29 @@ from neat_insight import genai_setup
 from neat_insight.board import BoardError, ExecResult, board_bp
 
 _FAKE_SIMA_CLI = r"""#!/bin/sh
-[ "$1 $2 $3" = "neat install apps" ] || { echo "unexpected: $*" >&2; exit 2; }
+[ "$1 $2" = "neat install" ] || { echo "unexpected: $*" >&2; exit 2; }
+case "$3" in apps) ref=main ;; apps@*) ref=${3#apps@} ;; *) echo "unexpected: $*" >&2; exit 2 ;; esac
 [ "${NEAT_APPS_SKIP_DEPENDENCIES:-}" = 1 ] || { echo "would reinstall Core and Insight" >&2; exit 3; }
 [ "$PWD" = "$HOME" ] || { echo "not in the home directory: $PWD" >&2; exit 4; }
+# Like the Apps installer: an existing bundle is replaced only when allowed, and kept as a backup.
+if [ -e "$PWD/prebuilt-apps" ]; then
+  [ "${NEAT_APPS_OVERWRITE:-0}" = 1 ] || { echo "Apps installation cancelled."; exit 1; }
+  rm -rf "$PWD/.prebuilt-apps-backup" && mv "$PWD/prebuilt-apps" "$PWD/.prebuilt-apps-backup"
+fi
 studio="$PWD/prebuilt-apps/examples/genai/neat-genai-studio"
-mkdir -p "$studio"
+mkdir -p "$studio" "$PWD/prebuilt-apps/deps"
 cp "$FAKE_STUDIO/run.sh" "$FAKE_STUDIO/setup.sh" "$studio/"
 chmod +x "$studio/run.sh" "$studio/setup.sh"
+printf '{\n  "neat-apps": {\n    "ref": "%s",\n    "spec": "b7ed981497d0"\n  }\n}\n' "$ref" > "$PWD/prebuilt-apps/deps/neat-apps.json"
+printf '{\n  "neat-core": {\n    "ref": "%s",\n    "spec": "%s"\n  }\n}\n' "${FAKE_APPS_CORE_REF:-develop}" \
+  "${FAKE_APPS_CORE_SPEC:-18e265b4ecc2}" > "$PWD/prebuilt-apps/deps/neat-core.json"
 echo "Installed apps runtime under: $PWD/prebuilt-apps"
+"""
+
+# The board's installed Core, as dpkg reports it; none unless a test sets FAKE_CORE_VERSION.
+_FAKE_DPKG_QUERY = r"""#!/bin/sh
+[ -n "${FAKE_CORE_VERSION:-}" ] || exit 1
+printf '%s' "$FAKE_CORE_VERSION"
 """
 
 _FAKE_SETUP = r"""#!/bin/sh
@@ -96,7 +112,8 @@ class BoardScriptTests(unittest.TestCase):
         self.home, fake, bin_dir = root / "home", root / "studio", root / "bin"
         for path in (self.home, fake, bin_dir):
             path.mkdir()
-        for path, text in ((bin_dir / "sima-cli", _FAKE_SIMA_CLI), (fake / "setup.sh", _FAKE_SETUP), (fake / "run.sh", _FAKE_RUN)):
+        for path, text in ((bin_dir / "sima-cli", _FAKE_SIMA_CLI), (bin_dir / "dpkg-query", _FAKE_DPKG_QUERY),
+                           (fake / "setup.sh", _FAKE_SETUP), (fake / "run.sh", _FAKE_RUN)):
             path.write_text(text)
             path.chmod(0o755)
         self.studio = self.home / "prebuilt-apps/examples/genai/neat-genai-studio"
@@ -171,6 +188,64 @@ class BoardScriptTests(unittest.TestCase):
         with self.assertRaises(BoardError) as refused:
             genai_setup.run(self.session)
         self.assertEqual(refused.exception.code, "setup_done")
+
+    def installed_apps_ref(self):
+        text = (self.home / "prebuilt-apps/deps/neat-apps.json").read_text()
+        return text.split('"ref": "')[1].split('"')[0]
+
+    def test_a_develop_insight_installs_the_develop_apps(self):
+        with mock.patch.object(genai_setup, "insight_channel", return_value="develop"):
+            genai_setup.run(self.session)
+            status = self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+        self.assertEqual(self.installed_apps_ref(), "develop")
+        self.assertEqual((status["apps"], status["outdated"]), ("apps@develop", False))
+
+    def test_a_studio_from_another_channel_is_replaced_with_this_insights(self):
+        # Installed and running from main, the way an earlier Insight left it.
+        genai_setup.run(self.session)
+        self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+        with mock.patch.object(genai_setup, "insight_channel", return_value="develop"):
+            status = self.status()
+            self.assertTrue(status["outdated"])
+            self.assertEqual(self.states(status), ["pending", "pending", "done"])
+            notice = status["steps"][0]["notice"]
+            self.assertIn("Neat Apps `main`", notice["message"])
+            self.assertIn("`develop` build", notice["message"])
+            self.assertIn("apps@develop", notice["fixes"][0])
+            # Run stops the old GenAI Studio, then installs, prepares and starts the new one.
+            genai_setup.run(self.session)
+            status = self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+        self.assertFalse(status["outdated"])
+        self.assertEqual(self.installed_apps_ref(), "develop")
+        self.assertTrue((self.home / ".prebuilt-apps-backup/deps/neat-apps.json").exists())
+
+    def test_a_studio_built_for_an_older_neat_library_line_is_replaced(self):
+        # Installed for Neat Library 0.5.0; the board was then updated to 0.6.0.
+        self.env.update(FAKE_APPS_CORE_REF="v0.5.0", FAKE_APPS_CORE_SPEC="7274b4eeb797")
+        self.install_and_prepare()
+        self.env.update(FAKE_CORE_VERSION="0.6.0")
+        status = self.status()
+        self.assertEqual(self.states(status)[:2], ["pending", "pending"])
+        self.assertIn("built for Neat Library 0.5.0, but the board has Neat Library 0.6.0",
+                      status["steps"][0]["notice"]["message"])
+        # Replaced with an Apps built for the board's line, it is up to date again.
+        self.env.update(FAKE_APPS_CORE_REF="v0.6.0")
+        genai_setup.run(self.session)
+        status = self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
+        self.assertFalse(status["outdated"])
+
+    def test_another_core_build_on_the_same_line_is_a_warning_not_an_update(self):
+        self.env.update(FAKE_APPS_CORE_SPEC="18e265b4ecc2", FAKE_CORE_VERSION="0.6.0+develop.d9002bc78891")
+        self.install_and_prepare()
+        status = self.status()
+        self.assertEqual((self.states(status), status["outdated"]), (["done", "done", "pending"], False))
+        warning = status["steps"][0]["warnings"][-1]
+        self.assertIn("built for Neat Library develop 18e265b4ecc2, but the board has 0.6.0+develop.d9002bc78891",
+                      warning["message"])
+        self.assertIn("sima-cli neat install apps", warning["fix"])
+        # The board's own Core matches: no warning.
+        self.env.update(FAKE_CORE_VERSION="0.6.0+develop.18e265b4ecc2")
+        self.assertEqual(self.status()["steps"][0]["warnings"], [])
 
     def test_studio_keeps_running_after_the_command_that_started_it_returns(self):
         genai_setup.run(self.session)
@@ -574,6 +649,10 @@ class DescribeTests(unittest.TestCase):
         command = self.describe(fields, records)["steps"][0]["problem"]["command"]
         self.assertTrue(command.startswith("cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 /data/sima-cli/.venv/bin/sima-cli neat install apps && "))
         self.assertTrue(command.endswith("echo 0 > ~/.neat-insight/genai-setup/install.exit"))
+        # A develop Insight offers the develop Apps.
+        with mock.patch.object(genai_setup, "insight_channel", return_value="develop"):
+            command = self.describe(fields, records)["steps"][0]["problem"]["command"]
+        self.assertIn("/data/sima-cli/.venv/bin/sima-cli neat install apps@develop && ", command)
         # A blocked step never ran: no log to read, and no command that could work instead.
         blocked = self.describe({"sima_cli": "", "core": "no"})["steps"]
         self.assertEqual([s["state"] for s in blocked], ["blocked", "blocked", "pending"])
@@ -606,6 +685,24 @@ class DescribeTests(unittest.TestCase):
         self.assertEqual(len(log.splitlines()), genai_setup.LOG_LINES)
         self.assertIn("Downloading 100%", genai_setup.clean_log(text.split("\nline 0")[0]))
         self.assertNotIn("55%", genai_setup.clean_log(text.split("\nline 0")[0]))
+
+    def test_the_apps_channel_follows_this_insights_version(self):
+        for version, channel in (("0.0.0+develop.e604419", "develop"), ("0.0.0+main.bedca8f", "main"),
+                                 ("0.0.8", "main"), ("0.0.0+feature.120.webcam.9a18d3b", "main")):
+            with mock.patch.object(genai_setup.metadata, "version", return_value=version):
+                self.assertEqual(genai_setup.insight_channel(), channel, version)
+        self.assertEqual((genai_setup.apps_target("main"), genai_setup.apps_target("develop")), ("apps", "apps@develop"))
+
+    def test_only_an_older_core_line_or_another_channel_makes_studio_outdated(self):
+        installed = {"installed": "yes", "apps_ref": "main", "apps_core_ref": "v0.6.0", "core_version": "0.6.0"}
+        self.assertIsNone(genai_setup.outdated_studio(installed, "main"))
+        self.assertIn("`main`", genai_setup.outdated_studio(installed, "develop"))
+        self.assertIn("0.5.0", genai_setup.outdated_studio(dict(installed, apps_core_ref="v0.5.0"), "main"))
+        # A board on an older line than the Apps needs a Core update, not a GenAI Studio update.
+        self.assertIsNone(genai_setup.outdated_studio(dict(installed, core_version="0.5.0"), "main"))
+        # Nothing recorded (an Apps without deps/, or no dpkg) is never called outdated.
+        self.assertIsNone(genai_setup.outdated_studio({"installed": "yes"}, "develop"))
+        self.assertIsNone(genai_setup.outdated_studio(dict(installed, installed="no"), "develop"))
 
     def test_the_status_output_is_parsed_with_each_steps_record(self):
         text = ("sima_cli=/usr/bin/sima-cli\ncore=yes\nactive=no\n@@install\nexit=0\nmtime=900\n@log\nInstalled\n"
@@ -674,7 +771,7 @@ class ApiTests(unittest.TestCase):
         transport = self.answer(self.status(installed="yes"), ExecResult(0, b"", b""),
                                 self.status(installed="yes", active="yes", steps="prepare start", step="prepare"))
         body = self.client.post("/api/genai-setup/run").get_json()
-        self.assertEqual(transport.commands[1][4:], ["prepare start", "/usr/bin/sima-cli"])
+        self.assertEqual(transport.commands[1][4:], ["prepare start", "/usr/bin/sima-cli", "apps"])
         self.assertEqual([s["state"] for s in body["steps"]], ["done", "running", "queued"])
 
     def test_run_refusals_say_what_to_do(self):
