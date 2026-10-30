@@ -22,6 +22,8 @@ Insight uses several ports during normal operation. The default ports are the po
 | `webrtcWhipIce` | `8189` | UDP | ICE media for browser webcam publishing. Signalling uses `webrtcWhip`; the video itself arrives here, so both must be reachable. |
 | `webSSH` | `8022` | HTTPS/TCP | Browser shell to a paired DevKit when available. |
 
+Insight also runs the mediamtx control API on `127.0.0.1:9901` (TCP). It is loopback-only, password-protected with a password generated on every start, and used only by Insight itself, to confirm webcam sources, to detect external publishers and to set up pulled streams, so it needs no port mapping. Like the other mediamtx ports, it is freed at startup if another process holds it.
+
 ## Find the actual SDK port map
 
 In the SDK, do not assume default host ports are available. Run:
@@ -74,6 +76,8 @@ For example:
 
 Keep the channel number consistent between video and metadata. If your application sends video to channel `3`, send corresponding metadata to the metadata port for channel `3`.
 
+The video port accepts RTP H.264 (payload type `96`), H.265 (`98`), or JPEG (`26`, RFC 2435 as GStreamer `rtpjpegpay` sends it). Keep every RTP packet at or below 4096 bytes; for JPEG, set `rtpjpegpay mtu=` to 4096 or less. JPEG frames reach the browser over the same WebRTC connection as metadata, so they need no additional port.
+
 ## SDK port mapping
 
 In the Neat Development Environment, ports may be remapped by the SDK container. Insight reads the SDK port-map configuration when available so UI links point to the browser-reachable host port.
@@ -81,6 +85,21 @@ In the Neat Development Environment, ports may be remapped by the SDK container.
 This matters most for the Video Viewer. The internal default viewer port is `8081`, but the browser-facing port can be different when the SDK maps `videoUI` to another host port.
 
 Use System Information in the Insight UI to check the actual exposed ports before assuming a URL is wrong.
+
+## Optional browser-facing configuration
+
+Hosted environments can separate the address used by a paired DevKit from the address advertised to an external browser. Insight reads two optional, startup-scoped files:
+
+| File | Purpose |
+| --- | --- |
+| `/home/docker/.insight-config/browser-ice-address` | One browser-reachable IPv4 address advertised by both the vf viewer and MediaMTX WHIP endpoint. |
+| `/home/docker/.insight-config/launch-url` | One trusted absolute HTTP or HTTPS launch URL. Insight derives its origin for generated viewer, WHIP, and HTTP MJPEG URLs. |
+
+When `browser-ice-address` is absent, Insight keeps the existing `CONTAINER_HOST_IP` behavior. When `launch-url` is absent, generated browser URLs continue to use the request host and SDK port map. The files therefore opt into hosted-environment behavior independently and do not change ordinary local or DevKit installations.
+
+`browser-ice-address` is validated before vf or MediaMTX starts. An empty or malformed browser address prevents Insight from becoming ready instead of silently advertising an unreachable address. `launch-url` is advisory: Insight accepts a full URL with an ASCII hostname, including a path, query, or fragment, and uses only its HTTP(S) origin. An invalid launch URL logs a warning and preserves legacy request-host/port-map URL generation. Replace files atomically, run `insight-admin restart`, and inspect `/api/health` to confirm the address and public origin applied by the new process.
+
+The browser ICE address is not required to be assigned to a local network interface. Public cloud IPv4 addresses commonly reach the host through 1:1 NAT. The WebRTC and `webrtcWhipIce` UDP ports must still be published and allowed by the surrounding network policy.
 
 ## Configure applications with the port map
 
@@ -112,6 +131,27 @@ metadata channel 3: <sdk-host-ip>:19103
 ```
 
 If the application and Insight run in the same SDK container, use the default local ports instead.
+
+### Direct SDK launches and shared proxies
+
+`/home/docker/.insight-config/url-routing` explicitly selects URL routing. Write
+one line containing `direct` or `proxy`; restart Insight after changing it.
+Invalid or empty values fail startup. An absent file selects `proxy` to preserve
+existing hosted configurations.
+
+In `proxy` mode, `launch-url` supplies the shared origin for viewer, WHIP, and
+HTTP MJPEG URLs, regardless of its port number. The proxy must route those
+paths to their respective services. In `direct` mode, `launch-url` remains
+available to SDK launch surfaces but does not set Insight's public origin.
+Generated URLs use the request hostname and each service's configured port;
+the viewer uses the SDK port map's `videoUI` port, falling back to `8081`.
+Browser ICE address configuration is independent of this setting.
+
+For a local SDK with a launch override such as `https://127.0.0.1:9900/`, set
+`url-routing` to `direct`. Alternatively, remove `launch-url` if no launch override
+is needed. Restart with `insight-admin restart` and check `/api/health`: direct
+routing reports `network.public_origin: null`. A proxy origin remains unchanged
+even when its port happens to match the SDK's `mainUI` port.
 
 ## Related tools
 

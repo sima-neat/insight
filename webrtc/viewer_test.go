@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +31,30 @@ func TestHandleOfferReturnsUnavailableBeforeCodecIsKnown(t *testing.T) {
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected HTTP %d, got %d: %s", http.StatusServiceUnavailable, response.Code, response.Body.String())
 	}
+}
+
+func TestConfiguredBrowserICEAddress(t *testing.T) {
+	t.Run("dedicated address wins", func(t *testing.T) {
+		t.Setenv("CONTAINER_HOST_IP", "10.77.0.1")
+		t.Setenv(browserICEAddressEnv, " 54.12.34.56 ")
+
+		address, source := configuredBrowserICEAddress()
+		if address != "54.12.34.56" || source != browserICEAddressEnv {
+			t.Fatalf("unexpected address selection: address=%q source=%q", address, source)
+		}
+	})
+
+	t.Run("container host remains the fallback", func(t *testing.T) {
+		t.Setenv("CONTAINER_HOST_IP", " 10.77.0.1 ")
+		if err := os.Unsetenv(browserICEAddressEnv); err != nil {
+			t.Fatal(err)
+		}
+
+		address, source := configuredBrowserICEAddress()
+		if address != "10.77.0.1" || source != "CONTAINER_HOST_IP" {
+			t.Fatalf("unexpected address selection: address=%q source=%q", address, source)
+		}
+	})
 }
 
 func TestHandleOfferAdvertisesSelectedCodec(t *testing.T) {
@@ -702,6 +728,231 @@ func TestRTPTimestampRewriterAdvancesPerFrame(t *testing.T) {
 	}
 }
 
+func TestRTPTimestampRewriterPreservesBackwardSourceDeltas(t *testing.T) {
+	rewriter := newRTPTimestampRewriter()
+	start := time.Unix(100, 0)
+	const ssrc = 0x1234
+	// Decode order of an I P B B P B B stream at 30 FPS: PTS moves backward
+	// for each B-frame. Starting near the wrap point also covers uint32 wrap.
+	base := uint32(0xffffffff - 4000)
+	sourceSteps := []uint32{0, 9000, 3000, 6000, 18000, 12000, 15000}
+	for i, sourceStep := range sourceSteps {
+		got := rewriter.timestampForSourceFrame(base+sourceStep, ssrc, false, start.Add(time.Duration(i)*33*time.Millisecond))
+		if want := initialRTPTimestamp + sourceStep; got != want {
+			t.Fatalf("frame %d: expected timestamp %d, got %d", i, want, got)
+		}
+	}
+}
+
+func TestRTPTimestampRewriterFallsBackOnLargeBackwardSourceJump(t *testing.T) {
+	rewriter := newRTPTimestampRewriter()
+	start := time.Unix(100, 0)
+	const ssrc = 0x1234
+
+	first := rewriter.timestampForSourceFrame(1_000_000, ssrc, false, start)
+	second := rewriter.timestampForSourceFrame(1_000_000-uint32(maxSourceRTPTimestampStep)-1, ssrc, false, start.Add(40*time.Millisecond))
+
+	if want := first + 3600; second != want {
+		t.Fatalf("expected arrival-time step to %d, got %d", want, second)
+	}
+}
+
+func TestRTPTimestampRewriterSourceStepFallbacks(t *testing.T) {
+	const ssrc = 0x1234
+	const sourceTimestamp = uint32(1_000_000)
+	tests := []struct {
+		name               string
+		sourceTimestamp    uint32
+		ssrc               uint32
+		afterSequenceBreak bool
+		arrival            time.Duration
+		wantStep           uint32
+	}{
+		{name: "in-range source step", sourceTimestamp: sourceTimestamp + 3000, ssrc: ssrc, arrival: 40 * time.Millisecond, wantStep: 3000},
+		{name: "ssrc change", sourceTimestamp: sourceTimestamp + 3000, ssrc: ssrc + 1, arrival: 40 * time.Millisecond, wantStep: 3600},
+		{name: "repeated source timestamp", sourceTimestamp: sourceTimestamp, ssrc: ssrc, arrival: 40 * time.Millisecond, wantStep: 3600},
+		{name: "repeated source timestamp at the same arrival", sourceTimestamp: sourceTimestamp, ssrc: ssrc, wantStep: 1},
+		{name: "large forward source jump", sourceTimestamp: sourceTimestamp + uint32(maxSourceRTPTimestampStep) + 1, ssrc: ssrc, arrival: 40 * time.Millisecond, wantStep: 3600},
+		{name: "after a sequence break", sourceTimestamp: sourceTimestamp + 3000, ssrc: ssrc, afterSequenceBreak: true, arrival: 40 * time.Millisecond, wantStep: 3600},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rewriter := newRTPTimestampRewriter()
+			start := time.Unix(100, 0)
+
+			first := rewriter.timestampForSourceFrame(sourceTimestamp, ssrc, false, start)
+			second := rewriter.timestampForSourceFrame(tt.sourceTimestamp, tt.ssrc, tt.afterSequenceBreak, start.Add(tt.arrival))
+
+			if got := second - first; got != tt.wantStep {
+				t.Fatalf("expected step %d, got %d", tt.wantStep, got)
+			}
+		})
+	}
+}
+
+// A sender that restarts its sequence but keeps its SSRC can rewind its source
+// clock by less than maxSourceRTPTimestampStep. The access-unit buffer drops the
+// unit that carries the sequence break, so the next accepted unit is the first
+// the rewriter sees after the restart and must not apply the rewind.
+func TestRTPForwarderUsesArrivalTimeAfterSameSSRCSequenceRestart(t *testing.T) {
+	tests := []struct {
+		name     string
+		codec    videoCodec
+		pt       uint8
+		key      []byte
+		delta    []byte
+		restarts [][]byte
+	}{
+		{
+			name: "h264", codec: videoCodecH264, pt: h264RTPPayloadType,
+			key: []byte{0x65, 0x88}, delta: []byte{0x41, 0x88},
+			restarts: [][]byte{{0x65, 0x88}},
+		},
+		{
+			// The recovery gate also withholds the delta unit after the break, so
+			// the restart has to survive more than one dropped unit.
+			name: "h265", codec: videoCodecH265, pt: h265RTPPayloadType,
+			key: []byte{0x26, 0x01}, delta: []byte{0x02, 0x01},
+			restarts: [][]byte{{0x02, 0x01}, {0x26, 0x01}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			channel := &Channel{
+				Stats:         NewIngestStats(0, 9000, 9100),
+				MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
+				MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
+			}
+			media := mustNewChannelMedia(t, tt.codec)
+			channel.Media.Store(media)
+			media.track.bindingCount.Store(1)
+			forwarder := newRTPForwarder()
+			send := func(sequence uint16, timestamp uint32, payload []byte) uint32 {
+				pkt := testRTPPacketForCodec(t, tt.pt, sequence, timestamp, true, payload)
+				forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+				return forwarder.timestampRewriter.nextTimestamp
+			}
+
+			// Four seconds into the stream at 30 FPS.
+			send(100, 360000, tt.key)
+			// Sampled before the last pre-restart frame records its arrival, so the
+			// bound below covers the whole interval the fallback step can measure.
+			lastFrameSentAt := time.Now()
+			if got, want := send(101, 363000, tt.delta), initialRTPTimestamp+3000; got != want {
+				t.Fatalf("expected source cadence before restart: want %d, got %d", want, got)
+			}
+			beforeRestart := forwarder.timestampRewriter.nextTimestamp
+
+			// Restart: sequence and source timestamp start again from zero.
+			send(0, 0, tt.key)
+			sequence := uint16(1)
+			for _, payload := range tt.restarts {
+				send(sequence, uint32(sequence)*3000, payload)
+				sequence++
+			}
+			afterRestart := forwarder.timestampRewriter.nextTimestamp
+			maxArrivalStep := int32(time.Since(lastFrameSentAt).Seconds()*videoRTPClockRate) + 1
+
+			if step := int32(afterRestart - beforeRestart); step < 1 || step > maxArrivalStep {
+				t.Fatalf("expected an arrival-time step in [1, %d] after restart, got %d", maxArrivalStep, step)
+			}
+			if got, want := send(sequence, uint32(sequence)*3000, tt.delta), afterRestart+3000; got != want {
+				t.Fatalf("expected source cadence after restart: want %d, got %d", want, got)
+			}
+		})
+	}
+}
+
+// H.264 decode order with B-frames; units after a loss arrive in a burst. Losing
+// B 12000 makes the buffer reject B 15000, which carries the sequence break, so
+// P 27000 takes the arrival-time step. The B-frames behind it must not rewind
+// the outgoing clock below frames already sent before the gap.
+func TestRTPForwarderKeepsPostGapBFramesAboveSentTimeline(t *testing.T) {
+	channel := &Channel{
+		Stats:         NewIngestStats(0, 9000, 9100),
+		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
+		MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
+	}
+	media := mustNewChannelMedia(t, videoCodecH264)
+	channel.Media.Store(media)
+	media.track.bindingCount.Store(1)
+	forwarder := newRTPForwarder()
+	send := func(sequence uint16, timestamp uint32, payload []byte) uint32 {
+		pkt := testRTPPacketForCodec(t, h264RTPPayloadType, sequence, timestamp, true, payload)
+		forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+		return forwarder.timestampRewriter.nextTimestamp
+	}
+	idr, nonIDR := []byte{0x65, 0x88}, []byte{0x41, 0x88}
+
+	send(1, 9000, idr)
+	sentBeforeGap := send(2, 18000, nonIDR)
+	// Sequence 3 (B 12000) is lost.
+	send(4, 15000, nonIDR)
+	for _, frame := range []struct {
+		sequence  uint16
+		timestamp uint32
+	}{{5, 27000}, {6, 21000}, {7, 24000}} {
+		if got := send(frame.sequence, frame.timestamp, nonIDR); int32(got-sentBeforeGap) <= 0 {
+			t.Fatalf("source %d: outgoing %d is not after %d sent before the gap", frame.timestamp, got, sentBeforeGap)
+		}
+	}
+	afterGap := forwarder.timestampRewriter.nextTimestamp
+	if got, want := send(8, 36000, nonIDR), afterGap+12000; got != want {
+		t.Fatalf("expected source cadence once past the gap: want %d, got %d", want, got)
+	}
+}
+
+// After any discontinuity fallback the source mapping is re-anchored, so later
+// backward source deltas are held above the highest timestamp already sent.
+func TestRTPTimestampRewriterHoldsTimelineAfterDiscontinuity(t *testing.T) {
+	const ssrc = 0x1234
+	type frame struct {
+		source             uint32
+		ssrc               uint32
+		afterSequenceBreak bool
+	}
+	tests := []struct {
+		name   string
+		before []frame
+		after  []frame
+	}{
+		{
+			name:   "sequence break after an anchor",
+			before: []frame{{9000, ssrc, false}, {18000, ssrc, false}},
+			after:  []frame{{27000, ssrc, true}, {21000, ssrc, false}, {24000, ssrc, false}},
+		},
+		{
+			name:   "sequence break after a B-frame",
+			before: []frame{{9000, ssrc, false}, {18000, ssrc, false}, {12000, ssrc, false}},
+			after:  []frame{{27000, ssrc, true}, {21000, ssrc, false}, {24000, ssrc, false}},
+		},
+		{
+			name:   "ssrc change",
+			before: []frame{{9000, ssrc, false}, {18000, ssrc, false}},
+			after:  []frame{{500000, ssrc + 1, false}, {494000, ssrc + 1, false}, {497000, ssrc + 1, false}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rewriter := newRTPTimestampRewriter()
+			// Same arrival for every frame: the burst gives a one-tick fallback step.
+			now := time.Unix(100, 0)
+			var highest uint32
+			for i, f := range tt.before {
+				got := rewriter.timestampForSourceFrame(f.source, f.ssrc, f.afterSequenceBreak, now)
+				if i == 0 || int32(got-highest) > 0 {
+					highest = got
+				}
+			}
+			for _, f := range tt.after {
+				if got := rewriter.timestampForSourceFrame(f.source, f.ssrc, f.afterSequenceBreak, now); int32(got-highest) <= 0 {
+					t.Fatalf("source %d: outgoing %d is not after %d already sent", f.source, got, highest)
+				}
+			}
+		})
+	}
+}
+
 func TestRTPPacketRewriterSetsTimestamp(t *testing.T) {
 	rewriter := rtpPacketRewriter{}
 	original := &rtp.Packet{
@@ -1010,4 +1261,314 @@ func testRTPPacketForCodec(t *testing.T, payloadType uint8, sequence uint16, tim
 		t.Fatal(err)
 	}
 	return testRTP{packet: packet, raw: raw}
+}
+
+func TestJPEGPayloadTypePublishesTracklessMedia(t *testing.T) {
+	channel := &Channel{}
+	media, err := channel.publishMediaForCodec(videoCodecForPayloadType(jpegRTPPayloadType))
+	if err != nil {
+		t.Fatalf("publish JPEG media: %v", err)
+	}
+	if media.codec != videoCodecJPEG || media.track != nil ||
+		media.parameters.MimeType != "video/jpeg" || media.parameters.PayloadType != jpegRTPPayloadType {
+		t.Fatalf("unexpected JPEG media: %#v", media)
+	}
+}
+
+func TestHandleOfferAnswersJPEGChannelWithoutVideo(t *testing.T) {
+	const channelIndex = 74
+	previous := channels[channelIndex]
+	channel := &Channel{
+		Stats:  NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		Egress: NewEgressStats(channelIndex),
+	}
+	media := mustNewChannelMedia(t, videoCodecJPEG)
+	channel.Media.Store(media)
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+	t.Cleanup(media.peers.retire)
+
+	// The browser offers only codecs it can decode, none of them JPEG.
+	viewer := newJPEGTestViewer(t)
+	if offerAdvertisesCodec(*viewer.pc.LocalDescription(), "video/jpeg") {
+		t.Fatal("test offer unexpectedly advertises JPEG")
+	}
+	answer := viewer.negotiate(t, channelIndex)
+	// Accepted, with no track behind it: a rejected (port 0) first m-line would
+	// carry the answer's candidates where browsers ignore them.
+	if strings.Contains(answer.SDP, "m=video 0 ") || strings.Contains(answer.SDP, "a=ssrc:") {
+		t.Fatalf("expected an accepted video m-line without a track: %s", answer.SDP)
+	}
+}
+
+func TestHandleOfferRejectsVideoOnlyOfferOnJPEGChannel(t *testing.T) {
+	const channelIndex = 73
+	previous := channels[channelIndex]
+	channel := &Channel{
+		Stats:  NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		Egress: NewEgressStats(channelIndex),
+	}
+	channel.Media.Store(mustNewChannelMedia(t, videoCodecJPEG))
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+
+	// The ROI editor preview offers video only, with no DataChannel for frames.
+	browser, offer := newReceiveOnlyOffer(t, webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: videoRTPClockRate},
+		PayloadType:        96,
+	})
+	t.Cleanup(func() { _ = browser.Close() })
+	body, err := json.Marshal(offer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handleOffer(response, httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/offer?channel=%d", channelIndex), bytes.NewReader(body)))
+
+	// 4xx so the preview reports it instead of waiting on a stream that never comes.
+	if response.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected HTTP %d, got %d: %s",
+			http.StatusUnsupportedMediaType, response.Code, response.Body.String())
+	}
+}
+
+type jpegTestViewer struct {
+	pc       *webrtc.PeerConnection
+	frames   chan []byte
+	metadata chan []byte
+}
+
+// newJPEGTestViewer offers what ViewerApp.jsx offers: a recvonly video
+// transceiver and the "jpeg" and "metadata" DataChannels.
+func newJPEGTestViewer(t *testing.T) *jpegTestViewer {
+	t.Helper()
+	mediaEngine := webrtc.MediaEngine{}
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: videoRTPClockRate},
+		PayloadType:        96,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine)).NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	viewer := &jpegTestViewer{pc: pc, frames: make(chan []byte, 16), metadata: make(chan []byte, 16)}
+	ordered, maxRetransmits := true, uint16(0)
+	for label, messages := range map[string]chan []byte{"jpeg": viewer.frames, "metadata": viewer.metadata} {
+		dc, err := pc.CreateDataChannel(label, &webrtc.DataChannelInit{Ordered: &ordered, MaxRetransmits: &maxRetransmits})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) { messages <- msg.Data })
+	}
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pc.SetLocalDescription(offer); err != nil {
+		t.Fatal(err)
+	}
+	<-webrtc.GatheringCompletePromise(pc)
+	return viewer
+}
+
+func (v *jpegTestViewer) negotiate(t *testing.T, channelIndex int) webrtc.SessionDescription {
+	t.Helper()
+	body, err := json.Marshal(v.pc.LocalDescription())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handleOffer(response, httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/offer?channel=%d", channelIndex), bytes.NewReader(body)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var answer webrtc.SessionDescription
+	if err := json.NewDecoder(response.Body).Decode(&answer); err != nil {
+		t.Fatalf("decode answer: %v", err)
+	}
+	if err := v.pc.SetRemoteDescription(answer); err != nil {
+		t.Fatalf("viewer rejected the answer: %v", err)
+	}
+	return answer
+}
+
+func TestRTPForwarderCountsJPEGDropsWithoutViewers(t *testing.T) {
+	channel := &Channel{Stats: NewIngestStats(0, 9000, 9100)}
+	media := mustNewChannelMedia(t, videoCodecJPEG)
+	forwarder := newRTPForwarder()
+	for _, pkt := range jpegFixtureFrame(t, fixtureI420, 10, 9000) {
+		forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+	}
+	snapshot := channel.Stats.Snapshot(false, false, time.Now())
+	if snapshot.Forwarding.PacketsDroppedNoTrack != uint64(len(fixtureI420)) ||
+		snapshot.Forwarding.FramesForwarded != 0 || snapshot.Forwarding.FramesDroppedIncomplete != 0 {
+		t.Fatalf("unexpected JPEG forwarding without a viewer: %#v", snapshot.Forwarding)
+	}
+}
+
+func TestRTPForwarderCountsIncompleteJPEGFrames(t *testing.T) {
+	channel := &Channel{Stats: NewIngestStats(0, 9000, 9100)}
+	channel.FramePeers.add(1, nil)
+	media := mustNewChannelMedia(t, videoCodecJPEG)
+	forwarder := newRTPForwarder()
+	frame := jpegFixtureFrame(t, fixtureI420, 10, 9000)
+	for _, pkt := range []testRTP{frame[0], frame[2]} {
+		forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+	}
+	snapshot := channel.Stats.Snapshot(true, false, time.Now())
+	if snapshot.Forwarding.FramesDroppedIncomplete != 1 || len(snapshot.Diagnostics.RecentErrors) != 1 {
+		t.Fatalf("lost fragment not reported: %#v %v", snapshot.Forwarding, snapshot.Diagnostics.RecentErrors)
+	}
+}
+
+func TestCodecTransitionBetweenH264AndJPEGRetiresPeers(t *testing.T) {
+	channel := &Channel{}
+	h264, err := channel.publishMediaForCodec(videoCodecH264)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jpegMedia, err := channel.publishMediaForCodec(videoCodecJPEG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !h264.peers.isRetired() || jpegMedia.peers.isRetired() || channel.Media.Load() != jpegMedia {
+		t.Fatal("switching H.264 to JPEG did not retire the H.264 generation")
+	}
+	if _, err := channel.publishMediaForCodec(videoCodecH264); err != nil {
+		t.Fatal(err)
+	}
+	if !jpegMedia.peers.isRetired() {
+		t.Fatal("switching JPEG to H.264 did not retire the JPEG generation")
+	}
+}
+
+// A pion client stands in for the browser: it opens the "jpeg" and "metadata"
+// DataChannels and checks that each frame's header timestamp is the value its
+// metadata carries as _insight.rtp_timestamp.
+func TestJPEGFramesAndMetadataShareTimestamps(t *testing.T) {
+	const channelIndex = 75
+	previous := channels[channelIndex]
+	channel := &Channel{
+		Stats:         NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		Egress:        NewEgressStats(channelIndex),
+		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
+		MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
+	}
+	media := mustNewChannelMedia(t, videoCodecJPEG)
+	channel.Media.Store(media)
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+	t.Cleanup(media.peers.retire)
+	go startMetadataForwarder(channel)
+
+	viewer := newJPEGTestViewer(t)
+	viewer.negotiate(t, channelIndex)
+	deadline := time.Now().Add(5 * time.Second)
+	for channel.FramePeers.len() == 0 || channel.MetadataPeers.len() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("DataChannels did not open")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	forwarder := newRTPForwarder()
+	sequence := uint16(100)
+	for i, pts := range []int64{1000, 1033, 1066, 1100} {
+		addMetadata := func() {
+			payload := fmt.Sprintf(`{"timestamp":%d,"type":"object-detection","data":{"objects":[]}}`, pts)
+			for _, ready := range channel.MetadataSync.addMetadata([]byte(payload), time.Now()) {
+				enqueueMetadata(channel, ready)
+			}
+		}
+		// Alternate which side arrives first; both must correlate.
+		if i%2 == 0 {
+			addMetadata()
+		}
+		for _, pkt := range jpegFixtureFrame(t, fixtureI420, sequence, uint32(pts*90)) {
+			channel.Stats.RecordRTPPacket(pkt.packet, len(pkt.raw), nil)
+			forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+			sequence++
+		}
+		if i%2 == 1 {
+			addMetadata()
+		}
+
+		var frameTimestamp uint32
+		select {
+		case message := <-viewer.frames:
+			frameTimestamp = binary.BigEndian.Uint32(message)
+			index, count := binary.BigEndian.Uint16(message[4:]), binary.BigEndian.Uint16(message[6:])
+			if index != 0 || count != 1 {
+				t.Fatalf("frame %d: unexpected chunk %d of %d", i, index, count)
+			}
+			if _, err := jpeg.Decode(bytes.NewReader(message[8:])); err != nil {
+				t.Fatalf("frame %d: received JPEG does not decode: %v", i, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("frame %d not received", i)
+		}
+		select {
+		case message := <-viewer.metadata:
+			var envelope struct {
+				Timestamp int64 `json:"timestamp"`
+				Insight   struct {
+					RTPTimestamp uint32 `json:"rtp_timestamp"`
+				} `json:"_insight"`
+			}
+			if err := json.Unmarshal(message, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Timestamp != pts || envelope.Insight.RTPTimestamp != frameTimestamp {
+				t.Fatalf("frame %d: metadata %s does not carry frame timestamp %d", i, message, frameTimestamp)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("metadata %d not received", i)
+		}
+	}
+
+	ingest := channel.Stats.Snapshot(false, true, time.Now())
+	if ingest.Media.Codec != "JPEG" || ingest.Media.Width != 64 || ingest.Media.Height != 48 ||
+		ingest.Media.JPEGType == nil || *ingest.Media.JPEGType != 1 || ingest.Media.JPEGQ != 255 ||
+		ingest.Forwarding.FramesForwarded != 4 || !ingest.Forwarding.WebRTCTrackAttached {
+		t.Fatalf("unexpected ingest stats: %#v %#v", ingest.Media, ingest.Forwarding)
+	}
+	egress, _ := channel.Egress.Snapshot(true, false, time.Now())
+	if len(egress.Peers) != 1 || egress.Peers[0].JPEG == nil ||
+		egress.Peers[0].JPEG.State != "open" || egress.Peers[0].JPEG.FramesSent != 4 {
+		t.Fatalf("unexpected egress stats: %#v", egress.Peers)
+	}
+
+	if err := viewer.pc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for channel.FramePeers.len() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("closed viewer stayed registered for JPEG frames")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func jpegFixtureFrame(t *testing.T, packets [][]byte, sequence uint16, timestamp uint32) []testRTP {
+	t.Helper()
+	frame := make([]testRTP, len(packets))
+	for i, raw := range packets {
+		var pkt rtp.Packet
+		if err := pkt.Unmarshal(raw); err != nil {
+			t.Fatal(err)
+		}
+		frame[i] = testRTPPacketForCodec(t, jpegRTPPayloadType, sequence+uint16(i), timestamp, pkt.Marker, pkt.Payload)
+	}
+	return frame
 }

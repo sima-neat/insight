@@ -25,12 +25,20 @@
     {"name": "Media sources", "description": "Manage one-based source slots that publish assigned media over RTSP or HTTP MJPEG. A normal workflow is list videos → assign a slot → start it → inspect state → stop it before changing or deleting media."},
     {"name": "Viewer", "description": "Generate a vf viewer URL that is reachable from the current browser and bounded to the configured channel capacity. Viewer channel indexes are zero-based even though media-source slots are one-based."},
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
-    {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."}
+    {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
+    {"name": "GenAI Studio", "description": "Reach the GenAI Studio backend running on a board (`run.sh`, port 5000 by default) through Insight, so the browser never calls the board directly. Configure the board address once, then call the Studio's own API under `/api/genai/`. `/api/genai-setup` installs, prepares and starts GenAI Studio on the selected board."},
+    {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
+    {"name": "Peripherals", "description": "List the MIPI and USB cameras and ALSA microphones SiMa Sentinel reports on the selected board, preview a camera, and test a microphone. Sentinel discovers the devices and Insight reads its catalog. Discovery never captures frames or audio, opens a sound device, changes sensor controls, or publishes streams; only a camera preview or a microphone test, started explicitly, captures, and only while it runs. Each camera mode is Available or Unsupported, decided from Sentinel's report: for a MIPI camera, its sensor is in the board's camera overlays, the ISP outputs its size, and its format is NV12 (a fixed fact about Neat's `CameraInput`, not queried from the board); for a USB camera, Sentinel reports it in MJPEG on the `uvcvideo` driver, which Neat's USB camera input reads. Core has no audio input node, so microphones carry no verdict."},
+    {"name": "Sentinel", "description": "Read SiMa Sentinel telemetry from the selected board and control its traces. Sentinel serves its API on a unix socket that is never exposed over the network, so Insight reaches it from the board itself: in process when Insight runs on the board, and otherwise by running a small client there over SSH. Metric values are `null` when the board cannot measure them, never zero."}
   ],
   "x-tagGroups": [
     {
       "name": "Observe Insight",
       "tags": ["Service and system", "Diagnostics", "Viewer", "DevKit shell"]
+    },
+    {
+      "name": "Board and peripherals",
+      "tags": ["Board", "Peripherals", "Sentinel", "GenAI Studio"]
     },
     {
       "name": "Automate Insight",
@@ -74,7 +82,7 @@
       "get": {
         "tags": ["Service and system"],
         "summary": "Check service readiness",
-        "description": "A lightweight readiness probe with no dependency on vf, a DevKit, or media tools. Call this first from automation; a `200` response confirms that the Flask backend can accept subsequent API requests.",
+        "description": "A lightweight readiness probe that also reports the startup-scoped browser network configuration applied to vf and MediaMTX. Call this first from automation; a `200` response confirms that the Flask backend can accept subsequent API requests. A present but invalid `browser-ice-address` configuration prevents Insight from starting. A full HTTP(S) `launch-url` is reduced to its origin; an invalid launch URL preserves legacy request-host/port-map URL generation.",
         "operationId": "getHealth",
         "x-codeSamples": [
           {
@@ -89,7 +97,7 @@
             "content": {
               "application/json": {
                 "schema": {"$ref": "#/components/schemas/Health"},
-                "example": {"status": "ok", "service": "neat-insight", "time": "2026-08-17T20:15:00Z"}
+                "example": {"status": "ok", "service": "neat-insight", "time": "2026-08-17T20:15:00Z", "network": {"browser_ice_address": "54.12.34.56", "browser_ice_address_source": "browser-ice-address", "public_origin": "https://insight.example.com/"}}
               }
             }
           }
@@ -190,7 +198,7 @@
       "get": {
         "tags": ["Media library"],
         "summary": "List media files as a folder tree",
-        "description": "Returns the complete visible media-library hierarchy using relative paths that can be passed directly to inspection, assignment, preview, and deletion APIs. Hidden entries and macOS archive metadata are omitted so the result matches what users see in Insight.",
+        "description": "Returns the complete visible media-library hierarchy using relative paths that can be passed directly to inspection, assignment, preview, and deletion APIs. Hidden entries and macOS archive metadata are omitted so the result matches what users see in Insight. File nodes carry `streamable`, folder nodes carry `streamable_count`, so clients hide unsupported files with the server's rule.",
         "operationId": "listMediaFiles",
         "responses": {
           "200": {
@@ -365,7 +373,7 @@
       "post": {
         "tags": ["Media library"],
         "summary": "Delete a media file or directory",
-        "description": "Permanently deletes a file or directory beneath the media root. If the deleted path is assigned to a media-source slot, Insight clears that assignment to avoid leaving stale playback state. Prefer stopping active sources first, and always obtain the relative path from the media tree rather than sending an absolute host path.",
+        "description": "Permanently deletes a file or directory beneath the media root. If a deleted file (or any file inside a deleted directory) is assigned to a media-source slot, Insight stops that slot and clears the assignment, and it discards any cached FPS renditions built from the deleted files. Prefer stopping active sources first, and always obtain the relative path from the media tree rather than sending an absolute host path.",
         "operationId": "deleteMedia",
         "requestBody": {
           "required": true,
@@ -478,7 +486,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign or clear one source slot",
-        "description": "Assigns a media-library path to one one-based source slot. Send an empty `file` value to clear the slot. Insight probes the media, normalizes the requested transport to one supported by the detected codec, persists the assignment, and automatically restarts the source when it was already playing. Obtain valid paths from `/api/mediasrc/videos`.\n\nAssigning a file to a webcam slot converts it back to a file source, so Insight first asks MediaMTX to close the browser publishing to it. If MediaMTX cannot be reached the call answers `502` and leaves the slot unchanged, because converting it would erase the only record that a camera may still be publishing. A caller that already closed its own publisher may send `publisher_released: true`.",
+        "description": "Assigns a media-library path to one one-based source slot. Send an empty `file` value to clear the slot. Insight probes the media, normalizes the requested transport to one supported by the detected codec, persists the assignment, and automatically restarts the source when it was already playing. Obtain valid paths from `/api/mediasrc/videos`. Returns 409 when an external publisher holds the slot and Insight has no stream of its own on it; use `/api/mediasrc/takeover` first. Returns 409 while Insight pulls a network stream into the slot; use `/api/mediasrc/stop` first.\n\nAssigning a file to a webcam slot converts it back to a file source, so Insight first asks MediaMTX to close the browser publishing to it. If MediaMTX cannot be reached the call answers `502` and leaves the slot unchanged, because converting it would erase the only record that a camera may still be publishing. A caller that already closed its own publisher may send `publisher_released: true`.",
         "operationId": "assignMediaSource",
         "x-codeSamples": [
           {
@@ -500,7 +508,7 @@
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "409": {"$ref": "#/components/responses/WebcamStopSuperseded"},
+          "409": {"description": "Nothing was changed: an external publisher holds the slot and Insight has no stream of its own on it (use `/api/mediasrc/takeover` first); or, for a webcam slot, the released session no longer publishes to it or the slot changed kind while this request was waiting on MediaMTX (reload the source list and retry).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "500": {"$ref": "#/components/responses/InternalError"},
           "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
@@ -554,7 +562,7 @@
           },
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "409": {"$ref": "#/components/responses/WebcamStopSuperseded"},
+          "409": {"description": "Nothing was changed: an external publisher holds the slot and Insight has no stream of its own on it (use `/api/mediasrc/takeover` first); or Insight is pulling a network stream into the slot (use `/api/mediasrc/stop` first); or, for a webcam slot, the released session no longer publishes to it or the slot changed kind while this request was waiting on MediaMTX (reload the source list and retry).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "500": {"$ref": "#/components/responses/InternalError"},
           "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
@@ -564,13 +572,13 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign available videos to source slots",
-        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin.\n\nWebcam slots are published by a browser, so Insight asks MediaMTX to close those sessions before rewriting the slot. A slot whose publisher could not be confirmed closed keeps its webcam marking and playing state, is left unassigned, and is listed in `unconfirmed_webcams`; the remaining slots are assigned as usual. A slot another caller reassigned while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that already closed its own publishers may name them in `released_webcams` as `{index, session}` objects; a bare index is not a claim and that slot is released the normal way.",
+        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. A slot whose file changes loses its `fps` override, exactly as with a manual assign. Call the bulk-start endpoint afterward when playback should begin. Slots held by an external publisher are skipped and listed in `skipped_external`. Slots Insight is pulling a network stream into are skipped too and listed in `skipped_pulled`.\n\nWebcam slots are published by a browser, so Insight asks MediaMTX to close those sessions before rewriting the slot. A slot whose publisher could not be confirmed closed keeps its webcam marking and playing state, is left unassigned, and is listed in `unconfirmed_webcams`; the remaining slots are assigned as usual. A slot another caller reassigned while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that already closed its own publishers may name them in `released_webcams` as `{index, session}` objects; a bare index is not a claim and that slot is released the normal way.",
         "operationId": "autoAssignMediaSources",
         "requestBody": {"$ref": "#/components/requestBodies/ReleasedWebcams"},
         "responses": {
           "200": {
             "description": "Assignment counts and success message.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "properties": {"skipped_external": {"type": "array", "description": "Slots left untouched because an external publisher holds them.", "items": {"type": "integer"}}, "skipped_pulled": {"type": "array", "description": "Slots left untouched because Insight is pulling a network stream into them.", "items": {"type": "integer"}}}}}}
           }
         }
       }
@@ -579,7 +587,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Start one source",
-        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources.\n\nA webcam slot is published by the browser rather than by Insight, so for those slots this endpoint only confirms the stream: it returns `409` until MediaMTX reports the WHIP stream as publishing.",
+        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources. Returns 409 when an external publisher holds the slot and Insight has no stream of its own on it; use `/api/mediasrc/takeover` first. Returns 409 while Insight pulls a network stream into the slot; use `/api/mediasrc/stop` first. When the slot has an `fps` that differs from the media's native frame rate, the matching rendition is created (synchronously, without progress output) or reused before the stream starts; use `/api/mediasrc/prepare` first to observe progress. Because that preparation can take minutes, the slot is re-read afterwards; if another request stopped, reassigned, reset or unassigned it meanwhile, or an external publisher took the slot, the start is abandoned with 409 and nothing is persisted. A start for a slot that a concurrent start already launched succeeds without changing anything.\n\nA webcam slot is published by the browser rather than by Insight, so for those slots this endpoint only confirms the stream: it returns `409` until MediaMTX reports the WHIP stream as publishing.",
         "operationId": "startMediaSource",
         "x-codeSamples": [
           {
@@ -606,10 +614,100 @@
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "409": {"$ref": "#/components/responses/WebcamNotPublishing"},
+          "409": {"description": "Either the webcam slot exists but the browser is not publishing to it yet (retry), or an external publisher holds the slot and Insight has no stream of its own on it (use `/api/mediasrc/takeover` first).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "410": {"$ref": "#/components/responses/SourceChangedWhileStarting"},
           "500": {"$ref": "#/components/responses/InternalError"},
           "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
+        }
+      }
+    },
+    "/api/mediasrc/prepare": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Prepare the FPS rendition for one source",
+        "description": "Creates or reuses the constant-frame-rate rendition that `/api/mediasrc/start` will stream when the slot's `fps` differs from the media's native frame rate. Streams plain-text progress: `Encoding <file> at <fps> fps (<encoder>)...`, `progress <seconds>/<total>` lines, then one of `Rendition ready: <path>`, `Reusing rendition: <path>`, `Source frame rate matches; no rendition needed.` or `Error: <message>`. Renditions are keyed by source content hash, fps, codec and profile, so replacing a source file never reuses an old rendition, while byte-identical files share one rendition that survives until the last of them is deleted or replaced. `/api/mediasrc/start` performs the same preparation without progress output when it is skipped. Returns 409 while Insight pulls a network stream into the slot; use `/api/mediasrc/stop` first.",
+        "operationId": "prepareMediaSourceRendition",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -N -H \"Content-Type: application/json\" -d '{\"index\":1}' https://<INSIGHT_HOST>:9900/api/mediasrc/prepare"
+          }
+        ],
+        "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/ProgressStream"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"}
+        }
+      }
+    },
+    "/api/mediasrc/renditions": {
+      "get": {
+        "tags": ["Media sources"],
+        "summary": "Get cached FPS rendition disk usage",
+        "description": "Returns how many FPS renditions are currently stored under `.renditions/` in the media directory and how many bytes they occupy. Rendition records whose file is missing are pruned before counting.",
+        "operationId": "getMediaSourceRenditions",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k https://<INSIGHT_HOST>:9900/api/mediasrc/renditions"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Count and total size of stored renditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": {"type": "integer"},
+                    "bytes": {"type": "integer"}
+                  },
+                  "required": ["count", "bytes"]
+                },
+                "example": {"count": 3, "bytes": 15728640}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mediasrc/renditions/clear": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Delete cached FPS renditions",
+        "description": "Deletes every stored FPS rendition file and record, except a rendition that a currently playing source is streaming. Renditions are re-created on the next start that needs them.",
+        "operationId": "clearMediaSourceRenditions",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -X POST https://<INSIGHT_HOST>:9900/api/mediasrc/renditions/clear"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed and kept renditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "removed": {"type": "integer"},
+                    "freed_bytes": {"type": "integer"},
+                    "kept": {"type": "array", "items": {"type": "string"}}
+                  },
+                  "required": ["removed", "freed_bytes", "kept"]
+                },
+                "example": {"removed": 2, "freed_bytes": 10485760, "kept": [".renditions/demo_3a9fc20b7e41c9d2_15fps_h264.mp4"]}
+              }
+            }
+          },
+          "500": {"$ref": "#/components/responses/InternalError"}
         }
       }
     },
@@ -630,7 +728,7 @@
         },
         "responses": {
           "200": {
-            "description": "Start results including started, already-running, and failed source indexes.",
+            "description": "Start results including started, already-running, and failed source indexes. Returned as well when every assigned slot is held by an external publisher: `started` is then empty and `skipped_external` lists those slots.",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BulkStartResult"}}}
           },
           "400": {"$ref": "#/components/responses/BadRequest"}
@@ -641,15 +739,15 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop one source",
-        "description": "Stops the process backing one source slot and persists its state as `stopped` without clearing the assigned file. The same slot can subsequently be started again without reassignment.\n\nA webcam slot is published by a browser rather than by Insight, so stopping one asks MediaMTX to close that session. If MediaMTX cannot be reached the call answers `502` rather than reporting a stop it cannot verify. A caller that has already closed its own publisher may send `publisher_released: true` with the `publisher_session` it closed; Insight then verifies that session still holds the slot rather than kicking anything (a different session answers `409`, an unreachable MediaMTX `502`, changing nothing either way).",
+        "description": "Stops the process backing one source slot and persists its state as `stopped` without clearing the assigned file. The same slot can subsequently be started again without reassignment. Returns 409 when an external publisher holds the slot and Insight has no stream of its own on it; use `/api/mediasrc/takeover` first. Stopping a pulled slot releases the pull and restores the stored file assignment.\n\nA webcam slot is published by a browser rather than by Insight, so stopping one asks MediaMTX to close that session. If MediaMTX cannot be reached the call answers `502` rather than reporting a stop it cannot verify. A caller that has already closed its own publisher may send `publisher_released: true` with the `publisher_session` it closed; Insight then verifies that session still holds the slot rather than kicking anything (a different session answers `409`, an unreachable MediaMTX `502`, changing nothing either way).",
         "operationId": "stopMediaSource",
         "requestBody": {"$ref": "#/components/requestBodies/WebcamStop"},
         "responses": {
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "409": {"$ref": "#/components/responses/WebcamStopSuperseded"},
-          "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
+          "409": {"description": "Nothing was changed: an external publisher holds the slot and Insight has no stream of its own on it (use `/api/mediasrc/takeover` first); or, for a webcam slot, the released session no longer publishes to it or the slot changed kind while this request was waiting on MediaMTX (reload the source list and retry).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "502": {"description": "Nothing was changed: MediaMTX could not be reached to verify a webcam slot's publisher, or could not be told to stop pulling into the slot (the slot stays `pulled` so Stop can be retried).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
     },
@@ -657,13 +755,13 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop every source",
-        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.\n\nWebcam slots are published by a browser rather than by Insight, so stopping one asks MediaMTX to close the session. Any slot whose publisher could not be confirmed closed is listed in `unconfirmed_webcams`; the other sources still stop. A slot reassigned by another caller while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that has already closed its own publishers may name them in `released_webcams` as `{index, session}` objects; a bare index is not a claim and that slot is stopped the normal way. A named session is honoured only if it still holds the slot, so a claim MediaMTX cannot confirm is still listed in `unconfirmed_webcams`.",
+        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing. The external stream on a slot held by an external publisher is left running and the slot is listed in `skipped_external`. A network stream Insight pulls into a slot is stopped like a file source: the slot returns to its previous file assignment and is listed in `stopped_pulled`, and counts toward `stopped_count`. A pull still being set up, or one MediaMTX did not confirm cleared, keeps running and is listed in `skipped_pulled`; stop it again later.\n\nWebcam slots are published by a browser rather than by Insight, so stopping one asks MediaMTX to close the session. Any slot whose publisher could not be confirmed closed is listed in `unconfirmed_webcams`; the other sources still stop. A slot reassigned by another caller while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that has already closed its own publishers may name them in `released_webcams` as `{index, session}` objects; a bare index is not a claim and that slot is stopped the normal way. A named session is honoured only if it still holds the slot, so a claim MediaMTX cannot confirm is still listed in `unconfirmed_webcams`.",
         "operationId": "stopAllMediaSources",
         "requestBody": {"$ref": "#/components/requestBodies/ReleasedWebcams"},
         "responses": {
           "200": {
             "description": "Number of sources that were previously playing.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}, "example": {"success": true, "stopped_count": 4, "unconfirmed_webcams": [], "changed_sources": [], "message": "Stopped 4 source(s)."}}}
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "properties": {"skipped_external": {"type": "array", "description": "Slots left untouched because an external publisher holds them.", "items": {"type": "integer"}}, "skipped_pulled": {"type": "array", "description": "Pulled slots whose pull could not be stopped now: still being set up, or MediaMTX did not confirm the clear.", "items": {"type": "integer"}}, "stopped_pulled": {"type": "array", "description": "Slots whose network-stream pull was stopped.", "items": {"type": "integer"}}}}, "example": {"success": true, "stopped_count": 4, "skipped_external": [2], "skipped_pulled": [], "stopped_pulled": [3], "unconfirmed_webcams": [], "changed_sources": [], "message": "Stopped 4 source(s). External stream(s) left running: src2."}}}
           }
         }
       }
@@ -672,14 +770,49 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Reset all source assignments",
-        "description": "Returns source management to its initial state by stopping every source and rewriting the persisted slot configuration with empty assignments. This is destructive configuration cleanup; use `stop-all` instead when assignments should be retained.\n\nWebcam slots are published by a browser, so Insight asks MediaMTX to close those sessions. A slot whose publisher could not be confirmed closed keeps its webcam marking and is listed in `unconfirmed_webcams`, so a later stop can still identify it and retry — clearing it would lose the only record that a camera may still be live. A slot another caller reassigned while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that already closed its own publishers may name them in `released_webcams` as `{index, session}` objects; a bare index is not a claim and that slot is released the normal way.",
+        "description": "Returns source management to its initial state by stopping every source and rewriting the persisted slot configuration with empty assignments. This is destructive configuration cleanup; use `stop-all` instead when assignments should be retained. The stored record of every slot is cleared, including a slot held by an external publisher; that external stream is left running and its slot is listed in `skipped_external`. A network stream Insight pulls into a slot is stopped like a file source and the slot is listed in `stopped_pulled`. A pull still being set up, or one MediaMTX did not confirm cleared, keeps running and is listed in `skipped_pulled`; stop it again later. Its stored record is cleared either way.\n\nWebcam slots are published by a browser, so Insight asks MediaMTX to close those sessions. A slot whose publisher could not be confirmed closed keeps its webcam marking and is listed in `unconfirmed_webcams`, so a later stop can still identify it and retry — clearing it would lose the only record that a camera may still be live. A slot another caller reassigned while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that already closed its own publishers may name them in `released_webcams` as `{index, session}` objects; a bare index is not a claim and that slot is released the normal way.",
         "operationId": "resetMediaSources",
         "requestBody": {"$ref": "#/components/requestBodies/ReleasedWebcams"},
         "responses": {
           "200": {
             "description": "Every source was stopped and default empty assignments were written.",
-            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SuccessMessage"}}}
+            "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessMessage"}, {"type": "object", "properties": {"skipped_external": {"type": "array", "description": "Slots left untouched because an external publisher holds them.", "items": {"type": "integer"}}, "skipped_pulled": {"type": "array", "description": "Pulled slots whose pull could not be stopped now: still being set up, or MediaMTX did not confirm the clear.", "items": {"type": "integer"}}, "stopped_pulled": {"type": "array", "description": "Slots whose network-stream pull was stopped.", "items": {"type": "integer"}}}}]}}}
           }
+        }
+      }
+    },
+    "/api/mediasrc/takeover": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Disconnect the external publisher holding a slot",
+        "description": "Kicks the non-Insight publisher currently holding one source slot through the mediamtx control API. Readers of that stream are disconnected too. Afterwards the slot reports its persisted state again and can be assigned and started. Idempotent when the publisher already left. Returns 409 while Insight pulls a network stream into the slot; use `/api/mediasrc/stop` first.",
+        "operationId": "takeoverMediaSource",
+        "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
+        "responses": {
+          "200": {"description": "Publisher disconnected.", "content": {"application/json": {"schema": {"type": "object", "required": ["success", "index"], "properties": {"success": {"type": "boolean"}, "index": {"type": "integer"}}}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "502": {"description": "The mediamtx control API is unreachable or refused the kick.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/api/mediasrc/pull": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Pull an existing RTSP stream into a slot",
+        "description": "Points the slot's mediamtx path at a stream that already exists on the network (an IP camera, another server) so applications read it at `rtsp://…/srcN`. The packets are forwarded unchanged. Only `rtsp://` and `rtsps://` URLs are accepted; credentials go in `username`/`password` or in the URL and never appear in any response. Insight checks the camera once before configuring the pull: rejected credentials answer 400 with `reason: \"auth_failed\"` and nothing is configured; an unreachable camera still configures the pull (status `unreachable`) and the slot recovers by itself. The pull is session-only and needs the loopback mediamtx control API.",
+        "operationId": "pullMediaSource",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PullRequest"}}}
+        },
+        "responses": {
+          "200": {"description": "The slot, now `pulled`.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MediaSource"}}}},
+          "400": {"description": "Invalid index or URL, or the camera rejected the credentials (`reason: \"auth_failed\"`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "The slot is streaming, held by an external publisher, a webcam source (clear it first), or already pulling.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "502": {"description": "mediamtx refused the path configuration or could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
     },
@@ -712,6 +845,24 @@
           "409": {"$ref": "#/components/responses/Conflict"},
           "500": {"$ref": "#/components/responses/InternalError"},
           "504": {"$ref": "#/components/responses/GatewayTimeout"}
+        }
+      }
+    },
+    "/stream/preview/src{index}.mjpg": {
+      "get": {
+        "tags": ["Media sources"],
+        "summary": "MJPEG preview of a live slot",
+        "description": "Multipart MJPEG rendering of whatever is currently published on one slot, external or Insight-owned, scaled to at most 640 px wide and following the source frame rate. The ffmpeg reader runs only while the HTTP connection is open. At most 4 previews run concurrently.",
+        "operationId": "previewMediaSource",
+        "parameters": [
+          {"name": "index", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "Multipart MJPEG stream.", "content": {"multipart/x-mixed-replace": {"schema": {"type": "string", "format": "binary"}}}},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "429": {"description": "Too many previews open.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "503": {"description": "ffmpeg is not installed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
     },
@@ -761,8 +912,496 @@
         "responses": {
           "200": {"description": "Running service status and launch metadata.", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
           "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
           "500": {"$ref": "#/components/responses/InternalError"},
           "502": {"$ref": "#/components/responses/BadGateway"}
+        }
+      }
+    },
+    "/api/genai/settings": {
+      "get": {
+        "tags": ["GenAI Studio"],
+        "summary": "Get the GenAI Studio board settings",
+        "description": "Returns the board address Insight relays GenAI calls to, whether it was configured or derived (`127.0.0.1` on a board, otherwise the paired DevKit's `DEVKIT_SYNC_DEVKIT_IP`).",
+        "operationId": "getGenaiSettings",
+        "responses": {
+          "200": {"description": "Board address in use and stored settings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}, "example": {"url": "https://192.168.2.3:5000", "configuredUrl": null, "defaultUrl": "https://192.168.2.3:5000"}}}},
+          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+        }
+      },
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Set the GenAI Studio board settings",
+        "description": "Sets or clears the board address. An empty string clears it; an omitted field is unchanged. The address must be `http(s)://host[:port]` with no path. Settings persist in Insight's `cfg.json`.",
+        "operationId": "setGenaiSettings",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettingsUpdate"}, "example": {"url": "https://192.168.2.3:5000"}}}},
+        "responses": {
+          "200": {"description": "Settings after the update.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "500": {"description": "Insight's `cfg.json` could not be read (`cfg-unreadable`; nothing is changed) or written (`cfg-unwritable`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+        }
+      }
+    },
+    "/api/genai/{subpath}": {
+      "parameters": [{"name": "subpath", "in": "path", "required": true, "description": "A GenAI Studio API path: `health`, `voices`, or one under `v1/`, `audio/`, `models/`, `benchmark/`, `tts/`, `piperplus/`, `supertonic/`, `voices/`, `rag/`, `board-camera/`. `shutdown` and every other path are refused.", "schema": {"type": "string"}, "example": "v1/chat/completions"}],
+      "get": {
+        "tags": ["GenAI Studio"],
+        "summary": "Relay a GET to the board's GenAI Studio backend",
+        "description": "Forwards the request, with its query string, to the configured board and streams the response back unchanged: status, body, content type and the Studio's `X-*` headers. Server-sent event streams such as `models/logs/stream` pass through unbuffered, and binary answers such as the JPEG from `board-camera/snapshot?device=/dev/videoN` byte for byte. The board's self-signed certificate is accepted for the configured address only.",
+        "operationId": "relayGenaiGet",
+        "responses": {
+          "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
+          "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+        }
+      },
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Relay a POST to the board's GenAI Studio backend",
+        "description": "Forwards the request body as sent (JSON or multipart audio uploads) to the configured board and streams the response back, so streamed chat replies arrive token by token.",
+        "operationId": "relayGenaiPost",
+        "requestBody": {"required": false, "content": {"*/*": {"schema": {}}}},
+        "responses": {
+          "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
+          "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+        }
+      }
+    },
+    "/api/genai-setup": {
+      "get": {
+        "tags": ["GenAI Studio"],
+        "summary": "Get GenAI Studio's setup state on the selected board",
+        "description": "Reads, on the board Insight is connected to, whether GenAI Studio is installed (`~/prebuilt-apps/examples/genai/neat-genai-studio`), prepared (`setup.sh` has run) and running, and the progress of a setup job started with `POST /api/genai-setup/run`. A failed step carries the cause, the fixes and the command to run by hand; a running step with no new output for a while carries a `stall` note.",
+        "operationId": "getGenaiSetup",
+        "responses": {
+          "200": {"description": "Each setup step's state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/genai-setup/run": {
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Install, prepare and start GenAI Studio on the selected board",
+        "description": "Starts one detached job on the board running every step that is not done yet, in order: `NEAT_APPS_SKIP_DEPENDENCIES=1 NEAT_APPS_OVERWRITE=1 sima-cli neat install apps` in the home directory (the running Insight is never reinstalled; a develop Insight installs `apps@develop`, and a GenAI Studio from another channel or built for an older Neat Library line is replaced, its files kept in `~/.prebuilt-apps-backup`), `setup.sh` without a terminal (default voice languages), then `run.sh`, which keeps running. The job outlives the request, the SSH session and Insight; its logs are in `~/.neat-insight/genai-setup/` on the board. Refuses while a step runs or GenAI Studio is still starting (`setup_running`), when everything is done (`setup_done`), or when a step's prerequisite is missing (`setup_blocked`, with the step and the fix). `{\"redo\": \"prepare\"}` runs `setup.sh` again and restarts GenAI Studio, for example after fixing what it warned about; GenAI Studio is stopped first. A GenAI Studio still running while an earlier step failed or was stopped is also stopped first, and started again after that step.",
+        "operationId": "runGenaiSetup",
+        "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"redo": {"type": "string", "enum": ["prepare"], "description": "Run this step again, and the ones after it, even though it is done."}}}, "example": {"redo": "prepare"}}}},
+        "responses": {
+          "200": {"description": "The job started; each step's state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/genai-setup/stop": {
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Stop the GenAI Studio setup job",
+        "description": "Ends the running setup step and the steps queued after it; the step is reported as failed with the message that it was stopped. During the start step this stops GenAI Studio with `run.sh stop`, and the start step waits to be run again. Does nothing when no job runs.",
+        "operationId": "stopGenaiSetup",
+        "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
+        "responses": {
+          "200": {"description": "Each setup step's state after stopping.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/genai-setup/stop-studio": {
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Stop GenAI Studio on the board",
+        "description": "Stops GenAI Studio with `run.sh stop`, whether the setup job or a shell on the board started it, and waits until it has ended. The start step then waits to be run again. Refused with `setup_running` while a setup step is in progress; does nothing when GenAI Studio is not running.",
+        "operationId": "stopGenaiStudio",
+        "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
+        "responses": {
+          "200": {"description": "Each setup step's state after stopping.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSetupStatus"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/board": {
+      "get": {
+        "tags": ["Board"],
+        "summary": "Get the selected board",
+        "description": "Returns the board target, where it came from (`manual`, `on-board`, or `sdk-env`), the available defaults, and the last connection status. This call never connects to the board; use `POST /api/board/test` for a live check. `generation` changes whenever the target changes, so clients can discard data collected from a previous board.",
+        "operationId": "getBoard",
+        "responses": {
+          "200": {"description": "Selected board and last known status.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}
+        }
+      }
+    },
+    "/api/board/select": {
+      "post": {
+        "tags": ["Board"],
+        "summary": "Select a board or restore the default",
+        "description": "Saves `{host, port, user}` as the manually selected board, or clears the saved selection when the body is `{\"reset\": true}` so the on-board or SDK default applies again. The selection holds no credentials.",
+        "operationId": "selectBoard",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardSelectRequest"}, "examples": {"manual": {"value": {"host": "192.168.2.2", "port": 22, "user": "sima"}}, "reset": {"value": {"reset": true}}}}}},
+        "responses": {
+          "200": {"description": "Updated board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/board/test": {
+      "post": {
+        "tags": ["Board"],
+        "summary": "Connect to the selected board",
+        "description": "Connects to the selected board and reads its host name, machine type, and build version. A changed SSH host key returns `409` with `host_key_changed`, both fingerprints, and a hint; trust the new key with `POST /api/board/trust-host-key` once you have confirmed the board was reflashed.",
+        "operationId": "testBoard",
+        "responses": {
+          "200": {"description": "Board state with `status.state` set to `connected`.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/board/trust-host-key": {
+      "post": {
+        "tags": ["Board"],
+        "summary": "Trust a reflashed board's new host key",
+        "description": "Replaces Insight's stored SSH host key for the selected board with the key it presented during the last failed connection. The fingerprint must match `presented_fingerprint` from that `host_key_changed` error.",
+        "operationId": "trustBoardHostKey",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TrustHostKeyRequest"}}}},
+        "responses": {
+          "200": {"description": "Updated board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Get the last peripheral scan",
+        "description": "Returns the snapshot from the last `POST /api/peripherals/refresh` of the selected board. Before the first scan, or after the selected board changes, `scanned_at` is `null` and `items` is empty. This call never connects to the board.",
+        "operationId": "getPeripherals",
+        "responses": {
+          "200": {"description": "Last peripheral snapshot, or an empty one.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/refresh": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Scan the selected board for cameras and microphones",
+        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan; Sentinel answers with the catalog of a scan that started after the request (it returns `504` after 10 s and `429` when 8 refreshes already wait). Over SSH the socket is reached with a stdlib `python3` helper. Each mode's `support` comes from Sentinel's catalog alone (see `SupportTier`). Microphones are Sentinel's ALSA capture devices, read from `/proc/asound` and sysfs without opening a sound device; their `availability` is Sentinel's own, passed through. A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists devices added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, discovery disabled, too old, malformed answer) return `503` or `502` with an install or update hint.",
+        "operationId": "refreshPeripherals",
+        "responses": {
+          "200": {"description": "New peripheral snapshot.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "503": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/preview": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Get the running camera preview",
+        "description": "Returns the preview session for the selected board, or `null`. Never contacts the board. A session belongs to one board generation; selecting another board invalidates it.",
+        "operationId": "getCameraPreview",
+        "responses": {
+          "200": {"description": "The current preview session, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"oneOf": [{"$ref": "#/components/schemas/PreviewSession"}, {"type": "null"}]}}}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/cameras/preview": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Start a camera preview",
+        "description": "Starts an explicit, temporary capture: over the board connection Insight runs a GStreamer pipeline (`gst-launch-1.0`; `libcamerasrc` for a MIPI camera, `v4l2src` on the camera's `/dev/v4l/by-id` path for a USB camera, or on its `/dev/videoN` node once a SiMa Sentinel rescan still reports the scanned camera there) that scales the mode to at most 640 pixels wide at up to 15 fps and writes JPEG frames to its stdout. Insight answers once the first frame arrived (within 10 s, or two frame periods for a mode slower than 0.2 fps, at most 60 s) and relays the frames at `stream_url`. Discovery never starts capture; only this call does. The mode defaults to the camera's `default_selection` and must be one the last scan listed: for a MIPI camera an `available` or `unverified` mode in NV12, for a USB camera any listed mode in MJPG or a raw format (YUYV, UYVY, YVYU, NV12, NV21, YU12, YV12, GREY, RGB3, BGR3). The rate is the scan's exact fraction (`framerate_num`/`framerate_den`). A camera listed from SiMa Sentinel's last successful scan, because its provider failed during the refresh (`modes_source: previous-scan`), is refused with 503 `peripheral_unavailable`: its device may have changed since. A USB camera without a `/dev/v4l/by-id` link whose `/dev/videoN` node Sentinel no longer reports for the scanned camera (same id, vendor, product and serial), because it was replugged or replaced, is refused with 409 `stale_snapshot`. Insight refuses a camera the scan or a check just before the start finds in use, or one the pipeline cannot acquire (409 `camera_in_use`); a board without `gst-launch-1.0`, or without a GStreamer element the pipeline needs (named in `tool`), returns 502 `tool_missing` with the packages to install; a pipeline that fails or sends no frame returns 502 `command_failed` with its output in `detail`. While a preview runs the camera cannot be opened by an application. Capture stops on `stop`, when its stream response ends, when nobody opens the stream within 15 s, when a refresh starts, or when the selected board changes.",
+        "operationId": "startCameraPreview",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "format": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "number"}}}, "example": {"id": "camera:imx477 5-001a"}}}},
+        "responses": {
+          "200": {"description": "The preview session.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"$ref": "#/components/schemas/PreviewSession"}}}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "503": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/cameras/preview/{session_id}/stream": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Stream a camera preview",
+        "description": "Relays the preview's JPEG frames as a long-lived `multipart/x-mixed-replace; boundary=frame` response, one `image/jpeg` part with a `Content-Length` per frame, for an `<img>` element. Insight checks the board's framing and refuses a frame over 4 MiB. One viewer per session: a second request returns 409 `preview_active`. When the response ends (the viewer disconnects, or the board sends nothing for 10 s, or for two frame periods for a mode slower than 0.2 fps, at most 60 s) the preview stops on the board. An unknown or superseded session id returns 404.",
+        "operationId": "streamCameraPreview",
+        "parameters": [{"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Long-lived multipart JPEG stream.", "content": {"multipart/x-mixed-replace": {"schema": {"type": "string", "format": "binary"}}}},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/cameras/preview/{session_id}/stop": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Stop a camera preview",
+        "description": "Closes the stream and stops the pipeline on the board by its process id (TERM, then KILL after 2 s), which releases the camera. Returns the stopped session, or `null` when that session already ended, so a repeated stop succeeds; an older session id never stops a newer session. The stream is closed first, so a pipeline whose kill command fails still ends at its next write; the session is kept for a retry only when the stream's own cleanup has not already released it.",
+        "operationId": "stopCameraPreview",
+        "parameters": [{"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "The stopped session, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"oneOf": [{"$ref": "#/components/schemas/PreviewSession"}, {"type": "null"}]}}}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/microphones/test": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Start a microphone test",
+        "description": "Starts recording from a scanned microphone on the board and returns `202` at once. It records until `POST .../test/stop` or for `seconds` (at most 30); poll `GET` for the live level and the result. Insight first re-reads SiMa Sentinel's catalog: when that microphone's capture target or identity changed since the scan (a replug, or a restarted Sentinel routing the id elsewhere), it returns `409 stale_snapshot` without recording; other catalog changes, such as a previewing camera's rate, do not count; it also refuses a microphone whose provider data is from an earlier scan (`409 stale_snapshot`), and one without a safe Sentinel selector (`502 peripheral_response`). Sentinel's availability is not used to refuse: Insight then checks the capture PCM on the board and returns `409 microphone_in_use`, naming the holding process where it can see it, only when a substream is open now. The board runs `arecord` on Sentinel's `plughw:CARD=<id>,DEV=<n>` selector, converted to 16-bit PCM at 48 kHz when the device offers it (else its nearest rate below, never above 48 kHz) and at most two channels. Only one test records at a time (`409 test_running`). Returns `409 stale_snapshot` when the selected board changed since the scan. A busy device, a board without `arecord`, or a failed recording ends the test with `state: failed` and the error.",
+        "operationId": "startMicrophoneTest",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MicrophoneTestRequest"}, "example": {"id": "microphone:alsa:3ff3d77bf791d455"}}}},
+        "responses": {
+          "202": {"description": "Recording started.", "content": {"application/json": {"schema": {"type": "object", "properties": {"test": {"$ref": "#/components/schemas/MicrophoneTest"}}}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "503": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      },
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Read the microphone test",
+        "description": "The latest microphone test on the selected board: while it records, its elapsed time and the level of the audio just received, for a live meter; once finished, its level and `audio_url`, or its error. `null` before any test, and once a scan lists another device under the microphone's id (a replug in the same port). Never contacts the board.",
+        "operationId": "getMicrophoneTest",
+        "responses": {
+          "200": {"description": "The test, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"test": {"oneOf": [{"$ref": "#/components/schemas/MicrophoneTest"}, {"type": "null"}]}}}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/microphones/test/stop": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Stop the microphone test's recording",
+        "description": "Ends the test named by `token` on the selected board at once; a token that is not the current test's (a late Stop for an earlier test) stops nothing and returns null. It ends the recording even when `arecord` has stopped producing audio; what was recorded becomes the result, read through `GET` as usual. A test stopped before 0.1 s was recorded ends with `stopped_early`. Returns the test, or null when there is none for the selected board. It never stops another application.",
+        "operationId": "stopMicrophoneTest",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["token"], "properties": {"token": {"type": "string", "description": "The token the start returned."}}}, "example": {"token": "35ed6b2dff5643bf8a13e65017dd11f4"}}}},
+        "responses": {
+          "200": {"description": "The test, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"test": {"oneOf": [{"$ref": "#/components/schemas/MicrophoneTest"}, {"type": "null"}]}}}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/microphones/test/{token}.wav": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Download the test recording",
+        "description": "The finished recording of the selected board as 16-bit PCM WAV. `404` once a newer test replaced it, another board was selected, or a scan lists another device under the microphone's id.",
+        "operationId": "getMicrophoneTestAudio",
+        "parameters": [{"name": "token", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "The recording.", "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}}},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Get Sentinel availability on the selected board",
+        "description": "Reports whether the `simaai-sentinel` daemon is installed, running and answering on its unix socket, together with its version and the board it belongs to. A daemon that is missing, stopped or unreadable is reported as `available: false` with `status.state` and `status.error`, not as an HTTP failure; only board-level failures (no board selected, unreachable, timeout) use an error status. The daemon state is cached briefly per board, so polling this endpoint does not run a command on the board for every call. Pass `refresh=1` for an explicit re-check that bypasses this cache.",
+        "operationId": "getSentinel",
+        "parameters": [
+          {"name": "refresh", "in": "query", "description": "Set to `1` to bypass the short-lived daemon-status cache.", "schema": {"type": "string", "enum": ["1"]}}
+        ],
+        "responses": {
+          "200": {"description": "Sentinel availability for the selected board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelState"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/install": {
+      "post": {
+        "tags": ["Sentinel"],
+        "summary": "Install Sentinel on the selected board",
+        "description": "Runs `sima-cli neat install sentinel` on the board itself (the installer has no `--ip`) with `SIMA_INSTALL_CONTEXT=1`, `SIMA_CLI_CHECK_FOR_UPDATE=0` and a temporary download directory, using passwordless sudo. An installed and healthy daemon is never reinstalled: the installer restarts the daemon and would end a trace in flight, so that case returns `409 already_installed`. Without passwordless sudo the response names the exact command to run on the board.",
+        "operationId": "installSentinel",
+        "parameters": [
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the Sentinel state that offered installation. Recommended: a request that outlives a board switch returns `409 stale_snapshot` instead of installing on the board selected now."}
+        ],
+        "responses": {
+          "200": {"description": "Sentinel installed; the new daemon state and the installer's output.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelInstallResult"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/metrics": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Get the board's current telemetry",
+        "description": "Joins Sentinel's metric definitions with its latest sample so every value carries its label, unit, group and thresholds, and ranks each value as `ok`, `warn`, `critical` or `unavailable`. A metric the board cannot measure has `value: null` and status `unavailable`; it is never reported as zero. Definitions are cached per board for a minute, while the sample is read on every call. Samples are also appended to a bounded per-board history: pass `history=<n>` to get the last `n` samples as aligned per-metric series for sparklines. The history holds one run of polling: a sample more than a minute after the last one starts it again, since the series are drawn with their points evenly spaced and nothing polls this endpoint while the Stats page is closed, and so does a restart of the daemon, which every call checks. Cached samples, definitions and history are keyed by the board's generation and fingerprint, so selecting another board starts empty.",
+        "operationId": "getSentinelMetrics",
+        "parameters": [
+          {"name": "history", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "maximum": 240, "default": 0}, "description": "Number of recent samples to return as series; `0` (the default) returns none."}
+        ],
+        "responses": {
+          "200": {"description": "Current metric values for the selected board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelMetrics"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/traces": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Get the active trace",
+        "description": "Returns Sentinel's active trace and its running summary in `sentinel`, or `trace: null` when nothing is being recorded.",
+        "operationId": "getSentinelTraces",
+        "responses": {
+          "200": {"description": "The active trace, if any.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      },
+      "post": {
+        "tags": ["Sentinel"],
+        "summary": "Start a named trace",
+        "description": "Starts recording a named trace around a workload. Only one trace can be active and names must be unique, so a second start returns `409 trace_conflict` with Sentinel's own message. The request is validated before it reaches the board: a missing or empty name, a name containing a comma, an over-long note, or tags that are not a list of non-empty strings return `400 invalid_request` without touching it.",
+        "operationId": "startSentinelTrace",
+        "parameters": [
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload the form was shown with. Recommended: a request that outlives a board switch returns `409 stale_snapshot` instead of starting a trace on the board selected now."}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceRequest"}, "example": {"name": "baseline", "note": "before optimization", "tags": ["compiler-v1"]}}}},
+        "responses": {
+          "200": {"description": "The trace Sentinel started.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/traces/stop": {
+      "post": {
+        "tags": ["Sentinel"],
+        "summary": "Stop the active trace",
+        "description": "Stops the active trace and persists it as a run, returning Sentinel's answer in `sentinel`. Returns `409 trace_conflict` when no trace is active or, when `trace_id` is sent, when the active trace is another one, and `409 stale_snapshot` without touching the board when `generation` names a board that is no longer selected. Current Sentinel versions compare `trace_id` and stop under one run-store lock; older schema-1 daemons retain their compatible check-then-stop behavior.",
+        "operationId": "stopSentinelTrace",
+        "parameters": [
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload being stopped. Recommended: a request that outlives a board switch is refused instead of stopping a trace on another board."},
+          {"name": "trace_id", "in": "query", "required": false, "schema": {"type": "string"}, "description": "The `id` of the trace being stopped, from `/api/sentinel/traces`. Recommended: a current Sentinel atomically returns `409 trace_conflict` instead of stopping a trace that replaced it on the same board. Without it, whichever trace is active is stopped."}
+        ],
+        "responses": {
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "200": {"description": "The run Sentinel saved.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/runs": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "List saved runs",
+        "description": "Returns Sentinel's recording and completed run summaries in `sentinel.runs`, newest retention first. Runs are stored on the board and survive a daemon restart.",
+        "operationId": "getSentinelRuns",
+        "responses": {
+          "200": {"description": "Run summaries held by the board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/runs/{run_id}": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Get one saved run",
+        "description": "Returns one run by unique name or stable id, with its metadata, metric definitions and raw samples, in `sentinel`. An unknown or ambiguous name returns `404 not_found` with Sentinel's message. A run whose answer exceeds the 12 MiB Insight reads from the daemon (about three hours of samples) returns `502 response_too_large` with the limit in `limit_bytes`, rather than a truncated body.",
+        "operationId": "getSentinelRun",
+        "parameters": [
+          {"name": "run_id", "in": "path", "required": true, "schema": {"type": "string"}, "description": "The run's unique name or stable id."}
+        ],
+        "responses": {
+          "200": {"description": "The saved run.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      },
+      "delete": {
+        "tags": ["Sentinel"],
+        "summary": "Delete one saved run",
+        "description": "Permanently deletes one completed run from the board and returns the deleted run's `id` and `name` in `deleted`, with Sentinel's run list afterwards in `sentinel`. Sentinel's API has no delete, so Insight resolves the name or id against the daemon's run list first and then runs `simaai-sentinel runs delete <id>` on the board with the id the daemon reported; the path value itself is never passed to the board. A run Sentinel does not list returns `404 not_found` without running anything. A run that is still recording returns `409 trace_conflict`; stop the trace first. When `generation` is sent and the selected board has changed since, `409 stale_snapshot` is returned and nothing is deleted. A CLI failure keeps its output in `detail`: `tool_missing` when `simaai-sentinel` is not on the board, `sentinel_denied` when the board user may not remove the file, and `sentinel_failed` otherwise, including when the run is still listed afterwards.",
+        "operationId": "deleteSentinelRun",
+        "parameters": [
+          {"name": "run_id", "in": "path", "required": true, "schema": {"type": "string"}, "description": "The run's unique name or stable id, as `GET /api/sentinel/runs` reports it."},
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the run list the run was chosen from. Recommended: a request that outlives a board switch is refused instead of deleting a run of the same name on another board."}
+        ],
+        "responses": {
+          "200": {"description": "The run was deleted. `deleted` names it; `sentinel.runs` is the run list after the delete.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/compare": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Compare saved runs",
+        "description": "Compares two or more runs on the same elapsed timeline and returns run metadata, per-run statistics and deltas against the first run, which is the baseline. `raw=1` adds timestamped samples and is much larger. Fewer than two runs, or more than eight, return `400 invalid_request` without touching the board; an unknown run returns `404 not_found`.",
+        "operationId": "compareSentinelRuns",
+        "parameters": [
+          {"name": "runs", "in": "query", "required": true, "schema": {"type": "string"}, "description": "Comma-separated run names or ids; the first is the baseline.", "example": "baseline,optimized"},
+          {"name": "raw", "in": "query", "required": false, "schema": {"type": "string", "enum": ["1", "true", "yes"]}, "description": "Include timestamped samples in the comparison."}
+        ],
+        "responses": {
+          "200": {"description": "The comparison Sentinel computed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
     },
@@ -794,7 +1433,7 @@
       "get": {
         "tags": ["Viewer"],
         "summary": "Build a browser-reachable vf viewer URL",
-        "description": "Constructs the vf HTTPS viewer URL on port `8081` using the current request host, selected color mode, and zero-based channel selection. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
+        "description": "Constructs the vf HTTPS viewer URL using the configured public origin when `/home/docker/.insight-config/launch-url` is present, otherwise the current request host and mapped `videoUI` port. Setting `/home/docker/.insight-config/url-routing` to `direct` disables public-origin routing while preserving launch-url for SDK launch surfaces; `proxy` (the default) keeps shared-origin routing regardless of port numbers. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
         "operationId": "getViewerUrl",
         "parameters": [
           {"name": "mode", "in": "query", "description": "Viewer color mode.", "schema": {"type": "string", "default": "light", "enum": ["light", "dark"]}},
@@ -984,14 +1623,13 @@
       "BadRequest": {"description": "Missing or invalid request data.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "WebcamNotPublishing": {"description": "The webcam slot exists but the browser is not publishing to it yet.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Conflict": {"description": "The resource's current state does not permit the requested operation, for example a slot that is not running, is held by an external publisher, or was stopped, reassigned, reset or unassigned while its FPS rendition was being prepared (start it again).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "SourceChangedWhileStarting": {"description": "The slot was reassigned while Insight was confirming a webcam publisher or starting a file, so the start was not recorded (a file stream started this way is stopped again). Unlike 409, not worth retrying: reload the source list.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "WebcamStopSuperseded": {"description": "Nothing was changed, for one of two reasons: the released session no longer publishes to this slot and a different session does; or the slot changed kind (file to webcam or back) while this request was waiting on MediaMTX. Reload the source list and retry.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "WebcamNotConfirmedStopped": {"description": "Insight could not reach MediaMTX to verify the slot's publisher, so nothing was changed. If the camera has in fact stopped, the slot updates on its own once MediaMTX is reachable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+      "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "BoardErrorResponse": {"description": "The board or a command on it could not be used. `code` identifies the failure and `hint` names the recovery step.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardError"}}}}
     },
     "schemas": {
       "Error": {
@@ -1000,6 +1638,72 @@
         "required": ["error"],
         "properties": {"error": {"type": "string", "description": "Human-readable failure reason suitable for logs and user-facing diagnostics."}},
         "example": {"error": "Missing index"}
+      },
+      "GenaiError": {
+        "type": "object",
+        "description": "Error from the GenAI relay itself (not from the board), with a machine-readable reason.",
+        "required": ["error", "reason"],
+        "properties": {"error": {"type": "string"}, "reason": {"type": "string", "enum": ["not-relayed", "not-configured", "invalid-address", "unreachable", "bad-request", "cfg-unreadable", "cfg-unwritable"]}},
+        "example": {"error": "GenAI Studio backend unreachable at https://192.168.2.3:5000: [Errno 61] Connection refused", "reason": "unreachable"}
+      },
+      "GenaiSetupStatus": {
+        "type": "object",
+        "description": "GenAI Studio's setup steps on the selected board.",
+        "required": ["board", "generation", "active", "steps", "logDir"],
+        "properties": {
+          "board": {"type": "object", "description": "The board the steps run on: its `label` and where it was selected (`source`).", "additionalProperties": true},
+          "generation": {"type": "integer", "description": "The board selection this state was read from."},
+          "active": {"type": "boolean", "description": "Whether a setup job is running on the board."},
+          "simaCli": {"type": ["string", "null"], "description": "The `sima-cli` found on the board, or null."},
+          "core": {"type": "boolean", "description": "Whether the Neat Library's Python environment (`~/pyneat`) is on the board."},
+          "installed": {"type": "boolean", "description": "Whether Neat Apps' GenAI Studio is on the board (its `run.sh`), whatever the install step's last record says."},
+          "target": {"type": "object", "description": "How Insight reaches the board the steps run on, so a client can tell whether it is the board its GenAI Studio address points at.", "properties": {"mode": {"type": ["string", "null"], "enum": ["local", "ssh", null]}, "host": {"type": ["string", "null"], "description": "The SSH host; null for the board Insight runs on."}}},
+          "logDir": {"type": "string", "description": "Where the job keeps its logs on the board."},
+          "apps": {"type": "string", "description": "The `sima-cli neat install` target the install step uses: `apps@develop` for a develop Insight, otherwise `apps`.", "example": "apps@develop"},
+          "outdated": {"type": "boolean", "description": "The installed GenAI Studio comes from another Apps channel than this Insight, or was built for an older Neat Library line than the board has. The install and prepare steps then report `pending`, and a run replaces it."},
+          "steps": {"type": "array", "items": {"$ref": "#/components/schemas/GenaiSetupStep"}}
+        }
+      },
+      "GenaiSetupStep": {
+        "type": "object",
+        "required": ["id", "title", "description", "state", "log", "problem", "stall", "warnings"],
+        "properties": {
+          "id": {"type": "string", "enum": ["install", "prepare", "start"]},
+          "title": {"type": "string"},
+          "description": {"type": "string"},
+          "state": {"type": "string", "enum": ["done", "running", "queued", "failed", "blocked", "pending"], "description": "`blocked`: a prerequisite is missing, and `problem` says which. The start step is `running` while GenAI Studio runs but does not answer yet (it loads its voices first), and `done` once it answers."},
+          "log": {"type": "string", "description": "The last lines of the step's output, without colours."},
+          "problem": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "Why a failed or blocked step can't finish."},
+          "stall": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "A running step with no new output for a while: what may be happening and what to do."},
+          "warnings": {"type": "array", "description": "What a done, running or failed step warned about (setup.sh's ⚠ lines, GenAI Studio's WARNING log lines), each listed once; known ones in plain words with the fix.", "items": {"type": "object", "required": ["message", "fix"], "properties": {"message": {"type": "string"}, "fix": {"type": ["string", "null"]}}}},
+          "notice": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "On the install step of an outdated GenAI Studio: why it is replaced and what a run does. `command` is null."}
+        }
+      },
+      "GenaiSetupProblem": {
+        "type": "object",
+        "required": ["message", "fixes"],
+        "properties": {
+          "message": {"type": "string", "description": "What went wrong, in plain words."},
+          "fixes": {"type": "array", "items": {"type": "string"}, "description": "What to do about it, in order."},
+          "command": {"type": ["string", "null"], "description": "The step's command, to run in a shell on the board instead, with the board's `sima-cli`. For install and prepare it also records the step's success (and drops the failed run's log), so the step shows done afterwards. Null for a blocked step, whose prerequisite is missing."}
+        }
+      },
+      "GenaiSettings": {
+        "type": "object",
+        "description": "Board address Insight relays GenAI calls to, and stored settings.",
+        "required": ["url", "configuredUrl", "defaultUrl"],
+        "properties": {
+          "url": {"type": "string", "description": "Address in use; empty when none is configured or derivable."},
+          "configuredUrl": {"type": ["string", "null"], "description": "Address set by the user, or null."},
+          "defaultUrl": {"type": ["string", "null"], "description": "Address used when none is configured, or null."}
+        }
+      },
+      "GenaiSettingsUpdate": {
+        "type": "object",
+        "description": "Fields to change; an empty string clears a value.",
+        "properties": {
+          "url": {"type": "string", "description": "`http(s)://host[:port]` of the board's GenAI Studio backend."}
+        }
       },
       "Success": {
         "type": "object",
@@ -1023,11 +1727,21 @@
       "Health": {
         "type": "object",
         "description": "Readiness result for the Insight Flask backend.",
-        "required": ["status", "service", "time"],
+        "required": ["status", "service", "time", "network"],
         "properties": {
           "status": {"type": "string", "const": "ok", "description": "Fixed readiness state returned when the backend can serve requests."},
           "service": {"type": "string", "const": "neat-insight", "description": "Stable service identifier for automated probes."},
-          "time": {"type": "string", "format": "date-time", "description": "Backend UTC time when the response was created."}
+          "time": {"type": "string", "format": "date-time", "description": "Backend UTC time when the response was created."},
+          "network": {
+            "type": "object",
+            "description": "Startup-scoped browser networking values applied by this Insight process.",
+            "required": ["browser_ice_address", "browser_ice_address_source", "public_origin"],
+            "properties": {
+              "browser_ice_address": {"type": ["string", "null"], "description": "Address advertised to browsers by vf and MediaMTX, or null when no override is active. The opt-in browser-ice-address file accepts IPv4; a legacy CONTAINER_HOST_IP fallback can also be IPv6."},
+              "browser_ice_address_source": {"type": "string", "enum": ["browser-ice-address", "CONTAINER_HOST_IP", "none"], "description": "Configuration source used for the effective browser ICE address."},
+              "public_origin": {"type": ["string", "null"], "format": "uri", "description": "Trusted browser-facing HTTP origin used for viewer, WHIP, and MJPEG URLs, or null for request-host and port-map behavior."}
+            }
+          }
         }
       },
       "MediaTreeNode": {
@@ -1038,6 +1752,8 @@
           "name": {"type": "string", "description": "Final filename or directory name displayed to the user."},
           "path": {"type": "string", "description": "Relative media-library path accepted by other media endpoints."},
           "type": {"type": "string", "enum": ["file", "folder"], "description": "Whether the node contains media bytes or nested nodes."},
+          "streamable": {"type": "boolean", "description": "Present on files: whether the media-source streamer accepts this file by its extension. Files with `false` are hidden from Insight's media selectors."},
+          "streamable_count": {"type": "integer", "minimum": 0, "description": "Present on folders: number of streamable files anywhere beneath the folder, used for the folder badge in the media selector."},
           "children": {"type": "array", "description": "Recursive children for a folder; omitted for files.", "items": {"$ref": "#/components/schemas/MediaTreeNode"}}
         }
       },
@@ -1133,7 +1849,12 @@
               "transport": {"type": "string", "enum": ["rtsp", "http"], "description": "Requested transport. Insight normalizes this to one supported by the detected codec."},
               "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg"], "description": "Compatibility hint; the detected source codec takes precedence."},
           "publisher_released": {"type": "boolean", "default": false, "description": "When assigning a file over a webcam slot: true if the caller has already closed its own publisher. Requires `publisher_session` and is verified the same way as for `/api/mediasrc/stop`."},
-          "publisher_session": {"type": "string", "description": "The WHIP session id the caller closed — the `Id` response header from the WHIP POST. Required with `publisher_released`."}
+          "publisher_session": {"type": "string", "description": "The WHIP session id the caller closed — the `Id` response header from the WHIP POST. Required with `publisher_released`."},
+              "fps": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "description": "Output frame rate for the slot, any whole number from 1; a rate no codec level covers for the source's resolution is refused when the slot starts or is prepared. Omit to keep the current value; send null to stream at the source frame rate. Changing `file` without `fps` resets it to null."
+              }
             }
           }
         ]
@@ -1141,13 +1862,13 @@
       "MediaSource": {
         "type": "object",
         "description": "Persisted configuration and current runtime state for one streaming source slot.",
-        "required": ["index", "file", "state", "transport", "codec", "type", "allowed_transports", "urls"],
+        "required": ["index", "file", "state", "transport", "codec", "type", "allowed_transports", "urls", "readers"],
         "properties": {
           "index": {"type": "integer", "minimum": 1, "description": "One-based source slot index."},
           "file": {"type": "string", "description": "Assigned relative media-library path, or an empty string for an unassigned slot."},
-          "state": {"type": "string", "enum": ["playing", "stopped"], "description": "Persisted playback state; `playing` indicates a source process should be active."},
+          "state": {"type": "string", "enum": ["playing", "stopped", "external", "pulled"], "description": "Persisted playback state, or `external` when a publisher other than Insight currently holds the slot's RTSP path, or `pulled` when Insight pulls a network stream into the slot (session-only, never persisted). `external` is derived at request time and never persisted."},
           "transport": {"type": "string", "enum": ["rtsp", "http", ""], "description": "Selected output transport, or empty when the slot is unassigned."},
-          "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg", "unknown"], "description": "Codec detected from the assigned media."},
+          "codec": {"type": "string", "description": "Codec detected from the assigned media, or the codec on the wire while the slot is external (any mediamtx track name lower-cased, e.g. `vp8`), or the codec on the wire while the slot is pulled (`none` until the stream is live)."},
           "type": {"type": "string", "enum": ["file", "webcam"], "description": "Source kind. A `file` slot streams an assigned media-library path; a `webcam` slot is published into MediaMTX by a browser over WHIP and has no file."},
           "allowed_transports": {"type": "array", "description": "Transports compatible with the detected codec and current backend capabilities.", "items": {"type": "string", "enum": ["rtsp", "http"]}},
           "urls": {
@@ -1155,16 +1876,84 @@
             "description": "Client URLs for the selected source and transports.",
             "properties": {
               "rtsp": {"type": "string", "format": "uri", "description": "RTSP URL when RTSP output is available."},
-              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available."},
-              "whip": {"type": "string", "format": "uri", "description": "WHIP publish URL for a `webcam` slot; absent for `file` slots."}
+              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available. Uses the configured public origin when present."},
+              "whip": {"type": "string", "format": "uri", "description": "WHIP publish URL for a `webcam` slot; absent for `file` slots. Uses the configured public origin when present."}
             }
+          },
+          "readers": {"type": "array", "description": "Clients currently reading this slot from mediamtx (Insight's own probe reader is hidden).", "items": {"$ref": "#/components/schemas/StreamReader"}},
+          "external": {"$ref": "#/components/schemas/ExternalStream"},
+          "pull": {"$ref": "#/components/schemas/PullStream"},
+          "fps": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "description": "Requested output frame rate for this slot, or null to stream at the source frame rate."
+          },
+          "native_fps": {
+            "type": ["integer", "null"],
+            "description": "Frame rate detected in the assigned media, rounded to a whole number; null when unassigned or undetectable."
+          },
+          "active_file": {
+            "type": ["string", "null"],
+            "description": "Relative media-library path the running stream reads: the source, or a `.renditions/` file when an FPS rendition is in use. Null when stopped."
           }
+        }
+      },
+      "PullRequest": {
+        "type": "object",
+        "required": ["index", "url"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 1, "description": "One-based source slot index."},
+          "url": {"type": "string", "description": "`rtsp://` or `rtsps://` URL of the stream to pull. Credentials typed as `user:pass@` are accepted."},
+          "username": {"type": "string", "description": "Optional; wins over credentials in the URL."},
+          "password": {"type": "string", "description": "Optional; wins over credentials in the URL."}
+        }
+      },
+      "PullStream": {
+        "type": "object",
+        "description": "Details of a stream Insight pulls into the slot. Present only when `state` is `pulled`. Never contains credentials.",
+        "required": ["status", "scheme", "host", "path", "error", "since", "codec_supported", "width", "height", "fps", "bitrate_bps"],
+        "properties": {
+          "status": {"type": "string", "enum": ["connecting", "live", "unreachable", "auth_failed"], "description": "`live` while mediamtx receives the stream; `unreachable` retries by itself; `auth_failed` stays until the slot is stopped and pulled again with other credentials."},
+          "scheme": {"type": "string", "enum": ["rtsp", "rtsps"]},
+          "host": {"type": "string", "description": "`host:port` of the source."},
+          "path": {"type": "string", "description": "Path and query of the source URL, with every query value shown as ***."},
+          "error": {"type": ["string", "null"], "description": "Short explanation for `unreachable` and `auth_failed`."},
+          "since": {"type": ["string", "null"], "description": "RFC 3339 time the path became ready; null until live."},
+          "codec_supported": {"type": "boolean"},
+          "width": {"type": ["integer", "null"]},
+          "height": {"type": ["integer", "null"]},
+          "fps": {"type": ["number", "null"]},
+          "bitrate_bps": {"type": ["integer", "null"]}
+        }
+      },
+      "StreamReader": {
+        "type": "object",
+        "required": ["protocol", "address"],
+        "properties": {
+          "protocol": {"type": "string", "description": "Reader protocol, e.g. rtsp, webrtc, srt."},
+          "address": {"type": ["string", "null"], "description": "Reader IP address without port. Inside the SDK container, clients outside the container appear as the Docker bridge gateway."},
+          "label": {"type": "string", "description": "Present for Insight's own preview reader (`insight preview`)."}
+        }
+      },
+      "ExternalStream": {
+        "type": "object",
+        "description": "Details of the non-Insight publisher holding a slot. Present only when `state` is `external`.",
+        "required": ["protocol", "address", "since", "codec_supported", "width", "height", "fps", "bitrate_bps"],
+        "properties": {
+          "protocol": {"type": "string", "description": "Publish protocol: rtsp, rtsps, webrtc, srt, rtmp, rtmps, or the raw mediamtx source type."},
+          "address": {"type": ["string", "null"], "description": "Publisher IP address without port."},
+          "since": {"type": ["string", "null"], "description": "RFC 3339 time the path became ready."},
+          "codec_supported": {"type": "boolean", "description": "False when the stream codec is not h264, h265 or mjpeg and Neat pipelines cannot decode it."},
+          "width": {"type": ["integer", "null"]},
+          "height": {"type": ["integer", "null"]},
+          "fps": {"type": ["number", "null"], "description": "Null until the one-time ffprobe completes, or when it failed."},
+          "bitrate_bps": {"type": ["integer", "null"], "description": "Ingress bit rate estimated between snapshots; null on first sighting."}
         }
       },
       "BulkStartResult": {
         "type": "object",
         "description": "Per-slot outcome summary for a bulk source-start request. Partial success is represented explicitly rather than converted to an HTTP error.",
-        "required": ["success", "requested", "targeted", "started", "already_running", "errors", "message", "started_or_running"],
+        "required": ["success", "requested", "targeted", "started", "already_running", "errors", "message", "started_or_running", "skipped_external", "skipped_pulled"],
         "properties": {
           "success": {"type": "boolean", "description": "Whether every targeted slot ended in a usable started or already-running state."},
           "requested": {"type": "integer", "description": "Count requested by the caller."},
@@ -1173,7 +1962,9 @@
           "already_running": {"type": "array", "description": "Indexes that required no action because they were already playing.", "items": {"type": "integer"}},
           "errors": {"type": "array", "description": "Per-slot startup failures that did not prevent other targets from being attempted.", "items": {"type": "object", "required": ["index", "error"], "properties": {"index": {"type": "integer", "description": "One-based source slot index."}, "error": {"type": "string", "description": "Human-readable startup failure."}}}},
           "message": {"type": "string", "description": "Overall human-readable result summary."},
-          "started_or_running": {"type": "integer", "description": "Combined count of newly started and already-running targets."}
+          "started_or_running": {"type": "integer", "description": "Combined count of newly started and already-running targets."},
+          "skipped_external": {"type": "array", "description": "Slots left untouched because an external publisher holds them.", "items": {"type": "integer"}},
+          "skipped_pulled": {"type": "array", "description": "Slots left untouched because Insight is pulling a network stream into them.", "items": {"type": "integer"}}
         }
       },
       "ViewerUrl": {
@@ -1231,6 +2022,307 @@
             }
           }
         ]
+      },
+      "BoardError": {
+        "type": "object",
+        "description": "Error envelope for board and peripheral operations.",
+        "required": ["error", "code"],
+        "properties": {
+          "error": {"type": "string", "description": "Human-readable failure reason."},
+          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "mode_adjusted", "preview_active", "unreachable", "auth_failed", "tool_missing", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version", "microphone_in_use", "test_running", "stopped_early", "trace_conflict", "already_installed", "request_too_large", "sentinel_missing", "sentinel_stopped", "sentinel_denied", "sentinel_schema", "sentinel_failed", "response_too_large", "setup_running", "setup_done", "setup_blocked"]},
+          "generation": {"type": "integer", "description": "Sentinel endpoints only: the board `generation` that answered with the failure, present once the selected board is known, so a client can discard a failure from a board other than the one it asked."},
+          "hint": {"type": ["string", "null"], "description": "Concrete recovery step, such as the `ssh-copy-id` command to run."},
+          "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
+          "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},
+          "step": {"type": "string", "description": "`setup_blocked` only: the GenAI Studio setup step whose prerequisite is missing."},
+          "detail": {"type": "string", "description": "The underlying error text, such as SiMa Sentinel's answer or the socket failure."},
+          "host": {"type": "string", "description": "`host_key_changed` only: the known_hosts name of the board."},
+          "expected_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint Insight trusted."},
+          "presented_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint the board presented."}
+        },
+        "additionalProperties": true,
+        "example": {"error": "SSH key authentication as sima on 192.168.2.2 failed.", "code": "auth_failed", "hint": "Insight signs in with the SSH keys of the 'root' account on this machine. Authorize one on the board, then retry: sudo -H ssh-copy-id -p 22 sima@192.168.2.2", "command": "sudo -H ssh-copy-id -p 22 sima@192.168.2.2"}
+      },
+      "BoardTarget": {
+        "type": "object",
+        "required": ["mode", "source", "label"],
+        "properties": {
+          "mode": {"type": "string", "enum": ["local", "ssh"]},
+          "source": {"type": "string", "enum": ["manual", "on-board", "sdk-env"], "description": "`sdk-env` is the DevKit paired with `sima-cli sdk setup` (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`)."},
+          "host": {"type": ["string", "null"]},
+          "port": {"type": ["integer", "null"]},
+          "user": {"type": ["string", "null"]},
+          "label": {"type": "string", "example": "sima@192.168.2.2"}
+        }
+      },
+      "BoardState": {
+        "type": "object",
+        "required": ["target", "saved", "defaults", "generation", "status", "board"],
+        "properties": {
+          "target": {"oneOf": [{"$ref": "#/components/schemas/BoardTarget"}, {"type": "null"}]},
+          "saved": {"type": ["object", "null"], "description": "Manually selected `{host, port, user}`, if any."},
+          "defaults": {"type": "object", "properties": {"on_board": {"type": "boolean"}, "sdk_env": {"type": ["object", "null"]}}},
+          "generation": {"type": "integer", "description": "Changes whenever the selected target changes."},
+          "status": {"type": "object", "properties": {"state": {"type": "string", "enum": ["unknown", "connected", "error"]}, "checked_at": {"type": ["string", "null"], "format": "date-time"}, "error": {"oneOf": [{"$ref": "#/components/schemas/BoardError"}, {"type": "null"}]}}},
+          "board": {"type": ["object", "null"], "description": "Identity read from the board: `hostname`, `machine`, `build_version`, and a stable `fingerprint`."}
+        }
+      },
+      "BoardSelectRequest": {
+        "type": "object",
+        "properties": {
+          "host": {"type": "string", "description": "IP address or host name."},
+          "port": {"type": "integer", "default": 22},
+          "user": {"type": "string", "default": "sima"},
+          "reset": {"type": "boolean", "description": "Clear the saved selection instead of saving one."}
+        }
+      },
+      "TrustHostKeyRequest": {
+        "type": "object",
+        "required": ["fingerprint"],
+        "properties": {"fingerprint": {"type": "string", "example": "SHA256:XLLXyv0V3JYCy0LHeC0piPrwnLQBSAMIrOev/d2ZUdo"}}
+      },
+      "SupportTier": {
+        "type": "object",
+        "description": "Whether a camera mode is usable, decided from SiMa Sentinel's catalog alone. A Sentinel that decides each mode itself (per-mode `available` and `reason`, sentinel#43) is followed, with its reason; on Platform 3.0 its modes are the sensor's sizes (`sensor_mode`), and IMX477 sizes wider than 4032 are `unsupported` because libcamera streams them at 4032 wide. A USB camera's modes are `available` when Sentinel reports them in MJPEG on the `uvcvideo` driver, which Neat's USB camera input reads, and `unsupported` with Sentinel's reason otherwise, or with a reason that Sentinel could not tell when it gives the mode no verdict. Only a Sentinel that reports a USB camera's driver (`identity.driver`) checks USB cameras; with an older one, including one that decides MIPI modes, Insight ignores any USB verdict and every USB mode is `unsupported` with a reason to update it. For a MIPI camera and a Sentinel that does not decide, the same rule is applied here. `available`: Sentinel's `board` block lists the camera's sensor (the `configured_cameras` entry whose `camera_id` is the camera's id) among the sensors the board's camera overlays support (`supported_sensors`), the mode is an ISP output size (`isp_output`), and its format is NV12, which Neat's `CameraInput` outputs (a fixed fact, not queried from the board). `unsupported`: anything else, with `reason`: a sensor not in the board's camera overlays (also when no configured camera matches), a size the ISP cannot output, a format other than NV12, or a Sentinel that sends no `board` block (every mode). A camera or format is `available` when any of its modes is; otherwise its `reason` says why none is. `unverified` marks a Platform 3.0 sensor size Sentinel leaves without a verdict: libcamera may crop it from a larger mode, so it is selectable and previewable but never the default.",
+        "required": ["tier", "reason"],
+        "properties": {
+          "tier": {"type": "string", "enum": ["available", "unverified", "unsupported"]},
+          "reason": {"type": "string", "description": "Empty when `available`."}
+        }
+      },
+      "PeripheralCamera": {
+        "type": "object",
+        "required": ["id", "kind", "connection", "name", "device", "availability", "support", "modes_source", "formats"],
+        "properties": {
+          "id": {"type": "string", "description": "SiMa Sentinel's stable device id: `camera:<sensor entity name>` (MIPI) or `camera:v4l2:<hash of the USB port>` (USB).", "example": "camera:imx477 5-001a"},
+          "kind": {"type": "string", "enum": ["camera"]},
+          "connection": {"type": "string", "description": "`mipi` or `usb`; a connection Insight does not group is passed through and not listed on the page."},
+          "name": {"type": "string"},
+          "model": {"type": ["string", "null"]},
+          "device": {"type": "object", "description": "Known identifiers from Sentinel: `camera_name`, `camera_name_source` (`media-graph`: the sensor entity Sentinel names the camera after), `media_device`, `bus_info`, and `csi` (CSI receiver) for MIPI; `video_node`, `by_id` (the /dev/v4l/by-id link), `camera_name` (the name `UsbCameraInput` opens the camera by), and `usb` identity (`vendor_id`, `product_id`, `manufacturer`, `serial`, `product`, `bus_path`, `speed_mbps`) for USB.", "additionalProperties": true},
+          "availability": {"type": "object", "description": "SiMa Sentinel's own availability fact, passed through. Insight does not inspect the board's processes; a camera another program holds is reported when a preview tries to open it (`camera_in_use`).", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
+          "support": {"$ref": "#/components/schemas/SupportTier"},
+          "modes_source": {"type": "string", "enum": ["live", "previous-scan", "unavailable"]},
+          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean", "description": "Whether the format has an Available mode."}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "framerate_num": {"type": "integer", "description": "The exact rate as a fraction: value is framerate_num / framerate_den, rounded for display."}, "framerate_den": {"type": "integer"}, "tier": {"type": "string", "enum": ["available", "unverified", "unsupported"], "description": "The state of the mode this rate belongs to."}, "reason": {"type": "string", "description": "Why the mode is Unverified or Unsupported; absent when it is Available."}}}}}}}}}},
+          "default_selection": {"type": ["object", "null"], "description": "The first Available mode (`format`, `width`, `height`, `fps`); null when no mode is Available."},
+          "notes": {"type": "array", "items": {"type": "string"}},
+          "errors": {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}}
+        }
+      },
+      "PeripheralsSnapshot": {
+        "type": "object",
+        "required": ["board", "generation", "scan_id", "scanned_at", "items", "issues", "changes", "camera_setup"],
+        "properties": {
+          "board": {"type": "object", "description": "Label, source, host name, machine, build version, and fingerprint of the scanned board."},
+          "generation": {"type": "integer", "description": "Board generation the scan belongs to; compare with `GET /api/board`."},
+          "scan_id": {"type": ["string", "null"], "description": "Opaque identifier for this exact peripheral scan; null before the first scan."},
+          "scanned_at": {"type": ["string", "null"], "format": "date-time"},
+          "scan_ms": {"type": "integer"},
+          "items": {"type": "array", "items": {"oneOf": [{"$ref": "#/components/schemas/PeripheralCamera"}, {"$ref": "#/components/schemas/PeripheralMicrophone"}], "discriminator": {"propertyName": "kind"}}},
+          "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
+          "changes": {"type": ["object", "null"], "description": "`added` and `removed` devices (`id`, `name`) compared with the previous refresh of the same board."},
+          "camera_setup": {"oneOf": [{"$ref": "#/components/schemas/PeripheralCameraSetup"}, {"type": "null"}], "description": "The board's camera setup from its device tree, as SiMa Sentinel reports it; null before the first scan or when Sentinel is too old to report it."}
+        }
+      },
+      "PreviewSession": {
+        "type": "object",
+        "description": "An explicit, temporary capture whose JPEG frames Insight relays at `stream_url`.",
+        "required": ["id", "camera_id", "mode", "stream_url", "generation", "state", "camera_fps"],
+        "properties": {
+          "id": {"type": "string", "description": "Session id; every later call must present it."},
+          "camera_id": {"type": "string"},
+          "mode": {"type": "object", "properties": {"format": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "number"}}},
+          "stream_url": {"type": "string", "description": "Same-origin path of the session's multipart JPEG stream.", "example": "/api/peripherals/cameras/preview/0f3c2a9e5b7d4c1e8a6f2d0b9c4e7a13/stream"},
+          "generation": {"type": "integer"},
+          "started_at": {"type": "string", "format": "date-time"},
+          "state": {"type": "string", "enum": ["live", "stopped"]},
+          "viewer": {"type": "boolean", "description": "Whether a page already shows this preview's stream, which has one viewer; only `GET /api/peripherals/preview` reports it."},
+          "camera_fps": {"type": ["number", "null"], "description": "The frame rate the camera runs at in this mode, or null while it is unknown. A USB camera's is the mode's rate, which the pipeline requests. A MIPI camera's is the most its sensor delivers in this mode: SiMa Sentinel's `max_fps` (computed at minimum blanking) from a rescan Insight requests after the first frame, when the sensor runs in this mode, so the page shows it as \"up to\"; it stays null when Sentinel does not report it. That rescan records no Insight scan and does not stop the preview.", "example": 66.18}
+        }
+      },
+      "PeripheralMicrophone": {
+        "type": "object",
+        "description": "An ALSA capture device from SiMa Sentinel's catalog. There is no Neat configuration to export for it: Core has no audio input node.",
+        "required": ["id", "kind", "connection", "name", "device", "availability", "capture", "notes", "errors"],
+        "properties": {
+          "id": {"type": "string", "description": "Sentinel's device id, derived from the device's sysfs path and capture PCM, never from a card number. Stable across rescans and card renumbering.", "example": "microphone:alsa:3ff3d77bf791d455"},
+          "kind": {"type": "string", "enum": ["microphone"]},
+          "record": {"type": "string", "description": "A fingerprint of the scanned capture target and identity a microphone test binds to. It changes when a rescan lists another device under the same `id` (a replug in the same port); a test from before the change is gone."},
+          "connection": {"type": "string", "enum": ["usb", "onboard"]},
+          "name": {"type": "string", "description": "USB product string, else Sentinel's name (the ALSA card name)."},
+          "device": {
+            "type": "object",
+            "description": "`card_index`, `card_id`, `card_name`, `card_driver`, `pcm_device`, `pcm_node` (`/dev/snd/pcmC<card>D<device>c`), `alsa_name` (`hw:CARD=<id>,DEV=<device>`), the card's `by_path` and `by_id` links when udev made them, `usb` identity and `part_of` (`id`, `name`) when the same USB device is also a camera item.",
+            "additionalProperties": true
+          },
+          "availability": {"type": "object", "description": "SiMa Sentinel's own availability fact, passed through. Insight does not inspect the board's processes during a scan; a microphone another program has open is reported when its test starts (`409 microphone_in_use`).", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
+          "capture": {
+            "type": ["array", "null"],
+            "description": "Each capture format, channel count, bit depth and rate set Sentinel reads from the USB-audio `/proc/asound/card<N>/stream<M>` file; `null` for other drivers, whose formats cannot be read without opening the device.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "format": {"type": ["string", "null"], "example": "S24_3LE"},
+                "channels": {"type": ["integer", "null"]},
+                "bits": {"type": ["integer", "null"]},
+                "rates": {"type": "array", "items": {"type": "integer"}, "description": "Discrete sample rates in Hz; empty when `rate_range` is set."},
+                "rate_range": {"type": ["object", "null"], "properties": {"min": {"type": "integer"}, "max": {"type": "integer"}}, "description": "A continuous rate range in Hz."},
+                "channel_map": {"type": ["array", "null"], "items": {"type": "string"}, "example": ["FL", "FR"]}
+              }
+            }
+          },
+          "notes": {"type": "array", "items": {"type": "string"}},
+          "errors": {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}}
+        }
+      },
+      "MicrophoneTestRequest": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {"type": "string", "description": "A microphone `id` from the last scan."},
+          "seconds": {"type": "integer", "minimum": 1, "maximum": 30, "default": 30, "description": "The longest to record when nobody stops it."}
+        }
+      },
+      "MicrophoneTest": {
+        "type": "object",
+        "required": ["token", "id", "state", "device", "format", "elapsed_ms", "level_dbfs"],
+        "properties": {
+          "token": {"type": "string"},
+          "id": {"type": "string", "description": "The microphone recorded."},
+          "state": {"type": "string", "enum": ["recording", "ready", "failed"]},
+          "device": {"type": "string", "description": "The ALSA device recorded from: Sentinel's selector.", "example": "plughw:CARD=Nano,DEV=0"},
+          "format": {"type": "object", "properties": {"rate": {"type": "integer"}, "channels": {"type": "integer"}, "bits": {"type": "integer", "enum": [16]}, "seconds": {"type": "integer"}}},
+          "elapsed_ms": {"type": "integer", "description": "Audio received so far."},
+          "level_dbfs": {"type": ["number", "null"], "description": "While recording, the peak of the audio just received in dBFS; `null` for silence and once finished."},
+          "level": {"type": "object", "description": "When ready: peak and RMS in dBFS (`null` for digital silence). `silent` is true when the typical level is below -60 dBFS, so a click on open does not count as sound.", "properties": {"peak_dbfs": {"type": ["number", "null"]}, "rms_dbfs": {"type": ["number", "null"]}, "silent": {"type": "boolean"}}},
+          "audio_url": {"type": "string", "description": "When ready: where to fetch the WAV."},
+          "error": {"$ref": "#/components/schemas/BoardError"}
+        }
+      },
+      "SentinelBoard": {
+        "type": "object",
+        "description": "The board the telemetry belongs to; `fingerprint` also keys Insight's per-board caches.",
+        "required": ["label", "source", "hostname", "machine", "build_version", "fingerprint"],
+        "properties": {
+          "label": {"type": "string", "example": "sima@192.168.2.2"},
+          "source": {"type": "string", "enum": ["manual", "on-board", "sdk-env"]},
+          "hostname": {"type": ["string", "null"]},
+          "machine": {"type": ["string", "null"]},
+          "build_version": {"type": ["string", "null"]},
+          "fingerprint": {"type": ["string", "null"]}
+        }
+      },
+      "SentinelDaemon": {
+        "type": "object",
+        "description": "What the board reports about the simaai-sentinel service.",
+        "required": ["installed", "healthy", "service", "socket", "socket_path", "sima_cli", "instance_id"],
+        "properties": {
+          "installed": {"type": "boolean", "description": "A simaai-sentinel unit or its socket exists on the board."},
+          "healthy": {"type": "boolean", "description": "The service is active and its socket is present."},
+          "service": {"type": "string", "description": "`systemctl is-active simaai-sentinel`.", "example": "active"},
+          "socket": {"type": "boolean"},
+          "socket_path": {"type": "string", "example": "/run/simaai-sentinel/api.sock"},
+          "sima_cli": {"type": ["string", "null"], "description": "Path to sima-cli on the board, used to install Sentinel."},
+          "instance_id": {"type": ["string", "null"], "description": "systemd's invocation ID for the running daemon; it changes on every service restart. Null when the daemon is not running."},
+          "started_at": {"type": ["string", "null"], "format": "date-time", "description": "When the running daemon started, on Insight's clock: measured on the board as how long the service has been active, so a board clock that is wrong after a boot does not skew it. Null when the daemon is not running."}
+        }
+      },
+      "SentinelState": {
+        "type": "object",
+        "required": ["board", "generation", "available", "schema", "version", "status", "daemon", "health"],
+        "properties": {
+          "board": {"$ref": "#/components/schemas/SentinelBoard"},
+          "generation": {"type": "integer", "description": "Board selection generation; it bumps whenever the selected board changes."},
+          "available": {"type": "boolean", "description": "Sentinel answered its API and speaks the schema Insight understands."},
+          "schema": {"type": "integer", "description": "The Sentinel API schema this Insight understands.", "example": 1},
+          "version": {"type": ["string", "null"], "example": "main:80ab7de4da31"},
+          "status": {
+            "type": "object",
+            "required": ["state", "error"],
+            "properties": {
+              "state": {"type": "string", "enum": ["ready", "missing", "stopped", "error"]},
+              "error": {"oneOf": [{"type": "null"}, {"$ref": "#/components/schemas/BoardError"}], "description": "Why Sentinel cannot be used, with the step that fixes it."}
+            }
+          },
+          "daemon": {"$ref": "#/components/schemas/SentinelDaemon"},
+          "health": {"type": ["object", "null"], "description": "Sentinel's `/v1/health` body: version, freshness, sample and metric counts, errors, and the active trace."}
+        }
+      },
+      "SentinelInstallResult": {
+        "type": "object",
+        "required": ["board", "generation", "daemon", "log"],
+        "properties": {
+          "board": {"$ref": "#/components/schemas/SentinelBoard"},
+          "generation": {"type": "integer"},
+          "daemon": {"$ref": "#/components/schemas/SentinelDaemon"},
+          "log": {"type": "string", "description": "Tail of the installer's output."}
+        }
+      },
+      "SentinelMetric": {
+        "type": "object",
+        "required": ["key", "label", "short", "unit", "description", "group", "warn", "critical", "value", "status"],
+        "properties": {
+          "key": {"type": "string", "example": "power_current_watts"},
+          "label": {"type": "string", "example": "Current board power"},
+          "short": {"type": "string", "example": "Current"},
+          "unit": {"type": ["string", "null"], "description": "As Sentinel defines it.", "example": "W"},
+          "description": {"type": ["string", "null"]},
+          "group": {"type": "string", "description": "Sentinel's group, or `Other` for a value with no definition.", "example": "Power"},
+          "warn": {"type": ["number", "null"]},
+          "critical": {"type": ["number", "null"]},
+          "value": {"type": ["number", "null"], "description": "`null` when the board cannot measure it; never zero for a missing value."},
+          "status": {"type": "string", "enum": ["ok", "warn", "critical", "unavailable"]}
+        }
+      },
+      "SentinelMetrics": {
+        "type": "object",
+        "required": ["board", "generation", "sampled_at", "version", "counts", "highlights", "groups", "order", "history"],
+        "properties": {
+          "board": {"$ref": "#/components/schemas/SentinelBoard"},
+          "generation": {"type": "integer"},
+          "sampled_at": {"type": ["string", "null"], "format": "date-time", "description": "Timestamp of the sample the values come from."},
+          "version": {"type": ["string", "null"]},
+          "counts": {"type": "object", "properties": {"total": {"type": "integer"}, "unavailable": {"type": "integer"}, "warn": {"type": "integer"}, "critical": {"type": "integer"}}},
+          "highlights": {"type": "array", "items": {"type": "string"}, "description": "Keys the Stats page leads with: board power, CPU, Linux memory, MLA allocated memory, EV74 memory, and the hottest temperature sensor the board reports."},
+          "groups": {"type": "array", "items": {"type": "object", "required": ["name", "metrics"], "properties": {"name": {"type": "string"}, "metrics": {"type": "array", "items": {"$ref": "#/components/schemas/SentinelMetric"}}}}},
+          "order": {"type": "array", "items": {"type": "string"}, "description": "Every metric key in Sentinel's own order, the order its ops view lists them in. A group's sensors are not always adjacent, so this is not the order of `groups`."},
+          "history": {
+            "type": "object",
+            "description": "The last `history` samples of this board, aligned; empty unless `history` was requested. On the first read of a board, and again after a gap in polling of more than a minute, the history is seeded from Sentinel's own sample cache (its newest 240 samples, read once from `GET /v1/cache`), so it opens full rather than filling from polling.",
+            "required": ["timestamps", "series"],
+            "properties": {
+              "timestamps": {"type": "array", "items": {"type": ["string", "null"]}},
+              "series": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": ["number", "null"]}}}
+            }
+          }
+        }
+      },
+      "SentinelPassthrough": {
+        "type": "object",
+        "description": "Sentinel's own response body under `sentinel`, minus its `schema` marker, plus the board it came from. Nesting keeps a run's or comparison's fields from shadowing `board` and `generation`.",
+        "required": ["board", "generation", "sentinel"],
+        "properties": {
+          "board": {"$ref": "#/components/schemas/SentinelBoard"},
+          "generation": {"type": "integer"},
+          "sentinel": {"type": "object", "description": "The daemon's body, such as `{trace, summary}`, `{runs}`, `{run}` or a comparison."}
+        }
+      },
+      "TraceRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^,]*$", "description": "Unique trace name of at most 80 UTF-8 bytes, without control characters or a comma (`/api/sentinel/compare` separates runs with commas); Sentinel rejects a name a run already uses."},
+          "note": {"type": ["string", "null"], "maxLength": 512},
+          "tags": {"type": ["array", "null"], "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 80}}
+        }
+      },
+      "PeripheralCameraSetup": {
+        "type": "object",
+        "required": ["model", "overlays"],
+        "properties": {
+          "model": {"type": ["string", "null"], "description": "The board model from its device tree.", "example": "SiMa.ai Modalix SoM 16Gig Board"},
+          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The device-tree overlays the board loads that configure a camera sensor, in U-Boot's order: the entries of SiMa Sentinel's overlay list that some sensor in its `board.supported_sensors` names. Other overlays (PCIe, secure boot) are not listed.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]}
+        }
       }
     }
   }

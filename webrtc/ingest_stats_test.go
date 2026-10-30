@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -238,5 +239,47 @@ func TestIngestStatsRecordsMetadataReassembly(t *testing.T) {
 	snapshot := stats.Snapshot(false, false, now).Metadata
 	if snapshot.ChunkDatagramsReceived != 3 || snapshot.MessagesReassembled != 1 || snapshot.ReassemblyDrops != 1 {
 		t.Fatalf("unexpected metadata reassembly counters: %#v", snapshot)
+	}
+}
+
+func TestIngestStatsReportsJPEGMediaAndFrameOutcomes(t *testing.T) {
+	stats := NewIngestStats(0, 9000, 9100)
+	for sequence, raw := range fixtureY42B {
+		var pkt rtp.Packet
+		if err := pkt.Unmarshal(raw); err != nil {
+			t.Fatal(err)
+		}
+		recordTestRTPPacket(stats, jpegRTPPayloadType, uint16(sequence), 0, pkt.Payload)
+	}
+	stats.RecordJPEGFrameForwarded(len(fixtureY42B), 1200)
+	stats.RecordJPEGFrameIncomplete(errors.New("frame lost a fragment"))
+	stats.RecordJPEGFrameDroppedBackpressure()
+
+	snapshot := stats.Snapshot(true, false, time.Now())
+	media := snapshot.Media
+	if media.Codec != "JPEG" || media.Width != 64 || media.Height != 48 ||
+		media.JPEGType == nil || *media.JPEGType != 0 || media.JPEGQ != 255 {
+		t.Fatalf("unexpected JPEG media: %#v", media)
+	}
+	forwarding := snapshot.Forwarding
+	if forwarding.FramesForwarded != 1 || forwarding.FramesDroppedIncomplete != 1 ||
+		forwarding.FramesDroppedBackpressure != 1 || forwarding.PacketsForwarded != uint64(len(fixtureY42B)) ||
+		forwarding.BytesForwarded != 1200 {
+		t.Fatalf("unexpected JPEG forwarding: %#v", forwarding)
+	}
+	if errs := snapshot.Diagnostics.RecentErrors; len(errs) != 1 || !strings.Contains(errs[0], "frame lost a fragment") {
+		t.Fatalf("incomplete frame missing from recent errors: %v", errs)
+	}
+	encoded, err := json.Marshal(snapshot.Media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"jpeg_type":0`) {
+		t.Fatalf("type 0 must still be reported: %s", encoded)
+	}
+
+	recordTestRTPPacket(stats, h264RTPPayloadType, 10, 0, []byte{0x65, 0x88})
+	if media := stats.Snapshot(false, false, time.Now()).Media; media.Width != 0 || media.JPEGType != nil {
+		t.Fatalf("H.264 snapshot retained JPEG media: %#v", media)
 	}
 }

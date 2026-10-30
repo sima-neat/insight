@@ -43,28 +43,45 @@ curl -k -H "Content-Type: application/json" \
   https://<INSIGHT_HOST>:9900/api/mediasrc/start
 ```
 
-할당 또는 재생 상태를 변경하기 전에 `/api/mediasrc`를 읽어보세요. 가능하면 미디어를 삭제하기 전에 활성 상태의 소스를 중지하세요.
+다른 프레임 속도로 스트리밍하려면 할당에 `fps`를 포함하고, 필요하면 인코딩 과정을 확인하세요.
+
+```sh
+curl -k -H "Content-Type: application/json" -d '{"index":1,"file":"person_clip.mp4","fps":15}' https://localhost:9900/api/mediasrc/assign
+curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/prepare
+curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
+```
+
+`prepare`는 `progress <seconds>/<total>` 줄을 스트리밍하고(다른 렌디션이 인코딩되는 동안에는 그 앞에 `Waiting for another rendition to finish encoding…` 줄이 반복해서 출력됩니다. Insight는 한 번에 하나씩 인코딩합니다) `Rendition ready: …`, `Reusing rendition: …` 또는 `Error: …`로 끝납니다. `prepare`를 건너뛰면 `start`가 같은 준비 작업을 출력 없이 수행합니다. `GET /api/mediasrc/renditions`는 캐시된 렌디션의 디스크 사용량을 보고하고, `POST /api/mediasrc/renditions/clear`는 재생 중인 소스가 사용하지 않는 캐시된 렌디션을 삭제합니다.
+
+할당 또는 재생 상태를 변경하기 전에 `/api/mediasrc`를 읽으십시오. 가능하면 미디어를 삭제하기 전에 활성 상태의 소스를 중지하십시오.
+
+Insight 이외의 주체가 게시하는 슬롯은 `state: "external"`과 `external` 객체(프로토콜, 주소, 게시 시작 시각, 코덱 지원 여부, 해상도, 비트레이트)를 보고하며, 모든 슬롯은 현재 `readers`도 나열합니다. 이러한 슬롯에 대해 `start`와 `assign`은 `409`를 반환하며, 슬롯에 Insight 자체 스트림이 더 이상 남아 있지 않으면 `stop`도 마찬가지입니다. `POST /api/mediasrc/takeover`는 게시자의 연결을 끊습니다. 일괄 작업은 외부 스트림을 계속 실행 상태로 두고 해당 슬롯을 `skipped_external`에 나열합니다. `reset`은 여전히 모든 슬롯의 저장된 기록을 지웁니다. `GET /stream/preview/src<N>.mjpg`는 라이브 상태인 모든 슬롯의 MJPEG 미리보기를 소스 프레임 속도로 렌더링합니다.
+
+`{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}`를 사용한 `POST /api/mediasrc/pull`은 기존 RTSP/RTSPS 스트림을 슬롯으로 끌어옵니다. 그러면 슬롯은 `state: "pulled"`와 `pull` 객체(`connecting`, `live`, `unreachable` 또는 `auth_failed` 중 하나인 `status`와 스킴, 호스트, 경로, 오류, 시작 시각, 코덱 지원 여부, 해상도, 프레임 속도, 비트레이트. 자격 증명은 절대 포함되지 않음)를 보고합니다. 자격 증명이 거부되면 `"reason": "auth_failed"`와 함께 `400`을 반환하고, 스트리밍 중이거나 외부이거나 웹캠 소스이거나 이미 끌어온 슬롯은 `409`를 반환하며, `502`는 mediamtx가 구성을 거부했거나 mediamtx에 연결할 수 없었다는 뜻입니다. `stop`은 끌어오기를 해제합니다. 끌어온 슬롯에 대해 `assign`, `assign-webcam`, `start`, `prepare`, `takeover`는 `409`를 반환합니다. `stop-all`과 `reset`은 끌어오기도 해제하고 `stopped_pulled`에 나열하며, `auto-assign-all`과 `start-bulk`는 끌어온 슬롯을 건너뛰고 `skipped_pulled`에 나열합니다. 끌어오기는 현재 세션에서만 유지됩니다.
 
 ## 응답 및 스트리밍 규칙
 
 - 대부분의 엔드포인트는 JSON 형식으로 응답합니다. 오류 발생 시에는 일반적으로 HTTP 오류 상태와 함께 `{"error": "message"}`를 사용합니다.
 - 업로드 및 가져오기는 단일 JSON 객체 대신 `text/plain` 형식의 진행 상황 스트림을 반환합니다.
-- `/api/neat-metrics`는 서버에서 전송하는 이벤트 스트림입니다.
-- MJPEG 미리보기 및 소스 엔드포인트는 다중 부분 이미지 스트림을 반환합니다.
-- 미디어 및 작업 공간의 원본 파일 엔드포인트는 요청된 이진 콘텐츠를 반환합니다.
+- `/api/neat-metrics`는 서버 전송 이벤트(server-sent events) 스트림입니다.
+- MJPEG 미리 보기 및 소스 엔드포인트는 멀티파트 이미지 스트림을 반환합니다.
+- 미디어 및 작업 공간의 원본 파일 엔드포인트는 요청된 바이너리 콘텐츠를 반환합니다.
 
-Swagger UI는 Insight와 동일한 호스트를 사용하므로, **사용해 보기** 요청은 현재 설치된 환경을 대상으로 합니다. 삭제, 재설정, 시작, 중지와 같은 작업은 서비스 상태를 즉시 변경합니다.
+Swagger UI는 Insight와 동일한 호스트를 사용하므로, **Try it out**(사용해 보기) 요청은 현재 설치된 환경을 대상으로 합니다. 삭제, 재설정, 시작, 중지와 같은 작업은 서비스 상태를 즉시 변경합니다.
 
 ## API 그룹
 
 OpenAPI 문서는 작업을 목적에 따라 그룹화합니다.
 
-- **서비스 및 시스템** — 건강 상태, 환경, 빌드 정보, 지표, 로그, 그리고 선택적인 도구.
-- **진단** — RTP 수신, WebRTC 전송, 서버에서 전송되는 지표.
+- **서비스 및 시스템** — 상태 확인, 환경, 빌드 정보, 지표, 로그 및 선택적 도구.
+- **진단** — RTP 수신, WebRTC 송신 및 서버 전송 지표.
 - **미디어 라이브러리 및 가져오기** — 카탈로그, YouTube, 업로드, 삭제, 검사, 미리 보기 및 다운로드.
 - **미디어 소스** — 할당 및 RTSP/HTTP 재생 제어.
-- **뷰어** — 브라우저에서 접근 가능한 뷰어 URL과 구성된 채널 용량입니다.
-- **작업 공간** — 작업 공간 파일과 MPK 아카이브 구성원을 찾아보고, 검색하고, 검사하고, 미리 볼 수 있습니다.
+- **뷰어** — 브라우저에서 접근 가능한 뷰어 URL과 구성된 채널 용량.
+- **작업 공간** — 작업 공간 파일과 MPK 아카이브 구성원을 찾아보고, 검색하고, 검사하고, 미리 봅니다.
 - **DevKit 셸** — 구성된 경우 호스팅된 셸 브리지를 검색하고 시작합니다.
+- **보드** — 보드 대상 기능이 사용할 보드를 선택하고, SSH 연결을 테스트하고, 다시 플래시된 보드의 호스트 키를 신뢰합니다.
+- **주변 장치** — 선택한 보드에서 SiMa Sentinel이 보고하는 MIPI 및 USB 카메라와 ALSA 마이크를 나열하고, 임시 카메라 미리 보기를 시작, 검사, 스트리밍 또는 중지하며, API를 통해 마이크를 테스트합니다.
+- **Sentinel** — 선택한 보드에서 SiMa Sentinel이 있는지 확인하고 설치하며, 보드의 텔레메트리를 읽고, 트레이스를 시작 및 중지하고, 저장된 실행 기록을 나열, 검사, 삭제 및 비교합니다.
 
-원본 OpenAPI 파일은 `neat_insight/openapi.json`에 있는 Insight 저장소에서도 유지 관리됩니다. 테스트에서는 해당 파일의 작동 방식을 Flask에 등록된 `/api` 경로와 비교하므로, 참조를 업데이트하지 않고는 새로운 엔드포인트를 자동으로 추가할 수 없습니다.
+원본 OpenAPI 파일은 Insight 저장소의 `neat_insight/openapi.json`에서도 유지 관리됩니다. 테스트는 이 파일의 작업을 Flask에 등록된 `/api` 경로와 비교하므로, 참조를 업데이트하지 않고 새 엔드포인트가 조용히 추가될 수 없습니다.

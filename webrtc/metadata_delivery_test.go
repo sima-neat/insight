@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"strconv"
 	"sync"
 	"testing"
@@ -81,5 +83,32 @@ func TestEnqueueMetadataRecordsEvictedMessage(t *testing.T) {
 	}
 	if got := string(ch.MetadataReady.dequeue().payload); got != "new" {
 		t.Fatalf("expected newest metadata to remain, got %q", got)
+	}
+}
+
+func TestJPEGFrameMessagesChunkTheFrame(t *testing.T) {
+	for _, size := range []int{1, jpegChunkBytes, jpegChunkBytes + 1, 2*jpegChunkBytes + 7} {
+		frame := make([]byte, size)
+		for i := range frame {
+			frame[i] = byte(i * 7)
+		}
+		messages := jpegFrameMessages(0xdeadbeef, frame)
+		wantCount := (size + jpegChunkBytes - 1) / jpegChunkBytes
+		if len(messages) != wantCount {
+			t.Fatalf("%d bytes: expected %d messages, got %d", size, wantCount, len(messages))
+		}
+		var rebuilt []byte
+		for index, message := range messages {
+			if len(message) > 8+jpegChunkBytes ||
+				binary.BigEndian.Uint32(message) != 0xdeadbeef ||
+				binary.BigEndian.Uint16(message[4:]) != uint16(index) ||
+				binary.BigEndian.Uint16(message[6:]) != uint16(wantCount) {
+				t.Fatalf("%d bytes: bad header on message %d: %x", size, index, message[:8])
+			}
+			rebuilt = append(rebuilt, message[8:]...)
+		}
+		if !bytes.Equal(rebuilt, frame) {
+			t.Fatalf("%d bytes: chunks do not rebuild the frame", size)
+		}
 	}
 }

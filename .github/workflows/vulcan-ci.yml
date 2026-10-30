@@ -24,9 +24,33 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  test:
+    name: Unit tests
+    uses: ./.github/workflows/tests.yml
+
+  docs-translations:
+    name: Check documentation translations
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Check translations
+        # Same coverage and source-hash rule Core's docs build applies when it imports these docs.
+        run: python scripts/check_translation_sources.py
+
   build:
     name: Build ${{ matrix.target_platform }}
     runs-on: ubuntu-latest
+    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -297,6 +321,71 @@ jobs:
             /tmp/metrics.json
           if-no-files-found: ignore
 
+  # Advisory for now: this job fails the run but is not in publish-vulcan-artifacts.needs, so a flaky UI suite cannot block a release. Add it there once it has a track record.
+  folder-navigation:
+    name: Folder navigation (Playwright)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install system tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg mkcert libnss3-tools
+          mkcert -install
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: insight-wheel-linux-amd64
+          path: dist
+
+      - name: Install neat-insight from the wheel
+        run: |
+          set -euo pipefail
+          python -m venv .venv-insight
+          .venv-insight/bin/pip install --upgrade pip
+          .venv-insight/bin/pip install dist/*.whl
+
+      - name: Install frontend dependencies and Chromium
+        run: |
+          set -euo pipefail
+          npm ci --prefix frontend
+          (cd frontend && npx playwright install --with-deps chromium)
+
+      - name: Run the folder-navigation suite
+        env:
+          NEAT_INSIGHT_CMD: ${{ github.workspace }}/.venv-insight/bin/neat-insight
+          INSIGHT_LOG: ${{ github.workspace }}/folder-navigation-insight.log
+        run: scripts/test-folder-navigation.sh
+
+      - name: Upload Playwright report and service log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: folder-navigation-report
+          path: |
+            frontend/e2e/report
+            frontend/e2e/test-results
+            folder-navigation-insight.log
+          if-no-files-found: ignore
+          retention-days: 3
+
   resolve-vulcan-config:
     name: Resolve Vulcan Config
     uses: sima-neat/.github/.github/workflows/vulcan-resolve-config.yml@main
@@ -305,9 +394,12 @@ jobs:
 
   publish-vulcan-artifacts:
     name: Publish to Vulcan
+    # Unit tests gate publication: a build whose tests fail is never published
+    # or promoted, even when its smoke tests pass.
     needs:
       - resolve-vulcan-config
       - smoke-linux
+      - test
     uses: sima-neat/.github/.github/workflows/vulcan-publish-artifacts.yml@main
     with:
       aws_region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}

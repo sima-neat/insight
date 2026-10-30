@@ -119,6 +119,27 @@ class ApiDocumentationTests(unittest.TestCase):
                 self.assertTrue(ref.startswith("#/"))
                 self.assertIsNotNone(_follow_json_pointer(self.spec, ref))
 
+    def test_every_tag_belongs_to_a_tag_group(self):
+        # Core's docs site builds the Insight API sidebar from x-tagGroups; a tag
+        # outside every group gets a page with no sidebar, which fails that build.
+        grouped = {tag for group in self.spec["x-tagGroups"] for tag in group["tags"]}
+        tags = {tag["name"] for tag in self.spec["tags"]} | {
+            tag
+            for path_item in self.spec["paths"].values()
+            for method, operation in path_item.items()
+            if method in HTTP_METHODS
+            for tag in operation.get("tags", [])
+        }
+
+        self.assertEqual(tags - grouped, set())
+
+    def test_board_error_schema_includes_sentinel_runtime_codes(self):
+        codes = set(self.spec["components"]["schemas"]["BoardError"]["properties"]["code"]["enum"])
+        self.assertTrue({
+            "already_installed", "request_too_large", "response_too_large", "sentinel_denied",
+            "sentinel_failed", "sentinel_missing", "sentinel_schema", "sentinel_stopped", "trace_conflict",
+        } <= codes)
+
     def test_sysinfo_documents_command_failure_statuses(self):
         responses = self.spec["paths"]["/api/sysinfo"]["get"]["responses"]
 
@@ -128,6 +149,24 @@ class ApiDocumentationTests(unittest.TestCase):
         self.assertEqual(
             responses["504"]["$ref"], "#/components/responses/GatewayTimeout"
         )
+
+    def test_board_change_and_preview_operations_document_propagated_errors(self):
+        expected = {
+            ("/api/board/select", "post"): {"400", "409", "502", "504"},
+            ("/api/board/trust-host-key", "post"): {"400", "409", "502", "504"},
+            ("/api/peripherals/cameras/preview/{session_id}/stream", "get"): {"404", "409"},
+            ("/api/peripherals/cameras/preview/{session_id}/stop", "post"): {"409", "502", "504"},
+        }
+
+        for (path, method), statuses in expected.items():
+            responses = self.spec["paths"][path][method]["responses"]
+            with self.subTest(path=path, method=method):
+                self.assertTrue(statuses.issubset(responses))
+                for status in statuses:
+                    self.assertEqual(
+                        responses[status]["$ref"],
+                        "#/components/responses/BoardErrorResponse",
+                    )
 
     def test_workspace_contract_matches_index_and_raw_preview_behavior(self):
         search_description = self.spec["paths"]["/api/workspace/search"]["get"][

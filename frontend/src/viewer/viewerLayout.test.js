@@ -7,6 +7,7 @@ import {
   gridDimensions,
   normalizeMaxChannels,
   normalizeVisiblePerPage,
+  orientationTransform,
   pageSizePresetsForLimit,
   parseChannelIndices,
 } from "./viewerLayout.js";
@@ -52,4 +53,14 @@ test("64, 72, and 80 visible streams use eight columns", () => {
   assert.deepEqual(gridDimensions(64), { columns: 8, rows: 8 });
   assert.deepEqual(gridDimensions(72), { columns: 8, rows: 9 });
   assert.deepEqual(gridDimensions(80), { columns: 8, rows: 10 });
+});
+
+test("orientation settings map to the CSS transform for picture and overlay", () => {
+  assert.equal(orientationTransform("none"), "");
+  assert.equal(orientationTransform("mirror"), "scaleX(-1)");
+  assert.equal(orientationTransform("flip-vertical"), "scaleY(-1)");
+  assert.equal(orientationTransform("rotate-180"), "rotate(180deg)");
+  assert.equal(orientationTransform("sideways"), "");
+  assert.equal(orientationTransform(undefined), "");
+  assert.equal(orientationTransform("toString"), "");
 });

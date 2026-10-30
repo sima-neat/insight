@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,5 +179,88 @@ func TestIngestStatsBoundsRetiredPeers(t *testing.T) {
 	}
 	if webrtcSnapshot.PeerCount != 1 || webrtcSnapshot.ConnectionStates["connected"] != 1 {
 		t.Fatalf("live peer lost to eviction: %#v", webrtcSnapshot)
+	}
+}
+
+func TestEgressStatsReportsJPEGDelivery(t *testing.T) {
+	stats := NewEgressStats(0)
+	h264Peer := stats.RegisterPeer()
+	jpegPeer := stats.RegisterPeer()
+	stats.UpdateJPEGState(jpegPeer, "open")
+	stats.RecordJPEGSent(jpegPeer, 1000)
+	stats.RecordJPEGSent(jpegPeer, 500)
+	stats.RecordJPEGDroppedBackpressure(jpegPeer)
+	stats.RecordJPEGSendError(jpegPeer, errors.New("closed"))
+
+	snapshot, _ := stats.Snapshot(true, true, time.Now())
+	if len(snapshot.Peers) != 2 || snapshot.Peers[0].ID != h264Peer || snapshot.Peers[0].JPEG != nil {
+		t.Fatalf("a peer without a jpeg DataChannel reported one: %#v", snapshot.Peers)
+	}
+	jpeg := snapshot.Peers[1].JPEG
+	if jpeg == nil || jpeg.State != "open" || jpeg.FramesSent != 2 || jpeg.BytesSent != 1500 ||
+		jpeg.FramesDroppedBackpressure != 1 || jpeg.SendErrors != 1 || jpeg.LastSentAt == "" {
+		t.Fatalf("unexpected JPEG egress: %#v", jpeg)
+	}
+	if errs := snapshot.Peers[1].Diagnostics.RecentErrors; len(errs) != 1 || !strings.Contains(errs[0], "jpeg send failed") {
+		t.Fatalf("send error missing from recent errors: %v", errs)
+	}
+}
+
+func browserSynchronizationFromReport(t *testing.T, raw string) BrowserSynchronizationStats {
+	t.Helper()
+	stats := NewEgressStats(1)
+	peerID := stats.RegisterPeer()
+	if !stats.RecordBrowserReport(peerID, []byte(raw)) {
+		t.Fatalf("expected browser report to be accepted: %s", raw)
+	}
+	snapshot, ok := stats.Snapshot(true, false, time.Now())
+	if !ok || snapshot.Peers[0].Browser == nil {
+		t.Fatalf("expected a browser report in the snapshot")
+	}
+	return snapshot.Peers[0].Browser.Synchronization
+}
+
+func TestEgressStatsReportsLateMetadata(t *testing.T) {
+	synchronization := browserSynchronizationFromReport(t, `{
+		"type": "browser_egress_stats",
+		"channel": 1,
+		"synchronization": {
+			"video_sync_buffer_ms": 350,
+			"metadata_late": 184,
+			"metadata_lateness_recent_median_ms": 153.4,
+			"metadata_lateness_recent_max_ms": 212
+		}
+	}`)
+
+	if synchronization.MetadataLate != 184 {
+		t.Fatalf("expected 184 late messages, got %d", synchronization.MetadataLate)
+	}
+	if synchronization.MetadataLatenessRecentMedianMS == nil || *synchronization.MetadataLatenessRecentMedianMS != 153.4 {
+		t.Fatalf("unexpected median lateness: %v", synchronization.MetadataLatenessRecentMedianMS)
+	}
+	if synchronization.MetadataLatenessRecentMaxMS == nil || *synchronization.MetadataLatenessRecentMaxMS != 212 {
+		t.Fatalf("unexpected maximum lateness: %v", synchronization.MetadataLatenessRecentMaxMS)
+	}
+}
+
+func TestEgressStatsOmitsLatenessWithoutSamples(t *testing.T) {
+	synchronization := browserSynchronizationFromReport(t, `{
+		"type": "browser_egress_stats",
+		"channel": 1,
+		"synchronization": {"video_sync_buffer_ms": 350, "metadata_late": 0}
+	}`)
+
+	if synchronization.MetadataLatenessRecentMedianMS != nil || synchronization.MetadataLatenessRecentMaxMS != nil {
+		t.Fatalf("expected no lateness without samples: %#v", synchronization)
+	}
+	encoded, err := json.Marshal(synchronization)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "metadata_lateness_recent") {
+		t.Fatalf("expected lateness fields to be omitted: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"metadata_late":0`) {
+		t.Fatalf("expected the late counter to be reported at zero: %s", encoded)
 	}
 }

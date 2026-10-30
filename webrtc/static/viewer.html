@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="/static/viewer.css">
+  <link rel="stylesheet" href="/static/viewer.css?v=16">
   <link rel="stylesheet" href="/static/pagination.css">
 </head>
 <body>
@@ -15,9 +15,11 @@
         <span id="viewerSettingsTitle" class="settings-popup-title">Viewer Configuration</span>
         <button id="viewerSettingsClose" title="Close">&times;</button>
       </div>
+      <p id="viewerSettingsScopeLine" class="settings-scope-line settings-channel-only"></p>
       <div class="settings-popup-body">
         <div class="settings-tab-header">
           <button class="settings-tab-link active" data-tab="viewer-metadata">Metadata</button>
+          <button class="settings-tab-link" data-tab="viewer-pose3d">3D Pose</button>
           <button class="settings-tab-link" data-tab="viewer-roi">ROI</button>
           <button class="settings-tab-link" data-tab="viewer-general">General</button>
         </div>
@@ -31,18 +33,23 @@
             <div id="objectDetectionSettings" class="metadata-type-section">
               <table class="filter-table metadata-filter-table">
                 <tr>
-                  <td><label for="confidenceSlider">Confidence Threshold</label></td>
+                  <td><label for="toggleObjectDetectionOverlay">Show Overlay</label></td>
+                  <td><input type="checkbox" id="toggleObjectDetectionOverlay" checked></td>
+                </tr>
+                <tr>
+                  <td><label for="confidenceInput">Confidence Threshold</label></td>
                   <td>
-                    <input type="range" id="confidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0">
-                    <span id="confidenceDisplay">0</span>
+                    <input type="number" id="confidenceInput" class="settings-number" min="0" max="1" step="0.01" value="0">
                   </td>
                 </tr>
               </table>
               <div class="object-list-header">
                 <button id="addViewerObject" class="add-btn" title="Add Object">+</button>
               </div>
+              <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="viewerObjectList">
                 <table class="viewer-object-table">
+                  <tbody id="viewerObjectInheritedBody" class="settings-inherited-body settings-channel-only" hidden></tbody>
                   <tbody id="viewerObjectTableBody">
                     <!-- Rows dynamically inserted here -->
                   </tbody>
@@ -52,25 +59,29 @@
             <div id="segmentationSettings" class="metadata-type-section">
               <table class="filter-table metadata-filter-table">
                 <tr>
-                  <td><label for="segmentationConfidenceSlider">Confidence Threshold</label></td>
+                  <td><label for="toggleSegmentationOverlay">Show Overlay</label></td>
+                  <td><input type="checkbox" id="toggleSegmentationOverlay" checked></td>
+                </tr>
+                <tr>
+                  <td><label for="segmentationConfidenceInput">Confidence Threshold</label></td>
                   <td>
-                    <input type="range" id="segmentationConfidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0">
-                    <span id="segmentationConfidenceDisplay">0</span>
+                    <input type="number" id="segmentationConfidenceInput" class="settings-number" min="0" max="1" step="0.01" value="0">
                   </td>
                 </tr>
                 <tr>
-                  <td><label for="segmentationOpacitySlider">Mask Opacity</label></td>
+                  <td><label for="segmentationOpacityInput">Mask Opacity</label></td>
                   <td>
-                    <input type="range" id="segmentationOpacitySlider" class="settings-slider" min="0" max="1" step="0.05" value="0.4">
-                    <span id="segmentationOpacityDisplay">0.4</span>
+                    <input type="number" id="segmentationOpacityInput" class="settings-number" min="0" max="1" step="0.05" value="0.4">
                   </td>
                 </tr>
               </table>
               <div class="object-list-header">
                 <button id="addSegmentationObject" class="add-btn" title="Add Object">+</button>
               </div>
+              <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="segmentationObjectList">
                 <table class="viewer-object-table">
+                  <tbody id="segmentationObjectInheritedBody" class="settings-inherited-body settings-channel-only" hidden></tbody>
                   <tbody id="segmentationObjectTableBody">
                     <!-- Rows dynamically inserted here -->
                   </tbody>
@@ -80,10 +91,13 @@
             <div id="trackingSettings" class="metadata-type-section">
               <table class="filter-table">
                 <tr>
-                  <td><label for="trackingConfidenceSlider">Confidence Threshold</label></td>
+                  <td><label for="toggleTrackingOverlay">Show Overlay</label></td>
+                  <td><input type="checkbox" id="toggleTrackingOverlay" checked></td>
+                </tr>
+                <tr>
+                  <td><label for="trackingConfidenceInput">Confidence Threshold</label></td>
                   <td>
-                    <input type="range" id="trackingConfidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0">
-                    <span id="trackingConfidenceDisplay">0</span>
+                    <input type="number" id="trackingConfidenceInput" class="settings-number" min="0" max="1" step="0.01" value="0">
                   </td>
                 </tr>
                 <tr>
@@ -93,23 +107,102 @@
                   </td>
                 </tr>
                 <tr class="track-history-dependent">
-                  <td><label for="trackTrailLengthSlider">Trail Length</label></td>
+                  <td><label for="trackTrailLengthInput">Trail Length</label></td>
                   <td>
-                    <input type="range" id="trackTrailLengthSlider" class="settings-slider" min="1" max="60" step="1" value="10">
-                    <span id="trackTrailLengthDisplay">10 positions</span>
+                    <input type="number" id="trackTrailLengthInput" class="settings-number" min="1" max="60" step="1" value="10">
+                    <span class="settings-unit">positions</span>
                   </td>
                 </tr>
                 <tr class="track-history-dependent">
-                  <td><label for="lostTrackTtlSlider">Keep Lost Tracks For</label></td>
+                  <td><label for="lostTrackTtlInput">Keep Lost Tracks For</label></td>
                   <td>
-                    <input type="range" id="lostTrackTtlSlider" class="settings-slider" min="0" max="10000" step="250" value="2000">
-                    <span id="lostTrackTtlDisplay">2.0 s</span>
+                    <input type="number" id="lostTrackTtlInput" class="settings-number" min="0" max="10000" step="250" value="2000">
+                    <span class="settings-unit">ms</span>
                   </td>
                 </tr>
               </table>
             </div>
-            <div id="metadataNoSettings" class="metadata-type-section metadata-empty-state">
-              No settings for this metadata type yet.
+            <div id="poseEstimationSettings" class="metadata-type-section">
+              <table class="filter-table">
+                <tr>
+                  <td><label for="togglePoseEstimationOverlay">Show Overlay</label></td>
+                  <td><input type="checkbox" id="togglePoseEstimationOverlay" checked></td>
+                </tr>
+                <tr>
+                  <td><label for="togglePoseKeypoints">Show Joint Markers</label></td>
+                  <td><input type="checkbox" id="togglePoseKeypoints" checked></td>
+                </tr>
+                <tr>
+                  <td><label for="togglePoseKeypointLabels">Show Landmark Names</label></td>
+                  <td><input type="checkbox" id="togglePoseKeypointLabels"></td>
+                </tr>
+              </table>
+              <p class="settings-field-note">
+                Landmark names are off by default to keep the video overlay readable.
+              </p>
+            </div>
+            <div id="classificationSettings" class="metadata-type-section">
+              <table class="filter-table">
+                <tr>
+                  <td><label for="toggleClassificationOverlay">Show Overlay</label></td>
+                  <td><input type="checkbox" id="toggleClassificationOverlay" checked></td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <!-- BlazePose 3D Config Tab -->
+          <div id="viewer-pose3d" class="settings-tab-section">
+            <p class="settings-field-note">
+              The BlazePose world-landmark panel shown beside a channel's video.
+            </p>
+            <table class="filter-table">
+              <tr>
+                <td><label for="toggleBlazePose3DPanel">Show 3D Pose Panel</label></td>
+                <td><input type="checkbox" id="toggleBlazePose3DPanel" checked></td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DPanelMode">Panel Size</label></td>
+                <td>
+                  <select id="blazePose3DPanelMode">
+                    <option value="compact">Compact</option>
+                    <option value="collapsed">Collapsed</option>
+                    <option value="expanded">Expanded</option>
+                  </select>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DTransparencySlider">Panel Transparency</label></td>
+                <td>
+                  <input type="range" id="blazePose3DTransparencySlider" class="settings-slider" min="0" max="100" step="5" value="0">
+                  <span id="blazePose3DTransparencyDisplay">0%</span>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DYawSlider">Camera Yaw</label></td>
+                <td>
+                  <input type="range" id="blazePose3DYawSlider" class="settings-slider" min="-180" max="180" step="5" value="-45">
+                  <span id="blazePose3DYawDisplay">-45&deg;</span>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DPitchSlider">Camera Pitch</label></td>
+                <td>
+                  <input type="range" id="blazePose3DPitchSlider" class="settings-slider" min="-60" max="60" step="5" value="20">
+                  <span id="blazePose3DPitchDisplay">20&deg;</span>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="toggleBlazePose3DReferenceBox">Show 3D Reference Box</label></td>
+                <td><input type="checkbox" id="toggleBlazePose3DReferenceBox" checked></td>
+              </tr>
+            </table>
+            <p class="settings-field-note">
+              Changes preview immediately. Save persists them; closing restores the saved view.
+              Transparency affects panel surfaces only; the pose and controls remain fully visible.
+            </p>
+            <div class="settings-inline-actions">
+              <button id="resetBlazePose3DView" type="button" class="app-button">Reset View</button>
             </div>
           </div>
 
@@ -124,10 +217,14 @@
                 <option value="inclusion">Inclusion Regions</option>
                 <option value="exclusion">Exclusion Regions</option>
               </select>
-              <label for="toggleRoiFiltering">Apply ROI Filtering:</label>
-              <input type="checkbox" id="toggleRoiFiltering" checked />
-              <label for="toggleRoiVisibility">Show ROI Overlay:</label>
-              <input type="checkbox" id="toggleRoiVisibility" checked />
+              <div class="roi-scope-setting">
+                <label for="toggleRoiFiltering">Apply ROI Filtering:</label>
+                <input type="checkbox" id="toggleRoiFiltering" checked />
+              </div>
+              <div class="roi-scope-setting">
+                <label for="toggleRoiVisibility">Show ROI Overlay:</label>
+                <input type="checkbox" id="toggleRoiVisibility" checked />
+              </div>
             </div>
 
             <div id="roiDrawingArea" class="roi-canvas-container">
@@ -147,17 +244,35 @@
           <div id="viewer-general" class="settings-tab-section">
             <table class="filter-table">
               <tr>
-                <td><label for="videoSyncBufferSlider">Video Sync Buffer (msec)</label></td>
+                <td><label for="videoSyncBufferInput">Video Sync Buffer</label></td>
                 <td>
-                  <input type="range" id="videoSyncBufferSlider" class="settings-slider" min="0" max="4000" step="50" value="350">
-                  <span id="videoSyncBufferDisplay">350</span>
+                  <input type="number" id="videoSyncBufferInput" class="settings-number" min="0" max="4000" step="50" value="300">
+                  <span class="settings-unit">ms</span>
                 </td>
               </tr>
               <tr>
-                <td><label for="metadataRetentionSlider">Metadata Retention (msec, 0 = no expiry)</label></td>
+                <td><label for="metadataRetentionInput">Metadata Retention (0 = no expiry)</label></td>
                 <td>
-                  <input type="range" id="metadataRetentionSlider" class="settings-slider" min="0" max="30000" step="250" value="0">
-                  <span id="metadataRetentionDisplay">0</span>
+                  <input type="number" id="metadataRetentionInput" class="settings-number" min="0" max="30000" step="250" value="0">
+                  <span class="settings-unit">ms</span>
+                </td>
+              </tr>
+              <tr>
+                <td><label for="lineWidthInput">Line Width</label></td>
+                <td>
+                  <input type="number" id="lineWidthInput" class="settings-number" min="1" max="10" step="1" value="3">
+                  <span class="settings-unit">px</span>
+                </td>
+              </tr>
+              <tr>
+                <td><label for="orientationSelector">Orientation</label></td>
+                <td>
+                  <select id="orientationSelector">
+                    <option value="none">None</option>
+                    <option value="mirror">Mirror</option>
+                    <option value="flip-vertical">Flip Vertical</option>
+                    <option value="rotate-180">Rotate 180&deg;</option>
+                  </select>
                 </td>
               </tr>
             </table>
@@ -165,7 +280,34 @@
         </div>
       </div>
       <div class="modal-footer">
+        <div class="settings-reset">
+          <button type="button" id="resetChannelScopes" class="settings-reset-all settings-global-only" hidden>Reset all channels to the global settings…</button>
+        </div>
         <button id="saveViewerSettings" class="app-button">Save</button>
+      </div>
+      <!-- Modals over the dialog, opened by the scope UI (settings-scope.js). -->
+      <div id="settingsOverridesModal" class="settings-submodal" hidden>
+        <div class="settings-submodal-card" role="dialog" aria-modal="true" aria-labelledby="settingsOverridesTitle" aria-describedby="settingsOverridesMessage">
+          <div class="settings-submodal-header">
+            <h3 id="settingsOverridesTitle" class="settings-submodal-title"></h3>
+            <button type="button" id="settingsOverridesClose" class="settings-submodal-close" aria-label="Close">&times;</button>
+          </div>
+          <p id="settingsOverridesMessage" class="settings-submodal-message"></p>
+          <div id="settingsOverridesList" class="settings-overrides-list"></div>
+          <div class="settings-submodal-actions">
+            <button type="button" id="settingsOverridesDone" class="settings-modal-button settings-modal-button--neutral">Close</button>
+          </div>
+        </div>
+      </div>
+      <div id="resetChannelScopesConfirm" class="settings-submodal" hidden>
+        <div class="settings-submodal-card" role="alertdialog" aria-modal="true" aria-labelledby="resetChannelScopesTitle" aria-describedby="resetChannelScopesMessage">
+          <h3 id="resetChannelScopesTitle" class="settings-submodal-title">Reset all channels?</h3>
+          <p id="resetChannelScopesMessage" class="settings-submodal-message"></p>
+          <div class="settings-submodal-actions">
+            <button type="button" id="resetChannelScopesCancel" class="settings-modal-button settings-modal-button--neutral">Cancel</button>
+            <button type="button" id="resetChannelScopesConfirmButton" class="settings-modal-button settings-modal-button--danger">Reset</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -175,14 +317,16 @@
     <img src="/static/icons/menu.png" alt="Settings Menu">
   </button>
 
-  <script src="/static/js/viewer-settings-resolver.js"></script>
-  <script src="/static/drawing.js"></script>
-  <script src="/static/viewer-react.js"></script>
-  <link rel="stylesheet" href="/static/css/settings.css">
+  <script src="/static/js/viewer-settings-resolver.js?v=18"></script>
+  <script src="/static/js/settings-scope.js?v=2"></script>
+  <script src="/static/js/metadata-colors.js?v=1"></script>
+  <script src="/static/drawing.js?v=18"></script>
+  <script src="/static/viewer-react.js?v=20"></script>
+  <link rel="stylesheet" href="/static/css/settings.css?v=15">
   <link rel="stylesheet" href="/static/css/app-buttons.css">
   <link rel="stylesheet" href="/static/css/roi.css">
   <script type="module" src="/static/js/roi.js"></script>
-  <script src="/static/settings.js"></script>
+  <script src="/static/settings.js?v=19"></script>
 
 </body>
 </html>

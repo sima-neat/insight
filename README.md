@@ -9,6 +9,7 @@
 
 It provides:
 - Multi-channel WebRTC video viewer with MetadataReceiver support
+- Frame-correlated auxiliary visualization panels, including BlazePose 3D
 - Codec-aware media source control with RTSP and HTTP MJPEG streaming
 - System and application metrics dashboard
 
@@ -57,7 +58,7 @@ Notes:
 
 1. Open the Viewer tab to monitor active channels.
 2. Open Streaming to assign/start/stop input sources. To publish a webcam attached to your browser's computer as a live source, enable a camera under Media Sources → Local cameras and select it in a source slot.
-3. Open Stats to see the planned location for system load and runtime metrics. This view is a placeholder in the current release and is expected to be completed in the next release.
+3. Open Stats to inspect live and recorded Sentinel telemetry from the selected board.
 
 ## Viewer settings
 
@@ -79,6 +80,12 @@ ROI settings are split into filtering and display:
 
 General settings include Overlay Delay, which delays metadata selection so boxes
 and tracks can be aligned with the displayed WebRTC frame.
+
+Frame-correlated data that should not cover the video can use an auxiliary
+visualization panel. See [`docs/auxiliary-visualizations.md`](docs/auxiliary-visualizations.md)
+for the generic contract and built-in BlazePose 3D renderer. Viewer Configuration
+controls the panel per channel, and the 3D skeleton stays frame-aligned with the
+2D pose overlay.
 
 ## Build from source
 
@@ -123,11 +130,13 @@ Examples:
 
 ```bash
 neat-insight-metadata-test --count 1 --types object-detection
-neat-insight-metadata-test --count 4 --types object-detection,classification,pose-estimation
+neat-insight-metadata-test --count 4 --types object-detection,classification,pose-estimation,segmentation,tracking
 neat_insight/tools/multisrc-harness.sh start --count 16
 ```
 
 Notes:
 - Default destination is `127.0.0.1`, starting at UDP port `9100`.
 - Supported metadata types are `object-detection`, `classification`, `pose-estimation`, `segmentation`, and `tracking`.
+- Overlay colors follow the identity rules in [docs/user-interface.md](docs/user-interface.md#metadata-colors): class for detection, segmentation and classification, `id` for tracking and pose estimation.
+- An `object-detection` object may carry `oriented_bbox` (`[cx, cy, width, height, angle]`, angle in radians, clockwise on screen) to draw a rotated box; `bbox` stays required as its upright extent. The test sender includes one rotated `ship`.
 - `neat_insight/tools/metadata-test.py` remains as a compatibility wrapper, but the packaged CLI is the preferred entry point.

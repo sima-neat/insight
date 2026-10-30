@@ -144,6 +144,12 @@ func rawMessageAt(atMS int, payload string) correlatorArrival {
 	return correlatorArrival{atMS: atMS, payload: []byte(payload)}
 }
 
+// msPtr is for want literals: the summary reports a millisecond lag through a
+// pointer, so absence (no samples) is distinguishable from a zero lag.
+func msPtr(ms float64) *float64 {
+	return &ms
+}
+
 // correlatorTally is what a scenario put in and got out, so a test can check it
 // against the counters the correlator reports.
 type correlatorTally struct {
@@ -196,7 +202,10 @@ func TestMetadataCorrelatorAttributesEveryOutcome(t *testing.T) {
 		name:         "video first",
 		arrivals:     []correlatorArrival{frameAt(0, 7, 90000, 400), messageAt(0, 1000)},
 		wantOutgoing: []uint32{400},
-		want:         MetadataCorrelationSnapshot{MatchedVideoFirst: 1, PendingVideo: 1},
+		want: MetadataCorrelationSnapshot{
+			MatchedVideoFirst: 1, PendingVideo: 1,
+			VideoFirstLagRecentMedianMS: msPtr(0), VideoFirstLagRecentMaxMS: msPtr(0), VideoFirstLagSamples: 1,
+		},
 	}, {
 		name:         "metadata first",
 		arrivals:     []correlatorArrival{messageAt(0, 1000), frameAt(0, 7, 90000, 400)},
@@ -209,7 +218,10 @@ func TestMetadataCorrelatorAttributesEveryOutcome(t *testing.T) {
 			messageAt(1, 2000), messageAt(1, 1000)},
 		observeMS:    1,
 		wantOutgoing: []uint32{500, 400},
-		want:         MetadataCorrelationSnapshot{MatchedVideoFirst: 2, PendingVideo: 2},
+		want: MetadataCorrelationSnapshot{
+			MatchedVideoFirst: 2, PendingVideo: 2,
+			VideoFirstLagRecentMedianMS: msPtr(0), VideoFirstLagRecentMaxMS: msPtr(1), VideoFirstLagSamples: 2,
+		},
 	}, {
 		name: "out of order frames, metadata first",
 		arrivals: []correlatorArrival{messageAt(0, 1000), frameAt(0, 7, 180000, 500),
@@ -222,7 +234,10 @@ func TestMetadataCorrelatorAttributesEveryOutcome(t *testing.T) {
 		arrivals:     []correlatorArrival{frameAt(0, 7, 90000, 400), messageAt(500, 1000)},
 		observeMS:    500,
 		wantOutgoing: []uint32{400},
-		want:         MetadataCorrelationSnapshot{MatchedVideoFirst: 1, PendingVideo: 1},
+		want: MetadataCorrelationSnapshot{
+			MatchedVideoFirst: 1, PendingVideo: 1,
+			VideoFirstLagRecentMedianMS: msPtr(500), VideoFirstLagRecentMaxMS: msPtr(500), VideoFirstLagSamples: 1,
+		},
 	}, {
 		name:         "video delayed within retention",
 		arrivals:     []correlatorArrival{messageAt(0, 1000), frameAt(500, 7, 90000, 400)},
@@ -267,6 +282,7 @@ func TestMetadataCorrelatorAttributesEveryOutcome(t *testing.T) {
 		wantOutgoing: []uint32{905},
 		want: MetadataCorrelationSnapshot{
 			MatchedVideoFirst: 1, PendingVideo: 1, EvictedVideo: 1, EvictedMetadata: 1,
+			VideoFirstLagRecentMedianMS: msPtr(1), VideoFirstLagRecentMaxMS: msPtr(1), VideoFirstLagSamples: 1,
 		},
 	}, {
 		// A restart after an idle gap lost its entries to age before the reset saw
@@ -351,11 +367,16 @@ func TestMetadataCorrelatorAttributesProgressiveDrift(t *testing.T) {
 		t.Fatalf("drifted messages were not being held: %+v", held)
 	}
 
-	// No message may vanish: what did not match has to show up as expired.
+	// No message may vanish: what did not match has to show up as expired. Every
+	// match here sees its frame and message recorded at the same arrival time, so
+	// every lag sample is zero.
 	want := MetadataCorrelationSnapshot{
-		MatchedVideoFirst: uint64(matchedCount),
-		ExpiredMetadata:   uint64(messages - matchedCount),
-		ExpiredVideo:      messages,
+		MatchedVideoFirst:           uint64(matchedCount),
+		ExpiredMetadata:             uint64(messages - matchedCount),
+		ExpiredVideo:                messages,
+		VideoFirstLagRecentMedianMS: msPtr(0),
+		VideoFirstLagRecentMaxMS:    msPtr(0),
+		VideoFirstLagSamples:        uint64(matchedCount),
 	}
 	got := correlator.pruneAndSnapshot(base.Add(span + testCorrelatorRetention + time.Millisecond))
 	if !reflect.DeepEqual(got, want) {
@@ -547,5 +568,110 @@ func BenchmarkMetadataTimestampCorrelatorVideoFrame(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		timestamp := uint32(i) * 3000
 		correlator.addVideoFrame(7, timestamp, timestamp, now)
+	}
+}
+
+func TestMetadataCorrelatorReportsVideoFirstLag(t *testing.T) {
+	correlator := newMetadataTimestampCorrelator(8, 5*time.Second)
+	start := time.Unix(100, 0)
+	for frame, lag := range []time.Duration{400 * time.Millisecond, 500 * time.Millisecond, 600 * time.Millisecond} {
+		timestampMS := int64(1000 + frame*40)
+		frameAt := start.Add(time.Duration(frame) * 40 * time.Millisecond)
+		correlator.addVideoFrame(7, uint32(timestampMS*90), uint32(frame), frameAt)
+		if ready := correlator.addMetadata(metadataPayload(timestampMS), frameAt.Add(lag)); len(ready) != 1 {
+			t.Fatalf("expected frame %d to match, got %d messages", frame, len(ready))
+		}
+	}
+
+	snapshot := correlator.pruneAndSnapshot(start.Add(time.Second))
+
+	if snapshot.VideoFirstLagSamples != 3 {
+		t.Fatalf("expected 3 lag samples, got %d", snapshot.VideoFirstLagSamples)
+	}
+	if snapshot.VideoFirstLagRecentMedianMS == nil || *snapshot.VideoFirstLagRecentMedianMS != 500 {
+		t.Fatalf("unexpected median lag: %v", snapshot.VideoFirstLagRecentMedianMS)
+	}
+	if snapshot.VideoFirstLagRecentMaxMS == nil || *snapshot.VideoFirstLagRecentMaxMS != 600 {
+		t.Fatalf("unexpected maximum lag: %v", snapshot.VideoFirstLagRecentMaxMS)
+	}
+}
+
+func TestMetadataCorrelatorTakesNoLagSampleWhenMetadataArrivesFirst(t *testing.T) {
+	correlator := newMetadataTimestampCorrelator(8, 5*time.Second)
+	now := time.Unix(100, 0)
+
+	correlator.addMetadata(metadataPayload(1000), now)
+	correlator.addVideoFrame(7, 90000, 1, now.Add(30*time.Millisecond))
+
+	snapshot := correlator.pruneAndSnapshot(now.Add(time.Second))
+	if snapshot.MatchedMetadataFirst != 1 {
+		t.Fatalf("expected a metadata-first match, got %+v", snapshot)
+	}
+	if snapshot.VideoFirstLagSamples != 0 || snapshot.VideoFirstLagRecentMedianMS != nil || snapshot.VideoFirstLagRecentMaxMS != nil {
+		t.Fatalf("expected no lag samples: %+v", snapshot)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "video_first_lag_recent") {
+		t.Fatalf("expected lag values to be omitted without samples: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"video_first_lag_samples":0`) {
+		t.Fatalf("expected the sample count to be reported at zero: %s", encoded)
+	}
+}
+
+func TestMetadataCorrelatorKeepsOnlyRecentLagSamples(t *testing.T) {
+	correlator := newMetadataTimestampCorrelator(8, 5*time.Second)
+	start := time.Unix(100, 0)
+	total := videoFirstLagSampleLimit + 10
+	for frame := 0; frame < total; frame++ {
+		timestampMS := int64(1000 + frame*40)
+		frameAt := start.Add(time.Duration(frame) * 40 * time.Millisecond)
+		// The first 10 samples lag by 900 ms, all later ones by 100 ms.
+		lag := 100 * time.Millisecond
+		if frame < 10 {
+			lag = 900 * time.Millisecond
+		}
+		correlator.addVideoFrame(7, uint32(timestampMS*90), uint32(frame), frameAt)
+		correlator.addMetadata(metadataPayload(timestampMS), frameAt.Add(lag))
+	}
+
+	snapshot := correlator.pruneAndSnapshot(start.Add(time.Hour))
+
+	if snapshot.VideoFirstLagSamples != videoFirstLagSampleLimit {
+		t.Fatalf("expected %d samples, got %d", videoFirstLagSampleLimit, snapshot.VideoFirstLagSamples)
+	}
+	if *snapshot.VideoFirstLagRecentMaxMS != 100 {
+		t.Fatalf("expected the old 900 ms samples to be gone, got max %v", *snapshot.VideoFirstLagRecentMaxMS)
+	}
+}
+
+func TestMetadataCorrelatorClearsLagSamplesOnSourceRestart(t *testing.T) {
+	correlator := newMetadataTimestampCorrelator(8, 5*time.Second)
+	now := time.Unix(100, 0)
+	correlator.addVideoFrame(7, 90000, 1, now)
+	correlator.addMetadata(metadataPayload(1000), now.Add(500*time.Millisecond))
+
+	correlator.addVideoFrame(8, 180000, 2, now.Add(time.Second)) // new SSRC
+
+	snapshot := correlator.pruneAndSnapshot(now.Add(2 * time.Second))
+	if snapshot.VideoFirstLagSamples != 0 {
+		t.Fatalf("expected lag samples to be cleared by the restart, got %d", snapshot.VideoFirstLagSamples)
+	}
+}
+
+func TestMetadataCorrelatorNeverReportsNegativeLag(t *testing.T) {
+	correlator := newMetadataTimestampCorrelator(8, 5*time.Second)
+	now := time.Unix(100, 0)
+	correlator.addVideoFrame(7, 90000, 1, now)
+
+	// The two arrival times come from separate clock reads and may be reordered.
+	correlator.addMetadata(metadataPayload(1000), now.Add(-time.Millisecond))
+
+	snapshot := correlator.pruneAndSnapshot(now.Add(time.Second))
+	if snapshot.VideoFirstLagSamples != 1 || *snapshot.VideoFirstLagRecentMaxMS != 0 {
+		t.Fatalf("expected one sample of 0 ms, got %+v", snapshot)
 	}
 }

@@ -1,0 +1,775 @@
+// The settings dialog's scope UI (spec part 3): a channel gets its own value for a
+// setting only while that setting's switch is on. The global dialog marks every
+// setting that channels set themselves with an icon that lists them, and offers a
+// reset of all channels. settings.js owns the dialog and calls into this file; nothing here
+// touches the page until create() runs from settings.js's DOMContentLoaded handler.
+(() => {
+  // The settings functions this UI calls (viewer-settings-resolver.js).
+  const REQUIRED_API_FUNCTIONS = [
+    "scalarSettings",
+    "followedValue",
+    "readScopeOwnValues",
+    "listChannelOverrides",
+    "inheritedObjects",
+    "writeScopeOwnSettings",
+    "clearScopeOwnValue",
+    "countChannelScopes",
+    "clearAllChannelScopes"
+  ];
+
+  // The page elements this UI needs besides the controls of the table below.
+  const REQUIRED_ELEMENT_IDS = [
+    "viewerSettingsOverlay",
+    "viewerSettingsScopeLine",
+    "viewerObjectInheritedBody",
+    "viewerObjectTableBody",
+    "segmentationObjectInheritedBody",
+    "segmentationObjectTableBody",
+    "resetChannelScopes",
+    "resetChannelScopesConfirm",
+    "resetChannelScopesMessage",
+    "resetChannelScopesConfirmButton",
+    "resetChannelScopesCancel",
+    "settingsOverridesModal",
+    "settingsOverridesTitle",
+    "settingsOverridesMessage",
+    "settingsOverridesList",
+    "settingsOverridesClose",
+    "settingsOverridesDone",
+    "saveViewerSettings"
+  ];
+
+  function readInteger(control) {
+    return parseInt(control.value, 10);
+  }
+
+  function readFraction(control) {
+    return parseFloat(control.value);
+  }
+
+  function readChecked(control) {
+    return control.checked;
+  }
+
+  function writeNumber(control, value) {
+    control.value = value;
+  }
+
+  // A slider or menu tells settings.js through the event the user's own input fires,
+  // so its readout and the live preview follow, as for writeChecked below.
+  function writeAndAnnounce(eventName) {
+    return (control, value) => {
+      control.value = value;
+      control.dispatchEvent(new Event(eventName));
+    };
+  }
+
+  function readSelected(control) {
+    return control.value;
+  }
+
+  // The panel transparency is stored as a fraction and edited in percent.
+  function readPercent(control) {
+    return parseInt(control.value, 10) / 100;
+  }
+
+  const writePercent = (control, value) =>
+    writeAndAnnounce("input")(control, Math.round((Number(value) || 0) * 100));
+
+  // Writing goes through the event the user's own click would fire, so settings.js
+  // updates the controls that depend on it exactly as it does for the user.
+  function writeChecked(control, value) {
+    control.checked = value !== false;
+    control.dispatchEvent(new Event("change"));
+  }
+
+  // The values as the notes quote them, with their unit.
+  function describeMs(value) {
+    return `${value} ms`;
+  }
+
+  function describeRetention(value) {
+    return Number(value) === 0 ? "no expiry" : describeMs(value);
+  }
+
+  function describeFraction(value) {
+    return Number(value).toFixed(2);
+  }
+
+  function describeOnOff(value) {
+    return value === false ? "off" : "on";
+  }
+
+  function describePixels(value) {
+    return `${value} px`;
+  }
+
+  function describePositions(value) {
+    return `${value} positions`;
+  }
+
+  function describeShown(value) {
+    return value === false ? "hidden" : "shown";
+  }
+
+  function describePercent(value) {
+    return `${Math.round((Number(value) || 0) * 100)}%`;
+  }
+
+  function describeDegrees(value) {
+    return `${value}\u00b0`;
+  }
+
+  const PANEL_SIZE_NAMES = { compact: "Compact", collapsed: "Collapsed", expanded: "Expanded" };
+
+  function describePanelSize(value) {
+    return PANEL_SIZE_NAMES[value] || String(value);
+  }
+
+  const ORIENTATION_NAMES = {
+    none: "None",
+    mirror: "Mirror",
+    "flip-vertical": "Flip Vertical",
+    "rotate-180": "Rotate 180\u00b0"
+  };
+
+  function describeOrientation(value) {
+    return ORIENTATION_NAMES[value] || String(value);
+  }
+
+  const NUMBER = { write: writeNumber };
+  const CHECKBOX = { read: readChecked, write: writeChecked };
+  const SLIDER = { read: readInteger, write: writeAndAnnounce("input") };
+  const MENU = { read: readSelected, write: writeAndAnnounce("change") };
+  const TRACK_HISTORY_ID = "types.tracking.history.enabled";
+  const BLAZEPOSE_PANEL_ID = "auxiliary.blazepose-3d.enabled";
+
+  function overlaySwitch(control) {
+    return { control, ...CHECKBOX, describe: describeShown };
+  }
+
+  // The one table: each scalar setting id with its control and how its value is
+  // read, written and described. Switches, notes, locking
+  // and saving are all driven by it.
+  const SCALAR_CONTROLS = {
+    "types.object-detection.visible": overlaySwitch("toggleObjectDetectionOverlay"),
+    "types.segmentation.visible": overlaySwitch("toggleSegmentationOverlay"),
+    "types.tracking.visible": overlaySwitch("toggleTrackingOverlay"),
+    "types.pose-estimation.visible": overlaySwitch("togglePoseEstimationOverlay"),
+    "types.classification.visible": overlaySwitch("toggleClassificationOverlay"),
+    "types.pose-estimation.showKeypoints": { control: "togglePoseKeypoints", ...CHECKBOX, describe: describeShown },
+    "types.pose-estimation.showKeypointLabels": {
+      control: "togglePoseKeypointLabels",
+      ...CHECKBOX,
+      describe: describeShown
+    },
+    "auxiliary.blazepose-3d.enabled": { control: "toggleBlazePose3DPanel", ...CHECKBOX, describe: describeShown },
+    "auxiliary.blazepose-3d.panelMode": {
+      control: "blazePose3DPanelMode",
+      ...MENU,
+      describe: describePanelSize,
+      dependsOn: BLAZEPOSE_PANEL_ID
+    },
+    "auxiliary.blazepose-3d.backgroundTransparency": {
+      control: "blazePose3DTransparencySlider",
+      read: readPercent,
+      write: writePercent,
+      describe: describePercent,
+      dependsOn: BLAZEPOSE_PANEL_ID
+    },
+    "auxiliary.blazepose-3d.yawDegrees": {
+      control: "blazePose3DYawSlider",
+      ...SLIDER,
+      describe: describeDegrees,
+      dependsOn: BLAZEPOSE_PANEL_ID
+    },
+    "auxiliary.blazepose-3d.pitchDegrees": {
+      control: "blazePose3DPitchSlider",
+      ...SLIDER,
+      describe: describeDegrees,
+      dependsOn: BLAZEPOSE_PANEL_ID
+    },
+    "auxiliary.blazepose-3d.showReferenceBox": {
+      control: "toggleBlazePose3DReferenceBox",
+      ...CHECKBOX,
+      describe: describeOnOff,
+      dependsOn: BLAZEPOSE_PANEL_ID
+    },
+    "general.videoSyncBufferMs": {
+      control: "videoSyncBufferInput",
+      ...NUMBER,
+      read: readInteger,
+      describe: describeMs
+    },
+    "general.metadataRetentionMs": {
+      control: "metadataRetentionInput",
+      ...NUMBER,
+      read: readInteger,
+      describe: describeRetention
+    },
+    "general.lineWidth": {
+      control: "lineWidthInput",
+      ...NUMBER,
+      read: readInteger,
+      describe: describePixels
+    },
+    "general.orientation": { control: "orientationSelector", ...MENU, describe: describeOrientation },
+    "general.showRoi": { control: "toggleRoiVisibility", ...CHECKBOX, describe: describeOnOff },
+    "general.applyRoiFiltering": { control: "toggleRoiFiltering", ...CHECKBOX, describe: describeOnOff },
+    "types.object-detection.confidenceThreshold": {
+      control: "confidenceInput",
+      ...NUMBER,
+      read: readFraction,
+      describe: describeFraction
+    },
+    "types.segmentation.confidenceThreshold": {
+      control: "segmentationConfidenceInput",
+      ...NUMBER,
+      read: readFraction,
+      describe: describeFraction
+    },
+    "types.segmentation.maskOpacity": {
+      control: "segmentationOpacityInput",
+      ...NUMBER,
+      read: readFraction,
+      describe: describeFraction
+    },
+    "types.tracking.confidenceThreshold": {
+      control: "trackingConfidenceInput",
+      ...NUMBER,
+      read: readFraction,
+      describe: describeFraction
+    },
+    "types.tracking.history.enabled": {
+      control: "toggleTrackHistory",
+      ...CHECKBOX,
+      describe: describeOnOff
+    },
+    "types.tracking.history.trailLength": {
+      control: "trackTrailLengthInput",
+      ...NUMBER,
+      read: readInteger,
+      describe: describePositions,
+      dependsOn: TRACK_HISTORY_ID
+    },
+    "types.tracking.history.lostTrackTtlMs": {
+      control: "lostTrackTtlInput",
+      ...NUMBER,
+      read: readInteger,
+      describe: describeMs,
+      dependsOn: TRACK_HISTORY_ID
+    }
+  };
+
+  // The class colour lists: where the inherited rows go, and the own rows' body.
+  const OBJECT_LISTS = [
+    { metadataType: "object-detection", inherited: "viewerObjectInheritedBody", own: "viewerObjectTableBody" },
+    { metadataType: "segmentation", inherited: "segmentationObjectInheritedBody", own: "segmentationObjectTableBody" }
+  ];
+
+  const STYLE_NAMES = { solid: "Solid", dashed: "Dashed", dotted: "Dotted" };
+  const WIDTH_NAMES = { 1: "Thin", 3: "Thick" };
+
+  function hasOwn(object, key) {
+    return Object.prototype.hasOwnProperty.call(object, key);
+  }
+
+  function isChannelScope(scope) {
+    return scope !== "global";
+  }
+
+  function channelOfScope(scope) {
+    const match = /^channel_(\d+)$/.exec(scope);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
+  // The row that holds a setting: a table row on the Metadata and General tabs,
+  // the setting's group in the ROI tab's row.
+  function settingContainer(control) {
+    return control.closest("tr, .roi-scope-setting");
+  }
+
+  // What keeps the scope UI from working with this settings script and this page;
+  // settings.js decides once from it whether to use the scope UI at all.
+  function missingRequirements(settingsApi) {
+    const functions = REQUIRED_API_FUNCTIONS.filter((name) => typeof settingsApi[name] !== "function");
+    const elements = REQUIRED_ELEMENT_IDS.filter((id) => !document.getElementById(id));
+    Object.values(SCALAR_CONTROLS).forEach((entry) => {
+      const control = document.getElementById(entry.control);
+      if (!control || !settingContainer(control)) elements.push(entry.control);
+    });
+    if (functions.length === 0) {
+      // Both sides must name the same settings, or a switch would save nothing.
+      const known = settingsApi.scalarSettings().map((setting) => setting.id);
+      const unmatched = known
+        .filter((id) => !hasOwn(SCALAR_CONTROLS, id))
+        .concat(Object.keys(SCALAR_CONTROLS).filter((id) => !known.includes(id)));
+      if (unmatched.length > 0) functions.push(`scalarSettings() matching ${unmatched.join(", ")}`);
+    }
+    return { functions, elements };
+  }
+
+  function createButton(text, className, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = text;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function overridesText(count) {
+    return count === 1 ? "1 channel uses its own value" : `${count} channels use their own value`;
+  }
+
+  // The global dialog's mark on a setting that channels set themselves: an icon at the
+  // end of its row (of its group on the ROI tab) that opens the list of those channels.
+  function createOverrideIcon(container, onClick) {
+    const wrapper = document.createElement(container.tagName === "TR" ? "td" : "span");
+    wrapper.className = "settings-override-cell settings-global-only";
+    const button = createButton("\u26a0", "settings-override-icon", onClick);
+    button.hidden = true;
+    wrapper.appendChild(button);
+    container.appendChild(wrapper);
+    return button;
+  }
+
+  // A modal over the settings dialog: Escape, a click beside its card and its close
+  // buttons all close it, without closing the dialog under it.
+  function wireModal(modal, closeButtons, close) {
+    closeButtons.forEach((button) => button.addEventListener("click", close));
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) close();
+    });
+    modal.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    });
+  }
+
+  function createNoteLine(text, button) {
+    const line = document.createElement("div");
+    line.className = "settings-scope-note-line";
+    line.appendChild(document.createTextNode(text));
+    if (button) {
+      line.appendChild(document.createTextNode(" "));
+      line.appendChild(button);
+    }
+    return line;
+  }
+
+  // The label of the setting itself, so the switch can name what it belongs to.
+  function settingLabelId(controlId) {
+    const label = document.querySelector(`label[for="${controlId}"]`);
+    if (!label) return null;
+    if (!label.id) label.id = `${controlId}Label`;
+    return label.id;
+  }
+
+  function createSwitch(controlId, container) {
+    const wrapper = document.createElement(container.tagName === "TR" ? "td" : "span");
+    wrapper.className = "settings-own-switch settings-channel-only";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = `${controlId}OwnValue`;
+    input.className = "settings-own-switch-input";
+    input.setAttribute("role", "switch");
+    const labelId = settingLabelId(controlId);
+    if (labelId) input.setAttribute("aria-describedby", labelId);
+    const label = document.createElement("label");
+    label.htmlFor = input.id;
+    label.textContent = "Own value";
+    wrapper.append(input, label);
+    container.appendChild(wrapper);
+    return { wrapper, input };
+  }
+
+  // A table setting gets a note row under its row; a ROI group gets a line inside it.
+  function createNote(container) {
+    if (container.tagName === "TR") {
+      const row = document.createElement("tr");
+      row.className = "settings-scope-note-row";
+      row.hidden = true;
+      const cell = document.createElement("td");
+      cell.className = "settings-scope-note";
+      cell.colSpan = 4;
+      row.appendChild(cell);
+      container.after(row);
+      return { box: row, content: cell };
+    }
+    const box = document.createElement("div");
+    box.className = "settings-scope-note";
+    box.hidden = true;
+    container.appendChild(box);
+    return { box, content: box };
+  }
+
+  function create(options) {
+    const { settingsApi, createObjectEntry, readObjectEntries, dispatchSettingsChanged } = options;
+    const dialog = document.getElementById("viewerSettingsOverlay");
+    const scopeLine = document.getElementById("viewerSettingsScopeLine");
+    const saveButton = document.getElementById("saveViewerSettings");
+    const resetLink = document.getElementById("resetChannelScopes");
+    const resetConfirm = document.getElementById("resetChannelScopesConfirm");
+    const resetMessage = document.getElementById("resetChannelScopesMessage");
+    const resetConfirmButton = document.getElementById("resetChannelScopesConfirmButton");
+    const resetCancel = document.getElementById("resetChannelScopesCancel");
+    const overridesModal = document.getElementById("settingsOverridesModal");
+    const overridesTitle = document.getElementById("settingsOverridesTitle");
+    const overridesMessage = document.getElementById("settingsOverridesMessage");
+    const overridesList = document.getElementById("settingsOverridesList");
+    let scope = "global";
+    // The setting whose channels the overrides modal lists while it is open.
+    let shownOverrides = null;
+
+    const settings = settingsApi.scalarSettings().map(({ id, metadataType }) => {
+      const entry = SCALAR_CONTROLS[id];
+      const control = document.getElementById(entry.control);
+      const container = settingContainer(control);
+      const own = createSwitch(entry.control, container);
+      const note = createNote(container);
+      const setting = { id, metadataType, entry, control, container, own, note };
+      setting.overrideIcon = createOverrideIcon(container, () => openOverrides(setting));
+      own.input.addEventListener("change", () => onSwitchChange(setting));
+      return setting;
+    });
+    const settingsById = new Map(settings.map((setting) => [setting.id, setting]));
+
+    const objectLists = OBJECT_LISTS.map((list) => {
+      const objectList = {
+        metadataType: list.metadataType,
+        ownBody: document.getElementById(list.own),
+        inheritedBody: document.getElementById(list.inherited)
+      };
+      // A renamed own entry can hide or reveal an inherited one.
+      objectList.ownBody.addEventListener("change", () => renderInherited(objectList));
+      return objectList;
+    });
+
+    resetLink.addEventListener("click", openResetConfirm);
+    resetConfirmButton.addEventListener("click", resetAllChannels);
+    wireModal(resetConfirm, [resetCancel], closeResetConfirm);
+    wireModal(
+      overridesModal,
+      ["settingsOverridesClose", "settingsOverridesDone"].map((id) => document.getElementById(id)),
+      closeOverrides
+    );
+
+    function inChannelDialog() {
+      return isChannelScope(scope);
+    }
+
+    function writeValue(setting, value) {
+      setting.entry.write(setting.control, value);
+    }
+
+    function readValue(setting) {
+      return setting.entry.read(setting.control);
+    }
+
+    // A control is usable when it is the channel's own (always, in the global
+    // dialog) and, for a setting that depends on another one (track history, the 3D
+    // pose panel), while that one is on. In a channel dialog that control holds what
+    // the channel ends up with: its own value when switched on, the followed value
+    // otherwise.
+    function isEnabled(setting) {
+      const controlling = setting.entry.dependsOn && settingsById.get(setting.entry.dependsOn);
+      if (controlling && !controlling.control.checked) return false;
+      return !inChannelDialog() || setting.own.input.checked;
+    }
+
+    function refreshControls() {
+      settings.forEach((setting) => {
+        const enabled = isEnabled(setting);
+        setting.control.disabled = !enabled;
+        setting.container.classList.toggle("settings-scope-locked", !enabled);
+      });
+    }
+
+    function renderChannelNote(setting) {
+      const isOwn = setting.own.input.checked;
+      setting.note.content.replaceChildren();
+      if (isOwn) {
+        const followed = settingsApi.followedValue(setting.id);
+        setting.note.content.appendChild(createNoteLine(`Global value: ${setting.entry.describe(followed)}.`));
+      }
+      setting.note.box.hidden = !isOwn;
+    }
+
+    // Collapsed to one summary line, so a long list cannot push the settings apart; `open`
+    // keeps it expanded when it is re-rendered after a "Use global value" click.
+    // The setting as the overrides modal names it: its label, after its metadata type
+    // where several types have a setting of that name.
+    function settingTitle(setting) {
+      const label = document.querySelector(`label[for="${setting.entry.control}"]`);
+      const name = label ? label.textContent.trim() : setting.id;
+      const type = settingsApi.metadataTypes.find(({ value }) => value === setting.metadataType);
+      return type ? `${type.label}: ${name}` : name;
+    }
+
+    function renderOverrideIcon(setting) {
+      const count = settingsApi.listChannelOverrides(setting.id).length;
+      const text = overridesText(count);
+      setting.overrideIcon.hidden = count === 0;
+      setting.overrideIcon.title = text;
+      setting.overrideIcon.setAttribute("aria-label", `${settingTitle(setting)}: ${text}`);
+    }
+
+    function renderOverridesModal() {
+      const setting = shownOverrides;
+      const overrides = settingsApi.listChannelOverrides(setting.id);
+      overridesTitle.textContent = settingTitle(setting);
+      overridesMessage.textContent =
+        `${overridesText(overrides.length)}. ` +
+        `Changes in the global settings do not affect ${overrides.length === 1 ? "it" : "them"}.`;
+      overridesList.replaceChildren(
+        ...overrides.map(({ channel, value }) => {
+          const line = document.createElement("div");
+          line.className = "settings-overrides-line";
+          const text = document.createElement("span");
+          text.textContent = `Channel ${channel}: ${setting.entry.describe(value)}`;
+          line.append(
+            text,
+            createButton("Use global value", "settings-scope-link", () => useGlobalValueForChannel(setting, channel))
+          );
+          return line;
+        })
+      );
+    }
+
+    function openOverrides(setting) {
+      shownOverrides = setting;
+      renderOverridesModal();
+      overridesModal.hidden = false;
+      const firstLink = overridesList.querySelector(".settings-scope-link");
+      if (firstLink) firstLink.focus();
+    }
+
+    function hideOverrides() {
+      overridesModal.hidden = true;
+      overridesList.replaceChildren();
+      shownOverrides = null;
+    }
+
+    // Back to the icon that opened the modal, or to the setting once no channel is left.
+    function closeOverrides() {
+      const setting = shownOverrides;
+      hideOverrides();
+      if (!setting) return;
+      if (!setting.overrideIcon.hidden) setting.overrideIcon.focus();
+      else if (!setting.control.disabled) setting.control.focus();
+      else saveButton.focus();
+    }
+
+    // "Use global value" in the overrides modal takes effect at once, without Save.
+    function useGlobalValueForChannel(setting, channel) {
+      const channelScope = `channel_${channel}`;
+      if (!settingsApi.clearScopeOwnValue(channelScope, setting.id)) return;
+      dispatchSettingsChanged(channelScope);
+      renderOverrideIcon(setting);
+      renderResetLink();
+      if (setting.overrideIcon.hidden) {
+        closeOverrides();
+        return;
+      }
+      renderOverridesModal();
+      overridesList.querySelector(".settings-scope-link").focus();
+    }
+
+    function onSwitchChange(setting) {
+      if (!setting.own.input.checked) writeValue(setting, settingsApi.followedValue(setting.id));
+      renderChannelNote(setting);
+      refreshControls();
+    }
+
+    function loadChannelSettings() {
+      const ownValues = settingsApi.readScopeOwnValues(scope);
+      settings.forEach((setting) => {
+        const isOwn = hasOwn(ownValues, setting.id);
+        setting.own.input.checked = isOwn;
+        writeValue(setting, isOwn ? ownValues[setting.id] : settingsApi.followedValue(setting.id));
+      });
+    }
+
+    // The global dialog has no own values; no switch keeps a channel's state.
+    function loadGlobalSettings() {
+      settings.forEach((setting) => {
+        setting.own.input.checked = false;
+      });
+    }
+
+    function createInheritedRow(objectList, entry) {
+      const row = document.createElement("tr");
+      row.className = "settings-inherited-row";
+
+      const labelCell = document.createElement("td");
+      const label = document.createElement("span");
+      label.className = "settings-inherited-label";
+      label.textContent = entry.label;
+      const tag = document.createElement("span");
+      tag.className = "settings-inherited-tag";
+      tag.textContent = "from global";
+      labelCell.append(label, tag);
+
+      const colorCell = document.createElement("td");
+      const swatch = document.createElement("span");
+      swatch.className = "settings-inherited-swatch";
+      swatch.style.backgroundColor = entry.color;
+      swatch.title = entry.color;
+      colorCell.appendChild(swatch);
+
+      const styleCell = document.createElement("td");
+      styleCell.textContent = STYLE_NAMES[entry.style] || entry.style;
+      const widthCell = document.createElement("td");
+      widthCell.textContent = WIDTH_NAMES[entry.width] || String(entry.width);
+
+      const actionCell = document.createElement("td");
+      actionCell.appendChild(
+        createButton("Override", "settings-scope-link", () => overrideInherited(objectList, entry))
+      );
+
+      row.append(labelCell, colorCell, styleCell, widthCell, actionCell);
+      return row;
+    }
+
+    // Global entries first, read-only; a global entry the channel has its own entry
+    // for is not shown. The global dialog shows none.
+    function renderInherited(objectList) {
+      objectList.inheritedBody.replaceChildren();
+      if (inChannelDialog()) {
+        const ownLabels = new Set(readObjectEntries(objectList.metadataType).map((entry) => entry.label.trim()));
+        settingsApi
+          .inheritedObjects(objectList.metadataType)
+          .filter((entry) => !ownLabels.has(entry.label))
+          .forEach((entry) => objectList.inheritedBody.appendChild(createInheritedRow(objectList, entry)));
+      }
+      objectList.inheritedBody.hidden = objectList.inheritedBody.childElementCount === 0;
+    }
+
+    function refreshInherited() {
+      objectLists.forEach(renderInherited);
+    }
+
+    // Override: an own entry with the same values, made by the dialog's own row creation.
+    function overrideInherited(objectList, entry) {
+      const row = createObjectEntry(objectList.metadataType, entry);
+      renderInherited(objectList);
+      const firstInput = row && row.querySelector("input");
+      if (firstInput) firstInput.focus();
+    }
+
+    function channelCountText(count) {
+      return count === 1 ? "1 channel" : `${count} channels`;
+    }
+
+    function renderResetLink() {
+      resetLink.hidden = settingsApi.countChannelScopes() === 0;
+    }
+
+    function openResetConfirm() {
+      const count = settingsApi.countChannelScopes();
+      resetMessage.textContent =
+        `The own values of ${channelCountText(count)} are removed, and ${count === 1 ? "it follows" : "they follow"} ` +
+        "the global settings again. " +
+        "Regions of interest are kept.";
+      resetConfirm.hidden = false;
+      resetCancel.focus();
+    }
+
+    function hideResetConfirm() {
+      resetConfirm.hidden = true;
+      resetMessage.textContent = "";
+    }
+
+    function closeResetConfirm() {
+      hideResetConfirm();
+      renderResetLink();
+      if (!resetLink.hidden) resetLink.focus();
+      else saveButton.focus();
+    }
+
+    // Every channel follows the global settings again; the drawn regions stay.
+    function resetAllChannels() {
+      settingsApi.clearAllChannelScopes();
+      hideResetConfirm();
+      dispatchSettingsChanged("global");
+      render();
+      if (!resetLink.hidden) resetLink.focus();
+      else saveButton.focus();
+    }
+
+    // The scope line is channel-only (see the dialog's kind); only its text is set here.
+    function renderScopeLine() {
+      scopeLine.textContent = inChannelDialog()
+        ? `These settings apply to channel ${channelOfScope(scope)} only. ` +
+          "Switch on a setting to give this channel its own value."
+        : "";
+    }
+
+    // The scope-dependent parts of the dialog, without touching values the user may
+    // have changed: notes, inherited entries, locks, scope line and reset link.
+    function render() {
+      if (inChannelDialog()) {
+        settings.forEach(renderChannelNote);
+      } else {
+        settings.forEach((setting) => {
+          setting.note.box.hidden = true;
+          renderOverrideIcon(setting);
+        });
+      }
+      refreshInherited();
+      refreshControls();
+      renderScopeLine();
+      renderResetLink();
+    }
+
+    // Called at the end of settings.js's loadSettings, once its own loading has
+    // put the scope's values and own class colour entries into the dialog. A
+    // channel dialog then shows, per setting, the own value or the followed one.
+    function load(targetScope) {
+      scope = targetScope;
+      // The one statement of the dialog's kind; viewer.css derives from it which of
+      // the settings-channel-only and settings-global-only elements are displayed.
+      dialog.dataset.settingsScope = inChannelDialog() ? "channel" : "global";
+      hideResetConfirm();
+      hideOverrides();
+      if (inChannelDialog()) loadChannelSettings();
+      else loadGlobalSettings();
+      render();
+    }
+
+    // What a channel dialog's Save stores: the switched-on settings of every tab
+    // and metadata type, read from their controls whatever their disabled state.
+    function collectOwnValues() {
+      const ownValues = {};
+      settings.forEach((setting) => {
+        if (setting.own.input.checked) ownValues[setting.id] = readValue(setting);
+      });
+      return ownValues;
+    }
+
+    function collectOwnObjects() {
+      const ownObjects = {};
+      objectLists.forEach((objectList) => {
+        ownObjects[objectList.metadataType] = readObjectEntries(objectList.metadataType);
+      });
+      return ownObjects;
+    }
+
+    return {
+      load,
+      refreshControls,
+      refreshInherited,
+      isChannelDialog: inChannelDialog,
+      collectOwnValues,
+      collectOwnObjects
+    };
+  }
+
+  window.viewerSettingsScopeUi = {
+    missingRequirements,
+    create
+  };
+})();

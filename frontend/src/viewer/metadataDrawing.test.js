@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-import { drawMetadata } from "./metadataDrawing.js";
+import { drawMetadata, hasDrawableMetadata } from "./metadataDrawing.js";
 
 const drawingSource = readFileSync(
   new URL("../../../webrtc/static/drawing.js", import.meta.url),
@@ -16,6 +16,9 @@ function loadStrategies(t, polygons = []) {
   vm.runInNewContext(drawingSource, {
     window, performance, console,
     localStorage: { getItem: () => JSON.stringify(polygons) },
+    // RLE masks are decoded onto an offscreen canvas before being drawn.
+    document: { createElement: () => ({ getContext: recordingContext }) },
+    ImageData: class {},
   });
   globalThis.window = window;
   t.after(() => {
@@ -31,24 +34,77 @@ function recordingContext() {
     lineDash: [],
     globalAlpha: 1,
     strokes: [],
+    strokeAlphas: [],
     fills: [],
     boxes: [],
+    path: [],
+    texts: [],
     save() { stack.push({ lineDash: [...this.lineDash], globalAlpha: this.globalAlpha }); },
     restore() { Object.assign(this, stack.pop()); },
     setLineDash(value) { this.lineDash = [...value]; },
     strokeRect(...box) { this.strokes.push([...this.lineDash]); this.boxes.push(box); },
-    stroke() { this.strokes.push([...this.lineDash]); },
-    beginPath() {},
+    stroke() { this.strokes.push([...this.lineDash]); this.strokeAlphas.push(this.globalAlpha); },
+    beginPath() { this.path = []; },
     closePath() {},
-    moveTo() {},
-    lineTo() {},
+    moveTo(x, y) { this.path.push([x, y]); },
+    lineTo(x, y) { this.path.push([x, y]); },
     arc() {},
     fill() { this.fills.push(this.fillStyle); },
     fillRect() {},
     measureText(text) { return { width: text.length * 7 }; },
-    fillText() {},
+    fillText(text) { this.texts.push(text); },
+    drawImage() {},
+    putImageData() {},
   };
 }
+
+test("ROI rendering remains independent of per-type overlay visibility", (t) => {
+  loadStrategies(t, [{ type: "inclusion", points: [
+    { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 },
+  ] }]);
+  const message = {
+    type: "object-detection",
+    data: { objects: [{ bbox: [10, 20, 30, 40], label: "person", confidence: 1 }] },
+  };
+  const settings = { general: { showRoi: true }, type: { visible: false } };
+  const ctx = recordingContext();
+
+  assert.equal(hasDrawableMetadata(message, settings), true);
+  drawMetadata(
+    ctx,
+    { clientWidth: 640, clientHeight: 480 },
+    message,
+    { videoWidth: 640, videoHeight: 480 },
+    0,
+    { settings, frameState: {} },
+  );
+
+  assert.equal(ctx.fills.filter((color) => color === "rgba(0,255,0,0.1)").length, 1);
+  assert.equal(ctx.boxes.length, 0);
+  assert.equal(
+    hasDrawableMetadata(message, { general: { showRoi: false }, type: { visible: false } }),
+    false,
+  );
+  assert.equal(
+    hasDrawableMetadata(
+      { type: "classification", data: { top_classes: [{ label: "person", confidence: 1 }] } },
+      settings,
+    ),
+    false,
+  );
+});
+
+test("custom metadata visibility is independent of object detection settings", () => {
+  const hiddenDetectionSettings = {
+    general: { showRoi: false },
+    type: { visible: false },
+  };
+
+  assert.equal(
+    hasDrawableMetadata({ type: "custom-heatmap", data: {} }, hiddenDetectionSettings),
+    true,
+  );
+});
 
 test("detection styles do not leak into pose skeletons or the next frame", (t) => {
   loadStrategies(t);
@@ -73,7 +129,8 @@ test("detection styles do not leak into pose skeletons or the next frame", (t) =
     drawMetadata(ctx, canvas, pose, video, 0, { settings });
     drawMetadata(ctx, canvas, pose, video, 0, { settings });
 
-    assert.deepEqual(ctx.strokes, [dash, [], []]);
+    // Each pose strokes its box and its skeleton.
+    assert.deepEqual(ctx.strokes, [dash, [], [], [], []]);
     assert.deepEqual(ctx.lineDash, []);
   }
 });
@@ -96,6 +153,51 @@ test("drawing restores canvas state even when a strategy throws", (t) => {
   assert.equal(ctx.globalAlpha, 1);
 });
 
+test("pose landmark names are opt-in while joint markers remain configurable", (t) => {
+  loadStrategies(t);
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+  const pose = {
+    type: "pose-estimation",
+    data: { poses: [{ keypoints: [{ name: "nose", x: 20, y: 20, confidence: 1 }] }] },
+  };
+
+  const clean = recordingContext();
+  drawMetadata(clean, canvas, pose, video, 0, {
+    settings: { general: {}, type: { showKeypoints: true, showKeypointLabels: false } },
+  });
+  assert.equal(clean.fills.length, 1);
+  assert.deepEqual(clean.texts, []);
+
+  const labeled = recordingContext();
+  drawMetadata(labeled, canvas, pose, video, 0, {
+    settings: { general: {}, type: { showKeypoints: false, showKeypointLabels: true } },
+  });
+  assert.equal(labeled.fills.length, 0);
+  assert.deepEqual(labeled.texts, ["nose"]);
+});
+
+test("low-confidence pose links fade instead of disappearing at the draw threshold", (t) => {
+  loadStrategies(t);
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+  const ctx = recordingContext();
+  const pose = {
+    type: "pose-estimation",
+    data: { poses: [{ keypoints: [
+      { name: "left_shoulder", x: 20, y: 20, confidence: 0 },
+      { name: "left_elbow", x: 30, y: 30, confidence: 0 },
+    ] }] },
+  };
+
+  drawMetadata(ctx, canvas, pose, video, 0, {
+    settings: { general: {}, type: { showKeypoints: true } },
+  });
+
+  assert.equal(ctx.strokes.length, 1);
+  assert.ok(ctx.strokeAlphas[0] > 0 && ctx.strokeAlphas[0] < 1);
+});
+
 test("a malformed pose does not stop tracking or later frames", (t) => {
   loadStrategies(t);
   t.mock.method(console, "warn", () => {});
@@ -114,6 +216,30 @@ test("a malformed pose does not stop tracking or later frames", (t) => {
   assert.equal(ctx.boxes.length, 2);
 });
 
+test("hiding tracking clears its saved trails", (t) => {
+  loadStrategies(t);
+  const history = new Map();
+  const message = { type: "tracking", data: { tracks: [{ id: 1, bbox: [10, 20, 30, 40] }] } };
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+
+  drawMetadata(recordingContext(), canvas, message, video, 0, {
+    settings: { general: { showRoi: false }, type: { visible: true } },
+    trackHistory: history,
+    now: 1,
+  });
+  assert.equal(history.size, 1);
+
+  const hiddenSettings = { general: { showRoi: false }, type: { visible: false } };
+  assert.equal(hasDrawableMetadata(message, hiddenSettings), true);
+  drawMetadata(recordingContext(), canvas, message, video, 0, {
+    settings: hiddenSettings,
+    trackHistory: history,
+    now: 2,
+  });
+  assert.equal(history.size, 0);
+});
+
 test("shared ROI is drawn once in any metadata order and filtering still applies", (t) => {
   loadStrategies(t, [{ type: "inclusion", points: [
     { x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.5, y: 0.5 }, { x: 0, y: 0.5 },
@@ -123,7 +249,12 @@ test("shared ROI is drawn once in any metadata order and filtering still applies
   const boxes = [[10, 20, 30, 40], [500, 300, 30, 40]];
   const messages = [
     { type: "object-detection", data: { objects: boxes.map(bbox => ({ bbox, label: "person", confidence: 1 })) } },
-    { type: "segmentation", data: { segments: boxes.map(bbox => ({ bbox, mask_format: "polygon", mask: [[10, 20], [40, 20], [10, 60]] })) } },
+    { type: "segmentation", data: { segments: boxes.map(bbox => ({
+      bbox,
+      mask_format: "polygon",
+      show_rectangle: true,
+      mask: [[10, 20], [40, 20], [10, 60]],
+    })) } },
     { type: "tracking", data: { tracks: boxes.map((bbox, id) => ({ bbox, id })) } },
   ];
   const settings = { general: { showRoi: true }, type: {} };
@@ -137,6 +268,52 @@ test("shared ROI is drawn once in any metadata order and filtering still applies
     }
     assert.equal(ctx.fills.filter(color => color === "rgba(0,255,0,0.1)").length - before, 1);
     assert.equal(ctx.boxes.length - boxesBefore, 3);
+  }
+});
+
+test("oriented boxes draw their rotated corners and fall back to bbox when malformed", (t) => {
+  const strategies = loadStrategies(t);
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+  const settings = { general: { showRoi: false }, type: {} };
+  const object = { label: "plane", confidence: 0.9, bbox: [45, 40, 10, 20] };
+
+  // A quarter turn clockwise stands a 20x10 box upright around its center.
+  const rotated = recordingContext();
+  const oriented_bbox = [50, 50, 20, 10, Math.PI / 2];
+  strategies["object-detection"](rotated, canvas, { objects: [{ ...object, oriented_bbox }] }, video, 0, { settings });
+  assert.deepEqual(
+    rotated.path.map(([x, y]) => [Math.round(x), Math.round(y)]),
+    [[45, 60], [55, 60], [55, 40], [45, 40]],
+  );
+  assert.deepEqual(rotated.boxes, []);
+  assert.deepEqual(rotated.texts, ["plane (90%)"]);
+
+  for (const malformed of [[50, 50, 20, 10], [50, 50, 20, 10, "0"], [50, 50, 20, NaN, 0]]) {
+    const ctx = recordingContext();
+    strategies["object-detection"](ctx, canvas, { objects: [{ ...object, oriented_bbox: malformed }] }, video, 0, { settings });
+    assert.deepEqual(ctx.boxes, [object.bbox], JSON.stringify(malformed));
+  }
+});
+
+test("segment rectangles are drawn only when show_rectangle is boolean true", (t) => {
+  const strategies = loadStrategies(t);
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+  const settings = { general: { showRoi: false }, type: {} };
+  const box = [10, 20, 30, 40];
+  const masks = {
+    polygon: { mask: [[10, 20], [40, 20], [10, 60]] },
+    rle: { bbox: box, mask: { size: [4, 3], counts: [0, 6, 6] } },
+  };
+  const cases = [[undefined, []], [true, [box]], [false, []], ["true", []], [1, []]];
+  for (const [mask_format, segment] of Object.entries(masks)) {
+    for (const [show_rectangle, expected] of cases) {
+      const ctx = recordingContext();
+      const segments = [{ ...segment, mask_format, show_rectangle }];
+      strategies.segmentation(ctx, canvas, { segments }, video, 0, { settings });
+      assert.deepEqual(ctx.boxes, expected, `${mask_format} show_rectangle=${JSON.stringify(show_rectangle)}`);
+    }
   }
 });
 

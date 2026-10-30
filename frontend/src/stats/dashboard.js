@@ -1,0 +1,539 @@
+/** Pure dashboard arithmetic matching Sentinel's fixed-scale, 240-sample ops view. */
+import { durationWords, isTemperatureUnit, isThermalMetric, unitSuffix } from './model.js'
+
+export const DASH_TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'thermal', label: 'Thermal' },
+  { id: 'power', label: 'Power' },
+  { id: 'system', label: 'System' },
+  { id: 'storage', label: 'Storage & Network' },
+  { id: 'runs', label: 'Runs' }
+]
+export const DASH_TAB_KEY = 'neat-insight:sentinel-tab'
+
+export function dashTabFrom(saved) {
+  return DASH_TABS.some((tab) => tab.id === saved) ? saved : DASH_TABS[0].id
+}
+
+// Temperatures share one band, as Sentinel's thermal charts do, so sensors compare at a glance.
+export const THERMAL_SCALE = { min: 40, max: 90 }
+const NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]
+
+function isNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+/** The smallest "round" number (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 times a power of ten) at or above `value`. */
+export function niceCeil(value) {
+  if (!isNumber(value) || value <= 0) return 1
+  const power = 10 ** Math.floor(Math.log10(value))
+  const step = NICE_STEPS.find((candidate) => candidate * power >= value - power * 1e-9)
+  return Number((step * power).toPrecision(6))
+}
+
+/** Fixed percent/temperature scales; other units get a rounded ceiling above their peak. */
+export function scaleFor(unit, valueLists, ceiling = null) {
+  const values = valueLists.flat().filter(isNumber)
+  const key = String(unit ?? '').trim().toLowerCase()
+  if (key === '%') return { min: 0, max: 100 }
+  if (isTemperatureUnit(key)) {
+    const low = Math.min(THERMAL_SCALE.min, ...values.map((value) => Math.floor(value / 10) * 10))
+    const high = Math.max(THERMAL_SCALE.max, ...values.map((value) => Math.ceil(value / 10) * 10))
+    return { min: low, max: high }
+  }
+  if (isNumber(ceiling) && ceiling > 0) return { min: 0, max: ceiling }
+  const top = values.length ? Math.max(...values) : 0
+  return { min: 0, max: niceCeil(top * 1.1) }
+}
+
+export function metricByKey(model, key) {
+  return (model?.metrics || []).find((metric) => metric.key === key) || null
+}
+
+export function seriesOf(model, key) {
+  return model?.series?.[key] || []
+}
+
+/** A current aggregate exists only when every constituent reading is available. */
+export function currentTotal(values) {
+  return values.length && values.every(isNumber) ? values.reduce((sum, value) => sum + value, 0) : null
+}
+
+export function currentValue(values) {
+  const value = values?.[values.length - 1]
+  return isNumber(value) ? value : null
+}
+
+/** Per sample, the highest reading among the board's temperature sensors (null where none reported). */
+export function thermalMaxSeries(model) {
+  const lists = (model?.metrics || []).filter(isThermalMetric).map((metric) => seriesOf(model, metric.key))
+  const length = Math.max(0, ...lists.map((list) => list.length))
+  return Array.from({ length }, (_, index) => {
+    const values = lists.map((list) => list[index]).filter(isNumber)
+    return values.length ? Math.max(...values) : null
+  })
+}
+
+function round(value) {
+  return Number(value.toFixed(2))
+}
+
+function yOf(value, scale, height) {
+  const span = scale.max - scale.min || 1
+  const clamped = Math.min(scale.max, Math.max(scale.min, value))
+  return height - ((clamped - scale.min) / span) * height
+}
+
+/**
+ * Where each sample sits across the plot (0..1), from its board timestamp, so a delayed poll or a back-off
+ * leaves a visible gap. Evenly spaced when the timestamps do not cover every sample in increasing order.
+ */
+export function timeFractions(timestamps, length) {
+  const times = boardSeconds(timestamps, length)
+  if (!times || length < 2 || !(times[length - 1] > times[0])) {
+    return Array.from({ length }, (_, index) => index / Math.max(1, length - 1))
+  }
+  return times.map((time) => (time - times[0]) / (times[length - 1] - times[0]))
+}
+
+/** Each sample's board time in seconds, or null unless every one of `length` samples has one, in order. */
+function boardSeconds(timestamps, length) {
+  const times = (timestamps || []).map(seconds)
+  if (!length || times.length !== length) return null
+  return times.some((time, index) => time === null || (index && time < times[index - 1])) ? null : times
+}
+
+/** SVG line and area; missing samples break the path rather than becoming zero. */
+export function linePath(values, scale, width, height, fractions = null) {
+  const list = values || []
+  const at = fractions && fractions.length === list.length ? fractions : timeFractions(null, list.length)
+  const segments = []
+  let current = []
+  list.forEach((value, index) => {
+    if (!isNumber(value)) {
+      if (current.length) segments.push(current)
+      current = []
+      return
+    }
+    current.push([round(at[index] * width), round(yOf(value, scale, height))])
+  })
+  if (current.length) segments.push(current)
+  const line = segments
+    .map((points) => points.map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join(' '))
+    .join(' ')
+  const area = segments
+    .filter((points) => points.length > 1)
+    .map((points) => `M${points[0][0]} ${height} ${points.map(([x, y]) => `L${x} ${y}`).join(' ')} L${points[points.length - 1][0]} ${height} Z`)
+    .join(' ')
+  const tail = segments.length ? segments[segments.length - 1] : null
+  const lastPoint = tail && tail[tail.length - 1][0] === round(at[list.length - 1] * width) ? tail[tail.length - 1] : null
+  return { line, area, last: lastPoint ? { x: lastPoint[0], y: lastPoint[1] } : null }
+}
+
+/** Stacked areas, bottom band first; a missing constituent breaks the whole stack. */
+export function stackedPaths(lists, scale, width, height, fractions = null) {
+  const length = Math.max(0, ...lists.map((list) => (list || []).length))
+  const at = fractions && fractions.length === length ? fractions : timeFractions(null, length)
+  const complete = Array.from({ length }, (_, index) => lists.every((list) => isNumber((list || [])[index])))
+  const base = new Array(length).fill(0)
+  const x = (index) => round(at[index] * width)
+  return lists.map((list) => {
+    const lower = base.slice()
+    for (let index = 0; index < length; index += 1) if (complete[index]) base[index] += list[index]
+    const paths = []
+    for (let start = 0; start < length;) {
+      while (start < length && !complete[start]) start += 1
+      let end = start
+      while (end + 1 < length && complete[end + 1]) end += 1
+      if (start < length && end > start) {
+        const top = base.slice(start, end + 1).map((value, offset) => `${offset ? 'L' : 'M'}${x(start + offset)} ${round(yOf(value, scale, height))}`).join(' ')
+        const bottom = lower.slice(start, end + 1).map((value, offset) => `L${x(start + offset)} ${round(yOf(value, scale, height))}`).reverse().join(' ')
+        paths.push(`${top} ${bottom} Z`)
+      }
+      start = end + 1
+    }
+    return paths.join(' ')
+  })
+}
+
+/** The totals a complete stack reaches, for its scale and tooltip. */
+export function stackTotals(lists) {
+  const length = Math.max(0, ...lists.map((list) => (list || []).length))
+  return Array.from({ length }, (_, index) => {
+    const values = lists.map((list) => (list || [])[index])
+    return values.every(isNumber) ? values.reduce((sum, value) => sum + value, 0) : null
+  })
+}
+
+function seconds(timestamp) {
+  const time = Date.parse(timestamp || '')
+  return Number.isFinite(time) ? time / 1000 : null
+}
+
+/** How far back the oldest sample is, from the newest one: "7 minutes ago". Board time only. */
+export function spanLabel(timestamps) {
+  const first = seconds(timestamps?.[0])
+  const last = seconds(timestamps?.[timestamps.length - 1])
+  if (first === null || last === null || last <= first) return ''
+  return `${durationWords(last - first)} ago`
+}
+
+/** How long before the newest sample a given one was taken: "4 minutes 46 seconds ago", or "Now". */
+export function agoLabel(timestamps, index) {
+  const at = seconds(timestamps?.[index])
+  const last = seconds(timestamps?.[timestamps.length - 1])
+  if (at === null || last === null) return ''
+  const gap = last - at
+  return gap < 1 ? 'Now' : `${durationWords(gap, { precise: true })} ago`
+}
+
+/** The sample nearest a pointer at `fraction` (0..1) of the plot's width, placed as `timeFractions` places it. */
+export function indexAt(fraction, length, fractions = null) {
+  if (!length) return -1
+  if (!fractions || fractions.length !== length) return Math.min(length - 1, Math.max(0, Math.round(fraction * (length - 1))))
+  let best = 0
+  fractions.forEach((at, index) => { if (Math.abs(at - fraction) < Math.abs(fractions[best] - fraction)) best = index })
+  return best
+}
+
+/** The board's temperature sensors under Sentinel's own group names, in Sentinel's order. */
+export function thermalGroups(model) {
+  const groups = []
+  for (const metric of (model?.metrics || []).filter(isThermalMetric)) {
+    let group = groups.find((entry) => entry.name === metric.group)
+    if (!group) {
+      group = { name: metric.group, metrics: [] }
+      groups.push(group)
+    }
+    group.metrics.push(metric)
+  }
+  return groups
+}
+
+/** Metrics whose key matches, in Sentinel's order: the per-core CPUs, the power rails. */
+export function metricsMatching(model, pattern) {
+  return (model?.metrics || []).filter((metric) => pattern.test(metric.key))
+}
+
+/** The warn and critical lines a chart draws, from the metric's own thresholds. */
+export function thresholdLines(metric) {
+  const lines = []
+  if (isNumber(metric?.warn)) lines.push({ value: metric.warn, tone: 'warn' })
+  if (isNumber(metric?.critical)) lines.push({ value: metric.critical, tone: 'critical' })
+  return lines
+}
+
+/** Thresholds that apply to every metric in a derived mixed-sensor series. */
+export function sharedThresholdLines(metrics) {
+  const first = thresholdLines((metrics || [])[0])
+  return (metrics || []).every((metric) => JSON.stringify(thresholdLines(metric)) === JSON.stringify(first)) ? first : []
+}
+
+/** An axis label: few digits, thousands separated, no unit. */
+export function axisLabel(value) {
+  if (!isNumber(value)) return ''
+  if (Math.abs(value) >= 1000) return Math.round(value).toLocaleString('en-US')
+  return String(Number(value.toFixed(value < 10 ? 1 : 0)))
+}
+
+/** A unit as it follows a number: "°C", "%" with no space before it, else " W". */
+export function unitAfter(unit) {
+  const suffix = unitSuffix(unit)
+  if (!suffix) return ''
+  return suffix === '%' ? '%' : ` ${suffix}`
+}
+
+/** A value to fixed decimals with its unit, so figures in a row line up: "12.0 W", "0.56 W". */
+export function fixedValue(value, unit, digits) {
+  if (!isNumber(value)) return '—'
+  return `${value.toFixed(digits)}${unitAfter(unit)}`
+}
+
+/** "0–100%", "40–90 °C", "0–1,000 MB": a scale as a reader says it. */
+export function scaleText(scale, unit) {
+  return `${axisLabel(scale.min)}–${axisLabel(scale.max)}${unitAfter(unit)}`
+}
+
+// Per-core heatmap: 48 columns over the window (10 s each at Sentinel's 2 s cadence), and a
+// one-minute average beside each core, so the view changes slowly rather than every sample.
+export const HEAT_COLUMNS = 48
+export const RECENT_SAMPLES = 30
+export const RECENT_SECONDS = 60
+
+function mean(values) {
+  const numbers = (values || []).filter(isNumber)
+  return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : null
+}
+
+/** The heatmap column a sample falls in: by board time when `timestamps` cover every sample, else by count. */
+function columnOf(index, length, columns, times) {
+  const span = times ? times[length - 1] - times[0] : 0
+  if (span > 0) return Math.min(columns - 1, Math.floor(((times[index] - times[0]) / span) * columns))
+  if (length <= columns) return index
+  const size = length / columns
+  return Math.min(columns - 1, Math.max(0, Math.ceil((index + 1) / size - 1e-9) - 1))
+}
+
+/**
+ * How many columns a history fills. A long one fills them all. A short one with board times gets one column per
+ * sampling interval, its smallest gap, so a pause in the samples stays an empty stretch instead of closing up.
+ */
+function columnCount(length, columns, times) {
+  const span = times ? times[length - 1] - times[0] : 0
+  if (length > columns) return columns
+  if (!(span > 0)) return length
+  let step = Infinity
+  for (let index = 1; index < length; index += 1) {
+    const gap = times[index] - times[index - 1]
+    if (gap > 0) step = Math.min(step, gap)
+  }
+  return Math.min(columns, Math.round(span / step) + 1)
+}
+
+/** A series split into equal slices of time, at most `columns`, each the mean of its samples (null where none). */
+export function columnMeans(values, columns = HEAT_COLUMNS, timestamps = null) {
+  const list = values || []
+  if (!list.length) return []
+  const times = boardSeconds(timestamps, list.length)
+  const count = columnCount(list.length, columns, times)
+  const slices = Array.from({ length: count }, () => [])
+  list.forEach((value, index) => slices[columnOf(index, list.length, count, times)].push(value))
+  return slices.map(mean)
+}
+
+/** The newest sample in a heatmap column, to say how long ago that slice was; -1 when it holds none. */
+export function newestInColumn(column, length, columns, timestamps = null) {
+  const times = boardSeconds(timestamps, length)
+  for (let index = length - 1; index >= 0; index -= 1) {
+    if (columnOf(index, length, columns, times) === column) return index
+  }
+  return -1
+}
+
+/** The samples of the last minute by board time; the last RECENT_SAMPLES when timestamps cannot tell. */
+function recentValues(values, timestamps) {
+  const times = boardSeconds(timestamps, values.length)
+  if (!times) return values.slice(-RECENT_SAMPLES)
+  const since = times[times.length - 1] - RECENT_SECONDS
+  return values.filter((_, index) => times[index] > since)
+}
+
+/** A 0-100 load as one blue: pale when idle, deep when busy. Missing reads as the empty track. */
+export function loadColor(percent) {
+  if (!isNumber(percent)) return 'var(--surface-soft)'
+  const p = Math.min(100, Math.max(0, percent)) / 100
+  const mix = (from, to) => Math.round(from + (to - from) * p)
+  return `rgb(${mix(236, 12)} ${mix(243, 64)} ${mix(250, 140)})`
+}
+
+function toneOf(value, warn, critical) {
+  if (!isNumber(value)) return 'unavailable'
+  if (isNumber(critical) && value >= critical) return 'critical'
+  if (isNumber(warn) && value >= warn) return 'warn'
+  return 'ok'
+}
+
+/** Heatmap rows plus one-minute average and busiest-core summaries. */
+export function coreSummary(cores, series, timestamps = null) {
+  const rows = (cores || []).map((core) => {
+    const values = series?.[core.key] || []
+    const recent = mean(recentValues(values, timestamps))
+    return {
+      key: core.key,
+      name: core.short || core.label,
+      label: core.label,
+      cells: columnMeans(values, HEAT_COLUMNS, timestamps),
+      recent,
+      tone: toneOf(recent, core.warn, core.critical)
+    }
+  })
+  const reporting = rows.filter((row) => isNumber(row.recent))
+  const busiest = reporting.reduce((top, row) => (!top || row.recent > top.recent ? row : top), null)
+  const average = reporting.length ? reporting.reduce((sum, row) => sum + row.recent, 0) / reporting.length : null
+  return { rows, average, busiest }
+}
+
+/** Series offered by Sentinel Compare Runs; thermal maximum is derived per sample. */
+export const COMPARE_SERIES = [
+  { id: 'power', label: 'Total power (Estimated)', key: 'power_current_watts' },
+  { id: 'thermal', label: 'Thermal maximum', thermal: true },
+  { id: 'cpu', label: 'CPU utilization', key: 'cpu_usage_pct' },
+  { id: 'load', label: 'CPU load', key: 'cpu_load_1' },
+  { id: 'ram', label: 'RAM used', key: 'linux_mem_used_mb' },
+  { id: 'mla', label: 'MLA memory', key: 'mla_mem_allocated_mb' },
+  { id: 'ev74', label: 'EV74 memory', key: 'ev74_mem_allocated_mb' }
+]
+
+function percentile(sorted, p) {
+  if (!sorted.length) return null
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))]
+}
+
+function stats(values) {
+  const sorted = values.filter(isNumber).sort((a, b) => a - b)
+  if (!sorted.length) return { count: 0, minimum: null, mean: null, median: null, p95: null, maximum: null }
+  const middle = Math.floor(sorted.length / 2)
+  return {
+    count: sorted.length,
+    minimum: sorted[0],
+    mean: sorted.reduce((sum, value) => sum + value, 0) / sorted.length,
+    median: sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2,
+    p95: percentile(sorted, 95),
+    maximum: sorted[sorted.length - 1]
+  }
+}
+
+const POWER_KEY = 'power_current_watts'
+
+/**
+ * Joules over the window: board power integrated between consecutive readings, up to the window's edge. A run with
+ * no reading at the edge has its last interval cut there, at the power interpolated between the readings either side,
+ * as its chart line is.
+ */
+function windowEnergy(points, window) {
+  const list = points || []
+  let joules = null
+  for (let index = 1; index < list.length; index += 1) {
+    const [before, after] = [list[index - 1], list[index]]
+    if (before.t >= window - 1e-9) break
+    if (!isNumber(before.v) || !isNumber(after.v) || !(after.t > before.t)) continue
+    const end = Math.min(after.t, window)
+    const atEnd = before.v + ((after.v - before.v) * (end - before.t)) / (after.t - before.t)
+    joules = (joules ?? 0) + ((before.v + atEnd) / 2) * (end - before.t)
+  }
+  return joules
+}
+
+/** The series in COMPARE_SERIES that these runs actually recorded. */
+export function compareSeriesAvailable(payload) {
+  const runs = (payload?.sentinel || payload || {}).runs || []
+  const defs = runs.flatMap((run) => (Array.isArray(run?.metrics) ? run.metrics : []))
+  return COMPARE_SERIES.filter((spec) => {
+    if (spec.thermal) return defs.some(isThermalMetric)
+    const matching = defs.filter((definition) => definition.key === spec.key)
+    return matching.length > 0 && new Set(matching.map((definition) => definition.unit ?? '')).size === 1
+  })
+}
+
+/** Compared samples and summaries, baseline first, over the runs' common time window. */
+export function compareOverlay(payload, seriesId) {
+  const body = payload?.sentinel || payload || {}
+  const available = compareSeriesAvailable(payload)
+  const spec = available.find((entry) => entry.id === seriesId) || available[0]
+  const runs = (body.runs || []).filter((run) => run?.metadata?.id && Array.isArray(run.samples))
+  if (!spec || !runs.length) return null
+  const defs = runs.flatMap((run) => (Array.isArray(run.metrics) ? run.metrics : []))
+  const definition = spec.thermal ? null : defs.find((entry) => entry.key === spec.key)
+  const unit = spec.thermal ? 'C' : definition?.unit ?? ''
+  const baselineId = body.baseline_id
+
+  const lines = runs.map((run) => {
+    // Each run's own sensors: a run recorded on another build can name its temperatures differently.
+    const thermalKeys = (Array.isArray(run.metrics) ? run.metrics : defs).filter(isThermalMetric).map((entry) => entry.key)
+    const start = seconds(run.samples[0]?.timestamp)
+    const timed = run.samples.map((sample) => {
+      const values = sample?.values || {}
+      const value = spec.thermal
+        ? thermalKeys.map((key) => values[key]).filter(isNumber).reduce((max, next) => (max === null || next > max ? next : max), null)
+        : values[spec.key]
+      const at = seconds(sample?.timestamp)
+      const t = start === null || at === null ? null : at - start
+      return { point: { t, v: isNumber(value) ? value : null }, power: { t, v: isNumber(values[POWER_KEY]) ? values[POWER_KEY] : null } }
+    }).filter(({ point }) => isNumber(point.t) && point.t >= 0)
+    return {
+      id: run.metadata.id,
+      name: String(run.metadata.name || run.metadata.id),
+      baseline: run.metadata.id === baselineId,
+      points: timed.map(({ point }) => point),
+      power: timed.map(({ power }) => power)
+    }
+  }).sort((a, b) => Number(b.baseline) - Number(a.baseline))
+
+  const ends = lines.map((line) => (line.points.length ? line.points[line.points.length - 1].t : 0))
+  const overlap = Math.min(...ends)
+  // The rows describe the same data as the chart: each run's samples inside the common window. Sentinel's
+  // own summaries cover each whole run, which differ in length, so they are left to the per-metric table.
+  const windowed = (line) => withinWindow(line.points, overlap).map((point) => point.v)
+  const baselineStats = stats(windowed(lines.find((line) => line.baseline) || { points: [] }))
+  const rows = lines.map((line) => {
+    const figures = stats(windowed(line))
+    const delta = isNumber(figures.mean) && isNumber(baselineStats.mean) && baselineStats.mean !== 0
+      ? ((figures.mean - baselineStats.mean) / baselineStats.mean) * 100
+      : null
+    return {
+      id: line.id,
+      name: line.name,
+      baseline: line.baseline,
+      samples: figures.count,
+      minimum: figures.minimum ?? null,
+      mean: figures.mean ?? null,
+      median: figures.median ?? null,
+      p95: figures.p95 ?? null,
+      maximum: figures.maximum ?? null,
+      delta: isNumber(delta) ? delta : null,
+      energy: windowEnergy(line.power, overlap)
+    }
+  })
+  // Scaled to the samples inside the common window only: the clipped point past it is drawn at the edge, not read.
+  const scale = tightScale(lines.map((line) => withinWindow(line.points, overlap).map((point) => point.v)))
+  return { spec, available, unit, lines, overlap, scale, rows }
+}
+
+/** A padded, outward-rounded comparison scale that keeps small differences visible. */
+export function tightScale(valueLists) {
+  const values = valueLists.flat().filter(isNumber)
+  if (!values.length) return { min: 0, max: 1 }
+  const low = values.reduce((minimum, value) => Math.min(minimum, value))
+  const high = values.reduce((maximum, value) => Math.max(maximum, value))
+  const pad = (high - low) / 6 || Math.abs(high) * 0.05 || 1
+  // Round to a tenth of the padded spread's order of magnitude: 8.44-9.11 W becomes 8.4-9.2.
+  const step = 10 ** Math.floor(Math.log10(high - low + 2 * pad))
+  const clean = (value) => Number(value.toPrecision(12))
+  return { min: clean(Math.floor((low - pad) / step) * step), max: clean(Math.ceil((high + pad) / step) * step) }
+}
+
+/** One run as an SVG line, retaining the first clipped point beyond the window. */
+export function windowPoints(points, window) {
+  const list = points || []
+  if (window <= 0) return list.filter((point) => Math.abs(point.t) <= 1e-9)
+  const past = list.findIndex((point) => point.t > window + 1e-9)
+  return past < 0 ? list : list.slice(0, past + 1)
+}
+
+/** The samples inside the window itself, without the clipped point that only carries the line to its edge. */
+export function withinWindow(points, window) {
+  return (points || []).filter((point) => point.t <= Math.max(window, 0) + 1e-9)
+}
+
+export function elapsedPath(points, window, scale, width, height) {
+  const inside = windowPoints(points, window)
+  if (window <= 0) {
+    const value = inside.find((point) => isNumber(point.v))?.v
+    if (!isNumber(value)) return ''
+    const middle = round(width / 2)
+    const y = round(yOf(value, scale, height))
+    return `M${middle - 1} ${y} L${middle + 1} ${y}`
+  }
+  const segments = []
+  let current = []
+  for (const point of inside) {
+    if (!isNumber(point.v)) {
+      if (current.length) segments.push(current)
+      current = []
+      continue
+    }
+    current.push([round(window > 0 ? (point.t / window) * width : 0), round(yOf(point.v, scale, height))])
+  }
+  if (current.length) segments.push(current)
+  return segments.map((segment) => segment.map(([x, y], index) => `${index ? 'L' : 'M'}${x} ${y}`).join(' ')).join(' ')
+}
+
+/** The reading nearest to elapsed time `t`, for the hover readout; a `window` leaves out samples past it. */
+export function valueNear(points, t, window) {
+  let best = null
+  for (const point of window === undefined ? points || [] : withinWindow(points, window)) {
+    if (!isNumber(point.t)) continue
+    if (!best || Math.abs(point.t - t) < Math.abs(best.t - t)) best = point
+  }
+  return best
+}

@@ -43,7 +43,21 @@ curl -k -H "Content-Type: application/json" \
   https://<INSIGHT_HOST>:9900/api/mediasrc/start
 ```
 
+To stream at a different frame rate, include `fps` in the assignment and optionally watch the encode:
+
+```sh
+curl -k -H "Content-Type: application/json" -d '{"index":1,"file":"person_clip.mp4","fps":15}' https://localhost:9900/api/mediasrc/assign
+curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/prepare
+curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
+```
+
+`prepare` streams `progress <seconds>/<total>` lines (preceded by repeated `Waiting for another rendition to finish encoding…` lines while another rendition encodes; Insight encodes one at a time) and ends with `Rendition ready: …`, `Reusing rendition: …`, or `Error: …`. `start` performs the same preparation silently when `prepare` is skipped. `GET /api/mediasrc/renditions` reports cached rendition disk usage; `POST /api/mediasrc/renditions/clear` deletes cached renditions not in use by a playing source.
+
 Read `/api/mediasrc` before changing assignments or playback state. Stop active sources before deleting their media when possible.
+
+A slot published to by something other than Insight reports `state: "external"` with an `external` object (protocol, address, since, codec support, dimensions, bit rate); every slot also lists its current `readers`. `start` and `assign` return `409` for such a slot, and so does `stop` once Insight has no stream of its own left on it; `POST /api/mediasrc/takeover` disconnects the publisher. Bulk operations leave the external stream running and list the slots in `skipped_external`; `reset` still clears the stored record of every slot. `GET /stream/preview/src<N>.mjpg` renders an MJPEG preview of any live slot at the source frame rate.
+
+`POST /api/mediasrc/pull` with `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` pulls an existing RTSP/RTSPS stream into a slot; the slot then reports `state: "pulled"` with a `pull` object (`status` of `connecting`, `live`, `unreachable` or `auth_failed`, plus scheme, host, path, error, since, codec support, dimensions, frame rate and bit rate; never the credentials). Rejected credentials answer `400` with `"reason": "auth_failed"`; a slot that is streaming, external, a webcam source or already pulled answers `409`, and `502` means mediamtx refused the configuration or could not be reached. `stop` releases the pull. `assign`, `assign-webcam`, `start`, `prepare` and `takeover` return `409` for a pulled slot. `stop-all` and `reset` release pulls too and list them in `stopped_pulled`; `auto-assign-all` and `start-bulk` skip a pulled slot and list it in `skipped_pulled`. Pulls are session-only.
 
 ## Response and streaming conventions
 
@@ -66,5 +80,8 @@ The OpenAPI document groups operations by purpose:
 - **Viewer** — browser-reachable viewer URL and configured channel capacity.
 - **Workspace** — browse, search, inspect, and preview workspace files and MPK archive members.
 - **DevKit shell** — discover and start the hosted shell bridge when configured.
+- **Board** — select the board that board-facing features use, test the SSH connection, and trust a reflashed board's host key.
+- **Peripherals** — list the MIPI and USB cameras and ALSA microphones that SiMa Sentinel reports on the selected board, start, inspect, stream, or stop a temporary camera preview, and test a microphone through the API.
+- **Sentinel** — check for and install SiMa Sentinel on the selected board, read the board's telemetry, start and stop traces, and list, inspect, delete, and compare saved runs.
 
 The raw OpenAPI file is also maintained in the Insight repository at `neat_insight/openapi.json`. Tests compare its operations with Flask's registered `/api` routes so new endpoints cannot be added silently without updating the reference.

@@ -1,0 +1,429 @@
+"""Read the peripheral catalog from SiMa Sentinel on the selected board."""
+import json
+import math
+import re
+from fractions import Fraction
+
+from neat_insight.board import BoardError
+from neat_insight.sentinel import socket_client
+from neat_insight.sentinel.client import DETAIL_LIMIT, NOT_RUN, RESPONSE, TOOL_MISSING, SentinelSocket
+
+MAX_BODY_BYTES = 4 * 1024 * 1024
+# Sentinel's refresh waits up to 10 s for its scan; the socket gets more so Sentinel's own 504 arrives.
+REFRESH_TIMEOUT_SEC = 20.0
+# RFC 3339 in UTC, as Sentinel serializes `observed_at`.
+_OBSERVED_AT = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z")
+INSTALL_HINT = "Install or update it with `sima-cli neat install sentinel`, then check `systemctl status simaai-sentinel`."
+STATUS_HINT = "Check `systemctl status simaai-sentinel` and `journalctl -u simaai-sentinel` on the board."
+
+_SOCKET_ERRORS = {
+    socket_client.MISSING: (
+        "peripheral_missing",
+        "SiMa Sentinel is not installed or not running on {label}: its socket {socket} does not exist.",
+        INSTALL_HINT,
+    ),
+    socket_client.REFUSED: (
+        "peripheral_refused",
+        "SiMa Sentinel is not running on {label}: nothing is listening on {socket}.",
+        "Start it with `sudo systemctl start simaai-sentinel`. " + INSTALL_HINT,
+    ),
+    socket_client.DENIED: (
+        "peripheral_denied",
+        "The SiMa Sentinel socket {socket} on {label} cannot be opened by this user.",
+        "Check the service and socket permissions on the board.",
+    ),
+    socket_client.TIMED_OUT: (
+        "timeout",
+        "SiMa Sentinel on {label} did not answer before the request timed out.",
+        STATUS_HINT,
+    ),
+    socket_client.FAILED: (
+        "peripheral_unavailable",
+        "The SiMa Sentinel socket {socket} on {label} could not be used.",
+        STATUS_HINT,
+    ),
+    socket_client.PROTOCOL: (
+        "peripheral_response",
+        "SiMa Sentinel on {label} returned a malformed or incomplete HTTP response.",
+        STATUS_HINT,
+    ),
+}
+_CLIENT_ERRORS = {
+    TOOL_MISSING: (
+        "tool_missing",
+        "python3 was not found on the board, so SiMa Sentinel cannot be reached.",
+        "Install python3 (3.8 or newer) on the board, then retry.",
+    ),
+    NOT_RUN: (
+        "peripheral_response",
+        "The Sentinel socket client did not run on the board (python3 exited {exit_code}).",
+        "Check that python3 on the board is 3.8 or newer; its error output is in detail.",
+    ),
+    RESPONSE: (
+        "peripheral_response",
+        "The Sentinel socket client returned a malformed response envelope.",
+        STATUS_HINT,
+    ),
+    socket_client.TOO_LARGE: (
+        "peripheral_response",
+        "The Sentinel response is larger than the {limit_mib} MiB Insight limit.",
+        STATUS_HINT,
+    ),
+}
+
+
+# Every integer Sentinel reports except the revision comes from a kernel __u32 (V4L2 sizes and frame
+# intervals, ALSA indices, rates and channels); a larger one would overflow a float or a browser number.
+U32_MAX = 2**32 - 1
+# The revision is a JSON number the browser reads; Sentinel keeps it below 2**52.
+MAX_SAFE_INTEGER = 2**53 - 1
+
+
+def _non_negative_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= U32_MAX
+
+
+def _positive_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= U32_MAX
+
+
+def _object_or_none(value) -> bool:
+    return value is None or isinstance(value, dict)
+
+
+def _fraction(value) -> bool:
+    return isinstance(value, dict) and _positive_int(value.get("numerator")) and _positive_int(value.get("denominator"))
+
+
+def _finite_positive(value) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value)) and value > 0
+    except OverflowError:
+        return False
+
+
+# The fractions of each interval type that the snapshot divides by; Sentinel reports none of them as zero.
+INTERVAL_FRACTIONS = {"stepwise": ("minimum", "maximum", "step"), "continuous": ("minimum", "maximum")}
+
+
+def _valid_interval(interval) -> bool:
+    if not isinstance(interval, dict):
+        return False
+    kind = interval.get("type")
+    if kind == "discrete":
+        return _fraction(interval)
+    # The snapshot reads any other kind as a range, so an unknown or missing kind must not pass.
+    if not isinstance(kind, str) or kind not in INTERVAL_FRACTIONS:
+        return False
+    if not all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS[kind]):
+        return False
+    # The shortest interval (fastest rate) comes first; a reversed range has no rate in it.
+    low, high = interval["minimum"], interval["maximum"]
+    return Fraction(low["numerator"], low["denominator"]) <= Fraction(high["numerator"], high["denominator"])
+
+
+# Sentinel's optional `board` block: the board model and the camera setup its device tree declares. It
+# only adds context, so a malformed field or entry is dropped instead of failing the refresh.
+BOARD_LIST_LIMIT = 32
+# Sentinel parses up to 512 overlay files, so the sensors they describe get a wider bound.
+SUPPORTED_SENSORS_LIMIT = 256
+BOARD_TEXT_LIMIT = 256
+
+
+def _text(value) -> bool:
+    return isinstance(value, str) and 0 < len(value) <= BOARD_TEXT_LIMIT
+
+
+def _texts(value) -> list:
+    return [entry for entry in value if _text(entry)][:BOARD_LIST_LIMIT] if isinstance(value, list) else []
+
+
+def _configured_camera(entry) -> dict:
+    if not isinstance(entry, dict) or not _text(entry.get("compatible")):
+        return {}
+    camera = {key: entry[key] for key in ("compatible", "dt_node", "i2c_device", "camera_id") if _text(entry.get(key))}
+    if _positive_int(entry.get("data_lanes")):
+        camera["data_lanes"] = entry["data_lanes"]
+    return camera
+
+
+def _supported_sensor(entry) -> dict:
+    if not isinstance(entry, dict) or not _text(entry.get("compatible")):
+        return {}
+    return {"compatible": entry["compatible"], "overlays": _texts(entry.get("overlays"))}
+
+
+def board_block(value):
+    """Sentinel's `board` block with every malformed field or entry dropped; None when there is none.
+
+    `overlays` is every overlay U-Boot applies, camera or not; it is omitted when Sentinel could not read it."""
+    if not isinstance(value, dict):
+        return None
+    block = {"configured_cameras": [], "supported_sensors": []}
+    if _text(value.get("model")):
+        block["model"] = value["model"]
+    if isinstance(value.get("overlays"), list):
+        block["overlays"] = _texts(value["overlays"])
+    for key, parse, limit in (
+        ("configured_cameras", _configured_camera, BOARD_LIST_LIMIT),
+        ("supported_sensors", _supported_sensor, SUPPORTED_SENSORS_LIMIT),
+    ):
+        entries = value.get(key) if isinstance(value.get(key), list) else []
+        block[key] = [parsed for parsed in map(parse, entries) if parsed][:limit]
+    return block
+
+
+class PeripheralClient(SentinelSocket):
+    socket_errors = _SOCKET_ERRORS
+    client_errors = _CLIENT_ERRORS
+    too_large_detail = "The Sentinel response is larger than {limit} bytes."
+    max_body_bytes = MAX_BODY_BYTES
+
+    def catalog(self) -> dict:
+        payload = self._call("GET", "/v1/peripherals")
+        self._validate_catalog(payload)
+        return payload
+
+    def refresh(self, timeout: float = REFRESH_TIMEOUT_SEC) -> dict:
+        """Rescan: Sentinel answers with the catalog of a scan that started after the request."""
+        payload = self._call("POST", "/v1/peripherals/refresh", timeout=timeout)
+        self._validate_catalog(payload)
+        return payload
+
+    def _call(self, method: str, path: str, body=None, timeout=socket_client.TIMEOUT_SEC) -> dict:
+        try:
+            status, text = self.request(method, path, body, timeout)
+        except BoardError:
+            # A failure from a board that is no longer selected is a stale result, not that board's error.
+            self.session.require_current()
+            raise
+        self.session.require_current()
+        try:
+            parsed = json.loads(text) if text else None
+        except (ValueError, RecursionError):  # deep nesting raises RecursionError, not a decode error
+            parsed = None
+        if not 200 <= status < 300:
+            detail = (parsed.get("reason") or parsed.get("error")) if isinstance(parsed, dict) else None
+            detail = str(detail or text or "").strip()[:DETAIL_LIMIT]
+            if status == 404:
+                # Sentinel answers routes it does not know with 404, so it predates peripheral discovery.
+                raise BoardError(
+                    "peripheral_version",
+                    f"SiMa Sentinel on {self.session.target.label} does not provide the peripheral catalog.",
+                    hint=INSTALL_HINT,
+                    detail=detail,
+                    daemon_status=status,
+                )
+            # 504: the refresh's scan did not finish within Sentinel's limit; 429: too many refreshes wait.
+            code = {400: "invalid_request", 504: "timeout"}.get(status, "peripheral_unavailable")
+            hint = {
+                400: "Correct the request and retry.",
+                429: "Other refreshes are waiting on the board; retry in a moment.",
+            }.get(status, STATUS_HINT)
+            raise BoardError(
+                code,
+                detail or f"SiMa Sentinel rejected the request with HTTP {status}.",
+                hint=hint,
+                daemon_status=status,
+            )
+        if not isinstance(parsed, dict):
+            raise self._response_error("SiMa Sentinel returned a response Insight cannot read.", text)
+        return parsed
+
+    def _validate_catalog(self, payload: dict) -> None:
+        observed_at = payload.get("observed_at", "")
+        if (
+            not isinstance(payload.get("revision"), int)
+            or isinstance(payload["revision"], bool)
+            or not 0 <= payload["revision"] <= MAX_SAFE_INTEGER
+            or not (observed_at is None or (isinstance(observed_at, str) and _OBSERVED_AT.fullmatch(observed_at)))
+            or not all(isinstance(payload.get(key), list) for key in ("devices", "errors"))
+        ):
+            raise self._response_error("The Sentinel peripheral catalog does not match the v1 API.", payload)
+        device_ids = set()
+        for device in payload["devices"]:
+            if not isinstance(device, dict) or not all(isinstance(device.get(key), str) and device[key] for key in ("id", "type")):
+                raise self._response_error("SiMa Sentinel returned a malformed device record.", device)
+            if device["id"] in device_ids:
+                raise self._response_error("SiMa Sentinel returned duplicate device identities.", device)
+            device_ids.add(device["id"])
+            if device["type"] == "camera":
+                self._validate_camera(device)
+            elif device["type"] == "microphone":
+                self._validate_microphone(device)
+        for error in payload["errors"]:
+            if not isinstance(error, dict) or not all(isinstance(error.get(key), str) and error[key] for key in ("provider", "code", "reason")):
+                raise self._response_error("SiMa Sentinel returned a malformed provider error.", error)
+        if "board" in payload:
+            board = board_block(payload["board"])
+            if board is None:
+                del payload["board"]
+            else:
+                payload["board"] = board
+
+    def _validate_camera(self, camera: dict) -> None:
+        identity = camera.get("identity")
+        if (
+            not isinstance(camera.get("backend"), str)
+            or not camera["backend"]
+            or not isinstance(camera.get("modes"), list)
+            or any(
+                camera.get(key) is not None and not isinstance(camera.get(key), str)
+                for key in (
+                    "camera_name", "model", "media_device", "bus_info",
+                    "csi_receiver", "device_path", "by_id_path",
+                )
+            )
+            or any(
+                camera.get(key) is not None and not isinstance(camera.get(key), dict)
+                for key in ("identity", "availability", "isp")
+            )
+            or (
+                isinstance(camera.get("availability"), dict)
+                and any(
+                    camera["availability"].get(key) is not None and not isinstance(camera["availability"][key], str)
+                    for key in ("state", "reason")
+                )
+            )
+            or (camera.get("max_fps") is not None and not _finite_positive(camera["max_fps"]))
+            or (
+                isinstance(identity, dict)
+                and (
+                    any(
+                        identity.get(key) is not None and not isinstance(identity.get(key), str)
+                        for key in (
+                            "stable_key", "topology", "interface", "vendor_id", "product_id",
+                            "serial", "manufacturer", "speed", "camera_name", "driver",
+                        )
+                    )
+                    or (
+                        identity.get("node_index") is not None
+                        and not (
+                            isinstance(identity["node_index"], str)
+                            or _non_negative_int(identity["node_index"])
+                        )
+                    )
+                )
+            )
+        ):
+            raise self._response_error("SiMa Sentinel returned malformed camera details.", camera)
+        for mode in camera["modes"]:
+            if (
+                not isinstance(mode, dict)
+                or not isinstance(mode.get("format"), str)
+                or not mode["format"]
+            ):
+                raise self._response_error("SiMa Sentinel returned a malformed camera mode.", mode)
+            # The verdict fields decide whether a mode is listed as Available, so a wrong type is rejected
+            # rather than read as a different verdict.
+            if any(mode.get(key) is not None and not isinstance(mode[key], bool)
+                   for key in ("available", "isp_output", "sensor_mode")) or (
+                mode.get("reason") is not None and not isinstance(mode["reason"], str)
+            ):
+                raise self._response_error("SiMa Sentinel returned a malformed camera mode verdict.", mode)
+            if "width" in mode or "height" in mode:
+                valid = "size_range" not in mode and all(_positive_int(mode.get(key)) for key in ("width", "height"))
+            else:
+                valid = self._valid_size_range(mode.get("size_range"))
+            if not valid:
+                raise self._response_error(
+                    "A camera mode must contain exactly one discrete size or size range.", mode
+                )
+            if "frame_intervals" in mode and not self._valid_frame_intervals(mode["frame_intervals"]):
+                raise self._response_error("SiMa Sentinel returned malformed frame intervals.", mode)
+
+    def _validate_microphone(self, microphone: dict) -> None:
+        """Sentinel's ALSA capture record; optional identity fields are omitted, never null. `backend` and
+        `connection` must be non-empty strings but are not checked against today's values: a new one is
+        shown, not a reason to reject the whole catalog. `backend` names the provider whose errors apply."""
+        target = microphone.get("capture_target")
+        identity = microphone.get("identity")
+        availability = microphone.get("availability")
+        issues = microphone.get("issues", [])
+        if (
+            not isinstance(microphone.get("name"), str)
+            or not microphone["name"]
+            or not all(isinstance(microphone.get(key), str) and microphone[key] for key in ("backend", "connection"))
+            or not isinstance(target, dict)
+            or not _non_negative_int(target.get("device"))
+            or not all(isinstance(target.get(key, ""), str) for key in ("card_id", "selector"))
+            or not isinstance(identity, dict)
+            or not isinstance(identity.get("stable_key"), str)
+            or not identity["stable_key"]
+            or ("card_index" in identity and not _non_negative_int(identity["card_index"]))
+            or not all(
+                isinstance(identity.get(key, ""), str)
+                for key in ("card_id", "card_name", "card_driver", "pcm_name", "pcm_node", "by_path", "by_id")
+            )
+            or not _object_or_none(identity.get("usb"))
+            or not all(
+                isinstance((identity.get("usb") or {}).get(key, ""), str)
+                for key in ("bus_path", "vendor_id", "product_id", "interface", "manufacturer", "product", "serial")
+            )
+            or not isinstance(microphone.get("modes"), list)
+            or not isinstance(availability, dict)
+            or availability.get("state") not in {"available", "in_use", "unknown"}
+            # The snapshot's reason is a string or null.
+            or (availability.get("reason") is not None and not isinstance(availability["reason"], str))
+            or not all(_non_negative_int(availability.get(key, 0)) for key in ("subdevices", "subdevices_available"))
+            # Both counts come from the same /proc/asound info file; more free than exist is impossible.
+            or (
+                "subdevices" in availability
+                and availability.get("subdevices_available", 0) > availability["subdevices"]
+            )
+            or not isinstance(issues, list)
+        ):
+            raise self._response_error("SiMa Sentinel returned malformed microphone details.", microphone)
+        for mode in microphone["modes"]:
+            if not self._valid_microphone_mode(mode):
+                raise self._response_error("SiMa Sentinel returned a malformed microphone mode.", mode)
+        for issue in issues:
+            if not isinstance(issue, dict) or not all(
+                isinstance(issue.get(key), str) and issue[key] for key in ("code", "reason")
+            ):
+                raise self._response_error("SiMa Sentinel returned a malformed microphone issue.", issue)
+
+    @staticmethod
+    def _valid_microphone_mode(mode) -> bool:
+        """One capture mode: a format, optional counts, and discrete `rates_hz` or one `rate_range_hz`, not both."""
+        if not isinstance(mode, dict) or not isinstance(mode.get("format"), str) or not mode["format"]:
+            return False
+        if "rates_hz" in mode and "rate_range_hz" in mode:
+            return False
+        rates, span = mode.get("rates_hz", [1]), mode.get("rate_range_hz", {"min": 1, "max": 1})
+        return (
+            all(_non_negative_int(mode.get(key, 0)) for key in ("interface", "altset"))
+            and all(_positive_int(mode.get(key, 1)) for key in ("channels", "sample_bits"))
+            and isinstance(rates, list)
+            and bool(rates)
+            and all(_positive_int(rate) for rate in rates)
+            and isinstance(span, dict)
+            and _positive_int(span.get("min"))
+            and _positive_int(span.get("max"))
+            and span["min"] <= span["max"]
+            and isinstance(mode.get("channel_map", []), list)
+            and all(isinstance(channel, str) for channel in mode.get("channel_map", []))
+        )
+
+    @staticmethod
+    def _valid_frame_intervals(value) -> bool:
+        """Each entry is one probed size with the list of intervals the device advertises for it; the size must
+        be one the snapshot can match to its mode, and every fraction the snapshot divides by must be positive."""
+        return isinstance(value, list) and all(
+            isinstance(entry, dict)
+            and all(_positive_int(entry.get(key)) for key in ("width", "height"))
+            and isinstance(entry.get("intervals"), list)
+            and all(_valid_interval(interval) for interval in entry["intervals"])
+            for entry in value
+        )
+
+    @staticmethod
+    def _valid_size_range(value) -> bool:
+        if not isinstance(value, dict):
+            return False
+        keys = ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")
+        if not all(_positive_int(value.get(key)) for key in keys):
+            return False
+        return value["min_width"] <= value["max_width"] and value["min_height"] <= value["max_height"]

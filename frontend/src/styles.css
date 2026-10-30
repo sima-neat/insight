@@ -47,6 +47,12 @@
   --danger-soft: #fff0f3;
   --ok: #19713e;
   --ok-soft: #ecf9f0;
+  --ext: #6b3fb3;
+  --ext-soft: #f1eafc;
+  --warn: #8a5a00;
+  --warn-soft: #fff6e0;
+  --pull: #0f6b6b;
+  --pull-soft: #d5efee;
 
   --radius-sm: 10px;
   --radius-md: 14px;
@@ -144,13 +150,19 @@ select:focus-visible,
 
 .masthead-actions {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  /* Every control in this row is the same height and centred on one line, so the board box sits on
+     the same axis as the round info button and the tour button rather than hanging above them. */
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-.devkit-trigger,
+.masthead-actions > button {
+  height: 38px;
+}
+
+.board-trigger,
 .tour-trigger,
 .sysinfo-trigger {
   background: var(--surface-soft);
@@ -159,10 +171,35 @@ select:focus-visible,
   white-space: nowrap;
 }
 
-.devkit-trigger {
-  border-color: rgba(14, 90, 184, 0.28);
-  background: var(--accent-soft);
-  color: #184b86;
+.board-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  cursor: pointer;
+}
+
+.board-trigger-label {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-trigger:hover {
+  border-color: var(--line-strong);
+}
+
+/* A connected board tints its own box, so the masthead answers "is the board there?" at a glance
+   without reading the pill. */
+.board-trigger.ok {
+  border-color: rgba(18, 122, 84, 0.34);
+  background: #edfaf3;
+  color: #14543c;
+}
+
+.board-trigger.ok:hover {
+  border-color: rgba(18, 122, 84, 0.55);
 }
 
 .sysinfo-trigger {
@@ -288,7 +325,9 @@ select:focus-visible,
   position: fixed;
   top: 18px;
   right: 18px;
-  z-index: 50;
+  /* above .modal-backdrop (60) and the workspace JSON modal (70): an error raised by a
+     dialog action must stay visible */
+  z-index: 80;
   max-width: min(480px, calc(100vw - 36px));
   display: grid;
   gap: 8px;
@@ -380,6 +419,9 @@ select:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .periph-preview-frame,
+  .periph-spinner,
+  .periph-live-dot,
   .toast,
   .upload-progress-card,
   .upload-progress-bar.indeterminate {
@@ -632,6 +674,7 @@ input {
 }
 
 .preview {
+  position: relative;
   min-height: 190px;
   border: 1px dashed #c9d5e2;
   border-radius: var(--radius-md);
@@ -646,6 +689,44 @@ input {
   max-width: 100%;
   max-height: 280px;
   border-radius: 10px;
+}
+
+/* Keeps loading (hidden elements still fetch) without showing a stale or partial frame. */
+.preview img.loading {
+  visibility: hidden;
+  position: absolute;
+}
+
+.preview-loading {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  width: min(260px, 100%);
+  color: var(--ink-soft);
+  font-size: 13px;
+  text-align: center;
+}
+
+.preview-loading .upload-progress-track {
+  width: 100%;
+}
+
+/* The live region stays mounted so screen readers announce it; keep it out of the grid while idle. */
+.preview-loading:empty {
+  display: none;
+}
+
+.ok-text {
+  color: var(--ok);
+}
+
+.muted-text {
+  color: #7b8c9c;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .actions {
@@ -742,6 +823,24 @@ button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
+/* Streaming Sources: the source list and the preview side by side, the preview below the
+   list as soon as the list would get narrower than its rows (owner review S5). */
+.sources-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.sources-list-panel {
+  flex: 1.05 1 0;
+  min-width: min-content;
+}
+
+.sources-preview-panel {
+  flex: 1 1 0;
+  min-width: min(360px, 100%);
+}
+
 .sources {
   display: grid;
   gap: 8px;
@@ -753,7 +852,7 @@ button:hover:not(:disabled) {
   border-radius: var(--radius-sm);
   padding: 8px;
   display: grid;
-  grid-template-columns: 54px 48px minmax(180px, 1fr) 100px 100px auto auto auto;
+  grid-template-columns: 54px 62px minmax(120px, 1fr) 100px 100px auto auto auto;
   gap: 8px;
   align-items: center;
   cursor: pointer;
@@ -808,6 +907,7 @@ button:hover:not(:disabled) {
 
 .codec-lock {
   min-height: 36px;
+  gap: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: #eef2f6;
@@ -824,6 +924,256 @@ button:hover:not(:disabled) {
 .codec-lock.empty {
   color: #7b8c9c;
   font-weight: 700;
+}
+
+.src-state.external {
+  background: var(--ext-soft);
+  color: var(--ext);
+}
+
+.source-row.external {
+  border-color: #cdb8ef;
+  background: #faf7ff;
+}
+
+.source-row.external.active {
+  border-color: var(--ext);
+  background: var(--ext-soft);
+}
+
+.external-chip {
+  min-height: 36px;
+  border: 1px solid #d9c8f3;
+  border-radius: var(--radius-sm);
+  background: var(--ext-soft);
+  color: var(--ext);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.codec-lock.warn {
+  background: var(--warn-soft);
+  border-color: #f0d49a;
+  color: var(--warn);
+}
+
+.icon-action-btn.takeover {
+  color: var(--ext);
+  border-color: #d9c8f3;
+}
+
+.src-state.pulled {
+  background: var(--pull-soft);
+  color: var(--pull);
+}
+
+.src-state.pulled.connecting {
+  background: #eef2f6;
+  color: #5f7487;
+}
+
+.src-state.pulled.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.src-state.pulled.failed {
+  background: #fde8e8;
+  color: var(--danger);
+}
+
+.source-row.pulled {
+  border-color: #a9d3d6;
+  background: #f3fbfb;
+}
+
+.source-row.pulled.warn,
+.source-row.pulled.failed {
+  border-color: #f0d49a;
+  background: #fffaf0;
+}
+
+.source-row.pulled.active {
+  border-color: var(--pull);
+  background: var(--pull-soft);
+}
+
+.source-row.pulled.warn.active,
+.source-row.pulled.failed.active {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.pull-chip {
+  min-height: 36px;
+  border: 1px solid #a9d3d6;
+  border-radius: var(--radius-sm);
+  background: var(--pull-soft);
+  color: var(--pull);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.source-row.pulled.warn .pull-chip,
+.source-row.pulled.failed .pull-chip {
+  border-color: #f0d49a;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.pull-error-text {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.preview-badge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.warn-text {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.fps-stepper {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  overflow: hidden;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.fps-stepper:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.fps-stepper button {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: var(--surface-soft);
+  color: #405f72;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.fps-stepper button:first-child {
+  border-right: 1px solid var(--line);
+}
+
+.fps-stepper button:last-child {
+  border-left: 1px solid var(--line);
+}
+
+.fps-stepper button:hover:not(:disabled) {
+  transform: none;
+  background: var(--accent-soft);
+}
+
+/* The file select plus a small note when the slot streams at an fps override. */
+.src-file-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.src-file-cell select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fps-note {
+  flex: 0 0 auto;
+  font-size: 0.8em;
+  color: var(--muted, #8b95a5);
+  white-space: nowrap;
+}
+
+/* At the source's own rate the note and the rendition hint say nothing new: grayed out. */
+.fps-note.native,
+.fps-hint.native {
+  opacity: 0.5;
+}
+
+/* The stepper's home in the Source Preview panel. */
+.fps-field-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 4px 0 8px;
+}
+
+.fps-field {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.fps-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: transparent;
+}
+
+.fps-field input:focus-visible {
+  box-shadow: none;
+}
+
+.fps-field small {
+  color: #7b8c9c;
+  font-size: 10px;
+}
+
+.fps-stepper.changed {
+  border-color: rgba(14, 90, 184, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(14, 90, 184, 0.12);
+}
+
+.fps-stepper.invalid {
+  border-color: #edb1be;
+  box-shadow: inset 0 0 0 1px rgba(179, 66, 90, 0.2);
+}
+
+.fps-stepper.changed:focus-within,
+.fps-stepper.invalid:focus-within {
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.fps-stepper.locked {
+  opacity: 0.55;
+}
+
+.src-state.encoding {
+  background: var(--accent-soft);
+  color: #174f4c;
 }
 
 .icon-action-btn svg {
@@ -853,7 +1203,7 @@ button:hover:not(:disabled) {
 .icon-action-btn:disabled,
 button:disabled {
   opacity: 0.52;
-  cursor: not-allowed;
+  cursor: default; /* not-allowed renders as no cursor on some desktop themes */
   transform: none;
 }
 
@@ -2269,77 +2619,6 @@ button:disabled {
   gap: 14px;
 }
 
-.gauge-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.gauge-card {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface-soft);
-  padding: 10px;
-  display: grid;
-  grid-template-columns: 1fr;
-  justify-items: center;
-  gap: 6px;
-}
-
-.gauge-card h3 {
-  margin: 0;
-  font-size: 12px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #34546a;
-}
-
-.gauge-visual {
-  position: relative;
-  width: 74px;
-  height: 74px;
-}
-
-.gauge-svg {
-  width: 74px;
-  height: 74px;
-  transform: rotate(-90deg);
-}
-
-.gauge-track {
-  fill: none;
-  stroke: #dbe5ee;
-  stroke-width: 8;
-}
-
-.gauge-progress {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 8;
-  stroke-linecap: round;
-}
-
-.gauge-center {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: #284c62;
-}
-
-.metric-summary-row {
-  margin-top: 12px;
-  border-top: 1px dashed #d4dee8;
-  padding-top: 10px;
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  color: #486176;
-}
-
 .profile-filter-bar {
   display: flex;
   gap: 8px;
@@ -3253,10 +3532,6 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .gauge-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .youtube-preview-panel {
     grid-template-columns: 1fr;
     align-items: start;
@@ -3304,8 +3579,9 @@ button:disabled {
     min-height: 520px;
   }
 
-  .source-row {
-    grid-template-columns: 54px 48px minmax(0, 1fr) 96px 96px auto auto auto;
+  .sources-list-panel,
+  .sources-preview-panel {
+    flex-basis: 100%;
   }
 
   .masthead {
@@ -3332,7 +3608,6 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .gauge-grid,
   .series-grid {
     grid-template-columns: 1fr;
   }
@@ -3353,4 +3628,4147 @@ button:disabled {
   .youtube-form-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.periph-view {
+  display: grid;
+  gap: 12px;
+}
+
+.periph-view a {
+  color: var(--accent-alt);
+  font-weight: 700;
+}
+
+.periph-view code,
+.periph-camera-id,
+.periph-facts dd,
+.periph-detail-head .hint {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.periph-actions,
+.periph-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.periph-board-summary {
+  display: flex;
+  flex-wrap: wrap;
+  /* The 16px label and the 12px pills share a baseline instead of being centred against each other. */
+  align-items: baseline;
+  gap: 8px;
+}
+
+.periph-board-summary .hint,
+.periph-issues p,
+.periph-form .hint,
+.periph-form .periph-callout {
+  margin: 0;
+}
+
+.periph-board-label {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.periph-facts {
+  /* A grid, not wrapped flex: hostname, build and machine line their values up in one column
+     instead of each pair starting wherever the previous one ended. */
+  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 16px;
+  font-size: 12px;
+}
+
+.periph-facts > div {
+  display: contents;
+}
+
+.periph-facts dt {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.periph-facts dd {
+  margin: 0;
+}
+
+.periph-pill {
+  min-width: 0;
+  white-space: normal;
+}
+
+.sysinfo-pill.periph-danger {
+  border-color: #f3c3cd;
+  background: var(--danger-soft);
+  color: #8f2f45;
+}
+
+.sysinfo-pill.periph-info {
+  border-color: #c5d8f3;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.periph-callout {
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 12px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.periph-callout.warn {
+  border-color: #eed39a;
+  background: #fff8e7;
+}
+
+.periph-callout.danger {
+  border-color: #f3c3cd;
+  background: var(--danger-soft);
+}
+
+.periph-callout.info {
+  border-color: #c5d8f3;
+  background: var(--accent-soft);
+}
+
+.periph-callout p,
+.periph-callout ol,
+.periph-callout ul {
+  margin: 0 0 4px;
+}
+
+.periph-callout > :last-child {
+  margin-bottom: 0;
+}
+
+.periph-callout ol {
+  padding-left: 16px;
+}
+
+.periph-callout-title {
+  font-weight: 700;
+}
+
+.periph-code {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #d9e5ee;
+  border-radius: 10px;
+  background: #f4f8fb;
+  color: #20384f;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: normal;
+}
+
+.periph-command {
+  margin-top: 4px;
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.periph-command .periph-code {
+  justify-self: stretch;
+  background: #fff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.periph-confirm,
+.periph-form {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-form-fields {
+  display: grid;
+  /* host, then the short port, then user */
+  grid-template-columns: minmax(0, 2fr) 110px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.periph-mode-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.periph-form label,
+.periph-modes label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f4c61;
+}
+
+/* A menu's title with the chosen entry's tier as a pill, so no entry needs a suffix. */
+.periph-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.periph-refresh[aria-disabled='true'] {
+  /* Dim the surface, never the label: fading both drops "Scanning… N s" below AA contrast,
+     and that state is on screen for the whole scan. */
+  background: #eef3fb;
+  border-color: rgba(23, 79, 76, 0.25);
+  cursor: progress;
+  transform: none;
+}
+
+.periph-meta {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.periph-issues {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.periph-issues li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.periph-notes,
+.periph-blocked {
+  margin: 8px 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.periph-grid {
+  margin-top: 12px;
+  display: grid;
+  /* The camera list takes only what its rows need (capped at 280px, long names wrap);
+     the detail column gets the rest. */
+  grid-template-columns: fit-content(280px) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.periph-list,
+.periph-group {
+  display: grid;
+  gap: 6px;
+}
+
+.periph-list {
+  min-width: 200px;
+}
+
+.periph-group-title,
+.periph-modes legend {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-camera-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.periph-camera-row:hover {
+  border-color: var(--line-strong);
+}
+
+.periph-camera-row.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: #f1fbfa;
+}
+
+/* An Unsupported camera: listed, with its reason, but not openable. */
+.periph-camera-row:focus-visible,
+.periph-code:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+  border-color: var(--accent);
+}
+
+.periph-camera-name {
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.periph-camera-id {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.periph-camera-row .periph-pills {
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.periph-detail {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+  padding: 12px;
+}
+
+.periph-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-detail h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.periph-detail-head .hint {
+  margin: 2px 0 8px;
+}
+
+.periph-modes {
+  min-width: 0;
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px 12px;
+}
+
+.periph-modes legend {
+  padding: 0 4px;
+}
+
+.periph-mode-fields {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.periph-modes .hint {
+  margin: 8px 0 0;
+}
+
+/* Microphone capture: one segmented badge row per format/channels/bits/rates combination. */
+.periph-capture {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.periph-capture .hint {
+  margin: 0;
+}
+
+.periph-capture-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #274155;
+}
+
+.periph-capture-badges > span {
+  padding: 4px 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.periph-capture-badges > span + span {
+  border-left: 1px solid var(--line);
+}
+
+/* Microphone test: record on the board, play back here. */
+.periph-mic-test {
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-mic-test-head {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-mic-test-head h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-mic-test .hint,
+.periph-mic-test .periph-callout {
+  margin: 0;
+}
+
+.periph-mic-warning {
+  color: #8f2f45;
+}
+
+/* Button, live level meter, caption: one row, as a video call's microphone test lays it out. */
+.periph-mic-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 12px;
+}
+
+.periph-mic-button {
+  min-width: 148px;
+}
+
+.periph-meter {
+  height: 14px;
+  display: flex;
+  gap: 3px;
+}
+
+.periph-meter > span {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.periph-meter > span.on.low {
+  background: #1f9d55;
+}
+
+.periph-meter > span.on.mid {
+  background: #e0a100;
+}
+
+.periph-meter > span.on.high {
+  background: var(--danger);
+}
+
+.periph-mic-caption {
+  justify-self: end;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .periph-mic-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .periph-mic-caption {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 980px) {
+  .periph-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .periph-form-fields,
+  .periph-mode-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Board settings panel (masthead indicator opens this) */
+.board-panel-card {
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(820px, calc(100vh - 24px));
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.board-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.board-panel-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+}
+
+/* The actions close the card, after what they act on, instead of floating beside the heading. */
+.periph-board-actions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.board-panel-body {
+  padding: 12px 16px 16px;
+}
+
+/* One rhythm down the panel: every block the card renders is spaced the same. */
+.board-panel-body .periph-board > * + * {
+  margin-top: 12px;
+}
+
+.board-panel-body .periph-board {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+}
+
+/* The card only takes focus as a last resort, when a collapse removed every nearer control. */
+.periph-board:focus {
+  outline: none;
+}
+
+/* Peripherals: device-kind icon rail. 56px wide: 46px buttons + 4px padding + 1px border. */
+.periph-kind-layout {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.periph-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+  width: 56px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+
+.periph-kind {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.periph-kind:hover:not([aria-disabled='true']) {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+/* No lift on hover (the global button rule): a transform would also re-anchor the phone-width tip. */
+.periph-kinds .periph-kind:hover {
+  transform: none;
+}
+
+.periph-kind.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: #f1fbfa;
+  color: var(--accent-alt);
+}
+
+.periph-kind:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+  border-color: var(--accent);
+}
+
+/* Greyed: not supported, or nothing detected. #7a8a99 keeps 3.39:1 on the rail and 3.55:1 on white. */
+.periph-kind[aria-disabled='true'] {
+  cursor: not-allowed;
+  color: #7a8a99;
+}
+
+.periph-kind.active[aria-disabled='true'] {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+.periph-kind-icon {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+.periph-kind-svg {
+  display: block;
+}
+
+/* White on --accent-alt is 5.18:1; the greyed bubble (--ink-soft on #e8edf2) is 5.49:1. */
+.periph-kind-badge {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 2px solid var(--surface-soft);
+  border-radius: 999px;
+  background: var(--accent-alt);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.periph-kind[aria-disabled='true'] .periph-kind-badge {
+  background: #e8edf2;
+  color: var(--ink-soft);
+}
+
+.periph-kind-tip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: max-content;
+  max-width: 260px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  pointer-events: none;
+}
+
+.periph-kind:hover .periph-kind-tip,
+.periph-kind:focus-visible .periph-kind-tip {
+  display: block;
+}
+
+.periph-kind-panel {
+  min-width: 0;
+}
+
+.periph-kind-panel .periph-grid {
+  margin-top: 0;
+}
+
+/* Detail pane: one explanation line, progressive disclosure */
+.periph-summary-line {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.periph-blocked-disclosure {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.periph-blocked-disclosure > summary {
+  width: max-content;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #40596d;
+  font-weight: 700;
+}
+
+.periph-blocked-disclosure > summary:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.periph-blocked-disclosure .periph-blocked {
+  margin-top: 4px;
+}
+
+.periph-title-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.periph-title-row .periph-neat-name {
+  margin: 0;
+}
+
+/* Opened, the ID floats under the title row so the header keeps its height. */
+.periph-neat-name .periph-command {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  top: calc(100% + 6px);
+  width: min(460px, calc(100vw - 64px));
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  box-shadow: var(--shadow-md);
+  padding: 10px;
+}
+
+.periph-neat-name .periph-command .hint {
+  margin: 0;
+  font-family: inherit;
+}
+
+/* Camera preview */
+.periph-preview {
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-preview-head h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-preview .hint,
+.periph-preview .periph-callout {
+  margin: 0;
+}
+
+.periph-preview-reason {
+  color: #8f2f45;
+}
+
+/* The live video: the one element that takes the full width, with its chip and Stop overlaid. */
+.periph-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #0e1923;
+  overflow: hidden;
+}
+
+.periph-preview-progress {
+  align-items: center;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.periph-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
+  animation: periph-spin 0.9s linear infinite;
+}
+
+.periph-preview-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The stream keeps the camera's aspect ratio, which need not be 16:9. */
+  object-fit: contain;
+  animation: periph-stage-in 200ms ease both;
+}
+
+.periph-stage-chip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.periph-stage-chip .periph-mode-badges {
+  background: transparent;
+  border: 0;
+  color: #fff;
+  gap: 8px;
+}
+
+.periph-stage-chip .periph-mode-badges > span {
+  background: transparent;
+  border: 0;
+  color: #fff;
+  padding: 0;
+}
+
+.periph-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff5c6c;
+  animation: periph-blink 1.2s steps(2, start) infinite;
+}
+
+.periph-stage-stop {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.periph-stage-stop:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+@keyframes periph-stage-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes periph-spin { to { transform: rotate(360deg) } }
+@keyframes periph-blink { to { visibility: hidden } }
+
+.periph-inline-code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* Phones: the rail becomes a row of icons above the panel (RAIL_ROW_QUERY in PeripheralsView.jsx).
+   The tip anchors to the whole row, so it spans the row's width and never runs off-screen. */
+@media (max-width: 640px) {
+  .periph-kind-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .periph-kinds {
+    position: relative;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: auto;
+  }
+
+  .periph-kind {
+    position: static;
+  }
+
+  .periph-kind-tip {
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    transform: none;
+    width: auto;
+    max-width: none;
+  }
+}
+
+/* Preview mode: format, size and rate as one segmented tag group. */
+.periph-mode-badges {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #274155;
+  white-space: nowrap;
+}
+
+.periph-mode-badges > span {
+  padding: 4px 10px;
+  line-height: 1.2;
+}
+
+.periph-mode-badges > span + span {
+  border-left: 1px solid var(--line);
+}
+
+/* GenAI Studio tab */
+/* The tab fills the window below Insight's header (--genai-top, set by
+   GenAIView): the panels above the chat take their size, and the chat takes
+   the rest, so the conversation fills the screen and the composer stays at
+   the bottom. With many panels open the page scrolls instead. */
+.genai {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: calc(100dvh - var(--genai-top, 0px) - 16px);
+}
+
+.genai > * {
+  flex: none;
+}
+
+.genai:fullscreen {
+  height: 100dvh;
+  padding: 12px;
+  background: var(--bg, #f4f6fa);
+}
+
+.genai-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 16px;
+}
+
+.genai-model-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-model-picker select {
+  width: auto;
+  min-width: 220px;
+}
+
+.genai-settings-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.genai-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+.genai-pill {
+  flex: none;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+}
+
+.genai-pill-ready {
+  background: var(--ok-soft);
+  border-color: rgba(25, 113, 62, 0.35);
+  color: var(--ok);
+}
+
+.genai-pill-busy,
+.genai-pill-starting {
+  background: var(--accent-soft);
+  border-color: rgba(14, 90, 184, 0.35);
+  color: var(--accent-strong);
+}
+
+.genai-pill-failed,
+.genai-pill-error,
+.genai-pill-unavailable,
+.genai-pill-incompatible {
+  background: var(--danger-soft);
+  border-color: #edb1be;
+  color: #8f2f45;
+}
+
+.genai-banner {
+  display: grid;
+  gap: 6px;
+}
+
+.genai-banner-title {
+  margin: 0;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.genai-banner-failed,
+.genai-banner-error,
+.genai-banner-incompatible,
+.genai-banner-unavailable {
+  border-color: #edb1be;
+}
+
+.genai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.genai-small {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.genai-check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.genai-check input {
+  width: auto;
+}
+
+/* Settings: one card per area in two columns, one on a narrow screen;
+   Models and Troubleshooting take the whole row. */
+.genai-settings-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .genai-settings-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.genai-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px 14px 14px;
+  background: var(--surface-soft);
+}
+
+.genai-card-wide {
+  grid-column: 1 / -1;
+}
+
+.genai-card .hint {
+  margin: 0;
+}
+
+.genai-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.genai-card-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.genai-card-titles {
+  min-width: 0;
+}
+
+.genai-card-titles h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: #274155;
+}
+
+/* The card's state in one line; the whole text is its tooltip. */
+.genai-card-summary {
+  margin: 1px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.genai-form label {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 220px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-row {
+  display: flex;
+  gap: 8px;
+}
+
+.genai-row input {
+  flex: 1;
+}
+
+.genai-model-group {
+  display: grid;
+  gap: 6px;
+}
+
+.genai-model-group-title {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #2d4f64;
+}
+
+.genai-models {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.genai-models > li.hint {
+  margin: 0;
+}
+
+/* A model: kind, name, size, state, then its actions, in aligned columns. */
+.genai-model-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 64px 104px minmax(130px, auto);
+  gap: 6px 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px 6px 10px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.genai-model-row-on {
+  border-color: rgba(25, 113, 62, 0.35);
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
+.genai-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.genai-model-size {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.genai-model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.genai-kind {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.genai-kind-vision {
+  background: var(--accent-alt-soft);
+  color: var(--accent-alt);
+}
+
+.genai-kind-speech {
+  background: #f3edfb;
+  color: #5b3f8c;
+}
+
+.genai-model-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* A dot before the state: filled green when loaded or in use. */
+.genai-model-state::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+}
+
+.genai-model-state-on {
+  color: var(--ok);
+}
+
+.genai-model-state-on::before {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.genai-model-state-loading {
+  color: var(--accent-strong);
+}
+
+.genai-model-state-loading::before {
+  border-color: var(--accent);
+  border-right-color: transparent;
+}
+
+.genai-model-state-unsupported {
+  color: var(--danger);
+}
+
+.genai-model-state-unsupported::before {
+  border-color: var(--danger);
+}
+
+/* A phone: the kind, name and size, then the state and the actions. */
+@media (max-width: 640px) {
+  .genai-model-row {
+    grid-template-columns: 62px minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "kind name name size"
+      "state state actions actions";
+  }
+
+  .genai-kind { grid-area: kind; }
+  .genai-model-row .genai-model-name { grid-area: name; }
+  .genai-model-size { grid-area: size; }
+  .genai-model-state { grid-area: state; }
+  .genai-model-actions { grid-area: actions; }
+
+  /* No tooltips on a touch screen: the whole line shows. */
+  .genai-card-summary {
+    white-space: normal;
+  }
+
+  .genai-card .genai-row {
+    flex-wrap: wrap;
+  }
+
+  .genai-card .genai-row input {
+    flex-basis: 100%;
+  }
+}
+
+.genai-download {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+}
+
+.genai-download .hint {
+  margin: 0;
+}
+
+/* The chat's offer of a first model: the welcome's look, higher up so the
+   download's progress shows under it on a laptop screen. */
+.genai-welcome.genai-first-model {
+  max-width: 640px;
+  margin: 0 auto;
+  padding-top: 3vh;
+}
+
+/* A heading in a .panel, but the welcome's title, not a panel label. */
+.genai-first-model .genai-welcome-title {
+  font-size: 22px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.genai-first-model .section-note {
+  margin: 0;
+  max-width: 60ch;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.genai-first-model-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.genai-first-model-icon .genai-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.genai-first-model-actions {
+  justify-content: center;
+}
+
+.genai-first-model-actions .btn-tonal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.genai-first-model-note {
+  margin: 0;
+  max-width: 60ch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  background: var(--surface-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.genai-header-spacer {
+  flex: 1;
+}
+
+/* The chat reads like everyday chat apps: one centered column, not the full
+   page width, with the message box at the bottom. */
+.genai-chat {
+  /* .genai > * would hold it at its content size: the chat grows instead. */
+  flex: 1 1 0;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* As wide as the header above it: the conversation uses the screen. */
+  width: 100%;
+  align-self: stretch;
+}
+
+.genai-chat > * {
+  flex: none;
+}
+
+.genai-transcript {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 8px 4px;
+}
+
+.genai-welcome {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 12vh 8px 0;
+}
+
+.genai-welcome-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.genai-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 6px 0 0 !important;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.genai-metric-label {
+  font-weight: 600;
+}
+
+.genai-msg {
+  border-radius: 18px;
+  padding: 10px 14px;
+  font-size: 14.5px;
+  line-height: 1.55;
+  max-width: 80%;
+}
+
+.genai-msg p {
+  margin: 0;
+}
+
+.genai-msg-user {
+  justify-self: end;
+  background: var(--accent-soft);
+  border: 1px solid rgba(14, 90, 184, 0.2);
+}
+
+.genai-msg-assistant {
+  justify-self: stretch;
+  max-width: none;
+  padding: 2px 4px;
+  background: none;
+  border: 0;
+}
+
+.genai-msg-assistant > button {
+  margin-top: 6px;
+}
+
+.genai-msg-image {
+  display: block;
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.genai-markdown > :first-child {
+  margin-top: 0;
+}
+
+.genai-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.genai-markdown pre {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.genai-markdown table {
+  border-collapse: collapse;
+}
+
+.genai-markdown th,
+.genai-markdown td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+}
+
+.genai-thinking {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
+.genai-thinking summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.genai-error {
+  color: var(--danger) !important;
+  font-size: 12px;
+}
+
+.genai-composer {
+  /* Centred under the wide conversation, as chat apps do. */
+  width: 100%;
+  max-width: 860px;
+  align-self: center;
+  display: grid;
+  gap: 4px;
+  padding: 10px 10px 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+}
+
+.genai-composer:focus-within {
+  border-color: var(--accent);
+}
+
+.genai-composer textarea {
+  width: 100%;
+  min-height: 44px;
+  max-height: 200px;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 4px 0;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.genai-composer-tools,
+.genai-composer-media {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.genai-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--surface);
+  cursor: pointer;
+}
+
+.genai-send:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.genai-send .genai-icon {
+  stroke-width: 2.4;
+}
+
+.genai-send-stop .genai-icon {
+  fill: currentColor;
+}
+
+.genai-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px;
+}
+
+.genai-field-error {
+  margin: 6px 0 0;
+  color: var(--danger, #b42318);
+  font-size: 0.9em;
+}
+
+.genai-tooltip-wrap {
+  display: inline-flex;
+}
+
+/* Let the wrapper receive the hover (and show "New chat") while the button is disabled. */
+.genai-tooltip-wrap > button:disabled {
+  pointer-events: none;
+}
+
+.genai-new-chat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.genai-listening {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.genai-attachment,
+.genai-camera {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.genai-attachment img {
+  max-height: 72px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.genai-camera video {
+  width: min(360px, 100%);
+  border-radius: var(--radius-sm);
+  background: #0b0f14;
+}
+
+.genai-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-accent);
+  overflow: hidden;
+}
+
+.genai-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+.genai-progress-fill.indeterminate {
+  width: 30%;
+  animation: genai-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes genai-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genai-progress-fill,
+  .genai-progress-fill.indeterminate {
+    transition: none;
+    animation: none;
+  }
+}
+
+.genai-tutorial {
+  display: grid;
+  gap: 6px;
+  border-color: rgba(14, 90, 184, 0.35);
+  background: var(--accent-soft);
+}
+
+.genai-tutorial-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.genai-tutorial-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.genai-tutorial-body {
+  margin: 0 0 4px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  max-width: 72ch;
+}
+
+.genai-tutorial-spacer {
+  flex: 1;
+}
+
+.genai-tutorial-question {
+  font-weight: 600;
+}
+
+.genai-tutorial-commands {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 72ch;
+}
+
+.genai-tutorial-commands pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.genai-setup-steps {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  max-width: 80ch;
+}
+
+.genai-setup-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.genai-setup-step-body {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.genai-setup-step-body .hint {
+  margin: 0;
+}
+
+.genai-setup-step-title {
+  margin: 0;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.genai-step-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+}
+
+.genai-step-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.genai-step-icon-done {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.genai-step-icon-running {
+  border-color: rgba(25, 113, 62, 0.25);
+  border-top-color: var(--ok);
+  animation: genai-step-spin 0.9s linear infinite;
+}
+
+.genai-step-icon-failed {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+@keyframes genai-step-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genai-step-icon-running {
+    animation-duration: 2.4s;
+  }
+}
+
+.genai-setup-fix {
+  color: var(--ink-soft);
+}
+
+.genai-setup-last {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.genai-setup-help {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #edb1be;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+/* Warnings and quiet-step notes stay in the panel's own blue, a shade lighter. */
+.genai-setup-help-warn {
+  border-color: rgba(14, 90, 184, 0.25);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+}
+
+.genai-setup-help-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.genai-setup-help ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 2px;
+}
+
+.genai-setup-help pre {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.genai-setup-help summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.genai-setup-manual {
+  display: grid;
+  gap: 4px;
+}
+
+.genai-setup-manual .genai-tutorial-commands pre {
+  margin: 0;
+  white-space: pre;
+}
+
+.genai-spotlight {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+.genai-spot-wrap {
+  display: inline-flex;
+}
+
+.genai-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.genai-examples .hint {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .genai-settings-btn {
+    margin-left: 0;
+  }
+
+  .genai-model-picker select {
+    min-width: 0;
+  }
+}
+
+.genai-composer .genai-icon-btn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 50%;
+}
+
+.genai-composer .genai-icon-btn:hover:not(:disabled) {
+  background: var(--surface-soft);
+}
+
+.genai-check-off {
+  opacity: 0.5;
+  cursor: help;
+}
+
+.genai-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.genai-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.genai:fullscreen {
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--bg);
+}
+
+/* SiMaSentry Solutions: a full-window launcher, then the chosen app. */
+.genai-solutions {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: #0b1018;
+  color: #e8eef6;
+}
+
+.genai-solutions-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #0b1018;
+}
+
+.genai-solutions-grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.genai-solutions-grid h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 30px;
+}
+
+.genai-solutions-grid h2 span {
+  background: linear-gradient(90deg, #2fd3b4, #58a6ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.genai-solutions-grid p {
+  margin: 0;
+  color: #a9b6c6;
+}
+
+.genai-solutions-model b {
+  color: #e8eef6;
+}
+
+.genai-solutions-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
+  justify-content: center;
+  gap: 18px;
+  width: 100%;
+  margin-top: 18px;
+}
+
+.genai-solutions-card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 22px 18px;
+  border: 1px solid #253244;
+  border-radius: 18px;
+  background: #121a26;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.genai-solutions-card:hover,
+.genai-solutions-card:focus-visible {
+  border-color: #2fd3b4;
+  transform: translateY(-2px);
+}
+
+.genai-solutions-card img {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+}
+
+.genai-solutions-name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.genai-solutions-summary {
+  font-size: 13px;
+  color: #a9b6c6;
+}
+
+.genai-solutions-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #3a2a12;
+  color: #f2c46d;
+  font-size: 11px;
+}
+
+.genai-solutions-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+}
+
+.genai-solutions-actions .btn-ghost {
+  background: rgba(18, 26, 38, 0.85);
+  color: #e8eef6;
+  border-color: #253244;
+  text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genai-solutions-card {
+    transition: none;
+  }
+}
+
+/* Benchmark: a full-window panel over the tab. */
+.genai-bench {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.genai-bench-top {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.genai-bench-top h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+}
+
+.genai-bench-top p {
+  flex: 1;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.genai-bench-body {
+  display: grid;
+  gap: 16px;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.genai-bench-config,
+.genai-bench-live,
+.genai-bench-results {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.genai-bench-config {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+}
+
+.genai-bench-models {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.genai-bench-models legend {
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.genai-bench-models label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.genai-bench-models .hint {
+  margin: 0;
+}
+
+.genai-bench-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-bench-field input {
+  width: 110px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.genai-bench-prompt {
+  flex: 1;
+  min-width: 220px;
+}
+
+.genai-bench-prompt input {
+  width: 100%;
+}
+
+.genai-bench-wide {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.genai-bench-live {
+  display: grid;
+  gap: 8px;
+}
+
+.genai-bench-phase {
+  margin: 0;
+  font-weight: 600;
+}
+
+.genai-bench-text {
+  max-height: 160px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.genai-bench-results {
+  display: grid;
+  gap: 14px;
+  overflow-x: auto;
+}
+
+.genai-bench-results-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.genai-bench-results-head h3 {
+  margin: 0;
+}
+
+.genai-bench-bars {
+  display: grid;
+  gap: 6px;
+}
+
+.genai-bench-bar {
+  display: grid;
+  grid-template-columns: minmax(90px, 160px) 1fr minmax(90px, auto);
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.genai-bench-track {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.genai-bench-track div {
+  height: 100%;
+  border-radius: 6px;
+  background: var(--accent);
+}
+
+.genai-bench-track div.best {
+  background: var(--ok);
+}
+
+.genai-bench-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.genai-bench-table th,
+.genai-bench-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+
+.genai-bench-table th:first-child,
+.genai-bench-table td:first-child {
+  text-align: left;
+}
+
+.genai-bench-best {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.genai-bench-runs summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.genai-sources {
+  margin: 6px 0 0 !important;
+  font-style: italic;
+}
+
+.genai-docs-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-size: 13px;
+}
+
+.genai-docs-hint span {
+  flex: 1;
+  min-width: 220px;
+}
+
+/* Settings, Replies: a labelled text area and a slider. */
+.genai-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-field textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.genai-field textarea:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.genai-field input[type="range"] {
+  max-width: 360px;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--accent);
+}
+
+/* Vision: the camera as large as fits, the latest answer and the question
+   under it. The controls keep their size; the picture and the answer share
+   what is left, so both stay on screen on a laptop and in full screen. */
+.genai-vision {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  /* Only on a screen too short for even the smallest picture. */
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.genai-vision > * {
+  flex: none;
+}
+
+.genai-vision-top {
+  flex-wrap: wrap;
+}
+
+.genai-vision-top p {
+  flex: 1 1 220px;
+}
+
+.genai-vision-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.genai-vision-note {
+  margin: 0;
+  padding: 6px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.genai-vision-stage {
+  position: relative;
+  /* Half the screen at most (on a phone, a 4:3 picture's height at full
+     width); less when the answer and the controls need the room. */
+  flex: 0 1 min(50vh, 75vw);
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #0b0f14;
+}
+
+/* Laid over the stage rather than in its flow: a camera's own size (720 or
+   1080 pixels high) can't push the answer and the controls off screen. */
+.genai-vision-stage video,
+.genai-vision-stage img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.genai-vision-empty {
+  max-width: 52ch;
+  margin: 0;
+  padding: 16px;
+  color: #c3cfdc;
+  text-align: center;
+}
+
+.genai-vision-over {
+  position: absolute;
+}
+
+.genai-vision-live {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(11, 15, 20, 0.8);
+  color: #e8eef6;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.genai-vision-answer {
+  /* Takes the rest of the screen and scrolls a long answer. */
+  flex: 1 1 96px;
+  min-height: 72px;
+  align-content: start;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+.genai-vision-answer p {
+  margin: 0;
+}
+
+.genai-vision-question {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-vision-ask {
+  display: grid;
+  gap: 8px;
+  padding: 10px 24px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+.genai-vision-ask .genai-examples {
+  margin-top: 0;
+}
+
+/* View documents: the summary, then each section. */
+.genai-docs-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+}
+
+.genai-docs-meta dt {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.genai-docs-meta dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.genai-docs-count {
+  flex: none;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.genai-docs-sections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.genai-docs-sections li {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  background: var(--surface-soft);
+}
+
+.genai-docs-heading {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #274155;
+}
+
+.genai-docs-heading span {
+  flex: none;
+  min-width: 2ch;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.genai-docs-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .genai-vision-note,
+  .genai-vision-answer,
+  .genai-vision-ask {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+
+/* Stats page (Insight PR #138) */
+
+/* Stats (Sentinel) view. It reuses the Peripherals panel, callout and pill styles and
+   adds only what telemetry needs: metric cards, sparklines and the run tables. */
+/* One column that may be narrower than its widest table. The default auto column grows to
+   the smallest width every panel fits in, so a wide table widened the page instead of
+   scrolling in its own region. */
+.stats-view {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.stats-view .stats-version,
+.stats-view .stats-cell-value {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.stats-version,
+.stats-ops-group,
+.dash-core-meta {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.stats-detail summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+  color: #274155;
+}
+
+.stats-detail summary:focus-visible,
+.stats-check input:focus-visible,
+.stats-chip:focus-visible,
+.stats-toggle input:focus-visible,
+.stats-table-scroll:focus-visible,
+.stats-segment:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.stats-detail,
+.stats-delete-failure {
+  margin-top: 10px;
+}
+
+/* The folded parts of this view are toggled with `hidden`. Several of them carry a class
+   that sets its own display, which would otherwise win over the attribute. */
+.stats-view [hidden] {
+  display: none !important;
+}
+
+/* Metric groups and the comparison filter: one row of chips that wraps onto further lines
+   when space runs out, rather than scrolling sideways or shrinking its labels. */
+.stats-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stats-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #fff;
+  color: #274155;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stats-chip-count,
+.stats-segment-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.stats-chip.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.stats-chip.active .stats-chip-count {
+  color: #fff;
+}
+
+.stats-chip-alert {
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.stats-chip-alert.tone-warn {
+  background: #fff8e7;
+  color: #795514;
+}
+
+.stats-chip-alert.tone-critical {
+  background: var(--danger-soft);
+  color: #8f2f45;
+}
+
+.stats-table th .hint,
+.stats-table td .hint {
+  display: block;
+  margin: 2px 0 0;
+  font-weight: 400;
+}
+
+.stats-table .stats-cell-value {
+  white-space: nowrap;
+}
+
+/* A run is named by whoever recorded it, and Sentinel keeps names of up to 128 characters
+   with no spaces to break at. `.sysinfo-table td` already wraps anywhere; the cells that
+   carry a run's name are header cells, which do not, so they are given the same rule
+   rather than letting one long name push the table past the panel. */
+.stats-run-table tbody th,
+.stats-compare-table thead th {
+  overflow-wrap: anywhere;
+}
+
+.stats-run-table tbody th {
+  width: 32%;
+}
+
+.stats-check {
+  display: inline-flex;
+  align-items: center;
+}
+
+.stats-run-table tr.active th,
+.stats-run-table tr.active td {
+  background: var(--accent-soft);
+}
+
+/* Appears above the runs once any is ticked: how many, and what can be done with them. */
+.stats-selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  border: 1px solid rgba(14, 90, 184, 0.18);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  padding: 6px 10px;
+}
+
+.stats-selection-count {
+  margin-right: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+/* "Delete" becomes this in place: the question, then Delete and Cancel. */
+.stats-delete-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.stats-delete-prompt {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8f2f45;
+}
+
+.stats-delete-failure:focus {
+  outline: none;
+}
+
+.stats-delete-failure:focus-visible .periph-callout {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+
+.stats-delete-failures {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+#stats-runs-title:focus {
+  outline: none;
+}
+
+#stats-runs-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.stats-run-detail,
+.stats-compare {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.stats-run-detail h3,
+.stats-compare h3 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: #274155;
+  overflow-wrap: anywhere;
+}
+
+/* The Runs header: the title and the trace form or what is recording share one
+   line, and wrap onto further lines rather than squeeze when the page is narrow. */
+.stats-runs-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.stats-trace-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.stats-trace-name {
+  flex: 1 1 300px;
+  max-width: 400px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f4c61;
+}
+
+.stats-trace-name span {
+  white-space: nowrap;
+}
+
+.stats-trace-name input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.stats-trace-running {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.stats-trace-extras {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+}
+
+.stats-trace-note {
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* A recording trace's running summary, under the header row. */
+.stats-runs-head ~ .sysinfo-table.key-value {
+  margin-top: 8px;
+}
+
+.stats-runs-note {
+  margin: 6px 0 10px;
+}
+
+/* Rows carry an Open button each; at the page's default button size that button, not the
+   run, set every row's height. */
+.stats-run-table td .btn-ghost {
+  padding: 4px 10px;
+  /* At phone width the column is narrow enough to break "Open" one letter per line. */
+  white-space: nowrap;
+}
+
+.stats-run-table th,
+.stats-run-table td {
+  vertical-align: middle;
+}
+
+@media (max-width: 700px) {
+  .stats-trace-extras {
+    grid-template-columns: 1fr;
+  }
+
+}
+
+/* The Insight host panel: the machine Insight runs on. It is quieter than the board
+   telemetry above it - a flat tinted panel, plain readings rather than cards - so the two
+   are never read as one set of numbers. Its readings sit in one short row. */
+.stats-view .stats-host {
+  padding: 10px 16px 12px;
+  background: var(--surface-soft);
+  box-shadow: none;
+}
+
+.stats-host-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.stats-host-rows {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+/* Each reading in its own box, as the board's metric cards are: label, value, bar, detail. */
+.stats-host-rows li {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.stats-host-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #274155;
+}
+
+.stats-host-value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.stats-host-rows .hint {
+  overflow-wrap: anywhere;
+}
+
+.stats-host-bar {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-accent);
+  overflow: hidden;
+}
+
+.stats-host-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.stats-host .stats-host-notice {
+  margin-top: 6px;
+}
+
+/* Run comparison: the change against the baseline sits under each value, and a metric
+   with nothing to compare against shows an em dash in the same place. */
+.stats-compare-table th[scope='col'] .hint {
+  display: block;
+  margin: 2px 0 0;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.stats-delta {
+  font-family: var(--font-mono);
+  color: var(--accent-alt);
+}
+
+.stats-compare-table td {
+  white-space: nowrap;
+}
+
+/* One line per metric: the change sits beside its value rather than under it, which halves
+   the height of a table that runs to sixty rows. */
+.stats-compare-table tbody th,
+.stats-compare-table td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.stats-compare-table td .hint {
+  display: inline;
+  margin: 0 0 0 10px;
+}
+
+/* The em dash of a cell with no change is a button so Tab and a tap can reach its reason,
+   but it must read as the same quiet dash: no chrome, only a dotted underline that says
+   there is more, and the reason beside it while it is hovered or focused. */
+.stats-delta-why {
+  position: relative;
+  display: inline-block;
+}
+
+.stats-delta-why-button {
+  border: 0;
+  background: none;
+  padding: 0 1px;
+  border-radius: 4px;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+.stats-delta-tip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  right: 0;
+  width: max-content;
+  max-width: 16rem;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink-soft);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+}
+
+.stats-delta-why:hover .stats-delta-tip,
+.stats-delta-why-button:focus + .stats-delta-tip {
+  display: block;
+}
+
+.stats-delta-tip[hidden] {
+  display: none !important;
+}
+
+/* A run's metadata can carry a multi-line value, such as the board's os-release; keep
+   its lines rather than running them together. Scoped to the key/value tables so the
+   numbers in the metric table keep their own wrapping rules. */
+.stats-run-detail .sysinfo-table.key-value td {
+  white-space: pre-wrap;
+}
+
+.stats-run-metrics td .sysinfo-pill {
+  margin-left: 6px;
+}
+
+/* A comparison collapses to its header line: what is compared, Export and Collapse. */
+.stats-compare-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.stats-trace-bar .hint,
+.stats-host .hint,
+.stats-compare .stats-compare-head h3,
+.dash-bar .periph-callout {
+  margin: 0;
+}
+
+.stats-compare-head .hint {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.stats-compare-head .periph-actions {
+  margin-left: auto;
+}
+
+.stats-compare-head .btn-ghost {
+  padding: 5px 10px;
+}
+
+.stats-compare-head + * {
+  margin-top: 8px;
+}
+
+#stats-compare-body {
+  margin-top: 8px;
+}
+
+.stats-compare-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 4px 0 8px;
+}
+
+.stats-toggle {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f4c61;
+  cursor: pointer;
+}
+
+/* However many runs are compared, the table scrolls inside the panel instead of widening
+   the page. */
+.stats-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+}
+
+/* DevKit | Host: the page's own sub-tabs, a segmented control above both panels. It is the
+   largest control on the page because it decides which machine every number below is from. */
+.stats-segments {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.stats-subtabs,
+.dash-subtabs {
+  justify-self: start;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.stats-segment {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: #274155;
+  font: inherit;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.stats-subtabs .stats-segment {
+  border-radius: 999px;
+  padding: 6px 18px;
+  font-size: 14px;
+}
+
+.stats-subtabs .stats-segment:hover,
+.dash-subtabs .stats-segment:hover {
+  background: var(--accent-soft);
+}
+
+.stats-subtabs .stats-segment.active,
+.dash-subtabs .stats-segment.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Same single shrinkable column as .stats-view itself: an auto column here would let the
+   comparison or run table widen the page instead of scrolling in its own region. */
+.stats-tabpanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Live metrics as Sentinel's ops view lists them: one line per metric, its history across the row. */
+.stats-ops {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.stats-ops thead th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.stats-ops tbody th,
+.stats-ops td {
+  padding: 3px 10px;
+  border-bottom: 1px solid #eef2f6;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.stats-ops tbody tr:hover {
+  background: var(--surface-soft);
+}
+
+.stats-ops tbody th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+  cursor: help;
+}
+
+.stats-ops .stats-ops-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-ops .stats-ops-history {
+  width: 100%;
+}
+
+.stats-ops-spark {
+  display: block;
+  width: 100%;
+  min-width: 120px;
+  height: 20px;
+  color: var(--accent-alt);
+}
+
+.stats-ops-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ok);
+}
+
+.stats-ops tr.tone-warn .stats-ops-status,
+.stats-ops tr.tone-warn .stats-ops-spark {
+  color: #b7791f;
+}
+
+.stats-ops tr.tone-critical .stats-ops-status,
+.stats-ops tr.tone-critical .stats-ops-spark {
+  color: var(--danger);
+}
+
+.stats-ops tr.tone-unavailable .stats-ops-status,
+.stats-ops tr.tone-unavailable .stats-ops-num {
+  color: var(--ink-soft);
+}
+
+@media (max-width: 640px) {
+  .stats-ops .stats-ops-group {
+    display: none;
+  }
+}
+
+/* Sentinel dashboard: a status line and tabs, then charts laid out as Sentinel's own ops view does. */
+.dash {
+  --chart-1: #0e5ab8;
+  --chart-2: #0f9d8f;
+  --chart-3: #7c5cc4;
+  --chart-4: #e08a2e;
+  --chart-5: #2f9e6b;
+  --chart-6: #c2456b;
+  --chart-7: #3a9bd6;
+  --chart-8: #8a7a3b;
+  --chart-warn: #b7791f;
+  --chart-critical: #b3425a;
+  display: grid;
+  gap: 14px;
+}
+
+.dash-bar {
+  display: grid;
+  gap: 12px;
+}
+
+.dash-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.dash-status h2 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.dash-live {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.dash-live.on {
+  background: var(--ok);
+  box-shadow: 0 0 0 0 rgba(25, 113, 62, 0.45);
+  animation: dash-pulse 2s ease-out infinite;
+}
+
+@keyframes dash-pulse {
+  70% { box-shadow: 0 0 0 8px rgba(25, 113, 62, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(25, 113, 62, 0); }
+}
+
+.dash-state {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dash-state {
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  padding: 2px 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.dash-state.on {
+  border-color: rgba(25, 113, 62, 0.3);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.dash-session {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.dash-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.dash-panel,
+.dash-grid {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dash-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Headline figures are narrow, so they stay in one row where charts would already wrap. */
+.dash-grid.three.dash-stats {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+/* The dashboard's tabs, underlined beneath the status line. */
+.dash-tabs {
+  gap: 4px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dash-tabs .stats-segment {
+  margin-bottom: -1px;
+  border-bottom: 3px solid transparent;
+  padding: 8px 12px 7px;
+  font-size: 15px;
+}
+
+.dash-tabs .stats-segment:hover {
+  color: var(--accent-strong);
+  border-bottom-color: var(--line-strong);
+}
+
+.dash-tabs .stats-segment.active {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent);
+}
+
+.dash-subtabs .stats-segment {
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.dash-subtabs .stats-segment.active .stats-segment-count {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.dash-grid.sensors {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+
+
+.dash-card,
+.dash-chart {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 12px 14px;
+}
+
+.dash-card {
+  display: grid;
+  gap: 10px;
+}
+
+.dash-card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.dash-card-note {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-soft);
+}
+
+.dash-chart {
+  display: grid;
+  gap: 8px;
+}
+
+.dash-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.dash-chart-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.dash-chart-value {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.dash-chart.tone-warn .dash-chart-value {
+  color: #b7791f;
+}
+
+.dash-chart.tone-critical .dash-chart-value {
+  color: var(--danger);
+}
+
+.dash-chart-scale {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.dash-chart-body {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.dash-chart-y {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.dash-chart-plot {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background-image: linear-gradient(to bottom, #eef2f6 1px, transparent 1px);
+  background-size: 100% 25%;
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+
+.dash-chart-svg {
+  display: block;
+  width: 100%;
+}
+
+.dash-chart-x {
+  display: flex;
+  justify-content: space-between;
+  padding-left: 40px;
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.dash-threshold {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed;
+  pointer-events: none;
+}
+
+.dash-threshold span {
+  position: absolute;
+  top: -14px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dash-threshold.warn {
+  border-color: rgba(183, 121, 31, 0.7);
+  color: #b7791f;
+}
+
+/* Warn is labelled on the left and critical on the right, so two close levels never collide. */
+.dash-threshold.warn span {
+  left: 4px;
+}
+
+.dash-threshold.critical span {
+  right: 2px;
+}
+
+.dash-threshold.below span {
+  top: 2px;
+}
+
+.dash-threshold.critical {
+  border-color: rgba(179, 66, 90, 0.7);
+  color: var(--danger);
+}
+
+.dash-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--series);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--series) 22%, transparent);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.dash-crosshair {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(15, 29, 43, 0.35);
+  pointer-events: none;
+}
+
+.dash-tooltip {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  transform: translateX(8px);
+  border-radius: 8px;
+  background: rgba(15, 29, 43, 0.92);
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.dash-tooltip.flip {
+  transform: translateX(calc(-100% - 8px));
+}
+
+.dash-tooltip-time {
+  font-family: var(--font-sans);
+  color: #b8c5d4;
+}
+
+.dash-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.dash-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-legend strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* Fixed columns: name, then value and share at set widths, so changing numbers never reflow it. */
+.dash-legend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 4px 20px;
+}
+
+.dash-legend-grid li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) 7ch 4ch;
+  gap: 8px;
+}
+
+.dash-legend-grid li > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-legend-grid strong,
+.dash-legend-grid .dash-share {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-share {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 3px;
+  background: var(--series);
+}
+
+.dash-chart.compact {
+  gap: 4px;
+  padding: 8px 10px;
+  box-shadow: none;
+}
+
+.dash-chart.compact .dash-chart-value {
+  font-size: 14px;
+}
+
+.dash-chart.compact .dash-chart-body {
+  grid-template-columns: 26px minmax(0, 1fr);
+}
+
+.dash-heat {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 54px;
+  gap: 10px;
+  height: calc(var(--rows) * 24px);
+}
+
+.dash-heat-names,
+.dash-heat-values {
+  display: grid;
+  grid-template-rows: repeat(var(--rows), 24px);
+  align-items: center;
+  line-height: 1.2;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dash-heat-names {
+  color: var(--ink-soft);
+}
+
+.dash-heat-values {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.dash-heat-values .tone-warn {
+  color: #b7791f;
+  font-weight: 700;
+}
+
+.dash-heat-values .tone-critical {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.dash-heat-grid {
+  position: relative;
+  min-width: 0;
+  cursor: crosshair;
+}
+
+/* An explicit height: at 100% an SVG in an auto-height cell sizes by its aspect ratio instead. */
+.dash-heat-grid svg {
+  display: block;
+  width: 100%;
+  height: calc(var(--rows) * 24px);
+}
+
+.dash-heat-focus {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The same columns as the heatmap, so the time axis runs exactly under the cells. */
+.dash-heat-foot {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 54px;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.dash-heat-axis {
+  grid-column: 2;
+  display: flex;
+  justify-content: space-between;
+}
+
+.dash-heat-scale {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.dash-heat-ramp {
+  width: 90px;
+  height: 8px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* Headline figures: a name and one number each, aligned in a row. */
+.dash-stat {
+  align-content: start;
+  gap: 6px;
+}
+
+.dash-stat-value {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* A reference level on a chart, such as the session average: neutral, not a warning. */
+.dash-threshold.reference {
+  border-color: rgba(15, 29, 43, 0.45);
+  color: var(--ink-soft);
+}
+
+.dash-threshold.reference span {
+  left: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0 4px;
+}
+
+@media (max-width: 1100px) {
+  .dash-grid.three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .dash-grid.three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dash-actions {
+    margin-left: 0;
+  }
+
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-live.on {
+    animation: none;
+  }
+}
+
+.dash-all > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.dash-all > summary::-webkit-details-marker {
+  display: none;
+}
+
+.dash-all > summary::before {
+  content: "▸";
+  margin-right: 6px;
+  color: var(--ink-soft);
+}
+
+.dash-all[open] > summary::before {
+  content: "▾";
+}
+
+.stats-compare-metrics {
+  margin-top: 14px;
+}
+
+.stats-compare-metrics[open] > summary {
+  margin-bottom: 10px;
+}
+
+/* Compare Runs: the overlay and its per-run summary. */
+.dash-compare {
+  margin: 0 0 14px;
+}
+
+.dash-baseline {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border-radius: 4px;
+  background: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.dash-compare-summary th[scope="row"] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.dash-compare-summary .stats-ops-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dash-tooltip-total {
+  font-weight: 700;
+}
+
+.dash-tooltip-label {
+  min-width: 15ch;
+  font-family: var(--font-sans);
+  color: #d8e0ea;
+}
+
+/* Media folder browser (issue #113) */
+.folder-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.crumb-sep {
+  color: #8aa0b2;
+  padding: 0 2px;
+}
+
+.crumb-link {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  border-radius: 4px;
+}
+
+.crumb-link:hover {
+  text-decoration: underline;
+}
+
+.crumb-current {
+  font-weight: 600;
+  padding: 2px 4px;
+}
+
+.media-row.folder-row {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.media-row.folder-row:hover {
+  border-color: var(--line-strong);
+}
+
+.folder-icon {
+  width: 16px;
+  height: 16px;
+  fill: #5b7188;
+}
+
+.folder-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #486176;
+  background: rgba(15, 122, 116, 0.08);
+  border-radius: 999px;
+  padding: 1px 7px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.media-row-lead {
+  width: 16px;
+  height: 16px;
+}
+
+.hidden-note {
+  margin: 2px 0 0;
+}
+
+.assign-dialog-card {
+  width: min(560px, 100%);
+}
+
+.assign-dialog-card .media-list {
+  max-height: 360px;
+}
+
+.assign-target {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.assign-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.assign-tab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.assign-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.assign-cameras {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.assign-camera {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assign-enable-cameras {
+  margin-right: auto;
+}
+
+.assign-camera:hover {
+  border-color: var(--line-strong);
+}
+
+.assign-camera.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: var(--accent-soft);
+}
+
+.pull-form {
+  display: grid;
+  gap: 8px;
+}
+
+.pull-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.pull-field input {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.pull-credentials {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pull-error {
+  margin: 0;
+  color: #a12626;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.source-file-btn {
+  min-width: 0;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.source-file-btn.unassigned {
+  color: #6b7f92;
+}
+
+.source-file-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.src-file-cell .source-file-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.media-row.unsupported .media-name {
+  color: #7d8da0;
+}
+
+.unsupported-tag {
+  color: #8b5a00;
+  background: #fff4e0;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* GenAI: choose which loaded models to unload so another can load. */
+.genai-unload-card h3 {
+  margin: 0 0 6px;
+}
+
+.genai-unload-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.genai-unload-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.genai-unload-list input[type="checkbox"] {
+  flex: none;
+  width: auto;
+  margin: 0;
+}
+
+.genai-unload-list label span:first-of-type {
+  flex: 1;
+}
+
+.genai-unload-list .hint {
+  margin-left: auto;
 }
