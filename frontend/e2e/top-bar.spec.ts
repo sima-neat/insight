@@ -163,7 +163,7 @@ test('in the expanded rail a long address is cut on its own line and the block s
     line.evaluate((element) => element.scrollWidth > element.clientWidth);
   await expect.poll(() => cut(detail)).toBe(true);
   // The short name above it is whole, and nothing reaches past the block or the rail.
-  await expect.poll(() => cut(board(page).locator('.name'))).toBe(false);
+  await expect.poll(() => cut(board(page).locator('.line').first())).toBe(false);
   await expect
     .poll(async () => {
       const [boardBox, mainBox, detailRight] = await Promise.all([

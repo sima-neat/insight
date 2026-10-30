@@ -8,7 +8,7 @@ import { TopBarDialogs } from '../top-bar-dialogs';
 import { BoardProblem } from './board-error';
 import { BoardRail } from './board-rail';
 import { BoardService } from './board.service';
-import { boardState, DEVKIT, FakeBoard } from './board.testing';
+import { boardState, DEVKIT, FakeBoard, railItemName } from './board.testing';
 
 /** The app frame: a rail item belongs in the shell's rail end, which gives it the rail's state. */
 @Component({
@@ -90,7 +90,7 @@ describe('BoardRail', () => {
     expect(icon(button)).toBe('board');
     expect(button.getAttribute('aria-haspopup')).toBe('dialog');
     // The state is in the name, not only in the dot's colour.
-    expect(button.getAttribute('aria-label')).toBe('DevKit — 192.168.1.20 — Connected');
+    expect(railItemName(button)).toBe('DevKit — 192.168.1.20 — Connected');
   });
 
   it('a board that is not connected says its state in words, in the state’s tone', async () => {
@@ -102,7 +102,7 @@ describe('BoardRail', () => {
 
     expect(lines(button)).toEqual(['DevKit', 'Error']);
     expect(button.getAttribute('data-tone')).toBe('danger');
-    expect(button.getAttribute('aria-label')).toBe('DevKit — 192.168.1.20 — Connection failed');
+    expect(railItemName(button)).toBe('DevKit — 192.168.1.20 — Connection failed');
 
     board.state.set(boardState({ target: DEVKIT }));
     await fixture.whenStable();
@@ -123,7 +123,7 @@ describe('BoardRail', () => {
 
     expect(lines(button)).toEqual(['DevKit', 'Checking…']);
     expect(button.getAttribute('data-tone')).toBe('warning');
-    expect(button.getAttribute('aria-label')).toBe(
+    expect(railItemName(button)).toBe(
       'DevKit — 192.168.1.20 — Checking the connection',
     );
 
@@ -141,7 +141,7 @@ describe('BoardRail', () => {
 
     expect(lines(button)).toEqual(['DevKit', 'Error']);
     expect(button.getAttribute('data-tone')).toBe('danger');
-    expect(button.getAttribute('aria-label')).toBe(
+    expect(railItemName(button)).toBe(
       'DevKit — 192.168.1.20 — Could not read the board: Could not reach the Insight server.',
     );
   });

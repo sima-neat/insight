@@ -1,15 +1,16 @@
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
-import { provideRouter, TitleStrategy, withComponentInputBinding } from '@angular/router';
-import { provideNeatUi } from '@sima/neat-ui';
+import { provideRouter, withComponentInputBinding } from '@angular/router';
+import { provideNeatTitles, provideNeatUi } from '@sima/neat-ui';
+import { APP_NAME } from './app-name';
 import { routes } from './app.routes';
-import { InsightTitleStrategy } from './title-strategy';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes, withComponentInputBinding()),
-    { provide: TitleStrategy, useClass: InsightTitleStrategy },
+    // The tab reads `Neat Insight · <route title>`, or the app name alone on untitled routes.
+    provideNeatTitles(APP_NAME),
     // XHR, not the default fetch backend: only XHR reports upload progress, which the import
     // dialog's byte progress needs (`postStreamedText`), and it gives the same streamed text.
     provideHttpClient(withXhr()),

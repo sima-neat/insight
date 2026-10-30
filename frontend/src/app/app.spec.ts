@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { App } from './app';
 import { appConfig } from './app.config';
-import { boardState, DEVKIT, shellInfo } from './board/board.testing';
+import { boardState, DEVKIT, railItemName, shellInfo } from './board/board.testing';
 
 /**
  * A routed page that does nothing of its own. The shell is what this spec is about; a real page
@@ -99,7 +99,7 @@ describe('App', () => {
     const board = boardButton(root);
     expect(board.closest('header')).toBeNull();
     expect(boardLines(board)).toEqual(['DevKit', '192.168.1.20']);
-    expect(board.getAttribute('aria-label')).toBe('DevKit — 192.168.1.20 — Connected');
+    expect(railItemName(board)).toBe('DevKit — 192.168.1.20 — Connected');
     // The top bar is the page's: nothing of the app's but the kiosk button is left in it.
     expect(root.querySelector('header app-board-rail')).toBeNull();
     expect(root.querySelector('header [aria-label="System information"]')).toBeNull();

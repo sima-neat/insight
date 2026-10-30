@@ -52,8 +52,9 @@ for (const { name, size } of VIEWPORTS) {
     expect(backend.posted('/api/board/select')).toEqual([
       { host: '192.168.2.2', port: 22, user: 'sima' },
     ]);
-    // The block follows the new board, which is not checked yet.
-    await expect(board(page)).toHaveAttribute('aria-label', 'Board — 192.168.2.2 — Not checked');
+    // The block follows the new board, which is not checked yet. The dialog is modal, which takes
+    // the page behind it out of the accessibility tree, so the name is read from the item's text.
+    await expect(board(page)).toContainText('Board — 192.168.2.2 — Not checked');
     await expect(dialog.getByRole('button', { name: 'Check again' })).toBeVisible();
 
     await page.keyboard.press('Escape');
@@ -99,7 +100,7 @@ for (const { name, size } of VIEWPORTS) {
       { fingerprint: error['presented_fingerprint'] },
     ]);
     await expect(dialog.getByText('Expected')).toHaveCount(0);
-    await expect(board(page)).toHaveAttribute('aria-label', /Not checked$/);
+    await expect(board(page)).toContainText(/Not checked$/);
   });
 
   test(`a board that cannot be read shows Error in the board block, not Loading…, and the dialog retries at ${name}`, async ({
@@ -110,7 +111,7 @@ for (const { name, size } of VIEWPORTS) {
     await backend.install(page);
     await page.setViewportSize(size);
     await page.goto('/streaming');
-    await expect(board(page)).toHaveText(/^\s*Board\s*Error\s*$/);
+    await expect(board(page).locator('.line')).toHaveText(['Board', 'Error']);
     await board(page).hover();
     await expect(page.getByRole('tooltip')).toHaveText(/^Board — Could not read the board: /);
 
@@ -121,7 +122,7 @@ for (const { name, size } of VIEWPORTS) {
     backend.boardFails = false;
     await retry.click();
     await expect(dialog).toContainText('Connected');
-    await expect(board(page)).toHaveAttribute('aria-label', 'DevKit — 192.168.100.200 — Connected');
+    await expect(board(page)).toContainText('DevKit — 192.168.100.200 — Connected');
   });
 
   test(`System information says what is missing, keeps its data after a failed Refresh, and Escape closes it at ${name}`, async ({

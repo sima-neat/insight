@@ -80,3 +80,14 @@ export function deferred<T>(): {
   });
   return { promise, resolve, reject };
 }
+
+/**
+ * A rail item's accessible name as the kit gives it: the item's content less what is `aria-hidden`
+ * (the lines the kit shows, whose full sentence is its visually hidden label). jsdom computes no
+ * accessible names, so the specs read it the way the browser composes it.
+ */
+export function railItemName(item: HTMLElement): string {
+  const clone = item.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('[aria-hidden="true"]').forEach((hidden) => hidden.remove());
+  return clone.textContent?.trim() ?? '';
+}

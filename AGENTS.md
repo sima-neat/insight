@@ -88,10 +88,10 @@ merging.
 ## How the frontend is put together
 
 - **Pages are routes.** `app.routes.ts` loads each page lazily and titles it with its rail label;
-  the title strategy turns that into `Neat Insight · <Page>`. `navigation.ts` lists the rail items.
-  A new page needs both, and `navigation.spec.ts` checks that they agree. The old app's paths keep
-  working: `/rtsp` and `/visualizer` redirect to their pages, and `/` and unknown paths (old
-  `/workspace` and `/genai` bookmarks) land on Streaming.
+  the kit's `provideNeatTitles` turns that into `Neat Insight · <Page>`. `navigation.ts` lists the
+  rail items. A new page needs both, and `navigation.spec.ts` checks that they agree. The old app's
+  paths keep working: `/rtsp` and `/visualizer` redirect to their pages, and `/` and unknown paths
+  (old `/workspace` and `/genai` bookmarks) land on Streaming.
 - **Side panels.** Viewer, Streaming, Media, Peripherals and Stats open their side panel with the
   kit's `neat-aside-toggle` ("Side panel"), declared in the page's template beside its
   `*neatPageToolbar`, never inside it (that throws in dev mode): the shell draws the button at the
@@ -175,18 +175,18 @@ merging.
   app puts nothing else in it, and `neatTopbarEnd` is unused. The rail holds the pages, then at its
   bottom (`neatRailEnd`, in `app.ts`) the board block (`app-board-rail`), a `neatRailDivider`
   line, and a `neatRailItem` "System information", followed by the kit's theme item and the rail's
-  own control. The board block is one `button[neatRailItem]`: a board icon with a state dot
-  (success connected, warning checking, danger error, neutral not selected or not checked), the
-  short name over the address when connected or the state in words in the state's colour
-  otherwise (each line ellipsizes itself: the kit cuts only the label's own line). Its accessible
-  name and its collapsed tooltip are one "name — address — state" (`boardRailView` in
-  `board-view.ts`), so the state is in words and not only in colour. `TopBarDialogs` (named for
-  where the dialogs began) opens both dialogs, from the rail and from any page that links to them
-  (Peripherals' "Open board settings"); each opens once at a time, and a chunk that cannot be
-  loaded says so in a toast. The dialogs are imported on their first open, not with the rail:
-  whatever the app root imports statically is in the initial bundle on every page, and the
-  dialogs, with the kit entries only they use, would cost every first paint for something most
-  visits never open.
+  own control. The board block is one `button[neatRailItem]` with the kit's state inputs: a board
+  icon as its content, `tone` the state dot on it (success connected, warning checking, danger
+  error, neutral not selected or not checked), `text` the short name and `detail` the address when
+  connected or the state in words in the state's colour otherwise; the kit draws the dot and both
+  lines, and cuts each. Its `label`, which is its accessible name and its collapsed tooltip, is one
+  "name — address — state" (`boardRailView` in `board-view.ts`), so the state is in words and not
+  only in colour. `TopBarDialogs` (named for where the dialogs began) opens both dialogs,
+  from the rail and from any page that links to them (Peripherals' "Open board settings"); each
+  opens once at a time, and a chunk that cannot be loaded says so in a toast. The dialogs are
+  imported on their first open, not with the rail: whatever the app root imports statically is in
+  the initial bundle on every page, and the dialogs, with the kit entries only they use, would cost
+  every first paint for something most visits never open.
 - **The board** has one reader and writer, `BoardService` (root-provided): the rail's board block,
   the board dialog, Peripherals and Stats read its state, and its actions (select, Check again,
   trust a host key) answer with the fresh state; page code never fetches `/api/board` itself. It is
@@ -249,8 +249,8 @@ merging.
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns at
-  600 kB. The initial bundle measures 582.8 kB raw with kit 0.19.1 (the shared chunk 465 kB, main 22
-  kB, styles 96 kB; 580.8 kB with kit 0.18.0; 579.2 kB before Stats used the kit's page tabs, whose
+  600 kB. The initial bundle measures 583.0 kB raw with kit 0.20.0 (main 20 kB, styles 96 kB;
+  582.8 kB with kit 0.19.1, the shared chunk 465 kB, main 22 kB; 580.8 kB with kit 0.18.0; 579.2 kB before Stats used the kit's page tabs, whose
   directives are in the primary entry and so in the shared chunk; 578.2 kB with kit 0.17.0; 579.3 kB
   while a start-up hook resumed the tab's webcams after a reload; 577.7 kB with kit 0.16.2, 3 kB
   less since the kit dropped its unused toggle code; 580.9 kB with kit 0.16.1; 580.4 kB with kit

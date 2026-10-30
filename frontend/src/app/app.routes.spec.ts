@@ -24,7 +24,7 @@ const STATS_VIEWS = ['/stats/runs', '/stats/compare'];
 
 /**
  * Stubs jsdom's missing ResizeObserver, which the kit measures with, and gives the TestBed the
- * app's own providers, so the routes are tested with the title strategy the app uses.
+ * app's own providers, so the routes are tested with the titles the app sets.
  */
 function setUp(): void {
   vi.stubGlobal(
