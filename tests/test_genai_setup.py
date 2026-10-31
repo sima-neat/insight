@@ -22,7 +22,7 @@ _FAKE_SIMA_CLI = r"""#!/bin/sh
 [ "$1 $2" = "neat install" ] || { echo "unexpected: $*" >&2; exit 2; }
 case "$3" in apps) ref=main ;; apps@*) ref=${3#apps@} ;; *) echo "unexpected: $*" >&2; exit 2 ;; esac
 [ "${NEAT_APPS_SKIP_DEPENDENCIES:-}" = 1 ] || { echo "would reinstall Core and Insight" >&2; exit 3; }
-[ "$PWD" = "$HOME" ] || { echo "not in the home directory: $PWD" >&2; exit 4; }
+[ "$PWD" = "$FAKE_NVME" ] || { echo "not on NVMe: $PWD" >&2; exit 4; }
 # Like the Apps installer: an existing bundle is replaced only when allowed, and kept as a backup.
 if [ -e "$PWD/prebuilt-apps" ]; then
   [ "${NEAT_APPS_OVERWRITE:-0}" = 1 ] || { echo "Apps installation cancelled."; exit 1; }
@@ -36,6 +36,12 @@ printf '{\n  "neat-apps": {\n    "ref": "%s",\n    "spec": "b7ed981497d0"\n  }\n
 printf '{\n  "neat-core": {\n    "ref": "%s",\n    "spec": "%s"\n  }\n}\n' "${FAKE_APPS_CORE_REF:-develop}" \
   "${FAKE_APPS_CORE_SPEC:-18e265b4ecc2}" > "$PWD/prebuilt-apps/deps/neat-core.json"
 echo "Installed apps runtime under: $PWD/prebuilt-apps"
+"""
+
+_FAKE_MOUNTPOINT = r"""#!/bin/sh
+[ "$1" = "$FAKE_NVME" ] && [ "${FAKE_NVME_MOUNTED:-1}" = 1 ] && exit 0
+echo "$1 is not a mountpoint"
+exit 32
 """
 
 # The board's installed Core, as dpkg reports it; none unless a test sets FAKE_CORE_VERSION.
@@ -60,6 +66,9 @@ mkdir -p "$dir/.venv/bin"
 printf '#!/bin/sh\n' > "$dir/.venv/bin/python"
 chmod +x "$dir/.venv/bin/python"
 touch "$dir/config.local.yaml"
+# Emulate setup downloads and temporary files without filling the real filesystem.
+mkdir -p "$PIP_CACHE_DIR" "$HF_HOME"
+touch "$PIP_CACHE_DIR/wheel" "$HF_HOME/model" "$TMPDIR/download"
 echo "Install complete."
 """
 
@@ -84,6 +93,10 @@ while :; do sleep 0.1; done
 """
 
 
+def board_command(argv, env):
+    return [arg.replace("/media/nvme", env["FAKE_NVME"]) for arg in argv]
+
+
 class ShellTransport:
     """Runs board commands as local processes, with HOME and PATH pointed at a fake board."""
 
@@ -93,7 +106,7 @@ class ShellTransport:
 
     def exec(self, argv, *, timeout, stdin=None):
         self.commands.append(argv)
-        done = subprocess.run(argv, env=self.env, capture_output=True, timeout=timeout)
+        done = subprocess.run(board_command(argv, self.env), env=self.env, capture_output=True, timeout=timeout)
         return ExecResult(done.returncode, done.stdout, done.stderr)
 
 
@@ -109,22 +122,22 @@ class BoardScriptTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
-        self.home, fake, bin_dir = root / "home", root / "studio", root / "bin"
-        for path in (self.home, fake, bin_dir):
+        self.home, self.nvme, fake, bin_dir = root / "home", root / "nvme", root / "studio", root / "bin"
+        for path in (self.home, self.nvme, fake, bin_dir):
             path.mkdir()
         for path, text in ((bin_dir / "sima-cli", _FAKE_SIMA_CLI), (bin_dir / "dpkg-query", _FAKE_DPKG_QUERY),
-                           (fake / "setup.sh", _FAKE_SETUP), (fake / "run.sh", _FAKE_RUN)):
+                           (bin_dir / "mountpoint", _FAKE_MOUNTPOINT), (fake / "setup.sh", _FAKE_SETUP), (fake / "run.sh", _FAKE_RUN)):
             path.write_text(text)
             path.chmod(0o755)
-        self.studio = self.home / "prebuilt-apps/examples/genai/neat-genai-studio"
+        self.studio = self.nvme / "prebuilt-apps/examples/genai/neat-genai-studio"
         self.add_core()
-        self.env = dict(os.environ, HOME=str(self.home), FAKE_STUDIO=str(fake),
+        self.env = dict(os.environ, HOME=str(self.home), FAKE_NVME=str(self.nvme), FAKE_STUDIO=str(fake),
                         PATH="{}:{}".format(bin_dir, os.environ.get("PATH", "")))
         self.transport = ShellTransport(self.env)
         self.session = session_for(self.transport)
         # Whatever a test leaves running on the fake board is stopped.
-        self.addCleanup(lambda: subprocess.run(genai_setup.stop_command(), env=self.env, capture_output=True, timeout=20))
-        self.addCleanup(lambda: subprocess.run(genai_setup.stop_studio_command(), env=self.env, capture_output=True, timeout=20))
+        self.addCleanup(lambda: subprocess.run(board_command(genai_setup.stop_command(), self.env), env=self.env, capture_output=True, timeout=20))
+        self.addCleanup(lambda: subprocess.run(board_command(genai_setup.stop_studio_command(), self.env), env=self.env, capture_output=True, timeout=20))
 
     def add_core(self):
         python = self.home / "pyneat/bin/python"
@@ -184,13 +197,36 @@ class BoardScriptTests(unittest.TestCase):
         self.assertIn("Installing voices", status["steps"][1]["log"])
         self.assertNotIn("\x1b", status["steps"][1]["log"])
         self.assertTrue((self.studio / ".neat-genai-studio.pid").exists())
+        self.assertFalse((self.home / "prebuilt-apps").exists())
+        cache = self.nvme / ".cache/neat-genai-studio"
+        self.assertTrue((cache / "pip/wheel").exists())
+        self.assertTrue((cache / "huggingface/model").exists())
+        self.assertTrue((cache / "tmp/download").exists())
         # The job now only keeps GenAI Studio running: nothing is left to set up.
         with self.assertRaises(BoardError) as refused:
             genai_setup.run(self.session)
         self.assertEqual(refused.exception.code, "setup_done")
 
+    def test_unmounted_nvme_refuses_install_and_prepare_without_writing_apps(self):
+        self.env["FAKE_NVME_MOUNTED"] = "0"
+        genai_setup.run(self.session)
+        status = self.wait_for(lambda state: not state["active"])
+        self.assertEqual(self.states(status)[0], "failed")
+        self.assertEqual(status["steps"][0]["problem"]["message"], "NVMe is not mounted on the board.")
+        self.assertFalse((self.home / "prebuilt-apps").exists())
+        self.assertFalse((self.nvme / "prebuilt-apps").exists())
+        self.assertFalse((self.nvme / ".cache").exists())
+
+        self.env["FAKE_NVME_MOUNTED"] = "1"
+        self.install_and_prepare()
+        self.env["FAKE_NVME_MOUNTED"] = "0"
+        genai_setup.run(self.session, redo="prepare")
+        status = self.wait_for(lambda state: not state["active"])
+        self.assertEqual(self.states(status)[1], "failed")
+        self.assertEqual(status["steps"][1]["problem"]["message"], "NVMe is not mounted on the board.")
+
     def installed_apps_ref(self):
-        text = (self.home / "prebuilt-apps/deps/neat-apps.json").read_text()
+        text = (self.nvme / "prebuilt-apps/deps/neat-apps.json").read_text()
         return text.split('"ref": "')[1].split('"')[0]
 
     def test_a_develop_insight_installs_the_develop_apps(self):
@@ -217,7 +253,7 @@ class BoardScriptTests(unittest.TestCase):
             status = self.wait_for(lambda s: self.states(s) == ["done", "done", "done"])
         self.assertFalse(status["outdated"])
         self.assertEqual(self.installed_apps_ref(), "develop")
-        self.assertTrue((self.home / ".prebuilt-apps-backup/deps/neat-apps.json").exists())
+        self.assertTrue((self.nvme / ".prebuilt-apps-backup/deps/neat-apps.json").exists())
 
     def test_a_studio_built_for_an_older_neat_library_line_is_replaced(self):
         # Installed for Neat Library 0.5.0; the board was then updated to 0.6.0.
@@ -375,7 +411,7 @@ class BoardScriptTests(unittest.TestCase):
         self.assertEqual(self.states(status), ["done", "failed", "pending"])
         del self.env["FAKE_SETUP_FAIL"]
         # The user fixes the network and pastes the panel's command into a shell on the board.
-        done = subprocess.run(["bash", "-c", status["steps"][1]["problem"]["command"].replace("~", str(self.home))],
+        done = subprocess.run(board_command(["bash", "-c", status["steps"][1]["problem"]["command"]], self.env),
                               env=self.env, capture_output=True, timeout=20)
         self.assertEqual(done.returncode, 0, done.stderr)
         status = self.status()
@@ -385,9 +421,34 @@ class BoardScriptTests(unittest.TestCase):
 
     def test_the_offered_install_command_works_on_a_board_setup_never_ran_on(self):
         command = genai_setup.manual_command("install", str(self.home.parent / "bin/sima-cli"))
-        done = subprocess.run(["bash", "-c", command.replace("~", str(self.home))], env=self.env, capture_output=True, timeout=20)
+        done = subprocess.run(board_command(["bash", "-c", command], self.env), env=self.env, capture_output=True, timeout=20)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.states(), ["done", "pending", "pending"])
+
+    def test_failed_manual_commands_keep_the_interactive_shell_open(self):
+        for mounted in (False, True):
+            self.env["FAKE_NVME_MOUNTED"] = "1" if mounted else "0"
+            if mounted:
+                # mkdir must fail too without exiting the caller or running the step.
+                cache_tmp = self.nvme / ".cache/neat-genai-studio/tmp"
+                cache_tmp.parent.mkdir(parents=True)
+                cache_tmp.touch()
+            for step in genai_setup.STEPS:
+                with self.subTest(step=step, mounted=mounted):
+                    command = genai_setup.manual_command(step).replace("~", str(self.home))
+                    script = command + r"""
+result=$?
+printf 'recovery_status=%s\n' "$result"
+echo shell_still_open
+exit 0
+"""
+                    result = subprocess.run(["bash", "--noprofile", "--norc", "-i"],
+                                            input=script.replace("/media/nvme", str(self.nvme)),
+                                            env=self.env, capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("shell_still_open", result.stdout)
+                    self.assertNotIn("recovery_status=0", result.stdout)
+        self.assertFalse((self.nvme / "prebuilt-apps").exists())
 
     def test_run_setup_again_needs_neat_apps_installed_not_a_clean_install_record(self):
         self.install_and_prepare()
@@ -523,7 +584,7 @@ class BoardScriptTests(unittest.TestCase):
         self.assertEqual(self.states(), ["done", "done", "pending"])
         genai_setup.stop_studio(self.session)
         self.assertEqual(self.states(), ["done", "done", "pending"])
-        subprocess.run(genai_setup.stop_studio_command(), env=self.env, capture_output=True, timeout=20)
+        subprocess.run(board_command(genai_setup.stop_studio_command(), self.env), env=self.env, capture_output=True, timeout=20)
         self.assertFalse(pid_file.exists(), "the stale pid file is dropped before run.sh stop")
 
     def test_a_launch_from_another_insight_at_the_same_moment_is_refused(self):
@@ -544,7 +605,7 @@ class BoardScriptTests(unittest.TestCase):
         jobs.mkdir(parents=True)
         with open(jobs / "launch.lock", "w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            stop = subprocess.Popen(genai_setup.stop_studio_command(), env=self.env)
+            stop = subprocess.Popen(board_command(genai_setup.stop_studio_command(), self.env), env=self.env)
             time.sleep(0.5)
             self.assertIsNone(stop.poll(), "Stop read the job before the launch finished")
         self.assertEqual(stop.wait(timeout=10), 0)
@@ -647,7 +708,7 @@ class DescribeTests(unittest.TestCase):
         fields = {"sima_cli": "/data/sima-cli/.venv/bin/sima-cli"}
         records = {"install": {"exit": "1", "mtime": "", "log": "boom", "warnings": []}}
         command = self.describe(fields, records)["steps"][0]["problem"]["command"]
-        self.assertTrue(command.startswith("cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 /data/sima-cli/.venv/bin/sima-cli neat install apps && "))
+        self.assertIn("cd /media/nvme && NEAT_APPS_SKIP_DEPENDENCIES=1 /data/sima-cli/.venv/bin/sima-cli neat install apps && ", command)
         self.assertTrue(command.endswith("echo 0 > ~/.neat-insight/genai-setup/install.exit"))
         # A develop Insight offers the develop Apps.
         with mock.patch.object(genai_setup, "insight_channel", return_value="develop"):
