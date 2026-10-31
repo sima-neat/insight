@@ -444,13 +444,14 @@ describe('CameraPanel', () => {
     await settle();
     expect(statusLine()).toBe('Starting the camera on the board… 3 s');
 
-    // Another starting state, as a new object, is not another start.
-    (preview as unknown as { dispatch(event: { type: 'start' }): void }).dispatch({
-      type: 'start',
-    });
+    // A second start while the first is out sets a new starting state, as a new object, but it is
+    // not another start of the camera: the count goes on.
+    void preview.start(imx477, sel('NV12', 1920, 1080, 30), 3);
+    const again = http.expectOne({ method: 'POST', url: START_URL });
     await settle();
     expect(statusLine()).toBe('Starting the camera on the board… 3 s');
     start.flush({ session: previewSession() });
+    again.flush({ session: previewSession() });
     await settle();
   });
 
