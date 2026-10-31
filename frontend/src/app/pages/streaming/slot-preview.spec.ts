@@ -776,6 +776,16 @@ describe('SlotPreview', () => {
       await fixture.whenStable();
       expect(frame.hasAttribute('aria-describedby')).toBe(false);
     });
+
+    it('is read once: the frame’s description carries it and the badge itself is hidden from readers', async () => {
+      await show(slot(1, { state: 'playing', file: 'cars.mp4', codec: 'h264' }));
+      const frame = root().querySelector('app-preview-frame')!;
+      // A description reads from the element it names even when that is hidden, so hiding the badge
+      // takes it out of the frame's content without shortening the description.
+      expect(badge()!.getAttribute('aria-hidden')).toBe('true');
+      expect(badge()!.id).toBe(frame.getAttribute('aria-describedby'));
+      expect(badgeText()).toBe('Live');
+    });
   });
 });
 

@@ -40,12 +40,16 @@
       <span>Connecting to src{{ slot().index }}…</span>
     }
   </div>
+  <!--
+    Said once: the frame's description names this element, and a description is read from a hidden
+    element too, so hiding it keeps the frame's content from saying it a second time.
+  -->
   @if (badge(); as badge) {
-    <span class="badge" [id]="badgeId" [class.on-picture]="onPicture()">
+    <span class="badge" aria-hidden="true" [id]="badgeId" [class.on-picture]="onPicture()">
       @if (badge.live) {
         <neat-live-dot pulse />
       } @else {
-        <span class="idle" aria-hidden="true"></span>
+        <span class="idle"></span>
       }
       {{ badge.label }}
     </span>

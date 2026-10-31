@@ -119,7 +119,7 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
  * (connecting, retrying or failed: the slot is live, and the message says the rest), and otherwise
  * what is shown instead: "File preview", "Camera preview", or "Not live" for a pull that waits or
  * fails. A frame that shows nothing else has none. The badge text is the frame's accessible
- * description.
+ * description, and the badge is hidden from readers so that its text is not read twice.
  */
 @Component({
   selector: 'app-slot-preview',
