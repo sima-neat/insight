@@ -23,6 +23,7 @@ import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { Announcement } from '../../announcement';
+import { AppDialogs } from '../../app-dialogs';
 import { AsidePrefs } from '../../aside-prefs';
 import { problemOf, type BoardProblem } from '../../board/board-error';
 import { BoardProblemNotice } from '../../board/board-problem-notice';
@@ -55,7 +56,6 @@ import { PeripheralsService } from '../../peripherals/peripherals.service';
 import { ListColumn } from '../../list-column';
 import { PanelTitle } from '../../panel-title';
 import { elapsedSeconds, formatRelativeTime } from '../../relative-time';
-import { TopBarDialogs } from '../../top-bar-dialogs';
 import { CameraPanel } from './camera-panel';
 import { DeviceDetails } from './device-details';
 import { MicrophonePanel } from './microphone-panel';
@@ -135,7 +135,7 @@ export class PeripheralsPage {
   private readonly session = inject(PeripheralsSession);
   private readonly preview = inject(CameraPreview);
   private readonly micTest = inject(MicTest);
-  private readonly dialogs = inject(TopBarDialogs);
+  private readonly dialogs = inject(AppDialogs);
   protected readonly asides = inject(AsidePrefs);
   protected readonly asideOpen = computed(() => this.asides.open('peripherals'));
 

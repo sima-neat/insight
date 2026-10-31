@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { NeatIcon, NeatRailItem } from '@sima/neat-ui';
-import { TopBarDialogs } from '../top-bar-dialogs';
+import { AppDialogs } from '../app-dialogs';
 import { BoardService } from './board.service';
 import { boardRailView } from './board-view';
 
@@ -10,7 +10,7 @@ import { boardRailView } from './board-view';
  * kit's rail item gives it the look of the rail's other items. The item's label is the whole
  * "name — address — state" (`boardRailView`): its name and, in a collapsed rail, its tooltip, so
  * the state is told in words and not only by the dot's colour. The kit draws the dot (`tone`) and
- * the two lines (`text`, `detail`); the dialog loads on its first open (`TopBarDialogs`).
+ * the two lines (`text`, `detail`); the dialog loads on its first open (`AppDialogs`).
  */
 @Component({
   selector: 'app-board-rail',
@@ -35,7 +35,7 @@ import { boardRailView } from './board-view';
 })
 export class BoardRail {
   private readonly service = inject(BoardService);
-  private readonly dialogs = inject(TopBarDialogs);
+  private readonly dialogs = inject(AppDialogs);
 
   protected readonly board = computed(() =>
     boardRailView(this.service.state(), this.service.error(), this.service.checking()),

@@ -7,6 +7,7 @@ import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { NeatIcon, NeatPage, NeatShell, type NeatTone } from '@sima/neat-ui';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { AppDialogs } from '../../app-dialogs';
 import type { BoardState } from '../../board/api';
 import { boardState, DEVKIT } from '../../board/board.testing';
 import { FakeLocalStorage } from '../../fake-storage.testing';
@@ -17,7 +18,6 @@ import { MicTest } from '../../peripherals/mic-test';
 import { yeti } from '../../peripherals/microphones.testing';
 import { PeripheralsSession } from '../../peripherals/peripherals-session';
 import { peripheralSnapshot } from '../../peripherals/snapshots.testing';
-import { TopBarDialogs } from '../../top-bar-dialogs';
 import { PeripheralsPage } from './peripherals.page';
 
 const BOARD_URL = '/api/board';
@@ -100,7 +100,7 @@ describe('PeripheralsPage', () => {
           { path: 'elsewhere', component: Elsewhere },
         ]),
         { provide: NeatToasts, useValue: toasts },
-        { provide: TopBarDialogs, useValue: dialogs },
+        { provide: AppDialogs, useValue: dialogs },
       ],
     });
     http = TestBed.inject(HttpTestingController);

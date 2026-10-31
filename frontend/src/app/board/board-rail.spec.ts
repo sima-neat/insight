@@ -3,8 +3,8 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { getDebugNode } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { NeatIcon, NeatShell } from '@sima/neat-ui';
+import { AppDialogs } from '../app-dialogs';
 import { FakeLocalStorage } from '../fake-storage.testing';
-import { TopBarDialogs } from '../top-bar-dialogs';
 import { BoardProblem } from './board-error';
 import { BoardRail } from './board-rail';
 import { BoardService } from './board.service';
@@ -35,7 +35,7 @@ describe('BoardRail', () => {
       providers: [
         provideRouter([]),
         { provide: BoardService, useValue: board },
-        { provide: TopBarDialogs, useValue: dialogs },
+        { provide: AppDialogs, useValue: dialogs },
       ],
     });
   });

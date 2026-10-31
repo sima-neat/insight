@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { NeatButton } from '@sima/neat-ui';
-import { TopBarDialogs } from '../top-bar-dialogs';
+import { AppDialogs } from '../app-dialogs';
 
 /**
  * Open board settings, as a callout's action for a problem the board's settings fix (no board, or
  * a connection failure): `<app-board-settings-action neatCalloutActions />`. It opens the board
- * dialog through `TopBarDialogs`. One place for the button and its words, which Peripherals'
+ * dialog through `AppDialogs`. One place for the button and its words, which Peripherals'
  * notices share.
  */
 @Component({
@@ -19,7 +19,7 @@ import { TopBarDialogs } from '../top-bar-dialogs';
   `,
 })
 export class BoardSettingsAction {
-  private readonly dialogs = inject(TopBarDialogs);
+  private readonly dialogs = inject(AppDialogs);
 
   protected open(): void {
     void this.dialogs.openBoard();

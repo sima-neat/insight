@@ -3,6 +3,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import type { NeatTone } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
+import { AppDialogs } from '../../app-dialogs';
 import { BoardProblem } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
 import { boardState, DEVKIT, FakeBoard } from '../../board/board.testing';
@@ -10,7 +11,6 @@ import type { PeripheralSnapshot } from '../../peripherals/api';
 import { imx477, usb } from '../../peripherals/cameras.testing';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import { peripheralSnapshot } from '../../peripherals/snapshots.testing';
-import { TopBarDialogs } from '../../top-bar-dialogs';
 import { PeripheralsBanners } from './peripherals-banners';
 
 /** `PeripheralsService` as the banners read it. */
@@ -54,7 +54,7 @@ describe('PeripheralsBanners', () => {
       providers: [
         { provide: BoardService, useValue: board },
         { provide: PeripheralsService, useValue: peripherals },
-        { provide: TopBarDialogs, useValue: dialogs },
+        { provide: AppDialogs, useValue: dialogs },
       ],
     });
     fixture = TestBed.createComponent(Host);

@@ -43,6 +43,7 @@ import {
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { filter, map } from 'rxjs';
 import { Announcement } from '../../announcement';
+import { AppDialogs } from '../../app-dialogs';
 import { AsidePrefs } from '../../aside-prefs';
 import { BoardProblemNotice } from '../../board/board-problem-notice';
 import { BoardSettingsAction } from '../../board/board-settings-action';
@@ -57,7 +58,6 @@ import { SentinelRuns } from '../../stats/sentinel-runs';
 import { SentinelTelemetry, type TelemetryUpdate } from '../../stats/sentinel-telemetry';
 import { StatsSession } from '../../stats/stats-session';
 import { sessionCsv, sessionCsvFilename, type OverviewCardId } from '../../stats/telemetry';
-import { TopBarDialogs } from '../../top-bar-dialogs';
 import { CompareView } from './compare-view';
 import { MetricsTable } from './metrics-table';
 import { overviewCards } from './overview-cards';
@@ -188,7 +188,7 @@ export class StatsPage {
   private readonly router = inject(Router);
   protected readonly install = inject(SentinelInstall);
   private readonly session = inject(StatsSession);
-  private readonly dialogs = inject(TopBarDialogs);
+  private readonly dialogs = inject(AppDialogs);
   private readonly document = inject(DOCUMENT);
   protected readonly asides = inject(AsidePrefs);
   protected readonly asideOpen = computed(() => this.asides.open('stats'));

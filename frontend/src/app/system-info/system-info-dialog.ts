@@ -35,7 +35,7 @@ const SYSINFO_URL = '/api/sysinfo';
 const METRICS_URL = '/api/metrics';
 
 /**
- * Opens the System Info dialog. `TopBarDialogs` calls it after importing this module on the first
+ * Opens the System Info dialog. `AppDialogs` calls it after importing this module on the first
  * open, so the dialog and the kit entries it uses stay out of the initial bundle.
  */
 export function openSystemInfoDialog(injector: Injector): NeatDialogRef<void> {

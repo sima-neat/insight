@@ -6,7 +6,7 @@ import { NeatToasts } from '@sima/neat-ui/toast';
 type OpenDialog = (injector: Injector) => NeatDialogRef<unknown>;
 
 /** Each of the rail's dialogs' modules, loaded by a dynamic import. */
-export interface TopBarDialogModules {
+export interface AppDialogModules {
   board(): Promise<{ openBoardDialog: OpenDialog }>;
   systemInfo(): Promise<{ openSystemInfoDialog: OpenDialog }>;
 }
@@ -17,8 +17,8 @@ export interface TopBarDialogModules {
  * the collapsible, the callout), are imported on their first open instead. A token so that a test
  * can see when a module loads.
  */
-export const TOP_BAR_DIALOG_MODULES = new InjectionToken<TopBarDialogModules>(
-  'TOP_BAR_DIALOG_MODULES',
+export const APP_DIALOG_MODULES = new InjectionToken<AppDialogModules>(
+  'APP_DIALOG_MODULES',
   {
     providedIn: 'root',
     factory: () => ({
@@ -28,7 +28,7 @@ export const TOP_BAR_DIALOG_MODULES = new InjectionToken<TopBarDialogModules>(
   },
 );
 
-type DialogName = keyof TopBarDialogModules;
+type DialogName = keyof AppDialogModules;
 
 /** What the toast says when a dialog's module could not be loaded (ruling Q11). */
 const LOAD_FAILED: Record<DialogName, string> = {
@@ -45,8 +45,8 @@ const LOAD_FAILED: Record<DialogName, string> = {
  * again.
  */
 @Injectable({ providedIn: 'root' })
-export class TopBarDialogs {
-  private readonly modules = inject(TOP_BAR_DIALOG_MODULES);
+export class AppDialogs {
+  private readonly modules = inject(APP_DIALOG_MODULES);
   private readonly injector = inject(Injector);
   private readonly toasts = inject(NeatToasts);
 

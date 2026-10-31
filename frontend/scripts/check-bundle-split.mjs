@@ -44,7 +44,7 @@ const LAZY_CODE = [
     what: 'the kit’s dialog',
     route: 'Streaming, Media and the rail’s dialogs',
   },
-  // The rail's dialogs are imported on their first open (`TopBarDialogs`), with the kit
+  // The rail's dialogs are imported on their first open (`AppDialogs`), with the kit
   // entries they bring beside them.
   { marker: 'app-board-dialog', what: 'the board dialog', route: 'the board dialog’s first open' },
   {

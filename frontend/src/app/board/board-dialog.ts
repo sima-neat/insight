@@ -33,7 +33,7 @@ import { BoardProblemNotice } from './board-problem-notice';
 import { boardFacts, boardStateChip, boardSummary } from './board-view';
 
 /**
- * Opens the board dialog. `TopBarDialogs` calls it after importing this module on the first open,
+ * Opens the board dialog. `AppDialogs` calls it after importing this module on the first open,
  * so the dialog and the kit entries it uses stay out of the initial bundle.
  */
 export function openBoardDialog(injector: Injector): NeatDialogRef<void> {

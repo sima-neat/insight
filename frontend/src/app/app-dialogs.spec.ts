@@ -3,16 +3,16 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { APP_DIALOG_MODULES, AppDialogs } from './app-dialogs';
 import { BoardService } from './board/board.service';
 import { FakeBoard, FakePeripherals } from './board/board.testing';
 import { PeripheralsService } from './peripherals/peripherals.service';
-import { TOP_BAR_DIALOG_MODULES, TopBarDialogs } from './top-bar-dialogs';
 
 /** Something to render, so that change detection runs for the dialogs in the overlay. */
 @Component({ template: '' })
 class Host {}
 
-describe('TopBarDialogs', () => {
+describe('AppDialogs', () => {
   let fixture: ComponentFixture<Host>;
   let loadBoard: ReturnType<typeof vi.fn>;
   let loadSystemInfo: ReturnType<typeof vi.fn>;
@@ -28,7 +28,7 @@ describe('TopBarDialogs', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         {
-          provide: TOP_BAR_DIALOG_MODULES,
+          provide: APP_DIALOG_MODULES,
           useValue: { board: loadBoard, systemInfo: loadSystemInfo },
         },
         { provide: BoardService, useValue: new FakeBoard() },
@@ -57,21 +57,21 @@ describe('TopBarDialogs', () => {
     {
       name: 'board',
       selector: 'app-board-dialog',
-      open: (top: TopBarDialogs) => top.openBoard(),
+      open: (top: AppDialogs) => top.openBoard(),
       loader: () => loadBoard,
       failure: 'Could not open the board dialog. Reload the page to try again.',
     },
     {
       name: 'System Info',
       selector: 'app-system-info-dialog',
-      open: (top: TopBarDialogs) => top.openSystemInfo(),
+      open: (top: AppDialogs) => top.openSystemInfo(),
       loader: () => loadSystemInfo,
       failure: 'Could not open the System information dialog. Reload the page to try again.',
     },
   ];
 
-  it('TopBarDialogs loads each dialog module on first open only', async () => {
-    const top = TestBed.inject(TopBarDialogs);
+  it('AppDialogs loads each dialog module on first open only', async () => {
+    const top = TestBed.inject(AppDialogs);
     await settle();
     expect(loadBoard).not.toHaveBeenCalled();
     expect(loadSystemInfo).not.toHaveBeenCalled();
@@ -110,7 +110,7 @@ describe('TopBarDialogs', () => {
 
   for (const { name, selector, open, loader, failure } of cases) {
     it(`a ${name} module that failed to load says so, and is loaded again on the next open`, async () => {
-      const top = TestBed.inject(TopBarDialogs);
+      const top = TestBed.inject(AppDialogs);
       loader().mockRejectedValueOnce(new Error('Failed to fetch dynamically imported module'));
       // Settles rather than rejects: every caller (the board block, System information, Peripherals, Stats) gets the toast.
       await expect(open(top)).resolves.toBeUndefined();

@@ -5,6 +5,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NeatSelect } from '@sima/neat-ui/select';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
+import { AppDialogs } from '../../app-dialogs';
 import { BoardService } from '../../board/board.service';
 import { boardState, DEVKIT, FakeBoard, FakePeripherals } from '../../board/board.testing';
 import type { CameraItem, PreviewSession } from '../../peripherals/api';
@@ -23,7 +24,6 @@ import {
 import { PeripheralsSession } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import { peripheralSnapshot } from '../../peripherals/snapshots.testing';
-import { TopBarDialogs } from '../../top-bar-dialogs';
 import { CameraPanel } from './camera-panel';
 
 const PREVIEW_URL = '/api/peripherals/preview';
@@ -98,7 +98,7 @@ describe('CameraPanel', () => {
         provideHttpClientTesting(),
         { provide: BoardService, useValue: board },
         { provide: PeripheralsService, useValue: peripherals },
-        { provide: TopBarDialogs, useValue: dialogs },
+        { provide: AppDialogs, useValue: dialogs },
       ],
     });
     http = TestBed.inject(HttpTestingController);

@@ -2,10 +2,10 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { NeatIcon, NeatRailDivider, NeatRailItem, NeatShell } from '@sima/neat-ui';
 import { NeatToastHost } from '@sima/neat-ui/toast';
+import { AppDialogs } from './app-dialogs';
 import { APP_NAME } from './app-name';
 import { BoardRail } from './board/board-rail';
 import { INSIGHT_NAV } from './navigation';
-import { TopBarDialogs } from './top-bar-dialogs';
 
 /**
  * The shell: the rail is the app's (the pages, then at its bottom the board, System information
@@ -46,7 +46,7 @@ import { TopBarDialogs } from './top-bar-dialogs';
 export class App {
   protected readonly appName = APP_NAME;
   protected readonly nav = INSIGHT_NAV;
-  private readonly dialogs = inject(TopBarDialogs);
+  private readonly dialogs = inject(AppDialogs);
 
   protected openSystemInfo(): void {
     void this.dialogs.openSystemInfo();

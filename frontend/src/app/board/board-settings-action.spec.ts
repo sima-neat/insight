@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { NeatCallout } from '@sima/neat-ui/callout';
-import { TopBarDialogs } from '../top-bar-dialogs';
+import { AppDialogs } from '../app-dialogs';
 import { BoardSettingsAction } from './board-settings-action';
 
 @Component({
@@ -17,7 +17,7 @@ class Host {}
 describe('BoardSettingsAction', () => {
   it("is a callout's Open board settings, which opens the board dialog", async () => {
     const dialogs = { openBoard: vi.fn(async () => undefined) };
-    TestBed.configureTestingModule({ providers: [{ provide: TopBarDialogs, useValue: dialogs }] });
+    TestBed.configureTestingModule({ providers: [{ provide: AppDialogs, useValue: dialogs }] });
     const fixture = TestBed.createComponent(Host);
     await fixture.whenStable();
     const button: HTMLButtonElement = fixture.nativeElement.querySelector(

@@ -12,6 +12,7 @@ import { NeatIcon, NeatPage, NeatShell, type NeatTone } from '@sima/neat-ui';
 import { NeatTimeChart } from '@sima/neat-ui/charts';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { AppDialogs } from '../../app-dialogs';
 import type { BoardTarget } from '../../board/api';
 import { problemOf } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
@@ -39,7 +40,6 @@ import {
   sessionCsvFilename,
   thermalMaxChart,
 } from '../../stats/telemetry';
-import { TopBarDialogs } from '../../top-bar-dialogs';
 import { StatsPage } from './stats.page';
 
 const STATE_URL = '/api/sentinel';
@@ -198,7 +198,7 @@ describe('StatsPage', () => {
         { provide: BoardService, useValue: board },
         { provide: PeripheralsService, useValue: new FakePeripherals() },
         { provide: NeatToasts, useValue: toasts },
-        { provide: TopBarDialogs, useValue: dialogs },
+        { provide: AppDialogs, useValue: dialogs },
       ],
     });
     http = TestBed.inject(HttpTestingController);

@@ -143,7 +143,7 @@ merging.
     The board dialog, Peripherals and Stats use it.
   - `app-board-settings-action` is a callout's "Open board settings"
     (`<app-board-settings-action neatCalloutActions />`), for a problem the board's settings fix;
-    it opens the board dialog through `TopBarDialogs`. Peripherals' and Stats' notices use it.
+    it opens the board dialog through `AppDialogs`. Peripherals' and Stats' notices use it.
   - `app-sentinel-failure` says why a Sentinel request failed: a danger callout, announced as an
     alert, with `failureOf`'s title, the backend's message and hint, and Retry (`retry`) only
     where asking again can help; `busy` makes Retry read "Retrying…" and wait with the focus kept
@@ -181,12 +181,12 @@ merging.
   connected or the state in words in the state's colour otherwise; the kit draws the dot and both
   lines, and cuts each. Its `label`, which is its accessible name and its collapsed tooltip, is one
   "name — address — state" (`boardRailView` in `board-view.ts`), so the state is in words and not
-  only in colour. `TopBarDialogs` (named for where the dialogs began) opens both dialogs,
-  from the rail and from any page that links to them (Peripherals' "Open board settings"); each
-  opens once at a time, and a chunk that cannot be loaded says so in a toast. The dialogs are
-  imported on their first open, not with the rail: whatever the app root imports statically is in
-  the initial bundle on every page, and the dialogs, with the kit entries only they use, would cost
-  every first paint for something most visits never open.
+  only in colour. `AppDialogs` opens both dialogs, from the rail and from any page
+  that links to them (Peripherals' "Open board settings"); each opens once at a time, and a chunk
+  that cannot be loaded says so in a toast. The dialogs are imported on their first open, not with
+  the rail: whatever the app root imports statically is in the initial bundle on every page, and
+  the dialogs, with the kit entries only they use, would cost every first paint for something most
+  visits never open.
 - **The board** has one reader and writer, `BoardService` (root-provided): the rail's board block,
   the board dialog, Peripherals and Stats read its state, and its actions (select, Check again,
   trust a host key) answer with the fresh state; page code never fetches `/api/board` itself. It is
@@ -271,7 +271,7 @@ merging.
   entries only they use (`/file-browser`, `/select-list`, `/dialog`, Peripherals' `/level-meter` and
   the charts entry, `/charts`, which only Stats draws with and which brings d3's scale and shape
   modules: nothing outside Stats imports it, and a type-only import is erased). The board and System
-  Info dialogs of the rail are imported on their first open (`TopBarDialogs`), with the kit entries
+  Info dialogs of the rail are imported on their first open (`AppDialogs`), with the kit entries
   they bring (`/collapsible`, `/callout`, which Peripherals and the Viewer use too). `npm run
   check:bundle` (after a build, and in CI) fails if any of that leaks into the initial bundle, or
   goes missing from the build: its markers are the selectors of the Viewer's video tile, the four
@@ -330,7 +330,7 @@ Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 | `npm test`             | Unit tests (`npm test -- --watch=false` runs once and exits)                                        |
 | `npm run lint`         | ESLint (angular-eslint, kit-only imports), Stylelint (no colour literals) and a typecheck of `e2e/` |
 | `npm run build`        | Production build into `frontend/dist`                                                               |
-| `npm run check:bundle` | Checks the built bundle: the video code, lazy pages and top-bar dialogs stay out of the initial one |
+| `npm run check:bundle` | Checks the built bundle: video, lazy pages and the two dialogs stay out of the initial one           |
 | `npm run e2e`          | Playwright end-to-end tests (`frontend/e2e`)                                                        |
 
 The backend's tests run from the repo root with `python -m unittest discover -s tests`. Run lint,
