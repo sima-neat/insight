@@ -30,7 +30,7 @@ genai_setup_bp = Blueprint("genai_setup", __name__)
 
 STEPS = ("install", "prepare", "start")
 JOB_DIR = "~/.neat-insight/genai-setup"
-STUDIO_DIR = "~/prebuilt-apps/examples/genai/neat-genai-studio"
+STUDIO_DIR = "/media/nvme/prebuilt-apps/examples/genai/neat-genai-studio"
 STATUS_TIMEOUT_SEC = 20.0
 LAUNCH_TIMEOUT_SEC = 20.0
 LOG_BYTES = 6000
@@ -46,7 +46,7 @@ TITLES = {
     "start": "Start GenAI Studio",
 }
 DESCRIPTIONS = {
-    "install": "Downloads Neat Apps, which includes GenAI Studio, into ~/prebuilt-apps. Takes a few minutes.",
+    "install": "Downloads Neat Apps, which includes GenAI Studio, into /media/nvme/prebuilt-apps. Requires mounted NVMe and takes a few minutes.",
     "prepare": "Runs setup.sh once: the speech model, the voices and document search. Needs internet access "
     "on the board and takes about 15 minutes.",
     "start": "Runs GenAI Studio in the background. It loads its voices first, which takes a few minutes, and keeps "
@@ -57,7 +57,7 @@ DESCRIPTIONS = {
 # the earlier failure. {sima_cli} is the sima-cli the board has, {apps} the Apps target.
 # Its success replaces the failed run's log, whose warnings no longer apply.
 MANUAL_COMMANDS = {
-    "install": "cd ~ && NEAT_APPS_SKIP_DEPENDENCIES=1 {sima_cli} neat install {apps} && mkdir -p " + JOB_DIR
+    "install": "cd /media/nvme && NEAT_APPS_SKIP_DEPENDENCIES=1 {sima_cli} neat install {apps} && mkdir -p " + JOB_DIR
     + " && rm -f " + JOB_DIR + "/install.log && echo 0 > " + JOB_DIR + "/install.exit",
     "prepare": "cd " + STUDIO_DIR + " && ./setup.sh && mkdir -p " + JOB_DIR + " && rm -f " + JOB_DIR
     + "/prepare.log && echo 0 > " + JOB_DIR + "/prepare.exit",
@@ -82,7 +82,7 @@ def apps_target(channel=None) -> str:
 
 
 def manual_command(step: str, sima_cli=None, channel=None) -> str:
-    return MANUAL_COMMANDS[step].format(sima_cli=sima_cli or "sima-cli", apps=apps_target(channel))
+    return _NVME_SETUP_PREFIX + MANUAL_COMMANDS[step].format(sima_cli=sima_cli or "sima-cli", apps=apps_target(channel))
 
 _HOSTS = (
     "pypi.org, files.pythonhosted.org, download.pytorch.org, huggingface.co, raw.githubusercontent.com "
@@ -90,12 +90,18 @@ _HOSTS = (
 )
 _RETRY_KEEPS = "Then press Retry. Files already downloaded are kept."
 _INSTALL_CORE = (
-    "Install Neat Apps with its dependencies in a shell on the board: `sima-cli neat install apps`. It also "
+    "With NVMe mounted at /media/nvme, install Neat Apps with its dependencies: "
+    "`cd /media/nvme && sima-cli neat install apps`. It also "
     "installs the Neat Library and Insight, and may ask for your password."
 )
 
 # Recognised causes of a failed step, checked in order against its log: (pattern, message, fixes).
 _CAUSES = (
+    (
+        r"is not a mountpoint",
+        "NVMe is not mounted on the board.",
+        ["Mount the NVMe drive at /media/nvme, then press Retry. Setup will not use the root filesystem."],
+    ),
     (
         r"Neat Python environment not found|pyneat is not importable",
         "The Neat Library (Core) is not installed on the board.",
@@ -196,9 +202,23 @@ forget_stale_studio() {
 }
 """
 
+# All setup, status and stop commands use the same installation.
+_APPS_PATHS = r"""
+nvme="/media/nvme"
+apps="$nvme/prebuilt-apps"
+studio="$apps/examples/genai/neat-genai-studio"
+"""
+
+# Run inside each logged step, before downloading or preparing anything.
+_NVME_SETUP_PREFIX = _APPS_PATHS + r"""
+mountpoint "$nvme" &&
+export XDG_CACHE_HOME="$nvme/.cache/neat-genai-studio" &&
+export PIP_CACHE_DIR="$XDG_CACHE_HOME/pip" HF_HOME="$XDG_CACHE_HOME/huggingface" TMPDIR="$XDG_CACHE_HOME/tmp" &&
+mkdir -p "$TMPDIR" &&
+"""
+
 # Every line is key=value, except each step's record, which starts at `@@<step>`.
-_STATUS_SCRIPT = _ALIVE + r"""
-studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
+_STATUS_SCRIPT = _ALIVE + _APPS_PATHS + r"""
 jobs="$HOME/.neat-insight/genai-setup"
 cli=$(command -v sima-cli 2>/dev/null || true)
 for c in SIMA_CLI_PATHS; do [ -n "$cli" ] || { [ -x "$c" ] && cli=$c; }; done
@@ -208,7 +228,7 @@ echo "sima_cli=$cli"
 [ -x "$studio/.venv/bin/python" ] && [ -f "$studio/config.local.yaml" ] && echo prepared=yes || echo prepared=no
 # Which Apps the installed GenAI Studio came from and the Core it was built for, and the
 # Core the board has (empty where a record or dpkg is missing).
-deps="$HOME/prebuilt-apps/deps"
+deps="$apps/deps"
 field() { sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" "$2" 2>/dev/null | head -n 1; }
 echo "apps_ref=$(field ref "$deps/neat-apps.json")"
 echo "apps_core_ref=$(field ref "$deps/neat-core.json")"
@@ -260,20 +280,22 @@ done
 # run.sh keeps running in the foreground, so the job lives as long as GenAI Studio.
 _RUNNER_SCRIPT = r"""
 jobs="$HOME/.neat-insight/genai-setup"
-studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 for s in $(cat "$jobs/steps"); do
   printf '%s\n' "$s" > "$jobs/step"
+  (
+NVME_SETUP_PREFIX
   case "$s" in
-    install) cd "$HOME" && NEAT_APPS_SKIP_DEPENDENCIES=1 NEAT_APPS_OVERWRITE=1 SIMA_CLI_CHECK_FOR_UPDATE=0 \
+    install) cd "$nvme" && NEAT_APPS_SKIP_DEPENDENCIES=1 NEAT_APPS_OVERWRITE=1 SIMA_CLI_CHECK_FOR_UPDATE=0 \
       "$SIMA_CLI" neat install "$APPS_TARGET" ;;
     prepare) cd "$studio" && ./setup.sh ;;
     start) cd "$studio" && ./run.sh ;;
-  esac >"$jobs/$s.log" 2>&1 </dev/null
+  esac
+  ) >"$jobs/$s.log" 2>&1 </dev/null
   code=$?
   printf '%s\n' "$code" > "$jobs/$s.exit"
   [ "$code" -eq 0 ] || exit "$code"
 done
-"""
+""".replace("NVME_SETUP_PREFIX", _NVME_SETUP_PREFIX)
 
 # $1: the steps to run, $2: the sima-cli to install with, $3: the Apps target. Detaches the
 # runner from this shell (setsid, where the system has it) so it outlives the SSH session
@@ -311,9 +333,8 @@ end_job() {
 
 # Ends the job: run.sh stops GenAI Studio and its model server itself; any other step
 # is ended with its whole process group. The step is recorded as stopped (143).
-_STOP_SCRIPT = _ALIVE + _END_JOB + r"""
+_STOP_SCRIPT = _ALIVE + _END_JOB + _APPS_PATHS + r"""
 jobs="$HOME/.neat-insight/genai-setup"
-studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 wait_for_launch "$jobs"
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 step=$(cat "$jobs/step" 2>/dev/null || true)
@@ -326,9 +347,8 @@ end_job "$runner"
 # Stops GenAI Studio however it was started: run.sh stops it and its model server. A setup
 # job that only kept it running then ends, and the start step is recorded as stopped on
 # purpose, so it waits to be started again instead of reporting a failure.
-_STOP_STUDIO_SCRIPT = _ALIVE + _END_JOB + r"""
+_STOP_STUDIO_SCRIPT = _ALIVE + _END_JOB + _APPS_PATHS + r"""
 jobs="$HOME/.neat-insight/genai-setup"
-studio="$HOME/prebuilt-apps/examples/genai/neat-genai-studio"
 wait_for_launch "$jobs"
 runner=$(cat "$jobs/runner.pid" 2>/dev/null || true)
 step=$(cat "$jobs/step" 2>/dev/null || true)
@@ -523,7 +543,7 @@ def _update_notice(reason: str, channel: str) -> dict:
         "message": reason,
         "fixes": ["Press Update and start GenAI Studio. It stops GenAI Studio, installs Neat Apps "
                   "(`sima-cli neat install {}`) and runs setup again, which takes about 15 minutes. Downloaded models "
-                  "are kept, and the previous files move to `~/.prebuilt-apps-backup`.".format(apps_target(channel))],
+                  "are kept, and the previous files move to `/media/nvme/.prebuilt-apps-backup`.".format(apps_target(channel))],
         "command": None,
     }
 
@@ -535,8 +555,8 @@ def _core_warning(fields: dict, channel: str) -> dict:
     return {
         "message": "This Neat Apps was built for Neat Library {}, but the board has {}.".format(
             built_for, fields.get("core_version", "")),
-        "fix": "If GenAI Studio fails, install Neat Apps with its dependencies in a shell on the board: "
-               "`sima-cli neat install {}`.".format(apps_target(channel)),
+        "fix": "If GenAI Studio fails, mount NVMe at /media/nvme and install Neat Apps with its dependencies: "
+               "`cd /media/nvme && sima-cli neat install {}`.".format(apps_target(channel)),
     }
 
 
