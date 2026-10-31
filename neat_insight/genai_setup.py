@@ -98,7 +98,7 @@ _INSTALL_CORE = (
 # Recognised causes of a failed step, checked in order against its log: (pattern, message, fixes).
 _CAUSES = (
     (
-        r"NVMe is not mounted",
+        r"is not a mountpoint",
         "NVMe is not mounted on the board.",
         ["Mount the NVMe drive at /media/nvme, then press Retry. Setup will not use the root filesystem."],
     ),
@@ -211,10 +211,10 @@ studio="$apps/examples/genai/neat-genai-studio"
 
 # Run inside each logged step, before downloading or preparing anything.
 _NVME_STORAGE = _APPS_PATHS + r"""
-mountpoint -q "$nvme" || { echo 'NVMe is not mounted at /media/nvme. Mount it before setting up GenAI Studio.' >&2; exit 1; }
-export XDG_CACHE_HOME="$nvme/.cache/neat-genai-studio"
-export PIP_CACHE_DIR="$XDG_CACHE_HOME/pip" HF_HOME="$XDG_CACHE_HOME/huggingface" TMPDIR="$XDG_CACHE_HOME/tmp"
-mkdir -p "$TMPDIR" || exit 1
+mountpoint "$nvme" &&
+export XDG_CACHE_HOME="$nvme/.cache/neat-genai-studio" &&
+export PIP_CACHE_DIR="$XDG_CACHE_HOME/pip" HF_HOME="$XDG_CACHE_HOME/huggingface" TMPDIR="$XDG_CACHE_HOME/tmp" &&
+mkdir -p "$TMPDIR" &&
 """
 
 # Every line is key=value, except each step's record, which starts at `@@<step>`.

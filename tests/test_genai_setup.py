@@ -39,7 +39,9 @@ echo "Installed apps runtime under: $PWD/prebuilt-apps"
 """
 
 _FAKE_MOUNTPOINT = r"""#!/bin/sh
-[ "$1" = -q ] && [ "$2" = "$FAKE_NVME" ] && [ "${FAKE_NVME_MOUNTED:-1}" = 1 ]
+[ "$1" = "$FAKE_NVME" ] && [ "${FAKE_NVME_MOUNTED:-1}" = 1 ] && exit 0
+echo "$1 is not a mountpoint"
+exit 32
 """
 
 # The board's installed Core, as dpkg reports it; none unless a test sets FAKE_CORE_VERSION.
@@ -425,6 +427,31 @@ class BoardScriptTests(unittest.TestCase):
         done = subprocess.run(["bash", "-c", command.replace("~", str(self.home)).replace("/media/nvme", str(self.nvme))], env=self.env, capture_output=True, timeout=20)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.states(), ["done", "pending", "pending"])
+
+    def test_failed_manual_commands_keep_the_interactive_shell_open(self):
+        for mounted in (False, True):
+            self.env["FAKE_NVME_MOUNTED"] = "1" if mounted else "0"
+            if mounted:
+                # mkdir must fail too without exiting the caller or running the step.
+                cache_tmp = self.nvme / ".cache/neat-genai-studio/tmp"
+                cache_tmp.parent.mkdir(parents=True)
+                cache_tmp.touch()
+            for step in genai_setup.STEPS:
+                with self.subTest(step=step, mounted=mounted):
+                    command = genai_setup.manual_command(step).replace("~", str(self.home))
+                    script = command + r"""
+result=$?
+printf 'recovery_status=%s\n' "$result"
+echo shell_still_open
+exit 0
+"""
+                    result = subprocess.run(["bash", "--noprofile", "--norc", "-i"],
+                                            input=script.replace("/media/nvme", str(self.nvme)),
+                                            env=self.env, capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("shell_still_open", result.stdout)
+                    self.assertNotIn("recovery_status=0", result.stdout)
+        self.assertFalse((self.nvme / "prebuilt-apps").exists())
 
     def test_run_setup_again_needs_neat_apps_installed_not_a_clean_install_record(self):
         self.install_and_prepare()
