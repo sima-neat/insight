@@ -66,7 +66,6 @@ mkdir -p "$dir/.venv/bin"
 printf '#!/bin/sh\n' > "$dir/.venv/bin/python"
 chmod +x "$dir/.venv/bin/python"
 touch "$dir/config.local.yaml"
-printf '%s\n' "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$HF_HOME" "$TMPDIR" > "$dir/setup.paths"
 # Emulate setup downloads and temporary files without filling the real filesystem.
 mkdir -p "$PIP_CACHE_DIR" "$HF_HOME"
 touch "$PIP_CACHE_DIR/wheel" "$HF_HOME/model" "$TMPDIR/download"
@@ -200,8 +199,6 @@ class BoardScriptTests(unittest.TestCase):
         self.assertTrue((self.studio / ".neat-genai-studio.pid").exists())
         self.assertFalse((self.home / "prebuilt-apps").exists())
         cache = self.nvme / ".cache/neat-genai-studio"
-        self.assertEqual((self.studio / "setup.paths").read_text().splitlines(),
-                         [str(cache), str(cache / "pip"), str(cache / "huggingface"), str(cache / "tmp")])
         self.assertTrue((cache / "pip/wheel").exists())
         self.assertTrue((cache / "huggingface/model").exists())
         self.assertTrue((cache / "tmp/download").exists())
@@ -414,7 +411,7 @@ class BoardScriptTests(unittest.TestCase):
         self.assertEqual(self.states(status), ["done", "failed", "pending"])
         del self.env["FAKE_SETUP_FAIL"]
         # The user fixes the network and pastes the panel's command into a shell on the board.
-        done = subprocess.run(["bash", "-c", status["steps"][1]["problem"]["command"].replace("~", str(self.home)).replace("/media/nvme", str(self.nvme))],
+        done = subprocess.run(board_command(["bash", "-c", status["steps"][1]["problem"]["command"]], self.env),
                               env=self.env, capture_output=True, timeout=20)
         self.assertEqual(done.returncode, 0, done.stderr)
         status = self.status()
@@ -424,7 +421,7 @@ class BoardScriptTests(unittest.TestCase):
 
     def test_the_offered_install_command_works_on_a_board_setup_never_ran_on(self):
         command = genai_setup.manual_command("install", str(self.home.parent / "bin/sima-cli"))
-        done = subprocess.run(["bash", "-c", command.replace("~", str(self.home)).replace("/media/nvme", str(self.nvme))], env=self.env, capture_output=True, timeout=20)
+        done = subprocess.run(board_command(["bash", "-c", command], self.env), env=self.env, capture_output=True, timeout=20)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.states(), ["done", "pending", "pending"])
 

@@ -82,7 +82,7 @@ def apps_target(channel=None) -> str:
 
 
 def manual_command(step: str, sima_cli=None, channel=None) -> str:
-    return _NVME_STORAGE + MANUAL_COMMANDS[step].format(sima_cli=sima_cli or "sima-cli", apps=apps_target(channel))
+    return _NVME_SETUP_PREFIX + MANUAL_COMMANDS[step].format(sima_cli=sima_cli or "sima-cli", apps=apps_target(channel))
 
 _HOSTS = (
     "pypi.org, files.pythonhosted.org, download.pytorch.org, huggingface.co, raw.githubusercontent.com "
@@ -210,7 +210,7 @@ studio="$apps/examples/genai/neat-genai-studio"
 """
 
 # Run inside each logged step, before downloading or preparing anything.
-_NVME_STORAGE = _APPS_PATHS + r"""
+_NVME_SETUP_PREFIX = _APPS_PATHS + r"""
 mountpoint "$nvme" &&
 export XDG_CACHE_HOME="$nvme/.cache/neat-genai-studio" &&
 export PIP_CACHE_DIR="$XDG_CACHE_HOME/pip" HF_HOME="$XDG_CACHE_HOME/huggingface" TMPDIR="$XDG_CACHE_HOME/tmp" &&
@@ -283,7 +283,7 @@ jobs="$HOME/.neat-insight/genai-setup"
 for s in $(cat "$jobs/steps"); do
   printf '%s\n' "$s" > "$jobs/step"
   (
-NVME_STORAGE
+NVME_SETUP_PREFIX
   case "$s" in
     install) cd "$nvme" && NEAT_APPS_SKIP_DEPENDENCIES=1 NEAT_APPS_OVERWRITE=1 SIMA_CLI_CHECK_FOR_UPDATE=0 \
       "$SIMA_CLI" neat install "$APPS_TARGET" ;;
@@ -295,7 +295,7 @@ NVME_STORAGE
   printf '%s\n' "$code" > "$jobs/$s.exit"
   [ "$code" -eq 0 ] || exit "$code"
 done
-""".replace("NVME_STORAGE", _NVME_STORAGE)
+""".replace("NVME_SETUP_PREFIX", _NVME_SETUP_PREFIX)
 
 # $1: the steps to run, $2: the sima-cli to install with, $3: the Apps target. Detaches the
 # runner from this shell (setsid, where the system has it) so it outlives the SSH session
