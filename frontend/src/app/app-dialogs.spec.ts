@@ -57,21 +57,21 @@ describe('AppDialogs', () => {
     {
       name: 'board',
       selector: 'app-board-dialog',
-      open: (top: AppDialogs) => top.openBoard(),
+      open: (service: AppDialogs) => service.openBoard(),
       loader: () => loadBoard,
       failure: 'Could not open the board dialog. Reload the page to try again.',
     },
     {
       name: 'System Info',
       selector: 'app-system-info-dialog',
-      open: (top: AppDialogs) => top.openSystemInfo(),
+      open: (service: AppDialogs) => service.openSystemInfo(),
       loader: () => loadSystemInfo,
       failure: 'Could not open the System information dialog. Reload the page to try again.',
     },
   ];
 
   it('AppDialogs loads each dialog module on first open only', async () => {
-    const top = TestBed.inject(AppDialogs);
+    const service = TestBed.inject(AppDialogs);
     await settle();
     expect(loadBoard).not.toHaveBeenCalled();
     expect(loadSystemInfo).not.toHaveBeenCalled();
@@ -80,8 +80,8 @@ describe('AppDialogs', () => {
       // Its module stays unloaded until this dialog is opened, whatever else was.
       expect(loader()).not.toHaveBeenCalled();
       // A double click: the second call, while the first is loading or open, does nothing.
-      const first = open(top);
-      const second = open(top);
+      const first = open(service);
+      const second = open(service);
       await shown(selector);
       await settle();
       expect(loader()).toHaveBeenCalledTimes(1);
@@ -98,7 +98,7 @@ describe('AppDialogs', () => {
       expect(dialogs(selector)).toHaveLength(0);
 
       // Opening again uses the module already loaded.
-      void open(top);
+      void open(service);
       await shown(selector);
       expect(loader()).toHaveBeenCalledTimes(1);
       document
@@ -110,14 +110,14 @@ describe('AppDialogs', () => {
 
   for (const { name, selector, open, loader, failure } of cases) {
     it(`a ${name} module that failed to load says so, and is loaded again on the next open`, async () => {
-      const top = TestBed.inject(AppDialogs);
+      const service = TestBed.inject(AppDialogs);
       loader().mockRejectedValueOnce(new Error('Failed to fetch dynamically imported module'));
       // Settles rather than rejects: every caller (the board block, System information, Peripherals, Stats) gets the toast.
-      await expect(open(top)).resolves.toBeUndefined();
+      await expect(open(service)).resolves.toBeUndefined();
       expect(toasts.error).toHaveBeenCalledExactlyOnceWith(failure);
       expect(dialogs(selector)).toHaveLength(0);
 
-      void open(top);
+      void open(service);
       await shown(selector);
       expect(loader()).toHaveBeenCalledTimes(2);
       expect(toasts.error).toHaveBeenCalledTimes(1);

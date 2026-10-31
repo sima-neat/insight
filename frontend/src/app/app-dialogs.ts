@@ -17,16 +17,13 @@ export interface AppDialogModules {
  * the collapsible, the callout), are imported on their first open instead. A token so that a test
  * can see when a module loads.
  */
-export const APP_DIALOG_MODULES = new InjectionToken<AppDialogModules>(
-  'APP_DIALOG_MODULES',
-  {
-    providedIn: 'root',
-    factory: () => ({
-      board: () => import('./board/board-dialog'),
-      systemInfo: () => import('./system-info/system-info-dialog'),
-    }),
-  },
-);
+export const APP_DIALOG_MODULES = new InjectionToken<AppDialogModules>('APP_DIALOG_MODULES', {
+  providedIn: 'root',
+  factory: () => ({
+    board: () => import('./board/board-dialog'),
+    systemInfo: () => import('./system-info/system-info-dialog'),
+  }),
+});
 
 type DialogName = keyof AppDialogModules;
 

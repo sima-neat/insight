@@ -330,7 +330,7 @@ Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 | `npm test`             | Unit tests (`npm test -- --watch=false` runs once and exits)                                        |
 | `npm run lint`         | ESLint (angular-eslint, kit-only imports), Stylelint (no colour literals) and a typecheck of `e2e/` |
 | `npm run build`        | Production build into `frontend/dist`                                                               |
-| `npm run check:bundle` | Checks the built bundle: video, lazy pages and the two dialogs stay out of the initial one           |
+| `npm run check:bundle` | Checks the built bundle: video, lazy pages and the two dialogs stay out of the initial one          |
 | `npm run e2e`          | Playwright end-to-end tests (`frontend/e2e`)                                                        |
 
 The backend's tests run from the repo root with `python -m unittest discover -s tests`. Run lint,

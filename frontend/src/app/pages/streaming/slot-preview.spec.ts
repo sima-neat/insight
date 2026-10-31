@@ -913,7 +913,9 @@ describe('SlotPreview', () => {
         message: 'Wrong password',
       });
 
-      host.slot.set(slot(3, { state: 'pulled', pull: pull({ status: 'auth_failed', error: null }) }));
+      host.slot.set(
+        slot(3, { state: 'pulled', pull: pull({ status: 'auth_failed', error: null }) }),
+      );
       await fixture.whenStable();
       expect(state()).toMatchObject({ badge: 'Not live', image: null, message: null });
     });
