@@ -787,6 +787,156 @@ describe('SlotPreview', () => {
       expect(badgeText()).toBe('Live');
     });
   });
+
+  // The slot kinds a publisher or the server's pull holds, which show no file and no local camera:
+  // only their stream, or the words for why there is none.
+  describe('a slot that is held by a publisher or pulled', () => {
+    const badge = () => root().querySelector<HTMLElement>('.badge');
+    const badgeText = () => badge()?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
+    const description = () => {
+      const id = root().querySelector('app-preview-frame')!.getAttribute('aria-describedby');
+      return id === null ? null : root().querySelector(`#${id}`)?.textContent?.trim();
+    };
+    const state = () => ({
+      badge: badgeText(),
+      description: description(),
+      onPicture: badge()?.classList.contains('on-picture') ?? null,
+      image: image()?.getAttribute('src') ?? null,
+      video: video() !== null,
+      message: message() ?? null,
+    });
+
+    async function showFirstFrame(): Promise<void> {
+      decodeFirstFrame(image()!);
+      vi.advanceTimersByTime(100);
+      await fixture.whenStable();
+    }
+
+    it('an external slot shows its stream, Live, and never its file or the local camera', async () => {
+      const since = '2026-10-26T09:00:00Z';
+      await show(
+        slot(2, {
+          state: 'external',
+          type: 'webcam',
+          file: 'cars.mp4',
+          codec: 'h264',
+          external: { since } as Slot['external'],
+        }),
+        {} as MediaStream,
+      );
+      // Connecting: the slot is live, there is no picture yet to put the badge on.
+      expect(state()).toEqual({
+        badge: 'Live',
+        description: 'Live',
+        onPicture: false,
+        image: `/stream/preview/src2.mjpg?t=1737000000000&s=${encodeURIComponent(since)}`,
+        video: false,
+        message: null,
+      });
+      expect(text()).toContain('Connecting to src2…');
+      expect(text()).not.toContain('File preview');
+
+      await showFirstFrame();
+      expect(text()).not.toContain('Connecting');
+      expect(state().onPicture).toBe(true);
+      expect(state().description).toBe('Live');
+    });
+
+    it('an external slot whose preview failed is still Live, with the message and Retry', async () => {
+      await show(slot(2, { state: 'external', external: { since: 'a' } as Slot['external'] }));
+      await failEarly((probe) =>
+        probe.flush({ error: 'Too many previews' }, { status: 429, statusText: 'Too Many' }),
+      );
+      expect(state()).toMatchObject({
+        badge: 'Live',
+        description: 'Live',
+        onPicture: false,
+        image: null,
+        message: 'Preview unavailable: too many previews open Retry',
+      });
+    });
+
+    it('a pull that has not connected is Not live, with the wait said and no file shown', async () => {
+      await show(
+        slot(3, {
+          state: 'pulled',
+          file: 'cars.mp4',
+          codec: 'h264',
+          pull: pull({ status: 'connecting', since: null }),
+        }),
+      );
+      expect(state()).toEqual({
+        badge: 'Not live',
+        description: 'Not live',
+        onPicture: false,
+        image: null,
+        video: false,
+        message: 'Waiting for the camera…',
+      });
+      expect(text()).not.toContain('File preview');
+    });
+
+    it('a pull that cannot be reached says why, in the wait, and an unexplained one just waits', async () => {
+      await show(
+        slot(3, {
+          state: 'pulled',
+          pull: pull({ status: 'unreachable', error: 'connection refused', since: null }),
+        }),
+      );
+      expect(state()).toMatchObject({
+        badge: 'Not live',
+        description: 'Not live',
+        message: 'Waiting for the camera… (connection refused)',
+      });
+
+      host.slot.set(
+        slot(3, { state: 'pulled', pull: pull({ status: 'unreachable', since: null }) }),
+      );
+      await fixture.whenStable();
+      expect(state()).toMatchObject({
+        badge: 'Not live',
+        message: 'Waiting for the camera…',
+      });
+    });
+
+    it('a pull the camera refused shows the camera’s words, or none, and stays Not live', async () => {
+      await show(
+        slot(3, {
+          state: 'pulled',
+          pull: pull({ status: 'auth_failed', error: 'Wrong password' }),
+        }),
+      );
+      expect(state()).toMatchObject({
+        badge: 'Not live',
+        description: 'Not live',
+        image: null,
+        message: 'Wrong password',
+      });
+
+      host.slot.set(slot(3, { state: 'pulled', pull: pull({ status: 'auth_failed', error: null }) }));
+      await fixture.whenStable();
+      expect(state()).toMatchObject({ badge: 'Not live', image: null, message: null });
+    });
+
+    it('a pull that is live shows its stream as Live, a new session of it as a new image', async () => {
+      await show(slot(3, { state: 'pulled', pull: pull({ since: '2026-10-26T09:00:00Z' }) }));
+      expect(state()).toMatchObject({
+        badge: 'Live',
+        description: 'Live',
+        onPicture: false,
+        image: `/stream/preview/src3.mjpg?t=1737000000000&s=${encodeURIComponent('2026-10-26T09:00:00Z')}`,
+        message: null,
+      });
+      await showFirstFrame();
+      expect(state().onPicture).toBe(true);
+
+      vi.setSystemTime(1_737_000_100_000);
+      host.slot.set(slot(3, { state: 'pulled', pull: pull({ since: '2026-10-26T10:00:00Z' }) }));
+      await fixture.whenStable();
+      expect(state().image).toContain('s=2026-10-26T10%3A00%3A00Z');
+      expect(state().onPicture).toBe(false);
+    });
+  });
 });
 
 describe('previewFailure', () => {
