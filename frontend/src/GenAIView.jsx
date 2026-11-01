@@ -98,7 +98,9 @@ import {
   setupStoppable,
   stepIcon
 } from './genai/setup.js'
+import { acceptedAnswer, clearDocumentsQuestion, deleteModelQuestion, loadModelQuestion, solutionQuestion } from './genai/confirmations.js'
 import { copyText } from './peripherals/api.js'
+import ConfirmDialog from './ConfirmDialog.jsx'
 
 const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
 
@@ -343,6 +345,9 @@ export default function GenAIView({ onError, onStatus }) {
   // A load that needs loaded models unloaded first: {model, choice, already},
   // where `already` lists the models this load was already asked to unload.
   const [unloadAsk, setUnloadAsk] = useState(null)
+  // A question before an action, asked in the page (ConfirmDialog):
+  // {kind, model, board, title, message, confirmLabel, danger}.
+  const [confirmAsk, setConfirmAsk] = useState(null)
   const [voices, setVoices] = useState(null)
   const voicesLoading = useRef(false)
 
@@ -690,6 +695,7 @@ export default function GenAIView({ onError, onStatus }) {
     setLoadProgress(null)
     setChosenModel(null)
     setUnloadAsk(null)
+    setConfirmAsk(null)       // a question about the previous board
     setVoices(null)
     setEngine('default')      // the new board may not have the chosen engine or voice
     setVoice('')
@@ -806,16 +812,34 @@ export default function GenAIView({ onError, onStatus }) {
     if (allowed.changeSpeechModel && model.supported !== false) runModelOp(`Switching speech recognition to ${friendlyModelName(model.name)}`, 'models/asr', { name: model.name })
   }
 
+  // Actions that ask first do it in the page: the browser's confirm() is
+  // blocked in a sandboxed frame such as an SDK editor tab (#221). A yes calls
+  // the action again with `confirmed`, so it checks what holds by then.
+  function askFirst(kind, question, model = null) {
+    setConfirmAsk({ kind, model, board: boardGeneration.current, ...question })
+  }
+
+  function answerAsk(yes) {
+    const ask = confirmAsk
+    setConfirmAsk(null)
+    if (!acceptedAnswer(ask, yes, boardGeneration.current)) return
+    if (ask.kind === 'delete-model') deleteModel(ask.model, true)
+    else if (ask.kind === 'load-model') chooseChatModel(ask.model.name, true)
+    else if (ask.kind === 'clear-documents') clearAllDocuments(true)
+  }
+
   // A model on the board that isn't in use; the board's refusal is shown as
   // the operation's error.
-  function deleteModel(model) {
+  function deleteModel(model, confirmed = false) {
     if (!allowed.deleteModel || !deletableModel(model, status)) return
-    const size = model.sizeBytes ? ` (${formatBytes(model.sizeBytes)})` : ''
-    if (!window.confirm(`Delete ${friendlyModelName(model.name)}${size} from the board? Its files are removed; download it again to use it.`)) return
+    if (!confirmed) {
+      askFirst('delete-model', deleteModelQuestion(model), model)
+      return
+    }
     runModelOp(`Deleting ${friendlyModelName(model.name)}`, 'models/delete', { name: model.name })
   }
 
-  function chooseChatModel(name) {
+  function chooseChatModel(name, confirmed = false) {
     const model = chatModels(status).find((m) => m.name === name)
     if (!model || model === chatModel || !allowed.changeChatModel) return
     if (model.supported === false) {
@@ -827,12 +851,10 @@ export default function GenAIView({ onError, onStatus }) {
       requestLoad(model)
       return
     }
-    const wait = model.estimatedLoadS ? ` It takes about ${formatDuration(model.estimatedLoadS)}.` : ''
-    const names = (list) => list.map((m) => friendlyModelName(m.name)).join(', ')
-    const others = plan.kind === 'add' && plan.keeps.length
-      ? ` ${names(plan.keeps)} ${plan.keeps.length === 1 ? 'stays' : 'stay'} loaded.`
-      : plan.kind === 'replace' && plan.unloads.length ? ` ${names(plan.unloads)} is unloaded first.` : ''
-    if (!window.confirm(`Load ${friendlyModelName(model.name)}?${wait}${others}`)) return
+    if (!confirmed) {
+      askFirst('load-model', loadModelQuestion(model, plan), model)
+      return
+    }
     loadChatModel(model)
   }
 
@@ -1551,6 +1573,12 @@ export default function GenAIView({ onError, onStatus }) {
     }
   }
 
+  function clearAllDocuments(confirmed = false) {
+    if (!allowed.documentTasks || !(docStatus && docStatus.database)) return
+    if (!confirmed) askFirst('clear-documents', clearDocumentsQuestion())
+    else runDocumentTask('Clearing', clearDocuments)
+  }
+
   function exportChat() {
     const now = new Date()
     const text = chatLog({ messages, model: chatModel ? chatModel.name : null, now })
@@ -2082,7 +2110,7 @@ export default function GenAIView({ onError, onStatus }) {
                 <div className="genai-actions">
                   <button type="button" className="btn-tonal" disabled={!allowed.documentTasks} onClick={() => docInput.current?.click()}>Upload a Markdown file</button>
                   <button type="button" className="btn-ghost" disabled={!allowed.documentTasks} onClick={() => runDocumentTask('Resetting', resetDocuments)}>Reset to the default</button>
-                  <button type="button" className="btn-ghost danger" disabled={!allowed.documentTasks || !(docStatus && docStatus.database)} onClick={() => window.confirm('Remove all documents from the board? Use my documents then finds nothing until you upload or reset.') && runDocumentTask('Clearing', clearDocuments)}>Clear</button>
+                  <button type="button" className="btn-ghost danger" disabled={!allowed.documentTasks || !(docStatus && docStatus.database)} onClick={() => clearAllDocuments()}>Clear</button>
                   <button type="button" className="btn-ghost" disabled={!allowed.inspectDocuments || !(docStatus && docStatus.database)} title="The sections the board searches, with a filter" onClick={() => { if (allowed.inspectDocuments) setDocsViewOpen(true) }}>
                     View documents
                   </button>
@@ -2370,6 +2398,17 @@ export default function GenAIView({ onError, onStatus }) {
           onClose={() => setSolutionsOpen(false)}
         />
       )}
+
+      {confirmAsk && (
+        <ConfirmDialog
+          title={confirmAsk.title}
+          message={confirmAsk.message}
+          confirmLabel={confirmAsk.confirmLabel}
+          danger={confirmAsk.danger}
+          onConfirm={() => answerAsk(true)}
+          onCancel={() => answerAsk(false)}
+        />
+      )}
     </div>
   )
 }
@@ -2379,6 +2418,8 @@ export default function GenAIView({ onError, onStatus }) {
 // loaded model through the relay. An app's own Home button returns here.
 function SolutionsOverlay({ model, sees, onClose }) {
   const [open, setOpen] = useState(null)
+  // The app waiting for "Open anyway" while the model can't serve it.
+  const [askApp, setAskApp] = useState(null)
   const frame = useRef(null)
   const frameWindow = useRef(null)    // the app's window, while Esc is watched there
   const backButton = useRef(null)
@@ -2433,14 +2474,13 @@ function SolutionsOverlay({ model, sees, onClose }) {
     }
   }, [open, onClose])
 
+  // The question describes the model as it was: a model loaded, unloaded or
+  // switched meanwhile drops it.
+  useEffect(() => { setAskApp(null) }, [model, sees])
+
   function launch(app) {
-    if (!sees) {
-      const why = model
-        ? `${friendlyModelName(model)} doesn't see images, so the ${app.name} picture features won't work. Open it anyway?`
-        : `No chat model is loaded, so ${app.name} can't answer until you load one. Open it anyway?`
-      if (!window.confirm(why)) return
-    }
-    setOpen(app)
+    if (!sees) setAskApp(app)
+    else setOpen(app)
   }
 
   return (
@@ -2471,6 +2511,16 @@ function SolutionsOverlay({ model, sees, onClose }) {
         {open && <a className="btn-ghost" href={solutionUrl(open.mode, model)} target="_blank" rel="noopener" title="Open in a new tab">New tab</a>}
         <button type="button" ref={closeButton} className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
       </div>
+      {askApp && (
+        <ConfirmDialog
+          {...solutionQuestion(askApp, model)}
+          onConfirm={() => {
+            setAskApp(null)
+            setOpen(askApp)
+          }}
+          onCancel={() => setAskApp(null)}
+        />
+      )}
     </div>
   )
 }
