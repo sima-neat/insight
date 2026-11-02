@@ -225,7 +225,7 @@ export class RunsView {
   protected compare(): void {
     const ids = this.session.checkedRuns();
     if (!this.canCompare() || this.deleting()) return;
-    void this.router.navigate(['/stats/compare'], {
+    void this.router.navigate(['/stats/runs/compare'], {
       queryParams: { runs: ids.join(','), baseline: ids[0] },
     });
   }

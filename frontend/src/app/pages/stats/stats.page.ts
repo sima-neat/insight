@@ -11,13 +11,7 @@ import {
   untracked,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import {
-  NavigationEnd,
-  PRIMARY_OUTLET,
-  Router,
-  RouterLink,
-  type UrlTree,
-} from '@angular/router';
+import { NavigationEnd, PRIMARY_OUTLET, Router, type UrlTree } from '@angular/router';
 import {
   NeatAsidePanel,
   NeatAsideToggle,
@@ -25,8 +19,6 @@ import {
   NeatIcon,
   NeatNote,
   NeatPage,
-  NeatPageTab,
-  NeatPageTabs,
   NeatPageToolbar,
   type NeatTone,
   NeatTooltip,
@@ -78,10 +70,11 @@ type Body = 'read-failed' | 'no-target' | 'checking' | 'ready' | 'not-ready';
 /** The page's views, each at its own address under `/stats`. */
 type StatsView = 'live' | 'runs' | 'compare';
 
-/** The view an address names: `/stats/runs` is Runs, `/stats/compare` Compare, the rest Live. */
+/** The view an address names: `/stats/runs/compare` is Compare, `/stats/runs` Runs, the rest Live. */
 function statsView(url: UrlTree): StatsView {
-  const view = url.root.children[PRIMARY_OUTLET]?.segments[1]?.path;
-  return view === 'runs' || view === 'compare' ? view : 'live';
+  const [, view, deeper] = url.root.children[PRIMARY_OUTLET]?.segments ?? [];
+  if (view?.path !== 'runs') return 'live';
+  return deeper?.path === 'compare' ? 'compare' : 'runs';
 }
 
 const UPDATE_CHIPS: Record<TelemetryUpdate, { label: string; tone: NeatTone }> = {
@@ -130,7 +123,7 @@ function notReadyHeading(
  * Stats, in three views at their own addresses (spec, "Stats, runs"): Live (`/stats`), the selected
  * board's live Sentinel telemetry as overview cards, the chosen card's area in the side panel and
  * every metric under All metrics (spec, "Stats, live telemetry"); Runs (`/stats/runs`), the runs
- * saved on the board; and Compare (`/stats/compare`). The views are child routes without
+ * saved on the board; and Compare (`/stats/runs/compare`). The views are child routes without
  * components, so the page stays one instance across them. `SentinelTelemetry` and `SentinelRuns`
  * are provided here, so leaving the page stops every request to the board; while Live is not shown
  * the metrics are not polled, and the run list is read only while Runs or Compare is. The install
@@ -158,8 +151,6 @@ function notReadyHeading(
     NeatIcon,
     NeatNote,
     NeatPage,
-    NeatPageTab,
-    NeatPageTabs,
     NeatPageToolbar,
     NeatPopover,
     NeatPopoverContent,
@@ -170,7 +161,6 @@ function notReadyHeading(
     NgTemplateOutlet,
     RecordTrace,
     RunPanel,
-    RouterLink,
     RunsView,
     SentinelFailureCallout,
     StatsAreaPanel,

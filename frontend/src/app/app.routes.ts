@@ -6,7 +6,8 @@ import { Routes } from '@angular/router';
  * unknown path (old `/workspace` and `/genai` bookmarks included) land on Streaming.
  *
  * Stats has three views, each with its own address so that it can be bookmarked or shared: Live
- * (`/stats`), Runs (`/stats/runs`) and Compare (`/stats/compare?runs=…`). They are child routes
+ * (`/stats`), Runs (`/stats/runs`) and Compare (`/stats/runs/compare?runs=…`). Live and Runs are
+ * Stats' children in the rail; Compare is reached from Runs, which stays current. They are child routes
  * without components of their own: the page stays the same instance across them, so its
  * telemetry and runs services keep what they read, and it draws the view its address names.
  */
@@ -39,7 +40,7 @@ export const routes: Routes = [
     children: [
       { path: '', children: [] },
       { path: 'runs', children: [] },
-      { path: 'compare', children: [] },
+      { path: 'runs/compare', title: 'Compare', children: [] },
     ],
   },
   { path: 'rtsp', redirectTo: 'streaming' },

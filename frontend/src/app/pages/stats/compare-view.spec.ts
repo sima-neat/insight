@@ -79,7 +79,7 @@ describe('CompareView', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         provideRouter([
-          { path: 'stats/compare', component: CompareView },
+          { path: 'stats/runs/compare', component: CompareView },
           { path: 'stats/runs', component: RunsList },
         ]),
         { provide: BoardService, useValue: board },
@@ -113,7 +113,7 @@ describe('CompareView', () => {
   }
 
   async function open(query: string): Promise<void> {
-    await harness.navigateByUrl(`/stats/compare?${query}`);
+    await harness.navigateByUrl(`/stats/runs/compare?${query}`);
     await settle();
   }
 
@@ -235,7 +235,7 @@ describe('CompareView', () => {
     baselineSelect().value.set(OTHER);
     await settle();
     const router = TestBed.inject(Router);
-    expect(router.url).toBe(`/stats/compare?runs=${BASELINE},${OTHER}&baseline=${OTHER}`);
+    expect(router.url).toBe(`/stats/runs/compare?runs=${BASELINE},${OTHER}&baseline=${OTHER}`);
     const request = compareRequest();
     expect(request.request.params.get('runs')).toBe(`${OTHER},${BASELINE}`);
     await flush(request, answer(SWAPPED));

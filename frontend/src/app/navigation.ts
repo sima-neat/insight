@@ -6,5 +6,13 @@ export const INSIGHT_NAV: NeatNavItem[] = [
   { label: 'Streaming', icon: 'streaming', path: '/streaming' },
   { label: 'Viewer', icon: 'viewer', path: '/viewer' },
   { label: 'Peripherals', icon: 'peripherals', path: '/peripherals' },
-  { label: 'Stats', icon: 'stats', path: '/stats' },
+  {
+    label: 'Stats',
+    icon: 'stats',
+    path: '/stats',
+    children: [
+      { label: 'Live', path: '/stats' },
+      { label: 'Runs', path: '/stats/runs' },
+    ],
+  },
 ];

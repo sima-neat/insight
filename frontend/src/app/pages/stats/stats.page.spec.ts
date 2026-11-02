@@ -190,7 +190,7 @@ describe('StatsPage', () => {
             children: [
               { path: '', children: [] },
               { path: 'runs', children: [] },
-              { path: 'compare', children: [] },
+              { path: 'runs/compare', children: [] },
             ],
           },
           { path: 'elsewhere', component: Elsewhere },
@@ -972,83 +972,33 @@ describe('StatsPage', () => {
   });
 
   describe('views', () => {
-    /** The page's views, a labelled navigation of links directly under `neat-page`. */
-    const viewTabs = (): HTMLElement =>
-      root().querySelector('neat-page > nav[aria-label="Stats views"]')!;
-    const viewTab = (label: string): HTMLAnchorElement =>
-      [...viewTabs().querySelectorAll<HTMLAnchorElement>('a')].find(
-        (tab) => text(tab) === label,
-      )!;
-    const tabLabels = (): string[] => [...viewTabs().querySelectorAll('a')].map(text);
-    const openTab = (): string[] =>
-      [...viewTabs().querySelectorAll('a[aria-current="page"]')].map(text);
+    /** The view drawn: each has a part of its own, Live its cards. */
+    const drawn = (): string[] =>
+      [
+        cards().length > 0 ? 'live' : null,
+        root().querySelector('app-stats-runs') ? 'runs' : null,
+        root().querySelector('app-stats-compare') ? 'compare' : null,
+      ].filter((view): view is string => view !== null);
     const telemetryOf = (): SentinelTelemetry =>
       fixture.debugElement.query(By.directive(StatsPage)).injector.get(SentinelTelemetry);
     const runsRead = (): TestRequest => http.expectOne((request) => request.url === RUNS_URL);
-    const url = (): string => TestBed.inject(Router).url;
 
-    it('the view follows the address: /stats is Live, /stats/runs Runs, /stats/compare Compare', async () => {
+    it('the view follows the address: /stats is Live, /stats/runs Runs, /stats/runs/compare Compare', async () => {
       await visit();
-      expect(tabLabels()).toEqual(['Live', 'Runs']);
-      expect(openTab()).toEqual(['Live']);
+      expect(drawn()).toEqual(['live']);
       expect(cards()).toHaveLength(6);
 
       await go('/stats/runs');
       await flush(runsRead(), runsAnswer());
-      expect(openTab()).toEqual(['Runs']);
-      expect(cards()).toHaveLength(0);
+      expect(drawn()).toEqual(['runs']);
 
-      await go('/stats/compare?runs=a,b');
-      expect(openTab()).toEqual(['Compare']);
-      expect(cards()).toHaveLength(0);
+      await go('/stats/runs/compare?runs=a,b');
+      expect(drawn()).toEqual(['compare']);
     });
 
-    it('the views are links to their addresses in a labelled navigation, not an ARIA tab list', async () => {
+    it("the page has no navigation of its own: the views are its rail item's children", async () => {
       await visit();
-      expect(viewTab('Live').getAttribute('href')).toBe('/stats');
-      expect(viewTab('Runs').getAttribute('href')).toBe('/stats/runs');
-      expect(viewTabs().querySelector('[role="tablist"], [role="tab"]')).toBeNull();
-      expect(viewTabs().getAttribute('role')).toBeNull();
-    });
-
-    it('Compare is a third tab while a comparison is open, to the same runs; Runs goes back to the list', async () => {
-      await visit();
-      expect(tabLabels()).toEqual(['Live', 'Runs']);
-
-      await go('/stats/compare?runs=a,b&baseline=a');
-      await flush(runsRead(), runsAnswer());
-      expect(tabLabels()).toEqual(['Live', 'Runs', 'Compare']);
-      expect(openTab()).toEqual(['Compare']);
-      expect(viewTab('Compare').getAttribute('href')).toBe('/stats/compare?runs=a,b&baseline=a');
-
-      await click(viewTab('Runs'));
-      expect(url()).toBe('/stats/runs');
-      expect(tabLabels()).toEqual(['Live', 'Runs']);
-      expect(openTab()).toEqual(['Runs']);
-    });
-
-    it('the Compare tab follows the comparison when its baseline is chosen', async () => {
-      await visit();
-      await go('/stats/compare?runs=a,b&baseline=a');
-      await flush(runsRead(), runsAnswer());
-      await go('/stats/compare?runs=a,b&baseline=b');
-      expect(viewTab('Compare').getAttribute('href')).toBe('/stats/compare?runs=a,b&baseline=b');
-    });
-
-    it('the tabs navigate between /stats and /stats/runs', async () => {
-      await visit();
-
-      await click(viewTab('Runs'));
-      expect(url()).toBe('/stats/runs');
-      await flush(runsRead(), runsAnswer());
-      expect(openTab()).toEqual(['Runs']);
-
-      await click(viewTab('Live'));
-      expect(url()).toBe('/stats');
-      await answerMetrics(
-        withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
-      );
-      expect(openTab()).toEqual(['Live']);
+      expect(root().querySelector('neat-page > nav')).toBeNull();
     });
 
     it('keeps the page and its telemetry across the views, polls no metrics on Runs and reads only what is new back on Live', async () => {
@@ -1086,7 +1036,7 @@ describe('StatsPage', () => {
     it('Compare shows the comparison of the runs the address names, across the full width', async () => {
       const [baseline, other] = COMPARE_RAW.runs.map((run) => run.metadata.id);
       await visit();
-      await go(`/stats/compare?runs=${baseline},${other}&baseline=${baseline}`);
+      await go(`/stats/runs/compare?runs=${baseline},${other}&baseline=${baseline}`);
       // The run list first: it says whether the runs are still on the board and finished.
       await flush(runsRead(), runsAnswer());
       const request = http.expectOne((request) => request.url === '/api/sentinel/compare');
@@ -1106,7 +1056,7 @@ describe('StatsPage', () => {
       await visit();
       http.expectNone((request) => request.url === RUNS_URL);
 
-      await go('/stats/compare?runs=a,b');
+      await go('/stats/runs/compare?runs=a,b');
       await flush(runsRead(), runsAnswer());
 
       await go('/stats');
@@ -1237,7 +1187,7 @@ describe('StatsPage', () => {
       expect(toolbarButton('Record')).toBeDefined();
       expect(sidePanelToggle()).not.toBeNull();
 
-      await go('/stats/compare?runs=a,b');
+      await go('/stats/runs/compare?runs=a,b');
       expect(toolbarButton('Record')).toBeDefined();
       expect(toolbarButton('More actions')).toBeUndefined();
       expect(sidePanelToggle()).toBeNull();
@@ -1259,15 +1209,14 @@ describe('StatsPage', () => {
       expect(toolbarButton('Record')).toBeUndefined();
     });
 
-    it('Runs and Compare show the same empty states as Live, with the tabs and no Record', async () => {
+    it('Runs and Compare show the same empty states as Live, and no Record', async () => {
       board.state.set(boardState({ target: null, generation: GENERATION }));
       await go('/stats/runs');
       expect(calloutHeadings()).toEqual(['Select a board to see its telemetry']);
-      expect(openTab()).toEqual(['Runs']);
       expect(toolbarButton('Record')).toBeUndefined();
 
       board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
-      await go('/stats/compare?runs=a,b');
+      await go('/stats/runs/compare?runs=a,b');
       expect(text(root().querySelector('neat-page p[role="status"]'))).toBe(
         'Checking Sentinel on the board…',
       );

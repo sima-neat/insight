@@ -60,13 +60,12 @@ describe('App', () => {
     const root: HTMLElement = fixture.nativeElement;
 
     expect(root.querySelector('neat-shell')?.textContent).toContain('Neat Insight');
-    expect(Array.from(root.querySelectorAll('nav a'), (a) => a.textContent?.trim())).toEqual([
-      'Media',
-      'Streaming',
-      'Viewer',
-      'Peripherals',
-      'Stats',
-    ]);
+    expect(
+      Array.from(
+        root.querySelectorAll('nav[aria-label="Main"] a, nav[aria-label="Main"] button'),
+        (a) => a.textContent?.trim(),
+      ),
+    ).toEqual(['Media', 'Streaming', 'Viewer', 'Peripherals', 'Stats']);
     expect(root.querySelector('neat-shell app-stand-in-page')).not.toBeNull();
   });
 

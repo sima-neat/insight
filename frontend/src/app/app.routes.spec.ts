@@ -19,8 +19,11 @@ const PAGES: [path: string, page: Type<unknown>, title: string][] = [
   ['/stats', StatsPage, 'Stats'],
 ];
 
-/** The Stats views' addresses, each of which shows the Stats page. */
-const STATS_VIEWS = ['/stats/runs', '/stats/compare'];
+/** The Stats views' addresses, each of which shows the Stats page, with the title it sets. */
+const STATS_VIEWS: [string, string][] = [
+  ['/stats/runs', 'Stats'],
+  ['/stats/runs/compare', 'Compare'],
+];
 
 /**
  * Stubs jsdom's missing ResizeObserver, which the kit measures with, and gives the TestBed the
@@ -65,11 +68,11 @@ describe('routes', () => {
     expect(router.url).toBe(path);
   });
 
-  it.each(STATS_VIEWS)('%s renders the Stats page, titled Stats', async (path) => {
+  it.each(STATS_VIEWS)('%s renders the Stats page, titled %s', async (path, title) => {
     await harness.navigateByUrl(path, StatsPage);
 
     expect(router.url).toBe(path);
-    expect(TestBed.inject(Title).getTitle()).toBe('Neat Insight · Stats');
+    expect(TestBed.inject(Title).getTitle()).toBe(`Neat Insight · ${title}`);
   });
 
   it('redirects / to /streaming', async () => {
@@ -116,9 +119,10 @@ describe('the rail on the Stats views', () => {
     await TestBed.inject(Router).navigateByUrl(path);
     await fixture.whenStable();
 
-    // The rail only: the page's own tabs (Stats' views) are `aria-current` links too.
+    // Collapsed, as here, Stats is the button that opens its menu; expanded, its open child is the
+    // current link instead. Either way one rail entry is current.
     const current = (fixture.nativeElement as HTMLElement).querySelectorAll(
-      'nav[aria-label="Main"] a[aria-current="page"]',
+      'nav[aria-label="Main"] [aria-current="page"]',
     );
     expect(Array.from(current, (link) => link.textContent?.trim())).toEqual(['Stats']);
   });

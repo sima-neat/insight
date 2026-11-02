@@ -19,8 +19,11 @@ const REAL_SLICE_MS = 50;
 
 export const tools = (page: Page) => page.getByRole('group', { name: 'Page tools' });
 export const toolButton = (page: Page, name: string) => tools(page).getByRole('button', { name });
-/** The page's views: a navigation of links, the open one carrying `aria-current="page"`. */
-export const viewTabs = (page: Page) => page.getByRole('navigation', { name: 'Stats views' });
+/**
+ * The page's views are its rail item's children (Live, Runs), links in the rail while it is
+ * expanded; the open one carries `aria-current="page"`.
+ */
+export const viewTabs = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 export const viewTab = (page: Page, name: string) =>
   viewTabs(page).getByRole('link', { name, exact: true });
 export const rail = (page: Page, name: string) =>

@@ -316,7 +316,7 @@ describe('RunsView', () => {
 
     await click(barButton('Compare'));
 
-    expect(navigate).toHaveBeenCalledWith(['/stats/compare'], {
+    expect(navigate).toHaveBeenCalledWith(['/stats/runs/compare'], {
       queryParams: { runs: `${HW_LONG.id},${TES3.id}`, baseline: HW_LONG.id },
     });
   });

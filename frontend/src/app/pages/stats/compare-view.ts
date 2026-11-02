@@ -74,7 +74,7 @@ type Gate =
 type Comparison = { answer: CompareExport } | { failure: SentinelFailure } | null;
 
 /**
- * Stats' Compare view (`/stats/compare?runs=<a>,<b>[,…]&baseline=<a>`, spec "Compare"): the runs
+ * Stats' Compare view (`/stats/runs/compare?runs=<a>,<b>[,…]&baseline=<a>`, spec "Compare"): the runs
  * of the address, each in its series colour with the baseline marked, one series of theirs drawn
  * over the common window with its summary per run, and Sentinel's per-metric comparison folded
  * below. The baseline is chosen in the header, which opens the same runs with it.
@@ -326,7 +326,7 @@ export class CompareView {
   protected chooseBaseline(id: string | null): void {
     const { ids, baseline } = this.params();
     if (id === null || id === orderedIds(ids, baseline)[0]) return;
-    void this.router.navigate(['/stats/compare'], {
+    void this.router.navigate(['/stats/runs/compare'], {
       queryParams: { runs: ids.join(','), baseline: id },
       replaceUrl: true,
     });

@@ -19,7 +19,6 @@ import {
   toolButton,
   tools,
   viewTab,
-  viewTabs,
 } from './stats-page';
 
 // Stats' Record, Runs and Compare against a fake board and Sentinel (`FakeStatsBackend`, whose
@@ -45,7 +44,7 @@ const chips = (page: Page) =>
 const summaryRows = (page: Page) =>
   page.getByRole('table', { name: 'Summary' }).locator('tbody').getByRole('row');
 const compareAddress = (runs: string[], baseline: string) =>
-  `/stats/compare?runs=${runs.join(',')}&baseline=${baseline}`;
+  `/stats/runs/compare?runs=${runs.join(',')}&baseline=${baseline}`;
 
 /** The runs and baseline the page's address names. */
 function compareParams(page: Page): { runs: string | null; baseline: string | null } {
@@ -154,9 +153,9 @@ test('Compare opens the ticked runs, follows a new baseline, filters the per-met
   await selectionBar(page).getByRole('button', { name: 'Compare' }).click();
 
   // The first run ticked is the baseline, and Sentinel is asked for it first.
-  await expect(page).toHaveURL(/\/stats\/compare\?/);
+  await expect(page).toHaveURL(/\/stats\/runs\/compare\?/);
   expect(compareParams(page)).toEqual({ runs: `${TES3},${HW}`, baseline: TES3 });
-  await expect(viewTab(page, 'Compare')).toHaveAttribute('aria-current', 'page');
+  await expect(viewTab(page, 'Runs')).toHaveAttribute('aria-current', 'page');
   await expect(compareView(page).getByRole('heading', { name: 'Comparison' })).toBeVisible();
   await expect(chips(page)).toHaveCount(2);
   await expect(chips(page).first()).toContainText('tes3');
@@ -256,12 +255,11 @@ test('the metrics are not polled while Runs shows, and are again on Live', async
     .toBeGreaterThan(polled);
 });
 
-test('the tabs switch the views, Compare is a tab only while it is open, and back and forward keep the open tab right', async ({
+test('the rail switches the views, Compare keeps Runs current, and back and forward keep the open child right', async ({
   page,
 }) => {
   await openStats(page, LAPTOP);
   await expect(page.locator('main neat-chart-card[data-selectable]')).toHaveCount(6);
-  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs']);
   await expect(viewTab(page, 'Live')).toHaveAttribute('aria-current', 'page');
   await expect(viewTab(page, 'Runs')).not.toHaveAttribute('aria-current');
 
@@ -273,19 +271,12 @@ test('the tabs switch the views, Compare is a tab only while it is open, and bac
   await checkBox(runRow(page, 'tes3')).click();
   await checkBox(runRow(page, 'insight-hw-1790177227')).click();
   await selectionBar(page).getByRole('button', { name: 'Compare' }).click();
-  await expect(page).toHaveURL(/\/stats\/compare\?/);
-  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs', 'Compare']);
-  await expect(viewTab(page, 'Compare')).toHaveAttribute('aria-current', 'page');
-  await expect(viewTab(page, 'Runs')).not.toHaveAttribute('aria-current');
-  // The tab leads to the comparison it stands for, with its runs and baseline.
-  await expect(viewTab(page, 'Compare')).toHaveAttribute(
-    'href',
-    compareAddress([TES3, HW], TES3),
-  );
+  await expect(page).toHaveURL(/\/stats\/runs\/compare\?/);
+  await expect(viewTab(page, 'Runs')).toHaveAttribute('aria-current', 'page');
+  await expect(viewTab(page, 'Live')).not.toHaveAttribute('aria-current');
 
   await page.goBack();
   await expect(page).toHaveURL(/\/stats\/runs$/);
-  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs']);
   await expect(viewTab(page, 'Runs')).toHaveAttribute('aria-current', 'page');
   await page.goBack();
   await expect(page).toHaveURL(/\/stats$/);
@@ -294,19 +285,17 @@ test('the tabs switch the views, Compare is a tab only while it is open, and bac
 
   await page.goForward();
   await page.goForward();
-  await expect(page).toHaveURL(/\/stats\/compare\?/);
-  await expect(viewTab(page, 'Compare')).toHaveAttribute('aria-current', 'page');
+  await expect(page).toHaveURL(/\/stats\/runs\/compare\?/);
+  await expect(viewTab(page, 'Runs')).toHaveAttribute('aria-current', 'page');
 });
 
-test('a compare address opened directly opens on the Compare tab, and Runs leads back to the list', async ({
+test('a compare address opened directly keeps Runs current in the rail, and Runs leads back to the list', async ({
   page,
 }) => {
   await openStats(page, LAPTOP, undefined, compareAddress([TES3, HW], TES3));
-  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs', 'Compare']);
-  await expect(viewTab(page, 'Compare')).toHaveAttribute('aria-current', 'page');
+  await expect(viewTab(page, 'Runs')).toHaveAttribute('aria-current', 'page');
   await viewTab(page, 'Runs').click();
   await expect(page).toHaveURL(/\/stats\/runs$/);
-  await expect(viewTabs(page).getByRole('link')).toHaveText(['Live', 'Runs']);
 });
 
 for (const { name, size } of VIEWPORTS) {

@@ -47,6 +47,14 @@ Give `neatEased` and `NeatEasedNumber` a name from `NEAT_EASINGS` (`ease-in-out`
 `ease-out`, `ease-in`, `linear`). Why: one motion language across apps. Escape hatch: if no curve
 fits, pass a custom function.
 
+**Pages live in the rail; a page's sub-pages are its rail item's `children`.**
+A page with views of its own gives its `NeatNavItem` `children` (`{ label, path }`), which unfold
+under it in the rail and show as a menu when the rail is collapsed; a child whose `path` equals its
+page's matches only exactly. A deeper route sets its own `title`. Never use route-linked tabs (the
+kit has none). Why: one place to navigate, so every address has the same place in the rail, the top
+bar and the browser history. `neat-tabs` is for views inside one page that are not addresses.
+Escape hatch: a level the rail cannot hold is a kit gap; raise it as a kit change.
+
 **If nothing fits, stop and propose a kit change instead of working around it.**
 A kit change is a new component or a new input on an existing one. Why: a workaround here is
 invisible to the other apps on the kit and hardens into a divergent fork; a kit change is reviewed
@@ -224,12 +232,11 @@ merging.
   which selects its camera and remembers its mode, so the page never leaves, and so stops, a
   preview it just took up.
 - **Stats** has three views, each at its own address so that it can be bookmarked or shared: Live
-  (`/stats`), Runs (`/stats/runs`) and Compare (`/stats/compare?runs=<a>,<b>[,…]&baseline=<a>`,
+  (`/stats`), Runs (`/stats/runs`) and Compare (`/stats/runs/compare?runs=<a>,<b>[,…]&baseline=<a>`,
   runs named by id). They are child routes without components of their own (`app.routes.ts`), so
   the page stays one instance across them, its services keep what they read, and it draws the
-  view its address names; the views are the page's tabs (`nav[neatPageTabs]` "Stats views", links
-  and not an ARIA tab list), which only navigate, and offer Compare, to the runs and baseline it is
-  open on, while one is open. Their shared parts are listed above (`app-stats-chart`, with
+  view its address names; Live and Runs are Stats' children in the rail (`INSIGHT_NAV`), and
+  Compare, reached from Runs, keeps Runs current and is titled "Compare". Their shared parts are listed above (`app-stats-chart`, with
   Compare's elapsed axis, `app-sentinel-failure`, the kit's table). The page splits its state by
   how long it lives, as Peripherals does. `SentinelTelemetry` and `SentinelRuns` are provided by
   the page, so they live exactly as long as it: leaving Stats stops every request to the board
