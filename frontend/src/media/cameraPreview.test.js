@@ -6,6 +6,8 @@ import {
   createCameraPreview,
   describePreviewError,
   frameAllowsCamera,
+  heldCaptures,
+  holdsLiveCamera,
   previewConstraints,
   publishingTrackFor,
   streamInfo
@@ -461,4 +463,26 @@ test('a request a closed preview left pending is released if nobody takes it ove
   media.calls[1].resolve(fakeStream([fakeTrack()]))
   await next
   assert.equal(later.states.at(-1).status, 'live')
+})
+
+test('a webcam start still connecting counts as a capture the preview can share', () => {
+  const starting = fakeTrack({ settings: { deviceId: 'cam-a' } })
+  const publishing = fakeTrack({ settings: { deviceId: 'cam-b' } })
+  const captures = heldCaptures(new Map([[3, { stream: fakeStream([starting]) }]]), new Map([[5, { stream: fakeStream([publishing]) }]]))
+  assert.deepEqual(publishingTrackFor(captures, {}, 'cam-a'), { track: starting, index: 3 })
+  assert.deepEqual(publishingTrackFor(captures, {}, 'cam-b'), { track: publishing, index: 5 })
+  // Once the start becomes a session, the session is what is shared.
+  const session = fakeTrack({ settings: { deviceId: 'cam-a' } })
+  const both = heldCaptures(new Map([[3, { stream: fakeStream([starting]) }]]), new Map([[3, { stream: fakeStream([session]) }]]))
+  assert.equal(publishingTrackFor(both, {}, 'cam-a').track, session)
+  assert.equal(heldCaptures(null, null).size, 0)
+})
+
+test('the tab holds a camera only while one of its captures has a live track', () => {
+  const live = fakeTrack()
+  const ended = fakeTrack({ readyState: 'ended' })
+  assert.equal(holdsLiveCamera(new Map([[1, { stream: fakeStream([live]) }]])), true)
+  assert.equal(holdsLiveCamera(new Map([[1, { stream: fakeStream([ended]) }], [2, { stream: null }]])), false)
+  assert.equal(holdsLiveCamera(new Map()), false)
+  assert.equal(holdsLiveCamera(null), false)
 })

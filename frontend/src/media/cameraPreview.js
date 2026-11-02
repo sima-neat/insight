@@ -187,6 +187,27 @@ export function publishingTrackFor(sessions, assignments, deviceId) {
   return null
 }
 
+// Every capture this tab holds for publishing, by slot: the sessions that publish, and the starts
+// that have opened the camera but are still connecting (they join the sessions only once the WHIP
+// answer arrives). A session wins over a start for the same slot.
+export function heldCaptures(starting, sessions) {
+  const captures = new Map(starting || [])
+  for (const [index, session] of sessions || []) captures.set(index, session)
+  return captures
+}
+
+// Whether any of those captures still has a live video track.
+export function holdsLiveCamera(captures) {
+  for (const [, capture] of captures || []) {
+    try {
+      if (capture?.stream?.getVideoTracks?.().some((track) => track.readyState === 'live')) return true
+    } catch {
+      // An unreadable capture holds nothing.
+    }
+  }
+  return false
+}
+
 function stopTracks(stream) {
   try {
     stream?.getTracks?.().forEach((track) => track.stop())

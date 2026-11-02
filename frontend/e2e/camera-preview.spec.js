@@ -65,8 +65,12 @@ function instrumentCameras() {
   window.__cameraStreams = []
   window.__cameraFault = null
   window.__cameraHold = null
+  window.__cameraProbes = 0
   media.getUserMedia = async (constraints) => {
-    if (!constraints?.video?.deviceId) return original(constraints)
+    if (!constraints?.video?.deviceId) {
+      window.__cameraProbes += 1
+      return original(constraints)
+    }
     if (window.__cameraHold) await window.__cameraHold.promise
     if (window.__cameraFault) throw new DOMException('Injected by the test', window.__cameraFault)
     const stream = await original(constraints)
@@ -263,10 +267,12 @@ test('in an SDK editor tab frame without allow="camera", Insight says the frame 
 function fakeWhipEndpoint() {
   const realFetch = window.fetch.bind(window)
   window.__whipPeers = []
+  window.__whipHold = null
   window.fetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : input.url
     if (!url.includes('/whip-test/')) return realFetch(input, init)
     if (init.method === 'DELETE') return new Response(null, { status: 200 })
+    if (window.__whipHold) await window.__whipHold.promise
     const peer = new RTCPeerConnection()
     window.__whipPeers.push(peer)
     await peer.setRemoteDescription({ type: 'offer', sdp: init.body })
@@ -331,7 +337,30 @@ test('previewing a camera this tab is publishing reuses its capture and never in
   await dialog.getByTestId('assign-camera').first().click()
   await dialog.getByTestId('assign-camera-submit').click()
   await expect(dialog).toHaveCount(0)
+
+  // Start, but hold the WHIP answer: the camera is open and the publish is still connecting.
+  await frame().evaluate(() => {
+    let release
+    window.__whipHold = { promise: new Promise((resolve) => { release = resolve }), release }
+  })
   await page.getByRole('button', { name: 'Start src1', exact: true }).click()
+  await expect.poll(() => trackStates(frame())).toEqual(['live'])
+  // Previewing the camera now shares that capture instead of opening the camera again.
+  await page.getByRole('tab', { name: 'Media Sources', exact: true }).click()
+  await rows(page).filter({ hasText: label }).click()
+  await expectLivePreview(page, frame, label)
+  await expect(page.getByTestId('camera-preview-shared')).toContainText('src1')
+  expect(await trackStates(frame()), 'no second capture while the start is connecting').toEqual(['live'])
+  // Refresh cameras while the preview holds the camera re-lists devices without opening one.
+  const probes = await frame().evaluate(() => window.__cameraProbes)
+  await page.getByRole('button', { name: 'Refresh cameras', exact: true }).first().click()
+  await expect(page.getByRole('button', { name: 'Refresh cameras', exact: true }).first()).toBeEnabled()
+  expect(await frame().evaluate(() => window.__cameraProbes), 'no probe while a camera is held').toBe(probes)
+  await expect(page.locator('.camera-optin-error')).toHaveCount(0)
+  await preview(page).getByRole('button', { name: 'Stop preview' }).click()
+  await page.getByRole('tab', { name: 'Streaming', exact: true }).click()
+  await frame().evaluate(() => window.__whipHold.release())
+
   await expect.poll(() => frame().evaluate(() => window.__whipPeers[0]?.connectionState), { timeout: 20_000 }).toBe('connected')
   await expect.poll(() => framesReceived(frame()), { timeout: 20_000 }).toBeGreaterThan(0)
   await expect(page.getByRole('button', { name: 'Stop src1', exact: true })).toBeVisible()

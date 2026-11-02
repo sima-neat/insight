@@ -8,7 +8,7 @@ import { allCommitsSucceeded, formatFpsProgress, isNativeRate, needsRendition, p
 import FolderBrowser from './media/FolderBrowser.jsx'
 import AssignMediaDialog from './media/AssignMediaDialog.jsx'
 import { CameraPreview } from './media/CameraPreview.jsx'
-import { describePreviewError, frameAllowsCamera, publishingTrackFor } from './media/cameraPreview.js'
+import { describePreviewError, frameAllowsCamera, heldCaptures, holdsLiveCamera, publishingTrackFor } from './media/cameraPreview.js'
 import { allFilePaths, listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
 
 import { requestJson as requestBoardJson } from './peripherals/api.js'
@@ -790,6 +790,12 @@ export default function App() {
   // The camera previewed in Media Sources (issue #222), shown in place of the selected file. Only a
   // local preview: it never touches a Streaming slot.
   const [previewCamera, setPreviewCamera] = useState(null)
+  const previewCameraRef = useRef(null)
+  previewCameraRef.current = previewCamera
+  // Webcam starts that have opened the camera but whose WHIP exchange is still running, by slot. They
+  // join webcamSessionsRef only once the answer arrives, and a preview of the same camera in between
+  // must reuse this capture rather than open the camera again.
+  const startingCapturesRef = useRef(new Map())
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
   const [mediaInfo, setMediaInfo] = useState(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -2002,8 +2008,14 @@ export default function App() {
     setCameraError(null)
     setCameraProbing(true)
     try {
-      const probe = await navigator.mediaDevices.getUserMedia({ video: true })
-      probe.getTracks().forEach((track) => track.stop())
+      // A camera this tab already holds (a preview, or a webcam source starting or publishing) shows
+      // access is granted, and probing would open a camera a second time, which an exclusive camera
+      // refuses as busy. Only re-list the devices then.
+      const holdsCamera = Boolean(previewCameraRef.current) || holdsLiveCamera(heldCaptures(startingCapturesRef.current, webcamSessionsRef.current))
+      if (!holdsCamera) {
+        const probe = await navigator.mediaDevices.getUserMedia({ video: true })
+        probe.getTracks().forEach((track) => track.stop())
+      }
       await refreshWebcamDevices()
     } catch (e) {
       // Embedded in a frame that withholds the camera (the Palette SDK editor tab can be one), the
@@ -2178,6 +2190,7 @@ export default function App() {
         video: { deviceId: { exact: assignment.deviceId } }
       })
       if (superseded()) throw WEBCAM_START_SUPERSEDED
+      startingCapturesRef.current.set(index, { stream })
       pc = new RTCPeerConnection()
       const videoTrack = stream.getVideoTracks()[0]
       const sender = pc.addTrack(videoTrack, stream)
@@ -2256,6 +2269,7 @@ export default function App() {
       if (!e?.superseded) setError(describeWebcamError(e))
       await loadSources()
     } finally {
+      if (stream && startingCapturesRef.current.get(index)?.stream === stream) startingCapturesRef.current.delete(index)
       setWebcamBusy((prev) => {
         const next = { ...prev }
         delete next[index]
@@ -2837,7 +2851,7 @@ export default function App() {
               {previewCamera ? (
                 <CameraPreview
                   camera={previewCamera}
-                  findShared={(deviceId) => publishingTrackFor(webcamSessionsRef.current, webcamAssignmentsRef.current, deviceId)}
+                  findShared={(deviceId) => publishingTrackFor(heldCaptures(startingCapturesRef.current, webcamSessionsRef.current), webcamAssignmentsRef.current, deviceId)}
                   onClose={() => setPreviewCamera(null)}
                   onRefreshCameras={enableCameraAccess}
                 />
