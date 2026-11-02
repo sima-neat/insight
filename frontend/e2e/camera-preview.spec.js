@@ -129,10 +129,13 @@ function videoFacts(frame) {
 async function expectLivePreview(ui, frame, label) {
   await expect(preview(ui)).toHaveAttribute('data-status', 'live')
   await expect(ui.getByTestId('camera-preview-name')).toHaveText(label)
-  await expect.poll(async () => (await videoFacts(frame()))?.videoWidth || 0).toBeGreaterThan(0)
+  // A muted autoplay video knows its size (metadata) a moment before it starts playing, so wait for both.
+  await expect.poll(async () => {
+    const facts = await videoFacts(frame())
+    return Boolean(facts && facts.videoWidth > 0 && !facts.paused)
+  }, { message: 'the preview video plays' }).toBe(true)
   const facts = await videoFacts(frame())
   expect(facts.label).toBe(label)
-  expect(facts.paused).toBe(false)
   return facts
 }
 
