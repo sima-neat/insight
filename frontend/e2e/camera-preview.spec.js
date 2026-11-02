@@ -256,3 +256,127 @@ test('in an SDK editor tab frame without allow="camera", Insight says the frame 
   expect(await trackStates(frame())).toEqual([])
   expect(slotWrites).toEqual([])
 })
+
+// Stands in for MediaMTX's WHIP endpoint inside the page: a publish to /whip-test/ is answered by a
+// second peer connection in the same page, so the camera really streams and the test can count the
+// frames that arrive.
+function fakeWhipEndpoint() {
+  const realFetch = window.fetch.bind(window)
+  window.__whipPeers = []
+  window.fetch = async (input, init = {}) => {
+    const url = typeof input === 'string' ? input : input.url
+    if (!url.includes('/whip-test/')) return realFetch(input, init)
+    if (init.method === 'DELETE') return new Response(null, { status: 200 })
+    const peer = new RTCPeerConnection()
+    window.__whipPeers.push(peer)
+    await peer.setRemoteDescription({ type: 'offer', sdp: init.body })
+    await peer.setLocalDescription(await peer.createAnswer())
+    await new Promise((resolve) => {
+      if (peer.iceGatheringState === 'complete') return resolve()
+      peer.addEventListener('icegatheringstatechange', () => peer.iceGatheringState === 'complete' && resolve())
+      setTimeout(resolve, 3000)
+    })
+    return new Response(peer.localDescription.sdp, {
+      status: 201,
+      headers: { 'Content-Type': 'application/sdp', Location: `${url}/session`, Id: 'test-session' }
+    })
+  }
+}
+
+// Frames the stand-in endpoint has received from the published camera so far.
+function framesReceived(frame) {
+  return frame.evaluate(async () => {
+    const peer = window.__whipPeers[0]
+    if (!peer) return 0
+    let frames = 0
+    ;(await peer.getStats()).forEach((report) => {
+      if (report.type === 'inbound-rtp' && report.kind === 'video') frames = report.framesReceived || 0
+    })
+    return frames
+  })
+}
+
+test('previewing a camera this tab is publishing reuses its capture and never interrupts the stream', async ({ page }) => {
+  await mockInsight(page)
+  // One slot that becomes a webcam slot when assigned and plays when started. Registered after
+  // mockInsight, so it answers /api/mediasrc instead.
+  const slot = { index: 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', type: 'file', allowed_transports: ['rtsp'], urls: {}, readers: [] }
+  const writes = []
+  await page.route(/\/api\/mediasrc/, (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (request.method() === 'GET') return json(route, path === '/api/mediasrc' ? [slot] : {})
+    writes.push(path)
+    if (path === '/api/mediasrc/assign-webcam') Object.assign(slot, { type: 'webcam', urls: { whip: new URL('/whip-test/src1', request.url()).href } })
+    if (path === '/api/mediasrc/start') slot.state = 'playing'
+    if (path === '/api/mediasrc/stop') slot.state = 'stopped'
+    return json(route, { ok: true })
+  })
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem('neat-insight:onboarding-seen', '1')
+    } catch {}
+  })
+  await page.addInitScript(instrumentCameras)
+  await page.addInitScript(fakeWhipEndpoint)
+  await page.goto(new URL('/streaming', test.info().project.use.baseURL).href)
+  const frame = () => page.mainFrame()
+
+  // Publish the first camera to src1 the way a user does: assign it, then Start.
+  await page.getByTestId('source-file-1').click()
+  const dialog = page.getByTestId('assign-dialog')
+  await dialog.getByTestId('assign-tab-camera').click()
+  await dialog.getByTestId('assign-enable-cameras').click()
+  const label = (await dialog.getByTestId('assign-camera').first().textContent()).trim()
+  await dialog.getByTestId('assign-camera').first().click()
+  await dialog.getByTestId('assign-camera-submit').click()
+  await expect(dialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Start src1', exact: true }).click()
+  await expect.poll(() => frame().evaluate(() => window.__whipPeers[0]?.connectionState), { timeout: 20_000 }).toBe('connected')
+  await expect.poll(() => framesReceived(frame()), { timeout: 20_000 }).toBeGreaterThan(0)
+  await expect(page.getByRole('button', { name: 'Stop src1', exact: true })).toBeVisible()
+  expect(writes).toEqual(['/api/mediasrc/assign-webcam', '/api/mediasrc/start'])
+  expect(await trackStates(frame())).toEqual(['live'])
+  const publishing = { live: () => frame().evaluate(() => window.__cameraStreams[0].getVideoTracks()[0].readyState) }
+
+  // The stream keeps delivering frames over the next second.
+  async function expectStreamFlowing() {
+    expect(await publishing.live()).toBe('live')
+    const before = await framesReceived(frame())
+    await expect.poll(() => framesReceived(frame()), { message: 'the published stream keeps delivering frames' }).toBeGreaterThan(before + 5)
+    expect(await frame().evaluate(() => window.__whipPeers[0].connectionState)).toBe('connected')
+  }
+
+  // Preview the same camera: it is previewed from the publish, without opening the camera again.
+  await page.getByRole('tab', { name: 'Media Sources', exact: true }).click()
+  await rows(page).filter({ hasText: label }).click()
+  await expectLivePreview(page, frame, label)
+  await expect(page.getByTestId('camera-preview-shared')).toContainText('src1')
+  expect(await trackStates(frame()), 'no second capture of the publishing camera').toEqual(['live'])
+  await expectStreamFlowing()
+
+  // Stop preview: only the preview's copy ends; the publish keeps streaming.
+  await preview(page).getByRole('button', { name: 'Stop preview' }).click()
+  await expect(preview(page)).toHaveCount(0)
+  await expectStreamFlowing()
+
+  // Preview it again, then leave Media Sources: same result.
+  await rows(page).filter({ hasText: label }).click()
+  await expectLivePreview(page, frame, label)
+  await page.getByRole('tab', { name: 'Streaming', exact: true }).click()
+  await expectStreamFlowing()
+
+  // Preview the other camera while the first one publishes: it opens and releases its own capture.
+  await page.getByRole('tab', { name: 'Media Sources', exact: true }).click()
+  const other = rows(page).filter({ hasNotText: label })
+  const otherLabel = (await other.textContent()).trim()
+  await other.click()
+  await expectLivePreview(page, frame, otherLabel)
+  await expect(page.getByTestId('camera-preview-shared')).toHaveCount(0)
+  expect(await trackStates(frame())).toEqual(['live', 'live'])
+  await preview(page).getByRole('button', { name: 'Stop preview' }).click()
+  await expect.poll(() => trackStates(frame())).toEqual(['live', 'ended'])
+  await expectStreamFlowing()
+
+  expect(writes, 'previewing never assigns, starts or stops a slot').toEqual(['/api/mediasrc/assign-webcam', '/api/mediasrc/start'])
+})
