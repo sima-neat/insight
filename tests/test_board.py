@@ -493,6 +493,40 @@ class SshTransportErrorTests(unittest.TestCase):
             error = self._connect_raising(paramiko.AuthenticationException("denied"))
         self.assertEqual(error.extra["command"], "sudo -H ssh-copy-id -p 22 sima@192.168.2.2")
 
+    def _connect_without_a_key(self, account, exc=None):
+        key = paramiko.RSAKey.generate(1024)
+        self.transport.replace_host_key(key)
+        presented = mock.Mock(**{"get_remote_server_key.return_value": key})
+        exc = exc or paramiko.SSHException("No authentication methods available")
+        with mock.patch.object(transport_module, "_local_account", return_value=account), \
+             mock.patch.object(paramiko.SSHClient, "get_transport", return_value=presented):
+            return self._connect_raising(exc)
+
+    def test_an_account_without_an_ssh_key_is_auth_failed_with_a_key_creating_command_as_root(self):
+        error = self._connect_without_a_key("root")
+        self.assertEqual(error.code, "auth_failed")
+        expected = 'sudo -H ssh-keygen -t ed25519 -N "" -f /root/.ssh/id_ed25519 && sudo -H ssh-copy-id -p 22 sima@192.168.2.2'
+        self.assertEqual(error.extra["command"], expected)
+        self.assertIn(expected, error.hint)
+        self.assertIn("no SSH key", error.message)
+
+    def test_an_account_without_an_ssh_key_is_auth_failed_with_a_key_creating_command_as_non_root(self):
+        error = self._connect_without_a_key("justin")
+        self.assertEqual(error.code, "auth_failed")
+        self.assertEqual(
+            error.extra["command"],
+            'ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 && ssh-copy-id -p 22 sima@192.168.2.2',
+        )
+
+    def test_other_ssh_failures_after_the_host_key_stay_unreachable(self):
+        for exc in (paramiko.SSHException("Error reading SSH protocol banner"), OSError("No authentication methods available")):
+            self.assertEqual(self._connect_without_a_key("root", exc).code, "unreachable")
+
+    def test_no_authentication_methods_without_the_trusted_host_key_stays_unreachable(self):
+        with mock.patch.object(paramiko.SSHClient, "get_transport", return_value=None):
+            error = self._connect_raising(paramiko.SSHException("No authentication methods available"))
+        self.assertEqual(error.code, "unreachable")
+
     def test_closed_transport_never_connects(self):
         self.transport.close()
         with mock.patch.object(paramiko.SSHClient, "connect") as connect:
@@ -590,6 +624,10 @@ class SshTransportErrorTests(unittest.TestCase):
         presented_old = mock.Mock(**{"get_remote_server_key.return_value": old})
         with mock.patch.object(paramiko.SSHClient, "get_transport", return_value=presented_old):
             error = self._connect_raising(paramiko.SSHException("No authentication methods available"))
+        self.assertEqual(error.code, "auth_failed")
+        self.assertIsNone(self.transport.presented_host_key)
+        with mock.patch.object(paramiko.SSHClient, "get_transport", return_value=presented_old):
+            error = self._connect_raising(paramiko.SSHException("Incompatible ssh server (no acceptable kex algorithm)"))
         self.assertEqual(error.code, "unreachable")
         self.assertIsNone(self.transport.presented_host_key)
 

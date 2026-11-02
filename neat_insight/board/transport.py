@@ -612,15 +612,32 @@ class SshTransport:
                 hint="Use the board's IP address, or check DNS on this machine.",
             ) from exc
         except (paramiko.SSHException, OSError, EOFError) as exc:
-            # Paramiko can fail after the host key check with a plain SSHException (for example "No
-            # authentication methods available"); the board then presented the trusted key, so an
-            # earlier rejected one is stale here too.
-            if self._presented_trusted_key(client):
+            # Paramiko can fail after the host key check with a plain SSHException; the board then
+            # presented the trusted key, so an earlier rejected one is stale here too.
+            trusted = self._presented_trusted_key(client)
+            if trusted:
                 self.presented_host_key = None
             client.close()
             if raw_socket is not None:
                 raw_socket.close()
             self._check_connect_deadline(deadline, argv, command_timeout)
+            # "No authentication methods available" means Paramiko found no key and no agent to try: the
+            # board is fine, this account has no SSH key. Anything else stays an unreachable board.
+            if trusted and isinstance(exc, paramiko.SSHException) and "No authentication methods available" in str(exc):
+                account = _local_account()
+                key = "/root/.ssh/id_ed25519" if account == "root" else "~/.ssh/id_ed25519"
+                sudo = "sudo -H " if account == "root" else ""
+                target = f"{shlex.quote(self.user)}@{shlex.quote(self.host)}"
+                command = (
+                    f'{sudo}ssh-keygen -t ed25519 -N "" -f {key} && {sudo}ssh-copy-id -p {self.port} {target}'
+                )
+                raise BoardError(
+                    "auth_failed",
+                    f"The '{account}' account on this machine has no SSH key to sign in to {self.host} with.",
+                    hint=f"Insight signs in with the SSH keys of the '{account}' account, and it has none. "
+                    f"Create one and authorize it on the board, then retry: {command}",
+                    command=command,
+                ) from exc
             raise self._unreachable(f"Could not connect to {self.host}:{self.port}: {exc}") from exc
         self._check_connect_deadline(deadline, argv, command_timeout, client)
         client.get_transport().set_keepalive(15)
