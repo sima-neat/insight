@@ -769,6 +769,9 @@ test('capabilities gate their controls when idle', () => {
   assert.equal(allowedActions({ ...READY, hasAsr: false }).startRecording, false)
   assert.equal(allowedActions({ ...READY, hasDraft: false }).send, false)
   assert.equal(allowedActions({ ...READY, hasChatModel: false }).typeMessage, false)
+  // A spoken question goes to the chat model too: no model, no recording.
+  assert.equal(allowedActions({ ...READY, hasChatModel: false }).startRecording, false)
+  assert.equal(allowedActions({ ...READY, hasChatModel: false, recording: true }).stopRecording, true, 'a recording can always be stopped')
   assert.equal(allowedActions({ ...READY, usable: false }).readAloud, false)
 })
 

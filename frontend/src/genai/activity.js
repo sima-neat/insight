@@ -66,8 +66,9 @@ export function allowedActions(state) {
     continueVisionLoop: canSee,
     // The picture source and camera stay fixed while the view is asking.
     chooseVisionSource: !visionBusy,
-    // A spoken question can be recorded while a reply streams; it waits as a draft.
-    startRecording: ready && Boolean(s.hasAsr) && !listening,
+    // A spoken question can be recorded while a reply streams; it waits as a draft. It needs
+    // a chat model like a typed one: without one the words would land in a closed message box.
+    startRecording: canChat && Boolean(s.hasAsr) && !listening,
     stopRecording: Boolean(s.recording),
     newChat: Boolean(s.hasMessages) && !listening,
     readAloud: ready,

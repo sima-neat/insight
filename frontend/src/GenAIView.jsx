@@ -2311,7 +2311,7 @@ export default function GenAIView({ onError, onStatus }) {
               className={`${recording ? 'btn-ghost danger genai-icon-btn' : 'btn-ghost genai-icon-btn'}${spot('mic')}`}
               aria-label={recording ? 'Stop recording' : 'Speak your question'}
               aria-pressed={recording}
-              title={recording ? 'Stop recording' : 'Speak your question'}
+              title={recording ? 'Stop recording' : chatModel ? 'Speak your question' : 'Needs a chat model: choose one at the top'}
               disabled={!allowed.startRecording && !allowed.stopRecording}
               onClick={toggleRecording}
             >
