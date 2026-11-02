@@ -11,7 +11,7 @@ const info = {
   resolution: '1280×720',
   frameRate: '30 fps',
   active: [{ key: 'resolution', label: 'Resolution', value: '1280×720' }, { key: 'frameRate', label: 'Frame rate', value: '30 fps' }],
-  supported: [{ key: 'resolution', label: 'Resolution', value: 'up to 1920×1080' }],
+  supported: [{ key: 'width', label: 'Width', value: 'up to 1920 px' }, { key: 'height', label: 'Height', value: 'up to 1080 px' }],
   capabilitiesReported: true
 }
 const stream = { id: 'stream-1' }
@@ -52,7 +52,7 @@ test('a live preview plays the stream with the active settings on the chip and i
   const active = byTestId(pane, 'camera-active-settings')
   assert.match(textOf(active), /Frame rate30 fps/)
   const capabilities = byTestId(pane, 'camera-capabilities')
-  assert.match(textOf(capabilities), /up to 1920×1080/)
+  assert.match(textOf(capabilities), /Widthup to 1920 px/)
   assert.doesNotMatch(textOf(active), /up to/, 'capabilities never appear as active settings')
 })
 

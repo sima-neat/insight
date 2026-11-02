@@ -48,7 +48,7 @@ Media Sources combines importing, file selection, preview, metadata inspection, 
 A webcam or phone camera connected to the computer running your browser can be previewed here before you stream it. Under **Local cameras**, select **Enable camera access** and allow access when the browser asks; your cameras are listed below the button. Select a camera to show its live video in place of the selected file, with the camera's name and what the browser reports about the stream:
 
 - **Active stream**: the resolution and frame rate the camera is sending now, and whether that is the camera's own mode or the browser crops or scales it.
-- **Camera capabilities**: the largest resolution and highest frame rate the camera reports. These are limits, not the current mode.
+- **Camera capabilities**: the largest width, the largest height and the highest frame rate the camera reports, each on its own. These are limits, not a mode the camera has: a camera that reports 1920 for both width and height need not capture 1920×1920.
 
 A value the browser does not report is left out. Browsers do not report the pixel format, so it is not shown.
 

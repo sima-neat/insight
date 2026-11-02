@@ -98,7 +98,8 @@ test('active settings are what the track reports, capabilities stay separate, no
     ['Scaling', 'Native camera mode']
   ])
   assert.deepEqual(info.supported.map((r) => [r.label, r.value]), [
-    ['Resolution', 'up to 1920×1080'],
+    ['Width', 'up to 1920 px'],
+    ['Height', 'up to 1080 px'],
     ['Frame rate', 'up to 60 fps']
   ])
   assert.equal(info.capabilitiesReported, true)
@@ -415,4 +416,12 @@ test('a reused request that fails shows the error once, for the current select o
   await Promise.all([first, second])
   assert.equal(states.filter((s) => s.status === 'error').length, 1)
   assert.equal(states.at(-1).error.kind, 'busy')
+})
+
+test('width and height limits are never joined into a size the camera may not have', () => {
+  // What Chrome reports for a MacBook's FaceTime HD camera.
+  const info = streamInfo(fakeTrack({ settings: { width: 640, height: 480, frameRate: 30 }, capabilities: { width: { min: 1, max: 1920 }, height: { min: 1, max: 1920 }, frameRate: { min: 1, max: 30 } } }))
+  assert.deepEqual(info.supported.map((r) => [r.label, r.value]), [['Width', 'up to 1920 px'], ['Height', 'up to 1920 px'], ['Frame rate', 'up to 30 fps']])
+  assert.ok(info.supported.every((r) => !r.value.includes('×')))
+  assert.deepEqual(streamInfo(fakeTrack({ capabilities: { width: { max: 1280 } } })).supported.map((r) => r.label), ['Width'])
 })

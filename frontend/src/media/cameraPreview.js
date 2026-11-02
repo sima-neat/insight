@@ -142,9 +142,12 @@ export function streamInfo(track) {
 
   const supported = []
   if (capabilities) {
+    // Browsers report the width and height limits separately, not as a mode the camera has: a
+    // FaceTime HD camera reports 1920 for both. So they are shown apart, never joined into a size.
     const maxWidth = positive(capabilities.width?.max)
     const maxHeight = positive(capabilities.height?.max)
-    if (maxWidth && maxHeight) supported.push({ key: 'resolution', label: 'Resolution', value: `up to ${sizeLabel(maxWidth, maxHeight)}` })
+    if (maxWidth) supported.push({ key: 'width', label: 'Width', value: `up to ${maxWidth} px` })
+    if (maxHeight) supported.push({ key: 'height', label: 'Height', value: `up to ${maxHeight} px` })
     const maxFps = rateLabel(positive(capabilities.frameRate?.max))
     if (maxFps) supported.push({ key: 'frameRate', label: 'Frame rate', value: `up to ${maxFps}` })
     const facingModes = Array.isArray(capabilities.facingMode) ? capabilities.facingMode.map(text).filter(Boolean) : []
