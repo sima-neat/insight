@@ -36,6 +36,17 @@ and the app root import. The compiler rejects a name imported from the wrong ent
 name starting with `ɵ`: those are shared internals the kit exports only for its own entries, with
 no stability promise, and ESLint rejects them. Escape hatch: if you need one, propose a kit change.
 
+**Name an icon from the kit's set first; a glyph from `@sima/neat-ui/lucide` only where none fits.**
+`neat-icon`'s `name` takes a name from `NEAT_ICON_NAMES`. Why: the kit's icon library stays
+swappable, and only the glyphs you import are bundled. Never import `lucide` or `@lucide/angular`
+yourself (ESLint rejects `@lucide/*`). Escape hatch: if no name fits, pass a glyph imported from
+`@sima/neat-ui/lucide` (`import { Rocket } from '@sima/neat-ui/lucide'`).
+
+**Ease with a catalog curve; a custom easing function only where none fits.**
+Give `neatEased` and `NeatEasedNumber` a name from `NEAT_EASINGS` (`ease-in-out`, the default,
+`ease-out`, `ease-in`, `linear`). Why: one motion language across apps. Escape hatch: if no curve
+fits, pass a custom function.
+
 **If nothing fits, stop and propose a kit change instead of working around it.**
 A kit change is a new component or a new input on an existing one. Why: a workaround here is
 invisible to the other apps on the kit and hardens into a divergent fork; a kit change is reviewed

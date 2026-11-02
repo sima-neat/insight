@@ -250,7 +250,7 @@ test.describe('Media with mocked APIs', () => {
 
     await expect(row(page, 'cars.mp4')).toContainText('src5 · Idle');
     await expect(row(page, 'notes.txt')).toContainText('NOT STREAMABLE');
-    await row(page, 'people').click();
+    await row(page, 'people').getByRole('button', { name: 'Open people' }).click();
     await expect(page.getByRole('navigation', { name: 'Current folder' })).toContainText('people');
     await expect(row(page, 'walk.mp4')).toContainText('src3 · Live, src9 · Idle');
 

@@ -336,7 +336,7 @@ describe('MediaPage', () => {
 
   it('keeps the folder, the selected file and the ticks across visits', async () => {
     await open();
-    rowOf('people').click();
+    rowOf('people').querySelector<HTMLElement>('button[aria-label="Open people"]')!.click();
     await settle();
     rowOf('walk.mp4').click();
     await settle();

@@ -3,7 +3,7 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component, computed, inject, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { NeatButton, NeatIcon, type NeatButtonVariant, type NeatIconName } from '@sima/neat-ui';
+import { NeatButton, NeatIcon, type NeatButtonVariant } from '@sima/neat-ui';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { Observable, Subject } from 'rxjs';
@@ -1140,7 +1140,7 @@ describe('SlotPanel', () => {
       .find((debug) => debug.nativeElement === element)!
       .injector.get(NeatButton);
   /** The name of the icon drawn in `element`, or null when it has none. */
-  const iconOf = (element: HTMLElement): NeatIconName | null =>
+  const iconOf = (element: HTMLElement): ReturnType<NeatIcon['name']> | null =>
     fixture.debugElement
       .queryAll(By.directive(NeatIcon))
       .find((debug) => element.contains(debug.nativeElement))
@@ -1210,7 +1210,7 @@ describe('SlotPanel', () => {
       pulled,
       fileSlot(6, { fps: 15 }),
     ]);
-    const looks: Record<string, [string, NeatButtonVariant, NeatIconName | null]> = {};
+    const looks: Record<string, [string, NeatButtonVariant, ReturnType<NeatIcon['name']> | null]> = {};
     for (const index of [2, 3, 4, 5]) {
       await open(index);
       const main = fixture.debugElement.query(By.css('[neatAsideActions] button')).nativeElement;
