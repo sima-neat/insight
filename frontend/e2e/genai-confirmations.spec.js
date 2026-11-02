@@ -177,6 +177,10 @@ for (const embedded of [false, true]) {
 
       await solutions.getByRole('button', { name: /SiMaSentry-Med/ }).click()
       await expect(ask).toContainText("Llama 3.2 3B doesn't see images, so the SiMaSentry-Med picture features won't work. Open it anyway?")
+      // Dark text on the white card, not the near-white text of the Solutions view around it.
+      const ink = 'rgb(15, 29, 43)'
+      await expect(ask.getByRole('heading', { name: 'Open SiMaSentry-Med' })).toHaveCSS('color', ink)
+      await expect(ask.getByRole('button', { name: 'Cancel' })).toHaveCSS('color', ink)
       await ask.press('Escape')
       await expect(ask).toHaveCount(0)
       await expect(solutions).toBeVisible()
