@@ -7,6 +7,8 @@ const SDK_WEBVIEW_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-p
 
 const LLAMA = 'Llama-3.2-3B-Instruct'
 const LLAMA_1B = 'Llama-3.2-1B-Instruct'
+// Another build of LLAMA: the tab shows both as Llama 3.2 3B.
+const LLAMA_AWQ = 'Llama-3.2-3B-Instruct-AWQ'
 const QWEN = 'Qwen2.5-VL-3B-Instruct'
 
 function json(route, body, status = 200) {
@@ -20,6 +22,7 @@ async function mockBoard(page) {
     catalog: [
       { name: LLAMA, type: 'chat', sizeBytes: 2_000_000_000 },
       { name: LLAMA_1B, type: 'chat', sizeBytes: 1_000_000_000 },
+      { name: LLAMA_AWQ, type: 'chat', sizeBytes: 2_000_000_000 },
       { name: QWEN, type: 'vlm', supportsVision: true, estimatedLoadS: 90, sizeBytes: 3_200_000_000 }
     ],
     loaded: [LLAMA],
@@ -145,6 +148,29 @@ for (const embedded of [false, true]) {
 
       await ask.getByRole('button', { name: 'Load' }).click()
       await expect(ask).toContainText('Llama 3.2 1B is unloaded first.')
+      expect(board.posts).toEqual([])
+
+      await ask.getByRole('button', { name: 'Load' }).click()
+      await expect(ask).toHaveCount(0)
+      await expect.poll(() => board.posts).toEqual([{ path: 'models/load', body: { name: QWEN } }])
+    })
+
+    test('a load question is asked again when another build of the same model is loaded', async ({ page }) => {
+      const picker = ui.getByRole('combobox', { name: 'Model' })
+      const ask = ui.getByRole('alertdialog', { name: 'Load the model' })
+      const question = 'Load Qwen2.5 VL 3B? It takes about 1 min 30 s. Llama 3.2 3B is unloaded first.'
+
+      await picker.selectOption(QWEN)
+      await expect(ask).toContainText(question)
+      // Another client swaps in another build; the question reads the same, but the load would
+      // unload a different model than the one the user was asked about.
+      board.loaded = [LLAMA_AWQ]
+      await expect(picker).toHaveValue(LLAMA_AWQ)
+
+      await ask.getByRole('button', { name: 'Load' }).click()
+      // The question closes and opens again; give a load sent by mistake time to arrive.
+      await page.waitForTimeout(500)
+      await expect(ask).toContainText(question)
       expect(board.posts).toEqual([])
 
       await ask.getByRole('button', { name: 'Load' }).click()

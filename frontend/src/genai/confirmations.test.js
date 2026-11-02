@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import test from 'node:test'
 
-import { acceptedAnswer, clearDocumentsQuestion, deleteModelQuestion, loadModelQuestion, solutionQuestion } from './confirmations.js'
+import { acceptedAnswer, clearDocumentsQuestion, deleteModelQuestion, loadModelQuestion, loadPlanKey, solutionQuestion } from './confirmations.js'
 
 const qwen = { name: 'Qwen2.5-VL-3B-Instruct', estimatedLoadS: 90, sizeBytes: 3_200_000_000 }
 const llama = { name: 'Llama-3.2-3B-Instruct' }
@@ -25,6 +25,20 @@ test('loading says how long it takes and what is unloaded or stays loaded', () =
   assert.equal(loadModelQuestion(llama, { kind: 'replace', unloads: [] }).message, 'Load Llama 3.2 3B?')
   assert.equal(loadModelQuestion(llama, { kind: 'add', keeps: [qwen] }).message, 'Load Llama 3.2 3B? Qwen2.5 VL 3B stays loaded.')
   assert.equal(loadModelQuestion(llama, { kind: 'add', keeps: [qwen, { name: 'Llama-3.2-1B-Instruct' }] }).message, 'Load Llama 3.2 3B? Qwen2.5 VL 3B, Llama 3.2 1B stay loaded.')
+})
+
+test('a load plan is told apart by exact model names, not by the question text', () => {
+  const gptq = { name: 'Llama-3.2-3B-Instruct-GPTQ-a16w4' }
+  const awq = { name: 'Llama-3.2-3B-Instruct-AWQ' }
+  // Two builds read the same in the question but unload different models.
+  const unloadsGptq = loadModelQuestion(qwen, { kind: 'replace', unloads: [gptq] })
+  const unloadsAwq = loadModelQuestion(qwen, { kind: 'replace', unloads: [awq] })
+  assert.equal(unloadsGptq.message, unloadsAwq.message)
+  assert.notEqual(unloadsGptq.plan, unloadsAwq.plan)
+  // Unloading a model and keeping it are different plans.
+  assert.notEqual(loadPlanKey({ kind: 'replace', unloads: [llama] }), loadPlanKey({ kind: 'add', keeps: [llama] }))
+  // The order the board lists them in doesn't matter.
+  assert.equal(loadPlanKey({ kind: 'add', keeps: [llama, qwen] }), loadPlanKey({ kind: 'add', keeps: [qwen, llama] }))
 })
 
 test('opening a solution the model cannot serve says why', () => {

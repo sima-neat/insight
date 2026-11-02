@@ -24,8 +24,19 @@ export function loadModelQuestion(model, plan) {
   return {
     title: 'Load the model',
     message: `Load ${friendlyModelName(model.name)}?${wait}${others}`,
-    confirmLabel: 'Load'
+    confirmLabel: 'Load',
+    plan: loadPlanKey(plan)
   }
+}
+
+// What a load does to the other loaded models, by their exact names: the
+// message can't tell two builds of a model apart, since friendlyModelName()
+// drops the build and quantization.
+export function loadPlanKey(plan) {
+  const names = (list) => list.map((m) => m.name).sort().join('\n')
+  if (plan.kind === 'replace') return `replace\n${names(plan.unloads)}`
+  if (plan.kind === 'add') return `add\n${names(plan.keeps)}`
+  return plan.kind
 }
 
 export function clearDocumentsQuestion() {

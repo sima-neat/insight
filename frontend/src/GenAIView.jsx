@@ -824,7 +824,7 @@ export default function GenAIView({ onError, onStatus }) {
     setConfirmAsk(null)
     if (!acceptedAnswer(ask, yes, boardGeneration.current)) return
     if (ask.kind === 'delete-model') deleteModel(ask.model, true)
-    else if (ask.kind === 'load-model') chooseChatModel(ask.model.name, ask.message)
+    else if (ask.kind === 'load-model') chooseChatModel(ask.model.name, ask.plan)
     else if (ask.kind === 'clear-documents') clearAllDocuments(true)
   }
 
@@ -839,9 +839,9 @@ export default function GenAIView({ onError, onStatus }) {
     runModelOp(`Deleting ${friendlyModelName(model.name)}`, 'models/delete', { name: model.name })
   }
 
-  // `agreedTo` is the question a yes answered. The status poll can change what
-  // a load unloads or keeps while it is open, so a question that now reads
-  // differently is asked again.
+  // `agreedTo` is the load plan a yes answered (loadPlanKey). The status poll
+  // can change which models a load unloads or keeps while the question is
+  // open, so a plan that differs by then is asked about again.
   function chooseChatModel(name, agreedTo = null) {
     const model = chatModels(status).find((m) => m.name === name)
     if (!model || model === chatModel || !allowed.changeChatModel) return
@@ -855,7 +855,7 @@ export default function GenAIView({ onError, onStatus }) {
       return
     }
     const question = loadModelQuestion(model, plan)
-    if (question.message !== agreedTo) {
+    if (question.plan !== agreedTo) {
       askFirst('load-model', question, model)
       return
     }
