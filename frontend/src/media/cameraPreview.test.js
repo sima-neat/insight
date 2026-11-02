@@ -425,3 +425,40 @@ test('width and height limits are never joined into a size the camera may not ha
   assert.ok(info.supported.every((r) => !r.value.includes('×')))
   assert.deepEqual(streamInfo(fakeTrack({ capabilities: { width: { max: 1280 } } })).supported.map((r) => r.label), ['Width'])
 })
+
+test('Cancel, then the same camera again from a new preview, still opens it only once', async () => {
+  // Cancel unmounts the preview panel; the next selection gets a new controller.
+  const media = deferredMedia()
+  const closed = preview({ mediaDevices: media.mediaDevices })
+  const first = closed.controller.select(camA)
+  closed.controller.stop()
+  const reopened = preview({ mediaDevices: media.mediaDevices })
+  const second = reopened.controller.select(camA)
+  assert.equal(media.calls.length, 1, 'the new preview waits for the request the closed one left pending')
+  const track = fakeTrack()
+  media.calls[0].resolve(fakeStream([track]))
+  await Promise.all([first, second])
+  assert.equal(track.readyState, 'live')
+  assert.equal(reopened.states.at(-1).status, 'live')
+  assert.deepEqual(closed.states.at(-1), { status: 'idle' })
+  reopened.controller.stop()
+  assert.equal(track.readyState, 'ended')
+})
+
+test('a request a closed preview left pending is released if nobody takes it over', async () => {
+  const media = deferredMedia()
+  const closed = preview({ mediaDevices: media.mediaDevices })
+  const first = closed.controller.select(camA)
+  closed.controller.stop()
+  const track = fakeTrack()
+  media.calls[0].resolve(fakeStream([track]))
+  await first
+  assert.equal(track.readyState, 'ended')
+  // Settled, so a later preview asks the browser again.
+  const later = preview({ mediaDevices: media.mediaDevices })
+  const next = later.controller.select(camA)
+  assert.equal(media.calls.length, 2)
+  media.calls[1].resolve(fakeStream([fakeTrack()]))
+  await next
+  assert.equal(later.states.at(-1).status, 'live')
+})

@@ -197,6 +197,20 @@ function stopTracks(stream) {
 
 export const IDLE = Object.freeze({ status: 'idle' })
 
+// getUserMedia requests still in flight, per camera, shared by every preview on the same
+// mediaDevices: Cancel closes the preview panel and the next selection makes a new one, and that
+// one must still find the request the closed panel left pending. deviceId -> { promise, claimedBy }.
+const pendingRequests = new WeakMap()
+
+function pendingFor(mediaDevices) {
+  let pending = pendingRequests.get(mediaDevices)
+  if (!pending) {
+    pending = new Map()
+    pendingRequests.set(mediaDevices, pending)
+  }
+  return pending
+}
+
 // One preview at a time. select() replaces whatever was showing; stop() releases it. Every track
 // this preview opened or cloned is stopped when it is replaced or stopped, and never any other:
 // a publish's own track is only ever cloned. A select() that is overtaken while the browser is
@@ -204,9 +218,10 @@ export const IDLE = Object.freeze({ status: 'idle' })
 // leave a camera on.
 //
 // Selecting a camera whose earlier request is still pending waits for that request instead of
-// opening the camera a second time. React's Strict Mode runs the preview's effect as select, stop,
-// select in development, and picking A, B, then A again quickly does the same; a second open of a
-// camera that only one client may hold would fail as busy while the first one succeeds.
+// opening the camera a second time, also from a new preview after Cancel closed the old one. React's
+// Strict Mode runs the preview's effect as select, stop, select in development, and picking A, B,
+// then A again quickly does the same; a second open of a camera that only one client may hold would
+// fail as busy while the first one succeeds.
 //
 // onState receives { status: 'idle' }, { status: 'loading', camera }, { status: 'live', camera,
 // stream, info, sharedWith }, or { status: 'error', camera, error }.
@@ -219,21 +234,20 @@ export function createCameraPreview({
   let generation = 0
   let current = null // { stream, track, onEnded }
   let state = IDLE
-  // deviceId -> { promise, claimedBy }: getUserMedia requests still in flight. claimedBy is the
-  // latest select() waiting on the request, the only one that may keep or stop its stream.
-  const pending = new Map()
-
-  function request(deviceId, mine) {
+  // claimedBy is the latest select() waiting on a request, from any preview: the only one that may
+  // keep or stop its stream.
+  function request(deviceId, ticket) {
+    const pending = pendingFor(mediaDevices)
     let entry = pending.get(deviceId)
     if (!entry) {
-      entry = { promise: mediaDevices.getUserMedia(previewConstraints(deviceId)), claimedBy: mine }
+      entry = { promise: mediaDevices.getUserMedia(previewConstraints(deviceId)), claimedBy: ticket }
       pending.set(deviceId, entry)
       const settled = () => {
         if (pending.get(deviceId) === entry) pending.delete(deviceId)
       }
       entry.promise.then(settled, settled)
     }
-    entry.claimedBy = mine
+    entry.claimedBy = ticket
     return entry
   }
 
@@ -252,6 +266,7 @@ export function createCameraPreview({
   // `shared` is publishingTrackFor()'s answer for this camera, read at selection time.
   async function select(camera, { shared = null } = {}) {
     const mine = ++generation
+    const ticket = {}
     release()
     if (!camera?.deviceId) {
       emit(IDLE)
@@ -270,7 +285,7 @@ export function createCameraPreview({
         if (typeof mediaDevices?.getUserMedia !== 'function') {
           throw Object.assign(new Error('getUserMedia is unavailable'), { code: NO_CAMERA_API })
         }
-        opened = request(camera.deviceId, mine)
+        opened = request(camera.deviceId, ticket)
         stream = await opened.promise
       }
     } catch (error) {
@@ -281,7 +296,7 @@ export function createCameraPreview({
 
     if (mine !== generation) {
       // A later select() waiting on the same request takes the stream over; otherwise nobody wants it.
-      if (!opened || opened.claimedBy === mine) stopTracks(stream)
+      if (!opened || opened.claimedBy === ticket) stopTracks(stream)
       return state
     }
     const track = stream?.getVideoTracks?.()[0]
