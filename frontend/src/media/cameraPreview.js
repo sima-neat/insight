@@ -200,6 +200,11 @@ export const IDLE = Object.freeze({ status: 'idle' })
 // still opening the camera stops what it gets, so a slow or answered-late permission prompt cannot
 // leave a camera on.
 //
+// Selecting a camera whose earlier request is still pending waits for that request instead of
+// opening the camera a second time. React's Strict Mode runs the preview's effect as select, stop,
+// select in development, and picking A, B, then A again quickly does the same; a second open of a
+// camera that only one client may hold would fail as busy while the first one succeeds.
+//
 // onState receives { status: 'idle' }, { status: 'loading', camera }, { status: 'live', camera,
 // stream, info, sharedWith }, or { status: 'error', camera, error }.
 export function createCameraPreview({
@@ -211,6 +216,23 @@ export function createCameraPreview({
   let generation = 0
   let current = null // { stream, track, onEnded }
   let state = IDLE
+  // deviceId -> { promise, claimedBy }: getUserMedia requests still in flight. claimedBy is the
+  // latest select() waiting on the request, the only one that may keep or stop its stream.
+  const pending = new Map()
+
+  function request(deviceId, mine) {
+    let entry = pending.get(deviceId)
+    if (!entry) {
+      entry = { promise: mediaDevices.getUserMedia(previewConstraints(deviceId)), claimedBy: mine }
+      pending.set(deviceId, entry)
+      const settled = () => {
+        if (pending.get(deviceId) === entry) pending.delete(deviceId)
+      }
+      entry.promise.then(settled, settled)
+    }
+    entry.claimedBy = mine
+    return entry
+  }
 
   function emit(next) {
     state = next
@@ -236,6 +258,7 @@ export function createCameraPreview({
 
     let stream
     let sharedWith = null
+    let opened = null
     try {
       if (shared?.track && shared.track.readyState === 'live') {
         stream = createStream([shared.track.clone()])
@@ -244,7 +267,8 @@ export function createCameraPreview({
         if (typeof mediaDevices?.getUserMedia !== 'function') {
           throw Object.assign(new Error('getUserMedia is unavailable'), { code: NO_CAMERA_API })
         }
-        stream = await mediaDevices.getUserMedia(previewConstraints(camera.deviceId))
+        opened = request(camera.deviceId, mine)
+        stream = await opened.promise
       }
     } catch (error) {
       if (mine !== generation) return state
@@ -253,7 +277,8 @@ export function createCameraPreview({
     }
 
     if (mine !== generation) {
-      stopTracks(stream)
+      // A later select() waiting on the same request takes the stream over; otherwise nobody wants it.
+      if (!opened || opened.claimedBy === mine) stopTracks(stream)
       return state
     }
     const track = stream?.getVideoTracks?.()[0]
