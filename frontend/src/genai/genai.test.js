@@ -22,18 +22,16 @@ import {
 import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } from './tutorial.js'
 import {
   SETUP_STORAGE_KEY,
-  bannerAction,
+  STEP_LABELS,
   canRunSetupAgain,
   canStopStudio,
   relayOnSetupBoard,
-  connectIcon,
-  lastLine,
   requestProblem,
   saveSetupOpen,
-  setupAction,
   setupOpenSaved,
+  setupPhase,
   setupStoppable,
-  stepIcon
+  setupView
 } from './setup.js'
 import { languageNames, latinLanguage, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
@@ -416,40 +414,111 @@ test('first-time setup is offered only while nothing answers at the board addres
   }
 })
 
-test('the setup button says what is left to do, and offers Retry after a failure', () => {
-  const status = (...states) => ({ active: false, steps: ['install', 'prepare', 'start'].map((id, i) => ({ id, state: states[i] })) })
-  assert.equal(setupAction(status('pending', 'pending', 'pending')).label, 'Install and start GenAI Studio')
-  assert.equal(setupAction(status('done', 'pending', 'pending')).label, 'Prepare and start GenAI Studio')
-  assert.equal(setupAction(status('done', 'done', 'pending')).label, 'Start GenAI Studio')
-  // An outdated GenAI Studio, still running, is replaced.
-  assert.equal(setupAction({ ...status('pending', 'pending', 'done'), outdated: true }).label, 'Update and start GenAI Studio')
-  assert.equal(bannerAction({ ...status('pending', 'pending', 'pending'), outdated: true }, 'https://127.0.0.1:5000').label, 'Set up GenAI Studio')
-  assert.equal(setupAction(status('done', 'failed', 'pending')).label, 'Retry')
-  assert.equal(setupAction(status('pending', 'blocked', 'pending')).label, 'Retry')
-  assert.equal(setupAction(status('done', 'done', 'done')), null, 'nothing left')
-  assert.equal(setupAction({ ...status('done', 'running', 'queued'), active: true }), null, 'a job runs')
-  assert.equal(setupAction({ ...status('done', 'failed', 'done'), active: true }).label, 'Retry', 'the job only keeps GenAI Studio running')
-  assert.equal(setupAction(null), null)
-  assert.equal(setupStoppable({ ...status('done', 'running', 'queued'), active: true }), true)
-  // Once GenAI Studio is starting or running, Stop GenAI Studio takes over.
-  assert.equal(setupStoppable({ ...status('done', 'done', 'running'), active: true }), false)
-  assert.equal(setupStoppable({ ...status('done', 'done', 'done'), active: true }), false)
-  assert.equal(setupStoppable(status('done', 'failed', 'pending')), false)
-  assert.equal(lastLine('Downloading\nInstalling voices\n\n'), 'Installing voices')
-  const local = { ...status('done', 'done', 'pending'), target: { mode: 'local', host: null } }
-  assert.deepEqual(bannerAction(local, 'https://127.0.0.1:5000'), { label: 'Start GenAI Studio', runNow: true })
-  assert.deepEqual(bannerAction(local, 'https://192.168.2.9:5000'), { label: 'Start GenAI Studio', runNow: false }, 'the tab points at another board')
-  assert.deepEqual(bannerAction(status('done', 'done', 'pending'), 'https://127.0.0.1:5000'), { label: 'Start GenAI Studio', runNow: false }, 'board unknown')
-  assert.deepEqual(bannerAction(status('pending', 'pending', 'pending')), { label: 'Set up GenAI Studio', runNow: false })
-  assert.deepEqual(bannerAction(status('done', 'failed', 'pending')), { label: 'Set up GenAI Studio', runNow: false }, 'a failure is shown first')
-  assert.deepEqual(bannerAction(null), { label: 'Set up GenAI Studio', runNow: false })
-  assert.equal(lastLine(''), '')
+// A setup state from the board: one step state per step, in order.
+const setupStatus = (...states) => ({ active: false, steps: ['install', 'prepare', 'start'].map((id, i) => ({ id, title: id, state: states[i] })) })
+
+test('setup tells not installed, installed but stopped and a disconnected board apart', () => {
+  const phase = (status, more = {}) => setupPhase({ status, ...more })
+  assert.equal(phase(setupStatus('pending', 'pending', 'pending')), 'missing')
+  assert.equal(phase({ ...setupStatus('pending', 'pending', 'done'), outdated: true }), 'outdated')
+  assert.equal(phase(setupStatus('done', 'pending', 'pending')), 'unprepared')
+  assert.equal(phase(setupStatus('done', 'done', 'pending')), 'studio-stopped', 'installed: start it, never install again')
+  assert.equal(phase(null), 'checking')
+  assert.equal(phase(setupStatus('done', 'done', 'pending'), { readError: { message: 'x', code: 'unreachable' } }), 'disconnected', 'an old state is not shown for an unreachable board')
+  for (const code of ['auth_failed', 'timeout', 'host_key_changed']) assert.equal(phase(null, { readError: { code } }), 'disconnected', code)
+  assert.equal(phase(null, { readError: { code: 'no_target' } }), 'no-board')
+  assert.equal(phase(null, { readError: { message: 'Insight did not answer.' } }), 'unreadable')
+  // Something runs: the step that runs names the page, also when GenAI Studio was started from a shell.
+  assert.equal(phase({ ...setupStatus('running', 'queued', 'queued'), active: true }), 'installing')
+  assert.equal(phase({ ...setupStatus('done', 'running', 'queued'), active: true }), 'preparing')
+  assert.equal(phase({ ...setupStatus('done', 'done', 'queued'), active: true }), 'starting')
+  assert.equal(phase(setupStatus('done', 'done', 'running')), 'starting')
+  // A failure, and a step stopped on purpose, which resumes.
+  assert.equal(phase(setupStatus('done', 'failed', 'pending')), 'failed')
+  assert.equal(phase(setupStatus('blocked', 'pending', 'pending')), 'failed')
+  const stopped = setupStatus('done', 'failed', 'pending')
+  stopped.steps[1].stopped = true
+  assert.equal(phase(stopped), 'stopped')
+  // Everything done: ready once the tab gets GenAI Studio's answer.
+  assert.equal(phase(setupStatus('done', 'done', 'done'), { reached: true }), 'ready')
+  assert.equal(phase(setupStatus('done', 'done', 'done')), 'connecting')
+  assert.equal(phase(setupStatus('done', 'done', 'done'), { elsewhere: true }), 'elsewhere')
 })
 
-test('steps show a check, a spinner or a grey circle, and setup runs again only after warnings', () => {
-  assert.deepEqual(['done', 'running', 'queued', 'pending', 'failed', 'blocked'].map(stepIcon),
-    ['done', 'running', 'waiting', 'waiting', 'failed', 'failed'])
-  assert.deepEqual(['ready', 'busy', 'starting', 'unavailable'].map(connectIcon), ['done', 'running', 'waiting', 'waiting'])
+test('the setup page shows the next action and keeps stopping a secondary button', () => {
+  const action = (status, more = {}) => setupView({ status, ...more }).action
+  assert.deepEqual(action(setupStatus('pending', 'pending', 'pending')), { kind: 'run', label: 'Install GenAI Studio' })
+  assert.deepEqual(action({ ...setupStatus('pending', 'pending', 'done'), outdated: true }), { kind: 'run', label: 'Update GenAI Studio' })
+  assert.deepEqual(action(setupStatus('done', 'pending', 'pending')), { kind: 'run', label: 'Continue setup' })
+  assert.deepEqual(action(setupStatus('done', 'done', 'pending')), { kind: 'run', label: 'Start GenAI Studio' })
+  assert.deepEqual(action(setupStatus('done', 'failed', 'pending')), { kind: 'run', label: 'Retry' })
+  assert.deepEqual(action(null, { readError: { code: 'unreachable' } }), { kind: 'reconnect', label: 'Try connection again' })
+  assert.deepEqual(action(setupStatus('done', 'done', 'done'), { elsewhere: true }), { kind: 'connection', label: 'Connection settings' })
+  assert.equal(action({ ...setupStatus('done', 'running', 'queued'), active: true }), null, 'nothing to start while a step runs')
+  // Done: Open Studio leads on, and Stop GenAI Studio is the secondary button.
+  const ready = setupView({ status: { ...setupStatus('done', 'done', 'done'), active: true }, reached: true })
+  assert.deepEqual(ready.action, { kind: 'open', label: 'Open Studio' })
+  assert.deepEqual(ready.stop, { kind: 'stop-studio', label: 'Stop GenAI Studio' })
+  assert.deepEqual(setupView({ status: { ...setupStatus('done', 'running', 'queued'), active: true } }).stop, { kind: 'stop', label: 'Stop setup' })
+  assert.deepEqual(setupView({ status: { ...setupStatus('done', 'done', 'running'), active: true } }).stop, { kind: 'stop-studio', label: 'Stop setup' })
+  assert.deepEqual(setupView({ status: setupStatus('done', 'done', 'running') }).stop, { kind: 'stop-studio', label: 'Stop GenAI Studio' }, 'started from a shell')
+  assert.equal(setupView({ status: setupStatus('done', 'done', 'pending') }).stop, null)
+  assert.equal(setupView({ status: { ...setupStatus('done', 'failed', 'done'), active: true } }).stop, null, 'Retry stops GenAI Studio itself')
+})
+
+test('the setup checklist says each step\'s status in a few words', () => {
+  const rows = (status, more = {}) => setupView({ status, ...more }).steps.map((s) => [s.name, s.icon, s.note])
+  assert.deepEqual(rows(setupStatus('pending', 'pending', 'pending')), [
+    ['Install Neat Apps', 'waiting', 'Ready to install'],
+    ['Prepare speech and search', 'waiting', 'Waiting'],
+    ['Start and connect', 'waiting', 'Waiting']
+  ])
+  assert.deepEqual(rows({ ...setupStatus('done', 'running', 'queued'), active: true }), [
+    ['Install Neat Apps', 'done', 'Installed'],
+    ['Prepare speech and search', 'running', 'Preparing voices and search…'],
+    ['Start and connect', 'waiting', 'Next']
+  ])
+  assert.deepEqual(rows(setupStatus('done', 'done', 'pending')).map((r) => r[2]), ['Installed', 'Prepared', 'Not running'])
+  assert.deepEqual(rows(setupStatus('done', 'done', 'done')).map((r) => r.slice(1)), [['done', 'Installed'], ['done', 'Prepared'], ['running', 'Connecting this tab…']])
+  assert.deepEqual(rows(setupStatus('done', 'done', 'done'), { reached: true })[2].slice(1), ['done', 'Connected'])
+  assert.deepEqual(rows(setupStatus('failed', 'pending', 'pending')).map((r) => r.slice(1)), [['failed', 'Needs attention'], ['waiting', 'Waiting'], ['waiting', 'Waiting']])
+  const stopped = setupStatus('done', 'failed', 'pending')
+  stopped.steps[1].stopped = true
+  assert.deepEqual(rows(stopped)[1].slice(1), ['waiting', 'Stopped, ready to resume'])
+  assert.deepEqual(rows({ ...setupStatus('pending', 'pending', 'done'), outdated: true })[0].slice(1), ['waiting', 'Update available'])
+  for (const icon of ['done', 'running', 'waiting', 'failed']) assert.ok(STEP_LABELS[icon], icon)
+})
+
+test('the setup page keeps failures and their fixes visible and folds warnings away', () => {
+  const failed = setupStatus('done', 'failed', 'pending')
+  failed.steps[1].problem = { message: 'The board could not download what this step needs.', fixes: ['Check the internet.'], command: './setup.sh' }
+  const view = setupView({ status: failed })
+  assert.equal(view.problem, failed.steps[1].problem)
+  assert.equal(view.subtitle, 'Prepare speech and search did not finish.')
+  const blocked = setupStatus('blocked', 'pending', 'pending')
+  blocked.steps[0].problem = { message: '`sima-cli` was not found on the board.', fixes: ['Install sima-cli.'], command: null }
+  assert.match(setupView({ status: blocked }).subtitle, /can't run yet/)
+  // A quiet step's note and an outdated GenAI Studio's reason stay visible too.
+  const quiet = { ...setupStatus('done', 'running', 'queued'), active: true }
+  quiet.steps[1].stall = { message: 'No new output for 12 minutes.', fixes: [] }
+  assert.equal(setupView({ status: quiet }).stall.message, 'No new output for 12 minutes.')
+  const outdated = { ...setupStatus('pending', 'pending', 'done'), outdated: true }
+  outdated.steps[0].notice = { message: 'GenAI Studio on the board comes from Neat Apps `main`.', fixes: [] }
+  assert.equal(setupView({ status: outdated }).notice, outdated.steps[0].notice)
+  // Warnings: counted in the ready page's line, listed per step.
+  const warned = { ...setupStatus('done', 'done', 'done'), active: true }
+  warned.steps[1].warnings = [{ message: 'The Supertonic voices were skipped.', fix: null }]
+  const ready = setupView({ status: warned, reached: true })
+  assert.equal(ready.subtitle, 'Chat is ready. Setup finished with 1 warning: review it below.')
+  assert.deepEqual(ready.warnings, [{ id: 'prepare', name: 'Prepare speech and search', done: true, warnings: warned.steps[1].warnings }])
+  assert.equal(ready.steps[1].note, 'Prepared with 1 warning')
+  // A board Insight can't read: its message is the problem, with no checklist.
+  const unreadable = setupView({ status: null, readError: { message: 'Insight did not answer.', fixes: ['Reload.'] } })
+  assert.deepEqual([unreadable.problem.message, unreadable.steps], ['Insight did not answer.', []])
+  assert.deepEqual(setupView({ status: setupStatus('done', 'done', 'pending'), readError: { code: 'unreachable' } }).steps, [], 'no stale checklist')
+})
+
+test('setup can run again only after warnings', () => {
   const warned = { id: 'prepare', state: 'done', warnings: [{ message: 'The Supertonic voices were skipped.', fix: null }] }
   const steps = (prepare, start = 'done') => [{ id: 'install', state: 'done' }, prepare, { id: 'start', state: start }]
   assert.equal(canRunSetupAgain({ active: true, steps: steps(warned) }), true, 'the job only keeps GenAI Studio running')
@@ -457,6 +526,9 @@ test('steps show a check, a spinner or a grey circle, and setup runs again only 
   assert.equal(canRunSetupAgain({ active: true, steps: steps(warned, 'running') }), true, 'GenAI Studio still loading: it is stopped first')
   assert.equal(canRunSetupAgain({ active: true, steps: steps(warned, 'queued') }), false, 'a job is about to start it')
   assert.equal(canRunSetupAgain(null), false)
+  assert.equal(setupStoppable({ ...setupStatus('done', 'running', 'queued'), active: true }), true)
+  assert.equal(setupStoppable({ ...setupStatus('done', 'done', 'running'), active: true }), false, 'GenAI Studio is stopped instead')
+  assert.equal(setupStoppable(setupStatus('done', 'failed', 'pending')), false)
 })
 
 test('GenAI Studio can be stopped once it runs and no setup step is in progress', () => {
@@ -465,13 +537,13 @@ test('GenAI Studio can be stopped once it runs and no setup step is in progress'
   assert.equal(canStopStudio({ active: false, steps: steps('done') }), true, 'started from a shell on the board')
   assert.equal(canStopStudio({ active: true, steps: steps('running') }), true, 'still loading its voices')
   assert.equal(canStopStudio({ active: false, steps: steps('running') }), true, 'started from a shell, still loading')
-  assert.equal(setupAction({ active: false, steps: steps('running') }), null, 'nothing to start while it loads')
+  assert.equal(setupView({ status: { active: false, steps: steps('running') } }).action, null, 'nothing to start while it loads')
   assert.equal(canStopStudio({ active: true, steps: steps('queued', 'running') }), false, 'setup.sh is running')
   assert.equal(canStopStudio({ active: false, steps: steps('pending') }), false, 'not running')
   assert.equal(canStopStudio(null), false)
 })
 
-test('the one-click start only acts on the board the tab connects to', () => {
+test('setup knows whether the tab connects to the board setup acts on', () => {
   const ssh = { target: { mode: 'ssh', host: '192.168.2.3' } }
   assert.equal(relayOnSetupBoard('https://192.168.2.3:5000', ssh), true)
   assert.equal(relayOnSetupBoard('https://192.168.2.4:5000', ssh), false)
@@ -490,13 +562,13 @@ test('a failed setup request says what happened and what to do', () => {
     status: 409,
     body: { error: 'No board is selected.', code: 'no_target', hint: "Enter the board's address." }
   }))
-  assert.deepEqual(board, { message: 'No board is selected.', fixes: ["Enter the board's address."], detail: '' })
+  assert.deepEqual(board, { message: 'No board is selected.', fixes: ["Enter the board's address."], detail: '', code: 'no_target' })
   const launch = requestProblem(new GenaiError('x', { status: 502, body: { error: 'Could not start.', detail: 'mkdir: Permission denied' } }))
   assert.deepEqual(launch.fixes, [])
   assert.equal(launch.detail, 'mkdir: Permission denied')
 })
 
-test('a reload reopens the setup panel, and storage failures only lose that', () => {
+test('a reload keeps the user in setup, and storage failures only lose that', () => {
   const store = new Map()
   const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) }
   assert.equal(setupOpenSaved(storage), false)

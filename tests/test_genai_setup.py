@@ -469,6 +469,8 @@ exit 0
         status = self.wait_for(lambda s: not s["active"])
         self.assertEqual(self.states(status), ["done", "failed", "pending"])
         self.assertEqual(status["steps"][1]["problem"]["message"], "The step was stopped before it finished.")
+        # Stopped on purpose, so the tab offers Resume setup rather than reporting a failure.
+        self.assertEqual([s["stopped"] for s in status["steps"]], [False, True, False])
         self.wait_until_ended(setup_pid)
 
     def test_a_pid_left_from_an_old_job_is_not_taken_for_the_runner(self):
@@ -652,10 +654,10 @@ class DescribeTests(unittest.TestCase):
         prepare = self.describe(fields, {"prepare": record})["steps"][1]
         self.assertEqual(prepare["state"], "running")
         self.assertEqual(prepare["stall"]["message"], "No new output for 10 minutes.")
-        self.assertIn("press Stop, then Retry", prepare["stall"]["fixes"][1])
+        self.assertIn("press Stop setup, then Resume setup", prepare["stall"]["fixes"][1])
         start = self.describe(dict(fields, prepared="yes", running="yes", answering="no", steps="start", step="start"),
                               {"start": dict(record, mtime=str(1000 - 200))})["steps"][2]
-        self.assertIn("press Stop GenAI Studio, then Start GenAI Studio", start["stall"]["fixes"][1])
+        self.assertIn("stop GenAI Studio and start it again", start["stall"]["fixes"][1])
         quiet = dict(record, mtime=str(1000 - 120))
         self.assertIsNone(self.describe(fields, {"prepare": quiet})["steps"][1]["stall"])
 
@@ -694,11 +696,14 @@ class DescribeTests(unittest.TestCase):
         # A running GenAI Studio is what counts for the start step.
         self.assertEqual([s["state"] for s in steps], ["failed", "failed", "done"])
         self.assertEqual(steps[1]["problem"]["message"], "The step was stopped before it finished.")
+        self.assertEqual([s["stopped"] for s in steps], [False, True, False], "only the stopped step resumes")
 
     def test_an_ended_job_leaves_its_cut_off_step_failed_but_a_cut_off_studio_just_stopped(self):
         fields = {"installed": "yes", "prepared": "yes", "steps": "prepare start", "step": "prepare"}
         records = {"prepare": {"exit": "", "mtime": "", "log": "Installing voices", "warnings": []}}
-        self.assertEqual([s["state"] for s in self.describe(fields, records)["steps"]], ["done", "failed", "pending"])
+        steps = self.describe(fields, records)["steps"]
+        self.assertEqual([s["state"] for s in steps], ["done", "failed", "pending"])
+        self.assertFalse(steps[1]["stopped"], "cut off (a board restart, say), not stopped from the tab")
         fields = dict(fields, step="start")
         records = {"prepare": {"exit": "0", "mtime": "", "log": "", "warnings": []},
                    "start": {"exit": "", "mtime": "", "log": "Loaded Piper model", "warnings": []}}
