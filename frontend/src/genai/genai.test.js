@@ -12,6 +12,7 @@ import {
   formatDuration,
   friendlyModelName,
   offersSetup,
+  studioAnswers,
   supportsThinking,
   thinkingModelOnBoard,
   voiceEngineWarnings,
@@ -443,6 +444,25 @@ test('setup tells not installed, installed but stopped and a disconnected board 
   assert.equal(phase(setupStatus('done', 'done', 'done'), { reached: true }), 'ready')
   assert.equal(phase(setupStatus('done', 'done', 'done')), 'connecting')
   assert.equal(phase(setupStatus('done', 'done', 'done'), { elsewhere: true }), 'elsewhere')
+  // A GenAI Studio answering at another board's address is not the one setup made ready.
+  assert.equal(phase(setupStatus('done', 'done', 'done'), { reached: true, elsewhere: true }), 'elsewhere')
+  // An address that answers with an error page or an unsupported API is not ready either.
+  assert.equal(phase(setupStatus('done', 'done', 'done'), { unusable: { title: 'x' } }), 'unusable')
+})
+
+test('setup is ready only when the tab can use the GenAI Studio it answers with', () => {
+  for (const state of ['ready', 'failed', 'busy', 'starting']) assert.equal(studioAnswers(state), true, state)
+  for (const state of ['error', 'incompatible', 'unavailable', 'unconfigured']) assert.equal(studioAnswers(state), false, state)
+  const done = { ...setupStatus('done', 'done', 'done'), active: true }
+  const page = setupView({ status: done, unusable: { title: "This address doesn't answer like GenAI Studio", detail: 'Check the GenAI Studio address.', fixAddress: true } })
+  assert.deepEqual([page.phase, page.title, page.subtitle], ['unusable', "This address doesn't answer like GenAI Studio", 'Check the GenAI Studio address.'])
+  assert.deepEqual(page.action, { kind: 'connection', label: 'Connection settings' })
+  assert.deepEqual(page.steps[2].icon, 'failed')
+  assert.deepEqual(page.stop, { kind: 'stop-studio', label: 'Stop GenAI Studio' })
+  // An unsupported API version is fixed by updating, not by the address: no address button.
+  assert.equal(setupView({ status: done, unusable: { title: 'Unsupported', detail: 'Update Insight.', fixAddress: false } }).action, null)
+  const other = setupView({ status: done, reached: true, elsewhere: true })
+  assert.deepEqual([other.action.kind, other.steps[2].note], ['connection', 'Running, but this tab connects elsewhere'])
 })
 
 test('the setup page shows the next action and keeps stopping a secondary button', () => {

@@ -138,6 +138,13 @@ export function offersSetup(state) {
   return state === 'unavailable' || state === 'unconfigured'
 }
 
+// GenAI Studio answers at the tab's address as itself: usable, or still starting its model
+// server or a model. An address that answers with an error, something else, or an API this
+// Insight can't use does not count.
+export function studioAnswers(state) {
+  return state === 'ready' || state === 'failed' || state === 'busy' || state === 'starting'
+}
+
 // Chat and speech run only when the backend is ready (a failed operation still
 // leaves the backend usable; the banner offers recovery).
 export function canUseModels(state) {

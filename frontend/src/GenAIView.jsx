@@ -14,6 +14,7 @@ import {
   friendlyModelName,
   offersSetup,
   speechModels,
+  studioAnswers,
   supportsThinking,
   thinkingModelOnBoard,
   voiceEngineWarnings
@@ -435,11 +436,13 @@ export default function GenAIView({ onError, onStatus }) {
 
   const backend = deriveBackendState({ health, status, busyOp, lastError })
   const usable = canUseModels(backend.state)
-  // GenAI Studio answers at the tab's address (it may still be starting its model server).
-  const reached = Boolean(health) && !offersSetup(backend.state)
-  // The tab shows only the setup page while GenAI Studio doesn't answer, and while the user is
-  // in setup; the chat once it answers. Before the first answer, the setup page checks.
-  const mode = setupOpen || (health && !reached) ? 'setup' : health ? 'workspace' : 'checking'
+  // Something answers at the tab's address: the chat can open and its banner says what is wrong.
+  const answers = Boolean(health) && !offersSetup(backend.state)
+  // That answer is a GenAI Studio this tab can use (or one still starting): setup is done.
+  const reached = Boolean(health) && studioAnswers(backend.state)
+  // The tab shows only the setup page while nothing answers, and while the user is in setup;
+  // the chat once something answers. Before the first answer, the setup page checks.
+  const mode = setupOpen || (health && !answers) ? 'setup' : health ? 'workspace' : 'checking'
   const docs = documentsSupport(health)
   const bench = benchmarkSupport(health)
   const boardCam = boardCameraSupport(health)
@@ -1723,10 +1726,12 @@ export default function GenAIView({ onError, onStatus }) {
     const elsewhere = Boolean(setupStatus && settings?.url && !relayOnSetupBoard(settings.url, setupStatus))
     // A custom address, one on another board, or none: the default follows the board, so it
     // has nothing to change.
-    const addressMatters = Boolean(settings && (elsewhere || settings.configuredUrl || !settings.url))
+    // The address answers, but not as a GenAI Studio this tab can use (setupView's `unusable`).
+    const unusable = answers && !reached ? { title: backend.title, detail: backend.detail, fixAddress: backend.action === 'settings' } : null
     const view = mode === 'checking'
       ? setupView({ status: null })
-      : setupView({ status: setupStatus, readError: setupReadError, reached, elsewhere })
+      : setupView({ status: setupStatus, readError: setupReadError, reached, elsewhere, unusable })
+    const addressMatters = Boolean(settings && (elsewhere || settings.configuredUrl || !settings.url || view.action?.kind === 'connection'))
     const onBoard = view.steps.length > 0
     const warningCount = view.warnings.reduce((n, group) => n + group.warnings.length, 0)
     const pageBusy = setupBusy !== null || setupRechecking

@@ -98,6 +98,8 @@ const PAGES = {
   starting: ['Starting GenAI Studio', 'Loading its voices and connecting to it. This takes a few minutes.'],
   connecting: ['Starting GenAI Studio', 'GenAI Studio runs on the board. Connecting this tab to it…'],
   elsewhere: ['This tab connects to another address', 'GenAI Studio runs on the selected board, but this tab connects to another address.'],
+  // Title and line come from what the address answered (setupView's `unusable`).
+  unusable: ['GenAI Studio is not usable from this tab', ''],
   failed: ['Setup needs attention', ''],
   stopped: ['Setup stopped', 'Files already downloaded are kept. Resume setup when you are ready.'],
   'studio-stopped': ['Start GenAI Studio', 'GenAI Studio is installed but not running. Starting it takes a few minutes.'],
@@ -124,11 +126,13 @@ const IN_PROGRESS = { install: 'installing', prepare: 'preparing', start: 'start
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
-// Which page setup shows now. `reached`: the tab gets an answer from GenAI Studio.
-// `elsewhere`: the tab's GenAI Studio address is not on the board setup acts on.
+// Which page setup shows now. `reached`: GenAI Studio answers at the tab's address and can
+// be used (or is still starting). `elsewhere`: that address is not on the board setup acts on.
+// `unusable`: the address answers, but not as a GenAI Studio this tab can use.
 // Not installed, installed but stopped and a disconnected board are different pages,
-// so a stopped GenAI Studio is started rather than installed again.
-export function setupPhase({ status, readError = null, reached = false, elsewhere = false }) {
+// so a stopped GenAI Studio is started rather than installed again. Setup is ready only
+// when the tab can use the GenAI Studio it set up.
+export function setupPhase({ status, readError = null, reached = false, elsewhere = false, unusable = null }) {
   if (readError && readError.code === 'no_target') return 'no-board'
   if (readError && OFFLINE_CODES.has(readError.code)) return 'disconnected'
   if (!status || !Array.isArray(status.steps)) return readError ? 'unreadable' : 'checking'
@@ -141,18 +145,20 @@ export function setupPhase({ status, readError = null, reached = false, elsewher
   if (left && left.id === 'install') return status.outdated ? 'outdated' : 'missing'
   if (left && left.id === 'prepare') return 'unprepared'
   if (left) return 'studio-stopped'
+  if (elsewhere) return 'elsewhere'
   if (reached) return 'ready'
-  return elsewhere ? 'elsewhere' : 'connecting'
+  return unusable ? 'unusable' : 'connecting'
 }
 
 // Everything the setup page shows: {phase, title, subtitle, steps, action, stop, problem,
-// stall, notice, warnings}. `steps` is the checklist, [{id, name, icon, note}] with an icon
-// from stepIcon; problem, stall and notice stay visible, the rest of a step's detail is in
-// the page's technical details.
-export function setupView({ status, readError = null, reached = false, elsewhere = false }) {
-  const phase = setupPhase({ status, readError, reached, elsewhere })
-  const [title, subtitle] = PAGES[phase]
-  const view = { phase, title, subtitle, steps: [], action: ACTIONS[phase] || null, stop: null, problem: null, stall: null, notice: null, warnings: [] }
+// stall, notice, warnings}. `steps` is the checklist, [{id, name, icon, note}]; problem,
+// stall and notice are shown under it. `unusable` is what the tab's address answered when it
+// is not a usable GenAI Studio: {title, detail, fixAddress}.
+export function setupView({ status, readError = null, reached = false, elsewhere = false, unusable = null }) {
+  const phase = setupPhase({ status, readError, reached, elsewhere, unusable })
+  const [title, subtitle] = phase === 'unusable' ? [unusable.title, unusable.detail || ''] : PAGES[phase]
+  const action = phase === 'unusable' ? (unusable.fixAddress ? { kind: 'connection', label: 'Connection settings' } : null) : ACTIONS[phase] || null
+  const view = { phase, title, subtitle, steps: [], action, stop: null, problem: null, stall: null, notice: null, warnings: [] }
   if (['no-board', 'disconnected', 'unreadable', 'checking'].includes(phase)) {
     if (phase === 'unreadable') view.problem = readError
     return view
@@ -163,8 +169,9 @@ export function setupView({ status, readError = null, reached = false, elsewhere
   view.steps = steps.map((s) => {
     const count = (s.warnings || []).length
     const row = (icon, note) => ({ id: s.id, name: STEP_NAMES[s.id] || s.title, icon, note })
-    if (s.state === 'done' && s.id === 'start' && !reached) {
-      return elsewhere ? row('waiting', 'Running, but this tab connects elsewhere') : row('running', 'Connecting this tab…')
+    if (s.state === 'done' && s.id === 'start' && (elsewhere || !reached)) {
+      if (elsewhere) return row('waiting', 'Running, but this tab connects elsewhere')
+      return unusable ? row('failed', 'Running, but this tab can\'t use it') : row('running', 'Connecting this tab…')
     }
     if (s.state === 'done') return row('done', DONE_NOTES[s.id] + (count ? ` with ${plural(count, 'warning')}` : ''))
     if (s.state === 'running') return row('running', RUNNING_NOTES[s.id])
@@ -191,7 +198,7 @@ export function setupView({ status, readError = null, reached = false, elsewhere
   // Stopping is never the main button: setup's own Stop while a step runs, otherwise a
   // secondary Stop GenAI Studio once it runs.
   if (setupStoppable(status)) view.stop = { kind: 'stop', label: 'Stop setup' }
-  else if (canStopStudio(status) && ['starting', 'connecting', 'elsewhere', 'ready'].includes(phase)) {
+  else if (canStopStudio(status) && ['starting', 'connecting', 'elsewhere', 'unusable', 'ready'].includes(phase)) {
     view.stop = { kind: 'stop-studio', label: phase === 'starting' && status.active ? 'Stop setup' : 'Stop GenAI Studio' }
   }
   return view
