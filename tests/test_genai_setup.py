@@ -749,10 +749,20 @@ class DescribeTests(unittest.TestCase):
 
     def test_the_apps_channel_follows_this_insights_version(self):
         for version, channel in (("0.0.0+develop.e604419", "develop"), ("0.0.0+main.bedca8f", "main"),
-                                 ("0.0.8", "main"), ("0.0.0+feature.120.webcam.9a18d3b", "main")):
+                                 ("0.0.10", "main"), ("0.0.0+unknown", "main"),
+                                 # Feature branches are cut from develop, so they install apps@develop.
+                                 ("0.0.0+225.genai.setup.flow.d4fb2d7", "develop"),
+                                 ("0.0.0+feature.120.webcam.9a18d3b", "develop"),
+                                 ("0.0.0+main.hotfix.9a18d3b", "develop")):
             with mock.patch.object(genai_setup.metadata, "version", return_value=version):
                 self.assertEqual(genai_setup.insight_channel(), channel, version)
+                self.assertEqual(genai_setup.apps_target(), "apps" if channel == "main" else "apps@develop", version)
         self.assertEqual((genai_setup.apps_target("main"), genai_setup.apps_target("develop")), ("apps", "apps@develop"))
+
+    def test_a_feature_branch_insight_keeps_a_develop_studio(self):
+        with mock.patch.object(genai_setup.metadata, "version", return_value="0.0.0+225.genai.setup.flow.d4fb2d7"):
+            status = self.describe({"installed": "yes", "prepared": "yes", "apps_ref": "develop"})
+        self.assertEqual((status["apps"], status["outdated"]), ("apps@develop", False))
 
     def test_only_an_older_core_line_or_another_channel_makes_studio_outdated(self):
         installed = {"installed": "yes", "apps_ref": "main", "apps_core_ref": "v0.6.0", "core_version": "0.6.0"}
