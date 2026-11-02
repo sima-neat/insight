@@ -126,8 +126,7 @@ _CAUSES = (
     (
         r"\b40[34]\b.*(latest\.tag|neat-apps)|(latest\.tag|neat-apps).*\b40[34]\b",
         "The Neat Apps package could not be downloaded.",
-        ["Check the board's internet access, then press Retry.",
-         "Or run the command below in a shell on the board to see the installer's full message."],
+        ["Check the board's internet access, then press Retry."],
     ),
     (
         r"dispatcher_unavailable|accelerator runtime is not available",
@@ -453,7 +452,7 @@ def diagnose(step: str, log: str, exit_code: str) -> dict:
     return _problem(
         step,
         "{} stopped with exit code {}.".format(TITLES[step], exit_code or "unknown"),
-        ["Its last output is below: fix what it reports, then press Retry."],
+        ["Its log on the board says why: fix what it reports, then press Retry."],
     )
 
 

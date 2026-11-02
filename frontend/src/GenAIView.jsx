@@ -92,7 +92,6 @@ import {
   setupOpenSaved,
   setupView
 } from './genai/setup.js'
-import { copyText } from './peripherals/api.js'
 
 const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
 
@@ -250,19 +249,6 @@ function SetupHelp({ problem, detail = '', warn = false, children }) {
         </details>
       )}
       {children}
-    </div>
-  )
-}
-
-// What to run in a shell on the board instead of a failed step.
-function ManualCommand({ command, onCopy }) {
-  return (
-    <div className="genai-setup-manual">
-      <span>Or run it yourself in a shell on the board:</span>
-      <div className="genai-tutorial-commands">
-        <pre><code>{command}</code></pre>
-        <button type="button" className="btn-ghost genai-small" onClick={() => onCopy(command)}>Copy</button>
-      </div>
     </div>
   )
 }
@@ -1656,10 +1642,6 @@ export default function GenAIView({ onError, onStatus }) {
     }
   }
 
-  function copyCommand(command) {
-    copyText(command).then(() => onStatus?.('Copied. Paste it into a shell on the board.'), (err) => onError?.(err.message))
-  }
-
   // Try connection again: read the board's setup state and GenAI Studio's answer now.
   function recheckBoard() {
     setSetupRechecking(true)
@@ -1820,24 +1802,6 @@ export default function GenAIView({ onError, onStatus }) {
               </button>
             )}
           </div>
-          {(onBoard || setupReadError) && (
-            <details className="genai-setup-details">
-              <summary>Technical details and logs</summary>
-              {/* The log tails change on every read: not announced. */}
-              <div className="genai-setup-tech" aria-live="off">
-                {!onBoard && setupReadError && <pre>{[setupReadError.message, setupReadError.detail].filter(Boolean).join('\n')}</pre>}
-                {onBoard && setupStatus.steps.map((item) => (
-                  <section key={item.id} className="genai-setup-tech-step">
-                    <h3 className="genai-setup-step-title">{item.title}</h3>
-                    <p className="hint">{item.description}</p>
-                    {item.log && <pre>{item.log}</pre>}
-                    {item.problem?.command && <ManualCommand command={item.problem.command} onCopy={copyCommand} />}
-                  </section>
-                ))}
-                {onBoard && <p className="hint">The full logs are on the board in <code>{setupStatus.logDir}</code>.</p>}
-              </div>
-            </details>
-          )}
         </section>
         {(connectionOpen || backend.state === 'unconfigured') && (
           <section className="panel genai-settings-panel genai-setup-connection" aria-label="Connection settings">

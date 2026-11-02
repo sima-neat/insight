@@ -5356,27 +5356,6 @@ button:disabled {
   flex: 1;
 }
 
-.genai-tutorial-commands {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  max-width: 72ch;
-}
-
-.genai-tutorial-commands pre {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  padding: 8px 10px;
-  overflow-x: auto;
-  border-radius: 8px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 .genai-setup-steps {
   display: grid;
   gap: 10px;
@@ -5511,16 +5490,6 @@ button:disabled {
   font-weight: 600;
 }
 
-.genai-setup-manual {
-  display: grid;
-  gap: 4px;
-}
-
-.genai-setup-manual .genai-tutorial-commands pre {
-  margin: 0;
-  white-space: pre;
-}
-
 /* While GenAI Studio can't be used the tab shows only the setup page: one card,
    and on request the board address under it, at a readable width. */
 .genai.genai-setup-page {
@@ -5580,7 +5549,7 @@ button:disabled {
   color: var(--ink-soft);
 }
 
-/* Warnings and technical output: folded until asked for. */
+/* Warnings: folded until asked for. */
 .genai-setup-details {
   display: grid;
   gap: 8px;
@@ -5600,40 +5569,6 @@ button:disabled {
 .genai-setup-details > summary:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
-}
-
-.genai-setup-tech {
-  display: grid;
-  gap: 12px;
-  min-width: 0;
-}
-
-.genai-setup-tech-step {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.genai-setup-tech-step h3 {
-  margin: 0;
-  font-size: 13px;
-}
-
-.genai-setup-tech .hint {
-  margin: 0;
-}
-
-.genai-setup-tech pre {
-  margin: 0;
-  padding: 8px 10px;
-  max-height: 220px;
-  overflow: auto;
-  border-radius: 8px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 @media (max-width: 560px) {
