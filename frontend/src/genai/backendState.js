@@ -42,7 +42,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'unconfigured',
       title: 'The saved board address is not valid',
-      detail: 'Enter the board address again, for example https://192.168.1.20:5000.',
+      detail: 'Enter the GenAI Studio address again, for example https://192.168.1.20:5000.',
       action: 'settings'
     }
   }
@@ -50,7 +50,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'error',
       title: "Insight's settings file can't be used",
-      detail: body.error || "Fix or remove Insight's cfg.json, then set the board address again.",
+      detail: body.error || "Fix or remove Insight's cfg.json, then set the GenAI Studio address again.",
       action: 'settings'
     }
   }
@@ -58,7 +58,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'unavailable',
       title: 'GenAI Studio is not running on the board',
-      detail: 'Insight can start it on the board, and install it there the first time. Or check the board address.',
+      detail: 'Insight can start it on the board, and install it there the first time. Or check the GenAI Studio address.',
       action: 'setup'
     }
   }
@@ -68,7 +68,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'error',
       title: "This address doesn't answer like GenAI Studio",
-      detail: `It answered HTTP ${health.httpStatus} with something other than GenAI Studio's reply. Check the board address: GenAI Studio listens on port 5000, for example https://192.168.1.20:5000.`,
+      detail: `It answered HTTP ${health.httpStatus} with something other than GenAI Studio's reply. Check the GenAI Studio address: GenAI Studio listens on port 5000, for example https://192.168.1.20:5000.`,
       action: 'settings'
     }
   }
@@ -76,7 +76,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'error',
       title: `GenAI Studio on the board answered with an error (HTTP ${health.httpStatus})`,
-      detail: body.error || 'Check the board address, or restart GenAI Studio on the board.',
+      detail: body.error || 'Check the GenAI Studio address, or restart GenAI Studio on the board.',
       action: 'settings'
     }
   }

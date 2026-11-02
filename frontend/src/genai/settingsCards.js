@@ -18,17 +18,16 @@ export const STATE_LABELS = {
 }
 
 // settings: GET /api/genai/settings ({url, configuredUrl, defaultUrl}).
-export function boardSummary({ settings = null, state = '' } = {}) {
+export function addressSummary({ settings = null } = {}) {
   const url = settings && settings.url
-  if (!url) return settings && settings.configuredUrl ? 'The saved address is not valid' : 'No board selected'
+  if (!url) return settings && settings.configuredUrl ? 'The saved address is not valid' : 'No address set'
   let host = url
   try {
     host = new URL(url).host
   } catch {
     // Shown as saved.
   }
-  const where = settings.configuredUrl ? host : `${host} (default)`
-  return STATE_LABELS[state] ? `${where} · ${STATE_LABELS[state]}` : where
+  return settings.configuredUrl ? host : `${host} (default)`
 }
 
 // The models the Models card lists (chat, vision and speech recognition).

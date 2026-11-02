@@ -356,7 +356,7 @@ GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、�
 ./run.sh
 ```
 
-當分頁無法連線到 GenAI Studio 時，只會顯示 Insight 所連線開發板（Insight 頁首中顯示的開發板）的設定頁面：在 GenAI Studio 回應之前，不會顯示聊天、模型或設定。頁面列出三個步驟，各附簡短狀態：**Install Neat Apps**（`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`，保留已安裝的 Core 和 Insight；develop 版本的 Insight 會安裝 `apps@develop`）、**Prepare speech and search**（執行一次 `setup.sh`：約 15 分鐘，開發板需要網際網路連線）以及 **Start and connect**（`./run.sh`，在此分頁收到 GenAI Studio 的回應後完成）。主要按鈕就是下一步要做的事：未安裝時為 **Install GenAI Studio**，已安裝但已停止時為 **Start GenAI Studio**，另有 **Continue setup**、失敗後的 **Retry**，以及 **Stop setup** 之後的 **Resume setup**。當 Insight 無法連線到開發板時，頁面會改為顯示開發板已中斷連線；請在 Board 選單中重新連線，再按 **Try connection again**。這些步驟在開發板上以單一工作執行，關閉頁面後仍會繼續，重新載入後會顯示目前進度。失敗的步驟會保持標示，並說明問題和處理方式；數分鐘沒有新輸出的步驟會提示此情況。每個步驟的記錄檔保存在開發板的 `~/.neat-insight/genai-setup/` 中。設定完成後，頁面會顯示 **GenAI Studio is ready**，按 **Open Studio** 即可開啟聊天。警告及其處理方式會收合在同一頁面中；修正設定的警告後，**Run setup again** 會重新執行 `setup.sh` 並重新啟動 GenAI Studio。**Stop GenAI Studio** 會在開發板上停止 GenAI Studio，從 shell 啟動的也一樣。**Connection settings** 會顯示 GenAI Studio 的位址；若位址指向與 Insight 不同的開發板，頁面會提示此情況。在 GenAI Studio 執行時，按 **Board** 設定中的 **Manage installation** 可開啟此頁面來更新、重新執行設定或停止它，按 **Back to Studio** 則返回聊天。若 GenAI Studio 是從與此 Insight 不同的頻道安裝，或是為比開發板上更舊的 Neat Library 建置，就會視為過期：分頁會顯示此狀況（即使 GenAI Studio 正在執行），按 **Update GenAI Studio** 會停止它、安裝相符的 Apps（先前的檔案會移至 `/media/nvme/.prebuilt-apps-backup`，已下載的模型會保留）、重新準備並啟動。若 GenAI Studio 是為同一系列中另一個 Neat Library 建置版本所建置，只會在安裝步驟下方列出警告。
+當分頁無法連線到 GenAI Studio 時，只會顯示 Insight 所連線開發板（Insight 頁首中顯示的開發板）的設定頁面：在 GenAI Studio 回應之前，不會顯示聊天、模型或設定。頁面列出三個步驟，各附簡短狀態：**Install Neat Apps**（`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`，保留已安裝的 Core 和 Insight；develop 版本的 Insight 會安裝 `apps@develop`）、**Prepare speech and search**（執行一次 `setup.sh`：約 15 分鐘，開發板需要網際網路連線）以及 **Start and connect**（`./run.sh`，在此分頁收到 GenAI Studio 的回應後完成）。主要按鈕就是下一步要做的事：未安裝時為 **Install GenAI Studio**，已安裝但已停止時為 **Start GenAI Studio**，另有 **Continue setup**、失敗後的 **Retry**，以及 **Stop setup** 之後的 **Resume setup**。當 Insight 無法連線到開發板時，頁面會改為顯示開發板已中斷連線；請在 Board 選單中重新連線，再按 **Try connection again**。這些步驟在開發板上以單一工作執行，關閉頁面後仍會繼續，重新載入後會顯示目前進度。失敗的步驟會保持標示，並說明問題和處理方式；數分鐘沒有新輸出的步驟會提示此情況。每個步驟的記錄檔保存在開發板的 `~/.neat-insight/genai-setup/` 中。設定完成後，頁面會顯示 **GenAI Studio is ready**，按 **Open Studio** 即可開啟聊天。警告及其處理方式會收合在同一頁面中；修正設定的警告後，**Run setup again** 會重新執行 `setup.sh` 並重新啟動 GenAI Studio。**Stop GenAI Studio** 會在開發板上停止 GenAI Studio，從 shell 啟動的也一樣。**Connection settings** 只在 GenAI Studio 位址需要處理時出現：自訂位址、指向與 Insight 不同開發板的位址（頁面會提示此情況），或尚未設定位址。在 GenAI Studio 執行時，按 Settings 中 **GenAI Studio address** 的 **Manage installation** 可開啟此頁面來更新、重新執行設定或停止它，按 **Back to Studio** 則返回聊天。若 GenAI Studio 是從與此 Insight 不同的頻道安裝，或是為比開發板上更舊的 Neat Library 建置，就會視為過期：分頁會顯示此狀況（即使 GenAI Studio 正在執行），按 **Update GenAI Studio** 會停止它、安裝相符的 Apps（先前的檔案會移至 `/media/nvme/.prebuilt-apps-backup`，已下載的模型會保留）、重新準備並啟動。若 GenAI Studio 是為同一系列中另一個 Neat Library 建置版本所建置，只會在安裝步驟下方列出警告。
 
 設定前須將 NVMe 掛載至 `/media/nvme`。Apps 與 Python 虛擬環境安裝於 `/media/nvme/prebuilt-apps`；下載快取與暫存檔案存放於 `/media/nvme/.cache/neat-genai-studio`。
 
@@ -364,7 +364,7 @@ GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、�
 
 狀態標籤以及需要處理時出現的橫幅，會顯示後端狀態和接下來應採取的動作：
 
-- **Not set up**：尚未選取開發板，設定頁面會顯示開發板位址。請輸入開發板位址，例如 `https://192.168.1.20:5000`。在開發板上，Insight 預設使用本機後端；在 Neat Development Environment 中則預設使用已配對的 DevKit。
+- **Not set up**：尚未設定 GenAI Studio 位址，設定頁面會顯示位址欄位。請輸入開發板上 GenAI Studio 的位址，例如 `https://192.168.1.20:5000`。在開發板上，Insight 預設使用本機後端；在 Neat Development Environment 中則預設使用已配對的 DevKit。
 - **Not running**：開發板沒有回應，分頁會顯示設定頁面：已安裝時用 **Start GenAI Studio** 啟動，第一次使用時則由此頁面安裝。或在 **Connection settings** 中檢查位址。
 - **Error**：開發板傳回錯誤，或該位址不是 GenAI Studio。橫幅會顯示開發板的訊息。
 - **Starting**：後端有回應，但模型伺服器尚未就緒。
@@ -399,9 +399,9 @@ GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、�
 
 **Use my documents** 會根據開發板上的文件資料庫回答：開發板會尋找符合每個問題的段落，在模型回答前加入，並在回答下方註明所用章節（或表示沒有符合的內容）。**Settings** 中的 **Documents** 可查看資料庫內容、上傳 Markdown 檔案（取代現有文件）、重設為預設 SiMa 文件，或清空資料庫。**View documents** 會列出已匯入的來源檔案、章節（區塊）數，以及各章節的標題路徑與文字；可用 **Filter sections…** 尋找段落（最多前 2,000 個章節）。文件功能需要支援文件搜尋的 GenAI Studio，否則開關會停用並顯示原因。
 
-**Settings** 會為每個區域顯示一張卡片：**Board**、**Replies**、**Models**、**Voice**、**Documents** 和 **Troubleshooting**。每張卡片的標題都有一行摘要說明目前的設定，例如 `192.168.1.20:5000 · Ready`、`Default system prompt · longest reply 512 tokens` 或 `Qwen3 VL 4B loaded · 3 models on the board`。
+**Settings** 會為每個區域顯示一張卡片：**GenAI Studio address**、**Replies**、**Models**、**Voice**、**Documents** 和 **Troubleshooting**。每張卡片的標題都有一行摘要說明目前的設定，例如 `192.168.1.20:5000 (default)`、`Default system prompt · longest reply 512 tokens` 或 `Qwen3 VL 4B loaded · 3 models on the board`。
 
-- **Board**：開發板位址。
+- **GenAI Studio address**：分頁連線到 GenAI Studio 的位址（開發板的連接埠 5000）以及 **Manage installation**。開發板本身在 Insight 頁首中選擇。
 - **Replies**：**System prompt** 是每次聊天和 Vision 提問時一併傳送的指示。在您變更之前，欄位會顯示預設值："You are a helpful assistant. Answer clearly and concisely. Use Markdown formatting when it helps. Answer the question in the language it was asked in." 編輯後即取代預設值；**Reset to default** 會恢復預設值，欄位留空時會傳送預設值（不會傳送空白提示）。分頁仍會補上一句話說明訊息是否含有照片，避免小型視覺模型誤判。**Longest reply** 設定回答的最大 token 數（32 到 2048，預設為 512，與獨立版 GenAI Studio 相同），以 `max_tokens` 傳送，不影響有獨立設定的基準測試。此瀏覽器會記住這兩項設定。
 - **Models**：先顯示可用磁碟空間，再將開發板上的每個模型列為一行，包含類型（**Chat**、**Vision** 或 **Speech**）、大小和狀態（**Loaded**、語音模型的 **In use**、**Loading…**、**Not loaded** 或 **Can't run here**，原因顯示在工具提示中）。**Load**、**Unload** 和 **Use** 可變更使用中的模型，橫幅會顯示載入進度。**Delete** 會在確認後從開發板刪除已下載的模型檔案；僅適用於尚未載入且不是使用中語音模型的模型，若開發板拒絕，會顯示原因。**Get more models** 會搜尋 Hugging Face，**Download** 可將模型放到開發板上；若開發板不允許下載，會說明如何允許。
 - **Voice**：語音引擎、聲音和您說的語言。

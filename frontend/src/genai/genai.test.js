@@ -75,7 +75,7 @@ import {
   hubReachOf,
   recommendedOffer
 } from './firstModel.js'
-import { STATE_LABELS, boardSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './settingsCards.js'
+import { STATE_LABELS, addressSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './settingsCards.js'
 import { LOOP_PAUSE_MS, VISION_PRESETS, createVisionLoop, pause } from './visionLoop.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
 import { allowedActions } from './activity.js'
@@ -1482,10 +1482,12 @@ test('the first model rules: one download at a time, not under a model operation
 
 test('Settings cards: one line each about how they are set now', () => {
   assert.equal(STATE_LABELS.unavailable, 'Not running')
-  assert.equal(boardSummary({ settings: { url: 'https://192.168.2.3:5000', configuredUrl: 'https://192.168.2.3:5000' }, state: 'ready' }), '192.168.2.3:5000 · Ready')
-  assert.equal(boardSummary({ settings: { url: 'https://10.0.0.5:5000', configuredUrl: null }, state: 'unavailable' }), '10.0.0.5:5000 (default) · Not running')
-  assert.equal(boardSummary({ settings: { url: '', configuredUrl: 'https://[bad' }, state: 'unconfigured' }), 'The saved address is not valid')
-  assert.equal(boardSummary({ settings: null }), 'No board selected')
+  // The address card says only where GenAI Studio is reached: whether it runs is the status
+  // label's (and the setup page's) job, and the board is Insight's header's.
+  assert.equal(addressSummary({ settings: { url: 'https://192.168.2.3:5000', configuredUrl: 'https://192.168.2.3:5000' } }), '192.168.2.3:5000')
+  assert.equal(addressSummary({ settings: { url: 'https://10.0.0.5:5000', configuredUrl: null } }), '10.0.0.5:5000 (default)')
+  assert.equal(addressSummary({ settings: { url: '', configuredUrl: 'https://[bad' } }), 'The saved address is not valid')
+  assert.equal(addressSummary({ settings: null }), 'No address set')
 
   assert.equal(modelsSummary(null), 'Waiting for the board')
   assert.equal(modelsSummary(STATUS), 'Qwen3 VL 4B loaded · 3 models on the board', 'chat, vision and speech models; not the search model')

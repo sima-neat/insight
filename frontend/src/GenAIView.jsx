@@ -76,7 +76,7 @@ import {
   hubReachOf,
   recommendedOffer
 } from './genai/firstModel.js'
-import { STATE_LABELS, boardSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './genai/settingsCards.js'
+import { STATE_LABELS, addressSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './genai/settingsCards.js'
 import { VISION_PRESETS, createVisionLoop } from './genai/visionLoop.js'
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
@@ -179,6 +179,7 @@ const ICONS = {
   fullscreen: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
   // Settings cards, and the chat's offer of a first model.
+  address: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
   board: 'M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4',
   models: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9',
   replies: 'M4 5h16v11H10l-6 4zM8 9h8M8 12h5',
@@ -356,7 +357,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [setupReadError, setSetupReadError] = useState(null)   // the last status read, when it failed
   const [setupRecheck, setSetupRecheck] = useState(0)   // + 1 to read the board again now
   const [setupRechecking, setSetupRechecking] = useState(false)
-  const [connectionOpen, setConnectionOpen] = useState(false)   // the setup page's board address
+  const [connectionOpen, setConnectionOpen] = useState(false)   // the setup page's GenAI Studio address
   const [setupBusy, setSetupBusy] = useState(null)   // 'run' | 'stop' | 'stop-studio' while that request is out
   const setupWrites = useRef(0)   // + 1 when a Run or Stop starts and ends: older status reads are dropped
   const [setupSlow, setSetupSlow] = useState(false)   // that request has not answered for a while
@@ -723,13 +724,13 @@ export default function GenAIView({ onError, onStatus }) {
       // Saving the same address keeps the conversation; another board starts fresh.
       if (saved?.url !== before) forgetBoard()
       setAddressError('')
-      onStatus?.('Board settings saved.')
+      onStatus?.('GenAI Studio address saved.')
       refresh()
     } catch (error) {
       // A rejected address is shown next to the field, where the user is
       // typing; anything else also goes to Insight's error popup.
       if (error.status === 400) {
-        setAddressError("That isn't a board address. Use https://<board address>:5000, for example https://192.168.1.20:5000.")
+        setAddressError("That isn't a GenAI Studio address. Use https://<board address>:5000, for example https://192.168.1.20:5000.")
       } else {
         setAddressError(error.message)
         onError?.(error.message)
@@ -1685,11 +1686,13 @@ export default function GenAIView({ onError, onStatus }) {
 
   // --- render -----------------------------------------------------------------
 
-  const boardCard = (
-    <SettingsCard id="board" icon="board" title="Board" summary={boardSummary({ settings, state: backend.state })}>
+  // Where this tab reaches GenAI Studio. Which board Insight works with is Insight's Board
+  // menu; this address only says how to reach GenAI Studio's port on it, so no status here.
+  const addressCard = (
+    <SettingsCard id="address" icon="address" title="GenAI Studio address" summary={addressSummary({ settings })}>
       <form className="genai-form" onSubmit={applySettings}>
         <label>
-          <span>Board address</span>
+          <span>GenAI Studio address</span>
           <input
             value={addressDraft}
             onChange={(e) => { setAddressDraft(e.target.value); setAddressError('') }}
@@ -1714,10 +1717,13 @@ export default function GenAIView({ onError, onStatus }) {
     </SettingsCard>
   )
 
-  // While GenAI Studio can't be used, or the user is in setup: only the setup page, and on
-  // request the board address. The board itself is chosen in Insight's Board menu.
+  // While GenAI Studio can't be used, or the user is in setup: only the setup page, and the
+  // GenAI Studio address when it needs attention. The board is chosen in Insight's Board menu.
   if (mode !== 'workspace') {
     const elsewhere = Boolean(setupStatus && settings?.url && !relayOnSetupBoard(settings.url, setupStatus))
+    // A custom address, one on another board, or none: the default follows the board, so it
+    // has nothing to change.
+    const addressMatters = Boolean(settings && (elsewhere || settings.configuredUrl || !settings.url))
     const view = mode === 'checking'
       ? setupView({ status: null })
       : setupView({ status: setupStatus, readError: setupReadError, reached, elsewhere })
@@ -1796,16 +1802,16 @@ export default function GenAIView({ onError, onStatus }) {
               <button type="button" className="btn-ghost" onClick={leaveSetup}>Back to Studio</button>
             )}
             <span className="genai-tutorial-spacer" />
-            {view.action?.kind !== 'connection' && (
+            {addressMatters && view.action?.kind !== 'connection' && backend.state !== 'unconfigured' && (
               <button type="button" className="btn-ghost" aria-expanded={connectionOpen} onClick={() => setConnectionOpen((open) => !open)}>
                 Connection settings
               </button>
             )}
           </div>
         </section>
-        {(connectionOpen || backend.state === 'unconfigured') && (
+        {((connectionOpen && addressMatters) || backend.state === 'unconfigured') && (
           <section className="panel genai-settings-panel genai-setup-connection" aria-label="Connection settings">
-            {boardCard}
+            {addressCard}
           </section>
         )}
       </div>
@@ -1925,7 +1931,7 @@ export default function GenAIView({ onError, onStatus }) {
               <button type="button" className="btn-tonal" onClick={openSetup}>Update GenAI Studio</button>
             )}
             {(backend.action === 'settings' || backend.action === 'setup') && !settingsOpen && (
-              <button type="button" className="btn-ghost" onClick={() => setSettingsOpen(true)}>Change board address</button>
+              <button type="button" className="btn-ghost" onClick={() => setSettingsOpen(true)}>Change GenAI Studio address</button>
             )}
             {lastError && <button type="button" className="btn-ghost" onClick={() => setLastError(null)}>Dismiss</button>}
           </div>
@@ -1934,7 +1940,7 @@ export default function GenAIView({ onError, onStatus }) {
 
       {(settingsOpen || backend.state === 'unconfigured') && (
         <section className="panel genai-settings-panel" aria-label="GenAI settings">
-          {boardCard}
+          {addressCard}
 
           <SettingsCard id="replies" icon="replies" title="Replies" summary={replySummary(replySettings)}>
             <label className="genai-field">

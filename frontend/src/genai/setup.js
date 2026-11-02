@@ -105,7 +105,7 @@ const PAGES = {
 }
 
 // Each page's main button. run: start the setup job for what is left; open: leave setup
-// for the chat; reconnect: read the board again; connection: show the board address.
+// for the chat; reconnect: read the board again; connection: show GenAI Studio's address.
 const ACTIONS = {
   'no-board': { kind: 'reconnect', label: 'Check again' },
   disconnected: { kind: 'reconnect', label: 'Try connection again' },

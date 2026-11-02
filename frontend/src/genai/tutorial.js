@@ -142,8 +142,8 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     title: 'When something is wrong',
     body:
       'The label at the top left shows whether the board is ready. If GenAI Studio stops, this tab shows its ' +
-      'setup page, where Start GenAI Studio starts it again. Settings holds the board address, and Manage ' +
-      'installation updates or stops GenAI Studio. If a model gets stuck, restart GenAI Studio on the board ' +
+      'setup page, where Start GenAI Studio starts it again. Settings holds GenAI Studio\'s address and Manage ' +
+      'installation, which updates or stops it. If a model gets stuck, restart GenAI Studio on the board ' +
       '(Settings, Troubleshooting says how). Replay this tutorial any time with Tutorial.',
     target: 'status',
     action: 'settings'
