@@ -1210,7 +1210,8 @@ describe('SlotPanel', () => {
       pulled,
       fileSlot(6, { fps: 15 }),
     ]);
-    const looks: Record<string, [string, NeatButtonVariant, ReturnType<NeatIcon['name']> | null]> = {};
+    const looks: Record<string, [string, NeatButtonVariant, ReturnType<NeatIcon['name']> | null]> =
+      {};
     for (const index of [2, 3, 4, 5]) {
       await open(index);
       const main = fixture.debugElement.query(By.css('[neatAsideActions] button')).nativeElement;
