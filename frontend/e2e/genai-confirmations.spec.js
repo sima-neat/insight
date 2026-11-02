@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test'
 const SDK_WEBVIEW_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-downloads'
 
 const LLAMA = 'Llama-3.2-3B-Instruct'
+const LLAMA_1B = 'Llama-3.2-1B-Instruct'
 const QWEN = 'Qwen2.5-VL-3B-Instruct'
 
 function json(route, body, status = 200) {
@@ -18,6 +19,7 @@ async function mockBoard(page) {
   const board = {
     catalog: [
       { name: LLAMA, type: 'chat', sizeBytes: 2_000_000_000 },
+      { name: LLAMA_1B, type: 'chat', sizeBytes: 1_000_000_000 },
       { name: QWEN, type: 'vlm', supportsVision: true, estimatedLoadS: 90, sizeBytes: 3_200_000_000 }
     ],
     loaded: [LLAMA],
@@ -129,6 +131,25 @@ for (const embedded of [false, true]) {
       await expect(ask).toHaveCount(0)
       await expect.poll(() => board.posts).toEqual([{ path: 'models/load', body: { name: QWEN } }])
       await expect(picker).toHaveValue(QWEN)
+    })
+
+    test('a load question is asked again when the board changes what the load unloads', async () => {
+      const picker = ui.getByRole('combobox', { name: 'Model' })
+      const ask = ui.getByRole('alertdialog', { name: 'Load the model' })
+
+      await picker.selectOption(QWEN)
+      await expect(ask).toContainText('Llama 3.2 3B is unloaded first.')
+      // Another client loads a different model while the question is open; the status poll sees it.
+      board.loaded = [LLAMA_1B]
+      await expect(picker).toHaveValue(LLAMA_1B)
+
+      await ask.getByRole('button', { name: 'Load' }).click()
+      await expect(ask).toContainText('Llama 3.2 1B is unloaded first.')
+      expect(board.posts).toEqual([])
+
+      await ask.getByRole('button', { name: 'Load' }).click()
+      await expect(ask).toHaveCount(0)
+      await expect.poll(() => board.posts).toEqual([{ path: 'models/load', body: { name: QWEN } }])
     })
 
     test('deleting a model asks first, with Cancel focused; a click outside cancels', async () => {

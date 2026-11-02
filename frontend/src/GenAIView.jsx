@@ -814,7 +814,7 @@ export default function GenAIView({ onError, onStatus }) {
 
   // Actions that ask first do it in the page: the browser's confirm() is
   // blocked in a sandboxed frame such as an SDK editor tab (#221). A yes calls
-  // the action again with `confirmed`, so it checks what holds by then.
+  // the action again, so it checks what holds by then.
   function askFirst(kind, question, model = null) {
     setConfirmAsk({ kind, model, board: boardGeneration.current, ...question })
   }
@@ -824,7 +824,7 @@ export default function GenAIView({ onError, onStatus }) {
     setConfirmAsk(null)
     if (!acceptedAnswer(ask, yes, boardGeneration.current)) return
     if (ask.kind === 'delete-model') deleteModel(ask.model, true)
-    else if (ask.kind === 'load-model') chooseChatModel(ask.model.name, true)
+    else if (ask.kind === 'load-model') chooseChatModel(ask.model.name, ask.message)
     else if (ask.kind === 'clear-documents') clearAllDocuments(true)
   }
 
@@ -839,7 +839,10 @@ export default function GenAIView({ onError, onStatus }) {
     runModelOp(`Deleting ${friendlyModelName(model.name)}`, 'models/delete', { name: model.name })
   }
 
-  function chooseChatModel(name, confirmed = false) {
+  // `agreedTo` is the question a yes answered. The status poll can change what
+  // a load unloads or keeps while it is open, so a question that now reads
+  // differently is asked again.
+  function chooseChatModel(name, agreedTo = null) {
     const model = chatModels(status).find((m) => m.name === name)
     if (!model || model === chatModel || !allowed.changeChatModel) return
     if (model.supported === false) {
@@ -851,8 +854,9 @@ export default function GenAIView({ onError, onStatus }) {
       requestLoad(model)
       return
     }
-    if (!confirmed) {
-      askFirst('load-model', loadModelQuestion(model, plan), model)
+    const question = loadModelQuestion(model, plan)
+    if (question.message !== agreedTo) {
+      askFirst('load-model', question, model)
       return
     }
     loadChatModel(model)
