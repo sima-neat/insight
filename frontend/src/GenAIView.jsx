@@ -90,6 +90,7 @@ import {
   relayOnSetupBoard,
   requestProblem,
   saveSetupOpen,
+  setupForBoard,
   setupOpenSaved,
   setupView
 } from './genai/setup.js'
@@ -311,7 +312,8 @@ function modelLabel(model) {
   return `${friendlyModelName(model.name)}${model.supportsVision ? ' · sees images' : ''}`
 }
 
-export default function GenAIView({ onError, onStatus }) {
+// selectedBoardGeneration: the board selection Insight's header shows (GET /api/board `generation`).
+export default function GenAIView({ onError, onStatus, selectedBoardGeneration = null }) {
   const [settings, setSettings] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [solutionsOpen, setSolutionsOpen] = useState(false)
@@ -616,18 +618,25 @@ export default function GenAIView({ onError, onStatus }) {
     if (mode === 'workspace' && !tutorialSeen(window.localStorage)) setTutorialStep(0)
   }, [mode])
 
+  // Another board selected in Insight's header: what setup showed belongs to the old one.
+  useEffect(() => {
+    setSetupStatus(null)
+    setSetupReadError(null)
+  }, [selectedBoardGeneration])
+
   // Once GenAI Studio answers, the banner says whether it is out of date for this Insight.
   useEffect(() => {
     if (mode !== 'workspace' || backend.state !== 'ready') return undefined
     let cancelled = false
-    getSetup().then((body) => { if (!cancelled) setSetupStatus(body) }, () => {})
+    getSetup().then((body) => { if (!cancelled && setupForBoard(body, selectedBoardGeneration)) setSetupStatus(body) }, () => {})
     return () => {
       cancelled = true
     }
-  }, [backend.state, mode])
+  }, [backend.state, mode, selectedBoardGeneration])
 
   // The setup page follows the job on the board while it is shown: one read at a time, the
-  // next SETUP_POLL_MS after the last answered, and none that started before a Run or Stop ended.
+  // next SETUP_POLL_MS after the last answered, and none that started before a Run or Stop
+  // ended or another board was selected in Insight's header (the reads then start over).
   const onSetupPage = mode === 'setup'
   useEffect(() => {
     if (!onSetupPage) return undefined
@@ -636,7 +645,12 @@ export default function GenAIView({ onError, onStatus }) {
     const read = () => {
       const writes = setupWrites.current
       getSetup().then(
-        (body) => { if (!cancelled && writes === setupWrites.current) { setSetupStatus(body); setSetupReadError(null) } },
+        (body) => {
+          if (!cancelled && writes === setupWrites.current && setupForBoard(body, selectedBoardGeneration)) {
+            setSetupStatus(body)
+            setSetupReadError(null)
+          }
+        },
         (err) => { if (!cancelled && writes === setupWrites.current) setSetupReadError(requestProblem(err)) }
       ).finally(() => {
         if (cancelled) return
@@ -649,7 +663,7 @@ export default function GenAIView({ onError, onStatus }) {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [onSetupPage, setupRecheck])
+  }, [onSetupPage, setupRecheck, selectedBoardGeneration])
 
   function onTranscriptScroll() {
     const box = transcriptBox.current

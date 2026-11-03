@@ -2723,7 +2723,7 @@ export default function App() {
 
           {tab === 'genai' && (
             <Suspense fallback={<section className="panel"><p className="workspace-empty">Loading GenAI Studio...</p></section>}>
-              <GenAIView onError={setError} onStatus={setUploadStatus} />
+              <GenAIView onError={setError} onStatus={setUploadStatus} selectedBoardGeneration={board?.generation ?? null} />
             </Suspense>
           )}
 

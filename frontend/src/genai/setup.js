@@ -54,7 +54,15 @@ export function relayOnSetupBoard(relayUrl, status) {
     return false
   }
   if (target.mode === 'local') return ['127.0.0.1', 'localhost', '::1'].includes(host)
-  return Boolean(target.host) && host === target.host
+  // URL lowercases a host name; the board target keeps the spelling it was entered with.
+  return Boolean(target.host) && host.toLowerCase() === String(target.host).replace(/^\[|\]$/g, '').toLowerCase()
+}
+
+// Whether a setup state (`body.generation`: the board selection it was read from) belongs to
+// the board Insight's header shows (`boardGeneration`), or a newer one. Unknown counts as yes.
+export function setupForBoard(body, boardGeneration) {
+  if (boardGeneration == null || !body || typeof body.generation !== 'number') return true
+  return body.generation >= boardGeneration
 }
 
 // A failed request to Insight or the board, as the panel shows it: what

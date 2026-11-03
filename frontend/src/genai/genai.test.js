@@ -29,6 +29,7 @@ import {
   relayOnSetupBoard,
   requestProblem,
   saveSetupOpen,
+  setupForBoard,
   setupOpenSaved,
   setupPhase,
   setupStoppable,
@@ -572,6 +573,17 @@ test('setup knows whether the tab connects to the board setup acts on', () => {
   assert.equal(relayOnSetupBoard('not a url', ssh), false)
   assert.equal(relayOnSetupBoard('', ssh), false)
   assert.equal(relayOnSetupBoard('https://192.168.2.3:5000', {}), false)
+  // URL lowercases the host; the board target keeps the case it was entered with.
+  assert.equal(relayOnSetupBoard('https://devkit.local:5000', { target: { mode: 'ssh', host: 'DevKit.Local' } }), true)
+  assert.equal(relayOnSetupBoard('https://[fe80::1]:5000', { target: { mode: 'ssh', host: 'FE80::1' } }), true)
+})
+
+test('a setup state read from a board no longer in Insight\'s header is dropped', () => {
+  assert.equal(setupForBoard({ generation: 3 }, 4), false, 'the previous board')
+  assert.equal(setupForBoard({ generation: 4 }, 4), true)
+  assert.equal(setupForBoard({ generation: 5 }, 4), true, 'a newer selection the header has not shown yet')
+  assert.equal(setupForBoard({ generation: 3 }, null), true, 'the header has not answered yet')
+  assert.equal(setupForBoard({}, 4), true)
 })
 
 test('a failed setup request says what happened and what to do', () => {
