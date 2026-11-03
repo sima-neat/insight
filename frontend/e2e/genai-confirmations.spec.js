@@ -236,7 +236,7 @@ for (const embedded of [false, true]) {
     })
 
     test('opening a SiMaSentry app the model cannot serve asks first; Esc keeps Solutions open', async () => {
-      await ui.getByRole('button', { name: 'SiMaSentry Solutions' }).click()
+      await ui.getByRole('button', { name: 'SiMaSentry apps' }).click()
       const solutions = ui.getByRole('dialog', { name: 'SiMaSentry Solutions' })
       const ask = ui.getByRole('alertdialog', { name: 'Open SiMaSentry-Med' })
 

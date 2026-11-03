@@ -26,6 +26,8 @@
 //   visionAsking  the vision view is waiting for an answer about a picture
 //   visionLoop    the vision view's loop is running
 //   useDocuments  questions are sent with the documents
+//   backendTitle  what the board's state is called, for blockedReason
+//   benchmarkReason  why the board doesn't offer the benchmark, for blockedReason
 //   downloading   a model download runs
 //   hubEnabled    the board allows model downloads (its server.hub.allow_download)
 export function allowedActions(state) {
@@ -71,6 +73,7 @@ export function allowedActions(state) {
     startRecording: canChat && Boolean(s.hasAsr) && !listening,
     stopRecording: Boolean(s.recording),
     newChat: Boolean(s.hasMessages) && !listening,
+    exportChat: Boolean(s.hasMessages),
     readAloud: ready,
     // The system prompt and reply length are read as each request is sent; a
     // running loop keeps asking the same way until it stops.
@@ -100,5 +103,75 @@ export function allowedActions(state) {
     documentTasks: ready && !s.documentTask && !(s.replying && s.useDocuments) && !listening,
     // Reading the database while it is rebuilt would show half of it.
     inspectDocuments: Boolean(s.documentsAvailable) && !s.documentTask
+  }
+}
+
+function notReady(s) {
+  if (!s.usable) return s.backendTitle || 'GenAI Studio is not ready'
+  if (s.modelOp) return 'A model is being changed'
+  if (s.benchmarking) return 'The benchmark is running'
+  return ''
+}
+
+function noChat(s) {
+  return notReady(s) || (s.hasChatModel ? '' : 'Needs a chat model: choose one at the top')
+}
+
+function noPictures(s) {
+  return noChat(s) || (s.sees ? '' : 'Needs a model that sees images')
+}
+
+function previewInTheWay(s) {
+  if (s.cameraOpen) return 'Close the camera panel first'
+  return s.visionOpen ? 'Close the vision view first' : ''
+}
+
+function listeningNow(s) {
+  if (s.recording) return 'Stop recording first'
+  if (s.micOpening) return 'The microphone is opening'
+  return s.transcribing ? 'Your words are being turned into text' : ''
+}
+
+function visionNow(s) {
+  return s.visionAsking || s.visionLoop ? 'The vision view is asking the model' : ''
+}
+
+// What a disabled button says: the first thing that stops the action, '' when nothing does. Covers
+// the actions with a button that has a tooltip, and must turn up something wherever allowedActions
+// says no (activity.test.js walks every state).
+export function blockedReason(action, state) {
+  const s = state || {}
+  switch (action) {
+    case 'exportChat':
+      return s.hasMessages ? '' : 'No messages to export yet'
+    case 'newChat':
+      return listeningNow(s) || (s.hasMessages ? '' : 'This chat is still empty')
+    case 'attachPicture':
+      return noPictures(s)
+    case 'openCamera':
+    case 'openVision':
+      return noPictures(s) || previewInTheWay(s)
+    case 'openBoardCamera':
+      return noPictures(s) || (s.boardCameraAvailable ? '' : "This board can't take pictures") || previewInTheWay(s)
+    case 'startRecording':
+      return noChat(s) || (s.hasAsr ? '' : 'Needs a speech model: choose one in Settings') || listeningNow(s)
+    case 'send':
+      return noChat(s)
+        || (s.replying ? 'Wait for the reply to finish' : '')
+        || listeningNow(s)
+        || visionNow(s)
+        || (s.useDocuments && s.documentTask ? 'The documents are being updated' : '')
+        || (s.hasDraft ? '' : 'Type a question first')
+    case 'openBenchmark':
+      return (s.usable ? '' : notReady(s))
+        || (s.benchmarkAvailable ? '' : s.benchmarkReason || "This board doesn't offer the benchmark")
+        || notReady(s)
+        || (s.replying ? 'Wait for the reply to finish' : '')
+        || listeningNow(s)
+        || previewInTheWay(s)
+        || visionNow(s)
+        || (s.documentTask ? 'The documents are being updated' : '')
+    default:
+      return ''
   }
 }

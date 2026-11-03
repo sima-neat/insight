@@ -41,7 +41,8 @@ import {
   transcribe
 } from './genai/client.js'
 import { languageNames, readAloudSupport } from './genai/speech.js'
-import { allowedActions } from './genai/activity.js'
+import ToolButton from './ToolButton.jsx'
+import { allowedActions, blockedReason } from './genai/activity.js'
 import { activeChatModel, keptChoice, loadPlan, residentLimit, unloadChoice } from './genai/models.js'
 import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
@@ -461,7 +462,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const keepsSeveral = residentLimit(status) > 1
   const sees = Boolean(chatModel && chatModel.supportsVision)
   // What the user may do now: every control and action reads this one table.
-  const allowed = allowedActions({
+  const activity = {
     usable,
     hasChatModel: Boolean(chatModel),
     sees,
@@ -486,8 +487,12 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     boardSnapshot: boardSnapshotting || visionActivity.snapshot,
     visionAsking: visionActivity.asking,
     visionLoop: visionActivity.loop,
-    useDocuments: useDocs && docs.available
-  })
+    useDocuments: useDocs && docs.available,
+    backendTitle: backend.title,
+    benchmarkReason: bench.reason
+  }
+  const allowed = allowedActions(activity)
+  const why = (action) => blockedReason(action, activity)
   const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
   // No model to chat with: the chat offers the recommended one instead.
   const firstModel = usable ? firstModelNeeded(status) : null
@@ -1946,12 +1951,9 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             ))}
           </select>
         </label>
-        {/* The tooltip sits on a wrapper: browsers show none on a disabled button. */}
-        <span className="genai-tooltip-wrap" title="New chat">
-          <button type="button" className="btn-ghost genai-tool genai-new-chat" onClick={newChat} disabled={!allowed.newChat} aria-label="New chat">
-            <Icon d={ICONS.newChat} />
-          </button>
-        </span>
+        <ToolButton label="New chat" blocked={why('newChat')} className="btn-ghost genai-tool genai-new-chat" onClick={newChat}>
+          <Icon d={ICONS.newChat} />
+        </ToolButton>
         <label className={`genai-check${spot('read-aloud')}`} title="Read every reply aloud with the board's speech engine">
           <input type="checkbox" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
           Read replies aloud
@@ -1974,24 +1976,24 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
         </label>
         <span className="genai-header-spacer" />
         <div className="genai-toolbar" role="toolbar" aria-label="GenAI Studio tools">
-          <button type="button" className={`btn-ghost genai-tool${spot('export')}`} onClick={exportChat} disabled={messages.length === 0} aria-label="Export chat" title="Export chat (.log)">
+          <ToolButton label="Export chat" blocked={why('exportChat')} className={`btn-ghost genai-tool${spot('export')}`} onClick={exportChat}>
             <Icon d={ICONS.export} />
-          </button>
-          <button type="button" className={`btn-ghost genai-tool${spot('solutions')}`} onClick={() => setSolutionsOpen(true)} aria-label="SiMaSentry Solutions" title="SiMaSentry Solutions: Med, Safe and Sec demo apps on the loaded model">
+          </ToolButton>
+          <ToolButton label="SiMaSentry apps" className={`btn-ghost genai-tool${spot('solutions')}`} onClick={() => setSolutionsOpen(true)}>
             <Icon d={ICONS.shield} />
-          </button>
-          <button type="button" className={`btn-ghost genai-tool${spot('benchmark')}`} onClick={() => { if (allowed.openBenchmark) setBenchOpen(true) }} disabled={!allowed.openBenchmark} aria-label="Benchmark" title={!usable ? backend.title : bench.available ? 'Benchmark: first token time and tokens per second for the board\'s models' : bench.reason}>
+          </ToolButton>
+          <ToolButton label="Benchmark" blocked={why('openBenchmark')} className={`btn-ghost genai-tool${spot('benchmark')}`} onClick={() => setBenchOpen(true)}>
             <Icon d={ICONS.gauge} />
-          </button>
-          <button type="button" className="btn-ghost genai-tool" onClick={() => setTutorialStep(0)} aria-pressed={step !== null} aria-label="Tutorial" title="Tutorial">
+          </ToolButton>
+          <ToolButton label="Tutorial" className="btn-ghost genai-tool" onClick={() => setTutorialStep(0)} aria-pressed={step !== null}>
             <Icon d={ICONS.help} />
-          </button>
-          <button type="button" className={settingsOpen ? 'btn-tonal genai-tool' : 'btn-ghost genai-tool'} aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)} aria-label="Settings" title="Settings">
+          </ToolButton>
+          <ToolButton label="Settings" className={settingsOpen ? 'btn-tonal genai-tool' : 'btn-ghost genai-tool'} aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>
             <Icon d={ICONS.settings} />
-          </button>
-          <button type="button" className="btn-ghost genai-tool" onClick={toggleFullscreen} aria-label="Full screen" title="Full screen">
+          </ToolButton>
+          <ToolButton label="Full screen" className="btn-ghost genai-tool" onClick={toggleFullscreen}>
             <Icon d={ICONS.fullscreen} />
-          </button>
+          </ToolButton>
         </div>
       </section>
 
@@ -2362,49 +2364,48 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           />
           <div className="genai-composer-tools">
             <span className={`genai-composer-media${spot('media')}`}>
-              <button type="button" className="btn-ghost genai-icon-btn" aria-label="Attach a picture" title={sees ? 'Attach a picture' : 'Needs a model that sees images'} disabled={!allowed.attachPicture} onClick={() => fileInput.current?.click()}>
+              <ToolButton label="Attach a picture" placement="top" blocked={why('attachPicture')} className="btn-ghost genai-icon-btn" onClick={() => fileInput.current?.click()}>
                 <Icon d={ICONS.photo} />
-              </button>
+              </ToolButton>
               {/* A board without its camera says why here, where the board's camera would be. */}
-              <button
-                type="button"
+              <ToolButton
+                label="This browser's camera"
+                placement="top"
+                blocked={why('openCamera')}
+                note={boardCam.available ? '' : `Board camera: ${boardCam.reason}`}
                 className="btn-ghost genai-icon-btn"
-                aria-label="Take a picture with this browser's camera"
-                title={!sees ? 'Needs a model that sees images' : `Take a picture with this browser's camera${boardCam.available ? '' : `. Board camera: ${boardCam.reason}`}`}
-                disabled={!allowed.openCamera}
                 onClick={openCamera}
               >
                 <Icon d={ICONS.camera} />
-              </button>
+              </ToolButton>
               {boardCam.available && (
-                <button type="button" className="btn-ghost genai-icon-btn" aria-label="Take a picture with the board's camera" title={sees ? "Take a picture with a camera plugged into the board" : 'Needs a model that sees images'} disabled={!allowed.openBoardCamera} onClick={openBoardCamera}>
+                <ToolButton label="Board camera" placement="top" blocked={why('openBoardCamera')} className="btn-ghost genai-icon-btn" onClick={openBoardCamera}>
                   <Icon d={ICONS.boardCamera} />
-                </button>
+                </ToolButton>
               )}
-              <button type="button" className={`btn-ghost genai-icon-btn${spot('vision')}`} aria-label="Vision view" title={sees ? 'Vision: the camera full size, ask about it once or in a loop' : 'Needs a model that sees images'} disabled={!allowed.openVision} onClick={openVision}>
+              <ToolButton label="Vision view" placement="top" blocked={why('openVision')} className={`btn-ghost genai-icon-btn${spot('vision')}`} onClick={openVision}>
                 <Icon d={ICONS.vision} />
-              </button>
+              </ToolButton>
             </span>
             <span className="genai-header-spacer" />
-            <button
-              type="button"
+            <ToolButton
+              label={recording ? 'Stop recording' : 'Speak your question'}
+              placement="top"
+              blocked={recording ? '' : why('startRecording')}
               className={`${recording ? 'btn-ghost danger genai-icon-btn' : 'btn-ghost genai-icon-btn'}${spot('mic')}`}
-              aria-label={recording ? 'Stop recording' : 'Speak your question'}
               aria-pressed={recording}
-              title={recording ? 'Stop recording' : chatModel ? 'Speak your question' : 'Needs a chat model: choose one at the top'}
-              disabled={!allowed.startRecording && !allowed.stopRecording}
               onClick={toggleRecording}
             >
               <Icon d={ICONS.mic} />
-            </button>
+            </ToolButton>
             {streaming ? (
-              <button type="button" className="genai-send genai-send-stop" aria-label="Stop the reply" title="Stop the reply" onClick={() => chatAbort.current?.abort()}>
+              <ToolButton label="Stop the reply" placement="top" className="genai-send genai-send-stop" onClick={() => chatAbort.current?.abort()}>
                 <Icon d={ICONS.stop} />
-              </button>
+              </ToolButton>
             ) : (
-              <button type="submit" className="genai-send" aria-label="Send" title="Send" disabled={!allowed.send}>
+              <ToolButton label="Send" type="submit" placement="top" blocked={why('send')} className="genai-send">
                 <Icon d={ICONS.send} />
-              </button>
+              </ToolButton>
             )}
           </div>
         </form>
@@ -3025,9 +3026,9 @@ function VisionView({ model, allowed, busyReason, boardCam, cameras, camera, onC
             </button>
           )}
         </div>
-        <button type="button" className="btn-ghost genai-tool" onClick={onFullscreen} aria-label="Full screen" title="Full screen">
+        <ToolButton label="Full screen" className="btn-ghost genai-tool" onClick={onFullscreen}>
           <Icon d={ICONS.fullscreen} />
-        </button>
+        </ToolButton>
         <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
       </div>
       {!boardCam.available && <p className="hint genai-vision-note">Board camera: {boardCam.reason}</p>}
