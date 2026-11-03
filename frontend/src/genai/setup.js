@@ -83,6 +83,15 @@ export function requestProblem(error) {
   }
 }
 
+// What the GenAI tab shows: 'checking' before the first answer from the tab's address, then the
+// setup page while the user is in setup or no usable GenAI Studio answers (nothing, an error
+// page, an unsupported API), and the chat once one does (`reached`, also while it starts).
+export function tabMode({ inSetup = false, checked = false, reached = false } = {}) {
+  if (inSetup) return 'setup'
+  if (!checked) return 'checking'
+  return reached ? 'workspace' : 'setup'
+}
+
 // Board errors that mean Insight can't reach the selected board at all, not that setup failed.
 const OFFLINE_CODES = new Set(['unreachable', 'auth_failed', 'timeout', 'host_key_changed'])
 

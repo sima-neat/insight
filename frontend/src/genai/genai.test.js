@@ -33,7 +33,8 @@ import {
   setupOpenSaved,
   setupPhase,
   setupStoppable,
-  setupView
+  setupView,
+  tabMode
 } from './setup.js'
 import { languageNames, latinLanguage, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
@@ -449,6 +450,18 @@ test('setup tells not installed, installed but stopped and a disconnected board 
   assert.equal(phase(setupStatus('done', 'done', 'done'), { reached: true, elsewhere: true }), 'elsewhere')
   // An address that answers with an error page or an unsupported API is not ready either.
   assert.equal(phase(setupStatus('done', 'done', 'done'), { unusable: { title: 'x' } }), 'unusable')
+})
+
+test('the chat opens only once a usable GenAI Studio answers', () => {
+  assert.equal(tabMode({}), 'checking')
+  assert.equal(tabMode({ checked: true }), 'setup', 'nothing answers')
+  assert.equal(tabMode({ checked: true, reached: true }), 'workspace')
+  assert.equal(tabMode({ inSetup: true, checked: true, reached: true }), 'setup', 'until Open Studio')
+  assert.equal(tabMode({ inSetup: true }), 'setup', 'a reload during setup')
+  // An address answering with a web page, an HTTP error or an unsupported API is not usable.
+  for (const state of ['error', 'incompatible']) {
+    assert.equal(tabMode({ checked: true, reached: studioAnswers(state) }), 'setup', state)
+  }
 })
 
 test('setup is ready only when the tab can use the GenAI Studio it answers with', () => {

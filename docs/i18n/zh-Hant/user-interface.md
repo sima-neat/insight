@@ -356,7 +356,7 @@ GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、�
 ./run.sh
 ```
 
-當分頁無法連線到 GenAI Studio 時，只會顯示 Insight 所連線開發板（Insight 頁首中顯示的開發板）的設定頁面：在 GenAI Studio 回應之前，不會顯示聊天、模型或設定。頁面列出三個步驟，各附簡短狀態：**Install Neat Apps**（`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`，保留已安裝的 Core 和 Insight；develop 版本的 Insight 會安裝 `apps@develop`）、**Prepare speech and search**（執行一次 `setup.sh`：約 15 分鐘，開發板需要網際網路連線）以及 **Start and connect**（`./run.sh`，在此分頁收到 GenAI Studio 的回應後完成）。主要按鈕就是下一步要做的事：未安裝時為 **Install GenAI Studio**，已安裝但已停止時為 **Start GenAI Studio**，另有 **Continue setup**、失敗後的 **Retry**，以及 **Stop setup** 之後的 **Resume setup**。當 Insight 無法連線到開發板時，頁面會改為顯示開發板已中斷連線；請在 Board 選單中重新連線，再按 **Try connection again**。這些步驟在開發板上以單一工作執行，關閉頁面後仍會繼續，重新載入後會顯示目前進度。失敗的步驟會保持標示，並說明問題和處理方式；數分鐘沒有新輸出的步驟會提示此情況。每個步驟的記錄檔保存在開發板的 `~/.neat-insight/genai-setup/` 中。設定完成後，頁面會顯示 **GenAI Studio is ready**，按 **Open Studio** 即可開啟聊天。警告及其處理方式會收合在同一頁面中；修正設定的警告後，**Run setup again** 會重新執行 `setup.sh` 並重新啟動 GenAI Studio。**Stop GenAI Studio** 會在開發板上停止 GenAI Studio，從 shell 啟動的也一樣。**Connection settings** 只在 GenAI Studio 位址需要處理時出現：自訂位址、指向與 Insight 不同開發板的位址（頁面會提示此情況），或尚未設定位址。在 GenAI Studio 執行時，按 Settings 中 **GenAI Studio address** 的 **Manage installation** 可開啟此頁面來更新、重新執行設定或停止它，按 **Back to Studio** 則返回聊天。若 GenAI Studio 是從與此 Insight 不同的頻道安裝，或是為比開發板上更舊的 Neat Library 建置，就會視為過期：分頁會顯示此狀況（即使 GenAI Studio 正在執行），按 **Update GenAI Studio** 會停止它、安裝相符的 Apps（先前的檔案會移至 `/media/nvme/.prebuilt-apps-backup`，已下載的模型會保留）、重新準備並啟動。若 GenAI Studio 是為同一系列中另一個 Neat Library 建置版本所建置，只會在安裝步驟下方列出警告。
+當分頁無法連線到或無法使用 GenAI Studio 時，只會顯示 Insight 所連線開發板（Insight 頁首中顯示的開發板）的設定頁面：在可用的 GenAI Studio 回應之前，不會顯示聊天、模型或設定。頁面列出三個步驟，各附簡短狀態：**Install Neat Apps**（`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`，保留已安裝的 Core 和 Insight；develop 版本的 Insight 會安裝 `apps@develop`）、**Prepare speech and search**（執行一次 `setup.sh`：約 15 分鐘，開發板需要網際網路連線）以及 **Start and connect**（`./run.sh`，在此分頁收到 GenAI Studio 的回應後完成）。主要按鈕就是下一步要做的事：未安裝時為 **Install GenAI Studio**，已安裝但已停止時為 **Start GenAI Studio**，另有 **Continue setup**、失敗後的 **Retry**，以及 **Stop setup** 之後的 **Resume setup**。當 Insight 無法連線到開發板時，頁面會改為顯示開發板已中斷連線；請在 Board 選單中重新連線，再按 **Try connection again**。這些步驟在開發板上以單一工作執行，關閉頁面後仍會繼續，重新載入後會顯示目前進度。失敗的步驟會保持標示，並說明問題和處理方式；數分鐘沒有新輸出的步驟會提示此情況。每個步驟的記錄檔保存在開發板的 `~/.neat-insight/genai-setup/` 中。設定完成後，頁面會顯示 **GenAI Studio is ready**，按 **Open Studio** 即可開啟聊天。警告及其處理方式會收合在同一頁面中；修正設定的警告後，**Run setup again** 會重新執行 `setup.sh` 並重新啟動 GenAI Studio。**Stop GenAI Studio** 會在開發板上停止 GenAI Studio，從 shell 啟動的也一樣。**Connection settings** 只在 GenAI Studio 位址需要處理時出現：自訂位址、指向與 Insight 不同開發板的位址（頁面會提示此情況），或尚未設定位址。在 GenAI Studio 執行時，按 Settings 中 **GenAI Studio address** 的 **Manage installation** 可開啟此頁面來更新、重新執行設定或停止它，按 **Back to Studio** 則返回聊天。若 GenAI Studio 是從與此 Insight 不同的頻道安裝，或是為比開發板上更舊的 Neat Library 建置，就會視為過期：分頁會顯示此狀況（即使 GenAI Studio 正在執行），按 **Update GenAI Studio** 會停止它、安裝相符的 Apps（先前的檔案會移至 `/media/nvme/.prebuilt-apps-backup`，已下載的模型會保留）、重新準備並啟動。若 GenAI Studio 是為同一系列中另一個 Neat Library 建置版本所建置，只會在安裝步驟下方列出警告。
 
 設定前須將 NVMe 掛載至 `/media/nvme`。Apps 與 Python 虛擬環境安裝於 `/media/nvme/prebuilt-apps`；下載快取與暫存檔案存放於 `/media/nvme/.cache/neat-genai-studio`。
 
@@ -366,10 +366,10 @@ GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、�
 
 - **Not set up**：尚未設定 GenAI Studio 位址，設定頁面會顯示位址欄位。請輸入開發板上 GenAI Studio 的位址，例如 `https://192.168.1.20:5000`。在開發板上，Insight 預設使用本機後端；在 Neat Development Environment 中則預設使用已配對的 DevKit。
 - **Not running**：開發板沒有回應，分頁會顯示設定頁面：已安裝時用 **Start GenAI Studio** 啟動，第一次使用時則由此頁面安裝。或在 **Connection settings** 中檢查位址。
-- **Error**：開發板傳回錯誤，或該位址不是 GenAI Studio。橫幅會顯示開發板的訊息。
+- **Error**：開發板傳回錯誤，或該位址不是 GenAI Studio。設定頁面會顯示開發板的訊息；若問題出在位址，還會顯示 **Connection settings**。
 - **Starting**：後端有回應，但模型伺服器尚未就緒。
 - **Busy**：正在載入模型。聊天與語音會等待載入完成。
-- **Incompatible**：開發板的 GenAI Studio API 版本與此 Insight 不相容。請更新橫幅指定的那一方。
+- **Incompatible**：開發板的 GenAI Studio API 版本與此 Insight 不相容。設定頁面會指出需要更新的那一方。
 - **Ready**：可使用聊天與語音。開發板上載入失敗的語音也會在此回報。
 
 **No model yet**：當開發板沒有聊天或視覺模型（或只有無法執行的模型）時，聊天會直接說明，而不是讓訊息框維持灰色停用。**Download Qwen3 VL 4B** 會將視覺語言模型 `simaai/Qwen3-VL-4B-Instruct-Autoround-a16w4` 下載到開發板，並在按鈕下方顯示進度，然後載入模型；開發板查詢到下載大小後，按鈕會顯示該大小，若開發板的可用空間比它小則會發出警告。**Browse models** 會開啟 **Settings** 中 **Models** 的 Hugging Face 搜尋，列出開發板可下載的模型。若開發板不允許下載，聊天會提示在開發板上 GenAI Studio 的 `config.local.yaml` 中設定 `server.hub.allow_download: true`，然後重新啟動 GenAI Studio；若開發板無法連線到 Hugging Face，聊天也會說明，**Check again** 可重新檢查。如果 Hugging Face 已將模型改名，下載失敗時會顯示新的 ID，並提議改為下載該模型。

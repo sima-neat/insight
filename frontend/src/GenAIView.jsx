@@ -92,7 +92,8 @@ import {
   saveSetupOpen,
   setupForBoard,
   setupOpenSaved,
-  setupView
+  setupView,
+  tabMode
 } from './genai/setup.js'
 
 const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
@@ -438,13 +439,11 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
 
   const backend = deriveBackendState({ health, status, busyOp, lastError })
   const usable = canUseModels(backend.state)
-  // Something answers at the tab's address: the chat can open and its banner says what is wrong.
+  // Something answers at the tab's address, maybe not as a GenAI Studio this tab can use.
   const answers = Boolean(health) && !offersSetup(backend.state)
   // That answer is a GenAI Studio this tab can use (or one still starting): setup is done.
   const reached = Boolean(health) && studioAnswers(backend.state)
-  // The tab shows only the setup page while nothing answers, and while the user is in setup;
-  // the chat once something answers. Before the first answer, the setup page checks.
-  const mode = setupOpen || (health && !answers) ? 'setup' : health ? 'workspace' : 'checking'
+  const mode = tabMode({ inSetup: setupOpen, checked: Boolean(health), reached })
   const docs = documentsSupport(health)
   const bench = benchmarkSupport(health)
   const boardCam = boardCameraSupport(health)
