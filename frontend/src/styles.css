@@ -3508,6 +3508,20 @@ button:disabled {
   color: #8f2f45;
 }
 
+/* ConfirmDialog: above the full-window GenAI views (z-index 1000), which ask too. */
+.confirm-backdrop {
+  z-index: 1100;
+}
+
+/* Its own text color: inside the dark Solutions view the card would inherit near-white text. */
+.confirm-card {
+  color: var(--ink);
+}
+
+.confirm-card:focus {
+  outline: none;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
