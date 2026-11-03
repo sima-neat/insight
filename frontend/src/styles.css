@@ -3572,7 +3572,7 @@ button:disabled {
   z-index: 1100;
 }
 
-/* Its own text color: inside the dark Solutions view the card would inherit near-white text. */
+/* Its own text color, so it stays dark over whatever view it opens in. */
 .confirm-card {
   color: var(--ink);
 }
@@ -5724,7 +5724,7 @@ button:disabled {
   background: var(--bg);
 }
 
-/* SiMaSentry Solutions: a full-window launcher, then the chosen app. */
+/* SiMaSentry Solutions: the launcher is a panel like Documents; a chosen app fills the window. */
 .genai-solutions {
   position: fixed;
   inset: 0;
@@ -5742,95 +5742,83 @@ button:disabled {
   background: #0b1018;
 }
 
-.genai-solutions-grid {
-  flex: 1;
-  overflow-y: auto;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 10px;
-  padding: 32px 16px;
-  text-align: center;
-}
-
-.genai-solutions-grid h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 30px;
-}
-
-.genai-solutions-grid h2 span {
-  background: linear-gradient(90deg, #2fd3b4, #58a6ff);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.genai-solutions-grid p {
-  margin: 0;
-  color: #a9b6c6;
+/* Above the cards, which are positioned and would scroll over it. */
+.genai-solutions-top {
+  z-index: 1;
 }
 
 .genai-solutions-model b {
-  color: #e8eef6;
+  color: var(--ink);
 }
 
 .genai-solutions-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
-  justify-content: center;
-  gap: 18px;
-  width: 100%;
-  margin-top: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
 }
 
 .genai-solutions-card {
   position: relative;
   display: grid;
-  justify-items: center;
-  gap: 8px;
-  padding: 22px 18px;
-  border: 1px solid #253244;
-  border-radius: 18px;
-  background: #121a26;
+  align-content: start;
+  gap: 12px;
+  padding: 12px 12px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
   color: inherit;
   font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: border-color 0.15s, transform 0.15s;
 }
 
 .genai-solutions-card:hover,
 .genai-solutions-card:focus-visible {
-  border-color: #2fd3b4;
+  border-color: var(--accent);
   transform: translateY(-2px);
 }
 
-.genai-solutions-card img {
-  width: 96px;
-  height: 96px;
+/* A tinted tile: the Med and Safe icons are white and would fade into a white card. */
+.genai-solutions-icon {
+  display: flex;
+  justify-content: center;
+  padding: 18px 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-accent);
+}
+
+.genai-solutions-icon img {
+  width: 112px;
+  height: 112px;
   object-fit: contain;
 }
 
 .genai-solutions-name {
+  padding: 0 6px;
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
+  color: #274155;
 }
 
 .genai-solutions-summary {
+  padding: 0 6px;
   font-size: 13px;
-  color: #a9b6c6;
+  line-height: 1.45;
+  color: var(--ink-soft);
 }
 
 .genai-solutions-badge {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  padding: 2px 8px;
+  top: 20px;
+  right: 20px;
+  padding: 3px 9px;
   border-radius: 999px;
-  background: #3a2a12;
-  color: #f2c46d;
-  font-size: 11px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .genai-solutions-actions {
@@ -5846,6 +5834,18 @@ button:disabled {
   color: #e8eef6;
   border-color: #253244;
   text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  .genai-solutions-top {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  .genai-bench-top.genai-solutions-top p {
+    order: 1;
+    flex-basis: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
