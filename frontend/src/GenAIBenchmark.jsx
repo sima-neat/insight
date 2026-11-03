@@ -276,7 +276,7 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
   const upNext = chosen.slice(current + 1)
 
   return (
-    <div className="genai-bench" role="dialog" aria-modal="true" aria-label="Benchmark">
+    <div className="genai-bench genai-bench-guided" role="dialog" aria-modal="true" aria-label="Benchmark">
       <div className="genai-bench-top">
         <h2>Benchmark</h2>
         <button type="button" className="btn-ghost" onClick={onClose} disabled={running} title={running ? 'Stop the benchmark first' : 'Close (Esc)'}>Close</button>
@@ -379,7 +379,7 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
         {note && <p className="hint">{note}</p>}
 
         {rows.length > 0 && (running || reviewing) && (
-          <section className="genai-bench-results" aria-label="Results">
+          <section className="genai-bench-report" aria-label="Results">
             <h3 className={running ? 'genai-bench-subtitle' : 'genai-bench-title'}>{running ? 'Results so far' : 'Results'}</h3>
             {summary && <p className="genai-bench-lead">{summary}</p>}
             {rows.map((r) => <ResultCard key={r.model} row={r} measured={measured} />)}

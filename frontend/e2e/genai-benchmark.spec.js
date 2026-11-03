@@ -35,7 +35,7 @@ async function mockBoard(page, { loaded = [LLAMA], holdRun = false } = {}) {
       return json(route, { running: false, done: 5, total: 5, summary, prompt: 'standard', runs: [{ ttftMs: 820, tps: 14.2, tokens: 128 }] })
     }
     if (path === 'settings') return json(route, { url: 'https://192.168.1.20:5000' })
-    if (path === 'health') return json(route, { ok: true, api_version: 1, model_server: { reachable: true }, features: { benchmark: true } })
+    if (path === 'health') return json(route, { ok: true, api_version: 1, model_server: { reachable: true }, features: { benchmark: true, rag: true } })
     if (path === 'models/status') {
       return json(route, {
         catalog: [{ name: LLAMA, type: 'chat' }, { name: QWEN, type: 'vlm', supportsVision: true, estimatedLoadS: 90 }],
@@ -44,6 +44,7 @@ async function mockBoard(page, { loaded = [LLAMA], holdRun = false } = {}) {
       })
     }
     if (path === 'rag/status') return json(route, { database: true, service: 'ok', sections: 3 })
+    if (path === 'rag/inspect') return json(route, { exists: true, meta: { input: 'guide.md' }, documents: [{ text: 'A section', metadata: { heading: 'Intro' } }] })
     return json(route, { error: 'not part of this test' }, 404)
   })
   return board
@@ -173,4 +174,21 @@ test('running shows progress and the reply, and Stop ends it', async ({ page }) 
   await expect(panel.getByRole('button', { name: 'Run benchmark' })).toBeVisible()
   await expect(panel.getByText('Benchmark stopped.')).toBeVisible()
   expect(posted(board, 'benchmark/stop').length).toBeGreaterThan(0)
+})
+
+// Documents shares the panel's rules, so the Benchmark page's own look must stay on the Benchmark page.
+test('the Documents panel keeps its own layout', async ({ page }) => {
+  await mockBoard(page)
+  await openBenchmark(page)
+  await page.getByRole('dialog', { name: 'Benchmark' }).getByRole('button', { name: 'Close' }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('region', { name: 'Documents' }).getByRole('button', { name: 'View documents' }).click()
+
+  const panel = page.getByRole('dialog', { name: 'Documents on the board' })
+  await expect(panel.locator('.genai-bench-body')).toHaveCSS('max-width', '1000px')
+  await expect(panel.locator('.genai-bench-top p')).toHaveCSS('font-size', '13px')
+  await expect(panel.locator('.genai-bench-top p')).toHaveCSS('margin-top', '0px')
+  await expect(panel.getByRole('region', { name: 'Summary' })).toHaveCSS('border-top-width', '1px')
+  await expect(panel.getByRole('region', { name: 'Sections' })).toHaveCSS('padding-top', '16px')
+  await expect(panel.locator('.genai-bench-results-head')).toHaveCSS('display', 'flex')
 })

@@ -5866,7 +5866,6 @@ button:disabled {
 .genai-bench-top {
   position: sticky;
   top: 0;
-  z-index: 1;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -5876,19 +5875,68 @@ button:disabled {
 }
 
 .genai-bench-top h2 {
-  flex: 1;
   margin: 0;
   font-family: var(--font-display);
   font-size: 20px;
 }
 
+.genai-bench-top p {
+  flex: 1;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
 .genai-bench-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
-  max-width: 760px;
+  max-width: 1000px;
   margin: 0 auto;
-  padding: 24px 16px 40px;
+  padding: 20px 16px 40px;
+}
+
+.genai-bench-live,
+.genai-bench-results {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.genai-bench-live {
+  display: grid;
+  gap: 8px;
+}
+
+.genai-bench-results {
+  display: grid;
+  gap: 14px;
+  overflow-x: auto;
+}
+
+.genai-bench-results-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.genai-bench-results-head h3 {
+  margin: 0;
+}
+
+/* The Benchmark page; Documents and the Vision view share the rules above. */
+.genai-bench-guided .genai-bench-top {
+  z-index: 1;
+}
+
+.genai-bench-guided .genai-bench-top h2 {
+  flex: 1;
+}
+
+.genai-bench-guided .genai-bench-body {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 760px;
+  padding-top: 24px;
 }
 
 .genai-bench-title {
@@ -5909,12 +5957,12 @@ button:disabled {
   font-size: 14px;
 }
 
-.genai-bench h4 {
+.genai-bench-guided h4 {
   margin: 0;
   font-size: 15px;
 }
 
-.genai-bench .hint {
+.genai-bench-guided .hint {
   margin: 0;
 }
 
@@ -6121,7 +6169,7 @@ button:disabled {
   white-space: pre-wrap;
 }
 
-.genai-bench-results {
+.genai-bench-report {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
