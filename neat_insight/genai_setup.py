@@ -10,8 +10,8 @@ on the board, and reinstalling it here would replace the server that started the
 GenAI Studio needs the Neat Library (Core), so a board without it is told to install
 Apps with its dependencies itself.
 
-The Apps installed is the channel of this Insight (a develop build installs
-`apps@develop`, any other build `apps` from main), so the tab and GenAI Studio come
+The Apps installed is the channel of this Insight (a release or main build installs
+`apps` from main, any other branch build `apps@develop`), so the tab and GenAI Studio come
 from the same line. A GenAI Studio from another channel, or one built for an older
 Neat Library than the board has, counts as not installed: the install step offers to
 replace it, and the job stops GenAI Studio and installs, prepares and starts it again.
@@ -66,13 +66,16 @@ MANUAL_COMMANDS = {
 
 
 def insight_channel() -> str:
-    """This Insight's channel from its package version: `0.0.0+develop.<sha>` is develop;
-    main, a release or an unknown build is main."""
+    """This Insight's channel from its package version: a release (`0.0.10`), a main build
+    (`0.0.0+main.<sha>`) or an unknown build is main; every other branch build, develop
+    (`0.0.0+develop.<sha>`) or a feature branch cut from it (`0.0.0+225.genai.setup.flow.<sha>`),
+    is develop."""
     try:
         version = metadata.version("neat-insight")
     except metadata.PackageNotFoundError:
         return "main"
-    return "develop" if version.partition("+")[2].split(".")[0] == "develop" else "main"
+    local = version.partition("+")[2]
+    return "main" if not local or local.rsplit(".", 1)[0] in ("main", "unknown") else "develop"
 
 
 def apps_target(channel=None) -> str:
