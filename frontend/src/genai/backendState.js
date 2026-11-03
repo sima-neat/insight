@@ -8,6 +8,12 @@ export const SUPPORTED_API_VERSIONS = { min: 1, max: 1 }
 
 export const START_COMMAND = './run.sh'
 
+// GenAI Studio's /health always answers with a boolean `ok` and a `model_server` object, also
+// while its model server is still starting.
+function studioHealthShape(body) {
+  return typeof body.ok === 'boolean' && Boolean(body.model_server) && typeof body.model_server === 'object'
+}
+
 export function checkApiVersion(health) {
   const version = health ? health.api_version : undefined
   if (version === undefined || version === null) return { supported: true, version: null }
@@ -63,8 +69,9 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     }
   }
   // Something answered, so it is running; it just isn't a healthy GenAI Studio.
-  // A reply that isn't JSON (a web page, even with HTTP 200) is not the Studio.
-  if (health.unreadable) {
+  // A reply that isn't JSON (a web page, even with HTTP 200) is not the Studio, nor is JSON
+  // without GenAI Studio's health fields (its /health always has `ok` and `model_server`).
+  if (health.unreadable || (health.httpStatus === 200 && !studioHealthShape(body))) {
     return {
       state: 'error',
       title: "This address doesn't answer like GenAI Studio",

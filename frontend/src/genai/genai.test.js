@@ -125,6 +125,12 @@ test('backend state: a board that answers with an error is running, not down', (
   assert.equal(studioError.state, 'error')
   assert.match(studioError.title, /answered with an error \(HTTP 500\)/)
   assert.equal(studioError.detail, 'Internal error in GenAI Studio')
+  // JSON that isn't GenAI Studio's health reply is not a GenAI Studio starting up.
+  for (const body of [{}, { status: 'ok' }, { ok: true }, { ok: false, model_server: 'down' }]) {
+    const other = deriveBackendState({ health: { httpStatus: 200, body } })
+    assert.deepEqual([other.state, other.title, other.action], ['error', "This address doesn't answer like GenAI Studio", 'settings'], JSON.stringify(body))
+  }
+  assert.equal(deriveBackendState({ health: { httpStatus: 200, body: { ok: false, model_server: { reachable: false } } } }).state, 'starting')
   const htmlPage = deriveBackendState({ health: { httpStatus: 200, body: {}, unreadable: true } })
   assert.equal(htmlPage.state, 'error')
   assert.equal(htmlPage.action, 'settings')

@@ -1647,6 +1647,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // shows is dropped, as for the reads.
   async function setupRequest(kind, call, slowAfter = SLOW_REQUEST_MS) {
     openSetup()
+    const board = selectedBoard.current
     setSetupBusy(kind)
     setSetupError(null)
     setSetupSlow(false)
@@ -1656,7 +1657,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
       const result = await call()
       if (setupForBoard(result, selectedBoard.current)) setSetupStatus(result)
     } catch (err) {
-      setSetupError(requestProblem(err))
+      // A failure on a board the header no longer shows is that board's, not this page's.
+      if (selectedBoard.current === board) setSetupError(requestProblem(err))
     } finally {
       setupWrites.current += 1
       clearTimeout(slow)
