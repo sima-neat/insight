@@ -81,7 +81,7 @@ import {
 import { STATE_LABELS, addressSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './settingsCards.js'
 import { LOOP_PAUSE_MS, VISION_PRESETS, createVisionLoop, pause } from './visionLoop.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
-import { allowedActions } from './activity.js'
+import { allowedActions, blockedReason } from './activity.js'
 import { anySignal, closedTicket, createBoardSession } from './boardSession.js'
 import { benchProgress, benchmarkCsv, benchmarkSupport, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, BENCH_LIMITS } from './benchmark.js'
 
@@ -1576,4 +1576,29 @@ test('a model row: its kind, size and whether it is in use', () => {
   assert.equal(modelRow({ ...small, supported: false }, STATUS).state.key, 'unsupported')
   // Hugging Face search results type their models llm, vlm or asr.
   assert.deepEqual(['llm', 'vlm', 'asr', undefined].map((type) => modelKind({ type }).label), ['Chat', 'Vision', 'Speech', 'Chat'])
+})
+
+test('a button that allowedActions turns off always says why, and one it allows says nothing', () => {
+  const flags = ['usable', 'hasChatModel', 'sees', 'hasAsr', 'hasMessages', 'hasDraft', 'cameraOpen', 'visionOpen', 'replying',
+    'recording', 'micOpening', 'transcribing', 'modelOp', 'benchmarking', 'documentTask', 'documentsAvailable', 'benchmarkAvailable',
+    'boardCameraAvailable', 'visionAsking', 'visionLoop', 'useDocuments']
+  const actions = ['exportChat', 'newChat', 'attachPicture', 'openCamera', 'openBoardCamera', 'openVision', 'startRecording', 'send', 'openBenchmark', 'toggleDocuments']
+  for (let bits = 0; bits < 2 ** flags.length; bits += 1) {
+    const state = Object.fromEntries(flags.map((flag, i) => [flag, Boolean(bits & (1 << i))]))
+    const allowed = allowedActions(state)
+    for (const action of actions) {
+      if (allowed[action] === (blockedReason(action, state) === '')) continue
+      assert.fail(`${action}: allowed ${allowed[action]}, reason "${blockedReason(action, state)}" in ${JSON.stringify(state)}`)
+    }
+  }
+})
+
+test('a disabled button names the first thing in the way', () => {
+  const ready = { usable: true, hasChatModel: true, sees: true, hasAsr: true, hasMessages: true, hasDraft: true, benchmarkAvailable: true, boardCameraAvailable: true }
+  assert.equal(blockedReason('send', { ...ready, usable: false, backendTitle: 'GenAI Studio is starting' }), 'GenAI Studio is starting')
+  assert.equal(blockedReason('attachPicture', { ...ready, sees: false }), 'Needs a vision model')
+  assert.equal(blockedReason('openVision', { ...ready, cameraOpen: true }), 'Close the camera panel first')
+  assert.equal(blockedReason('send', { ...ready, hasDraft: false }), 'Type a question first')
+  assert.equal(blockedReason('exportChat', { ...ready, hasMessages: false }), 'No messages to export yet')
+  assert.equal(blockedReason('openBenchmark', { ...ready, benchmarkAvailable: false, benchmarkReason: 'Update Apps on the board.' }), 'Update Apps on the board.')
 })

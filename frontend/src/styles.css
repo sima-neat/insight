@@ -665,6 +665,14 @@ input {
   font-size: 13px;
 }
 
+/* Our own arrow: the browser's sits against the border. Its inset matches the text's on the left. */
+select {
+  appearance: none;
+  padding-right: 31px;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%2340596d' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m2.5 4.5 3.5 3.5 3.5-3.5'/%3E%3C/svg%3E") no-repeat right 11px center / 12px;
+  text-overflow: ellipsis;
+}
+
 .media-list {
   display: grid;
   gap: 6px;
@@ -5320,13 +5328,43 @@ button:disabled {
   font-size: 0.9em;
 }
 
-.genai-tooltip-wrap {
+.tip-anchor {
   display: inline-flex;
 }
 
-/* Let the wrapper receive the hover (and show "New chat") while the button is disabled. */
-.genai-tooltip-wrap > button:disabled {
+/* ToolButton's tooltip, above the full-window GenAI views (z-index 1000). */
+.tip {
+  position: fixed;
+  z-index: 1200;
+  width: max-content;
+  max-width: 260px;
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
   pointer-events: none;
+}
+
+.tip-note {
+  display: block;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+/* Looks like button:disabled; aria-disabled keeps it focusable for its tooltip. */
+.tip-anchor > button[aria-disabled='true'] {
+  opacity: 0.52;
+  cursor: default;
+  transform: none;
+}
+
+.tip-anchor > .genai-send[aria-disabled='true'] {
+  opacity: 0.3;
 }
 
 .genai-new-chat {
@@ -5693,7 +5731,7 @@ button:disabled {
   border-radius: 50%;
 }
 
-.genai-composer .genai-icon-btn:hover:not(:disabled) {
+.genai-composer .genai-icon-btn:hover:not([aria-disabled='true']) {
   background: var(--surface-soft);
 }
 
@@ -7717,8 +7755,28 @@ button:disabled {
   margin: 2px 0 0;
 }
 
+/* One height for all three tabs, so switching between them moves nothing (issue #231). */
 .assign-dialog-card {
   width: min(560px, 100%);
+  height: min(650px, calc(100dvh - 24px));
+  display: flex;
+  flex-direction: column;
+}
+
+.assign-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The side padding leaves room for the focus ring, which the scrolling box would cut off. */
+.assign-panel-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -3px;
+  padding: 0 3px;
+  overflow-y: auto;
 }
 
 .assign-dialog-card .media-list {
@@ -7786,6 +7844,7 @@ button:disabled {
 
 .pull-form {
   display: grid;
+  align-content: start;
   gap: 8px;
 }
 
