@@ -1,4 +1,4 @@
-import { breadcrumbs, listFolder, playableCount, searchFolder, streamableOnly } from './mediaTree.js'
+import { MEDIA_ROOT_LABEL, breadcrumbs, listFolder, playableCount, searchFolder, streamableOnly } from './mediaTree.js'
 
 function FolderIcon() {
   return (
@@ -23,13 +23,14 @@ function plural(count, word, pluralForm = `${word}s`) {
 //   onSelect        (filePath) => void
 //   renderFileLead  optional (filePath) => node placed before the file name (the delete checkbox)
 //   fileRowClass    optional (filePath) => extra class for the row ('selected' for checked rows)
+//   heading         optional node for a header row, which then holds the count too
 //   idPrefix        test-id prefix so the two instances can be told apart
 //   showUnsupported list files Insight cannot stream, greyed and tagged, so they can still be
 //                   previewed or deleted; off by default, because the assign dialog must not
 //                   offer them. Without them, a folder with nothing streamable inside is greyed.
 export default function FolderBrowser({
   tree, folder, onNavigate, filter, onFilterChange, selectedPath, onSelect,
-  renderFileLead, fileRowClass, idPrefix = 'media', showUnsupported = false,
+  renderFileLead, fileRowClass, heading, idPrefix = 'media', showUnsupported = false,
 }) {
   const crumbs = breadcrumbs(folder)
   const query = (filter || '').trim()
@@ -38,7 +39,7 @@ export default function FolderBrowser({
   const visibleFiles = showUnsupported ? listing.files : streamableOnly(listing.files)
   const found = query ? searchFolder(tree, folder, query) : []
   const matches = showUnsupported ? found : streamableOnly(found)
-  const folderLabel = folder ? folder.split('/').pop() : 'Media Root'
+  const folderLabel = folder ? folder.split('/').pop() : MEDIA_ROOT_LABEL
   const countText = query
     ? `${plural(matches.length, 'match', 'matches')} in ${folderLabel}`
     : plural(playableCount(tree, folder), 'video')
@@ -66,8 +67,13 @@ export default function FolderBrowser({
     )
   }
 
+  const count = (
+    <p className="meta-count" data-testid={`${idPrefix}-count`} title={query ? undefined : 'Streamable videos in this folder and its subfolders'}>{countText}</p>
+  )
+
   return (
     <div className="folder-browser" data-testid={`${idPrefix}-browser`} data-folder={folder}>
+      {heading && <div className="media-card-head">{heading}{count}</div>}
       <div className="folder-nav">
         <nav className="breadcrumb" aria-label="Current folder" data-testid={`${idPrefix}-breadcrumb`}>
           {crumbs.map((crumb, index) => {
@@ -83,7 +89,7 @@ export default function FolderBrowser({
           })}
         </nav>
       </div>
-      <p className="meta-count" data-testid={`${idPrefix}-count`} title={query ? undefined : `Streamable videos in ${folderLabel} and its subfolders`}>{countText}</p>
+      {!heading && count}
       <div className="media-toolbar">
         <input
           className="search-input"
