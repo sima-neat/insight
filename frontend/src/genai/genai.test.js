@@ -83,7 +83,7 @@ import { LOOP_PAUSE_MS, VISION_PRESETS, createVisionLoop, pause } from './vision
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
 import { allowedActions } from './activity.js'
 import { anySignal, closedTicket, createBoardSession } from './boardSession.js'
-import { benchProgress, benchmarkCsv, benchmarkSupport, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, defaultChoice, firstWordVerdict, resultBadge, resultsSummary, settingsText, speedVerdict, wordsPerSecondText, BENCH_LIMITS } from './benchmark.js'
+import { benchProgress, benchmarkCsv, benchmarkSupport, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, defaultChoice, firstWordTime, firstWordVerdict, resultBadge, resultsSummary, settingsText, speedVerdict, wordsPerSecondText, BENCH_LIMITS } from './benchmark.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -1592,6 +1592,8 @@ test('the advanced options summary says what a run sends', () => {
 })
 
 test('benchmark labels say whether a number is good', () => {
+  assert.deepEqual(firstWordTime(63.18), { value: '63', unit: 'ms' })
+  assert.deepEqual(firstWordTime(1640), { value: '1.6', unit: 'seconds' })
   assert.equal(firstWordVerdict(999).label, 'Feels instant')
   assert.equal(firstWordVerdict(1000).label, 'A short pause')
   assert.equal(firstWordVerdict(3000).label, 'A short pause')

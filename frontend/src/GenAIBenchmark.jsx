@@ -10,6 +10,7 @@ import {
   benchmarkRequest,
   comparisonRows,
   defaultChoice,
+  firstWordTime,
   firstWordVerdict,
   formatNumber,
   resultBadge,
@@ -480,6 +481,7 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
 function ResultCard({ row, measured }) {
   const badge = row.failed ? '' : resultBadge(row, measured)
   const firstWord = row.failed ? null : firstWordVerdict(row.ttftMean)
+  const wait = row.failed ? null : firstWordTime(row.ttftMean)
   const speed = row.failed ? null : speedVerdict(row.tpsMean)
   return (
     <article className="genai-bench-card">
@@ -492,7 +494,7 @@ function ResultCard({ row, measured }) {
           <div className="genai-bench-pair">
             <div className="genai-bench-metric">
               <span className="genai-bench-label">Time to first word</span>
-              <span className="genai-bench-number">{formatNumber(row.ttftMean / 1000)} <small>seconds</small></span>
+              <span className="genai-bench-number">{wait.value} <small>{wait.unit}</small></span>
               <span className={`genai-bench-chip ${firstWord.tone}`}>{firstWord.label}</span>
               <span className="hint">How long you wait before the reply starts.</span>
             </div>

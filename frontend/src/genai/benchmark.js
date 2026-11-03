@@ -81,6 +81,12 @@ export function speedVerdict(tps) {
   return { label: 'Slower than you can read', tone: 'warn' }
 }
 
+// A board can answer within tens of milliseconds, which seconds would round
+// to 0.1 or 0.0.
+export function firstWordTime(ms) {
+  return ms < INSTANT_MS ? { value: formatNumber(ms, 0), unit: 'ms' } : { value: formatNumber(ms / 1000), unit: 'seconds' }
+}
+
 export function wordsPerSecondText(tps) {
   const words = Math.round(tps * 0.75)
   if (words < 1) return 'Less than 1 word a second.'

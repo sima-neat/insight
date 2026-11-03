@@ -88,7 +88,7 @@ test('the defaults run without changing anything, and each number is explained',
   expect(posted(board, 'models/load')).toEqual([])
   expect(posted(board, 'benchmark/run')).toEqual([{ path: 'benchmark/run', body: { model: LLAMA, num_samples: 5, max_new_tokens: 128, prompt: '' } }])
 
-  await expect(panel.getByText('0.8 seconds')).toBeVisible()
+  await expect(panel.locator('.genai-bench-number').first()).toHaveText('820 ms')
   await expect(panel.getByText('Feels instant', { exact: true })).toBeVisible()
   await expect(panel.getByText('14.2 tokens/s')).toBeVisible()
   await expect(panel.getByText('Faster than you can read')).toBeVisible()
