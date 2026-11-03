@@ -111,8 +111,8 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     id: 'benchmark',
     title: 'Measure the speed',
     body:
-      'The gauge opens the benchmark: choose one or more models, the number of runs and the reply length, and ' +
-      'compare time to first token and tokens per second. Download the results as CSV or JSON.',
+      'The gauge opens the benchmark: it times how long a model takes to start replying and how fast the reply ' +
+      'comes. The defaults are fine, so just run it. Download the results as CSV or JSON.',
     target: 'benchmark',
     action: null
   })

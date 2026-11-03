@@ -6000,7 +6000,6 @@ button:disabled {
   padding: 20px 16px 40px;
 }
 
-.genai-bench-config,
 .genai-bench-live,
 .genai-bench-results {
   padding: 16px;
@@ -6009,92 +6008,9 @@ button:disabled {
   background: var(--surface);
 }
 
-.genai-bench-config {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 16px;
-}
-
-.genai-bench-models {
-  flex-basis: 100%;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.genai-bench-models legend {
-  margin-bottom: 6px;
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.genai-bench-models label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  white-space: nowrap;
-}
-
-.genai-bench-models .hint {
-  margin: 0;
-}
-
-.genai-bench-field {
-  display: grid;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink-soft);
-}
-
-.genai-bench-field input {
-  width: 110px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  font: inherit;
-  font-weight: 400;
-  color: var(--ink);
-}
-
-.genai-bench-prompt {
-  flex: 1;
-  min-width: 220px;
-}
-
-.genai-bench-prompt input {
-  width: 100%;
-}
-
-.genai-bench-wide {
-  flex-basis: 100%;
-  margin: 0;
-}
-
 .genai-bench-live {
   display: grid;
   gap: 8px;
-}
-
-.genai-bench-phase {
-  margin: 0;
-  font-weight: 600;
-}
-
-.genai-bench-text {
-  max-height: 160px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 10px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  font-size: 12px;
-  white-space: pre-wrap;
 }
 
 .genai-bench-results {
@@ -6113,33 +6029,285 @@ button:disabled {
   margin: 0;
 }
 
-.genai-bench-bars {
-  display: grid;
-  gap: 6px;
+/* The Benchmark page; Documents and the Vision view share the rules above. */
+.genai-bench-guided .genai-bench-top {
+  z-index: 1;
 }
 
-.genai-bench-bar {
-  display: grid;
-  grid-template-columns: minmax(90px, 160px) 1fr minmax(90px, auto);
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
+.genai-bench-guided .genai-bench-top h2 {
+  flex: 1;
 }
 
-.genai-bench-track {
-  height: 12px;
-  border-radius: 6px;
+.genai-bench-guided .genai-bench-body {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 760px;
+  padding-top: 24px;
+}
+
+.genai-bench-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.genai-bench-subtitle {
+  margin: 8px 0 0;
+  font-size: 15px;
+}
+
+.genai-bench-lead {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
+.genai-bench-guided h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.genai-bench-guided .hint {
+  margin: 0;
+}
+
+.genai-bench-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.genai-bench-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.genai-bench-explain {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   background: var(--surface-soft);
 }
 
-.genai-bench-track div {
-  height: 100%;
-  border-radius: 6px;
-  background: var(--accent);
+.genai-bench-explain p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
 }
 
-.genai-bench-track div.best {
-  background: var(--ok);
+.genai-bench-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.genai-bench-models {
+  gap: 8px;
+}
+
+.genai-bench-models legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 0;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.genai-bench-models label,
+.genai-bench-next {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
+
+.genai-bench-models label {
+  cursor: pointer;
+}
+
+.genai-bench-models input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.genai-bench-models label.chosen {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.genai-bench-chip {
+  flex: none;
+  justify-self: start;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.genai-bench-chip.ok {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.genai-bench-chip.warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.genai-bench-chip.best {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.genai-bench-more {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.genai-bench-more summary {
+  min-height: 44px;
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.genai-bench-more summary span {
+  margin-left: 6px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.genai-bench-advanced {
+  display: grid;
+  gap: 14px;
+  padding: 4px 14px 14px;
+}
+
+.genai-bench-field {
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.genai-bench-field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.genai-bench-field small {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.genai-bench-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+/* White on --accent is 6.6:1. */
+.genai-bench-run {
+  min-height: 44px;
+  padding: 9px 22px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+}
+
+.genai-bench-run:disabled {
+  border-color: var(--line);
+  background: var(--line);
+  color: var(--ink-soft);
+  cursor: default;
+}
+
+.genai-bench-phase {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.genai-bench-text {
+  max-height: 160px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.genai-bench-report {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.genai-bench-metric {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+
+.genai-bench-label {
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.genai-bench-number {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.genai-bench-number small {
+  color: var(--ink-soft);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.genai-bench-scroll {
+  overflow-x: auto;
 }
 
 .genai-bench-table {
@@ -6156,6 +6324,10 @@ button:disabled {
   text-align: right;
 }
 
+.genai-bench-table th {
+  white-space: nowrap;
+}
+
 .genai-bench-table th:first-child,
 .genai-bench-table td:first-child {
   text-align: left;
@@ -6166,10 +6338,32 @@ button:disabled {
   font-weight: 700;
 }
 
-.genai-bench-runs summary {
-  cursor: pointer;
-  font-weight: 600;
+.genai-bench-glossary {
+  display: grid;
+  grid-template-columns: minmax(130px, max-content) 1fr;
+  gap: 6px 16px;
+  margin: 0;
   font-size: 13px;
+}
+
+.genai-bench-glossary dt {
+  font-weight: 600;
+}
+
+.genai-bench-glossary dd {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 560px) {
+  .genai-bench-glossary {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .genai-bench-glossary dd {
+    margin-bottom: 8px;
+  }
 }
 
 .genai-sources {

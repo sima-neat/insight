@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import test from 'node:test'
 
-import { acceptedAnswer, clearDocumentsQuestion, deleteModelQuestion, loadModelQuestion, loadPlanKey, solutionQuestion } from './confirmations.js'
+import { acceptedAnswer, benchmarkLoadQuestion, clearDocumentsQuestion, deleteModelQuestion, loadModelQuestion, loadPlanKey, solutionQuestion } from './confirmations.js'
 
 const qwen = { name: 'Qwen2.5-VL-3B-Instruct', estimatedLoadS: 90, sizeBytes: 3_200_000_000 }
 const llama = { name: 'Llama-3.2-3B-Instruct' }
@@ -70,4 +70,50 @@ test('the app asks in the page, never with window.confirm, alert or prompt', () 
     const text = readFileSync(new URL(path, root), 'utf8')
     assert.doesNotMatch(text, /\b(?:window|globalThis|self)\.(?:confirm|alert|prompt)\s*\(/, `${path} opens a native browser dialog`)
   }
+})
+
+test('a benchmark of loaded models asks nothing', () => {
+  const status = { catalog: [qwen, llama], loaded: [llama.name], maxResident: 1 }
+  assert.equal(benchmarkLoadQuestion(status, [llama.name]), null)
+})
+
+test('a benchmark that swaps the loaded model says so first', () => {
+  const status = { catalog: [qwen, llama], loaded: [llama.name], maxResident: 1 }
+  const question = benchmarkLoadQuestion(status, [qwen.name])
+  assert.equal(question.title, 'Swap the loaded model?')
+  assert.equal(question.message, 'This test loads Qwen2.5 VL 3B, which takes about 1 min 30 s and unloads Llama 3.2 3B. Qwen2.5 VL 3B stays loaded afterwards. To chat with Llama 3.2 3B again, load it from the Model menu.')
+  assert.equal(question.confirmLabel, 'Load and run')
+  assert.ok(!question.danger)
+})
+
+test('a benchmark that returns to the loaded model last leaves it loaded', () => {
+  const status = { catalog: [qwen, llama], loaded: [llama.name], maxResident: 1 }
+  const question = benchmarkLoadQuestion(status, [qwen.name, llama.name])
+  assert.equal(question.title, 'Load the model first?')
+  assert.equal(question.message, 'This test loads Qwen2.5 VL 3B and Llama 3.2 3B, one at a time, which takes a few minutes. Llama 3.2 3B stays loaded afterwards.')
+  const other = benchmarkLoadQuestion(status, [llama.name, qwen.name])
+  assert.equal(other.title, 'Swap the loaded model?')
+  assert.notEqual(other.plan, question.plan)
+})
+
+test('a benchmark with nothing loaded says it loads first', () => {
+  const question = benchmarkLoadQuestion({ catalog: [qwen, llama], loaded: [], maxResident: 1 }, [llama.name])
+  assert.equal(question.title, 'Load the model first?')
+  assert.equal(question.message, 'This test loads Llama 3.2 3B, which takes a few minutes. Llama 3.2 3B stays loaded afterwards.')
+})
+
+test('a benchmark on a board that keeps several models says what can go', () => {
+  const room = { catalog: [qwen, llama], loaded: [llama.name], maxResident: 2 }
+  assert.equal(benchmarkLoadQuestion(room, [qwen.name]).title, 'Load the model first?')
+  assert.match(benchmarkLoadQuestion(room, [qwen.name]).message, /If the board runs out of room, that unloads Llama 3\.2 3B\./)
+  const gemma = { name: 'Gemma-2B' }
+  const full = { catalog: [qwen, llama, gemma], loaded: [llama.name, gemma.name], maxResident: 2 }
+  assert.equal(benchmarkLoadQuestion(full, [qwen.name]).title, 'Swap the loaded model?')
+  assert.match(benchmarkLoadQuestion(full, [qwen.name]).message, /That unloads one or more of /)
+})
+
+test('a change to what is loaded changes a benchmark question\'s plan', () => {
+  const before = benchmarkLoadQuestion({ catalog: [qwen, llama], loaded: [llama.name], maxResident: 1 }, [qwen.name])
+  const after = benchmarkLoadQuestion({ catalog: [qwen, llama], loaded: [], maxResident: 1 }, [qwen.name])
+  assert.notEqual(before.plan, after.plan)
 })
