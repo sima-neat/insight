@@ -585,14 +585,73 @@ select:focus-visible,
 }
 
 .camera-list {
+  display: grid;
+  gap: 4px;
   margin: 8px 0 0;
-  padding-left: 18px;
-  font-size: 12px;
-  color: var(--ink-soft);
+  padding: 0;
+  list-style: none;
 }
 
-.camera-list li {
-  margin: 2px 0;
+/* A detected camera: selecting it previews it in the Selected Media panel (issue #222). */
+.camera-row {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.camera-row:hover {
+  border-color: var(--line-strong);
+}
+
+.camera-row.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.camera-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.camera-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.camera-preview-head h3 {
+  margin: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.camera-preview .hint,
+.camera-preview .periph-callout {
+  margin: 0;
+}
+
+.camera-preview-info h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.camera-preview-info h4:first-child {
+  margin-top: 0;
 }
 
 .search-input,

@@ -43,6 +43,26 @@ The library is shown as folders. Folder rows open the folder and list its subfol
 
 Media Sources combines importing, file selection, preview, metadata inspection, and delete actions in one view. Imported catalog assets are stored under `catalog/`, and YouTube clips are stored under `youtube/`, so you can identify how files entered the library.
 
+### Preview a camera
+
+A webcam or phone camera connected to the computer running your browser can be previewed here before you stream it. Under **Local cameras**, select **Enable camera access** and allow access when the browser asks; your cameras are listed below the button. Select a camera to show its live video in place of the selected file, with the camera's name and what the browser reports about the stream:
+
+- **Active stream**: the resolution and frame rate the camera is sending now, and whether that is the camera's own mode or the browser crops or scales it.
+- **Camera capabilities**: the largest width, the largest height and the highest frame rate the camera reports, each on its own. These are limits, not a mode the camera has: a camera that reports 1920 for both width and height need not capture 1920×1920.
+
+A value the browser does not report is left out. Browsers do not report the pixel format, so it is not shown.
+
+The preview stays in your browser. It does not assign a Streaming slot or start or stop a stream; to stream the camera, assign it to a slot in Streaming (see **Use a webcam as a source** below). If this browser tab is already publishing the camera, the preview shows that capture instead of opening the camera again, so the stream's settings do not change. Selecting another camera or a file, **Stop preview**, leaving Media Sources, or closing the tab releases the camera.
+
+If a camera cannot be previewed, the panel says why:
+
+| What you see | What to do |
+| --- | --- |
+| Camera permission was denied | Allow camera access for the Insight site in your browser settings, then select **Try again**. |
+| The camera could not be started | Another application is using the camera. Close it, then select **Try again**. |
+| That camera is no longer available, or The camera stopped sending video | The camera was disconnected. Reconnect it, then select **Refresh cameras**. |
+| This page is embedded in a frame that does not allow camera access | Insight is shown inside another page, such as an editor tab, that does not pass camera access on to it. Open Insight in its own browser tab. |
+
 ## Streaming Sources
 
 The Streaming Sources view turns uploaded media files into live source slots. Each source slot can expose an RTSP URL:
@@ -73,7 +93,7 @@ The Streaming Sources view lets you assign media files to source slots, start or
 
 ### Use a webcam as a source
 
-A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first.
+A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first. To check a camera first, preview it in Media Sources (see **Preview a camera** above).
 
 1. Select the file field of a source slot and switch the **Source for srcN** dialog to **Camera**.
 2. Select **Enable camera access**, there or under **Local cameras** in Media Sources. The browser asks for camera permission; Insight cannot grant it for you. After you allow access, your cameras are listed in the tab.
