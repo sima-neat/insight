@@ -5747,6 +5747,22 @@ button:disabled {
   z-index: 1;
 }
 
+/* The launcher's own layout, so changes made for Benchmark's panel don't reach it. */
+.genai-bench-top.genai-solutions-top h2 {
+  flex: none;
+}
+
+.genai-bench-top.genai-solutions-top p {
+  flex: 1;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.genai-bench-body.genai-solutions-body {
+  max-width: 1000px;
+}
+
 .genai-solutions-model b {
   color: var(--ink);
 }

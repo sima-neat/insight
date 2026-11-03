@@ -2572,7 +2572,7 @@ function SolutionsOverlay({ model, sees, onClose }) {
             </p>
             <button type="button" ref={closeButton} className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
           </div>
-          <div className="genai-bench-body">
+          <div className="genai-bench-body genai-solutions-body">
             <div className="genai-solutions-cards">
               {SOLUTIONS.map((app) => (
                 <button key={app.mode} type="button" className="genai-solutions-card" onClick={() => launch(app)}>
