@@ -6,6 +6,7 @@ import {
 } from './externalSource.js'
 import { allCommitsSucceeded, formatFpsProgress, isNativeRate, needsRendition, parseFps, renditionMayHaveChanged, stepFps, withCommittedFps } from './fps.js'
 import FolderBrowser from './media/FolderBrowser.jsx'
+import { CameraIcon, VideoFileIcon } from './media/MediaIcons.jsx'
 import AssignMediaDialog from './media/AssignMediaDialog.jsx'
 import { CameraPreview } from './media/CameraPreview.jsx'
 import { describePreviewError, frameAllowsCamera, heldCaptures, holdsLiveCamera, publishingTrackFor } from './media/cameraPreview.js'
@@ -2779,24 +2780,22 @@ export default function App() {
                   <span className="sr-only">Import Media</span>
                 </button>
               </div>
-              <div className="camera-optin">
-                <div className="camera-optin-head">
-                  <span className="camera-optin-title">Local cameras</span>
+              <div className="media-card" data-testid="cameras-card">
+                <div className="media-card-head">
+                  <h3 className="media-card-title"><CameraIcon />Cameras<span className="live-tag"><span className="live-dot" aria-hidden="true" />Live</span></h3>
                   <button
                     type="button"
                     className="btn-ghost"
                     onClick={enableCameraAccess}
                     disabled={cameraProbing}
-                    title="Ask this browser for camera access, then select a camera to preview it here"
+                    title="Ask this browser for camera access. To stream a camera, assign it to a slot in Streaming."
                   >
                     {cameraProbing ? 'Requesting…' : (webcamDevices.length ? 'Refresh cameras' : 'Enable camera access')}
                   </button>
                 </div>
-                <p className="section-note">
-                  A webcam or connected phone can be a live streaming source. Enable access, then select a camera to preview it here. To stream it, assign it to a slot in Streaming.
-                </p>
+                <p className="hint">{webcamDevices.length ? 'Select a camera to preview it.' : 'Enable access to preview a webcam or connected phone.'}</p>
                 {cameraError && <p className="camera-optin-error">{cameraError}</p>}
-                {webcamDevices.length > 0 ? (
+                {webcamDevices.length > 0 && (
                   <ul className="camera-list" aria-label="Cameras">
                     {webcamDevices.map((device) => {
                       const active = previewCamera?.deviceId === device.deviceId
@@ -2810,18 +2809,20 @@ export default function App() {
                             title={`Preview ${device.label}`}
                             data-testid="camera-row"
                           >
-                            {device.label}
+                            <CameraIcon className="camera-row-icon" />
+                            <span className="camera-row-name">{device.label}</span>
+                            <span className="live-dot" aria-hidden="true" />
                           </button>
                         </li>
                       )
                     })}
                   </ul>
-                ) : (
-                  !cameraError && <p className="hint">No cameras enabled yet.</p>
                 )}
               </div>
 
+              <div className="media-card" data-testid="video-files-card">
               <FolderBrowser
+                heading={<h3 className="media-card-title"><VideoFileIcon />Video files</h3>}
                 tree={mediaTree}
                 folder={mediaFolder}
                 onNavigate={navigateMediaFolder}
@@ -2844,6 +2845,7 @@ export default function App() {
                 )}
                 idPrefix="library"
               />
+              </div>
             </section>
 
             <section className="panel">

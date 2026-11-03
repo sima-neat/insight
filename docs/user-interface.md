@@ -37,7 +37,7 @@ Supported video formats include common container formats such as `mp4`, `mov`, `
 
 After importing media, you can filter the file list, preview a selected file, inspect its basic metadata, or delete files that are no longer needed. Use Media Sources before configuring streaming sources so you know which files are available, which codec Insight detected, and whether they are readable.
 
-The library is shown as folders. Folder rows open the folder and list its subfolders and videos. Each folder row shows how many streamable videos it holds, its subfolders included, and the line under the breadcrumb counts the same for the folder you are in. The breadcrumb shows where you are; click any part of it, **Media Root** included, to go back up to that level. The filter searches the current folder and everything beneath it and shows matches with their path relative to the current folder. Files Insight cannot stream are listed greyed with a **Not streamable** tag so you can still preview or delete them; the assign dialog in Streaming Sources hides them and greys out folders without a streamable video. Folder names are ordinary labels you choose, for example `30FPS/` or `120FPS-720p-h264/`; Insight never reads video settings from them. In the Neat SDK the library lives at `/workspace/.insight-media/`, so it survives SDK restarts. Uploads always land at the top of the library.
+The **Video files** card shows the library as folders. Folder rows open the folder and list its subfolders and videos. Each folder row shows how many streamable videos it holds, its subfolders included, and the count beside the **Video files** heading shows the same for the folder you are in. The breadcrumb shows where you are; click any part of it, **Videos** included, to go back up to that level. The filter searches the current folder and everything beneath it and shows matches with their path relative to the current folder. Files Insight cannot stream are listed greyed with a **Not streamable** tag so you can still preview or delete them; the assign dialog in Streaming Sources hides them and greys out folders without a streamable video. Folder names are ordinary labels you choose, for example `30FPS/` or `120FPS-720p-h264/`; Insight never reads video settings from them. In the Neat SDK the library lives at `/workspace/.insight-media/`, so it survives SDK restarts. Uploads always land at the top of the library.
 
 ![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
 
@@ -45,7 +45,7 @@ Media Sources combines importing, file selection, preview, metadata inspection, 
 
 ### Preview a camera
 
-A webcam or phone camera connected to the computer running your browser can be previewed here before you stream it. Under **Local cameras**, select **Enable camera access** and allow access when the browser asks; your cameras are listed below the button. Select a camera to show its live video in place of the selected file, with the camera's name and what the browser reports about the stream:
+A webcam or phone camera connected to the computer running your browser can be previewed here before you stream it. Under **Cameras**, select **Enable camera access** and allow access when the browser asks; your cameras are listed below the button. Select a camera to show its live video in place of the selected file, with the camera's name and what the browser reports about the stream:
 
 - **Active stream**: the resolution and frame rate the camera is sending now, and whether that is the camera's own mode or the browser crops or scales it.
 - **Camera capabilities**: the largest width, the largest height and the highest frame rate the camera reports, each on its own. These are limits, not a mode the camera has: a camera that reports 1920 for both width and height need not capture 1920×1920.
@@ -96,7 +96,7 @@ The Streaming Sources view lets you assign media files to source slots, start or
 A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first. To check a camera first, preview it in Media Sources (see **Preview a camera** above).
 
 1. Select the file field of a source slot and switch the **Source for srcN** dialog to **Camera**.
-2. Select **Enable camera access**, there or under **Local cameras** in Media Sources. The browser asks for camera permission; Insight cannot grant it for you. After you allow access, your cameras are listed in the tab.
+2. Select **Enable camera access**, there or under **Cameras** in Media Sources. The browser asks for camera permission; Insight cannot grant it for you. After you allow access, your cameras are listed in the tab.
 3. Select a camera and **Assign** it, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
 4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
 
@@ -110,7 +110,7 @@ If starting a webcam fails, the message names the cause:
 
 | What you see | What to do |
 | --- | --- |
-| Camera permission was denied | Allow camera access for the Insight site in your browser settings, then re-enable camera access under Media Sources → Local cameras. |
+| Camera permission was denied | Allow camera access for the Insight site in your browser settings, then re-enable camera access under Media Sources → Cameras. |
 | That camera is no longer available | The camera was disconnected. Select **Refresh cameras** and reselect it. |
 | The camera could not be started | Another application is using the camera. Close it and retry. |
 | Could not reach the webcam publish endpoint | The browser could not reach the publish listener. Trust the `webrtcWhip` endpoint's certificate (open its URL once to accept it) and confirm the port is reachable (see [Ports and Network Behavior](ports-network.md)). |
