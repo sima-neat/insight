@@ -1676,7 +1676,8 @@
           "problem": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "Why a failed or blocked step can't finish."},
           "stall": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "A running step with no new output for a while: what may be happening and what to do."},
           "warnings": {"type": "array", "description": "What a done, running or failed step warned about (setup.sh's ⚠ lines, GenAI Studio's WARNING log lines), each listed once; known ones in plain words with the fix.", "items": {"type": "object", "required": ["message", "fix"], "properties": {"message": {"type": "string"}, "fix": {"type": ["string", "null"]}}}},
-          "notice": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "On the install step of an outdated GenAI Studio: why it is replaced and what a run does. `command` is null."}
+          "notice": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "On the install step of an outdated GenAI Studio: why it is replaced and what a run does. `command` is null."},
+          "stopped": {"type": "boolean", "description": "A `failed` install or prepare step that was stopped on purpose (`POST /api/genai-setup/stop`, or its process was ended with SIGTERM) rather than failing: a run resumes it."}
         }
       },
       "GenaiSetupProblem": {
