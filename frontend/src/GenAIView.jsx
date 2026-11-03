@@ -618,6 +618,9 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     if (!tutorialSeen(window.localStorage)) setTutorialStep(0)
   }, [mode])
 
+  // The header's board as it is now, for a setup action that answers after a switch.
+  const selectedBoard = useRef(selectedBoardGeneration)
+  selectedBoard.current = selectedBoardGeneration
   // Another board selected in Insight's header: what setup showed belongs to the old one.
   useEffect(() => {
     setSetupStatus(null)
@@ -1640,7 +1643,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   }
 
   // Run or stop the job; a request the board is slow to answer says so. The page then stays
-  // until the user opens GenAI Studio from it.
+  // until the user opens GenAI Studio from it. An answer from a board the header no longer
+  // shows is dropped, as for the reads.
   async function setupRequest(kind, call, slowAfter = SLOW_REQUEST_MS) {
     openSetup()
     setSetupBusy(kind)
@@ -1649,7 +1653,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setupWrites.current += 1
     const slow = setTimeout(() => setSetupSlow(true), slowAfter)
     try {
-      setSetupStatus(await call())
+      const result = await call()
+      if (setupForBoard(result, selectedBoard.current)) setSetupStatus(result)
     } catch (err) {
       setSetupError(requestProblem(err))
     } finally {
