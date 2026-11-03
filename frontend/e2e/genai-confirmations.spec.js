@@ -178,6 +178,24 @@ for (const embedded of [false, true]) {
       await expect.poll(() => board.posts).toEqual([{ path: 'models/load', body: { name: QWEN } }])
     })
 
+    test('loading from the Settings model list asks the same question as the menu', async () => {
+      await ui.getByRole('button', { name: 'Settings', exact: true }).click()
+      const load = ui.getByRole('button', { name: 'Load Qwen2.5 VL 3B' })
+      const ask = ui.getByRole('alertdialog', { name: 'Load the model' })
+
+      await load.click()
+      await expect(ask).toContainText('Load Qwen2.5 VL 3B? It takes about 1 min 30 s. Llama 3.2 3B is unloaded first.')
+      await ask.getByRole('button', { name: 'Cancel' }).click()
+      await expect(ask).toHaveCount(0)
+      await expect(load).toBeFocused()
+      expect(board.posts).toEqual([])
+
+      await load.click()
+      await ask.getByRole('button', { name: 'Load' }).click()
+      await expect(ask).toHaveCount(0)
+      await expect.poll(() => board.posts).toEqual([{ path: 'models/load', body: { name: QWEN } }])
+    })
+
     test('deleting a model asks first, with Cancel focused; a click outside cancels', async () => {
       await ui.getByRole('button', { name: 'Settings', exact: true }).click()
       const remove = ui.getByRole('button', { name: 'Delete Qwen2.5 VL 3B' })
