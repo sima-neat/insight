@@ -364,7 +364,7 @@ GenAI Studio는 보드에서 실행됩니다. 아래 설명처럼 탭에서 설�
 
 상태 표시와 주의가 필요할 때 나타나는 배너는 백엔드 상태와 다음에 할 일을 알려 줍니다.
 
-- **Not set up**: GenAI Studio 주소가 설정되지 않았으며 설정 페이지에 주소 입력란이 표시됩니다. `https://192.168.1.20:5000` 같은 보드의 GenAI Studio 주소를 입력하십시오. 보드에서 실행되는 Insight는 기본적으로 로컬 백엔드를 사용하고, Neat Development Environment에서는 페어링된 DevKit을 사용합니다.
+- **Not set up**: GenAI Studio 주소가 설정되지 않았으며 설정 페이지에 주소 입력란이 표시됩니다. `https://192.168.1.20:5000` 같은 보드의 GenAI Studio 주소를 입력하십시오. Insight 헤더에서 입력한 보드가 가장 우선합니다. 그 외에는 보드에서 실행되는 Insight는 기본적으로 로컬 백엔드를 사용하고, Neat Development Environment에서는 페어링된 DevKit을 사용합니다.
 - **Not running**: 보드가 응답하지 않으며 탭에 설정 페이지가 표시됩니다. 설치된 경우 **Start GenAI Studio**로 시작하고, 처음에는 이 페이지에서 설치합니다. 또는 **Connection settings**에서 주소를 확인하십시오.
 - **Error**: 보드가 오류를 반환했거나 주소가 GenAI Studio를 가리키지 않습니다. 설정 페이지에 보드의 메시지가 표시되며, 주소가 원인이면 **Connection settings**도 표시됩니다.
 - **Starting**: 백엔드는 응답하지만 모델 서버가 아직 준비되지 않았습니다.

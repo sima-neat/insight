@@ -10,6 +10,7 @@ from pathlib import Path
 from flask import Flask
 
 from neat_insight import genai_relay as relay
+from neat_insight.board.target import BoardTarget
 
 # A JPEG's first and last bytes, with bytes that are not valid UTF-8 between.
 _JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01" + bytes(range(256)) + b"\xff\xd9"
@@ -153,6 +154,26 @@ class GenaiRelayTests(unittest.TestCase):
         with mock.patch.object(relay, "get_devkit_sync_devkit_ip", lambda: "192.168.2.3"):
             self.assertEqual(relay.default_board_url(), "https://192.168.2.3:5000")
         self.assertEqual(relay.default_board_url(), "")
+
+    def test_a_board_entered_in_the_header_is_the_default_address(self):
+        # Setup runs on that board, so GenAI Studio is there, whatever else is paired.
+        app = Flask(__name__)
+
+        def selected(target):
+            app.extensions["neat_board"] = mock.Mock(target=lambda: target)
+
+        with app.app_context(), mock.patch.object(relay, "get_devkit_sync_devkit_ip", lambda: "192.168.2.3"):
+            selected(BoardTarget("ssh", "manual", "192.168.2.7", 22, "sima"))
+            self.assertEqual(relay.default_board_url(), "https://192.168.2.7:5000")
+            with mock.patch.object(relay, "is_sima_board", lambda: True):
+                self.assertEqual(relay.default_board_url(), "https://192.168.2.7:5000", "also on a board")
+            selected(BoardTarget("ssh", "manual", "fe80::1", 22, "sima"))
+            self.assertEqual(relay.default_board_url(), "https://[fe80::1]:5000")
+            # Only one entered by hand: the others keep their own default.
+            selected(BoardTarget("ssh", "sdk-env", "192.168.2.9", 22, "sima"))
+            self.assertEqual(relay.default_board_url(), "https://192.168.2.3:5000")
+            selected(None)
+            self.assertEqual(relay.default_board_url(), "https://192.168.2.3:5000")
 
     def test_settings_round_trip_keeps_other_config(self):
         self.cfg.write_text(json.dumps({"remote-devkit": {"ip": "10.0.0.9"}}))

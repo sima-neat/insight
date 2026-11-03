@@ -364,7 +364,7 @@ GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、�
 
 狀態標籤以及需要處理時出現的橫幅，會顯示後端狀態和接下來應採取的動作：
 
-- **Not set up**：尚未設定 GenAI Studio 位址，設定頁面會顯示位址欄位。請輸入開發板上 GenAI Studio 的位址，例如 `https://192.168.1.20:5000`。在開發板上，Insight 預設使用本機後端；在 Neat Development Environment 中則預設使用已配對的 DevKit。
+- **Not set up**：尚未設定 GenAI Studio 位址，設定頁面會顯示位址欄位。請輸入開發板上 GenAI Studio 的位址，例如 `https://192.168.1.20:5000`。優先使用在 Insight 頁首輸入的開發板；否則在開發板上，Insight 預設使用本機後端，在 Neat Development Environment 中則預設使用已配對的 DevKit。
 - **Not running**：開發板沒有回應，分頁會顯示設定頁面：已安裝時用 **Start GenAI Studio** 啟動，第一次使用時則由此頁面安裝。或在 **Connection settings** 中檢查位址。
 - **Error**：開發板傳回錯誤，或該位址不是 GenAI Studio。設定頁面會顯示開發板的訊息；若問題出在位址，還會顯示 **Connection settings**。
 - **Starting**：後端有回應，但模型伺服器尚未就緒。

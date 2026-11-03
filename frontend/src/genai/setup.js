@@ -145,7 +145,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 // Which page setup shows now. `reached`: GenAI Studio answers at the tab's address and can
 // be used (or is still starting). `elsewhere`: that address is not on the board setup acts on.
-// `unusable`: the address answers, but not as a GenAI Studio this tab can use.
+// `unusable`: the address answers, but not as a GenAI Studio this tab can use, or there is none.
 // Not installed, installed but stopped and a disconnected board are different pages,
 // so a stopped GenAI Studio is started rather than installed again. Setup is ready only
 // when the tab can use the GenAI Studio it set up.
@@ -169,8 +169,8 @@ export function setupPhase({ status, readError = null, reached = false, elsewher
 
 // Everything the setup page shows: {phase, title, subtitle, steps, action, stop, problem,
 // stall, notice, warnings}. `steps` is the checklist, [{id, name, icon, note}]; problem,
-// stall and notice are shown under it. `unusable` is what the tab's address answered when it
-// is not a usable GenAI Studio: {title, detail, fixAddress}.
+// stall and notice are shown under it. `unusable` says why the tab's address gives no usable
+// GenAI Studio: {title, detail, fixAddress}.
 export function setupView({ status, readError = null, reached = false, elsewhere = false, unusable = null }) {
   const phase = setupPhase({ status, readError, reached, elsewhere, unusable })
   const [title, subtitle] = phase === 'unusable' ? [unusable.title, unusable.detail || ''] : PAGES[phase]

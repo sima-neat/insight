@@ -364,7 +364,7 @@ The first time the chat opens, also right after setup, a short **Tutorial** at t
 
 The status label, and a banner when something needs attention, show the backend's state and what to do next:
 
-- **Not set up**: no GenAI Studio address is set, and the setup page shows the address field. Enter GenAI Studio's address on the board, such as `https://192.168.1.20:5000`. On a board, Insight defaults to the local backend; in the Neat Development Environment it defaults to the paired DevKit.
+- **Not set up**: no GenAI Studio address is set, and the setup page shows the address field. Enter GenAI Studio's address on the board, such as `https://192.168.1.20:5000`. A board entered in Insight's header comes first; otherwise, on a board, Insight defaults to the local backend, and in the Neat Development Environment to the paired DevKit.
 - **Not running**: the board does not answer, and the tab shows the setup page: **Start GenAI Studio** starts an installed one, and the first time the page installs it. Or check the address in **Connection settings**.
 - **Error**: the board answered with an error, or the address is not GenAI Studio. The setup page shows the board's message, with **Connection settings** when the address is the cause.
 - **Starting**: the backend answers but its model server is not ready yet.
