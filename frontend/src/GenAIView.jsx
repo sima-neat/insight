@@ -809,14 +809,15 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   }
 
   // Load from the model list, or answer with a model that is loaded already.
-  // Past the board's limit, the user chooses what to unload first.
+  // Past the board's limit, the user chooses what to unload first; otherwise
+  // the list asks first, as the model menu does.
   function requestLoad(model) {
     if (!allowed.changeChatModel || model.supported === false) return
     const plan = loadPlan(status, model.name)
     if (plan.kind === 'use') answerWith(model)
     else if (plan.kind === 'choose') {
       setUnloadAsk({ model, choice: { code: 'resident_limit', candidates: plan.loaded.map((m) => m.name), needed: plan.needed } })
-    } else loadChatModel(model)
+    } else chooseChatModel(model.name)
   }
 
   // Answer with another loaded model. The conversation stays: the next
