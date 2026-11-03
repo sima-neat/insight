@@ -83,7 +83,7 @@ import { LOOP_PAUSE_MS, VISION_PRESETS, createVisionLoop, pause } from './vision
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
 import { allowedActions } from './activity.js'
 import { anySignal, closedTicket, createBoardSession } from './boardSession.js'
-import { benchProgress, benchmarkCsv, benchmarkSupport, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, BENCH_LIMITS } from './benchmark.js'
+import { benchProgress, benchmarkCsv, benchmarkSupport, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, defaultChoice, firstWordVerdict, resultBadge, resultsSummary, settingsText, speedVerdict, wordsPerSecondText, BENCH_LIMITS } from './benchmark.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -1576,4 +1576,47 @@ test('a model row: its kind, size and whether it is in use', () => {
   assert.equal(modelRow({ ...small, supported: false }, STATUS).state.key, 'unsupported')
   // Hugging Face search results type their models llm, vlm or asr.
   assert.deepEqual(['llm', 'vlm', 'asr', undefined].map((type) => modelKind({ type }).label), ['Chat', 'Vision', 'Speech', 'Chat'])
+})
+
+test('the benchmark tests something with no changes', () => {
+  const models = [{ name: 'a', supported: false }, { name: 'b' }, { name: 'c' }]
+  assert.deepEqual(defaultChoice(models, new Set(['c'])), ['c'])
+  assert.deepEqual(defaultChoice(models, new Set()), ['b'])
+  assert.deepEqual(defaultChoice([{ name: 'a', supported: false }], new Set()), [])
+  assert.deepEqual(defaultChoice([], new Set()), [])
+})
+
+test('the advanced options summary says what a run sends', () => {
+  assert.equal(settingsText({ runs: '5', maxTokens: '128', prompt: ' ' }), '5 runs · 128 tokens · standard prompt')
+  assert.equal(settingsText({ runs: '1', maxTokens: '9999', prompt: 'hi' }), '1 run · 2048 tokens · your prompt')
+})
+
+test('benchmark labels say whether a number is good', () => {
+  assert.equal(firstWordVerdict(999).label, 'Feels instant')
+  assert.equal(firstWordVerdict(1000).label, 'A short pause')
+  assert.equal(firstWordVerdict(3000).label, 'A short pause')
+  assert.equal(firstWordVerdict(3001).label, 'A noticeable wait')
+  assert.equal(speedVerdict(6).label, 'Faster than you can read')
+  assert.equal(speedVerdict(5.9).label, 'About reading speed')
+  assert.equal(speedVerdict(4).label, 'About reading speed')
+  assert.equal(speedVerdict(3.9).label, 'Slower than you can read')
+  assert.equal(wordsPerSecondText(18.6), 'About 14 words a second.')
+  assert.equal(wordsPerSecondText(1.4), 'About 1 word a second.')
+  assert.equal(wordsPerSecondText(0.5), 'Less than 1 word a second.')
+})
+
+test('the benchmark results read as a sentence', () => {
+  const row = (model, tps, ttft, runs = 5) => ({ model, runs, bestTps: tps, bestTtft: ttft })
+  assert.equal(resultsSummary([]), '')
+  assert.equal(resultsSummary([{ model: 'x', failed: 'no' }]), '')
+  assert.equal(resultsSummary([row('Phi-3', true, true)]), 'Each number is the average of 5 runs.')
+  assert.equal(resultsSummary([row('Phi-3', true, true, 1)]), 'Each number comes from 1 run.')
+  assert.equal(resultsSummary([row('Phi-3', true, true), row('Gemma', false, false)]), 'Phi 3 was the fastest on both numbers. Each number is the average of 5 runs.')
+  assert.equal(resultsSummary([row('Phi-3', true, false, 5), row('Gemma', false, true, 4)]), "Gemma started replying first and Phi 3 replied fastest. Each number is the average of that model's runs.")
+  assert.equal(resultsSummary([row('Phi-3', true, true), row('Gemma', true, false)]), 'Each number is the average of 5 runs.')
+  assert.equal(resultBadge(row('a', true, true), 1), '')
+  assert.equal(resultBadge(row('a', true, true), 2), 'Fastest')
+  assert.equal(resultBadge(row('a', true, false), 2), 'Fastest replies')
+  assert.equal(resultBadge(row('a', false, true), 2), 'Starts first')
+  assert.equal(resultBadge(row('a', false, false), 2), '')
 })
