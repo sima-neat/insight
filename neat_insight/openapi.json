@@ -1696,7 +1696,7 @@
         "properties": {
           "url": {"type": "string", "description": "Address in use; empty when none is configured or derivable."},
           "configuredUrl": {"type": ["string", "null"], "description": "Address set by the user, or null."},
-          "defaultUrl": {"type": ["string", "null"], "description": "Address used when none is configured, or null."}
+          "defaultUrl": {"type": ["string", "null"], "description": "Address used when none is configured: port 5000 on the board entered in Insight's header, else this board, else the paired DevKit; null when there is none."}
         }
       },
       "GenaiSettingsUpdate": {

@@ -384,7 +384,7 @@ GenAI Studio はボード上で動作します。以下のとおりタブから�
 
 状態ラベルと、対応が必要なときに表示されるバナーで、バックエンドの状態と次の操作を確認できます。
 
-- **Not set up**: GenAI Studio のアドレスが設定されておらず、セットアップページにアドレス欄が表示されます。`https://192.168.1.20:5000` などの、ボード上の GenAI Studio のアドレスを入力します。ボード上の Insight はローカルのバックエンドを、Neat Development Environment ではペアリング済みの DevKit を既定で使用します。
+- **Not set up**: GenAI Studio のアドレスが設定されておらず、セットアップページにアドレス欄が表示されます。`https://192.168.1.20:5000` などの、ボード上の GenAI Studio のアドレスを入力します。Insight のヘッダーで入力したボードが最優先です。それ以外の場合、ボード上の Insight はローカルのバックエンドを、Neat Development Environment ではペアリング済みの DevKit を既定で使用します。
 - **Not running**: ボードが応答せず、タブにセットアップページが表示されます。インストール済みの場合は **Start GenAI Studio** で起動し、初回はこのページからインストールします。または **Connection settings** でアドレスを確認します。
 - **Error**: ボードがエラーを返したか、アドレスが GenAI Studio を指していません。セットアップページにボードのメッセージが表示され、アドレスが原因の場合は **Connection settings** も表示されます。
 - **Starting**: バックエンドは応答していますが、モデルサーバーの準備ができていません。

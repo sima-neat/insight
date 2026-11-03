@@ -479,6 +479,12 @@ test('setup is ready only when the tab can use the GenAI Studio it answers with'
   assert.deepEqual(page.action, { kind: 'connection', label: 'Connection settings' })
   assert.deepEqual(page.steps[2].icon, 'failed')
   assert.deepEqual(page.stop, { kind: 'stop-studio', label: 'Stop GenAI Studio' })
+  // No address at all: never "connecting"; the page says so and the address card is already open.
+  const none = deriveBackendState({ health: { httpStatus: 503, body: { reason: 'not-configured' } } })
+  assert.equal(none.title, 'No GenAI Studio address')
+  const noAddress = setupView({ status: done, unusable: { title: none.title, detail: none.detail, fixAddress: false } })
+  assert.deepEqual([noAddress.phase, noAddress.title, noAddress.action], ['unusable', 'No GenAI Studio address', null])
+  assert.equal(noAddress.steps[2].note, "Running, but this tab can't use it")
   // An unsupported API version is fixed by updating, not by the address: no address button.
   assert.equal(setupView({ status: done, unusable: { title: 'Unsupported', detail: 'Update Insight.', fixAddress: false } }).action, null)
   const other = setupView({ status: done, reached: true, elsewhere: true })

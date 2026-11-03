@@ -626,10 +626,27 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // The header's board as it is now, for a setup action that answers after a switch.
   const selectedBoard = useRef(selectedBoardGeneration)
   selectedBoard.current = selectedBoardGeneration
-  // Another board selected in Insight's header: what setup showed belongs to the old one.
+  // Another board selected in Insight's header: what setup showed belongs to the old one, and
+  // the default address may follow it, so what this tab holds may too.
+  const settingsNow = useRef(settings)
+  settingsNow.current = settings
   useEffect(() => {
     setSetupStatus(null)
     setSetupReadError(null)
+    if (selectedBoardGeneration == null) return undefined
+    let cancelled = false
+    getSettings().then((s) => {
+      if (cancelled) return
+      const moved = settingsNow.current && settingsNow.current.url !== s.url
+      setSettings(s)
+      if (moved) {
+        forgetBoard()
+        refresh()
+      }
+    }).catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [selectedBoardGeneration])
 
   // Once GenAI Studio answers, the banner says whether it is out of date for this Insight.
@@ -1780,8 +1797,12 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     const elsewhere = Boolean(setupStatus && settings?.url && !relayOnSetupBoard(settings.url, setupStatus))
     // A custom address, one on another board, or none: the default follows the board, so it
     // has nothing to change.
-    // The address answers, but not as a GenAI Studio this tab can use (setupView's `unusable`).
-    const unusable = answers && !reached ? { title: backend.title, detail: backend.detail, fixAddress: backend.action === 'settings' } : null
+    // The address answers, but not as a GenAI Studio this tab can use, or there is none to try
+    // (setupView's `unusable`). Without one the address card already shows.
+    const noAddress = backend.state === 'unconfigured'
+    const unusable = (answers && !reached) || noAddress
+      ? { title: backend.title, detail: backend.detail, fixAddress: backend.action === 'settings' && !noAddress }
+      : null
     const view = mode === 'checking'
       ? setupView({ status: null })
       : setupView({ status: setupStatus, readError: setupReadError, reached, elsewhere, unusable })

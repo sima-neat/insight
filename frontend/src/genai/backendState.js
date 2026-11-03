@@ -37,8 +37,8 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
   if (health.httpStatus === 503 && body.reason === 'not-configured') {
     return {
       state: 'unconfigured',
-      title: 'No board selected',
-      detail: 'Enter the address of the board that runs GenAI Studio.',
+      title: 'No GenAI Studio address',
+      detail: "Enter GenAI Studio's address on the board, for example https://192.168.1.20:5000.",
       // The settings panel opens on its own in this state.
       action: null
     }
