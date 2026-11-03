@@ -28,6 +28,7 @@
 //   useDocuments  questions are sent with the documents
 //   backendTitle  what the board's state is called, for blockedReason
 //   benchmarkReason  why the board doesn't offer the benchmark, for blockedReason
+//   documentsReason  why the board can't answer from documents, for blockedReason
 //   downloading   a model download runs
 //   hubEnabled    the board allows model downloads (its server.hub.allow_download)
 export function allowedActions(state) {
@@ -118,7 +119,7 @@ function noChat(s) {
 }
 
 function noPictures(s) {
-  return noChat(s) || (s.sees ? '' : 'Needs a model that sees images')
+  return noChat(s) || (s.sees ? '' : 'Needs a vision model')
 }
 
 function previewInTheWay(s) {
@@ -162,6 +163,9 @@ export function blockedReason(action, state) {
         || visionNow(s)
         || (s.useDocuments && s.documentTask ? 'The documents are being updated' : '')
         || (s.hasDraft ? '' : 'Type a question first')
+    case 'toggleDocuments':
+      return (s.documentsAvailable ? '' : s.documentsReason || "This board can't search documents")
+        || (s.replying ? 'Wait for the reply to finish' : '')
     case 'openBenchmark':
       return (s.usable ? '' : notReady(s))
         || (s.benchmarkAvailable ? '' : s.benchmarkReason || "This board doesn't offer the benchmark")

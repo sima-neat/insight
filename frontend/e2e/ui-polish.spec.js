@@ -99,12 +99,34 @@ test('a disabled button does nothing when pressed; the buttons by the chat box s
   const attach = page.getByRole('button', { name: 'Attach a picture' })
   await attach.hover()
   const tip = page.getByRole('tooltip').filter({ visible: true })
-  await expect(tip).toHaveText('Attach a pictureNeeds a model that sees images')
+  await expect(tip).toHaveText('Attach a pictureNeeds a vision model')
   await expectTipBeside(page, attach, tip)
 
   const send = page.getByRole('button', { name: 'Send' })
   await send.hover()
   await expect(tip).toHaveText('SendType a question first')
+})
+
+test('the checkboxes on the left use the same tooltip, with a short label', async ({ page }) => {
+  await openGenAI(page)
+  const tip = page.getByRole('tooltip').filter({ visible: true })
+  await page.getByText('Read replies aloud').hover()
+  await expect(tip).toHaveText('Speak every reply')
+  await page.getByText('Think first').hover()
+  await expect(tip).toHaveText('Reason before answeringNeeds a reasoning model')
+  await page.getByText('Use my documents').hover()
+  await expect(tip).toContainText('Answer from documents')
+  await expect(page.locator('.genai-check[title]')).toHaveCount(0)
+
+  // Off, but the keyboard still reaches it, and pressing it changes nothing.
+  const think = page.getByRole('checkbox', { name: 'Think first' })
+  await page.mouse.move(0, 0)
+  await page.getByRole('checkbox', { name: 'Read replies aloud' }).focus()
+  await page.keyboard.press('Tab')
+  await expect(think).toBeFocused()
+  await expect(tip).toHaveText('Reason before answeringNeeds a reasoning model')
+  await page.keyboard.press('Space')
+  await expect(think).not.toBeChecked()
 })
 
 test('the tooltip goes away when its button opens something', async ({ page }) => {

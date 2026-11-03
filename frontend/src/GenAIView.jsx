@@ -41,7 +41,7 @@ import {
   transcribe
 } from './genai/client.js'
 import { languageNames, readAloudSupport } from './genai/speech.js'
-import ToolButton from './ToolButton.jsx'
+import ToolButton, { Tooltip } from './ToolButton.jsx'
 import { allowedActions, blockedReason } from './genai/activity.js'
 import { activeChatModel, keptChoice, loadPlan, residentLimit, unloadChoice } from './genai/models.js'
 import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.js'
@@ -489,7 +489,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     visionLoop: visionActivity.loop,
     useDocuments: useDocs && docs.available,
     backendTitle: backend.title,
-    benchmarkReason: bench.reason
+    benchmarkReason: bench.reason,
+    documentsReason: docs.reason
   }
   const allowed = allowedActions(activity)
   const why = (action) => blockedReason(action, activity)
@@ -1672,6 +1673,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   }
 
   const thinkingModel = thinkingModelOnBoard(status)
+  const thinkBlocked = canThink ? '' : thinkingModel ? `Choose ${thinkingModel}` : 'Needs a reasoning model'
   const steps = tutorialSteps({ canThink, thinkingModel })
   const step = tutorialStep === null ? null : steps[Math.min(tutorialStep, steps.length - 1)]
   const spot = (target) => (step && step.target === target ? ' genai-spotlight' : '')
@@ -1954,26 +1956,30 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
         <ToolButton label="New chat" blocked={why('newChat')} className="btn-ghost genai-tool genai-new-chat" onClick={newChat}>
           <Icon d={ICONS.newChat} />
         </ToolButton>
-        <label className={`genai-check${spot('read-aloud')}`} title="Read every reply aloud with the board's speech engine">
-          <input type="checkbox" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
-          Read replies aloud
-        </label>
-        <label
-          className={`genai-check${canThink ? '' : ' genai-check-off'}${spot('think')}`}
-          title={canThink
-            ? 'This model can reason step by step before answering: slower, sometimes better for maths and logic. The reasoning appears folded above the answer.'
-            : `${chatModel ? friendlyModelName(chatModel.name) : 'This model'} always answers directly. ${thinkingModel ? `Choose ${thinkingModel}` : 'Download a model that can reason, such as Qwen3,'} to think first.`}
-        >
-          <input type="checkbox" checked={canThink && thinking} disabled={!canThink} onChange={(e) => setThinking(e.target.checked)} />
-          Think first
-        </label>
-        <label
-          className={`genai-check${docs.available ? '' : ' genai-check-off'}${spot('documents')}`}
-          title={docs.available ? 'Answer from the documents on the board (Settings, Documents): the board adds the matching passages to each question.' : docs.reason}
-        >
-          <input type="checkbox" checked={docs.available && useDocs} disabled={!allowed.toggleDocuments} onChange={(e) => { setUseDocs(e.target.checked); setDocsMidChat(e.target.checked && messages.length > 0) }} />
-          Use my documents
-        </label>
+        <Tooltip label="Speak every reply">
+          {() => (
+            <label className={`genai-check${spot('read-aloud')}`}>
+              <input type="checkbox" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
+              Read replies aloud
+            </label>
+          )}
+        </Tooltip>
+        <Tooltip label="Reason before answering" note={thinkBlocked}>
+          {(describedBy) => (
+            <label className={`genai-check${canThink ? '' : ' genai-check-off'}${spot('think')}`}>
+              <input type="checkbox" checked={canThink && thinking} aria-disabled={canThink ? undefined : true} aria-describedby={describedBy} onChange={(e) => { if (canThink) setThinking(e.target.checked) }} />
+              Think first
+            </label>
+          )}
+        </Tooltip>
+        <Tooltip label="Answer from documents" note={why('toggleDocuments')}>
+          {(describedBy) => (
+            <label className={`genai-check${allowed.toggleDocuments ? '' : ' genai-check-off'}${spot('documents')}`}>
+              <input type="checkbox" checked={docs.available && useDocs} aria-disabled={allowed.toggleDocuments ? undefined : true} aria-describedby={describedBy} onChange={(e) => { if (!allowed.toggleDocuments) return; setUseDocs(e.target.checked); setDocsMidChat(e.target.checked && messages.length > 0) }} />
+              Use my documents
+            </label>
+          )}
+        </Tooltip>
         <span className="genai-header-spacer" />
         <div className="genai-toolbar" role="toolbar" aria-label="GenAI Studio tools">
           <ToolButton label="Export chat" blocked={why('exportChat')} className={`btn-ghost genai-tool${spot('export')}`} onClick={exportChat}>
