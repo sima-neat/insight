@@ -360,7 +360,7 @@ GenAI Studio는 보드에서 실행됩니다. 아래 설명처럼 탭에서 설�
 
 설정하려면 NVMe가 `/media/nvme`에 마운트되어 있어야 합니다. Apps와 Python 가상 환경은 `/media/nvme/prebuilt-apps`에 설치되며, 다운로드 캐시와 임시 파일은 `/media/nvme/.cache/neat-genai-studio`에 저장됩니다.
 
-채팅으로 열리는 첫 방문에서는 페이지 상단에 각 기능을 안내하는 짧은 **Tutorial**이 열립니다. 헤더의 **Tutorial**로 언제든 다시 볼 수 있습니다. 헤더에는 상태 표시, **Model** 선택기와 그 옆의 **New chat**(연필), **Read replies aloud**, **Think first**(항상 바로 답하는 모델에서는 비활성화), **Use my documents**가 있습니다. 도구 모음에는 **Export chat**, **SiMaSentry Solutions**(방패), **Benchmark**(계기), **Tutorial**, **Settings**, **Full screen**이 있습니다.
+채팅이 처음 열리면(설정 직후 포함) 페이지 상단에 각 기능을 안내하는 짧은 **Tutorial**이 열립니다. 헤더의 **Tutorial**로 언제든 다시 볼 수 있습니다. 헤더에는 상태 표시, **Model** 선택기와 그 옆의 **New chat**(연필), **Read replies aloud**, **Think first**(항상 바로 답하는 모델에서는 비활성화), **Use my documents**가 있습니다. 도구 모음에는 **Export chat**, **SiMaSentry Solutions**(방패), **Benchmark**(계기), **Tutorial**, **Settings**, **Full screen**이 있습니다.
 
 상태 표시와 주의가 필요할 때 나타나는 배너는 백엔드 상태와 다음에 할 일을 알려 줍니다.
 

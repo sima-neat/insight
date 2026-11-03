@@ -360,7 +360,7 @@ GenAI Studio はボード上で動作します。以下のとおりタブから�
 
 セットアップには `/media/nvme` にマウントされた NVMe が必要です。Apps と Python 仮想環境は `/media/nvme/prebuilt-apps` に、ダウンロードキャッシュと一時ファイルは `/media/nvme/.cache/neat-genai-studio` に保存されます。
 
-チャットが表示される初回アクセス時は、ページ上部に各機能を紹介する短い **Tutorial** が開きます。ヘッダーの **Tutorial** でいつでも再表示できます。ヘッダーには状態ラベル、**Model** セレクターとその隣の **New chat**（鉛筆）、**Read replies aloud**、**Think first**（常に直接回答するモデルでは無効）、**Use my documents** があります。ツールバーには **Export chat**、**SiMaSentry Solutions**（盾）、**Benchmark**（計器）、**Tutorial**、**Settings**、**Full screen** があります。
+チャットが初めて開いたとき（セットアップ直後も含む）、ページ上部に各機能を紹介する短い **Tutorial** が開きます。ヘッダーの **Tutorial** でいつでも再表示できます。ヘッダーには状態ラベル、**Model** セレクターとその隣の **New chat**（鉛筆）、**Read replies aloud**、**Think first**（常に直接回答するモデルでは無効）、**Use my documents** があります。ツールバーには **Export chat**、**SiMaSentry Solutions**（盾）、**Benchmark**（計器）、**Tutorial**、**Settings**、**Full screen** があります。
 
 状態ラベルと、対応が必要なときに表示されるバナーで、バックエンドの状態と次の操作を確認できます。
 

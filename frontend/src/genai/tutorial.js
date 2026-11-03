@@ -1,5 +1,5 @@
-// The GenAI tab's tutorial: shown on the first visit that opens on the chat and
-// replayable from the header. `target` names the control a step highlights;
+// The GenAI tab's tutorial: shown the first time the chat opens (after setup, if
+// it was needed) and replayable from the header. `target` names the control a step highlights;
 // `action` names what its "Try it" button does (the view decides how). While the
 // tab can't reach GenAI Studio it shows the setup page instead (genai/setup.js).
 

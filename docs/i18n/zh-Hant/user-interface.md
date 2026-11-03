@@ -360,7 +360,7 @@ GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、�
 
 設定前須將 NVMe 掛載至 `/media/nvme`。Apps 與 Python 虛擬環境安裝於 `/media/nvme/prebuilt-apps`；下載快取與暫存檔案存放於 `/media/nvme/.cache/neat-genai-studio`。
 
-第一次開啟且直接顯示聊天時，頁面頂端會顯示簡短的 **Tutorial**，逐一介紹各項功能；隨時可用頁首的 **Tutorial** 再次觀看。頁首包含狀態標籤、**Model** 選擇器及旁邊的 **New chat**（鉛筆）、**Read replies aloud**、**Think first**（對一律直接回答的模型停用）和 **Use my documents**。工具列包含 **Export chat**、**SiMaSentry Solutions**（盾牌）、**Benchmark**（儀表）、**Tutorial**、**Settings** 和 **Full screen**。
+聊天第一次開啟時（包括設定完成後），頁面頂端會顯示簡短的 **Tutorial**，逐一介紹各項功能；隨時可用頁首的 **Tutorial** 再次觀看。頁首包含狀態標籤、**Model** 選擇器及旁邊的 **New chat**（鉛筆）、**Read replies aloud**、**Think first**（對一律直接回答的模型停用）和 **Use my documents**。工具列包含 **Export chat**、**SiMaSentry Solutions**（盾牌）、**Benchmark**（儀表）、**Tutorial**、**Settings** 和 **Full screen**。
 
 狀態標籤以及需要處理時出現的橫幅，會顯示後端狀態和接下來應採取的動作：
 

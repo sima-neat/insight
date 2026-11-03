@@ -609,12 +609,13 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     }
   }, [])
 
-  // The first visit that opens on the chat starts the tutorial; one that opens on setup doesn't.
+  // The tutorial starts the first time the chat opens: on arrival, or after setup's Open Studio.
+  // It waits while the setup page shows, and starts once per visit (GenAI Studio may come and go).
   const tourDecided = useRef(false)
   useEffect(() => {
-    if (tourDecided.current || mode === 'checking') return
+    if (tourDecided.current || mode !== 'workspace') return
     tourDecided.current = true
-    if (mode === 'workspace' && !tutorialSeen(window.localStorage)) setTutorialStep(0)
+    if (!tutorialSeen(window.localStorage)) setTutorialStep(0)
   }, [mode])
 
   // Another board selected in Insight's header: what setup showed belongs to the old one.

@@ -360,7 +360,7 @@ While the tab can't reach or use GenAI Studio, it shows only the setup page for 
 
 Setup requires NVMe mounted at `/media/nvme`. Apps and its Python environments are installed under `/media/nvme/prebuilt-apps`; download caches and temporary files use `/media/nvme/.cache/neat-genai-studio`.
 
-The first visit that opens on the chat starts a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud**, **Think first** (greyed out for models that always answer directly) and **Use my documents**, and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Benchmark** (the gauge), **Tutorial**, **Settings** and **Full screen**.
+The first time the chat opens, also right after setup, a short **Tutorial** at the top of the page walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud**, **Think first** (greyed out for models that always answer directly) and **Use my documents**, and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Benchmark** (the gauge), **Tutorial**, **Settings** and **Full screen**.
 
 The status label, and a banner when something needs attention, show the backend's state and what to do next:
 
