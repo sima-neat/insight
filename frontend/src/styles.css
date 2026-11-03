@@ -557,7 +557,7 @@ select:focus-visible,
   margin: 8px 0 10px;
 }
 
-.camera-optin {
+.media-card {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
@@ -565,17 +565,53 @@ select:focus-visible,
   margin: 0 0 12px;
 }
 
-.camera-optin-head {
+.media-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin-bottom: 6px;
 }
 
-.camera-optin-title {
+.media-card-head .meta-count {
+  margin: 0;
+}
+
+.media-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
   font-weight: 700;
-  font-size: 13px;
   color: #2d4f64;
+}
+
+.media-card-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: currentColor;
+}
+
+.live-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
 }
 
 .camera-optin-error {
@@ -599,10 +635,25 @@ select:focus-visible,
   border-radius: var(--radius-sm);
   background: #fff;
   padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
   color: var(--ink-soft);
   text-align: left;
   cursor: pointer;
+}
+
+.camera-row-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: currentColor;
+}
+
+.camera-row-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

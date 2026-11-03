@@ -63,8 +63,8 @@ test.describe.serial('folder navigation', () => {
     await page.getByTestId(`source-file-${SLOT}`).click()
     const dialog = page.getByTestId('assign-dialog')
     await expect(dialog).toBeVisible()
-    // At the root, "Media Root" is the current crumb and no link.
-    const root = dialog.getByTestId('assign-breadcrumb').getByRole('button', { name: 'Media Root' })
+    // At the root, "Videos" is the current crumb and no link.
+    const root = dialog.getByTestId('assign-breadcrumb').getByRole('button', { name: 'Videos' })
     if (await root.count()) await root.click()
     await expect(dialog.getByTestId('assign-browser')).toHaveAttribute('data-folder', '')
     await navigateAssignTo(page, filePath.split('/').slice(0, -1).join('/'))
@@ -96,7 +96,7 @@ test.describe.serial('folder navigation', () => {
     await lib.folder(page, `${tree.name}/30FPS`).click()
     await lib.folder(page, `${tree.name}/30FPS/indoor`).click()
     await expect(lib.browser(page)).toHaveAttribute('data-folder', `${tree.name}/30FPS/indoor`)
-    await expect(lib.breadcrumb(page)).toContainText('Media Root')
+    await expect(lib.breadcrumb(page)).toContainText('Videos')
     await expect(lib.breadcrumb(page).locator('.crumb-current')).toHaveText('indoor')
     await expect(lib.file(page, `${tree.name}/30FPS/indoor/lobby.mp4`)).toBeVisible()
     await expect(lib.file(page, `${tree.name}/30FPS/indoor/notes.txt`)).toHaveAttribute('data-streamable', 'false')
@@ -104,7 +104,7 @@ test.describe.serial('folder navigation', () => {
     await expect(lib.file(page, `${tree.name}/30FPS/indoor/cam-a/deep.mp4`)).toBeVisible()
   })
 
-  test('3. breadcrumb segments go up one level or straight to Media Root', async ({ page }) => {
+  test('3. breadcrumb segments go up one level or straight to Videos', async ({ page }) => {
     await openTab(page, '/media')
     await lib.folder(page, tree.name).click()
     await lib.folder(page, `${tree.name}/30FPS`).click()
@@ -115,7 +115,7 @@ test.describe.serial('folder navigation', () => {
     await lib.breadcrumb(page).getByRole('button', { name: '30FPS' }).click()
     await expect(lib.browser(page)).toHaveAttribute('data-folder', `${tree.name}/30FPS`)
     await lib.folder(page, `${tree.name}/30FPS/indoor`).click()
-    await lib.breadcrumb(page).getByRole('button', { name: 'Media Root' }).click()
+    await lib.breadcrumb(page).getByRole('button', { name: 'Videos' }).click()
     await expect(lib.browser(page)).toHaveAttribute('data-folder', '')
     await expect(lib.breadcrumb(page).getByRole('button')).toHaveCount(0)
     await lib.folder(page, tree.name).click()
@@ -179,7 +179,7 @@ test.describe.serial('folder navigation', () => {
     await expect(dialog).toHaveCount(0)
   })
 
-  test('6. an upload through the import dialog lands at the media root', async ({ page, request }) => {
+  test('6. an upload through the import dialog lands at the top of the library', async ({ page, request }) => {
     const uploadName = `${tree.name}-upload.mp4`
     const local = path.join(os.tmpdir(), uploadName)
     makeVideo(local)

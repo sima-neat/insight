@@ -3,6 +3,7 @@
 // `streamable`. Folder paths are relative POSIX paths; '' is the media root.
 
 export const MEDIA_ROOT = ''
+export const MEDIA_ROOT_LABEL = 'Videos'
 
 function folderName(node) {
   return node.name.startsWith('/') ? node.name.slice(1) : node.name
@@ -54,9 +55,9 @@ export function parentPath(folderPath) {
   return index === -1 ? MEDIA_ROOT : folderPath.slice(0, index)
 }
 
-// [{ name: 'Media Root', path: '' }, { name: '30FPS', path: '30FPS' }, ...]
+// [{ name: 'Videos', path: '' }, { name: '30FPS', path: '30FPS' }, ...]
 export function breadcrumbs(folderPath) {
-  const crumbs = [{ name: 'Media Root', path: MEDIA_ROOT }]
+  const crumbs = [{ name: MEDIA_ROOT_LABEL, path: MEDIA_ROOT }]
   if (!folderPath) return crumbs
   let acc = ''
   for (const segment of folderPath.split('/')) {

@@ -409,3 +409,36 @@ test('previewing a camera this tab is publishing reuses its capture and never in
 
   expect(writes, 'previewing never assigns, starts or stops a slot').toEqual(['/api/mediasrc/assign-webcam', '/api/mediasrc/start'])
 })
+
+test('cameras and video files sit in separate labelled cards, and the library starts at Videos', async ({ page }) => {
+  await mockInsight(page)
+  const { ui } = await openMediaSources(page)
+  const cameras = ui.getByTestId('cameras-card')
+  const files = ui.getByTestId('video-files-card')
+
+  await expect(cameras.getByRole('heading', { name: 'Cameras' })).toContainText('Live')
+  await expect(files.getByRole('heading', { name: 'Video files' })).toBeVisible()
+
+  await enableCameras(ui)
+  await expect(cameras.getByTestId('camera-row')).toHaveCount(2)
+  await expect(cameras.getByTestId('camera-row').first().locator('svg')).toBeVisible()
+  await expect(cameras.getByText('Select a camera to preview it.')).toBeVisible()
+  await expect(files.getByTestId('camera-row')).toHaveCount(0)
+
+  await expect(files.getByTestId('library-breadcrumb')).toHaveText('Videos')
+  await expect(files.getByPlaceholder('Filter files in Videos...')).toBeVisible()
+  await expect(files.getByTestId('library-file')).toHaveCount(1)
+  await expect(ui.locator('body')).not.toContainText('Media Root')
+})
+
+test('the Cameras card asks for access while no camera is listed', async ({ page }) => {
+  await mockInsight(page)
+  await page.addInitScript(() => {
+    navigator.mediaDevices.enumerateDevices = async () => []
+  })
+  const { ui } = await openMediaSources(page)
+  const cameras = ui.getByTestId('cameras-card')
+  await expect(cameras.getByText('Enable access to preview a webcam or connected phone.')).toBeVisible()
+  await expect(cameras.getByRole('button', { name: 'Enable camera access' })).toBeVisible()
+  await expect(cameras.getByTestId('camera-row')).toHaveCount(0)
+})
