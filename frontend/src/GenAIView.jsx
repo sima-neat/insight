@@ -2560,33 +2560,40 @@ function SolutionsOverlay({ model, sees, onClose }) {
   }
 
   return (
-    <div className="genai-solutions" role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
+    <div className={open ? 'genai-solutions' : 'genai-bench'} role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
       {open ? (
-        <iframe ref={frame} className="genai-solutions-frame" title={open.name} src={solutionUrl(open.mode, model)} allow="camera; microphone; fullscreen" onLoad={watchFrameKeys} />
-      ) : (
-        <div className="genai-solutions-grid">
-          <h2>SiMaSentry <span>Solutions</span></h2>
-          <p>Demo apps that run on the board's loaded model. Voice input inside them uses the browser's own speech recognition, which may use an online service.</p>
-          <p className="genai-solutions-model">
-            {model ? <>Using <b>{friendlyModelName(model)}</b>{sees ? '' : ': load a model that sees images for the picture features'}</> : 'No model loaded: choose one in the Model menu first'}
-          </p>
-          <div className="genai-solutions-cards">
-            {SOLUTIONS.map((app) => (
-              <button key={app.mode} type="button" className="genai-solutions-card" onClick={() => launch(app)}>
-                {!sees && <span className="genai-solutions-badge">{model ? 'no vision support' : 'no model loaded'}</span>}
-                <img src={`${SOLUTIONS_ROOT}/${app.mode}/${app.image}`} alt="" loading="lazy" />
-                <span className="genai-solutions-name">{app.name}</span>
-                <span className="genai-solutions-summary">{app.summary}</span>
-              </button>
-            ))}
+        <>
+          <iframe ref={frame} className="genai-solutions-frame" title={open.name} src={solutionUrl(open.mode, model)} allow="camera; microphone; fullscreen" onLoad={watchFrameKeys} />
+          <div className="genai-solutions-actions">
+            <button type="button" ref={backButton} className="btn-ghost" onClick={() => setOpen(null)} title="Back to the solutions">Back</button>
+            <a className="btn-ghost" href={solutionUrl(open.mode, model)} target="_blank" rel="noopener" title="Open in a new tab">New tab</a>
+            <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
           </div>
-        </div>
+        </>
+      ) : (
+        <>
+          <div className="genai-bench-top genai-solutions-top">
+            <h2>SiMaSentry Solutions</h2>
+            <p className="genai-solutions-model">
+              {model ? <>Using <b>{friendlyModelName(model)}</b>{sees ? '' : ': load a model that sees images for the picture features'}</> : 'No model loaded: choose one in the Model menu first'}
+            </p>
+            <button type="button" ref={closeButton} className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
+          </div>
+          <div className="genai-bench-body genai-solutions-body">
+            <div className="genai-solutions-cards">
+              {SOLUTIONS.map((app) => (
+                <button key={app.mode} type="button" className="genai-solutions-card" onClick={() => launch(app)}>
+                  {!sees && <span className="genai-solutions-badge">{model ? 'no vision support' : 'no model loaded'}</span>}
+                  <span className="genai-solutions-icon"><img src={`${SOLUTIONS_ROOT}/${app.mode}/${app.image}`} alt="" loading="lazy" /></span>
+                  <span className="genai-solutions-name">{app.name}</span>
+                  <span className="genai-solutions-summary">{app.summary}</span>
+                </button>
+              ))}
+            </div>
+            <p className="hint">Demo apps that run on the board's loaded model. Voice input inside them uses the browser's own speech recognition, which may use an online service.</p>
+          </div>
+        </>
       )}
-      <div className="genai-solutions-actions">
-        {open && <button type="button" ref={backButton} className="btn-ghost" onClick={() => setOpen(null)} title="Back to the solutions">Back</button>}
-        {open && <a className="btn-ghost" href={solutionUrl(open.mode, model)} target="_blank" rel="noopener" title="Open in a new tab">New tab</a>}
-        <button type="button" ref={closeButton} className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
-      </div>
       {askApp && (
         <ConfirmDialog
           {...solutionQuestion(askApp, model)}
