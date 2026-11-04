@@ -2105,6 +2105,15 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             ))}
           </select>
         </label>
+        {keepsSeveral && (
+          <ComparePicker
+            models={comparableModels}
+            ticked={compareModels ? compareModels.map((m) => m.name) : (chatModel ? [chatModel.name] : [])}
+            comparing={Boolean(compareModels)}
+            spotClass={spot('compare')}
+            onToggle={toggleCompareModel}
+          />
+        )}
         <ToolButton label="New chat" blocked={why('newChat')} className="btn-ghost genai-tool genai-new-chat" onClick={newChat}>
           <Icon d={ICONS.newChat} />
         </ToolButton>

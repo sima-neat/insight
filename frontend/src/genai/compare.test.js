@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   chooseCard,
@@ -73,4 +74,10 @@ test('the combined speed counts every card over the whole turn', () => {
   assert.deepEqual(combinedRate(turn, 2000), { tokens: 40, tps: 20, seconds: 2 })
   assert.equal(combinedRate({ compare: [{}] }, 2000), null)
   assert.equal(combinedRate(turn, 0), null)
+})
+
+test('the view shows the Compare button when the board keeps several models', () => {
+  const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
+  assert.match(view, /keepsSeveral && \(\s*<ComparePicker/)
+  assert.match(view, /<CompareTurn\b/)
 })
