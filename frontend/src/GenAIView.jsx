@@ -2387,7 +2387,11 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           )}
           {messages.length === 0 && !firstModel && (
             <div className="genai-welcome">
-              <p className="genai-welcome-title">Chat with {chatModel ? friendlyModelName(chatModel.name) : 'a model'} on your board</p>
+              <p className="genai-welcome-title">
+                {compareModels
+                  ? `Ask ${compareModels.map((m) => friendlyModelName(m.name)).join(' and ')} side by side on your board`
+                  : `Chat with ${chatModel ? friendlyModelName(chatModel.name) : 'a model'} on your board`}
+              </p>
               <p className="section-note">
                 Type or talk, {sees ? 'add a picture, ' : ''}and hear the answer read aloud, in most languages. New here? Open the Tutorial.
               </p>
