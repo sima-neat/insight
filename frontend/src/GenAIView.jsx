@@ -42,6 +42,17 @@ import {
 import { languageNames, readAloudSupport } from './genai/speech.js'
 import { allowedActions } from './genai/activity.js'
 import { activeChatModel, keptChoice, loadPlan, residentLimit, unloadChoice } from './genai/models.js'
+import {
+  chooseCard,
+  combinedRate,
+  compareAnswerers,
+  compareSelection,
+  compareTurn,
+  imageNote,
+  loadedInDisplayOrder,
+  toggleTicked,
+  updateCard
+} from './genai/compare.js'
 import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
 import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from './genai/chatExport.js'
@@ -171,6 +182,7 @@ function Icon({ d }) {
 }
 
 const ICONS = {
+  compare: 'M4 5h7v14H4zM13 5h7v14h-7z',
   photo: 'M4 5h16v14H4zM4 15l5-5 4 4 3-3 4 4M15.5 9.5a1 1 0 1 0 0-.01',
   camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   boardCamera: 'M3 7h12v10H3zM15 10.5l6-3.5v10l-6-3.5',
@@ -340,6 +352,8 @@ export default function GenAIView({ onError, onStatus }) {
   // The loaded chat model the user chose to answer, when the board keeps
   // several; the most recently loaded one otherwise.
   const [chosenModel, setChosenModel] = useState(null)
+  // The models ticked in the Compare panel; two or more answer side by side.
+  const [compareNames, setCompareNames] = useState([])
   // A load that needs loaded models unloaded first: {model, choice, already},
   // where `already` lists the models this load was already asked to unload.
   const [unloadAsk, setUnloadAsk] = useState(null)
@@ -453,7 +467,9 @@ export default function GenAIView({ onError, onStatus }) {
     if (kept !== chosenModel) setChosenModel(kept)
   }, [status, chosenModel])
   const keepsSeveral = residentLimit(status) > 1
-  const sees = Boolean(chatModel && chatModel.supportsVision)
+  const comparableModels = loadedInDisplayOrder(status)
+  const compareModels = compareSelection(comparableModels, compareNames)
+  const sees = compareModels ? compareModels.some((m) => m.supportsVision) : Boolean(chatModel && chatModel.supportsVision)
   // What the user may do now: every control and action reads this one table.
   const allowed = allowedActions({
     usable,
@@ -482,7 +498,7 @@ export default function GenAIView({ onError, onStatus }) {
     visionLoop: visionActivity.loop,
     useDocuments: useDocs && docs.available
   })
-  const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
+  const canThink = compareModels ? compareModels.some((m) => supportsThinking(m.name)) : Boolean(chatModel && supportsThinking(chatModel.name))
   // No model to chat with: the chat offers the recommended one instead.
   const firstModel = usable ? firstModelNeeded(status) : null
   const offer = recommendedOffer({ status, card: recommendedCard })
@@ -1156,6 +1172,136 @@ export default function GenAIView({ onError, onStatus }) {
     return content.map((part) => (part.type === 'text' ? { ...part, text: `/no_think ${part.text}` } : part))
   }
 
+  // What one model is sent for a message.
+  function requestMessages(model, userContent) {
+    // Requests are stateless: send the most recent earlier image again so
+    // follow-up questions can still see it. Only that one, as several images
+    // make each reply slow on the board; a new image replaces it.
+    const earlier = messagesRef.current
+    const carried = !image && model.supportsVision ? earlier.findLastIndex((m) => m.role === 'user' && m.image) : -1
+    const history = earlier.map((m, i) => {
+      if (m.role === 'assistant') return { role: 'assistant', content: splitThinking(m.content).answer }
+      if (i === carried) return { role: 'user', content: [{ type: 'text', text: m.text }, { type: 'image_url', image_url: { url: m.image } }] }
+      return { role: 'user', content: m.text }
+    })
+    return [
+      { role: 'system', content: systemPromptFor({ custom: replySettings.systemPrompt, picture: image ? 'current' : carried >= 0 ? 'earlier' : 'none' }) },
+      ...history,
+      { role: 'user', content: supportsThinking(model.name) && !thinking ? withNoThink(userContent) : userContent }
+    ]
+  }
+
+  // The same message sent to every compared model at once, each answer in its
+  // own card. The conversation continues from the chosen card, which is also
+  // the one read aloud. GenAI Studio retries an accelerator that is busy
+  // because several models run at once.
+  function sendCompared({ userText, userContent, heard, replyPlayer, generation }) {
+    const sentImage = image
+    const { answer: models, skip } = compareAnswerers(compareModels, Boolean(sentImage))
+    if (!models.length) {
+      setImage(null)
+      onStatus?.("None of the models you are comparing can see images, so the picture was removed. Send again without it.")
+      return false
+    }
+    const chosen = models.some((m) => m.name === chatModel.name) ? chatModel.name : models[0].name
+    setChosenModel(chosen)
+    const requests = models.map((model) => ({ model, messages: requestMessages(model, userContent) }))
+    const replyId = Date.now()
+    setMessages((prev) => [...prev, { role: 'user', text: userText, image: sentImage, heard }, compareTurn(replyId, compareModels, chosen, skip)])
+    setDraft('')
+    setImage(null)
+    stickToBottom.current = true
+    streamingRef.current = true
+    setStreaming(true)
+    const controller = new AbortController()
+    chatAbort.current = controller
+    const t0 = performance.now()
+    const patch = (name, fields) => {
+      if (chatGeneration.current !== generation) return
+      setMessages((prev) => prev.map((m) => (m.id === replyId ? updateCard(m, name, fields) : m)))
+    }
+    const answered = new Set()
+    let failures = 0
+
+    async function streamCard({ model, messages: outgoing }) {
+      let reply = ''
+      let tFirst = null
+      let reading = replyPlayer && model.name === chosen ? startReading(cardSpeechId(replyId, model.name), replyPlayer, t0) : null
+      const splitter = createSentenceSplitter()
+      const speakNew = (final) => {
+        if (!reading) return
+        for (const piece of splitter.push(splitThinking(reply).answer, final)) {
+          if (!reading.add(piece)) {
+            reading = null
+            return
+          }
+        }
+        if (final) reading.finish()
+      }
+      try {
+        const { stats, rag } = await streamChat({
+          model: model.name,
+          messages: outgoing,
+          maxTokens: replySettings.maxTokens,
+          useDocuments: useDocs && docs.available,
+          signal: ticket(controller.signal).signal,
+          onDelta: (piece) => {
+            if (tFirst === null) tFirst = performance.now()
+            reply += piece
+            patch(model.name, { content: reply })
+            speakNew(false)
+          }
+        })
+        patch(model.name, { content: reply, pending: false, stats, rag, metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }) })
+        if (splitThinking(reply).answer.trim()) answered.add(model.name)
+        speakNew(true)
+      } catch (error) {
+        const stopped = error.name === 'AbortError'
+        if (stopped) reading?.abort()
+        else {
+          failures += 1
+          speakNew(true)
+        }
+        patch(model.name, { content: reply, pending: false, stopped, error: stopped ? null : error.message })
+      }
+    }
+
+    async function streamAll() {
+      await Promise.all(requests.map(streamCard))
+      // Carry on from a card that answered, not from an empty or failed one.
+      const carryOn = answered.has(chosen) ? null : models.find((m) => answered.has(m.name))?.name || null
+      const wallMs = performance.now() - t0
+      if (chatGeneration.current === generation) {
+        setMessages((prev) => prev.map((m) => {
+          if (m.id !== replyId) return m
+          const turn = { ...m, combined: combinedRate(m, wallMs) }
+          return carryOn ? chooseCard(turn, carryOn) : turn
+        }))
+        if (carryOn) setChosenModel(carryOn)
+        if (failures === models.length) fail('None of the compared models answered. Check the board, then try again.')
+      }
+      streamingRef.current = false
+      setStreaming(false)
+      if (chatAbort.current === controller) chatAbort.current = null
+    }
+    streamAll()
+    return true
+  }
+
+  // Which card of a comparison the conversation continues from.
+  function chooseAnswer(replyId, name) {
+    setMessages((prev) => prev.map((m) => (m.id === replyId && m.compare ? chooseCard(m, name) : m)))
+    setChosenModel(name)
+  }
+
+  // Two or more ticked models are compared; one is a normal chat with it.
+  function toggleCompareModel(name) {
+    const ticked = compareModels ? compareModels.map((m) => m.name) : (chatModel ? [chatModel.name] : [])
+    const next = toggleTicked(comparableModels, ticked, name)
+    setCompareNames(next.length > 1 ? next : [])
+    if (next.length === 1) setChosenModel(next[0])
+  }
+
   // Returns whether the message was sent. replyPlayer: an already unlocked
   // player (or null), when the click that asked was earlier than this call.
   function sendMessage(text = draft, { replyPlayer, heard = null } = {}) {
@@ -1169,21 +1315,8 @@ export default function GenAIView({ onError, onStatus }) {
     const userContent = image
       ? [{ type: 'text', text: userText }, { type: 'image_url', image_url: { url: image } }]
       : userText
-    // Requests are stateless: send the most recent earlier image again so
-    // follow-up questions can still see it. Only that one, as several images
-    // make each reply slow on the board; a new image replaces it.
-    const earlier = messagesRef.current
-    const carried = !image && chatModel.supportsVision ? earlier.findLastIndex((m) => m.role === 'user' && m.image) : -1
-    const history = earlier.map((m, i) => {
-      if (m.role === 'assistant') return { role: 'assistant', content: splitThinking(m.content).answer }
-      if (i === carried) return { role: 'user', content: [{ type: 'text', text: m.text }, { type: 'image_url', image_url: { url: m.image } }] }
-      return { role: 'user', content: m.text }
-    })
-    const outgoing = [
-      { role: 'system', content: systemPromptFor({ custom: replySettings.systemPrompt, picture: image ? 'current' : carried >= 0 ? 'earlier' : 'none' }) },
-      ...history,
-      { role: 'user', content: canThink && !thinking ? withNoThink(userContent) : userContent }
-    ]
+    if (compareModels) return sendCompared({ userText, userContent, heard, replyPlayer, generation })
+    const outgoing = requestMessages(chatModel, userContent)
     const replyId = Date.now()
     setMessages((prev) => [...prev, { role: 'user', text: userText, image, heard }, { role: 'assistant', id: replyId, content: '', pending: true }])
     setDraft('')
@@ -1594,7 +1727,7 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   const thinkingModel = thinkingModelOnBoard(status)
-  const steps = tutorialSteps({ canThink, thinkingModel })
+  const steps = tutorialSteps({ canThink, thinkingModel, canCompare: keepsSeveral })
   const step = tutorialStep === null ? null : steps[Math.min(tutorialStep, steps.length - 1)]
   const spot = (target) => (step && step.target === target ? ' genai-spotlight' : '')
 
@@ -1822,6 +1955,15 @@ export default function GenAIView({ onError, onStatus }) {
             ))}
           </select>
         </label>
+        {keepsSeveral && (
+          <ComparePicker
+            models={comparableModels}
+            ticked={compareModels ? compareModels.map((m) => m.name) : (chatModel ? [chatModel.name] : [])}
+            comparing={Boolean(compareModels)}
+            spotClass={spot('compare')}
+            onToggle={toggleCompareModel}
+          />
+        )}
         {/* The tooltip sits on a wrapper: browsers show none on a disabled button. */}
         <span className="genai-tooltip-wrap" title="New chat">
           <button type="button" className="btn-ghost genai-tool genai-new-chat" onClick={newChat} disabled={!allowed.newChat} aria-label="New chat">
@@ -2161,11 +2303,31 @@ export default function GenAIView({ onError, onStatus }) {
           {messages.map((m, index) => {
             if (m.role === 'user') {
               return (
-                <div key={index} className="genai-msg genai-msg-user">
+                <div key={index} className={`genai-msg genai-msg-user${messages[index + 1]?.compare ? ' genai-msg-user-compare' : ''}`}>
                   {m.image && <img src={m.image} alt="Sent with this message" className="genai-msg-image" />}
                   <p>{m.text}</p>
                   <Metrics items={m.heard} label="How fast your speech was heard" />
                 </div>
+              )
+            }
+            if (m.compare) {
+              return (
+                <CompareTurn
+                  key={index}
+                  turn={m}
+                  catalog={chatModels(status)}
+                  onChoose={(name) => chooseAnswer(m.id, name)}
+                  speech={{
+                    speakingId,
+                    error: speechError,
+                    stats: speechStats,
+                    canSpeak: allowed.readAloud,
+                    title: allowed.readAloud ? 'Read this reply aloud' : backend.title,
+                    support: voiceLanguageFor,
+                    onSpeak: speakText,
+                    onStop: stopSpeaking
+                  }}
+                />
               )
             }
             const parts = splitThinking(m.content)
@@ -2235,7 +2397,7 @@ export default function GenAIView({ onError, onStatus }) {
         {image && (
           <div className="genai-attachment">
             <img src={image} alt="Picture to send with your next message" />
-            <span className="hint">Sent with your next message.</span>
+            <span className="hint">Sent with your next message.{compareModels && imageNote(compareModels) ? ` ${imageNote(compareModels)}` : ''}</span>
             <button type="button" className="btn-ghost genai-small" onClick={() => setImage(null)}>Remove</button>
           </div>
         )}
@@ -2377,6 +2539,144 @@ export default function GenAIView({ onError, onStatus }) {
 // SiMaSentry Solutions, like the standalone Studio's shield button: a launcher
 // with the three demo apps, each opened full screen in a frame and wired to the
 // loaded model through the relay. An app's own Home button returns here.
+// The Compare button and its panel: every loaded model with a checkbox.
+function ComparePicker({ models, ticked, comparing, spotClass, onToggle }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  const tickedSet = new Set(ticked)
+  const enough = models.length > 1
+
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className={`genai-compare-picker${spotClass}`} ref={box}>
+      {/* The tooltip sits on a wrapper: browsers show none on a disabled button. */}
+      <span title={enough ? 'Compare side by side: tick the loaded models that answer every message' : 'Compare side by side: load two or more models first'}>
+        <button
+          type="button"
+          className={`${comparing ? 'btn-tonal genai-compare-on' : 'btn-ghost'} genai-compare-button`}
+          aria-expanded={open}
+          aria-haspopup="true"
+          disabled={!enough}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <Icon d={ICONS.compare} />
+          <span>{comparing ? `Comparing ${ticked.length}` : 'Compare'}</span>
+        </button>
+      </span>
+      {open && (
+        <div className="genai-compare-panel" role="group" aria-label="Models that answer">
+          <p className="genai-compare-panel-title">Models that answer</p>
+          {models.map((m) => (
+            <label key={m.name} className="genai-compare-option">
+              <input
+                type="checkbox"
+                checked={tickedSet.has(m.name)}
+                disabled={tickedSet.has(m.name) && tickedSet.size === 1}
+                onChange={() => onToggle(m.name)}
+              />
+              <span className="genai-compare-option-name" title={m.name}>{friendlyModelName(m.name)}</span>
+              <span className="genai-badge">{m.supportsVision ? 'sees images' : 'text only'}</span>
+            </label>
+          ))}
+          <p className="hint">Tick two or more to compare them side by side.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Reading aloud a card in a comparison: its own id, so its button and speed
+// figures follow that card.
+function cardSpeechId(turnId, model) {
+  return `${turnId}:${model}`
+}
+
+function CompareTurn({ turn, catalog, onChoose, speech }) {
+  const byName = new Map(catalog.map((m) => [m.name, m]))
+  return (
+    <div className="genai-compare" aria-label={`Answers from ${turn.compare.length} models`}>
+      <p className="genai-compare-title">
+        <span>Side by side · {turn.compare.length} models</span>
+        {turn.combined && (
+          <span className="hint" title="All tokens the models wrote, over the time until the last one finished">
+            {turn.combined.tokens} tokens in {turn.combined.seconds.toFixed(1)} s · {turn.combined.tps.toFixed(1)} tokens/s combined
+          </span>
+        )}
+      </p>
+      <div className="genai-compare-cards" style={{ '--cards': turn.compare.length }}>
+        {turn.compare.map((card) => {
+          const model = byName.get(card.model)
+          const parts = splitThinking(card.content)
+          const chosen = card.model === turn.chosen
+          return (
+            <section key={card.model} className={`genai-compare-card${chosen ? ' genai-compare-chosen' : ''}`} aria-label={friendlyModelName(card.model)}>
+              <header>
+                <span className="genai-model-name" title={card.model}>{friendlyModelName(card.model)}</span>
+                <span className="genai-badge">{model && model.supportsVision ? 'sees images' : 'text only'}</span>
+              </header>
+              {card.skipped && <p className="hint">This model can't take images, so it didn't answer this message.</p>}
+              {parts.thinking && (
+                <details className="genai-thinking" open={!parts.thinkingDone}>
+                  <summary>{parts.thinkingDone ? 'How it reasoned' : 'Thinking…'}</summary>
+                  <p>{parts.thinking}</p>
+                </details>
+              )}
+              {parts.answer ? (
+                <div className="genai-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>{parts.answer}</ReactMarkdown></div>
+              ) : (
+                card.pending && !parts.thinking && <p className="hint">Writing…</p>
+              )}
+              {card.stopped && <p className="hint">Stopped.</p>}
+              {card.error && <p className="genai-error">{card.error}</p>}
+              {card.rag && <p className="hint genai-sources">{sourcesNote(card.rag)}</p>}
+              <Metrics items={card.metrics} label={`How fast ${friendlyModelName(card.model)} answered`} />
+              <CardSpeech id={cardSpeechId(turn.id, card.model)} answer={card.pending ? '' : parts.answer} speech={speech} />
+              {chosen ? (
+                !turn.pending && parts.answer && <p className="hint genai-compare-note">✓ The conversation continues from this answer</p>
+              ) : (
+                !turn.pending && parts.answer && (
+                  <button type="button" className="btn-ghost genai-small" onClick={() => onChoose(card.model)}>Continue with this answer</button>
+                )
+              )}
+            </section>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// A card's Read aloud, like the one under a single reply.
+function CardSpeech({ id, answer, speech }) {
+  const support = answer ? speech.support(answer) : null
+  return (
+    <>
+      <Metrics items={speech.stats[id]} label="How fast the reply was spoken" />
+      {speech.error && speech.error.id === id && <p className="genai-error">{speech.error.text}</p>}
+      {speech.speakingId === id ? (
+        <button type="button" className="btn-ghost genai-small" onClick={speech.onStop}>Stop speaking</button>
+      ) : (
+        support && support.supported && (
+          <button type="button" className="btn-ghost genai-small" onClick={() => speech.onSpeak(answer, id)} disabled={!speech.canSpeak} title={speech.title}>
+            Read aloud
+          </button>
+        )
+      )}
+    </>
+  )
+}
+
 function SolutionsOverlay({ model, sees, onClose }) {
   const [open, setOpen] = useState(null)
   const frame = useRef(null)

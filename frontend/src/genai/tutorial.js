@@ -5,7 +5,7 @@
 
 export const TUTORIAL_STORAGE_KEY = 'neat-insight:genai-tutorial-seen'
 
-export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
+export function tutorialSteps({ canThink = false, thinkingModel = null, canCompare = false } = {}) {
   const steps = [
     {
       id: 'intro',
@@ -27,6 +27,18 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
       target: 'model',
       action: null
     },
+    ...(canCompare
+      ? [{
+          id: 'compare',
+          title: 'Compare models side by side',
+          body:
+            'The board can keep several models loaded at once. With two loaded, open Compare and tick them: ' +
+            'each message then goes to all of them, and their answers appear side by side. The conversation ' +
+            'continues from the answer you choose.',
+          target: 'compare',
+          action: null
+        }]
+      : []),
     {
       id: 'ask',
       title: 'Ask anything',
