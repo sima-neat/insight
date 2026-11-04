@@ -638,6 +638,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setSetupStatus(null)
     setSetupReadError(null)
     setSetupError(null)
+    setSetupBusy(null)   // a request still out belongs to the old board
+    setSetupSlow(false)
     if (selectedBoardGeneration == null) return undefined
     // The first generation is the board this tab opened on, not a change.
     const changed = boardSeen.current !== null && boardSeen.current !== selectedBoardGeneration
@@ -1724,7 +1726,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setSetupError(null)
     setSetupSlow(false)
     setupWrites.current += 1
-    const slow = setTimeout(() => setSetupSlow(true), slowAfter)
+    const slow = setTimeout(() => { if (selectedBoard.current === board) setSetupSlow(true) }, slowAfter)
     try {
       const result = await call()
       if (setupForBoard(result, selectedBoard.current)) setSetupStatus(result)
@@ -1734,8 +1736,11 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     } finally {
       setupWrites.current += 1
       clearTimeout(slow)
-      setSetupSlow(false)
-      setSetupBusy(null)
+      // After a board change the page is the new board's, and may have a request of its own.
+      if (selectedBoard.current === board) {
+        setSetupSlow(false)
+        setSetupBusy(null)
+      }
     }
   }
 

@@ -86,3 +86,24 @@ test('an address that cannot be read drops the conversation too', async ({ page 
   await expect(page.getByText('Hello')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Export chat' })).toBeDisabled()
 })
+
+test('a setup request left on the old board does not hold the new board\'s buttons', async ({ page }) => {
+  let answer
+  const held = new Promise((resolve) => { answer = resolve })
+  const steps = ['install', 'prepare', 'start'].map((id) => ({ id, state: 'pending', warnings: [] }))
+  const status = { active: false, generation: 99, target: { mode: 'ssh', host: '192.168.1.20' }, steps }
+  await mockInsight(page, { studioUp: false, settings: (route) => json(route, { url: 'https://192.168.1.20:5000' }) })
+  await page.route(/\/api\/genai-setup(\/.*)?(\?.*)?$/, async (route) => {
+    if (route.request().method() === 'POST') await held
+    return json(route, status)
+  })
+  await page.goto('/genai')
+  const install = page.getByRole('button', { name: 'Install GenAI Studio' })
+  await install.click()
+  await expect(page.getByRole('button', { name: 'Starting…' })).toBeDisabled()
+
+  await changeBoard(page)
+  await expect(install).toBeEnabled()
+  answer()
+  await expect(install).toBeEnabled()
+})
