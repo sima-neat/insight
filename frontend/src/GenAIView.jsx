@@ -1,6 +1,4 @@
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 
 import {
   START_COMMAND,
@@ -98,6 +96,7 @@ import {
 } from './genai/setup.js'
 import { acceptedAnswer, clearDocumentsQuestion, deleteModelQuestion, loadModelQuestion, solutionQuestion } from './genai/confirmations.js'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import ModelMarkdown from './ModelMarkdown.jsx'
 
 const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
 
@@ -152,13 +151,6 @@ function browserStorage() {
   } catch {
     return null
   }
-}
-
-// Model output is untrusted: an image in it would be fetched from wherever the
-// model points (so it is shown as its alt text), and links open outside Insight.
-const MARKDOWN_COMPONENTS = {
-  img: ({ alt }) => (alt ? <span>{alt}</span> : null),
-  a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />
 }
 
 function Icon({ d }) {
@@ -2285,7 +2277,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
                   </details>
                 )}
                 {parts.answer ? (
-                  <div className="genai-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>{parts.answer}</ReactMarkdown></div>
+                  <ModelMarkdown>{parts.answer}</ModelMarkdown>
                 ) : (
                   m.pending && !parts.thinking && <p className="hint">Writing…</p>
                 )}
@@ -3063,7 +3055,7 @@ function VisionView({ model, allowed, busyReason, boardCam, cameras, camera, onC
           <>
             <p className="genai-vision-question">{answer.prompt}</p>
             {answer.text ? (
-              <div className="genai-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>{answer.text}</ReactMarkdown></div>
+              <ModelMarkdown>{answer.text}</ModelMarkdown>
             ) : (
               answer.pending && <p className="hint">{snapshotting ? 'Taking a picture on the board…' : 'Looking…'}</p>
             )}

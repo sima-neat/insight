@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import ModelMarkdown from './ModelMarkdown.jsx'
 import { chatModels, friendlyModelName } from './genai/backendState.js'
 import {
   BENCH_LIMITS,
@@ -357,7 +358,12 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
                 </div>
               )}
               {progress.text && <p className="hint">{progress.text}</p>}
-              {live && live.current && live.current.text && <pre className="genai-bench-text">{live.current.text}</pre>}
+              {live && live.current && live.current.text && (
+                <div className="genai-bench-metric">
+                  <span className="genai-bench-label">The model's reply so far</span>
+                  <div className="genai-bench-text"><ModelMarkdown>{live.current.text}</ModelMarkdown></div>
+                </div>
+              )}
             </section>
             {upNext.length > 0 && (
               <section className="genai-bench-card genai-bench-models" aria-label="Up next">
@@ -414,14 +420,17 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
                     </tbody>
                   </table>
                 </div>
-                <dl className="genai-bench-glossary">
-                  <dt>Average speed</dt><dd>Tokens per second, averaged over the runs.</dd>
-                  <dt>Top speed (p90)</dt><dd>9 in 10 runs were at or below this speed.</dd>
-                  <dt>Variation (σ)</dt><dd>How much the speed changed between runs. Smaller is steadier.</dd>
-                  <dt>First word</dt><dd>Average wait before the reply starts, in milliseconds.</dd>
-                  <dt>Reply length</dt><dd>Average tokens per reply.</dd>
-                  <dt>Runs</dt><dd>Runs that finished, and how many failed.</dd>
-                </dl>
+                <details className="genai-bench-meanings">
+                  <summary>What these numbers mean</summary>
+                  <dl className="genai-bench-glossary">
+                    <dt>Average speed</dt><dd>Tokens per second, averaged over the runs.</dd>
+                    <dt>Top speed (p90)</dt><dd>9 in 10 runs were at or below this speed.</dd>
+                    <dt>Variation (σ)</dt><dd>How much the speed changed between runs. Smaller is steadier.</dd>
+                    <dt>First word</dt><dd>Average wait before the reply starts, in milliseconds.</dd>
+                    <dt>Reply length</dt><dd>Average tokens per reply.</dd>
+                    <dt>Runs</dt><dd>Runs that finished, and how many failed.</dd>
+                  </dl>
+                </details>
               </div>
             </details>
 

@@ -30,7 +30,7 @@ async function mockBoard(page, { loaded = [LLAMA], holdRun = false } = {}) {
     if (path === 'benchmark/status') {
       board.polls += 1
       if (board.polls < 2 || (holdRun && !board.stopped)) {
-        return json(route, { running: true, done: 2, total: 5, current: { tokens: 64, tps: 14.2, text: 'A transformer generates text' } })
+        return json(route, { running: true, done: 2, total: 5, current: { tokens: 64, tps: 14.2, text: '## How it works\n\nA **transformer** generates text ![a picture](https://example.com/a.png)' } })
       }
       return json(route, { running: false, done: 5, total: 5, summary, prompt: 'standard', runs: [{ ttftMs: 820, tps: 14.2, tokens: 128 }] })
     }
@@ -98,6 +98,8 @@ test('the defaults run without changing anything, and each number is explained',
   await panel.getByText('All numbers').click()
   const row = panel.getByRole('row', { name: /Llama 3.2 3B/ })
   await expect(row).toHaveText(/14\.2\s*14\.6\s*0\.30\s*820 ms\s*128\s*5/)
+  await expect(panel.getByRole('term').first()).toBeHidden()
+  await panel.getByText('What these numbers mean').click()
   for (const term of ['Average speed', 'Top speed (p90)', 'Variation (σ)', 'First word', 'Reply length', 'Runs']) {
     await expect(panel.getByRole('term').filter({ hasText: term })).toBeVisible()
   }
@@ -167,7 +169,12 @@ test('running shows progress and the reply, and Stop ends it', async ({ page }) 
   await expect(panel.getByText('Testing Llama 3.2 3B')).toBeVisible()
   await expect(panel.getByText('Model 1 of 1')).toBeVisible()
   await expect(panel.getByRole('progressbar', { name: 'Benchmark progress' })).toHaveAttribute('aria-valuenow', '40')
-  await expect(panel.getByText('A transformer generates text')).toBeVisible()
+  // The reply reads like the chat's: rendered Markdown, and no image fetched from what the model wrote.
+  await expect(panel.getByText("The model's reply so far")).toBeVisible()
+  await expect(panel.getByRole('heading', { name: 'How it works' })).toBeVisible()
+  await expect(panel.locator('.genai-bench-text strong')).toHaveText('transformer')
+  await expect(panel.locator('.genai-bench-text')).not.toContainText('**')
+  await expect(panel.locator('.genai-bench-text img')).toHaveCount(0)
   await expect(panel.getByRole('button', { name: 'Close' })).toBeDisabled()
 
   await panel.getByRole('button', { name: 'Stop' }).click()

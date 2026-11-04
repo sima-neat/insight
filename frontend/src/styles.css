@@ -6270,14 +6270,27 @@ button:disabled {
 }
 
 .genai-bench-text {
-  max-height: 160px;
+  max-height: 240px;
   overflow-y: auto;
-  margin: 0;
-  padding: 10px;
+  padding: 12px;
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
-  font-size: 12px;
-  white-space: pre-wrap;
+  font-size: 14px;
+}
+
+.genai-bench-text :is(h1, h2, h3, h4) {
+  margin: 12px 0 4px;
+  font-size: 15px;
+}
+
+.genai-bench-text p {
+  margin: 0 0 8px;
+}
+
+.genai-bench-text hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
 }
 
 .genai-bench-report {
@@ -6344,11 +6357,17 @@ button:disabled {
   font-weight: 700;
 }
 
+.genai-bench-more .genai-bench-meanings summary {
+  min-height: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
 .genai-bench-glossary {
   display: grid;
   grid-template-columns: minmax(130px, max-content) 1fr;
   gap: 6px 16px;
-  margin: 0;
+  margin: 10px 0 0;
   font-size: 13px;
 }
 
