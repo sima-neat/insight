@@ -169,6 +169,38 @@ The Viewer's playback tests run only against a deployed build, and need the test
 on channel 0. One of them stops the feed and starts it again, detached; afterwards
 `scripts/vf-test-feed.sh stop 0` stops it.
 
+### Run the prototype in the Neat SDK container
+
+The SDK container (`sima-cli sdk setup`) runs the stock Insight as the `insight-admin` service on
+port 9900. `scripts/deploy-sdk-dev.sh` replaces it with this checkout, for testing in the browser,
+and puts the stock service back when you are done. The container sees `~/workspace` on the host as
+`/workspace`; the script keeps a dev copy at `~/workspace/.insight-dev` with its own virtualenv and
+never touches `/opt/neat-insight` in the container.
+
+Once, to create the dev copy (`build.sh` needs Go and produces the viewer binaries under
+`neat_insight/bin/`):
+
+```bash
+C=$(docker ps --format '{{.Names}}' | grep -m1 sima-neat-sdk)
+./build.sh
+rsync -a --exclude .git --exclude node_modules ./ ~/workspace/.insight-dev/
+docker exec "$C" bash -c 'cd /workspace/.insight-dev && python3 -m venv .venv && .venv/bin/pip install -e .'
+```
+
+Then, after every change (Node.js 24 for the frontend build, which runs on the host because the
+container has no npm):
+
+```bash
+scripts/deploy-sdk-dev.sh                 # build the frontend, sync, restart on https://localhost:9900
+scripts/deploy-sdk-dev.sh --no-frontend   # backend or docs only
+scripts/deploy-sdk-dev.sh --restore       # stop the dev build, start the stock service again
+```
+
+The script picks the first running `sima-neat-sdk*` container (`INSIGHT_SDK_CONTAINER=<name>` picks
+another), writes the deployed commit to `~/workspace/.insight-dev/DEPLOYED_COMMIT` and logs to
+`~/workspace/.insight-dev/dev-insight.log`. A deploy restarts mediamtx, so external publishers (a
+webcam, a test stream) have to be started again; hard-reload the browser tab afterwards.
+
 ### Test feed for the Viewer
 
 `scripts/vf-test-feed.sh` feeds one vf channel in the Neat SDK container with a test stream. Video
