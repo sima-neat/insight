@@ -2013,7 +2013,9 @@ export default function App() {
     try {
       // A camera this tab already holds (a preview, or a webcam source starting or publishing) shows
       // access is granted, and probing would open a camera a second time, which an exclusive camera
-      // refuses as busy. Only re-list the devices then.
+      // refuses as busy. Only re-list the devices then. A start still opening one is waited for first:
+      // whether it gets the camera decides that.
+      await Promise.allSettled(openingCapturesRef.current.values())
       const holdsCamera = Boolean(previewCameraRef.current) || holdsLiveCamera(heldCaptures(startingCapturesRef.current, webcamSessionsRef.current))
       if (!holdsCamera) {
         const probe = await navigator.mediaDevices.getUserMedia({ video: true })
