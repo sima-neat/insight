@@ -242,7 +242,8 @@ function pendingFor(mediaDevices) {
 // opening the camera a second time, also from a new preview after Cancel closed the old one. React's
 // Strict Mode runs the preview's effect as select, stop, select in development, and picking A, B,
 // then A again quickly does the same; a second open of a camera that only one client may hold would
-// fail as busy while the first one succeeds.
+// fail as busy while the first one succeeds. For the same reason, a select() given `opening` (a
+// webcam start's own request for this camera) waits for it, then asks `findShared()` for the track.
 //
 // onState receives { status: 'idle' }, { status: 'loading', camera }, { status: 'live', camera,
 // stream, info, sharedWith }, or { status: 'error', camera, error }.
@@ -285,7 +286,7 @@ export function createCameraPreview({
   }
 
   // `shared` is publishingTrackFor()'s answer for this camera, read at selection time.
-  async function select(camera, { shared = null } = {}) {
+  async function select(camera, { shared = null, opening = null, findShared = null } = {}) {
     const mine = ++generation
     const ticket = {}
     release()
@@ -299,6 +300,11 @@ export function createCameraPreview({
     let sharedWith = null
     let opened = null
     try {
+      if (opening) {
+        await opening.catch(() => {}) // a start that failed leaves the camera free to open here
+        if (mine !== generation) return state
+        shared = findShared?.() || null
+      }
       if (shared?.track && shared.track.readyState === 'live') {
         stream = createStream([shared.track.clone()])
         sharedWith = shared.index

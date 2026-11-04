@@ -42,17 +42,25 @@ export function canRunSetupAgain(status) {
   return Boolean(prepare && prepare.state === 'done' && (prepare.warnings || []).length && !setupStoppable(status))
 }
 
+// A URL's host, without IPv6 brackets. URL can't parse a zoned IPv6 address (fe80::1%eth0), which a
+// board entered by hand may have, so that one is read from the text.
+function urlHost(url) {
+  const zoned = /^https?:\/\/\[([^\]]+%[^\]]+)\]/i.exec(url)
+  if (zoned) return zoned[1].replace('%25', '%')
+  try {
+    return new URL(url).hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return null
+  }
+}
+
 // Whether the GenAI Studio address the tab uses (`relayUrl`, from Settings) points at the
 // board setup acts on (`status.target`: Insight's selected board). Unknown counts as no.
 export function relayOnSetupBoard(relayUrl, status) {
   const target = status && status.target
   if (!target || !relayUrl) return false
-  let host
-  try {
-    host = new URL(relayUrl).hostname.replace(/^\[|\]$/g, '')
-  } catch {
-    return false
-  }
+  const host = urlHost(relayUrl)
+  if (host === null) return false
   if (target.mode === 'local') return ['127.0.0.1', 'localhost', '::1'].includes(host)
   // URL lowercases a host name; the board target keeps the spelling it was entered with.
   return Boolean(target.host) && host.toLowerCase() === String(target.host).replace(/^\[|\]$/g, '').toLowerCase()

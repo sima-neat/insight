@@ -797,6 +797,8 @@ export default function App() {
   // join webcamSessionsRef only once the answer arrives, and a preview of the same camera in between
   // must reuse this capture rather than open the camera again.
   const startingCapturesRef = useRef(new Map())
+  // Before that, while getUserMedia runs: the request, by camera, for the preview to wait on.
+  const openingCapturesRef = useRef(new Map())
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
   const [mediaInfo, setMediaInfo] = useState(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -2187,9 +2189,15 @@ export default function App() {
     let watcher = null
     try {
       // Video-only for now, per the ticket's initial scope.
-      stream = await navigator.mediaDevices.getUserMedia({
+      const opening = navigator.mediaDevices.getUserMedia({
         video: { deviceId: { exact: assignment.deviceId } }
       })
+      openingCapturesRef.current.set(assignment.deviceId, opening)
+      try {
+        stream = await opening
+      } finally {
+        if (openingCapturesRef.current.get(assignment.deviceId) === opening) openingCapturesRef.current.delete(assignment.deviceId)
+      }
       if (superseded()) throw WEBCAM_START_SUPERSEDED
       startingCapturesRef.current.set(index, { stream })
       pc = new RTCPeerConnection()
@@ -2854,6 +2862,7 @@ export default function App() {
                 <CameraPreview
                   camera={previewCamera}
                   findShared={(deviceId) => publishingTrackFor(heldCaptures(startingCapturesRef.current, webcamSessionsRef.current), webcamAssignmentsRef.current, deviceId)}
+                  findOpening={(deviceId) => openingCapturesRef.current.get(deviceId)}
                   onClose={() => setPreviewCamera(null)}
                   onRefreshCameras={enableCameraAccess}
                 />

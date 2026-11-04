@@ -595,6 +595,10 @@ test('setup knows whether the tab connects to the board setup acts on', () => {
   assert.equal(relayOnSetupBoard('https://192.168.2.4:5000', ssh), false)
   assert.equal(relayOnSetupBoard('https://localhost:5000', { target: { mode: 'local', host: null } }), true)
   assert.equal(relayOnSetupBoard('https://[::1]:5000', { target: { mode: 'local', host: null } }), true)
+  const zoned = { target: { mode: 'ssh', host: 'FE80::1%eth0' } }
+  assert.equal(relayOnSetupBoard('https://[fe80::1%eth0]:5000', zoned), true)
+  assert.equal(relayOnSetupBoard('https://[fe80::1%25eth0]:5000', zoned), true)
+  assert.equal(relayOnSetupBoard('https://[fe80::1%eth1]:5000', zoned), false)
   assert.equal(relayOnSetupBoard('not a url', ssh), false)
   assert.equal(relayOnSetupBoard('', ssh), false)
   assert.equal(relayOnSetupBoard('https://192.168.2.3:5000', {}), false)

@@ -130,19 +130,23 @@ export default function CameraPreviewPane({ state = IDLE, onStop, onRetry, onRef
 // Owns one camera preview while it is mounted: selecting another camera replaces it, and unmounting
 // (leaving Media Sources, picking a file, closing the page) releases it. `findShared(deviceId)`
 // returns this tab's publishing track for the camera, if any, so a camera that is already
-// publishing is previewed from a clone instead of being opened again.
-export function CameraPreview({ camera, findShared, onClose, onRefreshCameras }) {
+// publishing is previewed from a clone instead of being opened again. `findOpening(deviceId)` returns
+// the request of a publish still opening the camera, if any, which the preview waits for.
+export function CameraPreview({ camera, findShared, findOpening, onClose, onRefreshCameras }) {
   const [state, setState] = useState(IDLE)
   const controllerRef = useRef(null)
   if (!controllerRef.current) controllerRef.current = createCameraPreview({ onState: setState })
   const findRef = useRef(findShared)
   findRef.current = findShared
+  const findOpeningRef = useRef(findOpening)
+  findOpeningRef.current = findOpening
   const [attempt, setAttempt] = useState(0)
   const deviceId = camera?.deviceId || null
 
   useEffect(() => {
     const controller = controllerRef.current
-    controller.select(camera, { shared: deviceId ? findRef.current?.(deviceId) : null })
+    const findShared = () => (deviceId ? findRef.current?.(deviceId) : null)
+    controller.select(camera, { shared: findShared(), opening: deviceId ? findOpeningRef.current?.(deviceId) : null, findShared })
     return () => controller.stop()
     // A new label for the same camera is not a new preview.
   }, [deviceId, attempt])

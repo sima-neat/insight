@@ -486,3 +486,45 @@ test('the tab holds a camera only while one of its captures has a live track', (
   assert.equal(holdsLiveCamera(new Map()), false)
   assert.equal(holdsLiveCamera(null), false)
 })
+
+test('a preview waits for a publish still opening the camera, and clones its track', async () => {
+  const media = deferredMedia()
+  const { controller, states } = preview({ mediaDevices: media.mediaDevices })
+  const publishing = fakeTrack({ settings: { deviceId: 'cam-a' } })
+  let shared = null
+  let open
+  const opening = new Promise((resolve) => { open = resolve })
+  const done = controller.select(camA, { opening, findShared: () => shared })
+  await Promise.resolve()
+  assert.equal(states.at(-1).status, 'loading')
+  shared = { track: publishing, index: 3 }
+  open()
+  await done
+  assert.equal(media.calls.length, 0, 'the camera is not opened a second time')
+  assert.equal(states.at(-1).status, 'live')
+  assert.equal(states.at(-1).sharedWith, 3)
+})
+
+test('a preview opens the camera itself when the publish it waited for failed', async () => {
+  const media = deferredMedia()
+  const { controller, states } = preview({ mediaDevices: media.mediaDevices })
+  const done = controller.select(camA, { opening: Promise.reject(errorNamed('NotReadableError')), findShared: () => null })
+  await new Promise((resolve) => setTimeout(resolve))
+  assert.equal(media.calls.length, 1)
+  media.calls[0].resolve(fakeStream([fakeTrack()]))
+  await done
+  assert.equal(states.at(-1).status, 'live')
+  assert.equal(states.at(-1).sharedWith, null)
+})
+
+test('a preview replaced while waiting for a publish does nothing when it ends', async () => {
+  const media = deferredMedia()
+  const { controller, states } = preview({ mediaDevices: media.mediaDevices })
+  let open
+  const done = controller.select(camA, { opening: new Promise((resolve) => { open = resolve }), findShared: () => assert.fail('no longer wanted') })
+  controller.stop()
+  open()
+  await done
+  assert.equal(media.calls.length, 0)
+  assert.equal(states.at(-1).status, 'idle')
+})
