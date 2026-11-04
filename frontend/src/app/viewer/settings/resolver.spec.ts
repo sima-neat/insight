@@ -88,7 +88,13 @@ describe('viewer settings resolver', () => {
         confidenceThreshold: 0,
         history: { enabled: true, trailLength: 10, lostTrackTtlMs: 2000 },
       },
-      'pose-estimation': { visible: true, showKeypoints: true, showKeypointLabels: false },
+      'pose-estimation': {
+        visible: true,
+        showKeypoints: true,
+        showKeypointLabels: false,
+        showBoxes: true,
+        objects: [],
+      },
       classification: { visible: true },
     });
   });
@@ -147,6 +153,7 @@ describe('viewer settings resolver', () => {
         tab: 'Metadata',
         metadataType: 'pose-estimation',
       },
+      { id: 'types.pose-estimation.showBoxes', tab: 'Metadata', metadataType: 'pose-estimation' },
     ]);
   });
 
@@ -156,6 +163,22 @@ describe('viewer settings resolver', () => {
     expect(resolveOverlaySettings(EMPTY_OVERRIDES, EMPTY_OVERRIDES, [])).toStrictEqual(
       NEAT_OVERLAY_DEFAULTS,
     );
+  });
+
+  it('pose boxes resolve on with no class rows by default, and take a channel row and its own switch', () => {
+    const defaults = resolveOverlaySettings(EMPTY_OVERRIDES, EMPTY_OVERRIDES, []);
+    expect(defaults.types['pose-estimation'].showBoxes).toBe(true);
+    expect(defaults.types['pose-estimation'].objects).toStrictEqual([]);
+
+    const row = { label: 'person', color: '#ff0000', style: 'dashed' as const, width: 3 };
+    const channel = withOwnValue(
+      settingsOverrides({ version: 10, types: { 'pose-estimation': { objects: [row] } } }),
+      'types.pose-estimation.showBoxes',
+      false,
+    );
+    const resolved = resolveOverlaySettings(EMPTY_OVERRIDES, channel, []).types['pose-estimation'];
+    expect(resolved.showBoxes).toBe(false);
+    expect(resolved.objects).toStrictEqual([row]);
   });
 
   it('resolving takes the regions as given, whatever the scopes hold', () => {

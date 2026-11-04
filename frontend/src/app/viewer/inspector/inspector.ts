@@ -139,6 +139,7 @@ const METADATA_SECTIONS: readonly MetadataSection[] = [
         id: 'types.pose-estimation.showKeypointLabels',
         label: 'Show landmark names',
       },
+      { control: 'switch', id: 'types.pose-estimation.showBoxes', label: 'Show boxes' },
     ],
     note: 'Landmark names are off by default to keep the video overlay readable.',
   },

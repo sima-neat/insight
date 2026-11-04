@@ -345,6 +345,8 @@ export function resolveOverlaySettings(
         visible: value('types.pose-estimation.visible'),
         showKeypoints: value('types.pose-estimation.showKeypoints'),
         showKeypointLabels: value('types.pose-estimation.showKeypointLabels'),
+        showBoxes: value('types.pose-estimation.showBoxes'),
+        objects: resolveClassStyles(global, channel, 'pose-estimation'),
       },
       classification: {
         visible: value('types.classification.visible'),

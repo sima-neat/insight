@@ -39,6 +39,7 @@ export type MetadataType = keyof NeatOverlaySettings['types'];
 export const CLASS_STYLE_TYPES = [
   'object-detection',
   'segmentation',
+  'pose-estimation',
 ] as const satisfies readonly MetadataType[];
 
 export interface GeneralSettings extends Readonly<NeatOverlaySettings['general']> {
@@ -84,6 +85,7 @@ export interface SettingValues {
   'types.classification.visible': boolean;
   'types.pose-estimation.showKeypoints': boolean;
   'types.pose-estimation.showKeypointLabels': boolean;
+  'types.pose-estimation.showBoxes': boolean;
 }
 
 export type SettingId = keyof SettingValues;
@@ -164,6 +166,7 @@ export const SCALAR_SETTINGS: readonly ScalarSetting[] = [
   scalar('types.classification.visible', 'Metadata', 'classification'),
   scalar('types.pose-estimation.showKeypoints', 'Metadata', 'pose-estimation'),
   scalar('types.pose-estimation.showKeypointLabels', 'Metadata', 'pose-estimation'),
+  scalar('types.pose-estimation.showBoxes', 'Metadata', 'pose-estimation'),
 ];
 
 /** The defaults in the stored shape, so a setting's default is found by its path like any value. */
