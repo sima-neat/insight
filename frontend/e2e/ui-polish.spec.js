@@ -129,6 +129,22 @@ test('the checkboxes on the left use the same tooltip, with a short label', asyn
   await expect(think).not.toBeChecked()
 })
 
+// The tab's entrance animation does this for a moment: `fixed` then measures from that element.
+test('a tooltip stays beside its button under a moved parent, and follows it', async ({ page }) => {
+  const toolbar = await openGenAI(page)
+  await page.addStyleTag({ content: '.genai { transform: translateY(40px); }' })
+  const button = toolbar.getByRole('button', { name: 'Settings' })
+  // By keyboard: a moved button would slide out from under a hovering mouse.
+  await toolbar.getByRole('button', { name: 'Full screen' }).focus()
+  await page.keyboard.press('Shift+Tab')
+  const tip = page.getByRole('tooltip').filter({ visible: true })
+  await expect(tip).toHaveText('Settings')
+  await expectTipBeside(page, button, tip)
+  await page.addStyleTag({ content: '.genai { transform: translateY(0); }' })
+  await expect.poll(async () => (await tip.boundingBox()).y - (await button.boundingBox()).y).toBeLessThan(60)
+  await expectTipBeside(page, button, tip)
+})
+
 test('the tooltip goes away when its button opens something', async ({ page }) => {
   const toolbar = await openGenAI(page)
   await toolbar.getByRole('button', { name: 'SiMaSentry apps' }).click()

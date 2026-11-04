@@ -8,16 +8,28 @@ import { tipPosition } from './tooltip.js'
 // fullscreen element is drawn.
 export function Tooltip({ label, note = '', placement = 'bottom', children }) {
   const [open, setOpen] = useState(false)
-  const [position, setPosition] = useState(null)
   const anchor = useRef(null)
   const tip = useRef(null)
   const noteId = useId()
 
+  // Placed on every frame while open: the page can move under it. The tab's entrance animation
+  // also makes that element the box `fixed` is measured from, so where (0, 0) lands is measured too.
   useLayoutEffect(() => {
-    if (!open) return
-    const { width, height } = tip.current.getBoundingClientRect()
-    const view = { width: window.innerWidth, height: window.innerHeight }
-    setPosition(tipPosition(anchor.current.getBoundingClientRect(), { width, height }, view, placement))
+    if (!open) return undefined
+    let frame
+    const place = () => {
+      const { style } = tip.current
+      style.top = '0'
+      style.left = '0'
+      const origin = tip.current.getBoundingClientRect()
+      const view = { width: window.innerWidth, height: window.innerHeight }
+      const { top, left } = tipPosition(anchor.current.getBoundingClientRect(), origin, view, placement)
+      style.top = `${top - origin.top}px`
+      style.left = `${left - origin.left}px`
+      frame = requestAnimationFrame(place)
+    }
+    place()
+    return () => cancelAnimationFrame(frame)
   }, [open, label, note, placement])
 
   return (
@@ -33,7 +45,7 @@ export function Tooltip({ label, note = '', placement = 'bottom', children }) {
       onClick={(e) => { if (!e.currentTarget.querySelector('[aria-disabled="true"]')) setOpen(false) }}
     >
       {children(note ? noteId : undefined)}
-      <span ref={tip} className="tip" role="tooltip" hidden={!open} style={position || undefined}>
+      <span ref={tip} className="tip" role="tooltip" hidden={!open}>
         {label}
         {note && <span id={noteId} className="tip-note">{note}</span>}
       </span>

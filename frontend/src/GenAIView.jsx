@@ -438,7 +438,10 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const hubSearchBox = useRef(null)
 
   const backend = deriveBackendState({ health, status, busyOp, lastError })
-  const usable = canUseModels(backend.state)
+  // Between a header board change and knowing where the tab's address points now, nothing is sent:
+  // the relay may already reach the new board, with the old board's conversation still here.
+  const [switchingBoard, setSwitchingBoard] = useState(false)
+  const usable = canUseModels(backend.state) && !switchingBoard
   // Something answers at the tab's address, maybe not as a GenAI Studio this tab can use.
   const answers = Boolean(health) && !offersSetup(backend.state)
   // That answer is a GenAI Studio this tab can use (or one still starting): setup is done.
@@ -482,7 +485,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     visionAsking: visionActivity.asking,
     visionLoop: visionActivity.loop,
     useDocuments: useDocs && docs.available,
-    backendTitle: backend.title,
+    backendTitle: switchingBoard ? 'Switching boards…' : backend.title,
     benchmarkReason: bench.reason,
     documentsReason: docs.reason
   }
@@ -630,20 +633,33 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // the default address may follow it, so what this tab holds may too.
   const settingsNow = useRef(settings)
   settingsNow.current = settings
+  const boardSeen = useRef(null)
   useEffect(() => {
     setSetupStatus(null)
     setSetupReadError(null)
+    setSetupError(null)
     if (selectedBoardGeneration == null) return undefined
+    // The first generation is the board this tab opened on, not a change.
+    const changed = boardSeen.current !== null && boardSeen.current !== selectedBoardGeneration
+    boardSeen.current = selectedBoardGeneration
+    if (changed) setSwitchingBoard(true)
     let cancelled = false
+    const leaveBoard = () => {
+      forgetBoard()
+      refresh()
+    }
     getSettings().then((s) => {
       if (cancelled) return
       const moved = settingsNow.current && settingsNow.current.url !== s.url
       setSettings(s)
-      if (moved) {
-        forgetBoard()
-        refresh()
-      }
-    }).catch(() => {})
+      if (moved) leaveBoard()
+      setSwitchingBoard(false)
+    }).catch(() => {
+      if (cancelled || !changed) return
+      // The address can't be read, so the conversation can't be shown to belong to it.
+      leaveBoard()
+      setSwitchingBoard(false)
+    })
     return () => {
       cancelled = true
     }
