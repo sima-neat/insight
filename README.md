@@ -24,6 +24,12 @@ User documentation for the software docs site is maintained in
 
 ## Install
 
+> **For this prototype:** both options below install upstream Insight, not `insight-next`. To run the
+> prototype, build it from source (see [Build from source](#build-from-source) and
+> [Work on the frontend](#work-on-the-frontend)); its frontend uses the
+> [`neat-ui`](https://github.com/justin-guth-sima/neat-ui) kit, vendored as a release tarball in
+> `frontend/vendor/`.
+
 ### Option 1: Install from PyPI (official release)
 
 ```bash
