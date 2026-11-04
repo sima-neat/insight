@@ -557,7 +557,7 @@ select:focus-visible,
   margin: 8px 0 10px;
 }
 
-.camera-optin {
+.media-card {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
@@ -565,17 +565,59 @@ select:focus-visible,
   margin: 0 0 12px;
 }
 
-.camera-optin-head {
+.media-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin-bottom: 6px;
 }
 
-.camera-optin-title {
+.media-card-head .meta-count {
+  margin: 0;
+}
+
+.media-card-head-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.media-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
   font-weight: 700;
-  font-size: 13px;
   color: #2d4f64;
+}
+
+.media-card-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: currentColor;
+}
+
+.live-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
 }
 
 .camera-optin-error {
@@ -585,14 +627,88 @@ select:focus-visible,
 }
 
 .camera-list {
+  display: grid;
+  gap: 4px;
   margin: 8px 0 0;
-  padding-left: 18px;
-  font-size: 12px;
-  color: var(--ink-soft);
+  padding: 0;
+  list-style: none;
 }
 
-.camera-list li {
-  margin: 2px 0;
+/* A detected camera: selecting it previews it in the Selected Media panel (issue #222). */
+.camera-row {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+}
+
+.camera-row-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: currentColor;
+}
+
+.camera-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.camera-row:hover {
+  border-color: var(--line-strong);
+}
+
+.camera-row.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.camera-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.camera-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.camera-preview-head h3 {
+  margin: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.camera-preview .hint,
+.camera-preview .periph-callout {
+  margin: 0;
+}
+
+.camera-preview-info h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.camera-preview-info h4:first-child {
+  margin-top: 0;
 }
 
 .search-input,
@@ -604,6 +720,14 @@ input {
   background: #fff;
   padding: 9px 11px;
   font-size: 13px;
+}
+
+/* Our own arrow: the browser's sits against the border. Its inset matches the text's on the left. */
+select {
+  appearance: none;
+  padding-right: 31px;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%2340596d' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m2.5 4.5 3.5 3.5 3.5-3.5'/%3E%3C/svg%3E") no-repeat right 11px center / 12px;
+  text-overflow: ellipsis;
 }
 
 .media-list {
@@ -3508,6 +3632,20 @@ button:disabled {
   color: #8f2f45;
 }
 
+/* ConfirmDialog: above the full-window GenAI views (z-index 1000), which ask too. */
+.confirm-backdrop {
+  z-index: 1100;
+}
+
+/* Its own text color, so it stays dark over whatever view it opens in. */
+.confirm-card {
+  color: var(--ink);
+}
+
+.confirm-card:focus {
+  outline: none;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -5247,13 +5385,43 @@ button:disabled {
   font-size: 0.9em;
 }
 
-.genai-tooltip-wrap {
+.tip-anchor {
   display: inline-flex;
 }
 
-/* Let the wrapper receive the hover (and show "New chat") while the button is disabled. */
-.genai-tooltip-wrap > button:disabled {
+/* ToolButton's tooltip, above the full-window GenAI views (z-index 1000). */
+.tip {
+  position: fixed;
+  z-index: 1200;
+  width: max-content;
+  max-width: 260px;
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
   pointer-events: none;
+}
+
+.tip-note {
+  display: block;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+/* Looks like button:disabled; aria-disabled keeps it focusable for its tooltip. */
+.tip-anchor > button[aria-disabled='true'] {
+  opacity: 0.52;
+  cursor: default;
+  transform: none;
+}
+
+.tip-anchor > .genai-send[aria-disabled='true'] {
+  opacity: 0.3;
 }
 
 .genai-new-chat {
@@ -5356,31 +5524,6 @@ button:disabled {
   flex: 1;
 }
 
-.genai-tutorial-question {
-  font-weight: 600;
-}
-
-.genai-tutorial-commands {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  max-width: 72ch;
-}
-
-.genai-tutorial-commands pre {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  padding: 8px 10px;
-  overflow-x: auto;
-  border-radius: 8px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 .genai-setup-steps {
   display: grid;
   gap: 10px;
@@ -5467,15 +5610,6 @@ button:disabled {
   color: var(--ink-soft);
 }
 
-.genai-setup-last {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--ink-soft);
-}
-
 .genai-setup-help {
   display: grid;
   gap: 6px;
@@ -5524,14 +5658,145 @@ button:disabled {
   font-weight: 600;
 }
 
-.genai-setup-manual {
-  display: grid;
-  gap: 4px;
+/* While GenAI Studio can't be used the tab shows only the setup page: one card,
+   and on request the board address under it, at a readable width. */
+.genai.genai-setup-page {
+  height: auto;
 }
 
-.genai-setup-manual .genai-tutorial-commands pre {
+.genai-setup-page > * {
+  width: 100%;
+  max-width: 820px;
+  margin-inline: auto;
+}
+
+.genai-setup-page .genai-settings-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* What to do on the left, the steps as rows on the right; help and warnings run below both. */
+.genai-setup {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.genai-setup-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+}
+
+.genai-setup-lead {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.genai-setup-split .genai-setup-lead {
+  padding-right: 20px;
+}
+
+/* The page's heading, not a panel's section label. */
+.panel.genai-setup h2 {
+  font-size: 18px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.genai-setup .genai-setup-steps {
+  gap: 0;
   margin: 0;
-  white-space: pre;
+  padding-left: 20px;
+  border-left: 1px solid var(--line);
+}
+
+.genai-setup .genai-setup-step {
+  align-items: center;
+  padding: 11px 0;
+}
+
+.genai-setup .genai-setup-step + .genai-setup-step {
+  border-top: 1px solid var(--line);
+}
+
+.genai-setup .genai-setup-step-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+
+.genai-setup .genai-setup-step-title {
+  font-size: 13px;
+}
+
+.genai-setup .genai-setup-warned {
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.genai-setup .genai-actions {
+  margin-top: 8px;
+}
+
+/* A step still to come shows its number. */
+.genai-step-icon-waiting span {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-soft);
+}
+
+/* Warnings: folded until asked for. */
+.genai-setup-details {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.genai-setup-details > summary {
+  width: fit-content;
+  padding: 4px 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.genai-setup-details > summary:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+@media (max-width: 720px) {
+  .genai-setup-split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .genai-setup-split .genai-setup-lead {
+    padding-right: 0;
+  }
+
+  .genai-setup .genai-setup-steps {
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .genai-setup {
+    padding: 16px;
+  }
+
+  .genai-setup .genai-actions button {
+    min-height: 44px;
+  }
 }
 
 .genai-spotlight {
@@ -5573,7 +5838,7 @@ button:disabled {
   border-radius: 50%;
 }
 
-.genai-composer .genai-icon-btn:hover:not(:disabled) {
+.genai-composer .genai-icon-btn:hover:not([aria-disabled='true']) {
   background: var(--surface-soft);
 }
 
@@ -5604,7 +5869,7 @@ button:disabled {
   background: var(--bg);
 }
 
-/* SiMaSentry Solutions: a full-window launcher, then the chosen app. */
+/* SiMaSentry Solutions: the launcher is a panel like Documents; a chosen app fills the window. */
 .genai-solutions {
   position: fixed;
   inset: 0;
@@ -5622,95 +5887,99 @@ button:disabled {
   background: #0b1018;
 }
 
-.genai-solutions-grid {
+/* Above the cards, which are positioned and would scroll over it. */
+.genai-solutions-top {
+  z-index: 1;
+}
+
+/* The launcher's own layout, so changes made for Benchmark's panel don't reach it. */
+.genai-bench-top.genai-solutions-top h2 {
+  flex: none;
+}
+
+.genai-bench-top.genai-solutions-top p {
   flex: 1;
-  overflow-y: auto;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 10px;
-  padding: 32px 16px;
-  text-align: center;
-}
-
-.genai-solutions-grid h2 {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: 30px;
+  color: var(--ink-soft);
+  font-size: 13px;
 }
 
-.genai-solutions-grid h2 span {
-  background: linear-gradient(90deg, #2fd3b4, #58a6ff);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.genai-solutions-grid p {
-  margin: 0;
-  color: #a9b6c6;
+.genai-bench-body.genai-solutions-body {
+  max-width: 1000px;
 }
 
 .genai-solutions-model b {
-  color: #e8eef6;
+  color: var(--ink);
 }
 
 .genai-solutions-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
-  justify-content: center;
-  gap: 18px;
-  width: 100%;
-  margin-top: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
 }
 
 .genai-solutions-card {
   position: relative;
   display: grid;
-  justify-items: center;
-  gap: 8px;
-  padding: 22px 18px;
-  border: 1px solid #253244;
-  border-radius: 18px;
-  background: #121a26;
+  align-content: start;
+  gap: 12px;
+  padding: 12px 12px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
   color: inherit;
   font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: border-color 0.15s, transform 0.15s;
 }
 
 .genai-solutions-card:hover,
 .genai-solutions-card:focus-visible {
-  border-color: #2fd3b4;
+  border-color: var(--accent);
   transform: translateY(-2px);
 }
 
-.genai-solutions-card img {
-  width: 96px;
-  height: 96px;
+/* A tinted tile: the Med and Safe icons are white and would fade into a white card. */
+.genai-solutions-icon {
+  display: flex;
+  justify-content: center;
+  padding: 18px 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-accent);
+}
+
+.genai-solutions-icon img {
+  width: 112px;
+  height: 112px;
   object-fit: contain;
 }
 
 .genai-solutions-name {
+  padding: 0 6px;
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
+  color: #274155;
 }
 
 .genai-solutions-summary {
+  padding: 0 6px;
   font-size: 13px;
-  color: #a9b6c6;
+  line-height: 1.45;
+  color: var(--ink-soft);
 }
 
 .genai-solutions-badge {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  padding: 2px 8px;
+  top: 20px;
+  right: 20px;
+  padding: 3px 9px;
   border-radius: 999px;
-  background: #3a2a12;
-  color: #f2c46d;
-  font-size: 11px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .genai-solutions-actions {
@@ -5726,6 +5995,18 @@ button:disabled {
   color: #e8eef6;
   border-color: #253244;
   text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  .genai-solutions-top {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  .genai-bench-top.genai-solutions-top p {
+    order: 1;
+    flex-basis: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5775,7 +6056,6 @@ button:disabled {
   padding: 20px 16px 40px;
 }
 
-.genai-bench-config,
 .genai-bench-live,
 .genai-bench-results {
   padding: 16px;
@@ -5784,92 +6064,9 @@ button:disabled {
   background: var(--surface);
 }
 
-.genai-bench-config {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 16px;
-}
-
-.genai-bench-models {
-  flex-basis: 100%;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.genai-bench-models legend {
-  margin-bottom: 6px;
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.genai-bench-models label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  white-space: nowrap;
-}
-
-.genai-bench-models .hint {
-  margin: 0;
-}
-
-.genai-bench-field {
-  display: grid;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink-soft);
-}
-
-.genai-bench-field input {
-  width: 110px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  font: inherit;
-  font-weight: 400;
-  color: var(--ink);
-}
-
-.genai-bench-prompt {
-  flex: 1;
-  min-width: 220px;
-}
-
-.genai-bench-prompt input {
-  width: 100%;
-}
-
-.genai-bench-wide {
-  flex-basis: 100%;
-  margin: 0;
-}
-
 .genai-bench-live {
   display: grid;
   gap: 8px;
-}
-
-.genai-bench-phase {
-  margin: 0;
-  font-weight: 600;
-}
-
-.genai-bench-text {
-  max-height: 160px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 10px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  font-size: 12px;
-  white-space: pre-wrap;
 }
 
 .genai-bench-results {
@@ -5888,33 +6085,298 @@ button:disabled {
   margin: 0;
 }
 
-.genai-bench-bars {
-  display: grid;
-  gap: 6px;
+/* The Benchmark page; Documents and the Vision view share the rules above. */
+.genai-bench-guided .genai-bench-top {
+  z-index: 1;
 }
 
-.genai-bench-bar {
-  display: grid;
-  grid-template-columns: minmax(90px, 160px) 1fr minmax(90px, auto);
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
+.genai-bench-guided .genai-bench-top h2 {
+  flex: 1;
 }
 
-.genai-bench-track {
-  height: 12px;
-  border-radius: 6px;
+.genai-bench-guided .genai-bench-body {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 760px;
+  padding-top: 24px;
+}
+
+.genai-bench-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.genai-bench-subtitle {
+  margin: 8px 0 0;
+  font-size: 15px;
+}
+
+.genai-bench-lead {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
+.genai-bench-guided h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.genai-bench-guided .hint {
+  margin: 0;
+}
+
+.genai-bench-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.genai-bench-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.genai-bench-explain {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   background: var(--surface-soft);
 }
 
-.genai-bench-track div {
-  height: 100%;
-  border-radius: 6px;
-  background: var(--accent);
+.genai-bench-explain p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
 }
 
-.genai-bench-track div.best {
-  background: var(--ok);
+.genai-bench-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.genai-bench-models {
+  gap: 8px;
+}
+
+.genai-bench-models legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 0;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.genai-bench-models label,
+.genai-bench-next {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
+
+.genai-bench-models label {
+  cursor: pointer;
+}
+
+.genai-bench-models input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.genai-bench-models label.chosen {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.genai-bench-chip {
+  flex: none;
+  justify-self: start;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.genai-bench-chip.ok {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.genai-bench-chip.warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.genai-bench-chip.best {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.genai-bench-more {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.genai-bench-more summary {
+  min-height: 44px;
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.genai-bench-more summary span {
+  margin-left: 6px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.genai-bench-advanced {
+  display: grid;
+  gap: 14px;
+  padding: 4px 14px 14px;
+}
+
+.genai-bench-field {
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.genai-bench-field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.genai-bench-field small {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.genai-bench-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+/* White on --accent is 6.6:1. */
+.genai-bench-run {
+  min-height: 44px;
+  padding: 9px 22px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+}
+
+.genai-bench-run:disabled {
+  border-color: var(--line);
+  background: var(--line);
+  color: var(--ink-soft);
+  cursor: default;
+}
+
+.genai-bench-phase {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.genai-bench-text {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  font-size: 14px;
+}
+
+.genai-bench-text :is(h1, h2, h3, h4) {
+  margin: 12px 0 4px;
+  font-size: 15px;
+}
+
+.genai-bench-text p {
+  margin: 0 0 8px;
+}
+
+.genai-bench-text hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.genai-bench-report {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.genai-bench-metric {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+
+.genai-bench-label {
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.genai-bench-number {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.genai-bench-number small {
+  color: var(--ink-soft);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.genai-bench-scroll {
+  overflow-x: auto;
 }
 
 .genai-bench-table {
@@ -5931,6 +6393,10 @@ button:disabled {
   text-align: right;
 }
 
+.genai-bench-table th {
+  white-space: nowrap;
+}
+
 .genai-bench-table th:first-child,
 .genai-bench-table td:first-child {
   text-align: left;
@@ -5941,10 +6407,38 @@ button:disabled {
   font-weight: 700;
 }
 
-.genai-bench-runs summary {
-  cursor: pointer;
-  font-weight: 600;
+.genai-bench-more .genai-bench-meanings summary {
+  min-height: 0;
+  padding: 0;
   font-size: 13px;
+}
+
+.genai-bench-glossary {
+  display: grid;
+  grid-template-columns: minmax(130px, max-content) 1fr;
+  gap: 6px 16px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+.genai-bench-glossary dt {
+  font-weight: 600;
+}
+
+.genai-bench-glossary dd {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 560px) {
+  .genai-bench-glossary {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .genai-bench-glossary dd {
+    margin-bottom: 8px;
+  }
 }
 
 .genai-sources {
@@ -7597,8 +8091,28 @@ button:disabled {
   margin: 2px 0 0;
 }
 
+/* One height for all three tabs, so switching between them moves nothing (issue #231). */
 .assign-dialog-card {
   width: min(560px, 100%);
+  height: min(650px, calc(100dvh - 24px));
+  display: flex;
+  flex-direction: column;
+}
+
+.assign-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The side padding leaves room for the focus ring, which the scrolling box would cut off. */
+.assign-panel-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -3px;
+  padding: 0 3px;
+  overflow-y: auto;
 }
 
 .assign-dialog-card .media-list {
@@ -7666,6 +8180,7 @@ button:disabled {
 
 .pull-form {
   display: grid;
+  align-content: start;
   gap: 8px;
 }
 

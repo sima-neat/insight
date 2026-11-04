@@ -21,8 +21,9 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    // A fake webcam, granted without a prompt, for the Camera tab of the source dialog.
+    // Two fake webcams, granted without a prompt, for the Camera tab of the source dialog and for
+    // switching between camera previews in Media Sources.
     permissions: ['camera'],
-    launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] },
+    launchOptions: { args: ['--use-fake-device-for-media-stream=device-count=2', '--use-fake-ui-for-media-stream'] },
   },
 })

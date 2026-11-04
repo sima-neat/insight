@@ -1,8 +1,12 @@
-// The GenAI tab's setup panel: Insight installs, prepares and starts GenAI
+// The GenAI tab's setup page: Insight installs, prepares and starts GenAI
 // Studio on the selected board through /api/genai-setup, and the board reports
 // each step's state, the cause and fixes of a failed one, and a note when one
-// has gone quiet. Kept free of React so `node --test` covers it.
+// has gone quiet. While GenAI Studio can't be used, the tab shows only this page
+// (setupView says what it shows); the chat appears once GenAI Studio answers.
+// Kept free of React so `node --test` covers it.
 
+// Set while the user is in the setup flow, so a reload keeps them there until
+// they open GenAI Studio from the ready page.
 export const SETUP_STORAGE_KEY = 'neat-insight:genai-setup-open'
 
 // While a request to the board has not answered for this long, the panel says so.
@@ -10,58 +14,23 @@ export const SLOW_REQUEST_MS = 15000
 // Stopping GenAI Studio (alone or before setup runs again) normally takes up to about 30 s.
 export const SLOW_STOP_MS = 45000
 
+// What each checklist icon (setupView's steps) says to a screen reader.
 export const STEP_LABELS = {
   done: 'Done',
-  running: 'Running',
-  queued: 'Next',
-  failed: 'Failed',
-  blocked: 'Needs attention',
-  pending: 'To do'
+  running: 'In progress',
+  waiting: 'Not done yet',
+  failed: 'Needs attention'
 }
 
-// What the panel's main button does now, or null while a step runs or nothing is left.
-export function setupAction(status) {
-  if (!status || !Array.isArray(status.steps)) return null
-  // Nothing while a step runs or waits to, including a GenAI Studio still loading. A job
-  // that only keeps GenAI Studio running doesn't count: Retry stops it first.
-  if (status.steps.some((s) => s.state === 'running' || s.state === 'queued')) return null
-  const left = status.steps.filter((s) => s.state !== 'done')
-  if (!left.length) return null
-  if (left.some((s) => s.state === 'failed' || s.state === 'blocked')) return { label: 'Retry' }
-  const ids = new Set(left.map((s) => s.id))
-  // An outdated GenAI Studio is replaced: the board reports why under the install step.
-  if (ids.has('install') && status.outdated) return { label: 'Update and start GenAI Studio' }
-  if (ids.has('install')) return { label: 'Install and start GenAI Studio' }
-  if (ids.has('prepare')) return { label: 'Prepare and start GenAI Studio' }
-  return { label: 'Start GenAI Studio' }
-}
-
-// Stop ends the install or prepare step in progress. Once GenAI Studio is starting,
-// the main button stops it instead (Stop GenAI Studio).
+// Stop setup ends the install or prepare step in progress. Once GenAI Studio is
+// starting, stopping it (canStopStudio) takes over.
 export function setupStoppable(status) {
   return Boolean(status && status.active && (status.steps || []).some((s) =>
     s.id === 'start' ? s.state === 'queued' : s.state === 'running' || s.state === 'queued'))
 }
 
-// The icon a step shows: a check when done, a spinner while running, a grey
-// circle for steps still to come, a warning sign when it failed or can't start.
-export function stepIcon(state) {
-  if (state === 'done') return 'done'
-  if (state === 'running') return 'running'
-  if (state === 'failed' || state === 'blocked') return 'failed'
-  return 'waiting'
-}
-
-// The last row, Connect this tab, from the tab's own backend state.
-export function connectIcon(backendState) {
-  if (backendState === 'ready' || backendState === 'failed') return 'done'
-  if (backendState === 'busy') return 'running'
-  return 'waiting'
-}
-
-// GenAI Studio runs or is still loading, and no setup step is in progress: the main
-// button, Start GenAI Studio when it is stopped, becomes Stop GenAI Studio. Works
-// whether setup or a shell on the board started it.
+// GenAI Studio runs or is still loading, and no setup step is in progress: it can be
+// stopped, whether setup or a shell on the board started it.
 export function canStopStudio(status) {
   const start = status && Array.isArray(status.steps) && status.steps.find((s) => s.id === 'start')
   return Boolean(start && (start.state === 'done' || start.state === 'running') && !setupStoppable(status))
@@ -73,35 +42,35 @@ export function canRunSetupAgain(status) {
   return Boolean(prepare && prepare.state === 'done' && (prepare.warnings || []).length && !setupStoppable(status))
 }
 
+// A URL's host, without IPv6 brackets. URL can't parse a zoned IPv6 address (fe80::1%eth0), which a
+// board entered by hand may have, so that one is read from the text.
+function urlHost(url) {
+  const zoned = /^https?:\/\/\[([^\]]+%[^\]]+)\]/i.exec(url)
+  if (zoned) return zoned[1].replace('%25', '%')
+  try {
+    return new URL(url).hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return null
+  }
+}
+
 // Whether the GenAI Studio address the tab uses (`relayUrl`, from Settings) points at the
 // board setup acts on (`status.target`: Insight's selected board). Unknown counts as no.
 export function relayOnSetupBoard(relayUrl, status) {
   const target = status && status.target
   if (!target || !relayUrl) return false
-  let host
-  try {
-    host = new URL(relayUrl).hostname.replace(/^\[|\]$/g, '')
-  } catch {
-    return false
-  }
+  const host = urlHost(relayUrl)
+  if (host === null) return false
   if (target.mode === 'local') return ['127.0.0.1', 'localhost', '::1'].includes(host)
-  return Boolean(target.host) && host === target.host
+  // URL lowercases a host name; the board target keeps the spelling it was entered with.
+  return Boolean(target.host) && host.toLowerCase() === String(target.host).replace(/^\[|\]$/g, '').toLowerCase()
 }
 
-// The banner's button while GenAI Studio doesn't answer: one click starts an installed
-// Studio on the board the tab's address points at; anything more opens the panel first.
-export function bannerAction(status, relayUrl) {
-  const next = setupAction(status)
-  if (next && next.label === 'Start GenAI Studio') {
-    return { label: 'Start GenAI Studio', runNow: relayOnSetupBoard(relayUrl, status) }
-  }
-  return { label: 'Set up GenAI Studio', runNow: false }
-}
-
-// The last line a running step printed, to show what it is doing now.
-export function lastLine(log) {
-  const lines = String(log || '').split('\n').filter((line) => line.trim())
-  return lines.length ? lines[lines.length - 1] : ''
+// Whether a setup state (`body.generation`: the board selection it was read from) belongs to
+// the board Insight's header shows (`boardGeneration`), or a newer one. Unknown counts as yes.
+export function setupForBoard(body, boardGeneration) {
+  if (boardGeneration == null || !body || typeof body.generation !== 'number') return true
+  return body.generation >= boardGeneration
 }
 
 // A failed request to Insight or the board, as the panel shows it: what
@@ -117,8 +86,147 @@ export function requestProblem(error) {
   return {
     message: body.error || error.message,
     fixes: [body.hint].filter(Boolean),
-    detail: typeof body.detail === 'string' ? body.detail : ''
+    detail: typeof body.detail === 'string' ? body.detail : '',
+    code: typeof body.code === 'string' ? body.code : null
   }
+}
+
+// What the GenAI tab shows: 'checking' before the first answer from the tab's address, then the
+// setup page while the user is in setup or no usable GenAI Studio answers (nothing, an error
+// page, an unsupported API), and the chat once one does (`reached`, also while it starts).
+export function tabMode({ inSetup = false, checked = false, reached = false } = {}) {
+  if (inSetup) return 'setup'
+  if (!checked) return 'checking'
+  return reached ? 'workspace' : 'setup'
+}
+
+// Board errors that mean Insight can't reach the selected board at all, not that setup failed.
+const OFFLINE_CODES = new Set(['unreachable', 'auth_failed', 'timeout', 'host_key_changed'])
+
+// The checklist's step names, in the user's words; the board's own titles stay in the details.
+const STEP_NAMES = { install: 'Install Neat Apps', prepare: 'Prepare speech and search', start: 'Start and connect' }
+const DONE_NOTES = { install: 'Installed', prepare: 'Prepared', start: 'Connected' }
+const RUNNING_NOTES = { install: 'Downloading and installing Apps…', prepare: 'Preparing voices and search…', start: 'Waiting for GenAI Studio to answer…' }
+const READY_NOTES = { install: 'Ready to install', prepare: 'Ready to prepare', start: 'Not running' }
+
+// Each page's title and the line under it.
+const PAGES = {
+  checking: ['Checking the board…', 'Insight is reading what is installed on the selected board.'],
+  'no-board': ['No board selected', 'Choose a board in the Board menu at the top of the page.'],
+  disconnected: ['Board disconnected', 'Insight cannot reach the selected board. Reconnect it in the Board menu at the top of the page.'],
+  unreadable: ['Insight could not check the board', ''],
+  missing: ['Install GenAI Studio', 'About 20 minutes. Keep the board connected to the internet; setup keeps running if you leave this page.'],
+  outdated: ['Update GenAI Studio', 'About 20 minutes. Downloaded models are kept; setup keeps running if you leave this page.'],
+  unprepared: ['Finish setting up GenAI Studio', 'Apps is installed. Preparing speech and search takes about 15 minutes and needs internet access on the board.'],
+  installing: ['Installing GenAI Studio', 'Downloading Apps to the board. You can leave this page; setup keeps running.'],
+  preparing: ['Preparing your Studio', 'Setting up voices, speech recognition and document search. This takes about 15 minutes.'],
+  starting: ['Starting GenAI Studio', 'Loading its voices and connecting to it. This takes a few minutes.'],
+  connecting: ['Starting GenAI Studio', 'GenAI Studio runs on the board. Connecting this tab to it…'],
+  elsewhere: ['This tab connects to another address', 'GenAI Studio runs on the selected board, but this tab connects to another address.'],
+  // Title and line come from what the address answered (setupView's `unusable`).
+  unusable: ['GenAI Studio is not usable from this tab', ''],
+  failed: ['Setup needs attention', ''],
+  stopped: ['Setup stopped', 'Files already downloaded are kept. Resume setup when you are ready.'],
+  'studio-stopped': ['Start GenAI Studio', 'GenAI Studio is installed but not running. Starting it takes a few minutes.'],
+  ready: ['GenAI Studio is ready', 'Next, choose a model and start a conversation.']
+}
+
+// Each page's main button. run: start the setup job for what is left; open: leave setup
+// for the chat; reconnect: read the board again; connection: show GenAI Studio's address.
+const ACTIONS = {
+  'no-board': { kind: 'reconnect', label: 'Check again' },
+  disconnected: { kind: 'reconnect', label: 'Try connection again' },
+  unreadable: { kind: 'reconnect', label: 'Try again' },
+  missing: { kind: 'run', label: 'Install GenAI Studio' },
+  outdated: { kind: 'run', label: 'Update GenAI Studio' },
+  unprepared: { kind: 'run', label: 'Continue setup' },
+  elsewhere: { kind: 'connection', label: 'Connection settings' },
+  failed: { kind: 'run', label: 'Retry' },
+  stopped: { kind: 'run', label: 'Resume setup' },
+  'studio-stopped': { kind: 'run', label: 'Start GenAI Studio' },
+  ready: { kind: 'open', label: 'Open Studio' }
+}
+
+const IN_PROGRESS = { install: 'installing', prepare: 'preparing', start: 'starting' }
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+// Which page setup shows now. `reached`: GenAI Studio answers at the tab's address and can
+// be used (or is still starting). `elsewhere`: that address is not on the board setup acts on.
+// `unusable`: the address answers, but not as a GenAI Studio this tab can use, or there is none.
+// Not installed, installed but stopped and a disconnected board are different pages,
+// so a stopped GenAI Studio is started rather than installed again. Setup is ready only
+// when the tab can use the GenAI Studio it set up.
+export function setupPhase({ status, readError = null, reached = false, elsewhere = false, unusable = null }) {
+  if (readError && readError.code === 'no_target') return 'no-board'
+  if (readError && OFFLINE_CODES.has(readError.code)) return 'disconnected'
+  if (!status || !Array.isArray(status.steps)) return readError ? 'unreadable' : 'checking'
+  const steps = status.steps
+  const busy = steps.find((s) => s.state === 'running') || steps.find((s) => s.state === 'queued')
+  if (busy) return IN_PROGRESS[busy.id] || 'installing'
+  const broken = steps.find((s) => s.state === 'failed' || s.state === 'blocked')
+  if (broken) return broken.stopped ? 'stopped' : 'failed'
+  const left = steps.find((s) => s.state !== 'done')
+  if (left && left.id === 'install') return status.outdated ? 'outdated' : 'missing'
+  if (left && left.id === 'prepare') return 'unprepared'
+  if (left) return 'studio-stopped'
+  if (elsewhere) return 'elsewhere'
+  if (reached) return 'ready'
+  return unusable ? 'unusable' : 'connecting'
+}
+
+// Everything the setup page shows: {phase, title, subtitle, steps, action, stop, problem,
+// stall, notice, warnings}. `steps` is the checklist, [{id, name, icon, note}]; problem,
+// stall and notice are shown under it. `unusable` says why the tab's address gives no usable
+// GenAI Studio: {title, detail, fixAddress}.
+export function setupView({ status, readError = null, reached = false, elsewhere = false, unusable = null }) {
+  const phase = setupPhase({ status, readError, reached, elsewhere, unusable })
+  const [title, subtitle] = phase === 'unusable' ? [unusable.title, unusable.detail || ''] : PAGES[phase]
+  const action = phase === 'unusable' ? (unusable.fixAddress ? { kind: 'connection', label: 'Connection settings' } : null) : ACTIONS[phase] || null
+  const view = { phase, title, subtitle, steps: [], action, stop: null, problem: null, stall: null, notice: null, warnings: [] }
+  if (['no-board', 'disconnected', 'unreadable', 'checking'].includes(phase)) {
+    if (phase === 'unreadable') view.problem = readError
+    return view
+  }
+  const steps = status.steps
+  const next = steps.find((s) => s.state !== 'done')
+  const broken = steps.find((s) => s.state === 'failed' || s.state === 'blocked')
+  view.steps = steps.map((s) => {
+    const count = (s.warnings || []).length
+    const row = (icon, note) => ({ id: s.id, name: STEP_NAMES[s.id] || s.title, icon, note, warned: count > 0 })
+    if (s.state === 'done' && s.id === 'start' && (elsewhere || !reached)) {
+      if (elsewhere) return row('waiting', 'Running, but this tab connects elsewhere')
+      return unusable ? row('failed', 'Running, but this tab can\'t use it') : row('running', 'Connecting this tab…')
+    }
+    if (s.state === 'done') return row('done', DONE_NOTES[s.id] + (count ? ` with ${plural(count, 'warning')}` : ''))
+    if (s.state === 'running') return row('running', RUNNING_NOTES[s.id])
+    if (s.state === 'queued') return row('waiting', 'Next')
+    if (s.stopped) return row('waiting', 'Stopped, ready to resume')
+    if (s.state === 'failed' || s.state === 'blocked') return row('failed', 'Needs attention')
+    if (s.id === 'install' && status.outdated) return row('waiting', 'Update available')
+    return row('waiting', s === next && !broken ? READY_NOTES[s.id] : 'Waiting')
+  })
+  if (phase === 'failed') {
+    view.problem = broken.problem
+    view.subtitle = broken.state === 'blocked'
+      ? `${STEP_NAMES[broken.id]} can't run yet: the board is missing something it needs.`
+      : `${STEP_NAMES[broken.id]} did not finish.`
+  }
+  const running = steps.find((s) => s.state === 'running')
+  view.stall = (running && running.stall) || null
+  view.notice = (steps.find((s) => s.notice) || {}).notice || null
+  view.warnings = steps
+    .filter((s) => (s.warnings || []).length)
+    .map((s) => ({ id: s.id, name: STEP_NAMES[s.id] || s.title, done: s.state === 'done', warnings: s.warnings }))
+  const warned = view.warnings.reduce((n, s) => n + s.warnings.length, 0)
+  if (phase === 'ready' && warned) view.subtitle = `Chat is ready. Setup finished with ${plural(warned, 'warning')}: review ${warned === 1 ? 'it' : 'them'} below.`
+  // Stopping is never the main button: setup's own Stop while a step runs, otherwise a
+  // secondary Stop GenAI Studio once it runs.
+  if (setupStoppable(status)) view.stop = { kind: 'stop', label: 'Stop setup' }
+  else if (canStopStudio(status) && ['starting', 'connecting', 'elsewhere', 'unusable', 'ready'].includes(phase)) {
+    view.stop = { kind: 'stop-studio', label: phase === 'starting' && status.active ? 'Stop setup' : 'Stop GenAI Studio' }
+  }
+  return view
 }
 
 export function setupOpenSaved(storage) {
@@ -134,6 +242,6 @@ export function saveSetupOpen(storage, open) {
     if (open) storage.setItem(SETUP_STORAGE_KEY, '1')
     else storage.removeItem(SETUP_STORAGE_KEY)
   } catch {
-    // Without storage the panel just doesn't reopen after a reload; the board keeps the job's state.
+    // Without storage a reload just skips the ready page; the board keeps the job's state.
   }
 }

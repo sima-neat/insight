@@ -6,7 +6,10 @@ import {
 } from './externalSource.js'
 import { allCommitsSucceeded, formatFpsProgress, isNativeRate, needsRendition, parseFps, renditionMayHaveChanged, stepFps, withCommittedFps } from './fps.js'
 import FolderBrowser from './media/FolderBrowser.jsx'
+import { CameraIcon, VideoFileIcon } from './media/MediaIcons.jsx'
 import AssignMediaDialog from './media/AssignMediaDialog.jsx'
+import { CameraPreview } from './media/CameraPreview.jsx'
+import { describePreviewError, frameAllowsCamera, heldCaptures, holdsLiveCamera, publishingTrackFor } from './media/cameraPreview.js'
 import { allFilePaths, listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
 
 import { requestJson as requestBoardJson } from './peripherals/api.js'
@@ -110,7 +113,7 @@ const ONBOARDING_STEPS = [
     title: 'Start in Media Sources',
     summary: 'This is where you bring files into Insight and inspect what is available before you stream anything.',
     details:
-      'Use this tab to upload videos or images, filter the library, preview a file, and remove media you no longer need.'
+      'Use this tab to upload videos or images, filter the library, preview a file or one of your cameras, and remove media you no longer need.'
   },
   {
     id: 'rtsp',
@@ -785,6 +788,17 @@ export default function App() {
   // abandons itself rather than publishing a camera the user already replaced.
   const webcamGenerationRef = useRef({})
   const [selectedFile, setSelectedFile] = useState('')
+  // The camera previewed in Media Sources (issue #222), shown in place of the selected file. Only a
+  // local preview: it never touches a Streaming slot.
+  const [previewCamera, setPreviewCamera] = useState(null)
+  const previewCameraRef = useRef(null)
+  previewCameraRef.current = previewCamera
+  // Webcam starts that have opened the camera but whose WHIP exchange is still running, by slot. They
+  // join webcamSessionsRef only once the answer arrives, and a preview of the same camera in between
+  // must reuse this capture rather than open the camera again.
+  const startingCapturesRef = useRef(new Map())
+  // Before that, while getUserMedia runs: the request, by camera, for the preview to wait on.
+  const openingCapturesRef = useRef(new Map())
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
   const [mediaInfo, setMediaInfo] = useState(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -978,7 +992,8 @@ export default function App() {
   const activePreviewSrc = tab === 'rtsp' ? previewImgSrc : null
   const previewLoading = Boolean(activePreviewSrc) && !previewError && loadedPreviewSrc !== activePreviewSrc
   const takeoverSource = takeoverTarget && (sources.find((s) => s.index === takeoverTarget.index) || takeoverTarget)
-  const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
+  // While a camera is previewed the selected file is hidden, so Delete only acts on checked files.
+  const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile && !previewCamera ? [selectedFile] : [])
 
   function selectTab(nextTab, workspacePath = '', options = {}) {
     setTab(nextTab)
@@ -1200,6 +1215,12 @@ export default function App() {
   useEffect(() => {
     loadMediaInfo(selectedFile)
   }, [selectedFile])
+
+  // Leaving Media Sources unmounts the camera preview, which releases the camera; drop the
+  // selection too, so coming back shows the file instead of opening the camera again unasked.
+  useEffect(() => {
+    if (tab !== 'media') setPreviewCamera(null)
+  }, [tab])
 
   useEffect(() => {
     if (!selectedMediaPaths.length) return
@@ -1990,11 +2011,22 @@ export default function App() {
     setCameraError(null)
     setCameraProbing(true)
     try {
-      const probe = await navigator.mediaDevices.getUserMedia({ video: true })
-      probe.getTracks().forEach((track) => track.stop())
+      // A camera this tab already holds (a preview, or a webcam source starting or publishing) shows
+      // access is granted, and probing would open a camera a second time, which an exclusive camera
+      // refuses as busy. Only re-list the devices then. A start still opening one is waited for first:
+      // whether it gets the camera decides that.
+      await Promise.allSettled(openingCapturesRef.current.values())
+      const holdsCamera = Boolean(previewCameraRef.current) || holdsLiveCamera(heldCaptures(startingCapturesRef.current, webcamSessionsRef.current))
+      if (!holdsCamera) {
+        const probe = await navigator.mediaDevices.getUserMedia({ video: true })
+        probe.getTracks().forEach((track) => track.stop())
+      }
       await refreshWebcamDevices()
     } catch (e) {
-      setCameraError(describeWebcamError(e))
+      // Embedded in a frame that withholds the camera (the Palette SDK editor tab can be one), the
+      // browser reports a plain denial; say that the frame, not the permission, is the cause.
+      const blocked = describePreviewError(e, { frameAllowsCamera: frameAllowsCamera() })
+      setCameraError(blocked.kind === 'blocked' ? `${blocked.title} ${blocked.action}` : describeWebcamError(e))
     } finally {
       setCameraProbing(false)
     }
@@ -2159,10 +2191,17 @@ export default function App() {
     let watcher = null
     try {
       // Video-only for now, per the ticket's initial scope.
-      stream = await navigator.mediaDevices.getUserMedia({
+      const opening = navigator.mediaDevices.getUserMedia({
         video: { deviceId: { exact: assignment.deviceId } }
       })
+      openingCapturesRef.current.set(assignment.deviceId, opening)
+      try {
+        stream = await opening
+      } finally {
+        if (openingCapturesRef.current.get(assignment.deviceId) === opening) openingCapturesRef.current.delete(assignment.deviceId)
+      }
       if (superseded()) throw WEBCAM_START_SUPERSEDED
+      startingCapturesRef.current.set(index, { stream })
       pc = new RTCPeerConnection()
       const videoTrack = stream.getVideoTracks()[0]
       const sender = pc.addTrack(videoTrack, stream)
@@ -2241,6 +2280,7 @@ export default function App() {
       if (!e?.superseded) setError(describeWebcamError(e))
       await loadSources()
     } finally {
+      if (stream && startingCapturesRef.current.get(index)?.stream === stream) startingCapturesRef.current.delete(index)
       setWebcamBusy((prev) => {
         const next = { ...prev }
         delete next[index]
@@ -2723,7 +2763,7 @@ export default function App() {
 
           {tab === 'genai' && (
             <Suspense fallback={<section className="panel"><p className="workspace-empty">Loading GenAI Studio...</p></section>}>
-              <GenAIView onError={setError} onStatus={setUploadStatus} />
+              <GenAIView onError={setError} onStatus={setUploadStatus} selectedBoardGeneration={board?.generation ?? null} />
             </Suspense>
           )}
 
@@ -2735,57 +2775,76 @@ export default function App() {
                   <h2>Media Sources</h2>
                   <p className="section-note">Browse, preview, and manage local media assets.</p>
                 </div>
-                <button
-                  type="button"
-                  className={uploadBusy ? 'upload-icon-btn busy' : 'upload-icon-btn'}
-                  title="Import Media"
-                  aria-label="Import Media"
-                  aria-busy={uploadBusy ? 'true' : 'false'}
-                  disabled={uploadBusy}
-                  onClick={() => openImportDialog('local')}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 3l4.5 4.5-1.4 1.4-2.1-2.1V16h-2V6.8L8.9 8.9 7.5 7.5 12 3zM5 18h14v2H5v-2z" />
-                  </svg>
-                  <span className="sr-only">Import Media</span>
-                </button>
               </div>
-              <div className="camera-optin">
-                <div className="camera-optin-head">
-                  <span className="camera-optin-title">Local cameras</span>
+              <div className="media-card" data-testid="cameras-card">
+                <div className="media-card-head">
+                  <h3 className="media-card-title"><CameraIcon />Cameras<span className="live-tag"><span className="live-dot" aria-hidden="true" />Live</span></h3>
                   <button
                     type="button"
                     className="btn-ghost"
                     onClick={enableCameraAccess}
                     disabled={cameraProbing}
-                    title="Ask this browser for camera access, then use a camera as a live source in Streaming"
+                    title="Ask this browser for camera access. To stream a camera, assign it to a slot in Streaming."
                   >
                     {cameraProbing ? 'Requesting…' : (webcamDevices.length ? 'Refresh cameras' : 'Enable camera access')}
                   </button>
                 </div>
-                <p className="section-note">
-                  A webcam or connected phone can be a live streaming source. Enable access here, then pick it in a Streaming slot.
-                </p>
+                <p className="hint">{webcamDevices.length ? 'Select a camera to preview it.' : 'Enable access to preview a webcam or connected phone.'}</p>
                 {cameraError && <p className="camera-optin-error">{cameraError}</p>}
-                {webcamDevices.length > 0 ? (
-                  <ul className="camera-list">
-                    {webcamDevices.map((device) => (
-                      <li key={device.deviceId}>{device.label}</li>
-                    ))}
+                {webcamDevices.length > 0 && (
+                  <ul className="camera-list" aria-label="Cameras">
+                    {webcamDevices.map((device) => {
+                      const active = previewCamera?.deviceId === device.deviceId
+                      return (
+                        <li key={device.deviceId}>
+                          <button
+                            type="button"
+                            className={active ? 'camera-row active' : 'camera-row'}
+                            aria-pressed={active}
+                            onClick={() => setPreviewCamera(device)}
+                            title={`Preview ${device.label}`}
+                            data-testid="camera-row"
+                          >
+                            <CameraIcon className="camera-row-icon" />
+                            <span className="camera-row-name">{device.label}</span>
+                            <span className="live-dot" aria-hidden="true" />
+                          </button>
+                        </li>
+                      )
+                    })}
                   </ul>
-                ) : (
-                  !cameraError && <p className="hint">No cameras enabled yet.</p>
                 )}
               </div>
 
+              <div className="media-card" data-testid="video-files-card">
               <FolderBrowser
+                heading={<h3 className="media-card-title"><VideoFileIcon />Video files</h3>}
+                headingAction={(
+                  <button
+                    type="button"
+                    className={uploadBusy ? 'upload-icon-btn busy' : 'upload-icon-btn'}
+                    title="Import Media"
+                    aria-label="Import Media"
+                    aria-busy={uploadBusy ? 'true' : 'false'}
+                    disabled={uploadBusy}
+                    onClick={() => openImportDialog('local')}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 3l4.5 4.5-1.4 1.4-2.1-2.1V16h-2V6.8L8.9 8.9 7.5 7.5 12 3zM5 18h14v2H5v-2z" />
+                    </svg>
+                    <span className="sr-only">Import Media</span>
+                  </button>
+                )}
                 tree={mediaTree}
                 folder={mediaFolder}
                 onNavigate={navigateMediaFolder}
                 filter={mediaFilter}
                 onFilterChange={setMediaFilter}
-                selectedPath={selectedFile}
-                onSelect={setSelectedFile}
+                selectedPath={previewCamera ? '' : selectedFile}
+                onSelect={(path) => {
+                  setPreviewCamera(null)
+                  setSelectedFile(path)
+                }}
                 showUnsupported
                 fileRowClass={(path) => (selectedMediaPaths.includes(path) ? 'selected' : '')}
                 renderFileLead={(path) => (
@@ -2798,32 +2857,47 @@ export default function App() {
                 )}
                 idPrefix="library"
               />
+              </div>
             </section>
 
             <section className="panel">
-              <h2>Selected Media</h2>
-              {selectedFile && <p className="section-note">{selectedFile}</p>}
+              <h2>{previewCamera ? 'Selected Camera' : 'Selected Media'}</h2>
+              {previewCamera ? (
+                <CameraPreview
+                  camera={previewCamera}
+                  findShared={(deviceId) => publishingTrackFor(heldCaptures(startingCapturesRef.current, webcamSessionsRef.current), webcamAssignmentsRef.current, deviceId)}
+                  findOpening={(deviceId) => openingCapturesRef.current.get(deviceId)}
+                  onClose={() => setPreviewCamera(null)}
+                  onRefreshCameras={enableCameraAccess}
+                />
+              ) : (
+                <>
+                  {selectedFile && <p className="section-note">{selectedFile}</p>}
 
-              <div className="preview">
-                {selectedFile && selectedIsMjpeg && <img src={mediaPreviewUrl(selectedFile)} alt={selectedFile} />}
-                {selectedFile && isVideo && <video controls src={`/media/${selectedFile}`} />}
-                {selectedFile && isImage && <img src={`/media/${selectedFile}`} alt={selectedFile} />}
-                {!selectedFile && <p>Select a file.</p>}
-              </div>
+                  <div className="preview">
+                    {selectedFile && selectedIsMjpeg && <img src={mediaPreviewUrl(selectedFile)} alt={selectedFile} />}
+                    {selectedFile && isVideo && <video controls src={`/media/${selectedFile}`} />}
+                    {selectedFile && isImage && <img src={`/media/${selectedFile}`} alt={selectedFile} />}
+                    {!selectedFile && <p>Select a file{webcamDevices.length ? ' or a camera' : ''}.</p>}
+                  </div>
+                </>
+              )}
 
-              <div className="actions">
-                {selectedMediaPaths.length > 0 && (
-                  <button type="button" className="btn-ghost" onClick={clearSelectedMediaPaths}>
-                    Clear {selectedMediaPaths.length}
+              {(!previewCamera || selectedMediaPaths.length > 0) && (
+                <div className="actions">
+                  {selectedMediaPaths.length > 0 && (
+                    <button type="button" className="btn-ghost" onClick={clearSelectedMediaPaths}>
+                      Clear {selectedMediaPaths.length}
+                    </button>
+                  )}
+                  <button className="delete-icon-btn" onClick={() => setDeleteConfirmOpen(true)} disabled={!deleteTargetPaths.length} aria-label="Delete Selected" title="Delete Selected">
+                    <img src="/icons/delete.png" alt="" />
+                    <span className="sr-only">Delete</span>
                   </button>
-                )}
-                <button className="delete-icon-btn" onClick={() => setDeleteConfirmOpen(true)} disabled={!deleteTargetPaths.length} aria-label="Delete Selected" title="Delete Selected">
-                  <img src="/icons/delete.png" alt="" />
-                  <span className="sr-only">Delete</span>
-                </button>
-              </div>
+                </div>
+              )}
 
-              {mediaInfo && (
+              {mediaInfo && !previewCamera && (
                 <table className="kv-table">
                   <tbody>
                     {Object.entries(mediaInfo).map(([key, val]) => (

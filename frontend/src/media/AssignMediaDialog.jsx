@@ -95,48 +95,52 @@ export default function AssignMediaDialog({
           {tab('stream', 'Stream URL')}
         </div>
         {mode === 'file' && (
-          <>
-            <p className="hint">Selected: <span className="assign-target" data-testid="assign-picked">{picked || 'Not assigned'}</span></p>
-            <FolderBrowser
-              tree={tree}
-              folder={view}
-              onNavigate={navigate}
-              filter={filter}
-              onFilterChange={setFilter}
-              selectedPath={picked}
-              onSelect={setPicked}
-              idPrefix="assign"
-            />
+          <div className="assign-panel">
+            <div className="assign-panel-body">
+              <p className="hint">Selected: <span className="assign-target" data-testid="assign-picked">{picked || 'Not assigned'}</span></p>
+              <FolderBrowser
+                tree={tree}
+                folder={view}
+                onNavigate={navigate}
+                filter={filter}
+                onFilterChange={setFilter}
+                selectedPath={picked}
+                onSelect={setPicked}
+                idPrefix="assign"
+              />
+            </div>
             <div className="modal-actions">
               <button type="button" className="btn-ghost" onClick={() => commit('')} disabled={busy || !currentFile}>Clear</button>
               <button type="button" onClick={close} disabled={busy}>Cancel</button>
               <button type="button" className="btn-tonal" onClick={() => commit(picked)} disabled={busy || !picked || picked === currentValue}>Assign</button>
             </div>
-          </>
+          </div>
         )}
         {mode === 'camera' && (
-          <>
-            <p className="hint">The browser publishes the camera to <code>rtsp://…:8554/src{sourceIndex}</code> while this tab stays open.</p>
-            {cameras.length > 0 ? (
-              <div className="assign-cameras" role="listbox" aria-label="Cameras" data-testid="assign-cameras">
-                {cameras.map((camera) => (
-                  <button
-                    key={camera.value}
-                    type="button"
-                    role="option"
-                    aria-selected={camera.value === pickedCamera}
-                    className={camera.value === pickedCamera ? 'assign-camera active' : 'assign-camera'}
-                    onClick={() => setPickedCamera(camera.value)}
-                    data-testid="assign-camera"
-                  >
-                    {camera.label}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              !cameraError && <p className="hint" data-testid="assign-no-cameras">No cameras enabled yet. Insight needs this browser's permission to use them.</p>
-            )}
-            {cameraError && <p className="camera-optin-error" role="alert">{cameraError}</p>}
+          <div className="assign-panel">
+            <div className="assign-panel-body">
+              <p className="hint">The browser publishes the camera to <code>rtsp://…:8554/src{sourceIndex}</code> while this tab stays open.</p>
+              {cameras.length > 0 ? (
+                <div className="assign-cameras" role="listbox" aria-label="Cameras" data-testid="assign-cameras">
+                  {cameras.map((camera) => (
+                    <button
+                      key={camera.value}
+                      type="button"
+                      role="option"
+                      aria-selected={camera.value === pickedCamera}
+                      className={camera.value === pickedCamera ? 'assign-camera active' : 'assign-camera'}
+                      onClick={() => setPickedCamera(camera.value)}
+                      data-testid="assign-camera"
+                    >
+                      {camera.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                !cameraError && <p className="hint" data-testid="assign-no-cameras">No cameras enabled yet. Insight needs this browser's permission to use them.</p>
+              )}
+              {cameraError && <p className="camera-optin-error" role="alert">{cameraError}</p>}
+            </div>
             <div className="modal-actions">
               {onEnableCameras && (
                 <button type="button" className="btn-ghost assign-enable-cameras" onClick={onEnableCameras} disabled={busy || cameraProbing} data-testid="assign-enable-cameras">
@@ -147,28 +151,30 @@ export default function AssignMediaDialog({
               <button type="button" onClick={close} disabled={busy}>Cancel</button>
               <button type="button" className="btn-tonal" onClick={() => commit(pickedCamera)} disabled={busy || !pickedCamera || pickedCamera === currentValue} data-testid="assign-camera-submit">Assign</button>
             </div>
-          </>
+          </div>
         )}
         {mode === 'stream' && (
-          <form className="pull-form" onSubmit={(e) => { e.preventDefault(); if (canPull) pull() }}>
-            <p className="hint">Insight pulls the stream and forwards it unchanged to <code>rtsp://…:8554/src{sourceIndex}</code>. RTSP and RTSPS only.</p>
-            {isWebcam && <p className="hint muted-text" data-testid="pull-webcam-note">This slot is a webcam source. Clear it on the Camera tab before pulling a stream into it.</p>}
-            <label className="pull-field">
-              <span>Stream URL</span>
-              <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="rtsp://192.168.1.10:554/stream1" autoFocus data-testid="pull-url" />
-            </label>
-            <div className="pull-credentials">
+          <form className="assign-panel" onSubmit={(e) => { e.preventDefault(); if (canPull) pull() }}>
+            <div className="assign-panel-body pull-form">
+              <p className="hint">Insight pulls the stream and forwards it unchanged to <code>rtsp://…:8554/src{sourceIndex}</code>. RTSP and RTSPS only.</p>
+              {isWebcam && <p className="hint muted-text" data-testid="pull-webcam-note">This slot is a webcam source. Clear it on the Camera tab before pulling a stream into it.</p>}
               <label className="pull-field">
-                <span>Username</span>
-                <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" data-testid="pull-username" />
+                <span>Stream URL</span>
+                <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="rtsp://192.168.1.10:554/stream1" autoFocus data-testid="pull-url" />
               </label>
-              <label className="pull-field">
-                <span>Password</span>
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" data-testid="pull-password" />
-              </label>
+              <div className="pull-credentials">
+                <label className="pull-field">
+                  <span>Username</span>
+                  <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" data-testid="pull-username" />
+                </label>
+                <label className="pull-field">
+                  <span>Password</span>
+                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" data-testid="pull-password" />
+                </label>
+              </div>
+              <p className="hint muted-text">Most IP cameras need a username and password. Credentials typed into the URL work too and are never shown again.</p>
+              {pullError && <p className="pull-error" role="alert" data-testid="pull-error">{pullError}</p>}
             </div>
-            <p className="hint muted-text">Most IP cameras need a username and password. Credentials typed into the URL work too and are never shown again.</p>
-            {pullError && <p className="pull-error" role="alert" data-testid="pull-error">{pullError}</p>}
             <div className="modal-actions">
               <button type="button" onClick={close} disabled={busy}>Cancel</button>
               <button type="submit" className="btn-tonal" disabled={!canPull || isWebcam} data-testid="pull-submit">{busy ? 'Checking…' : 'Pull'}</button>
