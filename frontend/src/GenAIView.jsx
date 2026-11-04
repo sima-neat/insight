@@ -1835,26 +1835,46 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     const busyLabel = { run: 'Starting…', stop: 'Stopping…', 'stop-studio': 'Stopping…' }
     return (
       <div className="genai genai-setup-page" ref={root}>
-        <section className="panel genai-tutorial genai-setup" aria-labelledby="genai-setup-title" aria-live="polite">
-          <p className="genai-tutorial-eyebrow">GenAI Studio</p>
-          {view.phase === 'ready' && (
-            <p className="genai-setup-complete"><StepIcon kind="done" label={STEP_LABELS.done} /> Setup complete</p>
-          )}
-          <h2 id="genai-setup-title" className="genai-tutorial-title">{view.title}</h2>
-          {view.subtitle && <p className="genai-tutorial-body">{view.subtitle}</p>}
-          {onBoard && (
-            <ol className="genai-setup-steps">
-              {view.steps.map((item, i) => (
-                <li key={item.id} className={`genai-setup-step genai-setup-${item.icon}`}>
-                  <StepIcon kind={item.icon} label={STEP_LABELS[item.icon]} number={i + 1} />
-                  <div className="genai-setup-step-body">
-                    <p className="genai-setup-step-title">{item.name}</p>
-                    <p className="hint">{item.note}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
+        <section className="panel genai-setup" aria-labelledby="genai-setup-title" aria-live="polite">
+          <div className={onBoard ? 'genai-setup-main genai-setup-split' : 'genai-setup-main'}>
+            <div className="genai-setup-lead">
+              <h2 id="genai-setup-title" className="genai-tutorial-title">{view.title}</h2>
+              {view.subtitle && <p className="genai-tutorial-body">{view.subtitle}</p>}
+              <div className="genai-actions">
+                {view.action && (
+                  <button type="button" className="btn-tonal" disabled={pageBusy} onClick={() => setupPageAction(view.action)}>
+                    {setupBusy === 'run' ? busyLabel.run : setupRechecking ? 'Checking…' : view.action.label}
+                  </button>
+                )}
+                {view.stop && (
+                  <button type="button" className="btn-ghost" disabled={pageBusy} onClick={() => setupPageAction(view.stop)}>
+                    {busyLabel[setupBusy] && setupBusy !== 'run' ? busyLabel[setupBusy] : view.stop.label}
+                  </button>
+                )}
+                {reached && view.phase !== 'ready' && (
+                  <button type="button" className="btn-ghost" onClick={leaveSetup}>Back to Studio</button>
+                )}
+                {addressMatters && view.action?.kind !== 'connection' && backend.state !== 'unconfigured' && (
+                  <button type="button" className="btn-ghost" aria-expanded={connectionOpen} onClick={() => setConnectionOpen((open) => !open)}>
+                    Connection settings
+                  </button>
+                )}
+              </div>
+            </div>
+            {onBoard && (
+              <ol className="genai-setup-steps">
+                {view.steps.map((item, i) => (
+                  <li key={item.id} className={`genai-setup-step genai-setup-${item.icon}`}>
+                    <StepIcon kind={item.icon} label={STEP_LABELS[item.icon]} number={i + 1} />
+                    <div className="genai-setup-step-body">
+                      <p className="genai-setup-step-title">{item.name}</p>
+                      <p className={item.warned ? 'hint genai-setup-warned' : 'hint'}>{item.note}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
           {view.problem && <SetupHelp problem={view.problem} />}
           {view.stall && <SetupHelp problem={view.stall} warn />}
           {view.notice && <SetupHelp problem={view.notice} warn />}
@@ -1889,27 +1909,6 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
               ))}
             </details>
           )}
-          <div className="genai-actions">
-            {view.action && (
-              <button type="button" className="btn-tonal" disabled={pageBusy} onClick={() => setupPageAction(view.action)}>
-                {setupBusy === 'run' ? busyLabel.run : setupRechecking ? 'Checking…' : view.action.label}
-              </button>
-            )}
-            {view.stop && (
-              <button type="button" className="btn-ghost" disabled={pageBusy} onClick={() => setupPageAction(view.stop)}>
-                {busyLabel[setupBusy] && setupBusy !== 'run' ? busyLabel[setupBusy] : view.stop.label}
-              </button>
-            )}
-            {reached && view.phase !== 'ready' && (
-              <button type="button" className="btn-ghost" onClick={leaveSetup}>Back to Studio</button>
-            )}
-            <span className="genai-tutorial-spacer" />
-            {addressMatters && view.action?.kind !== 'connection' && backend.state !== 'unconfigured' && (
-              <button type="button" className="btn-ghost" aria-expanded={connectionOpen} onClick={() => setConnectionOpen((open) => !open)}>
-                Connection settings
-              </button>
-            )}
-          </div>
         </section>
         {((connectionOpen && addressMatters) || backend.state === 'unconfigured') && (
           <section className="panel genai-settings-panel genai-setup-connection" aria-label="Connection settings">

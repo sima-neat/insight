@@ -25,7 +25,7 @@ async function seenIntros(page) {
   })
 }
 
-async function openGenAI(page) {
+async function mockGenAI(page) {
   await page.route(/\/api\/genai\//, (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/genai\//, '')
     if (path === 'settings') return json(route, { url: 'https://192.168.1.20:5000' })
@@ -34,6 +34,10 @@ async function openGenAI(page) {
     return json(route, { error: 'not part of this test' }, 404)
   })
   await seenIntros(page)
+}
+
+async function openGenAI(page) {
+  await mockGenAI(page)
   await page.goto(new URL('/genai', test.info().project.use.baseURL).href)
   await expect(page.getByRole('combobox', { name: 'Model' })).toHaveValue(LLAMA)
   return page.getByRole('toolbar', { name: 'GenAI Studio tools' })
@@ -177,3 +181,37 @@ for (const height of [1080, 500]) {
     }
   })
 }
+
+const setupSteps = () => [
+  { id: 'install', state: 'done', warnings: [{ message: 'Two packages were skipped' }] },
+  { id: 'prepare', state: 'done', warnings: [] },
+  { id: 'start', state: 'done', warnings: [] }
+]
+
+async function openSetup(page, status) {
+  await page.route(/\/api\/genai-setup(\?|$)/, (route) => json(route, status))
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem('neat-insight:genai-setup-open', '1')
+    } catch {}
+  })
+  await mockGenAI(page)
+  await page.goto(new URL('/genai', test.info().project.use.baseURL).href)
+}
+
+test('the ready page puts the action beside the steps, and stacks them on a phone', async ({ page }) => {
+  await openSetup(page, { active: false, generation: 1, target: { mode: 'ssh', host: '192.168.1.20' }, steps: setupSteps() })
+  const ready = page.getByRole('region', { name: 'GenAI Studio is ready' })
+  const open = ready.getByRole('button', { name: 'Open Studio' })
+  const steps = ready.getByRole('list')
+  await expect(open).toBeVisible()
+  await expect(ready.getByText('Setup complete')).toHaveCount(0)
+  await expect(ready.getByRole('listitem')).toHaveCount(3)
+  const [wideButton, wideSteps] = [await open.boundingBox(), await steps.boundingBox()]
+  expect(wideSteps.x).toBeGreaterThan(wideButton.x + wideButton.width)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const [narrowButton, narrowSteps] = [await open.boundingBox(), await steps.boundingBox()]
+  expect(narrowSteps.y).toBeGreaterThan(narrowButton.y + narrowButton.height)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})

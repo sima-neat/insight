@@ -193,7 +193,7 @@ export function setupView({ status, readError = null, reached = false, elsewhere
   const broken = steps.find((s) => s.state === 'failed' || s.state === 'blocked')
   view.steps = steps.map((s) => {
     const count = (s.warnings || []).length
-    const row = (icon, note) => ({ id: s.id, name: STEP_NAMES[s.id] || s.title, icon, note })
+    const row = (icon, note) => ({ id: s.id, name: STEP_NAMES[s.id] || s.title, icon, note, warned: count > 0 })
     if (s.state === 'done' && s.id === 'start' && (elsewhere || !reached)) {
       if (elsewhere) return row('waiting', 'Running, but this tab connects elsewhere')
       return unusable ? row('failed', 'Running, but this tab can\'t use it') : row('running', 'Connecting this tab…')
