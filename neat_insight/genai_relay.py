@@ -22,7 +22,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional
 
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+from flask import Blueprint, Response, current_app, has_app_context, jsonify, request, stream_with_context
 
 from neat_insight.utils import get_devkit_sync_devkit_ip, init_environment, is_sima_board
 
@@ -130,18 +130,30 @@ def _cfg_unreadable(exc: Exception):
     )
 
 
+def _studio_url(host: str) -> str:
+    return f"https://[{host}]:{STUDIO_PORT}" if ":" in host else f"https://{host}:{STUDIO_PORT}"
+
+
+def _entered_board_host() -> str:
+    """The board entered by hand in Insight's header, or "": setup runs GenAI Studio there."""
+    manager = current_app.extensions.get("neat_board") if has_app_context() else None
+    target = manager.target() if manager else None
+    return target.host if target and target.source == "manual" else ""
+
+
 def default_board_url() -> str:
-    """The Studio backend Insight connects to when no address is configured."""
+    """The Studio backend Insight connects to when no address is configured: the board
+    entered in Insight's header, else this board, else the paired DevKit."""
+    entered = _entered_board_host()
+    if entered:
+        return _studio_url(entered)
     if is_sima_board():
         return f"https://127.0.0.1:{STUDIO_PORT}"
     try:
         devkit_ip = get_devkit_sync_devkit_ip()
     except RuntimeError:
         devkit_ip = ""
-    if devkit_ip:
-        host = f"[{devkit_ip}]" if ":" in devkit_ip else devkit_ip
-        return f"https://{host}:{STUDIO_PORT}"
-    return ""
+    return _studio_url(devkit_ip) if devkit_ip else ""
 
 
 def _configured_url() -> str:

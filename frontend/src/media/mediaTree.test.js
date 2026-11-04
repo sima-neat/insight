@@ -51,7 +51,7 @@ test('listFolder lists folders with counts, then every file, and counts the unsu
 })
 
 test('playableCount counts the streamable files in a folder and all its subfolders, like a folder badge', () => {
-  // Owner review (O6): the line under the breadcrumb and the folder badges count the same thing.
+  // Owner review (O6): the folder browser's count and the folder badges count the same thing.
   assert.equal(playableCount(tree, ''), 5)
   assert.equal(playableCount(tree, '30FPS'), 3)
   assert.equal(playableCount(tree, '30FPS/indoor'), 2)
@@ -66,8 +66,8 @@ test('streamableOnly keeps the files Insight can play and drops the rest', () =>
   assert.deepEqual(streamableOnly([]), [])
 })
 
-test('breadcrumbs start at Media Root and accumulate one segment per level', () => {
-  assert.deepEqual(breadcrumbs(''), [{ name: 'Media Root', path: '' }])
+test('breadcrumbs start at Videos and accumulate one segment per level', () => {
+  assert.deepEqual(breadcrumbs(''), [{ name: 'Videos', path: '' }])
   assert.deepEqual(breadcrumbs('30FPS/indoor/cam-a').map((c) => c.path), ['', '30FPS', '30FPS/indoor', '30FPS/indoor/cam-a'])
   assert.equal(breadcrumbs('30FPS/indoor').at(-1).name, 'indoor')
 })

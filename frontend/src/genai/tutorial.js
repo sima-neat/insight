@@ -1,7 +1,7 @@
-// The GenAI tab's tutorial: shown on the first visit and replayable from the
-// header. `target` names the control a step highlights; `action` names what
-// its "Try it" button does (the view decides how). While the tab can't reach
-// GenAI Studio, the first step offers to set it up (genai/setup.js).
+// The GenAI tab's tutorial: shown the first time the chat opens (after setup, if
+// it was needed) and replayable from the header. `target` names the control a step highlights;
+// `action` names what its "Try it" button does (the view decides how). While the
+// tab can't reach GenAI Studio it shows the setup page instead (genai/setup.js).
 
 export const TUTORIAL_STORAGE_KEY = 'neat-insight:genai-tutorial-seen'
 
@@ -111,8 +111,8 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     id: 'benchmark',
     title: 'Measure the speed',
     body:
-      'The gauge opens the benchmark: choose one or more models, the number of runs and the reply length, and ' +
-      'compare time to first token and tokens per second. Download the results as CSV or JSON.',
+      'The gauge opens the benchmark: it times how long a model takes to start replying and how fast the reply ' +
+      'comes. The defaults are fine, so just run it. Download the results as CSV or JSON.',
     target: 'benchmark',
     action: null
   })
@@ -141,10 +141,10 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     id: 'help',
     title: 'When something is wrong',
     body:
-      'The label at the top left shows whether the board is ready. If it says Not running, start GenAI ' +
-      'Studio on the board; the first time, Set up GenAI Studio in the banner installs and starts it. ' +
-      'Settings holds the board address. If a model gets stuck, restart GenAI Studio on the board (Settings, ' +
-      'Troubleshooting says how). Replay this tutorial any time with Tutorial.',
+      'The label at the top left shows whether the board is ready. If GenAI Studio stops, this tab shows its ' +
+      'setup page, where Start GenAI Studio starts it again. Settings holds GenAI Studio\'s address and Manage ' +
+      'installation, which updates or stops it. If a model gets stuck, restart GenAI Studio on the board ' +
+      '(Settings, Troubleshooting says how). Replay this tutorial any time with Tutorial.',
     target: 'status',
     action: 'settings'
   })

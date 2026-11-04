@@ -20,7 +20,7 @@
     {"name": "API documentation", "description": "Open the embedded Swagger UI or download the authoritative OpenAPI 3.1 document for generators, validators, and external documentation systems."},
     {"name": "Service and system", "description": "Confirm readiness and discover the environment in which Insight is running. These endpoints expose logs, optional tool availability, Neat component status, platform build metadata, and the LAN address inferred for browser-facing links."},
     {"name": "Diagnostics", "description": "Observe Insight, vf ingest, and WebRTC delivery. Start with the compact views for active channels, then add `all=1&verbose=1` when diagnosing inactive ports, packet loss, malformed RTP, missing keyframes, RTCP feedback, or browser decode problems."},
-    {"name": "Media library", "description": "Browse and inspect files managed under Insight's media root. Paths are relative to that root; destructive operations reject traversal and clear source assignments that would otherwise reference deleted media."},
+    {"name": "Media library", "description": "Browse and inspect files managed in Insight's media library. Paths are relative to the top of the library; destructive operations reject traversal and clear source assignments that would otherwise reference deleted media."},
     {"name": "Media imports", "description": "Populate the media library by uploading local files or archives, downloading published test-media assets, or validating and transcoding YouTube clips. Long-running operations stream human-readable progress."},
     {"name": "Media sources", "description": "Manage one-based source slots that publish assigned media over RTSP or HTTP MJPEG. A normal workflow is list videos → assign a slot → start it → inspect state → stop it before changing or deleting media."},
     {"name": "Viewer", "description": "Generate a vf viewer URL that is reachable from the current browser and bounded to the configured channel capacity. Viewer channel indexes are zero-based even though media-source slots are one-based."},
@@ -343,7 +343,7 @@
       "post": {
         "tags": ["Media imports"],
         "summary": "Upload media or a media archive",
-        "description": "Uploads one local file using multipart field `file`. Archives (`zip`, `tar`, `gz`, and `tar.gz`) are safely extracted beneath the media root, and compatible MP4 files may be optimized for browser playback after upload. The response is a plain-text progress stream, so clients should consume it through the final line rather than treating the first bytes as completion.",
+        "description": "Uploads one local file using multipart field `file`. Archives (`zip`, `tar`, `gz`, and `tar.gz`) are safely extracted inside the media library, and compatible MP4 files may be optimized for browser playback after upload. The response is a plain-text progress stream, so clients should consume it through the final line rather than treating the first bytes as completion.",
         "operationId": "uploadMedia",
         "x-codeSamples": [
           {
@@ -373,7 +373,7 @@
       "post": {
         "tags": ["Media library"],
         "summary": "Delete a media file or directory",
-        "description": "Permanently deletes a file or directory beneath the media root. If a deleted file (or any file inside a deleted directory) is assigned to a media-source slot, Insight stops that slot and clears the assignment, and it discards any cached FPS renditions built from the deleted files. Prefer stopping active sources first, and always obtain the relative path from the media tree rather than sending an absolute host path.",
+        "description": "Permanently deletes a file or directory inside the media library. If a deleted file (or any file inside a deleted directory) is assigned to a media-source slot, Insight stops that slot and clears the assignment, and it discards any cached FPS renditions built from the deleted files. Prefer stopping active sources first, and always obtain the relative path from the media tree rather than sending an absolute host path.",
         "operationId": "deleteMedia",
         "requestBody": {
           "required": true,
@@ -443,7 +443,7 @@
       "get": {
         "tags": ["Media library"],
         "summary": "Download or preview a media file",
-        "description": "Serves the original bytes for a relative path beneath the media root using the detected content type. Browsers may display supported media inline; automation can use the same route to download the file. Missing paths return `404` and traversal outside the library is not permitted.",
+        "description": "Serves the original bytes for a relative path inside the media library using the detected content type. Browsers may display supported media inline; automation can use the same route to download the file. Missing paths return `404` and traversal outside the library is not permitted.",
         "operationId": "getMediaFile",
         "parameters": [
           {"name": "filename", "in": "path", "required": true, "description": "Relative media-library path, including any folders.", "schema": {"type": "string"}, "example": "catalog/people/person.mp4"}
@@ -990,7 +990,7 @@
       "post": {
         "tags": ["GenAI Studio"],
         "summary": "Install, prepare and start GenAI Studio on the selected board",
-        "description": "Starts one detached job on the board running every step that is not done yet, in order: `NEAT_APPS_SKIP_DEPENDENCIES=1 NEAT_APPS_OVERWRITE=1 sima-cli neat install apps` from `/media/nvme` (the running Insight is never reinstalled; a develop Insight installs `apps@develop`, and a GenAI Studio from another channel or built for an older Neat Library line is replaced, its files kept in `/media/nvme/.prebuilt-apps-backup`), `setup.sh` without a terminal (default voice languages), then `run.sh`, which keeps running. NVMe must be mounted at `/media/nvme`; caches and temporary files use `/media/nvme/.cache/neat-genai-studio`. The job outlives the request, the SSH session and Insight; its logs are in `~/.neat-insight/genai-setup/` on the board. Refuses while a step runs or GenAI Studio is still starting (`setup_running`), when everything is done (`setup_done`), or when a step's prerequisite is missing (`setup_blocked`, with the step and the fix). `{\"redo\": \"prepare\"}` runs `setup.sh` again and restarts GenAI Studio, for example after fixing what it warned about; GenAI Studio is stopped first. A GenAI Studio still running while an earlier step failed or was stopped is also stopped first, and started again after that step.",
+        "description": "Starts one detached job on the board running every step that is not done yet, in order: `NEAT_APPS_SKIP_DEPENDENCIES=1 NEAT_APPS_OVERWRITE=1 sima-cli neat install apps` from `/media/nvme` (the running Insight is never reinstalled; an Insight built from develop or any branch other than main installs `apps@develop`, and a GenAI Studio from another channel or built for an older Neat Library line is replaced, its files kept in `/media/nvme/.prebuilt-apps-backup`), `setup.sh` without a terminal (default voice languages), then `run.sh`, which keeps running. NVMe must be mounted at `/media/nvme`; caches and temporary files use `/media/nvme/.cache/neat-genai-studio`. The job outlives the request, the SSH session and Insight; its logs are in `~/.neat-insight/genai-setup/` on the board. Refuses while a step runs or GenAI Studio is still starting (`setup_running`), when everything is done (`setup_done`), or when a step's prerequisite is missing (`setup_blocked`, with the step and the fix). `{\"redo\": \"prepare\"}` runs `setup.sh` again and restarts GenAI Studio, for example after fixing what it warned about; GenAI Studio is stopped first. A GenAI Studio still running while an earlier step failed or was stopped is also stopped first, and started again after that step.",
         "operationId": "runGenaiSetup",
         "parameters": [{"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the setup state the panel shows. Recommended: once another board is selected the request returns `409 stale_snapshot` and does nothing."}],
         "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"redo": {"type": "string", "enum": ["prepare"], "description": "Run this step again, and the ones after it, even though it is done."}}}, "example": {"redo": "prepare"}}}},
@@ -1659,7 +1659,7 @@
           "installed": {"type": "boolean", "description": "Whether Neat Apps' GenAI Studio is on the board (its `run.sh`), whatever the install step's last record says."},
           "target": {"type": "object", "description": "How Insight reaches the board the steps run on, so a client can tell whether it is the board its GenAI Studio address points at.", "properties": {"mode": {"type": ["string", "null"], "enum": ["local", "ssh", null]}, "host": {"type": ["string", "null"], "description": "The SSH host; null for the board Insight runs on."}}},
           "logDir": {"type": "string", "description": "Where the job keeps its logs on the board."},
-          "apps": {"type": "string", "description": "The `sima-cli neat install` target the install step uses: `apps@develop` for a develop Insight, otherwise `apps`.", "example": "apps@develop"},
+          "apps": {"type": "string", "description": "The `sima-cli neat install` target the install step uses: `apps` for a release or main build of Insight, otherwise `apps@develop` (develop and every other branch build).", "example": "apps@develop"},
           "outdated": {"type": "boolean", "description": "The installed GenAI Studio comes from another Apps channel than this Insight, or was built for an older Neat Library line than the board has. The install and prepare steps then report `pending`, and a run replaces it."},
           "steps": {"type": "array", "items": {"$ref": "#/components/schemas/GenaiSetupStep"}}
         }
@@ -1676,7 +1676,8 @@
           "problem": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "Why a failed or blocked step can't finish."},
           "stall": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "A running step with no new output for a while: what may be happening and what to do."},
           "warnings": {"type": "array", "description": "What a done, running or failed step warned about (setup.sh's ⚠ lines, GenAI Studio's WARNING log lines), each listed once; known ones in plain words with the fix.", "items": {"type": "object", "required": ["message", "fix"], "properties": {"message": {"type": "string"}, "fix": {"type": ["string", "null"]}}}},
-          "notice": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "On the install step of an outdated GenAI Studio: why it is replaced and what a run does. `command` is null."}
+          "notice": {"oneOf": [{"$ref": "#/components/schemas/GenaiSetupProblem"}, {"type": "null"}], "description": "On the install step of an outdated GenAI Studio: why it is replaced and what a run does. `command` is null."},
+          "stopped": {"type": "boolean", "description": "A `failed` install or prepare step that was stopped on purpose (`POST /api/genai-setup/stop`, or its process was ended with SIGTERM) rather than failing: a run resumes it."}
         }
       },
       "GenaiSetupProblem": {
@@ -1695,7 +1696,7 @@
         "properties": {
           "url": {"type": "string", "description": "Address in use; empty when none is configured or derivable."},
           "configuredUrl": {"type": ["string", "null"], "description": "Address set by the user, or null."},
-          "defaultUrl": {"type": ["string", "null"], "description": "Address used when none is configured, or null."}
+          "defaultUrl": {"type": ["string", "null"], "description": "Address used when none is configured: port 5000 on the board entered in Insight's header, else this board, else the paired DevKit; null when there is none."}
         }
       },
       "GenaiSettingsUpdate": {
@@ -1746,7 +1747,7 @@
       },
       "MediaTreeNode": {
         "type": "object",
-        "description": "One visible file or folder beneath Insight's managed media root.",
+        "description": "One visible file or folder inside Insight's managed media library.",
         "required": ["name", "path", "type"],
         "properties": {
           "name": {"type": "string", "description": "Final filename or directory name displayed to the user."},
@@ -1759,7 +1760,7 @@
       },
       "MediaPathRequest": {
         "type": "object",
-        "description": "Identifies a file or directory beneath Insight's managed media root.",
+        "description": "Identifies a file or directory inside Insight's managed media library.",
         "required": ["path"],
         "properties": {"path": {"type": "string", "description": "Relative path under the Insight media directory."}}
       },

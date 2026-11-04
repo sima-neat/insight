@@ -469,6 +469,8 @@ exit 0
         status = self.wait_for(lambda s: not s["active"])
         self.assertEqual(self.states(status), ["done", "failed", "pending"])
         self.assertEqual(status["steps"][1]["problem"]["message"], "The step was stopped before it finished.")
+        # Stopped on purpose, so the tab offers Resume setup rather than reporting a failure.
+        self.assertEqual([s["stopped"] for s in status["steps"]], [False, True, False])
         self.wait_until_ended(setup_pid)
 
     def test_a_pid_left_from_an_old_job_is_not_taken_for_the_runner(self):
@@ -652,10 +654,10 @@ class DescribeTests(unittest.TestCase):
         prepare = self.describe(fields, {"prepare": record})["steps"][1]
         self.assertEqual(prepare["state"], "running")
         self.assertEqual(prepare["stall"]["message"], "No new output for 10 minutes.")
-        self.assertIn("press Stop, then Retry", prepare["stall"]["fixes"][1])
+        self.assertIn("press Stop setup, then Resume setup", prepare["stall"]["fixes"][1])
         start = self.describe(dict(fields, prepared="yes", running="yes", answering="no", steps="start", step="start"),
                               {"start": dict(record, mtime=str(1000 - 200))})["steps"][2]
-        self.assertIn("press Stop GenAI Studio, then Start GenAI Studio", start["stall"]["fixes"][1])
+        self.assertIn("stop GenAI Studio and start it again", start["stall"]["fixes"][1])
         quiet = dict(record, mtime=str(1000 - 120))
         self.assertIsNone(self.describe(fields, {"prepare": quiet})["steps"][1]["stall"])
 
@@ -694,11 +696,14 @@ class DescribeTests(unittest.TestCase):
         # A running GenAI Studio is what counts for the start step.
         self.assertEqual([s["state"] for s in steps], ["failed", "failed", "done"])
         self.assertEqual(steps[1]["problem"]["message"], "The step was stopped before it finished.")
+        self.assertEqual([s["stopped"] for s in steps], [False, True, False], "only the stopped step resumes")
 
     def test_an_ended_job_leaves_its_cut_off_step_failed_but_a_cut_off_studio_just_stopped(self):
         fields = {"installed": "yes", "prepared": "yes", "steps": "prepare start", "step": "prepare"}
         records = {"prepare": {"exit": "", "mtime": "", "log": "Installing voices", "warnings": []}}
-        self.assertEqual([s["state"] for s in self.describe(fields, records)["steps"]], ["done", "failed", "pending"])
+        steps = self.describe(fields, records)["steps"]
+        self.assertEqual([s["state"] for s in steps], ["done", "failed", "pending"])
+        self.assertFalse(steps[1]["stopped"], "cut off (a board restart, say), not stopped from the tab")
         fields = dict(fields, step="start")
         records = {"prepare": {"exit": "0", "mtime": "", "log": "", "warnings": []},
                    "start": {"exit": "", "mtime": "", "log": "Loaded Piper model", "warnings": []}}
@@ -749,10 +754,20 @@ class DescribeTests(unittest.TestCase):
 
     def test_the_apps_channel_follows_this_insights_version(self):
         for version, channel in (("0.0.0+develop.e604419", "develop"), ("0.0.0+main.bedca8f", "main"),
-                                 ("0.0.8", "main"), ("0.0.0+feature.120.webcam.9a18d3b", "main")):
+                                 ("0.0.10", "main"), ("0.0.0+unknown", "main"),
+                                 # Feature branches are cut from develop, so they install apps@develop.
+                                 ("0.0.0+225.genai.setup.flow.d4fb2d7", "develop"),
+                                 ("0.0.0+feature.120.webcam.9a18d3b", "develop"),
+                                 ("0.0.0+main.hotfix.9a18d3b", "develop")):
             with mock.patch.object(genai_setup.metadata, "version", return_value=version):
                 self.assertEqual(genai_setup.insight_channel(), channel, version)
+                self.assertEqual(genai_setup.apps_target(), "apps" if channel == "main" else "apps@develop", version)
         self.assertEqual((genai_setup.apps_target("main"), genai_setup.apps_target("develop")), ("apps", "apps@develop"))
+
+    def test_a_feature_branch_insight_keeps_a_develop_studio(self):
+        with mock.patch.object(genai_setup.metadata, "version", return_value="0.0.0+225.genai.setup.flow.d4fb2d7"):
+            status = self.describe({"installed": "yes", "prepared": "yes", "apps_ref": "develop"})
+        self.assertEqual((status["apps"], status["outdated"]), ("apps@develop", False))
 
     def test_only_an_older_core_line_or_another_channel_makes_studio_outdated(self):
         installed = {"installed": "yes", "apps_ref": "main", "apps_core_ref": "v0.6.0", "core_version": "0.6.0"}
