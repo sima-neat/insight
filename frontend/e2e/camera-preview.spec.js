@@ -418,6 +418,7 @@ test('cameras and video files sit in separate labelled cards, and the library st
 
   await expect(cameras.getByRole('heading', { name: 'Cameras' })).toContainText('Live')
   await expect(files.getByRole('heading', { name: 'Video files' })).toBeVisible()
+  await expect(files.getByRole('button', { name: 'Import Media' })).toBeVisible()
 
   await enableCameras(ui)
   await expect(cameras.getByTestId('camera-row')).toHaveCount(2)

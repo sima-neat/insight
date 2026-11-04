@@ -24,13 +24,14 @@ function plural(count, word, pluralForm = `${word}s`) {
 //   renderFileLead  optional (filePath) => node placed before the file name (the delete checkbox)
 //   fileRowClass    optional (filePath) => extra class for the row ('selected' for checked rows)
 //   heading         optional node for a header row, which then holds the count too
+//   headingAction   optional node at the end of that header row
 //   idPrefix        test-id prefix so the two instances can be told apart
 //   showUnsupported list files Insight cannot stream, greyed and tagged, so they can still be
 //                   previewed or deleted; off by default, because the assign dialog must not
 //                   offer them. Without them, a folder with nothing streamable inside is greyed.
 export default function FolderBrowser({
   tree, folder, onNavigate, filter, onFilterChange, selectedPath, onSelect,
-  renderFileLead, fileRowClass, heading, idPrefix = 'media', showUnsupported = false,
+  renderFileLead, fileRowClass, heading, headingAction, idPrefix = 'media', showUnsupported = false,
 }) {
   const crumbs = breadcrumbs(folder)
   const query = (filter || '').trim()
@@ -73,7 +74,7 @@ export default function FolderBrowser({
 
   return (
     <div className="folder-browser" data-testid={`${idPrefix}-browser`} data-folder={folder}>
-      {heading && <div className="media-card-head">{heading}{count}</div>}
+      {heading && <div className="media-card-head">{heading}<div className="media-card-head-end">{count}{headingAction}</div></div>}
       <div className="folder-nav">
         <nav className="breadcrumb" aria-label="Current folder" data-testid={`${idPrefix}-breadcrumb`}>
           {crumbs.map((crumb, index) => {
