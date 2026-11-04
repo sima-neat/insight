@@ -577,6 +577,12 @@ select:focus-visible,
   margin: 0;
 }
 
+.media-card-head-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .media-card-title {
   display: flex;
   align-items: center;

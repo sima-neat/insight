@@ -2765,20 +2765,6 @@ export default function App() {
                   <h2>Media Sources</h2>
                   <p className="section-note">Browse, preview, and manage local media assets.</p>
                 </div>
-                <button
-                  type="button"
-                  className={uploadBusy ? 'upload-icon-btn busy' : 'upload-icon-btn'}
-                  title="Import Media"
-                  aria-label="Import Media"
-                  aria-busy={uploadBusy ? 'true' : 'false'}
-                  disabled={uploadBusy}
-                  onClick={() => openImportDialog('local')}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 3l4.5 4.5-1.4 1.4-2.1-2.1V16h-2V6.8L8.9 8.9 7.5 7.5 12 3zM5 18h14v2H5v-2z" />
-                  </svg>
-                  <span className="sr-only">Import Media</span>
-                </button>
               </div>
               <div className="media-card" data-testid="cameras-card">
                 <div className="media-card-head">
@@ -2823,6 +2809,22 @@ export default function App() {
               <div className="media-card" data-testid="video-files-card">
               <FolderBrowser
                 heading={<h3 className="media-card-title"><VideoFileIcon />Video files</h3>}
+                headingAction={(
+                  <button
+                    type="button"
+                    className={uploadBusy ? 'upload-icon-btn busy' : 'upload-icon-btn'}
+                    title="Import Media"
+                    aria-label="Import Media"
+                    aria-busy={uploadBusy ? 'true' : 'false'}
+                    disabled={uploadBusy}
+                    onClick={() => openImportDialog('local')}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 3l4.5 4.5-1.4 1.4-2.1-2.1V16h-2V6.8L8.9 8.9 7.5 7.5 12 3zM5 18h14v2H5v-2z" />
+                    </svg>
+                    <span className="sr-only">Import Media</span>
+                  </button>
+                )}
                 tree={mediaTree}
                 folder={mediaFolder}
                 onNavigate={navigateMediaFolder}
