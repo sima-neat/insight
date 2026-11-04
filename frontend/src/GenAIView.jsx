@@ -43,15 +43,12 @@ import ToolButton, { Tooltip } from './ToolButton.jsx'
 import { allowedActions, blockedReason } from './genai/activity.js'
 import { activeChatModel, keptChoice, loadPlan, residentLimit, unloadChoice } from './genai/models.js'
 import {
-  chooseCard,
-  combinedRate,
   compareAnswerers,
   compareSelection,
-  compareTurn,
   imageNote,
   loadedInDisplayOrder,
-  toggleTicked,
-  updateCard
+  panelHistory,
+  toggleTicked
 } from './genai/compare.js'
 import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
@@ -342,6 +339,9 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const [chosenModel, setChosenModel] = useState(null)
   // The models ticked in the Compare panel; two or more answer side by side.
   const [compareNames, setCompareNames] = useState([])
+  // Each compared model's own conversation, by model name.
+  const [panelChats, setPanelChats] = useState({})
+  const panelStreams = useRef(new Map())
   // A load that needs loaded models unloaded first: {model, choice, already},
   // where `already` lists the models this load was already asked to unload.
   const [unloadAsk, setUnloadAsk] = useState(null)
@@ -480,7 +480,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     hasChatModel: Boolean(chatModel),
     sees,
     hasAsr: Boolean(status?.asrModel),
-    hasMessages: messages.length > 0,
+    hasMessages: messages.length > 0 || Object.values(panelChats).some((chat) => chat.length > 0),
     hasDraft: Boolean(draft.trim() || image),
     // Opening counts as open: a permission prompt may be pending.
     cameraOpen: cameraOpen || cameraOpening || boardCameraOpen,
@@ -1281,107 +1281,25 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     ]
   }
 
-  // The same message sent to every compared model at once, each answer in its
-  // own card. The conversation continues from the chosen card, which is also
-  // the one read aloud. GenAI Studio retries an accelerator that is busy
-  // because several models run at once.
-  function sendCompared({ userText, userContent, heard, replyPlayer, generation }) {
-    const sentImage = image
-    const { answer: models, skip } = compareAnswerers(compareModels, Boolean(sentImage))
-    if (!models.length) {
-      setImage(null)
-      onStatus?.("None of the models you are comparing can see images, so the picture was removed. Send again without it.")
-      return false
-    }
-    const chosen = models.some((m) => m.name === chatModel.name) ? chatModel.name : models[0].name
-    setChosenModel(chosen)
-    const requests = models.map((model) => ({ model, messages: requestMessages(model, userContent) }))
-    const replyId = Date.now()
-    setMessages((prev) => [...prev, { role: 'user', text: userText, image: sentImage, heard }, compareTurn(replyId, compareModels, chosen, skip)])
-    setDraft('')
-    setImage(null)
-    stickToBottom.current = true
-    streamingRef.current = true
-    setStreaming(true)
-    const controller = new AbortController()
-    chatAbort.current = controller
-    const t0 = performance.now()
-    const patch = (name, fields) => {
-      if (chatGeneration.current !== generation) return
-      setMessages((prev) => prev.map((m) => (m.id === replyId ? updateCard(m, name, fields) : m)))
-    }
-    const answered = new Set()
-    let failures = 0
-
-    async function streamCard({ model, messages: outgoing }) {
-      let reply = ''
-      let tFirst = null
-      let reading = replyPlayer && model.name === chosen ? startReading(cardSpeechId(replyId, model.name), replyPlayer, t0) : null
-      const splitter = createSentenceSplitter()
-      const speakNew = (final) => {
-        if (!reading) return
-        for (const piece of splitter.push(splitThinking(reply).answer, final)) {
-          if (!reading.add(piece)) {
-            reading = null
-            return
-          }
-        }
-        if (final) reading.finish()
-      }
-      try {
-        const { stats, rag } = await streamChat({
-          model: model.name,
-          messages: outgoing,
-          maxTokens: replySettings.maxTokens,
-          useDocuments: useDocs && docs.available,
-          signal: ticket(controller.signal).signal,
-          onDelta: (piece) => {
-            if (tFirst === null) tFirst = performance.now()
-            reply += piece
-            patch(model.name, { content: reply })
-            speakNew(false)
-          }
-        })
-        patch(model.name, { content: reply, pending: false, stats, rag, metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }) })
-        if (splitThinking(reply).answer.trim()) answered.add(model.name)
-        speakNew(true)
-      } catch (error) {
-        const stopped = error.name === 'AbortError'
-        if (stopped) reading?.abort()
-        else {
-          failures += 1
-          speakNew(true)
-        }
-        patch(model.name, { content: reply, pending: false, stopped, error: stopped ? null : error.message })
-      }
-    }
-
-    async function streamAll() {
-      await Promise.all(requests.map(streamCard))
-      // Carry on from a card that answered, not from an empty or failed one.
-      const carryOn = answered.has(chosen) ? null : models.find((m) => answered.has(m.name))?.name || null
-      const wallMs = performance.now() - t0
-      if (chatGeneration.current === generation) {
-        setMessages((prev) => prev.map((m) => {
-          if (m.id !== replyId) return m
-          const turn = { ...m, combined: combinedRate(m, wallMs) }
-          return carryOn ? chooseCard(turn, carryOn) : turn
-        }))
-        if (carryOn) setChosenModel(carryOn)
-        if (failures === models.length) fail('None of the compared models answered. Check the board, then try again.')
-      }
-      streamingRef.current = false
-      setStreaming(false)
-      if (chatAbort.current === controller) chatAbort.current = null
-    }
-    streamAll()
-    return true
+  // What a panel sends to its model: the panel's own conversation and message.
+  function panelRequest(model, chat, userContent, hasImage) {
+    const { history, picture } = panelHistory(chat, model, hasImage)
+    return [
+      { role: 'system', content: systemPromptFor({ custom: replySettings.systemPrompt, picture }) },
+      ...history,
+      { role: 'user', content: supportsThinking(model.name) && !thinking ? withNoThink(userContent) : userContent }
+    ]
   }
 
-  // Which card of a comparison the conversation continues from.
-  function chooseAnswer(replyId, name) {
-    setMessages((prev) => prev.map((m) => (m.id === replyId && m.compare ? chooseCard(m, name) : m)))
-    setChosenModel(name)
+  function askPanel({ model, messages: outgoing, controller, onDelta }) {
+    return streamChat({
+      model: model.name,
+      messages: outgoing,
+      maxTokens: replySettings.maxTokens,
+      useDocuments: useDocs && docs.available,
+      signal: ticket(controller.signal).signal,
+      onDelta
+    })
   }
 
   // Two or more ticked models are compared; one is a normal chat with it.
@@ -1405,7 +1323,6 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     const userContent = image
       ? [{ type: 'text', text: userText }, { type: 'image_url', image_url: { url: image } }]
       : userText
-    if (compareModels) return sendCompared({ userText, userContent, heard, replyPlayer, generation })
     const outgoing = requestMessages(chatModel, userContent)
     const replyId = Date.now()
     setMessages((prev) => [...prev, { role: 'user', text: userText, image, heard }, { role: 'assistant', id: replyId, content: '', pending: true }])
@@ -1803,6 +1720,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // clears the history. New chat and switching boards both start here.
   function resetConversation() {
     chatGeneration.current += 1
+    panelStreams.current.forEach((controller) => controller.abort())
+    setPanelChats({})
     chatAbort.current?.abort()
     stopSpeaking()
     setSpeechError(null)
@@ -2379,6 +2298,28 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             <button type="button" className="btn-ghost genai-small" onClick={() => setDocsMidChat(false)}>Keep this chat</button>
           </div>
         )}
+        {compareModels ? (
+          <ParallelPanels
+            models={compareModels}
+            chats={panelChats}
+            setChats={setPanelChats}
+            streams={panelStreams}
+            request={panelRequest}
+            ask={askPanel}
+            onError={onError}
+            speech={{
+              speakingId,
+              error: speechError,
+              stats: speechStats,
+              canSpeak: allowed.readAloud,
+              title: allowed.readAloud ? 'Read this reply aloud' : backend.title,
+              support: voiceLanguageFor,
+              onSpeak: speakText,
+              onStop: stopSpeaking
+            }}
+          />
+        ) : (
+        <>
         <div className="genai-transcript" ref={transcriptBox} onScroll={onTranscriptScroll}>
           {messages.length === 0 && firstModel && (
             <FirstModelOffer
@@ -2397,9 +2338,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           {messages.length === 0 && !firstModel && (
             <div className="genai-welcome">
               <p className="genai-welcome-title">
-                {compareModels
-                  ? `Ask ${compareModels.map((m) => friendlyModelName(m.name)).join(' and ')} side by side on your board`
-                  : `Chat with ${chatModel ? friendlyModelName(chatModel.name) : 'a model'} on your board`}
+                {`Chat with ${chatModel ? friendlyModelName(chatModel.name) : 'a model'} on your board`}
               </p>
               <p className="section-note">
                 Type or talk, {sees ? 'add a picture, ' : ''}and hear the answer read aloud, in most languages. New here? Open the Tutorial.
@@ -2431,31 +2370,11 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           {messages.map((m, index) => {
             if (m.role === 'user') {
               return (
-                <div key={index} className={`genai-msg genai-msg-user${messages[index + 1]?.compare ? ' genai-msg-user-compare' : ''}`}>
+                <div key={index} className="genai-msg genai-msg-user">
                   {m.image && <img src={m.image} alt="Sent with this message" className="genai-msg-image" />}
                   <p>{m.text}</p>
                   <Metrics items={m.heard} label="How fast your speech was heard" />
                 </div>
-              )
-            }
-            if (m.compare) {
-              return (
-                <CompareTurn
-                  key={index}
-                  turn={m}
-                  catalog={chatModels(status)}
-                  onChoose={(name) => chooseAnswer(m.id, name)}
-                  speech={{
-                    speakingId,
-                    error: speechError,
-                    stats: speechStats,
-                    canSpeak: allowed.readAloud,
-                    title: allowed.readAloud ? 'Read this reply aloud' : backend.title,
-                    support: voiceLanguageFor,
-                    onSpeak: speakText,
-                    onStop: stopSpeaking
-                  }}
-                />
               )
             }
             const parts = splitThinking(m.content)
@@ -2525,7 +2444,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
         {image && (
           <div className="genai-attachment">
             <img src={image} alt="Picture to send with your next message" />
-            <span className="hint">Sent with your next message.{compareModels && imageNote(compareModels) ? ` ${imageNote(compareModels)}` : ''}</span>
+            <span className="hint">Sent with your next message.</span>
             <button type="button" className="btn-ghost genai-small" onClick={() => setImage(null)}>Remove</button>
           </div>
         )}
@@ -2600,6 +2519,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             )}
           </div>
         </form>
+        </>
+        )}
       </section>
 
       {benchOpen && (
@@ -2735,68 +2656,248 @@ function ComparePicker({ models, ticked, comparing, spotClass, onToggle }) {
   )
 }
 
-// Reading aloud a card in a comparison: its own id, so its button and speed
-// figures follow that card.
-function cardSpeechId(turnId, model) {
-  return `${turnId}:${model}`
-}
+// A chat panel per compared model, each with its own conversation. Prompt
+// chooses a box in every panel, or one box that sends to all of them at once.
+function ParallelPanels({ models, chats, setChats, streams, request, ask, onError, speech }) {
+  const [mode, setMode] = useState('different')
+  const [drafts, setDrafts] = useState({})
+  const [pictures, setPictures] = useState({})
+  const [running, setRunning] = useState([])
+  const latest = useRef(chats)
+  latest.current = chats
+  const same = mode === 'same'
 
-function CompareTurn({ turn, catalog, onChoose, speech }) {
-  const byName = new Map(catalog.map((m) => [m.name, m]))
+  const setDraft = (key, text) => setDrafts((prev) => ({ ...prev, [key]: text }))
+  const setPicture = (key, picture) => setPictures((prev) => ({ ...prev, [key]: picture }))
+  const addToChat = (name, ...entries) => setChats((prev) => ({ ...prev, [name]: [...(prev[name] || []), ...entries] }))
+
+  async function attach(key, file) {
+    if (!file) return
+    try {
+      setPicture(key, await imageToDataUrl(file))
+    } catch {
+      onError?.('That file could not be read as an image.')
+    }
+  }
+
+  async function send(model, text, image) {
+    if (streams.current.has(model.name)) return
+    const userContent = image
+      ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: image } }]
+      : text
+    const outgoing = request(model, latest.current[model.name] || [], userContent, Boolean(image))
+    const id = `${model.name}:${Date.now()}`
+    addToChat(model.name, { role: 'user', text, image }, { role: 'assistant', id, content: '', pending: true })
+    const patch = (fields) => setChats((prev) => ({
+      ...prev,
+      [model.name]: (prev[model.name] || []).map((m) => (m.id === id ? { ...m, ...fields } : m))
+    }))
+    const controller = new AbortController()
+    streams.current.set(model.name, controller)
+    setRunning([...streams.current.keys()])
+    const t0 = performance.now()
+    let tFirst = null
+    let reply = ''
+    try {
+      const { stats, rag } = await ask({
+        model,
+        messages: outgoing,
+        controller,
+        onDelta: (piece) => {
+          if (tFirst === null) tFirst = performance.now()
+          reply += piece
+          patch({ content: reply })
+        }
+      })
+      patch({ content: reply, pending: false, rag, metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }) })
+    } catch (error) {
+      const stopped = error.name === 'AbortError'
+      patch({ content: reply, pending: false, stopped, error: stopped ? null : error.message })
+    } finally {
+      streams.current.delete(model.name)
+      setRunning([...streams.current.keys()])
+    }
+  }
+
+  function sendOne(model) {
+    const text = (drafts[model.name] || '').trim()
+    const image = pictures[model.name] || null
+    if ((!text && !image) || running.includes(model.name)) return
+    setDraft(model.name, '')
+    setPicture(model.name, null)
+    send(model, text || 'Describe this image.', image)
+  }
+
+  // A model without a picture's sight sits the message out, in its panel.
+  function sendShared() {
+    const text = (drafts[SHARED_BOX] || '').trim()
+    const image = pictures[SHARED_BOX] || null
+    if ((!text && !image) || running.length) return
+    const { answer, skip } = compareAnswerers(models, Boolean(image))
+    if (!answer.length) {
+      onError?.("None of these models can see images. Remove the picture and send again.")
+      return
+    }
+    setDraft(SHARED_BOX, '')
+    setPicture(SHARED_BOX, null)
+    const said = text || 'Describe this image.'
+    skip.forEach((m) => addToChat(m.name, { role: 'user', text: said, skipped: true }, { role: 'assistant', content: '', skipped: true }))
+    answer.forEach((m) => send(m, said, image))
+  }
+
   return (
-    <div className="genai-compare" aria-label={`Answers from ${turn.compare.length} models`}>
-      <p className="genai-compare-title">
-        <span>Side by side · {turn.compare.length} models</span>
-        {turn.combined && (
-          <span className="hint" title="All tokens the models wrote, over the time until the last one finished">
-            {turn.combined.tokens} tokens in {turn.combined.seconds.toFixed(1)} s · {turn.combined.tps.toFixed(1)} tokens/s combined
-          </span>
+    <div className="genai-panels">
+      <div className="genai-panels-bar">
+        <label className="genai-panels-mode">
+          <span>Prompt</span>
+          <select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="different">Different prompts</option>
+            <option value="same">Same prompt</option>
+          </select>
+        </label>
+        <span className="hint">
+          {same ? 'One prompt goes to every panel at once; each panel keeps its own conversation.' : 'Each model has its own prompt and Send, and they run at the same time.'}
+        </span>
+        {running.length > 0 && (
+          <button type="button" className="btn-ghost genai-small" onClick={() => streams.current.forEach((c) => c.abort())}>Stop all</button>
         )}
-      </p>
-      <div className="genai-compare-cards" style={{ '--cards': turn.compare.length }}>
-        {turn.compare.map((card) => {
-          const model = byName.get(card.model)
-          const parts = splitThinking(card.content)
-          const chosen = card.model === turn.chosen
-          return (
-            <section key={card.model} className={`genai-compare-card${chosen ? ' genai-compare-chosen' : ''}`} aria-label={friendlyModelName(card.model)}>
-              <header>
-                <span className="genai-model-name" title={card.model}>{friendlyModelName(card.model)}</span>
-                <span className="genai-badge">{model && model.supportsVision ? 'sees images' : 'text only'}</span>
-              </header>
-              {card.skipped && <p className="hint">This model can't take images, so it didn't answer this message.</p>}
-              {parts.thinking && (
-                <details className="genai-thinking" open={!parts.thinkingDone}>
-                  <summary>{parts.thinkingDone ? 'How it reasoned' : 'Thinking…'}</summary>
-                  <p>{parts.thinking}</p>
-                </details>
-              )}
-              {parts.answer ? (
-                <div className="genai-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>{parts.answer}</ReactMarkdown></div>
-              ) : (
-                card.pending && !parts.thinking && <p className="hint">Writing…</p>
-              )}
-              {card.stopped && <p className="hint">Stopped.</p>}
-              {card.error && <p className="genai-error">{card.error}</p>}
-              {card.rag && <p className="hint genai-sources">{sourcesNote(card.rag)}</p>}
-              <Metrics items={card.metrics} label={`How fast ${friendlyModelName(card.model)} answered`} />
-              <CardSpeech id={cardSpeechId(turn.id, card.model)} answer={card.pending ? '' : parts.answer} speech={speech} />
-              {chosen ? (
-                !turn.pending && parts.answer && <p className="hint genai-compare-note">✓ The conversation continues from this answer</p>
-              ) : (
-                !turn.pending && parts.answer && (
-                  <button type="button" className="btn-ghost genai-small" onClick={() => onChoose(card.model)}>Continue with this answer</button>
-                )
-              )}
-            </section>
-          )
-        })}
       </div>
+      <div className="genai-panels-grid" style={{ '--panels': models.length }}>
+        {models.map((model) => (
+          <section key={model.name} className="genai-panel" aria-label={friendlyModelName(model.name)}>
+            <header>
+              <span className="genai-model-name" title={model.name}>{friendlyModelName(model.name)}</span>
+              <span className="genai-badge">{model.supportsVision ? 'sees images' : 'text only'}</span>
+            </header>
+            <PanelChat chat={chats[model.name] || []} speech={speech} />
+            {!same && (
+              <PanelComposer
+                id={model.name}
+                draft={drafts[model.name] || ''}
+                picture={pictures[model.name] || null}
+                canAttach={model.supportsVision}
+                busy={running.includes(model.name)}
+                placeholder={`Ask ${friendlyModelName(model.name)}`}
+                onDraft={setDraft}
+                onPicture={setPicture}
+                onAttach={attach}
+                onSend={() => sendOne(model)}
+                onStop={() => streams.current.get(model.name)?.abort()}
+              />
+            )}
+          </section>
+        ))}
+      </div>
+      {same && (
+        <PanelComposer
+          id={SHARED_BOX}
+          draft={drafts[SHARED_BOX] || ''}
+          picture={pictures[SHARED_BOX] || null}
+          note={pictures[SHARED_BOX] ? imageNote(models) : null}
+          canAttach={models.some((m) => m.supportsVision)}
+          busy={running.length > 0}
+          placeholder="One prompt for every panel"
+          onDraft={setDraft}
+          onPicture={setPicture}
+          onAttach={attach}
+          onSend={sendShared}
+          onStop={() => streams.current.forEach((c) => c.abort())}
+        />
+      )}
     </div>
   )
 }
 
-// A card's Read aloud, like the one under a single reply.
+const SHARED_BOX = '__shared__'
+
+function PanelComposer({ id, draft, picture, note, canAttach, busy, placeholder, onDraft, onPicture, onAttach, onSend, onStop }) {
+  const file = useRef(null)
+  return (
+    <form className="genai-panel-composer" onSubmit={(e) => { e.preventDefault(); onSend() }}>
+      {picture && (
+        <div className="genai-attachment">
+          <img src={picture} alt="Picture to send with the next message" />
+          <span className="hint">Sent with the next message.{note ? ` ${note}` : ''}</span>
+          <button type="button" className="btn-ghost genai-small" onClick={() => onPicture(id, null)}>Remove</button>
+        </div>
+      )}
+      <textarea
+        rows={2}
+        value={draft}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        onChange={(e) => onDraft(id, e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend() } }}
+      />
+      <div className="genai-composer-tools">
+        <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { onAttach(id, e.target.files[0]); e.target.value = '' }} />
+        {canAttach && (
+          <ToolButton label="Attach a picture" placement="top" className="btn-ghost genai-icon-btn" onClick={() => file.current?.click()}>
+            <Icon d={ICONS.photo} />
+          </ToolButton>
+        )}
+        <span className="genai-header-spacer" />
+        {busy ? (
+          <ToolButton label="Stop the reply" placement="top" className="genai-send genai-send-stop" onClick={onStop}>
+            <Icon d={ICONS.stop} />
+          </ToolButton>
+        ) : (
+          <ToolButton label="Send" type="submit" placement="top" className="genai-send">
+            <Icon d={ICONS.send} />
+          </ToolButton>
+        )}
+      </div>
+    </form>
+  )
+}
+
+// Follows the newest message as it is written.
+function PanelChat({ chat, speech }) {
+  const box = useRef(null)
+  useEffect(() => {
+    if (box.current) box.current.scrollTop = box.current.scrollHeight
+  }, [chat])
+  return (
+    <div className="genai-panel-chat" ref={box}>
+      {chat.map((m, index) => <PanelMessage key={index} message={m} speech={speech} />)}
+    </div>
+  )
+}
+
+function PanelMessage({ message: m, speech }) {
+  if (m.role === 'user') {
+    return (
+      <div className="genai-msg genai-msg-user">
+        {m.image && <img src={m.image} alt="Sent with this message" className="genai-msg-image" />}
+        <p>{m.text}</p>
+      </div>
+    )
+  }
+  if (m.skipped) return <p className="hint">This model can't take images, so it didn't answer this message.</p>
+  const parts = splitThinking(m.content)
+  return (
+    <div className="genai-msg genai-msg-assistant">
+      {parts.thinking && (
+        <details className="genai-thinking" open={!parts.thinkingDone}>
+          <summary>{parts.thinkingDone ? 'How it reasoned' : 'Thinking…'}</summary>
+          <p>{parts.thinking}</p>
+        </details>
+      )}
+      {parts.answer ? (
+        <div className="genai-markdown"><ModelMarkdown>{parts.answer}</ModelMarkdown></div>
+      ) : (
+        m.pending && !parts.thinking && <p className="hint">Writing…</p>
+      )}
+      {m.stopped && <p className="hint">Stopped.</p>}
+      {m.error && <p className="genai-error">{m.error}</p>}
+      {m.rag && <p className="hint genai-sources">{sourcesNote(m.rag)}</p>}
+      <Metrics items={m.metrics} label="How fast the model answered" />
+      <CardSpeech id={m.id} answer={m.pending ? '' : parts.answer} speech={speech} />
+    </div>
+  )
+}
+
+// A panel reply's Read aloud, like the one under a single reply.
 function CardSpeech({ id, answer, speech }) {
   const support = answer ? speech.support(answer) : null
   return (

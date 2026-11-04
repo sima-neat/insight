@@ -1,13 +1,14 @@
-// Compare side by side: one message answered by several loaded models, each in
-// its own card. The board keeps the models loaded (apps#587); the tab only
-// chooses who answers. Kept free of React so `node --test` covers it.
+// Compare side by side: a chat panel per ticked model, sent one prompt each or
+// the same prompt to all. The board keeps the models loaded (apps#587); the tab
+// only chooses who answers. Kept free of React so `node --test` covers it.
 
 import { chatModels, friendlyModelName } from './backendState.js'
 import { loadedChatModels } from './models.js'
+import { splitThinking } from './streams.js'
 
 // The loaded chat models in catalog order, for anything shown side by side:
 // the most-recently-used order changes whenever another model is picked, which
-// would swap the cards between turns.
+// would swap the panels around.
 export function loadedInDisplayOrder(status) {
   const loaded = new Set(loadedChatModels(status).map((m) => m.name))
   return chatModels(status).filter((m) => loaded.has(m.name))
@@ -51,45 +52,17 @@ export function imageNote(models) {
   return `${names(skip)} can't take images, so only ${names(answer)} will answer this message.`
 }
 
-// A comparison turn keeps one card per model; `chosen` is the card the
-// conversation continues from, and `content` mirrors it so history, export
-// and Read aloud treat the turn like any other reply. Models in `skipped` get
-// a card that says why they didn't answer.
-export function compareTurn(id, models, chosen, skipped = []) {
-  const skip = new Set(skipped.map((m) => m.name))
-  return {
-    role: 'assistant',
-    id,
-    compare: models.map((m) => (skip.has(m.name)
-      ? { model: m.name, content: '', pending: false, skipped: true }
-      : { model: m.name, content: '', pending: true })),
-    chosen,
-    content: '',
-    pending: true
-  }
-}
-
-export function updateCard(turn, model, patch) {
-  const compare = turn.compare.map((c) => (c.model === model ? { ...c, ...patch } : c))
-  const chosenCard = compare.find((c) => c.model === turn.chosen) || compare[0]
-  return {
-    ...turn,
-    compare,
-    content: chosenCard ? chosenCard.content : '',
-    pending: compare.some((c) => c.pending)
-  }
-}
-
-export function chooseCard(turn, model) {
-  if (!turn.compare.some((c) => c.model === model)) return turn
-  return updateCard({ ...turn, chosen: model }, model, {})
-}
-
-// The turn's combined speed: all tokens the models wrote over the time until
-// the last one finished.
-export function combinedRate(turn, wallMs) {
-  if (!turn.compare || typeof wallMs !== 'number' || wallMs <= 0) return null
-  const tokens = turn.compare.reduce((sum, c) => sum + ((c.stats && c.stats.tokens) || 0), 0)
-  if (!tokens) return null
-  return { tokens, tps: tokens / (wallMs / 1000), seconds: wallMs / 1000 }
+// One model's panel conversation as request history, and what the system
+// prompt should say about pictures. Requests are stateless: the most recent
+// earlier picture goes again so follow-ups can still see it, only to a model
+// that sees images and only while no new picture replaces it.
+export function panelHistory(chat, model, hasNewImage) {
+  const said = chat.filter((m) => !m.skipped)
+  const carried = !hasNewImage && model.supportsVision ? said.findLastIndex((m) => m.role === 'user' && m.image) : -1
+  const history = said.map((m, i) => {
+    if (m.role === 'assistant') return { role: 'assistant', content: splitThinking(m.content).answer }
+    if (i === carried) return { role: 'user', content: [{ type: 'text', text: m.text }, { type: 'image_url', image_url: { url: m.image } }] }
+    return { role: 'user', content: m.text }
+  })
+  return { history, picture: hasNewImage ? 'current' : carried >= 0 ? 'earlier' : 'none' }
 }

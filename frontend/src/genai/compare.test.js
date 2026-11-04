@@ -3,15 +3,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
-  chooseCard,
-  combinedRate,
   compareAnswerers,
   compareSelection,
-  compareTurn,
   imageNote,
   loadedInDisplayOrder,
-  toggleTicked,
-  updateCard
+  panelHistory,
+  toggleTicked
 } from './compare.js'
 
 const LM = { name: 'LFM2.5-230M-a16w4', type: 'chat', supportsVision: false, loaded: true }
@@ -24,7 +21,7 @@ const status = {
   maxResident: 2
 }
 
-test('cards keep catalog order whichever model was used last', () => {
+test('panels keep catalog order whichever model was used last', () => {
   assert.deepEqual(loadedInDisplayOrder(status).map((m) => m.name), [LM.name, VL.name])
 })
 
@@ -51,33 +48,30 @@ test('a picture goes only to the models that see images', () => {
   assert.equal(imageNote([LM]), null)
 })
 
-test('a turn mirrors the chosen card and finishes with its last card', () => {
-  let turn = compareTurn(1, [LM, VL], VL.name)
-  turn = updateCard(turn, LM.name, { content: 'a', pending: false })
-  assert.equal(turn.content, '')
-  assert.equal(turn.pending, true)
-  turn = updateCard(turn, VL.name, { content: 'b', pending: false })
-  assert.equal(turn.content, 'b')
-  assert.equal(turn.pending, false)
-  assert.equal(chooseCard(turn, LM.name).content, 'a')
-  assert.equal(chooseCard(turn, 'other'), turn)
+test('a panel keeps its own history and leaves out messages it sat out', () => {
+  const chat = [
+    { role: 'user', text: 'first' },
+    { role: 'assistant', content: '<think>hm</think>one' },
+    { role: 'user', text: 'with a picture', image: 'data:x' },
+    { role: 'assistant', skipped: true, content: '' }
+  ]
+  const { history, picture } = panelHistory(chat, LM, false)
+  assert.deepEqual(history.map((m) => m.role), ['user', 'assistant', 'user'])
+  assert.equal(history[2].content, 'with a picture')
+  assert.equal(picture, 'none')
 })
 
-test('a skipped model has a finished card from the start', () => {
-  const turn = compareTurn(1, [LM, VL], VL.name, [LM])
-  assert.deepEqual(turn.compare[0], { model: LM.name, content: '', pending: false, skipped: true })
-  assert.equal(turn.compare[1].pending, true)
-})
-
-test('the combined speed counts every card over the whole turn', () => {
-  const turn = { compare: [{ stats: { tokens: 30 } }, { stats: { tokens: 10 } }, {}] }
-  assert.deepEqual(combinedRate(turn, 2000), { tokens: 40, tps: 20, seconds: 2 })
-  assert.equal(combinedRate({ compare: [{}] }, 2000), null)
-  assert.equal(combinedRate(turn, 0), null)
+test('a follow-up sends the last picture again only to a model that sees images', () => {
+  const chat = [{ role: 'user', text: 'look', image: 'data:x' }, { role: 'assistant', content: 'red' }]
+  const seen = panelHistory(chat, VL, false)
+  assert.equal(seen.picture, 'earlier')
+  assert.equal(seen.history[0].content[1].image_url.url, 'data:x')
+  assert.equal(panelHistory(chat, VL, true).picture, 'current')
+  assert.equal(panelHistory(chat, VL, true).history[0].content, 'look')
 })
 
 test('the view shows the Compare button when the board keeps several models', () => {
   const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
   assert.match(view, /keepsSeveral && \(\s*<ComparePicker/)
-  assert.match(view, /<CompareTurn\b/)
+  assert.match(view, /<ParallelPanels\b/)
 })

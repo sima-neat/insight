@@ -8365,81 +8365,92 @@ button:disabled {
   margin: 4px 0 0;
 }
 
-.genai-compare {
-  justify-self: stretch;
-  display: grid;
-  gap: 8px;
+/* Compare's panels: one chat per model, side by side. */
+.genai-panels {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.genai-compare-title {
+.genai-panels-bar {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 12px;
-  margin: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
+  align-items: center;
+  gap: 8px 12px;
 }
 
-.genai-compare-title .hint {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 500;
-}
-
-.genai-compare-cards {
-  display: grid;
-  /* One column per model, sharing the width; wraps on narrow screens. */
-  grid-template-columns: repeat(var(--cards, 2), minmax(0, 1fr));
-  gap: 10px;
-  align-items: start;
-}
-
-.genai-compare-card {
-  display: grid;
+.genai-panels-mode {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.genai-panels-mode select {
+  width: auto;
+}
+
+.genai-panels-bar .hint {
+  flex: 1;
+  margin: 0;
+}
+
+.genai-panels-grid {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--panels, 2), minmax(0, 1fr));
+  gap: 10px;
+}
+
+.genai-panel {
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface-soft);
 }
 
-.genai-compare-card header {
+.genai-panel header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
 
-.genai-compare-chosen {
-  border-color: var(--accent-alt);
-  box-shadow: inset 0 0 0 1px var(--accent-alt);
+.genai-panel-chat {
+  flex: 1 1 0;
+  min-height: 160px;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 10px;
 }
 
-.genai-compare-card > button {
-  justify-self: start;
+.genai-panel-composer {
+  display: grid;
+  gap: 6px;
 }
 
-.genai-compare-note {
-  color: var(--accent-alt);
+.genai-panel-composer textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font: inherit;
+  resize: none;
 }
 
 @media (max-width: 900px) {
-  .genai-compare-cards {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  .genai-panels-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
-}
-
-/* A question answered side by side sits centered above the cards: it went to
-   every model in the comparison. */
-.genai-thread > .genai-msg-user-compare,
-.genai-transcript > .genai-msg-user-compare {
-  justify-self: center;
-  margin-right: 0;
-  text-align: center;
 }
