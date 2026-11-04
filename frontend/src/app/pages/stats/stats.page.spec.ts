@@ -9,7 +9,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { NeatIcon, NeatPage, NeatShell, type NeatTone } from '@sima/neat-ui';
-import { NeatTimeChart } from '@sima/neat-ui/charts';
+import { NeatChartCard, NeatTimeChart } from '@sima/neat-ui/charts';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { AppDialogs } from '../../app-dialogs';
@@ -303,11 +303,12 @@ describe('StatsPage', () => {
   const cards = (): HTMLElement[] => [
     ...root().querySelectorAll<HTMLElement>('.cards > neat-chart-card'),
   ];
+  const headingOf = (card: HTMLElement): string => debugOf(NeatChartCard, card)?.heading() ?? '';
   const cardNamed = (heading: string): HTMLElement =>
-    cards().find((card) => text(card.querySelector('.heading')) === heading)!;
+    cards().find((card) => headingOf(card) === heading)!;
   /** A card as it reads: heading, value with unit, caption and chip. */
   const cardText = (card: HTMLElement) => ({
-    heading: text(card.querySelector('.heading')),
+    heading: headingOf(card),
     value: text(card.querySelector('.value')),
     caption: text(card.querySelector('.caption')),
     chip: text(card.querySelector('neat-status-chip')),

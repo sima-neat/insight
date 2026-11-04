@@ -38,8 +38,9 @@
                   // The confirmation dialog (NeatConfirm: the CDK dialog and brain's alert dialog)
                   // lives in the main bundle and adds about 30 kB. The video code is not part of it:
                   // it comes from @sima/neat-ui/video and loads with the Viewer route only.
+                  // The kit's global stylesheet carries every entry's utilities, so kit releases grow this.
                   "type": "initial",
-                  "maximumWarning": "600kB",
+                  "maximumWarning": "620kB",
                   "maximumError": "1MB"
                 },
                 {
