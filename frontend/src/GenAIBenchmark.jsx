@@ -46,8 +46,9 @@ function download(name, text, type) {
 // the board names, as a board that keeps one does on its own. A run that loads
 // a model says so first, in the page (ConfirmDialog).
 // ticket: the tab's board session (genai/boardSession.js); leaving the tab or
-// changing boards ends the run. onRunningChange tells the tab's rule table.
-export default function GenAIBenchmark({ status, ticket, onClose, onModelsChanged, onRunningChange }) {
+// changing boards ends the run. boardNow(): which board the tab is on, so a stop only goes to the
+// board that runs the benchmark. onRunningChange tells the tab's rule table.
+export default function GenAIBenchmark({ status, ticket, boardNow, onClose, onModelsChanged, onRunningChange }) {
   const models = chatModels(status)
   const loaded = new Set((status && status.loaded) || [])
   const [chosen, setChosen] = useState(() => defaultChoice(models, loaded))
@@ -71,9 +72,12 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
   const runTicket = useRef(null)
   const over = () => stopRequested.current || !runTicket.current || !runTicket.current.live()
 
-  // Closing the panel or leaving the tab mid-run stops the board's benchmark too.
+  const runBoard = useRef(null)
+
+  // Closing the panel or leaving the tab mid-run stops the board's benchmark too. After a board
+  // change the relay reaches the new board, whose own run isn't this one to stop.
   useEffect(() => () => {
-    if (runTicket.current && !stopRequested.current) {
+    if (runTicket.current && !stopRequested.current && runBoard.current === boardNow?.()) {
       stopRequested.current = true
       postJson('benchmark/stop', {}).catch(() => {})
     }
@@ -198,6 +202,7 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
   async function run() {
     stopRequested.current = false
     runTicket.current = ticket()
+    runBoard.current = boardNow?.()
     runLoaded.current = new Set((status && status.loaded) || [])
     setRunConfig({ runs, maxTokens, prompt })
     setRunning(true)

@@ -199,3 +199,34 @@ test('the Documents panel keeps its own layout', async ({ page }) => {
   await expect(panel.getByRole('region', { name: 'Sections' })).toHaveCSS('padding-top', '16px')
   await expect(panel.locator('.genai-bench-results-head')).toHaveCSS('display', 'flex')
 })
+
+test('a board change during a run closes the page, unlocks the tab and sends no stop to the new board', async ({ page }) => {
+  const board = await mockBoard(page, { holdRun: true })
+  let address = 'https://192.168.1.20:5000'
+  await page.route(/\/api\/genai\/settings$/, (route) => json(route, { url: address }))
+  await page.route(/\/api\/peripherals$/, (route) => json(route, {}))
+  await page.route(/\/api\/board(\/.*)?$/, (route) => {
+    if (route.request().method() === 'GET') return json(route, { generation: 1, target: null })
+    address = 'https://192.168.1.30:5000'
+    return json(route, { generation: 2, target: null })
+  })
+
+  const dialog = await openBenchmark(page)
+  await dialog.getByRole('button', { name: 'Run benchmark' }).click()
+  await expect(dialog.getByRole('button', { name: 'Stop' })).toBeVisible()
+
+  // The header sits behind the page, where the keyboard can still reach it.
+  await page.locator('.board-trigger').evaluate((trigger) => trigger.click())
+  const form = page.getByRole('form', { name: 'Board connection' })
+  await form.getByRole('textbox').first().fill('192.168.1.30')
+  await form.getByRole('textbox').first().press('Enter')
+
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByText('The board changed, so the benchmark closed.')).toBeVisible()
+  await page.getByRole('button', { name: 'Close board settings' }).click()
+  await page.getByRole('button', { name: 'Benchmark' }).click()
+  await expect(page.getByRole('dialog', { name: 'Benchmark' })).toBeVisible()
+  await page.getByRole('dialog', { name: 'Benchmark' }).getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('combobox', { name: 'Model' })).toBeEnabled()
+  expect(posted(board, 'benchmark/stop')).toHaveLength(0)
+})

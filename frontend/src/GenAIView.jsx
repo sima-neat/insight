@@ -315,6 +315,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const [solutionsOpen, setSolutionsOpen] = useState(false)
   const [benchOpen, setBenchOpen] = useState(false)
   const [benchmarking, setBenchmarking] = useState(false)
+  const benchmarkingNow = useRef(false)
+  benchmarkingNow.current = benchmarking
   const root = useRef(null)
   const [addressDraft, setAddressDraft] = useState('')
   const [addressError, setAddressError] = useState('')   // shown under the address until it is edited
@@ -722,6 +724,11 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   function forgetBoard() {
     boardGeneration.current += 1
     boardSession.current?.restart()
+    // Insight's relay already points at the new board, so a run on the previous one can't be
+    // stopped from here: it ends by itself, and this tab stops waiting for it.
+    if (benchmarkingNow.current) onError?.('The board changed, so the benchmark closed. It may finish on the previous board.')
+    setBenchOpen(false)
+    setBenchmarking(false)
     voicesLoading.current = false
     // The conversation and an attached picture belong to the previous board:
     // the next message must not send them to the new one.
@@ -2414,6 +2421,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           <GenAIBenchmark
             status={status}
             ticket={ticket}
+            boardNow={() => boardGeneration.current}
             onRunningChange={setBenchmarking}
             onClose={() => { setBenchOpen(false); setBenchmarking(false) }}
             onModelsChanged={refresh}
