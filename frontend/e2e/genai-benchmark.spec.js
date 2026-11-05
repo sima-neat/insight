@@ -189,7 +189,8 @@ test('the Documents panel keeps its own layout', async ({ page }) => {
   await openBenchmark(page)
   await page.getByRole('dialog', { name: 'Benchmark' }).getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  await page.getByRole('region', { name: 'Documents' }).getByRole('button', { name: 'View documents' }).click()
+  await page.getByRole('tab', { name: 'Documents' }).click()
+  await page.getByRole('button', { name: 'View sections' }).click()
 
   const panel = page.getByRole('dialog', { name: 'Documents on the board' })
   await expect(panel.locator('.genai-bench-body')).toHaveCSS('max-width', '1000px')

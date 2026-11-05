@@ -22,8 +22,8 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
       title: 'Choose a model',
       body:
         'The model at the top answers your messages. "Sees images" means it also understands pictures. ' +
-        'Loading a different model takes a few minutes; Settings, Models downloads new ones from Hugging Face, ' +
-        'and its Delete frees the space of one you no longer need.',
+        'Loading a different model takes a few minutes; Manage models in the menu downloads new ones from Hugging Face, ' +
+        'and Remove from DevKit, under a model\'s arrow, frees the space of one you no longer need.',
       target: 'model',
       action: null
     },
@@ -32,7 +32,7 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
       title: 'Ask anything',
       body:
         'Type in the message box and press Enter. The answer appears as it is written, with how fast it came ' +
-        'underneath; the stop button ends it early. New chat, next to the model, starts over. Settings, Replies ' +
+        'underneath; the stop button ends it early. New chat, next to the model, starts over. Settings, Replies & voice ' +
         'sets your own system prompt and how long a reply may be.',
       target: 'composer',
       action: 'example-question'
@@ -103,7 +103,7 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     body:
       'Turn on Use my documents and the board looks up the matching passages in its document database before ' +
       'answering, and says which ones it used. Settings, Documents uploads your own Markdown file or resets to ' +
-      'the default SiMa document, and View documents shows the sections the board searches.',
+      'the default SiMa document, and View sections shows the sections the board searches.',
     target: 'documents',
     action: null
   })
@@ -142,9 +142,9 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     title: 'When something is wrong',
     body:
       'The label at the top left shows whether the board is ready. If GenAI Studio stops, this tab shows its ' +
-      'setup page, where Start GenAI Studio starts it again. Settings holds GenAI Studio\'s address and Manage ' +
+      'setup page, where Start GenAI Studio starts it again. Settings, Connection holds GenAI Studio\'s address and Manage ' +
       'installation, which updates or stops it. If a model gets stuck, restart GenAI Studio on the board ' +
-      '(Settings, Troubleshooting says how). Replay this tutorial any time with Tutorial.',
+      '(Troubleshooting, on the same tab, says how). Replay this tutorial any time with Tutorial.',
     target: 'status',
     action: 'settings'
   })
