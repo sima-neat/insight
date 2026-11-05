@@ -1309,7 +1309,6 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   function toggleCompareModel(name) {
     const ticked = compareModels ? compareModels.map((m) => m.name) : (chatModel ? [chatModel.name] : [])
     const next = toggleTicked(comparableModels, ticked, name)
-    if (next.length < 2) stopSpeaking()
     setCompareNames(next.length > 1 ? next : [])
     if (next.length === 1) setChosenModel(next[0])
   }
@@ -2350,10 +2349,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             readAloud={readAloud}
             unlockPlayer={unlockPlayer}
             startReading={startReading}
-            onBack={() => {
-              stopSpeaking()
-              setCompareNames([])
-            }}
+            onBack={() => setCompareNames([])}
             camera={{
               browser: allowed.openCamera,
               board: allowed.openBoardCamera && boardCam.available,
@@ -2719,6 +2715,14 @@ function ParallelPanels({ models, loadedCount, ready, notReady, onBusy, readAlou
   const [readerName, setReaderName] = useState(null)
   const reader = models.some((m) => m.name === readerName) ? readerName : models[0].name
 
+  // However Compare closes, nothing keeps running without its Stop controls.
+  const stopEverything = useRef(null)
+  stopEverything.current = () => {
+    streams.current.forEach((controller) => controller.abort())
+    speech.onStop()
+  }
+  useEffect(() => () => stopEverything.current(), [])
+
   useEffect(() => {
     if (!camera.picture || !camera.target.current) return
     setPicture(camera.target.current, camera.picture)
@@ -2797,8 +2801,19 @@ function ParallelPanels({ models, loadedCount, ready, notReady, onBusy, readAlou
     }
   }
 
-  function clearPanel(name) {
+  // Stopping a model stops its reply and anything of its being read aloud.
+  function stopModel(name) {
     streams.current.get(name)?.abort()
+    if (String(speech.speakingId).startsWith(`${name}:`)) speech.onStop()
+  }
+
+  function stopAll() {
+    streams.current.forEach((controller) => controller.abort())
+    if (speech.speakingId) speech.onStop()
+  }
+
+  function clearPanel(name) {
+    stopModel(name)
     setChats((prev) => ({ ...prev, [name]: [] }))
   }
 
@@ -2844,7 +2859,7 @@ function ParallelPanels({ models, loadedCount, ready, notReady, onBusy, readAlou
             <option value="same">Same prompt</option>
           </select>
         </label>
-        <button type="button" className="btn-ghost genai-small" disabled={!running.length} onClick={() => streams.current.forEach((c) => c.abort())}>Stop all</button>
+        <button type="button" className="btn-ghost genai-small" disabled={!running.length && !speech.speakingId} onClick={stopAll}>Stop all</button>
         <button type="button" className="btn-ghost genai-small" disabled={running.length > 0} title={running.length ? 'Wait for the replies to finish, or stop them' : undefined} onClick={onBack}>Back to chat</button>
       </div>
       <div className="genai-panels-grid" style={{ '--panels': models.length }}>
@@ -2881,7 +2896,7 @@ function ParallelPanels({ models, loadedCount, ready, notReady, onBusy, readAlou
                 onPicture={setPicture}
                 onAttach={attach}
                 onSend={() => sendOne(model)}
-                onStop={() => streams.current.get(model.name)?.abort()}
+                onStop={() => stopModel(model.name)}
               />
             )}
           </section>
@@ -2902,7 +2917,7 @@ function ParallelPanels({ models, loadedCount, ready, notReady, onBusy, readAlou
           onPicture={setPicture}
           onAttach={attach}
           onSend={sendShared}
-          onStop={() => streams.current.forEach((c) => c.abort())}
+          onStop={stopAll}
         />
       )}
     </div>
