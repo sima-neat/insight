@@ -2067,7 +2067,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             models={comparableModels}
             ticked={compareModels ? compareModels.map((m) => m.name) : (chatModel ? [chatModel.name] : [])}
             comparing={Boolean(compareModels)}
-            busy={panelsBusy}
+            busy={panelsBusy || streaming || recording || transcribing || visionActivity.asking || visionActivity.loop}
             spotClass={spot('compare')}
             onToggle={toggleCompareModel}
           />
