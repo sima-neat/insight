@@ -1567,6 +1567,7 @@ test('a model row: its kind, size and whether it is in use', () => {
   assert.equal(modelRow({ ...whisper, activeAsr: false }, { ...STATUS, asrModel: 'other' }).state.label, 'On DevKit')
   assert.equal(modelRow(small, { ...STATUS, loading: { name: small.name } }).state.label, 'Loading…')
   assert.equal(modelRow({ ...small, supported: false }, STATUS).state.key, 'unsupported')
+  assert.deepEqual(modelRow({ ...small, complete: false }, STATUS).state, { key: 'incomplete', label: 'Download incomplete' })
   // Hugging Face search results type their models llm, vlm or asr.
   assert.deepEqual(['llm', 'vlm', 'asr', undefined].map((type) => modelKind({ type }).label), ['Chat', 'Vision', 'Speech', 'Chat'])
 })

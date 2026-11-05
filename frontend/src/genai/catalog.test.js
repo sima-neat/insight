@@ -116,6 +116,14 @@ test('the download in progress shows in its row; a model that can\'t run says so
   assert.deepEqual([blocked[0].state.key, blocked[0].unsupportedReason], ['unsupported', 'Too big'])
 })
 
+test('a model still downloading stays a download, even once the board lists it', () => {
+  const repoId = CATALOG.models[1].repoId
+  const rows = catalogRows({ status: STATUS, catalog: CATALOG, download: { repoId, pct: 60 } })
+  const row = rows.find((r) => r.repoId === repoId)
+  assert.deepEqual([row.onBoard, row.model, row.state.key], [false, null, 'downloading'])
+  assert.equal(rows.filter((r) => r.repoId === repoId).length, 1)
+})
+
 test('no board status yet still lists the saved catalog', () => {
   assert.equal(catalogRows({ status: null, catalog: CATALOG }).length, 3)
   assert.deepEqual(catalogRows(), [])

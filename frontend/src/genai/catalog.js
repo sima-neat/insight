@@ -88,7 +88,11 @@ const rowRank = (row) => (row.on || row.state.key === 'loading' ? 0 : row.onBoar
 // activeName: as for modelRow. download: the download in progress, if any.
 export function catalogRows({ status = null, catalog = EMPTY_CATALOG, activeName, download = null } = {}) {
   const offered = new Map(catalog.models.map((m) => [catalogNameFor(m.repoId).toLowerCase(), m]))
-  const onBoard = [...chatModels(status), ...speechModels(status)].map((model) => {
+  // A download in progress can already be in the board's catalog, part way
+  // through: it stays a download until it ends.
+  const downloadingName = download ? catalogNameFor(download.repoId).toLowerCase() : ''
+  const models = [...chatModels(status), ...speechModels(status)].filter((m) => m.name.toLowerCase() !== downloadingName)
+  const onBoard = models.map((model) => {
     const key = model.name.toLowerCase()
     const card = offered.get(key)
     offered.delete(key)

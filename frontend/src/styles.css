@@ -5477,7 +5477,8 @@ input.genai-switch[aria-disabled='true'] {
   color: var(--accent);
 }
 
-.genai-catalog-status-unsupported {
+.genai-catalog-status-unsupported,
+.genai-catalog-status-incomplete {
   color: var(--warn);
 }
 

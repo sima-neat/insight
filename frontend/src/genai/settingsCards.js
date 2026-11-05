@@ -50,8 +50,9 @@ export function modelRow(model, status, activeName) {
   const on = speech ? Boolean(model.activeAsr) || (status && status.asrModel) === model.name : loaded.has(model.name)
   const state = loading === model.name ? { key: 'loading', label: 'Loading…' }
     : on ? { key: 'on', label: speech || (activeName && activeName === model.name) ? 'In use' : 'Loaded' }
-      : model.supported === false ? { key: 'unsupported', label: "Can't run here" }
-        : { key: 'off', label: 'On DevKit' }
+      : model.complete === false ? { key: 'incomplete', label: 'Download incomplete' }
+        : model.supported === false ? { key: 'unsupported', label: "Can't run here" }
+          : { key: 'off', label: 'On DevKit' }
   return {
     name: friendlyModelName(model.name),
     kind,

@@ -23,6 +23,7 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0 } = {}
     ],
     loaded: [QWEN],
     hub,
+    statusDelay: 0,
     searches: 0,
     cards: 0,
     finishDownload: null
@@ -33,9 +34,13 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0 } = {}
     const path = url.pathname.replace(/^\/api\/genai\//, '')
     if (request.method() === 'POST') {
       if (path === 'models/hub/download') {
-        await new Promise((resolve) => { board.finishDownload = resolve })
         const repoId = request.postDataJSON().repoId
-        board.catalog.push({ name: repoId.split('/')[1], type: 'asr', sizeBytes: 2_400_000_000 })
+        // The board can list a model before its download ends.
+        const model = { name: repoId.split('/')[1], type: 'asr', sizeBytes: 2_400_000_000, complete: false, incompleteReason: 'download is incomplete' }
+        board.catalog.push(model)
+        await new Promise((resolve) => { board.finishDownload = resolve })
+        model.complete = true
+        delete model.incompleteReason
         const lines = [{ state: 'downloading', repoId, pct: 40 }, { state: 'done', repoId, name: repoId.split('/')[1] }]
         return route.fulfill({ status: 200, contentType: 'application/x-ndjson', body: lines.map((l) => JSON.stringify(l)).join('\n') + '\n' })
       }
@@ -44,6 +49,7 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0 } = {}
     if (path === 'settings') return json(route, { url: 'https://192.168.1.20:5000' })
     if (path === 'health') return json(route, { ok: true, api_version: 1, model_server: { reachable: true }, features: { rag: true } })
     if (path === 'models/status') {
+      await new Promise((resolve) => setTimeout(resolve, board.statusDelay))
       return json(route, {
         catalog: board.catalog,
         loaded: board.loaded,
@@ -208,6 +214,20 @@ test('the board\'s models and the ones to download are separate lists, and only 
   expect(board.searches).toBe(1)
 })
 
+test('the list stays put while a model operation refreshes the board', async ({ page }) => {
+  const board = await mockBoard(page)
+  await openGenAI(page)
+  await settingsButton(page).click()
+  await expect(page.getByText('3 models on this DevKit')).toBeVisible()
+
+  board.statusDelay = 1500
+  await page.getByRole('button', { name: 'Unload Qwen3 0.6B' }).click()
+  await page.waitForTimeout(700)
+  // Read now, not with a retrying expect: the slow answer would cover the gap.
+  expect(await page.getByText('No models on this DevKit yet').count()).toBe(0)
+  expect(await page.getByLabel('Models on this DevKit').getByRole('article', { name: 'Llama 3.2 3B' }).count()).toBe(1)
+})
+
 test('actions are Load, Unload and Download; the speech model in use can\'t be unloaded', async ({ page }) => {
   await mockBoard(page)
   await openGenAI(page)
@@ -227,11 +247,26 @@ test('a download shows in its row, and the model lands on the board', async ({ p
 
   await expect(row(page, 'Whisper medium')).toContainText('Downloading to DevKit')
   await expect(row(page, 'Qwen3 VL 4B').getByRole('button', { name: 'Download Qwen3 VL 4B' })).toBeDisabled()
+  await page.waitForResponse((r) => r.url().endsWith('/models/status'))
+  await page.waitForTimeout(300)
+  await expect(row(page, 'Whisper medium')).toContainText('Downloading to DevKit')
+  await expect(row(page, 'Whisper medium').getByRole('button', { name: 'Load Whisper medium' })).toHaveCount(0)
 
   board.finishDownload()
   await expect(row(page, 'Whisper medium')).toContainText('On DevKit')
   await expect(row(page, 'Whisper medium').getByRole('button', { name: 'Load Whisper medium' })).toBeEnabled()
   await expect(page.getByText('4 models on this DevKit')).toBeVisible()
+  await expect(row(page, 'Qwen3 VL 4B').getByRole('button', { name: 'Download Qwen3 VL 4B' })).toBeEnabled()
+})
+
+test('a reload during a download shows it unfinished, and it can\'t be loaded', async ({ page }) => {
+  const board = await mockBoard(page)
+  board.catalog.push({ name: 'whisper-medium-a16w8', type: 'asr', complete: false, incompleteReason: 'download is incomplete' })
+  await openGenAI(page)
+  await settingsButton(page).click()
+
+  await expect(row(page, 'Whisper medium')).toContainText('Download incomplete')
+  await expect(page.getByRole('button', { name: 'Load Whisper medium' })).toBeDisabled()
 })
 
 test('with Hugging Face out of reach the saved catalog stays and downloads wait', async ({ page }) => {

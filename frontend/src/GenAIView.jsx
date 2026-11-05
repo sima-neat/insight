@@ -467,6 +467,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const settingsBox = useRef(null)
   const catalogAutoSynced = useRef(false)
   const catalogNow = useRef(modelCatalog)
+  const lastStatus = useRef(null)
   const cardsAsked = useRef(new Set())
   const cardQueue = useRef([])
   const cardReaders = useRef(0)
@@ -797,6 +798,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setEngine('default')      // the new board may not have the chosen engine or voice
     setVoice('')
     setCatalogSync(false)
+    lastStatus.current = null
     catalogAutoSynced.current = false
     cardsAsked.current.clear()
     cardQueue.current = []
@@ -1886,7 +1888,11 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // Settings takes the chat's place. With no address yet it opens by itself, at the address.
   const showSettings = settingsOpen || backend.state === 'unconfigured'
   const openTab = settingsOpen ? settingsTab : 'connection'
-  const modelRows = catalogRows({ status, catalog: modelCatalog, activeName: chatModel?.name, download })
+  // A model operation drops the status until the fresh one comes: the list keeps
+  // the last one meanwhile, or every model would read as not downloaded.
+  if (status) lastStatus.current = status
+  const catalogStatus = status || (busyOp ? lastStatus.current : null)
+  const modelRows = catalogRows({ status: catalogStatus, catalog: modelCatalog, activeName: chatModel?.name, download })
 
   // --- render -----------------------------------------------------------------
 
@@ -2157,7 +2163,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
               <ModelCatalog
                 rows={modelRows}
                 catalog={modelCatalog}
-                status={status}
+                status={catalogStatus}
                 chatModel={chatModel}
                 searchBox={catalogSearchBox}
                 syncing={catalogSync}
@@ -2868,11 +2874,11 @@ function ModelActions({ row, allowed, canDownload, downloadNote, onDownload, onL
   if (row.kind.key === 'speech') {
     // The board refuses to unload the speech model in use: loading another replaces it.
     if (row.on) return <button type="button" className="btn-ghost genai-small" disabled title="Load another speech model to replace this one" aria-label={`Unload ${name}`}>Unload</button>
-    return <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeSpeechModel || model.supported === false} title={model.unsupportedReason || ''} aria-label={`Load ${name}`} onClick={() => onUseSpeech(model)}>Load</button>
+    return <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeSpeechModel || model.supported === false || model.complete === false} title={model.incompleteReason || model.unsupportedReason || ''} aria-label={`Load ${name}`} onClick={() => onUseSpeech(model)}>Load</button>
   }
   if (!row.on) {
     return (
-      <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeChatModel || model.supported === false} title={model.unsupportedReason || (model.estimatedLoadS ? `About ${formatDuration(model.estimatedLoadS)} to load` : '')} aria-label={`Load ${name}`} onClick={() => onLoad(model)}>
+      <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeChatModel || model.supported === false || model.complete === false} title={model.incompleteReason || model.unsupportedReason || (model.estimatedLoadS ? `About ${formatDuration(model.estimatedLoadS)} to load` : '')} aria-label={`Load ${name}`} onClick={() => onLoad(model)}>
         Load
       </button>
     )
@@ -2895,7 +2901,8 @@ function CatalogRow({ row, open, onToggle, download, status, allowed, onDelete, 
 
   const downloading = row.state.key === 'downloading'
   const pct = downloading && typeof download?.pct === 'number' ? download.pct : null
-  const eta = downloading && download?.etaS ? `About ${formatDuration(download.etaS)} left` : undefined
+  // A stalled download reports years: no estimate is better.
+  const eta = downloading && download?.etaS && download.etaS < 86400 ? `About ${formatDuration(download.etaS)} left` : undefined
   return (
     <article ref={box} className="genai-catalog-row" aria-label={row.name}>
       <div className="genai-catalog-main">
@@ -2910,7 +2917,7 @@ function CatalogRow({ row, open, onToggle, download, status, allowed, onDelete, 
         </div>
         <span className="genai-catalog-type"><span className={`genai-kind genai-kind-${row.kind.key}`}>{row.kind.label}</span></span>
         <span className="genai-catalog-size">{row.size || '—'}</span>
-        <span className={`genai-catalog-status genai-catalog-status-${row.state.key}`} title={eta || (row.state.key === 'unsupported' ? row.model?.unsupportedReason || row.unsupportedReason || undefined : undefined)}>
+        <span className={`genai-catalog-status genai-catalog-status-${row.state.key}`} title={eta || row.model?.incompleteReason || (row.state.key === 'unsupported' ? row.model?.unsupportedReason || row.unsupportedReason || undefined : undefined)}>
           {row.state.label}{pct !== null ? ` ${pct}%` : ''}
           {downloading && <ProgressBar pct={download?.pct} label={`Downloading ${row.repoId}`} />}
         </span>
