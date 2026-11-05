@@ -2338,6 +2338,9 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           <ParallelPanels
             models={compareModels}
             loadedCount={comparableModels.length}
+            readAloud={readAloud}
+            unlockPlayer={unlockPlayer}
+            startReading={startReading}
             onBack={() => setCompareNames([])}
             camera={{
               browser: allowed.openCamera,
@@ -2685,7 +2688,7 @@ function ComparePicker({ models, ticked, comparing, spotClass, onToggle }) {
 
 // A chat panel per compared model, each with its own conversation. Prompt
 // chooses a box in every panel, or one box that sends to all of them at once.
-function ParallelPanels({ models, loadedCount, onBack, camera, chats, setChats, streams, request, ask, onError, speech }) {
+function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startReading, onBack, camera, chats, setChats, streams, request, ask, onError, speech }) {
   const [mode, setMode] = useState('different')
   const [drafts, setDrafts] = useState({})
   const [pictures, setPictures] = useState({})
@@ -2693,6 +2696,10 @@ function ParallelPanels({ models, loadedCount, onBack, camera, chats, setChats, 
   const latest = useRef(chats)
   latest.current = chats
   const same = mode === 'same'
+  // With Read replies aloud on, the one model whose replies are read as they
+  // are written.
+  const [readerName, setReaderName] = useState(null)
+  const reader = models.some((m) => m.name === readerName) ? readerName : models[0].name
 
   useEffect(() => {
     if (!camera.picture || !camera.target.current) return
@@ -2732,6 +2739,19 @@ function ParallelPanels({ models, loadedCount, onBack, camera, chats, setChats, 
     const t0 = performance.now()
     let tFirst = null
     let reply = ''
+    const player = readAloud && model.name === reader ? unlockPlayer() : null
+    let reading = player ? startReading(id, player, t0) : null
+    const splitter = createSentenceSplitter()
+    const speakNew = (final) => {
+      if (!reading) return
+      for (const piece of splitter.push(splitThinking(reply).answer, final)) {
+        if (!reading.add(piece)) {
+          reading = null
+          return
+        }
+      }
+      if (final) reading.finish()
+    }
     try {
       const { stats, rag } = await ask({
         model,
@@ -2741,11 +2761,15 @@ function ParallelPanels({ models, loadedCount, onBack, camera, chats, setChats, 
           if (tFirst === null) tFirst = performance.now()
           reply += piece
           patch({ content: reply })
+          speakNew(false)
         }
       })
       patch({ content: reply, pending: false, rag, metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }) })
+      speakNew(true)
     } catch (error) {
       const stopped = error.name === 'AbortError'
+      if (stopped) reading?.abort()
+      else speakNew(true)
       patch({ content: reply, pending: false, stopped, error: stopped ? null : error.message })
     } finally {
       streams.current.delete(model.name)
@@ -2810,7 +2834,16 @@ function ParallelPanels({ models, loadedCount, onBack, camera, chats, setChats, 
               <span className="genai-model-name" title={model.name}>{friendlyModelName(model.name)}</span>
               <span className="genai-badge">{model.supportsVision ? 'sees images' : 'text only'}</span>
               <span className="genai-header-spacer" />
-              <PanelReadAloud name={model.name} chat={chats[model.name] || []} speech={speech} />
+              <button
+                type="button"
+                className={`${readAloud && model.name === reader ? 'btn-tonal' : 'btn-ghost'} genai-small`}
+                aria-pressed={readAloud && model.name === reader}
+                disabled={!readAloud}
+                title={readAloud ? "Read this model's replies aloud" : 'Tick Read replies aloud first'}
+                onClick={() => setReaderName(model.name)}
+              >
+                Read aloud
+              </button>
               <button type="button" className="btn-ghost genai-small" onClick={() => clearPanel(model.name)}>New chat</button>
             </header>
             <PanelChat chat={chats[model.name] || []} speech={speech} />
@@ -2897,15 +2930,6 @@ function PanelComposer({ id, draft, picture, note, canAttach, camera, busy, plac
       </div>
     </form>
   )
-}
-
-// Reads the panel's latest answer.
-function PanelReadAloud({ name, chat, speech }) {
-  const last = chat.findLast((m) => m.role === 'assistant' && !m.skipped && !m.pending)
-  const answer = last ? splitThinking(last.content).answer : ''
-  const id = `${name}:latest`
-  if (speech.speakingId === id) return <button type="button" className="btn-tonal genai-small" onClick={speech.onStop}>Reading aloud</button>
-  return <button type="button" className="btn-ghost genai-small" disabled={!answer || !speech.canSpeak} title={speech.title} onClick={() => speech.onSpeak(answer, id)}>Read aloud</button>
 }
 
 // Follows the newest message as it is written.
