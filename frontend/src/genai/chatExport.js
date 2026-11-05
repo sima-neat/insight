@@ -38,7 +38,7 @@ export function chatLog({ messages, model, now = new Date() }) {
 // its messages.
 export function compareLog({ chats, now = new Date() }) {
   const sections = Object.entries(chats || {})
-    .map(([model, messages]) => ({ model, body: chatLines(messages) }))
+    .map(([model, messages]) => ({ model, body: chatLines((messages || []).filter((m) => !m.skipped)) }))
     .filter(({ body }) => body.length)
   if (!sections.length) return null
   const header = [

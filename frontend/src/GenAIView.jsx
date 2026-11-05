@@ -1309,6 +1309,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   function toggleCompareModel(name) {
     const ticked = compareModels ? compareModels.map((m) => m.name) : (chatModel ? [chatModel.name] : [])
     const next = toggleTicked(comparableModels, ticked, name)
+    if (next.length < 2) stopSpeaking()
     setCompareNames(next.length > 1 ? next : [])
     if (next.length === 1) setChosenModel(next[0])
   }
@@ -2349,7 +2350,10 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             readAloud={readAloud}
             unlockPlayer={unlockPlayer}
             startReading={startReading}
-            onBack={() => setCompareNames([])}
+            onBack={() => {
+              stopSpeaking()
+              setCompareNames([])
+            }}
             camera={{
               browser: allowed.openCamera,
               board: allowed.openBoardCamera && boardCam.available,

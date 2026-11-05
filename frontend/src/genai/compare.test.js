@@ -89,4 +89,6 @@ test('an export has a section for every model that has a conversation', () => {
   assert.match(log, new RegExp(`Model: ${LM.name}[\\s\\S]*hello[\\s\\S]*Model: ${VL.name}[\\s\\S]*\\[image\\][\\s\\S]*red`))
   assert.doesNotMatch(log, /Qwen3/)
   assert.equal(compareLog({ chats: {} }), null)
+  const sat = compareLog({ chats: { [LM.name]: [{ role: 'user', text: 'see this', skipped: true }, { role: 'assistant', content: '', skipped: true }] } })
+  assert.equal(sat, null)
 })
