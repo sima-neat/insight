@@ -2067,6 +2067,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             models={comparableModels}
             ticked={compareModels ? compareModels.map((m) => m.name) : (chatModel ? [chatModel.name] : [])}
             comparing={Boolean(compareModels)}
+            busy={panelsBusy}
             spotClass={spot('compare')}
             onToggle={toggleCompareModel}
           />
@@ -2342,7 +2343,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           <ParallelPanels
             models={compareModels}
             loadedCount={comparableModels.length}
-            ready={usable}
+            ready={usable && !(useDocs && docs.available && activity.documentTask)}
             notReady={why('send')}
             onBusy={setPanelsBusy}
             readAloud={readAloud}
@@ -2643,7 +2644,7 @@ function ModelKindTag({ model }) {
 }
 
 // The Compare button and its panel: every loaded model with a checkbox.
-function ComparePicker({ models, ticked, comparing, spotClass, onToggle }) {
+function ComparePicker({ models, ticked, comparing, busy, spotClass, onToggle }) {
   const [open, setOpen] = useState(false)
   const box = useRef(null)
   const tickedSet = new Set(ticked)
@@ -2670,7 +2671,7 @@ function ComparePicker({ models, ticked, comparing, spotClass, onToggle }) {
           className={`${comparing ? 'btn-tonal genai-compare-on' : 'btn-ghost'} genai-compare-button`}
           aria-expanded={open}
           aria-haspopup="true"
-          disabled={!enough}
+          disabled={!enough || busy}
           onClick={() => setOpen((v) => !v)}
         >
           <Icon d={ICONS.compare} />
@@ -2840,7 +2841,7 @@ function ParallelPanels({ models, loadedCount, ready, notReady, onBusy, readAlou
           </select>
         </label>
         <button type="button" className="btn-ghost genai-small" disabled={!running.length} onClick={() => streams.current.forEach((c) => c.abort())}>Stop all</button>
-        <button type="button" className="btn-ghost genai-small" onClick={onBack}>Back to chat</button>
+        <button type="button" className="btn-ghost genai-small" disabled={running.length > 0} title={running.length ? 'Wait for the replies to finish, or stop them' : undefined} onClick={onBack}>Back to chat</button>
       </div>
       <div className="genai-panels-grid" style={{ '--panels': models.length }}>
         {models.map((model) => (
