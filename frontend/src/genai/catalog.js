@@ -35,7 +35,7 @@ export function saveCatalog(storage, catalog) {
 }
 
 // results: GET models/hub/search's list. Hugging Face's listing has no sizes or
-// descriptions, so what earlier cards said stays until the new cards are read.
+// descriptions, so what the cards already read said stays.
 export function catalogFromSearch(results, previous = EMPTY_CATALOG, syncedAt = Date.now()) {
   const known = new Map(previous.models.map((m) => [m.repoId, m]))
   return {
@@ -79,12 +79,6 @@ export function cardSummary(text) {
     if (plain) return plain.length > 240 ? `${plain.slice(0, 239).trimEnd()}…` : plain
   }
   return ''
-}
-
-// The accounts the catalog's models come from, for the line above the list.
-export function catalogOrgs(catalog) {
-  const orgs = [...new Set(catalog.models.map((m) => m.org).filter(Boolean))]
-  return orgs.length ? orgs.join(', ') : 'simaai'
 }
 
 const rowRank = (row) => (row.on || row.state.key === 'loading' ? 0 : row.onBoard ? 1 : 2)
@@ -132,12 +126,11 @@ export function catalogRows({ status = null, catalog = EMPTY_CATALOG, activeName
     .map(({ row }) => row)
 }
 
-// type: all, or a modelKind key. place: all, board or available.
-export function filterRows(rows, { query = '', type = 'all', place = 'all' } = {}) {
+// type: all, or a modelKind key.
+export function filterRows(rows, { query = '', type = 'all' } = {}) {
   const text = query.trim().toLowerCase()
   return rows.filter((row) => `${row.name} ${row.kind.label} ${row.source} ${row.summary}`.toLowerCase().includes(text) &&
-    (type === 'all' || row.kind.key === type) &&
-    (place === 'all' || (place === 'board') === row.onBoard))
+    (type === 'all' || row.kind.key === type))
 }
 
 export function resultsLine(shown, total) {

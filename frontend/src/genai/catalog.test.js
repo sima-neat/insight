@@ -6,7 +6,6 @@ import {
   boardSummary,
   cardSummary,
   catalogFromSearch,
-  catalogOrgs,
   catalogRows,
   filterRows,
   loadCatalog,
@@ -52,7 +51,7 @@ test('the saved catalog survives a reload, and bad or refused storage is an empt
   assert.deepEqual(loadCatalog(memoryStorage({ [CATALOG_KEY]: '{"models":[{"repoId":"a/b"},{"x":1},null]}' })).models, [{ repoId: 'a/b' }], 'an entry with no repository is dropped')
 })
 
-test('a sync keeps what earlier cards said until the new cards are read', () => {
+test('a sync keeps what the cards already read said', () => {
   const next = catalogFromSearch([{ repoId: 'simaai/whisper-medium-a16w8', type: 'asr', sizeBytes: null }, { repoId: 'simaai/new', org: 'simaai', type: 'llm' }, {}], {
     syncedAt: 1,
     models: [{ repoId: 'simaai/whisper-medium-a16w8', sizeBytes: 5, summary: 'Old card.' }, { repoId: 'simaai/gone', summary: 'Left the list.' }]
@@ -80,12 +79,6 @@ test('a model card reads as its first paragraph of prose', () => {
   const long = cardSummary('word '.repeat(100))
   assert.equal(long.length, 240)
   assert.ok(long.endsWith('…'))
-})
-
-test('the list says which accounts its models come from', () => {
-  assert.equal(catalogOrgs(CATALOG), 'simaai')
-  assert.equal(catalogOrgs({ models: [{ org: 'simaai' }, { org: 'other' }] }), 'simaai, other')
-  assert.equal(catalogOrgs(EMPTY_CATALOG), 'simaai')
 })
 
 test('one row per model: in use first, then the board, then what can be downloaded', () => {
@@ -135,8 +128,7 @@ test('search and the filters narrow the rows together', () => {
   assert.deepEqual(names({ query: '  WHISPER ' }), ['Whisper small', 'Whisper medium'])
   assert.deepEqual(names({ query: 'sees images' }), ['Qwen3 VL 4B'], 'the card is searched too')
   assert.deepEqual(names({ query: 'simaai/qwen3-0.6b' }), ['Qwen3 0.6B'], 'so is the repository')
-  assert.deepEqual(names({ type: 'speech', place: 'board' }), ['Whisper small'])
-  assert.deepEqual(names({ type: 'speech', place: 'available' }), ['Whisper medium'])
+  assert.deepEqual(names({ type: 'speech' }), ['Whisper small', 'Whisper medium'])
   assert.deepEqual(names({ query: 'qwen', type: 'speech' }), [])
 })
 

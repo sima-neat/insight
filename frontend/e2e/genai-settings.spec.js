@@ -14,7 +14,7 @@ function json(route, body, status = 200) {
 
 // A board with a chat model in use, another on disk and a speech model, that can keep two chat
 // models loaded. `hub` is what Hugging Face answers; `searches` and `cards` count what was asked.
-async function mockBoard(page, { hub = true, maxResident = 2 } = {}) {
+async function mockBoard(page, { hub = true, maxResident = 2, offered = 0 } = {}) {
   const board = {
     catalog: [
       { name: QWEN, type: 'chat', sizeBytes: 893_000_000 },
@@ -63,7 +63,9 @@ async function mockBoard(page, { hub = true, maxResident = 2 } = {}) {
         results: [
           { repoId: `simaai/${QWEN}`, org: 'simaai', type: 'llm', sizeBytes: null },
           { repoId: VISION_REPO, org: 'simaai', type: 'vlm', sizeBytes: null },
-          { repoId: SPEECH_REPO, org: 'simaai', type: 'asr', sizeBytes: null }
+          { repoId: SPEECH_REPO, org: 'simaai', type: 'asr', sizeBytes: null },
+          { repoId: 'florianvoss/experiment', org: 'florianvoss', type: 'llm', sizeBytes: null },
+          ...Array.from({ length: offered }, (_, i) => ({ repoId: `simaai/extra-${i}`, org: 'simaai', type: 'llm', sizeBytes: null }))
         ]
       })
     }
@@ -119,7 +121,7 @@ test('the Model menu\'s Manage models opens the catalog and keeps the model', as
   await expect(menu).toHaveValue(before)
 })
 
-test('the first look fills the catalog from the model cards, and a reload needs no sync', async ({ page }) => {
+test('the first look fills the catalog, cards fill in by row, and a reload needs no sync', async ({ page }) => {
   const board = await mockBoard(page)
   await openGenAI(page)
   await settingsButton(page).click()
@@ -130,6 +132,7 @@ test('the first look fills the catalog from the model cards, and a reload needs 
   await expect(page.getByText('Qwen3 0.6B in use')).toBeVisible()
 
   const vision = row(page, 'Qwen3 VL 4B')
+  await vision.scrollIntoViewIfNeeded()
   await expect(vision).toContainText('4.2 GB')
   await expect(vision).toContainText('Not downloaded')
   await expect(row(page, 'Qwen3 0.6B')).toContainText('In use')
@@ -140,11 +143,11 @@ test('the first look fills the catalog from the model cards, and a reload needs 
   await expect(vision).toContainText(`This is the card of ${VISION_REPO}.`)
   await expect(vision.getByRole('link', { name: 'Model card on Hugging Face' })).toHaveAttribute('href', `https://huggingface.co/${VISION_REPO}`)
 
-  await expect.poll(() => board.cards).toBe(3)
   expect(board.searches).toBe(1)
 
   await page.reload()
   await settingsButton(page).click()
+  await row(page, 'Qwen3 VL 4B').scrollIntoViewIfNeeded()
   await expect(row(page, 'Qwen3 VL 4B')).toContainText('4.2 GB')
   expect(board.searches).toBe(1)
 
@@ -160,7 +163,6 @@ test('a board that keeps one chat model says the same thing in its row and its s
   await expect(page.getByText('One chat model runs at a time.')).toBeVisible()
   await expect(page.getByText('Qwen3 0.6B in use')).toBeVisible()
   await expect(row(page, 'Qwen3 0.6B')).toContainText('In use')
-  await expect(row(page, 'Qwen3 0.6B').getByRole('button', { name: 'Use Qwen3 0.6B' })).toHaveCount(0)
 })
 
 test('search and the filters narrow the list, and Clear filters brings it back', async ({ page }) => {
@@ -169,19 +171,52 @@ test('search and the filters narrow the list, and Clear filters brings it back',
   await settingsButton(page).click()
   await expect(row(page, 'Whisper medium')).toBeVisible()
   const count = page.getByText(/^Showing /)
-  await expect(count).toHaveText('Showing all 5 models · Search filters this saved catalog')
+  await expect(count).toHaveText('Showing all 6 models · Search filters this saved catalog')
 
   await page.getByLabel('Search saved model catalog').fill('whisper')
-  await page.getByLabel('Filter by board status').selectOption({ label: 'Available to download' })
-  await expect(count).toHaveText('Showing 1 of 5 models · Search filters this saved catalog')
+  await expect(count).toHaveText('Showing 2 of 6 models · Search filters this saved catalog')
   await expect(row(page, 'Whisper medium')).toBeVisible()
-  await expect(row(page, 'Whisper small')).toHaveCount(0)
+  await expect(row(page, 'Whisper small')).toBeVisible()
+  await expect(row(page, 'Qwen3 VL 4B')).toHaveCount(0)
 
   await page.getByLabel('Filter by model type').selectOption({ label: 'Vision' })
   await expect(page.getByText('No models match these filters')).toBeVisible()
 
   await page.getByRole('button', { name: 'Clear filters' }).first().click()
-  await expect(count).toHaveText('Showing all 5 models · Search filters this saved catalog')
+  await expect(count).toHaveText('Showing all 6 models · Search filters this saved catalog')
+})
+
+test('the board\'s models and the ones to download are separate lists, and only rows in view read a card', async ({ page }) => {
+  const board = await mockBoard(page, { offered: 60 })
+  await openGenAI(page)
+  await settingsButton(page).click()
+
+  const onBoard = page.getByLabel('Models on this DevKit')
+  const offered = page.getByLabel('Models to download')
+  await expect(offered.getByRole('article', { name: 'Whisper medium' })).toBeVisible()
+  await expect(onBoard.getByRole('article', { name: 'Llama 3.2 3B' })).toBeVisible()
+  await expect(onBoard.getByRole('article', { name: 'Whisper medium' })).toHaveCount(0)
+  await expect(page.getByText('Models from simaai on Hugging Face')).toBeVisible()
+  await expect(page.getByText('florianvoss on Hugging Face')).toHaveCount(0)
+
+  const list = await offered.evaluate((el) => ({ scrolls: el.scrollHeight > el.clientHeight, overflow: getComputedStyle(el).overflowY }))
+  expect(list).toEqual({ scrolls: true, overflow: 'auto' })
+  await expect(page.getByRole('button', { name: 'Sync catalog' })).toBeEnabled()
+  await expect.poll(() => board.cards).toBeGreaterThan(0)
+  await page.waitForTimeout(500)
+  expect(board.cards).toBeLessThan(30)
+  expect(board.searches).toBe(1)
+})
+
+test('actions are Load, Unload and Download; the speech model in use can\'t be unloaded', async ({ page }) => {
+  await mockBoard(page)
+  await openGenAI(page)
+  await settingsButton(page).click()
+
+  await expect(row(page, 'Qwen3 0.6B').getByRole('button', { name: 'Unload Qwen3 0.6B' })).toBeEnabled()
+  await expect(row(page, 'Llama 3.2 3B').getByRole('button', { name: 'Load Llama 3.2 3B' })).toBeEnabled()
+  await expect(row(page, 'Whisper small').getByRole('button', { name: 'Unload Whisper small' })).toBeDisabled()
+  await expect(row(page, 'Whisper medium').getByRole('button', { name: 'Download Whisper medium' })).toBeEnabled()
 })
 
 test('a download shows in its row, and the model lands on the board', async ({ page }) => {
@@ -195,7 +230,7 @@ test('a download shows in its row, and the model lands on the board', async ({ p
 
   board.finishDownload()
   await expect(row(page, 'Whisper medium')).toContainText('On DevKit')
-  await expect(row(page, 'Whisper medium').getByRole('button', { name: 'Use Whisper medium' })).toBeEnabled()
+  await expect(row(page, 'Whisper medium').getByRole('button', { name: 'Load Whisper medium' })).toBeEnabled()
   await expect(page.getByText('4 models on this DevKit')).toBeVisible()
 })
 
@@ -203,6 +238,7 @@ test('with Hugging Face out of reach the saved catalog stays and downloads wait'
   const board = await mockBoard(page)
   await openGenAI(page)
   await settingsButton(page).click()
+  await row(page, 'Qwen3 VL 4B').scrollIntoViewIfNeeded()
   await expect(row(page, 'Qwen3 VL 4B')).toContainText('4.2 GB')
 
   board.hub = false

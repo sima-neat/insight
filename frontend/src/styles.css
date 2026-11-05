@@ -5261,6 +5261,17 @@ input.genai-switch[aria-disabled='true'] {
   margin: 4px 0 0;
 }
 
+.genai-catalog-head-offer {
+  margin-top: 28px;
+}
+
+.genai-catalog-rows-scroll {
+  max-height: 440px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
 .genai-catalog-sync {
   flex: none;
   text-align: right;
@@ -5490,12 +5501,6 @@ input.genai-switch[aria-disabled='true'] {
   height: 16px;
 }
 
-.genai-catalog-check {
-  display: inline-grid;
-  place-items: center;
-  color: var(--ok);
-}
-
 .genai-catalog-details {
   padding: 2px 20px 16px 49px;
   border-top: 1px dashed var(--line);
@@ -5714,8 +5719,8 @@ input.genai-switch[aria-disabled='true'] {
   flex: 1;
 }
 
-/* The chat reads like everyday chat apps: one centered column, not the full
-   page width, with the message box at the bottom. */
+/* The chat reads like everyday chat apps: the messages and the message box
+   share one centered column, however wide the page is. */
 .genai-chat {
   /* .genai > * would hold it at its content size: the chat grows instead. */
   flex: 1 1 0;
@@ -5723,7 +5728,6 @@ input.genai-switch[aria-disabled='true'] {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* As wide as the header above it: the conversation uses the screen. */
   width: 100%;
   align-self: stretch;
 }
@@ -5739,7 +5743,8 @@ input.genai-switch[aria-disabled='true'] {
   display: grid;
   align-content: start;
   gap: 14px;
-  padding: 8px 4px;
+  /* Padding, not a narrower box: the scrollbar stays at the panel's edge. */
+  padding: 8px max(4px, calc((100% - 860px) / 2));
 }
 
 .genai-welcome {

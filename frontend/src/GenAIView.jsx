@@ -79,7 +79,6 @@ import { STATE_LABELS, addressSummary } from './genai/settingsCards.js'
 import {
   boardSummary,
   catalogFromSearch,
-  catalogOrgs,
   catalogRows,
   filterRows,
   loadCatalog,
@@ -451,7 +450,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
 
   // Settings, Models: what Hugging Face offers, saved in this browser, and a sync in progress.
   const [modelCatalog, setModelCatalog] = useState(() => loadCatalog(browserStorage()))
-  const [catalogSync, setCatalogSync] = useState(null)
+  const [catalogSync, setCatalogSync] = useState(false)
   const [download, setDownload] = useState(null)
   // Hugging Face as the board last answered about it ({enabled, error}), the
   // recommended model's card (its download size), why the last download
@@ -467,6 +466,10 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const catalogSearchBox = useRef(null)
   const settingsBox = useRef(null)
   const catalogAutoSynced = useRef(false)
+  const catalogNow = useRef(modelCatalog)
+  const cardsAsked = useRef(new Set())
+  const cardQueue = useRef([])
+  const cardReaders = useRef(0)
 
   const backend = deriveBackendState({ health, status, busyOp, lastError })
   // Between a header board change and knowing where the tab's address points now, nothing is sent:
@@ -793,8 +796,10 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setVoices(null)
     setEngine('default')      // the new board may not have the chosen engine or voice
     setVoice('')
-    setCatalogSync(null)
+    setCatalogSync(false)
     catalogAutoSynced.current = false
+    cardsAsked.current.clear()
+    cardQueue.current = []
     setHubReach(null)
     setRecommendedCard(null)
     recommendedCardLoading.current = false
@@ -959,45 +964,51 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   }
 
   function rememberCatalog(next) {
+    catalogNow.current = next
     setModelCatalog(next)
     saveCatalog(browserStorage(), next)
   }
 
-  // Sync catalog: what Hugging Face lists for this board, then each model's
-  // card, which is the only place that says its size and what it is for.
+  // Sync catalog: one call for what Hugging Face lists for this board.
   const catalogSyncId = useRef(0)
   async function syncCatalog() {
     if (!allowed.searchModels || catalogSync) return
     const id = ++catalogSyncId.current
     const board = ticket()
     const current = () => id === catalogSyncId.current && board.live()
-    setCatalogSync({ done: 0, total: null })
+    setCatalogSync(true)
     try {
       const results = await getJson('models/hub/search', { signal: board.signal })
       if (!current()) return
       setHubReach((prev) => hubReachOf(results) || prev)
       if (results.enabled === false) return
-      let next = catalogFromSearch(results.results, modelCatalog)
-      rememberCatalog(next)
-      const waiting = next.models.map((m) => m.repoId)
-      const total = waiting.length
-      let done = 0
-      setCatalogSync({ done, total })
-      const readCards = async () => {
-        while (waiting.length && current()) {
-          const card = await getJson(cardPath(waiting.shift()), { signal: board.signal }).catch(() => null)
-          if (!current()) return
-          next = withCard(next, card)
-          rememberCatalog(next)
-          done += 1
-          setCatalogSync({ done, total })
-        }
-      }
-      await Promise.all([readCards(), readCards(), readCards()])
+      cardsAsked.current.clear()
+      rememberCatalog(catalogFromSearch(results.results, catalogNow.current))
     } catch (error) {
       if (current() && !isAbort(error)) onError?.(`Sync failed: ${error.message}`)
     } finally {
-      if (current()) setCatalogSync(null)
+      if (current()) setCatalogSync(false)
+    }
+  }
+
+  // A model's size and description are only in its card, one call per model:
+  // read for the rows in view, the latest first, a few at a time.
+  async function readCards() {
+    const board = ticket()
+    while (cardQueue.current.length && board.live()) {
+      const card = await getJson(cardPath(cardQueue.current.pop()), { signal: board.signal }).catch(() => null)
+      if (board.live()) rememberCatalog(withCard(catalogNow.current, card))
+    }
+    cardReaders.current -= 1
+  }
+
+  function readCard(repoId) {
+    if (downloads.state !== 'available' || cardsAsked.current.has(repoId)) return
+    cardsAsked.current.add(repoId)
+    cardQueue.current.push(repoId)
+    if (cardReaders.current < 3) {
+      cardReaders.current += 1
+      readCards()
     }
   }
 
@@ -2149,7 +2160,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
                 status={status}
                 chatModel={chatModel}
                 searchBox={catalogSearchBox}
-                sync={catalogSync}
+                syncing={catalogSync}
                 downloads={downloads}
                 download={download}
                 failedDownload={failedDownload}
@@ -2158,9 +2169,9 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
                 onDownload={startDownload}
                 onLoad={requestLoad}
                 onUnload={unloadChatModel}
-                onUse={answerWith}
                 onUseSpeech={switchSpeechModel}
                 onDelete={deleteModel}
+                onSeen={readCard}
               />
             )}
 
@@ -2842,8 +2853,8 @@ function SettingsTabs({ active, onChange, modelCount }) {
   )
 }
 
-// What can be done with a model from its row: download, load, unload or use it.
-function ModelActions({ row, activeName, allowed, canDownload, downloadNote, onDownload, onLoad, onUnload, onUse, onUseSpeech }) {
+// What can be done with a model from its row: download, load or unload it.
+function ModelActions({ row, allowed, canDownload, downloadNote, onDownload, onLoad, onUnload, onUseSpeech }) {
   const { model, name } = row
   if (!model) {
     if (row.state.key === 'downloading') return null
@@ -2855,8 +2866,9 @@ function ModelActions({ row, activeName, allowed, canDownload, downloadNote, onD
     )
   }
   if (row.kind.key === 'speech') {
-    if (row.on) return <span className="genai-catalog-check" title="In use"><Icon d={ICONS.check} /></span>
-    return <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeSpeechModel || model.supported === false} title={model.unsupportedReason || ''} aria-label={`Use ${name}`} onClick={() => onUseSpeech(model)}>Use</button>
+    // The board refuses to unload the speech model in use: loading another replaces it.
+    if (row.on) return <button type="button" className="btn-ghost genai-small" disabled title="Load another speech model to replace this one" aria-label={`Unload ${name}`}>Unload</button>
+    return <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeSpeechModel || model.supported === false} title={model.unsupportedReason || ''} aria-label={`Load ${name}`} onClick={() => onUseSpeech(model)}>Load</button>
   }
   if (!row.on) {
     return (
@@ -2865,33 +2877,80 @@ function ModelActions({ row, activeName, allowed, canDownload, downloadNote, onD
       </button>
     )
   }
+  return <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeChatModel} aria-label={`Unload ${name}`} onClick={() => onUnload(model)}>Unload</button>
+}
+
+// A model in the catalog. Its card is asked for once its row comes near the view.
+function CatalogRow({ row, open, onToggle, download, status, allowed, onDelete, onSeen, actions }) {
+  const box = useRef(null)
+  const needsCard = Boolean(row.repoId && !row.summary)
+  useEffect(() => {
+    if (!needsCard || !box.current) return undefined
+    const watch = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) onSeen(row.repoId)
+    }, { rootMargin: '200px' })
+    watch.observe(box.current)
+    return () => watch.disconnect()
+  }, [needsCard, row.repoId])
+
+  const downloading = row.state.key === 'downloading'
+  const pct = downloading && typeof download?.pct === 'number' ? download.pct : null
+  const eta = downloading && download?.etaS ? `About ${formatDuration(download.etaS)} left` : undefined
   return (
-    <>
-      {activeName && model.name !== activeName && (
-        <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeChatModel} aria-label={`Use ${name}`} onClick={() => onUse(model)}>Use</button>
-      )}
-      <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeChatModel} aria-label={`Unload ${name}`} onClick={() => onUnload(model)}>Unload</button>
-    </>
+    <article ref={box} className="genai-catalog-row" aria-label={row.name}>
+      <div className="genai-catalog-main">
+        <div className="genai-catalog-name">
+          <button type="button" className={`genai-catalog-expand${open ? ' genai-catalog-expand-open' : ''}`} aria-expanded={open} aria-controls={`genai-model-${row.key}`} aria-label={`${open ? 'Hide' : 'Show'} details for ${row.name}`} onClick={() => onToggle(row.key)}>
+            <Icon d={ICONS.chevron} />
+          </button>
+          <div>
+            <strong>{row.name}</strong>
+            <small title={row.source}>{row.source}</small>
+          </div>
+        </div>
+        <span className="genai-catalog-type"><span className={`genai-kind genai-kind-${row.kind.key}`}>{row.kind.label}</span></span>
+        <span className="genai-catalog-size">{row.size || '—'}</span>
+        <span className={`genai-catalog-status genai-catalog-status-${row.state.key}`} title={eta || (row.state.key === 'unsupported' ? row.model?.unsupportedReason || row.unsupportedReason || undefined : undefined)}>
+          {row.state.label}{pct !== null ? ` ${pct}%` : ''}
+          {downloading && <ProgressBar pct={download?.pct} label={`Downloading ${row.repoId}`} />}
+        </span>
+        <div className="genai-catalog-action">
+          <ModelActions row={row} allowed={allowed} {...actions} />
+        </div>
+      </div>
+      <div className="genai-catalog-details" id={`genai-model-${row.key}`} hidden={!open}>
+        <p>{row.summary || (row.repoId ? 'Reading its model card…' : 'This model is not in the saved Hugging Face catalog.')}</p>
+        <div className="genai-actions">
+          {row.repoId && <a href={`https://huggingface.co/${row.repoId}`} target="_blank" rel="noreferrer">Model card on Hugging Face</a>}
+          {row.model && deletableModel(row.model, status) && (
+            <button type="button" className="btn-ghost genai-small danger" disabled={!allowed.deleteModel} title="Delete its files from the board to free the space" aria-label={`Remove ${row.name} from DevKit`} onClick={() => onDelete(row.model)}>
+              Remove from DevKit
+            </button>
+          )}
+        </div>
+      </div>
+    </article>
   )
 }
 
-// Settings, Models: what the board holds and what it can download, with search,
-// filters and each model's card behind its arrow.
-function ModelCatalog({ rows, catalog, status, chatModel, searchBox, sync, downloads, download, failedDownload, allowed, onSync, onDownload, onDelete, ...actions }) {
+// Settings, Models: what the board holds, then what it can download in a list
+// that scrolls by itself, both under one search. Each model's card is behind
+// its arrow.
+function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, downloads, download, failedDownload, allowed, onSync, onDownload, onDelete, onSeen, ...handlers }) {
   const [query, setQuery] = useState('')
   const [type, setType] = useState('all')
-  const [place, setPlace] = useState('all')
   const [opened, setOpened] = useState(() => new Set())
-  const shown = filterRows(rows, { query, type, place })
-  const filtered = Boolean(query.trim()) || type !== 'all' || place !== 'all'
+  const shown = filterRows(rows, { query, type })
+  const onBoard = shown.filter((r) => r.onBoard)
+  const offered = shown.filter((r) => !r.onBoard)
+  const filtered = Boolean(query.trim()) || type !== 'all'
   const storage = storageSummary(status?.disk)
-  const canDownload = allowed.downloadModel && downloads.state === 'available'
   const downloadElsewhere = download && !rows.some((r) => r.repoId === download.repoId)
+  const actions = { ...handlers, onDownload, canDownload: allowed.downloadModel && downloads.state === 'available', downloadNote: downloads.message }
 
   function clearFilters() {
     setQuery('')
     setType('all')
-    setPlace('all')
   }
 
   function toggle(key) {
@@ -2901,6 +2960,15 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, sync, downl
       return next
     })
   }
+
+  const list = (models) => models.map((row) => (
+    <CatalogRow key={row.key} row={row} open={opened.has(row.key)} onToggle={toggle} download={download} status={status} allowed={allowed} onDelete={onDelete} onSeen={onSeen} actions={actions} />
+  ))
+  const columns = (
+    <div className="genai-catalog-columns" aria-hidden="true">
+      <span>Model</span><span>Type</span><span>Size</span><span>DevKit status</span><span>Action</span>
+    </div>
+  )
 
   return (
     <>
@@ -2921,27 +2989,6 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, sync, downl
         )}
       </div>
 
-      <div className="genai-catalog-head">
-        <div>
-          <h3>Model catalog</h3>
-          <p className="hint">Models from <strong>{catalogOrgs(catalog)}</strong> on Hugging Face, ready to download to your DevKit.</p>
-        </div>
-        {downloads.state !== 'disabled' && downloads.state !== 'unknown' && (
-          <div className="genai-catalog-sync">
-            <button type="button" className={`btn-ghost${sync ? ' genai-catalog-syncing' : ''}`} disabled={Boolean(sync) || !allowed.searchModels} title="Sync model cards from Hugging Face" onClick={onSync}>
-              <Icon d={ICONS.sync} />
-              {sync ? 'Syncing…' : 'Sync catalog'}
-            </button>
-            <span className="hint" aria-live="polite">{sync && sync.total ? `Reading model cards: ${sync.done} of ${sync.total}` : syncedLabel(catalog.syncedAt)}</span>
-          </div>
-        )}
-      </div>
-
-      {downloads.state === 'disabled' && <p className="hint"><WithCode text={downloads.message} /></p>}
-      {downloads.state === 'offline' && <p className="hint">{downloads.message}</p>}
-      {downloadElsewhere && <DownloadProgress download={download} />}
-      <DownloadFailure failure={failedDownload} disabled={!allowed.downloadModel} onDownload={(repoId) => onDownload(repoId)} />
-
       <div className="genai-catalog-search">
         <div className="genai-catalog-searchbox">
           <Icon d={ICONS.search} />
@@ -2953,11 +3000,6 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, sync, downl
           <option value="vision">Vision</option>
           <option value="speech">Speech</option>
         </select>
-        <select value={place} onChange={(e) => setPlace(e.target.value)} aria-label="Filter by board status">
-          <option value="all">All statuses</option>
-          <option value="board">On this DevKit</option>
-          <option value="available">Available to download</option>
-        </select>
       </div>
 
       <div className="genai-catalog-results">
@@ -2965,68 +3007,55 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, sync, downl
         {filtered && <button type="button" className="btn-ghost genai-small" onClick={clearFilters}>Clear filters</button>}
       </div>
 
-      <div className="genai-catalog-columns" aria-hidden="true">
-        <span>Model</span><span>Type</span><span>Size</span><span>DevKit status</span><span>Action</span>
+      <div className="genai-catalog-head">
+        <h3>On this DevKit</h3>
       </div>
-      <div className="genai-catalog-rows" aria-label="Model catalog">
-        {shown.length === 0 && (
-          <div className="genai-catalog-empty">
-            <h4>{filtered ? 'No models match these filters' : 'No models yet'}</h4>
-            {filtered ? (
-              <>
-                <p className="hint">Try a model family, such as Qwen, or clear the filters.</p>
-                <button type="button" className="btn-ghost" onClick={clearFilters}>Clear filters</button>
-              </>
-            ) : <p className="hint">Sync the catalog to list the models this board can download.</p>}
+      {columns}
+      <div className="genai-catalog-rows" aria-label="Models on this DevKit">
+        {onBoard.length ? list(onBoard) : (
+          <div className="genai-catalog-empty"><p className="hint">{filtered ? 'No models on this DevKit match these filters.' : 'No models on this DevKit yet.'}</p></div>
+        )}
+      </div>
+
+      <div className="genai-catalog-head genai-catalog-head-offer">
+        <div>
+          <h3>Model catalog</h3>
+          <p className="hint">Models from <strong>simaai</strong> on Hugging Face, ready to download to your DevKit.</p>
+        </div>
+        {downloads.state !== 'disabled' && downloads.state !== 'unknown' && (
+          <div className="genai-catalog-sync">
+            <button type="button" className={`btn-ghost${syncing ? ' genai-catalog-syncing' : ''}`} disabled={syncing || !allowed.searchModels} title="Refresh the list from Hugging Face" onClick={onSync}>
+              <Icon d={ICONS.sync} />
+              {syncing ? 'Syncing…' : 'Sync catalog'}
+            </button>
+            <span className="hint" aria-live="polite">{syncedLabel(catalog.syncedAt)}</span>
           </div>
         )}
-        {shown.map((row) => {
-          const open = opened.has(row.key)
-          const downloading = row.state.key === 'downloading'
-          const pct = downloading && typeof download?.pct === 'number' ? download.pct : null
-          const eta = downloading && download?.etaS ? `About ${formatDuration(download.etaS)} left` : undefined
-          return (
-            <article key={row.key} className="genai-catalog-row" aria-label={row.name}>
-              <div className="genai-catalog-main">
-                <div className="genai-catalog-name">
-                  <button type="button" className={`genai-catalog-expand${open ? ' genai-catalog-expand-open' : ''}`} aria-expanded={open} aria-controls={`genai-model-${row.key}`} aria-label={`${open ? 'Hide' : 'Show'} details for ${row.name}`} onClick={() => toggle(row.key)}>
-                    <Icon d={ICONS.chevron} />
-                  </button>
-                  <div>
-                    <strong>{row.name}</strong>
-                    <small title={row.source}>{row.source}</small>
-                  </div>
-                </div>
-                <span className="genai-catalog-type"><span className={`genai-kind genai-kind-${row.kind.key}`}>{row.kind.label}</span></span>
-                <span className="genai-catalog-size">{row.size || '—'}</span>
-                <span className={`genai-catalog-status genai-catalog-status-${row.state.key}`} title={eta || (row.state.key === 'unsupported' ? row.model?.unsupportedReason || row.unsupportedReason || undefined : undefined)}>
-                  {row.state.label}{pct !== null ? ` ${pct}%` : ''}
-                  {downloading && <ProgressBar pct={download?.pct} label={`Downloading ${row.repoId}`} />}
-                </span>
-                <div className="genai-catalog-action">
-                  <ModelActions row={row} activeName={chatModel?.name} allowed={allowed} canDownload={canDownload} downloadNote={downloads.message} onDownload={onDownload} {...actions} />
-                </div>
-              </div>
-              <div className="genai-catalog-details" id={`genai-model-${row.key}`} hidden={!open}>
-                <p>{row.summary || (row.repoId ? 'Sync the catalog to read its model card.' : 'This model is not in the saved Hugging Face catalog.')}</p>
-                <div className="genai-actions">
-                  {row.repoId && <a href={`https://huggingface.co/${row.repoId}`} target="_blank" rel="noreferrer">Model card on Hugging Face</a>}
-                  {row.model && deletableModel(row.model, status) && (
-                    <button type="button" className="btn-ghost genai-small danger" disabled={!allowed.deleteModel} title="Delete its files from the board to free the space" aria-label={`Remove ${row.name} from DevKit`} onClick={() => onDelete(row.model)}>
-                      Remove from DevKit
-                    </button>
-                  )}
-                </div>
-              </div>
-            </article>
-          )
-        })}
+      </div>
+
+      {downloads.state === 'disabled' && <p className="hint"><WithCode text={downloads.message} /></p>}
+      {downloads.state === 'offline' && <p className="hint">{downloads.message}</p>}
+      {downloadElsewhere && <DownloadProgress download={download} />}
+      <DownloadFailure failure={failedDownload} disabled={!allowed.downloadModel} onDownload={(repoId) => onDownload(repoId)} />
+
+      {columns}
+      <div className="genai-catalog-rows genai-catalog-rows-scroll" aria-label="Models to download">
+        {offered.length ? list(offered) : (
+          <div className="genai-catalog-empty">
+            {filtered ? (
+              <>
+                <h4>No models match these filters</h4>
+                <p className="hint">Try a model family, such as Qwen, or clear the filters.</p>
+              </>
+            ) : <p className="hint">{catalog.syncedAt ? 'Every model in the catalog is on this DevKit.' : 'Sync the catalog to list the models this board can download.'}</p>}
+          </div>
+        )}
       </div>
 
       <p className="genai-catalog-foot hint">Download saves model files from Hugging Face to your DevKit. Load a downloaded model when you're ready to use it.</p>
       <div className="genai-catalog-note">
         <span>Browse and search the saved catalog even when Hugging Face is offline.</span>
-        <span>Sync refreshes model cards; it doesn't download model files.</span>
+        <span>Sync refreshes the list; it doesn't download model files.</span>
       </div>
     </>
   )
