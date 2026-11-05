@@ -1055,10 +1055,10 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // The first look at the catalog fills it; after that, Sync catalog refreshes it.
   useEffect(() => {
     if (!settingsOpen || settingsTab !== 'models' || modelCatalog.syncedAt) return
-    if (downloads.state !== 'available' || catalogAutoSynced.current) return
+    if (downloads.state !== 'available' || !allowed.searchModels || catalogAutoSynced.current) return
     catalogAutoSynced.current = true
     syncCatalog()
-  }, [settingsOpen, settingsTab, modelCatalog.syncedAt, downloads.state])
+  }, [settingsOpen, settingsTab, modelCatalog.syncedAt, downloads.state, allowed.searchModels])
 
   // The offer says how big the download is, and finds out early whether the
   // board can reach Hugging Face. Once per board; the size is only a nicety,
@@ -1875,7 +1875,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // Settings takes the chat's place. With no address yet it opens by itself, at the address.
   const showSettings = settingsOpen || backend.state === 'unconfigured'
   const openTab = settingsOpen ? settingsTab : 'connection'
-  const modelRows = catalogRows({ status, catalog: modelCatalog, activeName: keepsSeveral && chatModel ? chatModel.name : undefined, download })
+  const modelRows = catalogRows({ status, catalog: modelCatalog, activeName: chatModel?.name, download })
 
   // --- render -----------------------------------------------------------------
 
@@ -2147,7 +2147,6 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
                 rows={modelRows}
                 catalog={modelCatalog}
                 status={status}
-                activeName={keepsSeveral && chatModel ? chatModel.name : undefined}
                 chatModel={chatModel}
                 searchBox={catalogSearchBox}
                 sync={catalogSync}
@@ -2878,7 +2877,7 @@ function ModelActions({ row, activeName, allowed, canDownload, downloadNote, onD
 
 // Settings, Models: what the board holds and what it can download, with search,
 // filters and each model's card behind its arrow.
-function ModelCatalog({ rows, catalog, status, activeName, chatModel, searchBox, sync, downloads, download, failedDownload, allowed, onSync, onDownload, onDelete, ...actions }) {
+function ModelCatalog({ rows, catalog, status, chatModel, searchBox, sync, downloads, download, failedDownload, allowed, onSync, onDownload, onDelete, ...actions }) {
   const [query, setQuery] = useState('')
   const [type, setType] = useState('all')
   const [place, setPlace] = useState('all')
@@ -3005,7 +3004,7 @@ function ModelCatalog({ rows, catalog, status, activeName, chatModel, searchBox,
                   {downloading && <ProgressBar pct={download?.pct} label={`Downloading ${row.repoId}`} />}
                 </span>
                 <div className="genai-catalog-action">
-                  <ModelActions row={row} activeName={activeName} allowed={allowed} canDownload={canDownload} downloadNote={downloads.message} onDownload={onDownload} {...actions} />
+                  <ModelActions row={row} activeName={chatModel?.name} allowed={allowed} canDownload={canDownload} downloadNote={downloads.message} onDownload={onDownload} {...actions} />
                 </div>
               </div>
               <div className="genai-catalog-details" id={`genai-model-${row.key}`} hidden={!open}>

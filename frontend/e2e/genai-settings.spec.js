@@ -14,7 +14,7 @@ function json(route, body, status = 200) {
 
 // A board with a chat model in use, another on disk and a speech model, that can keep two chat
 // models loaded. `hub` is what Hugging Face answers; `searches` and `cards` count what was asked.
-async function mockBoard(page, { hub = true } = {}) {
+async function mockBoard(page, { hub = true, maxResident = 2 } = {}) {
   const board = {
     catalog: [
       { name: QWEN, type: 'chat', sizeBytes: 893_000_000 },
@@ -48,7 +48,7 @@ async function mockBoard(page, { hub = true } = {}) {
         catalog: board.catalog,
         loaded: board.loaded,
         resident: board.loaded,
-        maxResident: 2,
+        maxResident,
         asrModel: WHISPER,
         hubEnabled: true,
         disk: { freeBytes: 459_000_000_000, totalBytes: 512_000_000_000 }
@@ -150,6 +150,17 @@ test('the first look fills the catalog from the model cards, and a reload needs 
 
   await page.getByRole('button', { name: 'Sync catalog' }).click()
   await expect.poll(() => board.searches).toBe(2)
+})
+
+test('a board that keeps one chat model says the same thing in its row and its summary', async ({ page }) => {
+  await mockBoard(page, { maxResident: 1 })
+  await openGenAI(page)
+  await settingsButton(page).click()
+
+  await expect(page.getByText('One chat model runs at a time.')).toBeVisible()
+  await expect(page.getByText('Qwen3 0.6B in use')).toBeVisible()
+  await expect(row(page, 'Qwen3 0.6B')).toContainText('In use')
+  await expect(row(page, 'Qwen3 0.6B').getByRole('button', { name: 'Use Qwen3 0.6B' })).toHaveCount(0)
 })
 
 test('search and the filters narrow the list, and Clear filters brings it back', async ({ page }) => {
