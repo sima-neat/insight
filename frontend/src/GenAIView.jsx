@@ -342,6 +342,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // Each compared model's own conversation, by model name.
   const [panelChats, setPanelChats] = useState({})
   const panelStreams = useRef(new Map())
+  const panelCameraTarget = useRef(null)
   // A load that needs loaded models unloaded first: {model, choice, already},
   // where `already` lists the models this load was already asked to unload.
   const [unloadAsk, setUnloadAsk] = useState(null)
@@ -1741,6 +1742,39 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     composer.current?.focus()
   }
 
+  // A picture for a panel comes through the same camera views as the chat's.
+  function openPanelCamera(panel, board) {
+    panelCameraTarget.current = panel
+    if (board) openBoardCamera()
+    else openCamera()
+  }
+
+  const cameraViews = (
+    <>
+        {cameraOpen && (
+          <div className="genai-camera">
+            <video ref={videoRef} autoPlay playsInline muted aria-label="Camera preview" />
+            <div className="genai-actions">
+              <button type="button" className="btn-tonal" onClick={captureFrame}>Use this picture</button>
+              <button type="button" className="btn-ghost" onClick={closeCamera}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {boardCameraOpen && (
+          <div className="genai-camera" role="group" aria-label="Board camera">
+            <BoardCameraPicker cameras={boardCameras} camera={boardCamera} onChange={setBoardCamera} disabled={!allowed.takeBoardSnapshot} />
+            <div className="genai-actions">
+              <button type="button" className="btn-tonal" onClick={takeBoardPicture} disabled={!allowed.takeBoardSnapshot || !boardCamera}>
+                {boardSnapshotting ? 'Taking a picture…' : 'Take a picture'}
+              </button>
+              <button type="button" className="btn-ghost" onClick={closeBoardCamera}>Cancel</button>
+            </div>
+          </div>
+        )}
+    </>
+  )
+
   const thinkingModel = thinkingModelOnBoard(status)
   const thinkBlocked = canThink ? '' : thinkingModel ? `Choose ${thinkingModel}` : 'Needs a reasoning model'
   const steps = tutorialSteps({ canThink, thinkingModel, canCompare: keepsSeveral })
@@ -2299,8 +2333,20 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           </div>
         )}
         {compareModels ? (
+          <>
+          {cameraViews}
           <ParallelPanels
             models={compareModels}
+            loadedCount={comparableModels.length}
+            onBack={() => setCompareNames([])}
+            camera={{
+              browser: allowed.openCamera,
+              board: allowed.openBoardCamera && boardCam.available,
+              open: openPanelCamera,
+              picture: image,
+              target: panelCameraTarget,
+              clear: () => setImage(null)
+            }}
             chats={panelChats}
             setChats={setPanelChats}
             streams={panelStreams}
@@ -2318,6 +2364,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
               onStop: stopSpeaking
             }}
           />
+          </>
         ) : (
         <>
         <div className="genai-transcript" ref={transcriptBox} onScroll={onTranscriptScroll}>
@@ -2419,27 +2466,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           })}
         </div>
 
-        {cameraOpen && (
-          <div className="genai-camera">
-            <video ref={videoRef} autoPlay playsInline muted aria-label="Camera preview" />
-            <div className="genai-actions">
-              <button type="button" className="btn-tonal" onClick={captureFrame}>Use this picture</button>
-              <button type="button" className="btn-ghost" onClick={closeCamera}>Cancel</button>
-            </div>
-          </div>
-        )}
-
-        {boardCameraOpen && (
-          <div className="genai-camera" role="group" aria-label="Board camera">
-            <BoardCameraPicker cameras={boardCameras} camera={boardCamera} onChange={setBoardCamera} disabled={!allowed.takeBoardSnapshot} />
-            <div className="genai-actions">
-              <button type="button" className="btn-tonal" onClick={takeBoardPicture} disabled={!allowed.takeBoardSnapshot || !boardCamera}>
-                {boardSnapshotting ? 'Taking a picture…' : 'Take a picture'}
-              </button>
-              <button type="button" className="btn-ghost" onClick={closeBoardCamera}>Cancel</button>
-            </div>
-          </div>
-        )}
+        {cameraViews}
 
         {image && (
           <div className="genai-attachment">
@@ -2658,7 +2685,7 @@ function ComparePicker({ models, ticked, comparing, spotClass, onToggle }) {
 
 // A chat panel per compared model, each with its own conversation. Prompt
 // chooses a box in every panel, or one box that sends to all of them at once.
-function ParallelPanels({ models, chats, setChats, streams, request, ask, onError, speech }) {
+function ParallelPanels({ models, loadedCount, onBack, camera, chats, setChats, streams, request, ask, onError, speech }) {
   const [mode, setMode] = useState('different')
   const [drafts, setDrafts] = useState({})
   const [pictures, setPictures] = useState({})
@@ -2666,6 +2693,13 @@ function ParallelPanels({ models, chats, setChats, streams, request, ask, onErro
   const latest = useRef(chats)
   latest.current = chats
   const same = mode === 'same'
+
+  useEffect(() => {
+    if (!camera.picture || !camera.target.current) return
+    setPicture(camera.target.current, camera.picture)
+    camera.target.current = null
+    camera.clear()
+  }, [camera.picture])
 
   const setDraft = (key, text) => setDrafts((prev) => ({ ...prev, [key]: text }))
   const setPicture = (key, picture) => setPictures((prev) => ({ ...prev, [key]: picture }))
@@ -2719,6 +2753,11 @@ function ParallelPanels({ models, chats, setChats, streams, request, ask, onErro
     }
   }
 
+  function clearPanel(name) {
+    streams.current.get(name)?.abort()
+    setChats((prev) => ({ ...prev, [name]: [] }))
+  }
+
   function sendOne(model) {
     const text = (drafts[model.name] || '').trim()
     const image = pictures[model.name] || null
@@ -2748,6 +2787,12 @@ function ParallelPanels({ models, chats, setChats, streams, request, ask, onErro
   return (
     <div className="genai-panels">
       <div className="genai-panels-bar">
+        <div className="genai-panels-title">
+          <strong>Parallel · {models.length} of {loadedCount} loaded models</strong>
+          <span className="hint">
+            {same ? 'One prompt goes to every panel at once; each panel keeps its own conversation.' : 'Each model has its own prompt and Send. They run at the same time on the accelerator.'}
+          </span>
+        </div>
         <label className="genai-panels-mode">
           <span>Prompt</span>
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
@@ -2755,12 +2800,8 @@ function ParallelPanels({ models, chats, setChats, streams, request, ask, onErro
             <option value="same">Same prompt</option>
           </select>
         </label>
-        <span className="hint">
-          {same ? 'One prompt goes to every panel at once; each panel keeps its own conversation.' : 'Each model has its own prompt and Send, and they run at the same time.'}
-        </span>
-        {running.length > 0 && (
-          <button type="button" className="btn-ghost genai-small" onClick={() => streams.current.forEach((c) => c.abort())}>Stop all</button>
-        )}
+        <button type="button" className="btn-ghost genai-small" disabled={!running.length} onClick={() => streams.current.forEach((c) => c.abort())}>Stop all</button>
+        <button type="button" className="btn-ghost genai-small" onClick={onBack}>Back to chat</button>
       </div>
       <div className="genai-panels-grid" style={{ '--panels': models.length }}>
         {models.map((model) => (
@@ -2768,6 +2809,9 @@ function ParallelPanels({ models, chats, setChats, streams, request, ask, onErro
             <header>
               <span className="genai-model-name" title={model.name}>{friendlyModelName(model.name)}</span>
               <span className="genai-badge">{model.supportsVision ? 'sees images' : 'text only'}</span>
+              <span className="genai-header-spacer" />
+              <PanelReadAloud name={model.name} chat={chats[model.name] || []} speech={speech} />
+              <button type="button" className="btn-ghost genai-small" onClick={() => clearPanel(model.name)}>New chat</button>
             </header>
             <PanelChat chat={chats[model.name] || []} speech={speech} />
             {!same && (
@@ -2776,6 +2820,7 @@ function ParallelPanels({ models, chats, setChats, streams, request, ask, onErro
                 draft={drafts[model.name] || ''}
                 picture={pictures[model.name] || null}
                 canAttach={model.supportsVision}
+                camera={camera}
                 busy={running.includes(model.name)}
                 placeholder={`Ask ${friendlyModelName(model.name)}`}
                 onDraft={setDraft}
@@ -2795,6 +2840,7 @@ function ParallelPanels({ models, chats, setChats, streams, request, ask, onErro
           picture={pictures[SHARED_BOX] || null}
           note={pictures[SHARED_BOX] ? imageNote(models) : null}
           canAttach={models.some((m) => m.supportsVision)}
+          camera={camera}
           busy={running.length > 0}
           placeholder="One prompt for every panel"
           onDraft={setDraft}
@@ -2810,7 +2856,7 @@ function ParallelPanels({ models, chats, setChats, streams, request, ask, onErro
 
 const SHARED_BOX = '__shared__'
 
-function PanelComposer({ id, draft, picture, note, canAttach, busy, placeholder, onDraft, onPicture, onAttach, onSend, onStop }) {
+function PanelComposer({ id, draft, picture, note, canAttach, camera, busy, placeholder, onDraft, onPicture, onAttach, onSend, onStop }) {
   const file = useRef(null)
   return (
     <form className="genai-panel-composer" onSubmit={(e) => { e.preventDefault(); onSend() }}>
@@ -2832,9 +2878,11 @@ function PanelComposer({ id, draft, picture, note, canAttach, busy, placeholder,
       <div className="genai-composer-tools">
         <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { onAttach(id, e.target.files[0]); e.target.value = '' }} />
         {canAttach && (
-          <ToolButton label="Attach a picture" placement="top" className="btn-ghost genai-icon-btn" onClick={() => file.current?.click()}>
-            <Icon d={ICONS.photo} />
-          </ToolButton>
+          <>
+            <button type="button" className="btn-ghost genai-small" onClick={() => file.current?.click()}>Picture</button>
+            {camera.browser && <button type="button" className="btn-ghost genai-small" onClick={() => camera.open(id, false)}>Camera</button>}
+            {camera.board && <button type="button" className="btn-ghost genai-small" onClick={() => camera.open(id, true)}>Board camera</button>}
+          </>
         )}
         <span className="genai-header-spacer" />
         {busy ? (
@@ -2851,6 +2899,15 @@ function PanelComposer({ id, draft, picture, note, canAttach, busy, placeholder,
   )
 }
 
+// Reads the panel's latest answer.
+function PanelReadAloud({ name, chat, speech }) {
+  const last = chat.findLast((m) => m.role === 'assistant' && !m.skipped && !m.pending)
+  const answer = last ? splitThinking(last.content).answer : ''
+  const id = `${name}:latest`
+  if (speech.speakingId === id) return <button type="button" className="btn-tonal genai-small" onClick={speech.onStop}>Reading aloud</button>
+  return <button type="button" className="btn-ghost genai-small" disabled={!answer || !speech.canSpeak} title={speech.title} onClick={() => speech.onSpeak(answer, id)}>Read aloud</button>
+}
+
 // Follows the newest message as it is written.
 function PanelChat({ chat, speech }) {
   const box = useRef(null)
@@ -2859,6 +2916,7 @@ function PanelChat({ chat, speech }) {
   }, [chat])
   return (
     <div className="genai-panel-chat" ref={box}>
+      {!chat.length && <p className="hint">Type a message and press Send. This panel keeps its own conversation.</p>}
       {chat.map((m, index) => <PanelMessage key={index} message={m} speech={speech} />)}
     </div>
   )
