@@ -8426,9 +8426,19 @@ button:disabled {
 
 .genai-panel header {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+.genai-panel header .genai-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.genai-panel header > :not(.genai-model-name) {
+  flex: none;
 }
 
 .genai-panel-chat {

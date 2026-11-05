@@ -2629,6 +2629,12 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
 // SiMaSentry Solutions, like the standalone Studio's shield button: a launcher
 // with the three demo apps, each opened full screen in a frame and wired to the
 // loaded model through the relay. An app's own Home button returns here.
+// The small Chat or Vision tag, as in Settings, Models.
+function ModelKindTag({ model }) {
+  const kind = model.supportsVision ? { key: 'vision', label: 'Vision' } : { key: 'chat', label: 'Chat' }
+  return <span className={`genai-kind genai-kind-${kind.key}`}>{kind.label}</span>
+}
+
 // The Compare button and its panel: every loaded model with a checkbox.
 function ComparePicker({ models, ticked, comparing, spotClass, onToggle }) {
   const [open, setOpen] = useState(false)
@@ -2676,7 +2682,7 @@ function ComparePicker({ models, ticked, comparing, spotClass, onToggle }) {
                 onChange={() => onToggle(m.name)}
               />
               <span className="genai-compare-option-name" title={m.name}>{friendlyModelName(m.name)}</span>
-              <span className="genai-badge">{m.supportsVision ? 'sees images' : 'text only'}</span>
+              <ModelKindTag model={m} />
             </label>
           ))}
           <p className="hint">Tick two or more to compare them side by side.</p>
@@ -2832,7 +2838,7 @@ function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startRea
           <section key={model.name} className="genai-panel" aria-label={friendlyModelName(model.name)}>
             <header>
               <span className="genai-model-name" title={model.name}>{friendlyModelName(model.name)}</span>
-              <span className="genai-badge">{model.supportsVision ? 'sees images' : 'text only'}</span>
+              <ModelKindTag model={model} />
               <span className="genai-header-spacer" />
               <button
                 type="button"
