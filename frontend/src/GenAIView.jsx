@@ -2790,7 +2790,7 @@ function ParallelPanels({ models, loadedCount, onBack, camera, chats, setChats, 
         <div className="genai-panels-title">
           <strong>Parallel · {models.length} of {loadedCount} loaded models</strong>
           <span className="hint">
-            {same ? 'One prompt goes to every panel at once; each panel keeps its own conversation.' : 'Each model has its own prompt and Send. They run at the same time on the accelerator.'}
+            {same ? 'One prompt goes to every model at once; each model keeps its own conversation.' : 'Each model has its own prompt and Send. They run at the same time on the accelerator.'}
           </span>
         </div>
         <label className="genai-panels-mode">
@@ -2842,7 +2842,7 @@ function ParallelPanels({ models, loadedCount, onBack, camera, chats, setChats, 
           canAttach={models.some((m) => m.supportsVision)}
           camera={camera}
           busy={running.length > 0}
-          placeholder="One prompt for every panel"
+          placeholder="One prompt for every model"
           onDraft={setDraft}
           onPicture={setPicture}
           onAttach={attach}
@@ -2916,7 +2916,7 @@ function PanelChat({ chat, speech }) {
   }, [chat])
   return (
     <div className="genai-panel-chat" ref={box}>
-      {!chat.length && <p className="hint">Type a message and press Send. This panel keeps its own conversation.</p>}
+      {!chat.length && <p className="hint">Type a message and press Send. This model keeps its own conversation.</p>}
       {chat.map((m, index) => <PanelMessage key={index} message={m} speech={speech} />)}
     </div>
   )

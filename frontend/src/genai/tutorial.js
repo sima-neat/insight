@@ -33,7 +33,7 @@ export function tutorialSteps({ canThink = false, thinkingModel = null, canCompa
           title: 'Compare models side by side',
           body:
             'The board can keep several models loaded at once. With two loaded, open Compare and tick them: ' +
-            'each gets a panel with its own conversation. Prompt chooses whether you write to each one, or ' +
+            'each gets its own conversation, side by side. Prompt chooses whether you write to each one, or ' +
             'send the same message to all of them at once.',
           target: 'compare',
           action: null
