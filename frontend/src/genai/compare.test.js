@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
+import { compareLog } from './chatExport.js'
+
 import {
   compareAnswerers,
   compareSelection,
@@ -74,4 +76,17 @@ test('the view shows the Compare button when the board keeps several models', ()
   const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
   assert.match(view, /keepsSeveral && \(\s*<ComparePicker/)
   assert.match(view, /<ParallelPanels\b/)
+})
+
+test('an export has a section for every model that has a conversation', () => {
+  const log = compareLog({
+    chats: {
+      [LM.name]: [{ role: 'user', text: 'hi' }, { role: 'assistant', content: 'hello' }],
+      [VL.name]: [{ role: 'user', text: 'look', image: 'data:x' }, { role: 'assistant', content: 'red' }],
+      [QWEN.name]: []
+    }
+  })
+  assert.match(log, new RegExp(`Model: ${LM.name}[\\s\\S]*hello[\\s\\S]*Model: ${VL.name}[\\s\\S]*\\[image\\][\\s\\S]*red`))
+  assert.doesNotMatch(log, /Qwen3/)
+  assert.equal(compareLog({ chats: {} }), null)
 })

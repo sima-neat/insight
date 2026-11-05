@@ -4,7 +4,7 @@ import { splitThinking } from './streams.js'
 
 // The conversation as the standalone Studio's .log export: a header, then each
 // turn as "You:" / "Assistant:" and its text; pictures appear as [image].
-export function chatLog({ messages, model, now = new Date() }) {
+function chatLines(messages) {
   const body = []
   for (const m of messages || []) {
     if (m.role === 'user') {
@@ -18,6 +18,11 @@ export function chatLog({ messages, model, now = new Date() }) {
       body.push('Assistant:', answer || `[${m.error}]`, '')
     }
   }
+  return body
+}
+
+export function chatLog({ messages, model, now = new Date() }) {
+  const body = chatLines(messages)
   if (!body.length) return null
   const header = [
     'Neat GenAI Studio — chat export',
@@ -27,6 +32,23 @@ export function chatLog({ messages, model, now = new Date() }) {
     ''
   ]
   return header.concat(body).join('\n')
+}
+
+// Every compared model's conversation, one section each. chats: model name to
+// its messages.
+export function compareLog({ chats, now = new Date() }) {
+  const sections = Object.entries(chats || {})
+    .map(([model, messages]) => ({ model, body: chatLines(messages) }))
+    .filter(({ body }) => body.length)
+  if (!sections.length) return null
+  const header = [
+    'Neat GenAI Studio — compare export',
+    `Exported: ${now.toLocaleString()}`,
+    `Models: ${sections.map(({ model }) => model).join(', ')}`,
+    '='.repeat(60),
+    ''
+  ]
+  return header.concat(sections.flatMap(({ model, body }) => [`Model: ${model}`, '-'.repeat(60), '', ...body])).join('\n')
 }
 
 export function chatLogFilename(now = new Date()) {

@@ -52,7 +52,7 @@ import {
 } from './genai/compare.js'
 import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
-import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from './genai/chatExport.js'
+import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, compareLog, solutionUrl } from './genai/chatExport.js'
 import { benchmarkSupport } from './genai/benchmark.js'
 import {
   documentsSummary,
@@ -342,6 +342,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // Each compared model's own conversation, by model name.
   const [panelChats, setPanelChats] = useState({})
   const panelStreams = useRef(new Map())
+  const [panelsBusy, setPanelsBusy] = useState(false)
   const panelCameraTarget = useRef(null)
   // A load that needs loaded models unloaded first: {model, choice, already},
   // where `already` lists the models this load was already asked to unload.
@@ -475,18 +476,19 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const comparableModels = loadedInDisplayOrder(status)
   const compareModels = compareSelection(comparableModels, compareNames)
   const sees = compareModels ? compareModels.some((m) => m.supportsVision) : Boolean(chatModel && chatModel.supportsVision)
+  const hasConversation = compareModels ? compareModels.some((m) => panelChats[m.name]?.length > 0) : messages.length > 0
   // What the user may do now: every control and action reads this one table.
   const activity = {
     usable,
     hasChatModel: Boolean(chatModel),
     sees,
     hasAsr: Boolean(status?.asrModel),
-    hasMessages: messages.length > 0 || Object.values(panelChats).some((chat) => chat.length > 0),
+    hasMessages: hasConversation,
     hasDraft: Boolean(draft.trim() || image),
     // Opening counts as open: a permission prompt may be pending.
     cameraOpen: cameraOpen || cameraOpening || boardCameraOpen,
     visionOpen,
-    replying: streaming,
+    replying: streaming || panelsBusy,
     recording,
     micOpening,
     transcribing,
@@ -1700,7 +1702,9 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
 
   function exportChat() {
     const now = new Date()
-    const text = chatLog({ messages, model: chatModel ? chatModel.name : null, now })
+    const text = compareModels
+      ? compareLog({ chats: Object.fromEntries(compareModels.map((m) => [m.name, panelChats[m.name]])), now })
+      : chatLog({ messages, model: chatModel ? chatModel.name : null, now })
     if (!text) return
     const link = document.createElement('a')
     link.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
@@ -2089,7 +2093,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
         <Tooltip label="Answer from documents" note={why('toggleDocuments')}>
           {(describedBy) => (
             <label className={`genai-check${allowed.toggleDocuments ? '' : ' genai-check-off'}${spot('documents')}`}>
-              <input type="checkbox" checked={docs.available && useDocs} aria-disabled={allowed.toggleDocuments ? undefined : true} aria-describedby={describedBy} onChange={(e) => { if (!allowed.toggleDocuments) return; setUseDocs(e.target.checked); setDocsMidChat(e.target.checked && messages.length > 0) }} />
+              <input type="checkbox" checked={docs.available && useDocs} aria-disabled={allowed.toggleDocuments ? undefined : true} aria-describedby={describedBy} onChange={(e) => { if (!allowed.toggleDocuments) return; setUseDocs(e.target.checked); setDocsMidChat(e.target.checked && hasConversation) }} />
               Use my documents
             </label>
           )}
@@ -2325,7 +2329,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
       )}
 
       <section className="panel genai-chat" aria-label="Chat">
-        {docsMidChat && useDocs && messages.length > 0 && (
+        {docsMidChat && useDocs && hasConversation && (
           <div className="genai-docs-hint" role="status">
             <span>Earlier replies in this chat can win over your documents. Start a new chat to answer from them.</span>
             <button type="button" className="btn-tonal genai-small" onClick={newChat} disabled={!allowed.newChat}>New chat</button>
@@ -2338,6 +2342,9 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           <ParallelPanels
             models={compareModels}
             loadedCount={comparableModels.length}
+            ready={usable}
+            notReady={why('send')}
+            onBusy={setPanelsBusy}
             readAloud={readAloud}
             unlockPlayer={unlockPlayer}
             startReading={startReading}
@@ -2694,7 +2701,7 @@ function ComparePicker({ models, ticked, comparing, spotClass, onToggle }) {
 
 // A chat panel per compared model, each with its own conversation. Prompt
 // chooses a box in every panel, or one box that sends to all of them at once.
-function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startReading, onBack, camera, chats, setChats, streams, request, ask, onError, speech }) {
+function ParallelPanels({ models, loadedCount, ready, notReady, onBusy, readAloud, unlockPlayer, startReading, onBack, camera, chats, setChats, streams, request, ask, onError, speech }) {
   const [mode, setMode] = useState('different')
   const [drafts, setDrafts] = useState({})
   const [pictures, setPictures] = useState({})
@@ -2742,6 +2749,7 @@ function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startRea
     const controller = new AbortController()
     streams.current.set(model.name, controller)
     setRunning([...streams.current.keys()])
+    onBusy(true)
     const t0 = performance.now()
     let tFirst = null
     let reply = ''
@@ -2780,6 +2788,7 @@ function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startRea
     } finally {
       streams.current.delete(model.name)
       setRunning([...streams.current.keys()])
+      onBusy(streams.current.size > 0)
     }
   }
 
@@ -2791,7 +2800,7 @@ function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startRea
   function sendOne(model) {
     const text = (drafts[model.name] || '').trim()
     const image = pictures[model.name] || null
-    if ((!text && !image) || running.includes(model.name)) return
+    if (!ready || (!text && !image) || running.includes(model.name)) return
     setDraft(model.name, '')
     setPicture(model.name, null)
     send(model, text || 'Describe this image.', image)
@@ -2801,7 +2810,7 @@ function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startRea
   function sendShared() {
     const text = (drafts[SHARED_BOX] || '').trim()
     const image = pictures[SHARED_BOX] || null
-    if ((!text && !image) || running.length) return
+    if (!ready || (!text && !image) || running.length) return
     const { answer, skip } = compareAnswerers(models, Boolean(image))
     if (!answer.length) {
       onError?.("None of these models can see images. Remove the picture and send again.")
@@ -2860,6 +2869,7 @@ function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startRea
                 picture={pictures[model.name] || null}
                 canAttach={model.supportsVision}
                 camera={camera}
+                blocked={ready ? '' : notReady}
                 busy={running.includes(model.name)}
                 placeholder={`Ask ${friendlyModelName(model.name)}`}
                 onDraft={setDraft}
@@ -2880,6 +2890,7 @@ function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startRea
           note={pictures[SHARED_BOX] ? imageNote(models) : null}
           canAttach={models.some((m) => m.supportsVision)}
           camera={camera}
+          blocked={ready ? '' : notReady}
           busy={running.length > 0}
           placeholder="One prompt for every model"
           onDraft={setDraft}
@@ -2895,7 +2906,7 @@ function ParallelPanels({ models, loadedCount, readAloud, unlockPlayer, startRea
 
 const SHARED_BOX = '__shared__'
 
-function PanelComposer({ id, draft, picture, note, canAttach, camera, busy, placeholder, onDraft, onPicture, onAttach, onSend, onStop }) {
+function PanelComposer({ id, draft, picture, note, canAttach, camera, blocked, busy, placeholder, onDraft, onPicture, onAttach, onSend, onStop }) {
   const file = useRef(null)
   return (
     <form className="genai-panel-composer" onSubmit={(e) => { e.preventDefault(); onSend() }}>
@@ -2929,7 +2940,7 @@ function PanelComposer({ id, draft, picture, note, canAttach, camera, busy, plac
             <Icon d={ICONS.stop} />
           </ToolButton>
         ) : (
-          <ToolButton label="Send" type="submit" placement="top" className="genai-send">
+          <ToolButton label="Send" type="submit" placement="top" blocked={blocked} className="genai-send">
             <Icon d={ICONS.send} />
           </ToolButton>
         )}
