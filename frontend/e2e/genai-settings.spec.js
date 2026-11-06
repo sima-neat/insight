@@ -14,14 +14,15 @@ function json(route, body, status = 200) {
 
 // A board with a chat model in use, another on disk and a speech model, that can keep two chat
 // models loaded. `hub` is what Hugging Face answers; `searches` and `cards` count what was asked.
-async function mockBoard(page, { hub = true, maxResident = 2, offered = 0 } = {}) {
+async function mockBoard(page, { hub = true, maxResident = 2, offered = 0, loaded = [QWEN] } = {}) {
   const board = {
     catalog: [
       { name: QWEN, type: 'chat', sizeBytes: 893_000_000 },
       { name: LLAMA, type: 'chat', sizeBytes: 3_700_000_000 },
       { name: WHISPER, type: 'asr', activeAsr: true, sizeBytes: 1_300_000_000 }
     ],
-    loaded: [QWEN],
+    loaded,
+    posts: [],
     hub,
     statusDelay: 0,
     searches: 0,
@@ -44,10 +45,15 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0 } = {}
         const lines = [{ state: 'downloading', repoId, pct: 40 }, { state: 'done', repoId, name: repoId.split('/')[1] }]
         return route.fulfill({ status: 200, contentType: 'application/x-ndjson', body: lines.map((l) => JSON.stringify(l)).join('\n') + '\n' })
       }
+      board.posts.push(path)
+      if (path === 'settings') {
+        board.url = request.postDataJSON().url
+        return json(route, { url: board.url })
+      }
       return json(route, { ok: true })
     }
-    if (path === 'settings') return json(route, { url: 'https://192.168.1.20:5000' })
-    if (path === 'health') return json(route, { ok: true, api_version: 1, model_server: { reachable: true }, features: { rag: true } })
+    if (path === 'settings') return json(route, { url: board.url || 'https://192.168.1.20:5000' })
+    if (path === 'health') return json(route, { ok: true, api_version: 1, model_server: { reachable: true }, features: { rag: true, benchmark: true } })
     if (path === 'models/status') {
       await new Promise((resolve) => setTimeout(resolve, board.statusDelay))
       return json(route, {
@@ -228,6 +234,42 @@ test('a dialog covers the whole window, above Insight\'s header', async ({ page 
   expect([box.x, box.y, box.width, box.height]).toEqual([0, 0, 1920, 1080])
 })
 
+test('Settings, Benchmark, SiMaSentry and each of its apps are one dialog size', async ({ page }) => {
+  await mockBoard(page)
+  await openGenAI(page)
+  await page.waitForTimeout(600)
+  // The dialog's card: from the top of its first part to the bottom of its last.
+  const card = () => page.locator('[role="dialog"]').last().evaluate((dialog) => {
+    const parts = [...dialog.children].map((el) => el.getBoundingClientRect())
+    const edges = [parts[0].left, parts[0].right, parts[0].top, parts[parts.length - 1].bottom]
+    return edges.map(Math.round)
+  })
+
+  await settingsButton(page).click()
+  const size = await card()
+  await page.getByRole('tab', { name: 'Documents' }).click()
+  expect(await card()).toEqual(size)
+  await page.getByRole('button', { name: 'Close settings' }).click()
+
+  await page.getByRole('button', { name: 'Benchmark' }).click()
+  expect(await card()).toEqual(size)
+  await page.getByRole('dialog', { name: 'Benchmark' }).getByRole('button', { name: 'Close' }).click()
+
+  await page.getByRole('button', { name: 'SiMaSentry apps' }).click()
+  const solutions = page.getByRole('dialog', { name: 'SiMaSentry Solutions' })
+  expect(await card()).toEqual(size)
+  for (const app of ['SiMaSentry-Med', 'SiMaSentry-Safe', 'SiMaSentry-Sec']) {
+    await solutions.getByRole('button', { name: new RegExp(app) }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Open anyway' }).click()
+    await expect(solutions.locator(`iframe[title="${app}"]`)).toHaveCount(1)
+    expect(await solutions.evaluate((dialog) => {
+      const parts = [...dialog.children].map((el) => el.getBoundingClientRect())
+      return [parts[0].left, parts[0].right, parts[0].top, parts[parts.length - 1].bottom].map(Math.round)
+    })).toEqual(size)
+    await solutions.getByRole('button', { name: 'Back' }).click()
+  }
+})
+
 test('the board\'s models and the ones to download are separate lists, and only rows in view read a card', async ({ page }) => {
   const board = await mockBoard(page, { offered: 60 })
   await openGenAI(page)
@@ -262,6 +304,33 @@ test('the list stays put while a model operation refreshes the board', async ({ 
   // Read now, not with a retrying expect: the slow answer would cover the gap.
   expect(await page.getByText('No models on this DevKit yet').count()).toBe(0)
   expect(await page.getByLabel('Models on this DevKit').getByRole('article', { name: 'Llama 3.2 3B' }).count()).toBe(1)
+})
+
+test('another board refreshes the saved catalog', async ({ page }) => {
+  const board = await mockBoard(page)
+  await openGenAI(page)
+  await settingsButton(page).click()
+  await expect(row(page, 'Whisper medium')).toBeVisible()
+  expect(board.searches).toBe(1)
+
+  await page.getByRole('tab', { name: 'Connection' }).click()
+  await page.getByLabel('GenAI Studio address').fill('https://192.168.1.30:5000')
+  await page.getByRole('button', { name: 'Save address' }).click()
+  await expect.poll(() => board.posts).toContain('settings')
+  await page.getByRole('tab', { name: /Models/ }).click()
+  await expect.poll(() => board.searches).toBe(2)
+})
+
+test('Load on a loaded model makes it answer, without loading anything', async ({ page }) => {
+  const board = await mockBoard(page, { loaded: [QWEN, LLAMA] })
+  await openGenAI(page)
+  await settingsButton(page).click()
+  await expect(page.getByText('Qwen3 0.6B in use')).toBeVisible()
+
+  await row(page, 'Llama 3.2 3B').getByRole('button', { name: 'Load Llama 3.2 3B', exact: true }).click()
+  await expect(page.getByText('Llama 3.2 3B in use')).toBeVisible()
+  await expect(row(page, 'Qwen3 0.6B').getByRole('button', { name: 'Load Qwen3 0.6B', exact: true })).toBeVisible()
+  expect(board.posts).toEqual([])
 })
 
 test('actions are Load, Unload and Download; the speech model in use can\'t be unloaded', async ({ page }) => {

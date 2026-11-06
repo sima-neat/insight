@@ -4971,7 +4971,7 @@ button:disabled {
   width: 100%;
   min-height: 0;
   max-width: 1100px;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-md);
@@ -6454,21 +6454,16 @@ input.genai-switch[aria-disabled='true'] {
 }
 
 /* SiMaSentry Solutions: the launcher is a panel like Documents; a chosen app fills the window. */
-.genai-solutions {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  background: #0b1018;
-  color: #e8eef6;
-}
-
+/* A running app, in the same dialog as the list. */
 .genai-solutions-frame {
-  flex: 1;
+  flex: 1 1 0;
   width: 100%;
+  min-height: 0;
+  max-width: 1100px;
   border: 0;
-  background: #0b1018;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
 }
 
 /* Above the cards, which are positioned and would scroll over it. */
@@ -6563,17 +6558,12 @@ input.genai-switch[aria-disabled='true'] {
 }
 
 .genai-solutions-actions {
-  position: absolute;
-  top: 12px;
-  right: 12px;
   display: flex;
   gap: 6px;
+  margin-left: auto;
 }
 
 .genai-solutions-actions .btn-ghost {
-  background: rgba(18, 26, 38, 0.85);
-  color: #e8eef6;
-  border-color: #253244;
   text-decoration: none;
 }
 
@@ -6595,8 +6585,8 @@ input.genai-switch[aria-disabled='true'] {
   }
 }
 
-/* Benchmark, Documents, Settings and the SiMaSentry list: a dialog over the
-   dimmed chat. Its body scrolls under the heading. */
+/* Benchmark, Documents, Settings and SiMaSentry: one dialog size over the
+   dimmed chat, whatever they hold. What needs more room scrolls in the body. */
 .genai-bench {
   position: fixed;
   inset: 0;
@@ -6604,8 +6594,7 @@ input.genai-switch[aria-disabled='true'] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 32px 16px;
+  padding: max(32px, calc((100dvh - 844px) / 2)) 16px;
   background: rgba(14, 25, 35, 0.4);
   backdrop-filter: blur(2px);
 }
@@ -6618,7 +6607,8 @@ input.genai-switch[aria-disabled='true'] {
 }
 
 .genai-bench > .genai-bench-body {
-  flex: 0 1 auto;
+  flex: 1 1 0;
+  align-content: start;
   width: 100%;
   min-height: 0;
   max-width: 1100px;
@@ -6698,13 +6688,9 @@ input.genai-switch[aria-disabled='true'] {
   flex: 1;
 }
 
-.genai-bench-guided > .genai-bench-top,
 .genai-bench-guided > .genai-bench-body {
-  max-width: 760px;
-}
-
-.genai-bench-guided > .genai-bench-body {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 760px);
+  justify-content: center;
   padding-top: 24px;
 }
 

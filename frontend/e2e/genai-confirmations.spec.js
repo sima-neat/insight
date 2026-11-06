@@ -257,6 +257,10 @@ for (const embedded of [false, true]) {
       await solutions.getByRole('button', { name: /SiMaSentry-Med/ }).click()
       await ask.getByRole('button', { name: 'Open anyway' }).click()
       await expect(solutions.locator('iframe[title="SiMaSentry-Med"]')).toHaveCount(1)
+      // In the same dialog as the list, not over the whole window.
+      await expect(solutions.getByRole('heading', { name: 'SiMaSentry-Med' })).toBeVisible()
+      expect((await solutions.locator('iframe').boundingBox()).width).toBeLessThanOrEqual(1100)
+      await expect(solutions.getByRole('button', { name: 'Back' })).toBeVisible()
     })
   })
 }

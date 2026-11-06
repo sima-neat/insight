@@ -468,6 +468,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const settingsBox = useRef(null)
   const settingsClose = useRef(null)
   const catalogAutoSynced = useRef(false)
+  const catalogFromOtherBoard = useRef(false)
   const catalogNow = useRef(modelCatalog)
   const lastStatus = useRef(null)
   const cardsAsked = useRef(new Set())
@@ -802,6 +803,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setCatalogSync(false)
     lastStatus.current = null
     catalogAutoSynced.current = false
+    // Boards can allow other accounts: what was saved may not apply to this one.
+    catalogFromOtherBoard.current = true
     cardsAsked.current.clear()
     cardQueue.current = []
     setHubReach(null)
@@ -1087,9 +1090,11 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
 
   // The first look at the catalog fills it; after that, Sync catalog refreshes it.
   useEffect(() => {
-    if (!settingsOpen || settingsTab !== 'models' || modelCatalog.syncedAt) return
+    if (!settingsOpen || settingsTab !== 'models') return
+    if (modelCatalog.syncedAt && !catalogFromOtherBoard.current) return
     if (downloads.state !== 'available' || !allowed.searchModels || catalogAutoSynced.current) return
     catalogAutoSynced.current = true
+    catalogFromOtherBoard.current = false
     syncCatalog()
   }, [settingsOpen, settingsTab, modelCatalog.syncedAt, downloads.state, allowed.searchModels])
 
@@ -2717,15 +2722,18 @@ function SolutionsOverlay({ model, sees, onClose }) {
   }
 
   return (
-    <div className={open ? 'genai-solutions' : 'genai-bench'} role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
+    <div className="genai-bench" role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
       {open ? (
         <>
-          <iframe ref={frame} className="genai-solutions-frame" title={open.name} src={solutionUrl(open.mode, model)} allow="camera; microphone; fullscreen" onLoad={watchFrameKeys} />
-          <div className="genai-solutions-actions">
-            <button type="button" ref={backButton} className="btn-ghost" onClick={() => setOpen(null)} title="Back to the solutions">Back</button>
-            <a className="btn-ghost" href={solutionUrl(open.mode, model)} target="_blank" rel="noopener" title="Open in a new tab">New tab</a>
-            <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
+          <div className="genai-bench-top genai-solutions-top">
+            <h2>{open.name}</h2>
+            <div className="genai-solutions-actions">
+              <button type="button" ref={backButton} className="btn-ghost" onClick={() => setOpen(null)} title="Back to the solutions">Back</button>
+              <a className="btn-ghost" href={solutionUrl(open.mode, model)} target="_blank" rel="noopener" title="Open in a new tab">New tab</a>
+              <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
+            </div>
           </div>
+          <iframe ref={frame} className="genai-solutions-frame" title={open.name} src={solutionUrl(open.mode, model)} allow="camera; microphone; fullscreen" onLoad={watchFrameKeys} />
         </>
       ) : (
         <>
@@ -2883,7 +2891,7 @@ function SettingsTabs({ active, onChange, modelCount }) {
 }
 
 // What can be done with a model from its row: download, load or unload it.
-function ModelActions({ row, allowed, canDownload, downloadNote, onDownload, onLoad, onUnload, onUseSpeech }) {
+function ModelActions({ row, activeName, allowed, canDownload, downloadNote, onDownload, onLoad, onUnload, onUseSpeech }) {
   const { model, name } = row
   if (!model) {
     if (row.state.key === 'downloading') return null
@@ -2906,11 +2914,19 @@ function ModelActions({ row, allowed, canDownload, downloadNote, onDownload, onL
       </button>
     )
   }
-  return <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeChatModel} aria-label={`Unload ${name}`} onClick={() => onUnload(model)}>Unload</button>
+  return (
+    <>
+      {/* Another model answers: Load on a loaded model makes this one answer, at once. */}
+      {model.name !== activeName && (
+        <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeChatModel} title="Answer with this model" aria-label={`Load ${name}`} onClick={() => onLoad(model)}>Load</button>
+      )}
+      <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeChatModel} aria-label={`Unload ${name}`} onClick={() => onUnload(model)}>Unload</button>
+    </>
+  )
 }
 
 // A model in the catalog. Its card is asked for once its row comes near the view.
-function CatalogRow({ row, open, onToggle, download, status, allowed, onDelete, onSeen, actions }) {
+function CatalogRow({ row, activeName, open, onToggle, download, status, allowed, onDelete, onSeen, actions }) {
   const box = useRef(null)
   const needsCard = Boolean(row.repoId && !row.summary)
   useEffect(() => {
@@ -2945,7 +2961,7 @@ function CatalogRow({ row, open, onToggle, download, status, allowed, onDelete, 
           {downloading && <ProgressBar pct={download?.pct} label={`Downloading ${row.repoId}`} />}
         </span>
         <div className="genai-catalog-action">
-          <ModelActions row={row} allowed={allowed} {...actions} />
+          <ModelActions row={row} activeName={activeName} allowed={allowed} {...actions} />
         </div>
       </div>
       <div className="genai-catalog-details" id={`genai-model-${row.key}`} hidden={!open}>
@@ -2995,7 +3011,7 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, do
   }
 
   const list = (models) => models.map((row) => (
-    <CatalogRow key={row.key} row={row} open={opened.has(row.key)} onToggle={toggle} download={download} status={status} allowed={allowed} onDelete={onDelete} onSeen={onSeen} actions={actions} />
+    <CatalogRow key={row.key} row={row} activeName={chatModel?.name} open={opened.has(row.key)} onToggle={toggle} download={download} status={status} allowed={allowed} onDelete={onDelete} onSeen={onSeen} actions={actions} />
   ))
   const columns = (
     <div className="genai-catalog-columns" aria-hidden="true">

@@ -107,6 +107,18 @@ test('the defaults run without changing anything, and each number is explained',
   await expect(panel.getByRole('button', { name: 'Download JSON' })).toBeEnabled()
 })
 
+test('the dialog keeps its size as results arrive, and scrolls instead', async ({ page }) => {
+  await mockBoard(page)
+  const panel = await openBenchmark(page)
+  const body = panel.locator('.genai-bench-body')
+  const before = (await body.boundingBox()).height
+
+  await panel.getByRole('button', { name: 'Run benchmark' }).click()
+  await expect(panel.getByRole('heading', { name: 'Results', exact: true })).toBeVisible()
+  expect((await body.boundingBox()).height).toBe(before)
+  expect(await body.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto')
+})
+
 test('a run that swaps the loaded model says so first', async ({ page }) => {
   const board = await mockBoard(page)
   const panel = await openBenchmark(page)

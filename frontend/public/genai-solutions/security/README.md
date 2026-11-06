@@ -11,7 +11,7 @@ The console has three views, switchable via tabs in the header:
 ```
 security/
 ├── index.html   # markup + inline SVG icons + inline data-URI favicon
-├── style.css   # hand-written, dark-only SOC theme
+├── style.css   # hand-written theme, shared with SiMaSentry-Med
 ├── app.js     # SecurityConsole class — settings, fetch, vision, voice
 └── README.md   # this file
 ```
