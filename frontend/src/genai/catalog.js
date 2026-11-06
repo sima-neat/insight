@@ -81,6 +81,14 @@ export function cardSummary(text) {
   return ''
 }
 
+// What a row's details say about the model. missed: its card was read and gave
+// no description.
+export function cardNote(row, { canRead = true, missed = false } = {}) {
+  if (row.summary) return row.summary
+  if (!row.repoId) return 'This model is not in the saved Hugging Face catalog.'
+  return canRead && !missed ? 'Reading its model card…' : 'No description could be read from its model card.'
+}
+
 const rowRank = (row) => (row.on || row.state.key === 'loading' ? 0 : row.onBoard ? 1 : 2)
 
 // One row per model: what is in use first, then the rest of the board, then

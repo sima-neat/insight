@@ -4,6 +4,7 @@ import {
   CATALOG_KEY,
   EMPTY_CATALOG,
   boardSummary,
+  cardNote,
   cardSummary,
   catalogFromSearch,
   catalogRows,
@@ -150,6 +151,15 @@ test('the catalog\'s lines of text', () => {
   assert.equal(boardSummary([{ onBoard: false }]), 'No models on this DevKit yet')
   assert.equal(residencyNote({ maxResident: 2 }), 'Up to 2 chat models can stay loaded. Speech recognition uses a separate model.')
   assert.equal(residencyNote({}), 'One chat model runs at a time. Speech recognition uses a separate model.')
+})
+
+test('a row says Reading only while its card can still arrive', () => {
+  const row = { repoId: 'simaai/model', summary: '' }
+  assert.equal(cardNote(row), 'Reading its model card…')
+  assert.equal(cardNote(row, { missed: true }), 'No description could be read from its model card.')
+  assert.equal(cardNote(row, { canRead: false }), 'No description could be read from its model card.')
+  assert.equal(cardNote({ ...row, summary: 'A model.' }, { missed: true }), 'A model.')
+  assert.equal(cardNote({ repoId: '', summary: '' }), 'This model is not in the saved Hugging Face catalog.')
 })
 
 test('storage reads from the board, or not at all', () => {

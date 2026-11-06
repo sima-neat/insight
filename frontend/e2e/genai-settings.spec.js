@@ -28,6 +28,7 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0, loade
     hubEnabled: true,
     searches: 0,
     cards: 0,
+    cardsFail: false,
     finishDownload: null
   }
   await page.route(/\/api\/genai\//, async (route) => {
@@ -85,6 +86,7 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0, loade
     if (path === 'models/hub/card') {
       board.cards += 1
       const repoId = url.searchParams.get('repoId')
+      if (board.cardsFail) return json(route, { error: 'Hugging Face timed out' }, 502)
       return json(route, { enabled: true, repoId, sizeBytes: 4_200_000_000, card: `# Title\n\nThis is the card of **${repoId}**.\n` })
     }
     return json(route, { error: 'not part of this test' }, 404)
@@ -321,6 +323,26 @@ test('rows already in view read their cards once Hugging Face can be reached', a
 
   board.hubEnabled = true
   await expect(row(page, 'Whisper medium')).toContainText('4.2 GB', { timeout: 30_000 })
+})
+
+test('a card that fails to read says so, and opening its row asks again', async ({ page }) => {
+  const board = await mockBoard(page)
+  board.cardsFail = true
+  await openGenAI(page)
+  await settingsButton(page).click()
+  const vision = row(page, 'Qwen3 VL 4B')
+  await vision.scrollIntoViewIfNeeded()
+  await expect.poll(() => board.cards).toBeGreaterThan(0)
+
+  const details = vision.getByRole('button', { name: /details for/ })
+  await details.click()
+  await expect(vision.getByText('No description could be read from its model card.')).toBeVisible()
+  await details.click()
+
+  board.cardsFail = false
+  await details.click()
+  await expect(vision.getByText(`This is the card of ${VISION_REPO}.`)).toBeVisible()
+  await expect(vision.getByText('4.2 GB')).toBeVisible()
 })
 
 test('another board refreshes the saved catalog', async ({ page }) => {

@@ -86,6 +86,8 @@ import {
 import { STATE_LABELS, addressSummary } from './genai/settingsCards.js'
 import {
   boardSummary,
+  cardNote,
+  cardSummary,
   catalogFromSearch,
   catalogRows,
   filterRows,
@@ -490,6 +492,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const cardsAsked = useRef(new Set())
   const cardQueue = useRef([])
   const cardReaders = useRef(0)
+  // Cards that were read and left a row with no description.
+  const [cardsMissed, setCardsMissed] = useState(() => new Set())
 
   const backend = deriveBackendState({ health, status, busyOp, lastError })
   // Between a header board change and knowing where the tab's address points now, nothing is sent:
@@ -826,6 +830,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     catalogFromOtherBoard.current = true
     cardsAsked.current.clear()
     cardQueue.current = []
+    setCardsMissed(new Set())
     setHubReach(null)
     setRecommendedCard(null)
     recommendedCardLoading.current = false
@@ -1018,12 +1023,17 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   }
 
   // A model's size and description are only in its card, one call per model:
-  // read for the rows in view, the latest first, a few at a time.
+  // read for the rows in view, the latest first, a few at a time. One that
+  // fails is asked for again when its row comes back into view or is opened.
   async function readCards() {
     const board = ticket()
     while (cardQueue.current.length && board.live()) {
-      const card = await getJson(cardPath(cardQueue.current.pop()), { signal: board.signal }).catch(() => null)
-      if (board.live()) rememberCatalog(withCard(catalogNow.current, card))
+      const repoId = cardQueue.current.pop()
+      const card = await getJson(cardPath(repoId), { signal: board.signal }).catch(() => null)
+      if (!board.live()) break
+      rememberCatalog(withCard(catalogNow.current, card))
+      if (!card?.repoId) cardsAsked.current.delete(repoId)
+      if (!card?.repoId || !cardSummary(card.card)) setCardsMissed((missed) => new Set(missed).add(repoId))
     }
     cardReaders.current -= 1
   }
@@ -1032,6 +1042,12 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     if (downloads.state !== 'available' || cardsAsked.current.has(repoId)) return
     cardsAsked.current.add(repoId)
     cardQueue.current.push(repoId)
+    setCardsMissed((missed) => {
+      if (!missed.has(repoId)) return missed
+      const next = new Set(missed)
+      next.delete(repoId)
+      return next
+    })
     if (cardReaders.current < 3) {
       cardReaders.current += 1
       readCards()
@@ -2305,6 +2321,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
                 onUseSpeech={switchSpeechModel}
                 onDelete={deleteModel}
                 onSeen={readCard}
+                cardsMissed={cardsMissed}
               />
             )}
 
@@ -3450,7 +3467,7 @@ function ModelActions({ row, activeName, allowed, canDownload, downloadNote, onD
 }
 
 // A model in the catalog. Its card is asked for once its row comes near the view.
-function CatalogRow({ row, activeName, canReadCard, open, onToggle, download, status, allowed, onDelete, onSeen, actions }) {
+function CatalogRow({ row, activeName, canReadCard, cardMissed, open, onToggle, download, status, allowed, onDelete, onSeen, actions }) {
   const box = useRef(null)
   // Waits for Hugging Face: the row watches again once a card can be read.
   const needsCard = Boolean(canReadCard && row.repoId && !row.summary)
@@ -3471,7 +3488,7 @@ function CatalogRow({ row, activeName, canReadCard, open, onToggle, download, st
     <article ref={box} className="genai-catalog-row" aria-label={row.name}>
       <div className="genai-catalog-main">
         <div className="genai-catalog-name">
-          <button type="button" className={`genai-catalog-expand${open ? ' genai-catalog-expand-open' : ''}`} aria-expanded={open} aria-controls={`genai-model-${row.key}`} aria-label={`${open ? 'Hide' : 'Show'} details for ${row.name}`} onClick={() => onToggle(row.key)}>
+          <button type="button" className={`genai-catalog-expand${open ? ' genai-catalog-expand-open' : ''}`} aria-expanded={open} aria-controls={`genai-model-${row.key}`} aria-label={`${open ? 'Hide' : 'Show'} details for ${row.name}`} onClick={() => { onToggle(row.key); if (!open && needsCard) onSeen(row.repoId) }}>
             <Icon d={ICONS.chevron} />
           </button>
           <div>
@@ -3490,7 +3507,7 @@ function CatalogRow({ row, activeName, canReadCard, open, onToggle, download, st
         </div>
       </div>
       <div className="genai-catalog-details" id={`genai-model-${row.key}`} hidden={!open}>
-        <p>{row.summary || (row.repoId ? 'Reading its model card…' : 'This model is not in the saved Hugging Face catalog.')}</p>
+        <p>{cardNote(row, { canRead: canReadCard, missed: cardMissed })}</p>
         <div className="genai-actions">
           {row.repoId && <a href={`https://huggingface.co/${row.repoId}`} target="_blank" rel="noreferrer">Model card on Hugging Face</a>}
           {row.model && deletableModel(row.model, status) && (
@@ -3507,7 +3524,7 @@ function CatalogRow({ row, activeName, canReadCard, open, onToggle, download, st
 // Settings, Models: what the board holds, then what it can download in a list
 // that scrolls by itself, both under one search. Each model's card is behind
 // its arrow.
-function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, downloads, download, failedDownload, allowed, onSync, onDownload, onDelete, onSeen, ...handlers }) {
+function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, downloads, download, failedDownload, allowed, onSync, onDownload, onDelete, onSeen, cardsMissed, ...handlers }) {
   const [query, setQuery] = useState('')
   const [catalogQuery, setCatalogQuery] = useState('')
   const [type, setType] = useState('all')
@@ -3536,7 +3553,7 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, do
   }
 
   const list = (models) => models.map((row) => (
-    <CatalogRow key={row.key} row={row} activeName={chatModel?.name} canReadCard={downloads.state === 'available'} open={opened.has(row.key)} onToggle={toggle} download={download} status={status} allowed={allowed} onDelete={onDelete} onSeen={onSeen} actions={actions} />
+    <CatalogRow key={row.key} row={row} activeName={chatModel?.name} canReadCard={downloads.state === 'available'} cardMissed={cardsMissed.has(row.repoId)} open={opened.has(row.key)} onToggle={toggle} download={download} status={status} allowed={allowed} onDelete={onDelete} onSeen={onSeen} actions={actions} />
   ))
   const columns = (
     <div className="genai-catalog-columns" aria-hidden="true">
