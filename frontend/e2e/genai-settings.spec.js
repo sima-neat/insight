@@ -25,6 +25,7 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0, loade
     posts: [],
     hub,
     statusDelay: 0,
+    hubEnabled: true,
     searches: 0,
     cards: 0,
     finishDownload: null
@@ -62,7 +63,7 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0, loade
         resident: board.loaded,
         maxResident,
         asrModel: WHISPER,
-        hubEnabled: true,
+        hubEnabled: board.hubEnabled,
         disk: { freeBytes: 459_000_000_000, totalBytes: 512_000_000_000 }
       })
     }
@@ -304,6 +305,22 @@ test('the list stays put while a model operation refreshes the board', async ({ 
   // Read now, not with a retrying expect: the slow answer would cover the gap.
   expect(await page.getByText('No models on this DevKit yet').count()).toBe(0)
   expect(await page.getByLabel('Models on this DevKit').getByRole('article', { name: 'Llama 3.2 3B' }).count()).toBe(1)
+})
+
+test('rows already in view read their cards once Hugging Face can be reached', async ({ page }) => {
+  const board = await mockBoard(page)
+  board.hubEnabled = false
+  await page.addInitScript((repoId) => {
+    window.localStorage.setItem('neat-insight:genai-model-catalog', JSON.stringify({ syncedAt: 1, models: [{ repoId, org: 'simaai', type: 'asr' }] }))
+  }, SPEECH_REPO)
+  await openGenAI(page)
+  await settingsButton(page).click()
+  await row(page, 'Whisper medium').scrollIntoViewIfNeeded()
+  await expect(row(page, 'Whisper medium')).toContainText('—')
+  expect(board.cards).toBe(0)
+
+  board.hubEnabled = true
+  await expect(row(page, 'Whisper medium')).toContainText('4.2 GB', { timeout: 30_000 })
 })
 
 test('another board refreshes the saved catalog', async ({ page }) => {

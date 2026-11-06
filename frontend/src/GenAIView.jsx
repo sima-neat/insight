@@ -3450,9 +3450,10 @@ function ModelActions({ row, activeName, allowed, canDownload, downloadNote, onD
 }
 
 // A model in the catalog. Its card is asked for once its row comes near the view.
-function CatalogRow({ row, activeName, open, onToggle, download, status, allowed, onDelete, onSeen, actions }) {
+function CatalogRow({ row, activeName, canReadCard, open, onToggle, download, status, allowed, onDelete, onSeen, actions }) {
   const box = useRef(null)
-  const needsCard = Boolean(row.repoId && !row.summary)
+  // Waits for Hugging Face: the row watches again once a card can be read.
+  const needsCard = Boolean(canReadCard && row.repoId && !row.summary)
   useEffect(() => {
     if (!needsCard || !box.current) return undefined
     const watch = new IntersectionObserver((entries) => {
@@ -3535,7 +3536,7 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, do
   }
 
   const list = (models) => models.map((row) => (
-    <CatalogRow key={row.key} row={row} activeName={chatModel?.name} open={opened.has(row.key)} onToggle={toggle} download={download} status={status} allowed={allowed} onDelete={onDelete} onSeen={onSeen} actions={actions} />
+    <CatalogRow key={row.key} row={row} activeName={chatModel?.name} canReadCard={downloads.state === 'available'} open={opened.has(row.key)} onToggle={toggle} download={download} status={status} allowed={allowed} onDelete={onDelete} onSeen={onSeen} actions={actions} />
   ))
   const columns = (
     <div className="genai-catalog-columns" aria-hidden="true">
