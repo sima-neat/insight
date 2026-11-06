@@ -11,7 +11,6 @@ import {
   formatDuration,
   friendlyModelName,
   offersSetup,
-  speechModels,
   studioAnswers,
   supportsThinking,
   thinkingModelOnBoard,
@@ -55,6 +54,7 @@ import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
 import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, compareLog, solutionUrl } from './genai/chatExport.js'
 import { benchmarkSupport } from './genai/benchmark.js'
 import {
+  documentsCard,
   documentsSummary,
   documentsSupport,
   filterSections,
@@ -69,7 +69,6 @@ import {
   MAX_TOKENS_LIMITS,
   clampMaxTokens,
   loadReplySettings,
-  replySummary,
   saveReplySettings,
   systemPromptFor,
   systemPromptNote
@@ -84,7 +83,22 @@ import {
   hubReachOf,
   recommendedOffer
 } from './genai/firstModel.js'
-import { STATE_LABELS, addressSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './genai/settingsCards.js'
+import { STATE_LABELS, addressSummary } from './genai/settingsCards.js'
+import {
+  boardSummary,
+  cardNote,
+  cardSummary,
+  catalogFromSearch,
+  catalogRows,
+  filterRows,
+  loadCatalog,
+  residencyNote,
+  resultsLine,
+  saveCatalog,
+  storageSummary,
+  syncedLabel,
+  withCard
+} from './genai/catalog.js'
 import { VISION_PRESETS, createVisionLoop } from './genai/visionLoop.js'
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
@@ -104,6 +118,7 @@ import {
 } from './genai/setup.js'
 import { acceptedAnswer, clearDocumentsQuestion, deleteModelQuestion, loadModelQuestion, solutionQuestion } from './genai/confirmations.js'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import { useDialogFocus } from './useDialogFocus.js'
 import ModelMarkdown from './ModelMarkdown.jsx'
 
 const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
@@ -161,6 +176,15 @@ function browserStorage() {
   }
 }
 
+// Settings' tabs, and the Model menu's way there.
+const SETTINGS_TABS = [
+  { id: 'models', label: 'Models', icon: 'models' },
+  { id: 'replies', label: 'Replies & voice', icon: 'replies' },
+  { id: 'documents', label: 'Documents', icon: 'documents' },
+  { id: 'connection', label: 'Connection', icon: 'address' }
+]
+const MANAGE_MODELS = '\u0000manage-models'
+
 function Icon({ d }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="genai-icon">
@@ -193,7 +217,13 @@ const ICONS = {
   voice: 'M4 9h4l5-4v14l-5-4H4zM16.5 9.5a3.5 3.5 0 0 1 0 5M19 7a7 7 0 0 1 0 10',
   documents: 'M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6',
   troubleshoot: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5.6 5.6l3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6',
-  download: 'M12 4v11M7 10l5 5 5-5M5 20h14'
+  download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+  // Settings.
+  close: 'M6 6l12 12M18 6L6 18',
+  chevron: 'M9 5l7 7-7 7',
+  search: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM16 16l5 5',
+  check: 'M5 12l4 4L19 6',
+  sync: 'M20 8a8 8 0 0 0-14-3L3 8M3 3v5h5M4 16a8 8 0 0 0 14 3l3-3M21 21v-5h-5'
 }
 
 function StatusChip({ state }) {
@@ -321,6 +351,7 @@ function modelLabel(model) {
 export default function GenAIView({ onError, onStatus, selectedBoardGeneration = null }) {
   const [settings, setSettings] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState('models')
   const [solutionsOpen, setSolutionsOpen] = useState(false)
   const [benchOpen, setBenchOpen] = useState(false)
   const [benchmarking, setBenchmarking] = useState(false)
@@ -437,8 +468,9 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const [speechStats, setSpeechStats] = useState({})
   const spokenLanguage = useRef(null)
 
-  const [hubQuery, setHubQuery] = useState('')
-  const [hubResults, setHubResults] = useState(null)
+  // Settings, Models: what Hugging Face offers, saved in this browser, and a sync in progress.
+  const [modelCatalog, setModelCatalog] = useState(() => loadCatalog(browserStorage()))
+  const [catalogSync, setCatalogSync] = useState(false)
   const [download, setDownload] = useState(null)
   // Hugging Face as the board last answered about it ({enabled, error}), the
   // recommended model's card (its download size), why the last download
@@ -451,7 +483,19 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const [loadAfterDownload, setLoadAfterDownload] = useState(null)
   // Browse models: + 1 each time it asks Settings to show the Hugging Face search.
   const [browseRequest, setBrowseRequest] = useState(0)
-  const hubSearchBox = useRef(null)
+  const catalogSearchBox = useRef(null)
+  const settingsDialog = useRef(null)
+  const settingsBox = useRef(null)
+  const settingsClose = useRef(null)
+  const catalogAutoSynced = useRef(false)
+  const catalogFromOtherBoard = useRef(false)
+  const catalogNow = useRef(modelCatalog)
+  const lastStatus = useRef(null)
+  const cardsAsked = useRef(new Set())
+  const cardQueue = useRef([])
+  const cardReaders = useRef(0)
+  // Cards that were read and left a row with no description.
+  const [cardsMissed, setCardsMissed] = useState(() => new Set())
 
   const backend = deriveBackendState({ health, status, busyOp, lastError })
   // Between a header board change and knowing where the tab's address points now, nothing is sent:
@@ -781,7 +825,14 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setVoices(null)
     setEngine('default')      // the new board may not have the chosen engine or voice
     setVoice('')
-    setHubResults(null)
+    setCatalogSync(false)
+    lastStatus.current = null
+    catalogAutoSynced.current = false
+    // Boards can allow other accounts: what was saved may not apply to this one.
+    catalogFromOtherBoard.current = true
+    cardsAsked.current.clear()
+    cardQueue.current = []
+    setCardsMissed(new Set())
     setHubReach(null)
     setRecommendedCard(null)
     recommendedCardLoading.current = false
@@ -945,26 +996,65 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     loadChatModel(model)
   }
 
-  // Only the latest search is shown.
-  const hubSearchId = useRef(0)
-  function searchHub(event) {
-    event.preventDefault()
-    runHubSearch(hubQuery)
+  function rememberCatalog(next) {
+    catalogNow.current = next
+    setModelCatalog(next)
+    saveCatalog(browserStorage(), next)
   }
 
-  async function runHubSearch(text) {
-    if (!allowed.searchModels) return
-    const id = ++hubSearchId.current
+  // Sync catalog: one call for what Hugging Face lists for this board.
+  const catalogSyncId = useRef(0)
+  async function syncCatalog() {
+    if (!allowed.searchModels || catalogSync) return
+    const id = ++catalogSyncId.current
     const board = ticket()
+    const current = () => id === catalogSyncId.current && board.live()
+    setCatalogSync(true)
     try {
-      const query = text.trim() ? `?q=${encodeURIComponent(text.trim())}` : ''
-      const results = await getJson(`models/hub/search${query}`, { signal: board.signal })
-      if (id === hubSearchId.current && board.live()) {
-        setHubResults(results)
-        setHubReach((prev) => hubReachOf(results) || prev)
-      }
+      const results = await getJson('models/hub/search', { signal: board.signal })
+      if (!current()) return
+      setHubReach((prev) => hubReachOf(results) || prev)
+      if (results.enabled === false) return
+      // Every organization failing still answers 200: the saved catalog stays.
+      if (results.error) throw new Error(results.error)
+      cardsAsked.current.clear()
+      rememberCatalog(catalogFromSearch(results.results, catalogNow.current))
     } catch (error) {
-      if (id === hubSearchId.current && board.live() && !isAbort(error)) onError?.(`Search failed: ${error.message}`)
+      if (current() && !isAbort(error)) onError?.(`Sync failed: ${error.message}`)
+    } finally {
+      if (current()) setCatalogSync(false)
+    }
+  }
+
+  // A model's size and description are only in its card, one call per model:
+  // read for the rows in view, the latest first, a few at a time. One that
+  // fails is asked for again when its row comes back into view or is opened.
+  async function readCards() {
+    const board = ticket()
+    while (cardQueue.current.length && board.live()) {
+      const repoId = cardQueue.current.pop()
+      const card = await getJson(cardPath(repoId), { signal: board.signal }).catch(() => null)
+      if (!board.live()) break
+      rememberCatalog(withCard(catalogNow.current, card))
+      if (!card?.repoId) cardsAsked.current.delete(repoId)
+      if (!card?.repoId || !cardSummary(card.card)) setCardsMissed((missed) => new Set(missed).add(repoId))
+    }
+    cardReaders.current -= 1
+  }
+
+  function readCard(repoId) {
+    if (downloads.state !== 'available' || cardsAsked.current.has(repoId)) return
+    cardsAsked.current.add(repoId)
+    cardQueue.current.push(repoId)
+    setCardsMissed((missed) => {
+      if (!missed.has(repoId)) return missed
+      const next = new Set(missed)
+      next.delete(repoId)
+      return next
+    })
+    if (cardReaders.current < 3) {
+      cardReaders.current += 1
+      readCards()
     }
   }
 
@@ -979,7 +1069,6 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
       if (!board.live()) return
       setHubReach({ enabled: true, error: '' })
       onStatus?.(`Downloaded ${repoId}.`)
-      setHubResults(null)
       if (thenLoad) setLoadAfterDownload(done.name || catalogNameFor(repoId))
     } catch (error) {
       if (!isAbort(error) && board.live()) {
@@ -1000,21 +1089,53 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     if (allowed.downloadFirstModel) startDownload(repoId, { thenLoad: true })
   }
 
-  // Browse models: Settings, Models at the Hugging Face search, listing the
-  // models the board can download.
+  // Browse models: Settings, Models at the catalog's search, listing the models
+  // the board can download.
   function browseModels() {
     if (!allowed.browseModels) return
-    setSettingsOpen(true)
+    openSettings('models')
     setBrowseRequest((n) => n + 1)
-    if (!hubResults) runHubSearch(hubQuery)
   }
 
   useEffect(() => {
     if (!browseRequest || !settingsOpen) return
-    const box = hubSearchBox.current
+    const box = catalogSearchBox.current
     box?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     box?.focus({ preventScroll: true })
   }, [browseRequest, settingsOpen])
+
+  // As a dialog: the keyboard starts inside it and goes back where it was, and
+  // Esc closes it unless a question or the documents are open on top.
+  useEffect(() => {
+    if (!settingsOpen) return undefined
+    const opener = document.activeElement
+    if (!settingsClose.current?.closest('[role="dialog"]')?.contains(opener)) settingsClose.current?.focus()
+    return () => opener?.focus?.()
+  }, [settingsOpen])
+
+  useEffect(() => {
+    if (!settingsOpen || confirmAsk || unloadAsk || docsViewOpen) return undefined
+    function onKey(e) {
+      if (e.key === 'Escape') setSettingsOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [settingsOpen, confirmAsk, unloadAsk, docsViewOpen])
+
+  // A tab starts at its top, whatever was scrolled to on the one before.
+  useEffect(() => {
+    if (settingsBox.current) settingsBox.current.scrollTop = 0
+  }, [settingsTab])
+
+  // The first look at the catalog fills it; after that, Sync catalog refreshes it.
+  useEffect(() => {
+    if (!settingsOpen || settingsTab !== 'models') return
+    if (modelCatalog.syncedAt && !catalogFromOtherBoard.current) return
+    if (downloads.state !== 'available' || !allowed.searchModels || catalogAutoSynced.current) return
+    catalogAutoSynced.current = true
+    catalogFromOtherBoard.current = false
+    syncCatalog()
+  }, [settingsOpen, settingsTab, modelCatalog.syncedAt, downloads.state, allowed.searchModels])
 
   // The offer says how big the download is, and finds out early whether the
   // board can reach Hugging Face. Once per board; the size is only a nicety,
@@ -1589,6 +1710,11 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     }
   }
 
+  function openSettings(tab) {
+    setSettingsTab(tab)
+    setSettingsOpen(true)
+  }
+
   // --- reply settings ---------------------------------------------------------
 
   function changeReplySettings(update) {
@@ -1780,6 +1906,23 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   )
 
   const thinkingModel = thinkingModelOnBoard(status)
+  function chooseUseDocs(on) {
+    if (!allowed.toggleDocuments) return
+    setUseDocs(on)
+    setDocsMidChat(on && hasConversation)
+  }
+
+  async function copyRestartCommands() {
+    const commands = `./run.sh stop\n${START_COMMAND}`
+    try {
+      await navigator.clipboard.writeText(commands)
+      onStatus?.('Restart commands copied.')
+    } catch {
+      // The SDK editor's frame may refuse the clipboard.
+      onStatus?.(`Restart commands: ./run.sh stop, then ${START_COMMAND}`)
+    }
+  }
+
   const thinkBlocked = canThink ? '' : thinkingModel ? `Choose ${thinkingModel}` : 'Needs a reasoning model'
   const steps = tutorialSteps({ canThink, thinkingModel, canCompare: keepsSeveral })
   const step = tutorialStep === null ? null : steps[Math.min(tutorialStep, steps.length - 1)]
@@ -1857,7 +2000,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     else if (action === 'example-translate') tryPrompt("Translate 'good morning, how are you?' into Spanish.")
     else if (action === 'camera') openCamera()
     else if (action === 'vision') openVision()
-    else if (action === 'settings') setSettingsOpen(true)
+    else if (action === 'settings') openSettings('connection')
   }
 
   const engines = (voices && voices.engines) || []
@@ -1874,13 +2017,22 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const voiceWarnings = usable ? voiceEngineWarnings(health) : []
   const studioOutdated = Boolean(setupStatus?.outdated) && mode === 'workspace'
   const needsAttention = backend.state !== 'ready' || voiceWarnings.length > 0 || studioOutdated
+  // Settings opens over the chat. With no address yet it opens by itself, at the address.
+  const showSettings = settingsOpen || backend.state === 'unconfigured'
+  useDialogFocus(settingsDialog, showSettings)
+  const openTab = settingsOpen ? settingsTab : 'connection'
+  // A model operation drops the status until the fresh one comes: the list keeps
+  // the last one meanwhile, or every model would read as not downloaded.
+  if (status) lastStatus.current = status
+  const catalogStatus = status || (busyOp ? lastStatus.current : null)
+  const modelRows = catalogRows({ status: catalogStatus, catalog: modelCatalog, activeName: chatModel?.name, download })
 
   // --- render -----------------------------------------------------------------
 
   // Where this tab reaches GenAI Studio. Which board Insight works with is Insight's Board
   // menu; this address only says how to reach GenAI Studio's port on it, so no status here.
-  const addressCard = (
-    <SettingsCard id="address" icon="address" title="GenAI Studio address" summary={addressSummary({ settings })}>
+  const addressForm = (
+    <>
       <form className="genai-form" onSubmit={applySettings}>
         <label>
           <span>GenAI Studio address</span>
@@ -1892,20 +2044,12 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             aria-describedby={addressError ? 'genai-address-error' : undefined}
           />
         </label>
-        <button type="submit" className="btn-tonal" disabled={!allowed.changeBoard}>Save</button>
+        <button type="submit" className="btn-tonal" disabled={!allowed.changeBoard}>Save address</button>
       </form>
       {!allowed.changeBoard && <p className="hint">The address can be changed once the current reply, recording, model operation or download finishes.</p>}
       {addressError && <p id="genai-address-error" className="genai-field-error" role="alert">{addressError}</p>}
-      {mode === 'workspace' && (
-        <div className="genai-actions">
-          <button type="button" className="btn-ghost genai-small" onClick={openSetup}>Manage installation</button>
-        </div>
-      )}
-      <p className="hint">
-        {mode === 'workspace' ? 'Manage installation shows the setup steps on the board Insight is connected to: update GenAI Studio, run setup again or stop it. ' : ''}
-        Leave the address empty to use {settings?.defaultUrl || 'the paired DevKit'}.
-      </p>
-    </SettingsCard>
+      <p className="hint">Leave the address empty to use {settings?.defaultUrl || 'the paired DevKit'}.</p>
+    </>
   )
 
   // While GenAI Studio can't be used, or the user is in setup: only the setup page, and the
@@ -2007,7 +2151,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
         </section>
         {((connectionOpen && addressMatters) || backend.state === 'unconfigured') && (
           <section className="panel genai-settings-panel genai-setup-connection" aria-label="Connection settings">
-            {addressCard}
+            <SettingsCard id="address" icon="address" title="GenAI Studio address" summary={addressSummary({ settings })}>{addressForm}</SettingsCard>
           </section>
         )}
       </div>
@@ -2050,7 +2194,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
           <span>Model</span>
           <select
             value={chatModel ? chatModel.name : ''}
-            onChange={(e) => chooseChatModel(e.target.value)}
+            onChange={(e) => { if (e.target.value === MANAGE_MODELS) openSettings('models'); else chooseChatModel(e.target.value) }}
             disabled={!allowed.changeChatModel || chatModels(status).length === 0}
             title={chatModel ? chatModel.name : ''}
           >
@@ -2060,6 +2204,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
                 {modelLabel(m)}{keepsSeveral && (status?.loaded || []).includes(m.name) ? ' · loaded' : ''}{m.supported === false ? ' · not supported' : ''}
               </option>
             ))}
+            <option value={MANAGE_MODELS}>Manage models</option>
           </select>
         </label>
         {keepsSeveral && (
@@ -2094,7 +2239,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
         <Tooltip label="Answer from documents" note={why('toggleDocuments')}>
           {(describedBy) => (
             <label className={`genai-check${allowed.toggleDocuments ? '' : ' genai-check-off'}${spot('documents')}`}>
-              <input type="checkbox" checked={docs.available && useDocs} aria-disabled={allowed.toggleDocuments ? undefined : true} aria-describedby={describedBy} onChange={(e) => { if (!allowed.toggleDocuments) return; setUseDocs(e.target.checked); setDocsMidChat(e.target.checked && hasConversation) }} />
+              <input type="checkbox" checked={docs.available && useDocs} aria-disabled={allowed.toggleDocuments ? undefined : true} aria-describedby={describedBy} onChange={(e) => chooseUseDocs(e.target.checked)} />
               Use my documents
             </label>
           )}
@@ -2138,195 +2283,214 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
               <button type="button" className="btn-tonal" onClick={openSetup}>Update GenAI Studio</button>
             )}
             {(backend.action === 'settings' || backend.action === 'setup') && !settingsOpen && (
-              <button type="button" className="btn-ghost" onClick={() => setSettingsOpen(true)}>Change GenAI Studio address</button>
+              <button type="button" className="btn-ghost" onClick={() => openSettings('connection')}>Change GenAI Studio address</button>
             )}
             {lastError && <button type="button" className="btn-ghost" onClick={() => setLastError(null)}>Dismiss</button>}
           </div>
         </section>
       )}
 
-      {(settingsOpen || backend.state === 'unconfigured') && (
-        <section className="panel genai-settings-panel" aria-label="GenAI settings">
-          {addressCard}
-
-          <SettingsCard id="replies" icon="replies" title="Replies" summary={replySummary(replySettings)}>
-            <label className="genai-field">
-              <span>System prompt</span>
-              <textarea
-                value={replySettings.systemPrompt}
-                onChange={(e) => changeReplySettings({ systemPrompt: e.target.value })}
-                // A field left empty shows the default again: that is what is sent.
-                onBlur={() => { if (!replySettings.systemPrompt.trim()) changeReplySettings({ systemPrompt: DEFAULT_SYSTEM_PROMPT }) }}
-                placeholder={DEFAULT_SYSTEM_PROMPT}
-                rows={3}
-                disabled={!allowed.changeReplySettings}
-                aria-describedby="genai-system-prompt-note"
-              />
-            </label>
-            <div className="genai-actions">
-              <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeReplySettings || replySettings.systemPrompt === DEFAULT_SYSTEM_PROMPT} onClick={() => changeReplySettings({ systemPrompt: DEFAULT_SYSTEM_PROMPT })}>
-                Reset to default
-              </button>
-              <span id="genai-system-prompt-note" className="hint">
-                {systemPromptNote(replySettings.systemPrompt)} The tab still tells the model whether a message has a picture.
-              </span>
+      {showSettings && (
+        <div ref={settingsDialog} className="genai-bench" role="dialog" aria-modal="true" aria-label="GenAI settings">
+        <section className="genai-settings">
+          <div className="genai-settings-head">
+            <div className="genai-settings-title">
+              <h2>Settings</h2>
+              <p>Manage your models and make GenAI Studio your own.</p>
             </div>
-            <label className="genai-field">
-              <span>Longest reply: {replySettings.maxTokens} tokens</span>
-              <input
-                type="range"
-                min={MAX_TOKENS_LIMITS.min}
-                max={MAX_TOKENS_LIMITS.max}
-                step={MAX_TOKENS_LIMITS.step}
-                value={replySettings.maxTokens}
-                onChange={(e) => changeReplySettings({ maxTokens: clampMaxTokens(e.target.value) })}
-                disabled={!allowed.changeReplySettings}
+            <span className={`genai-pill genai-pill-${backend.state}`}>{backend.state === 'ready' ? 'DevKit connected' : STATE_LABELS[backend.state] || backend.state}</span>
+            {settingsOpen && (
+              <button type="button" ref={settingsClose} className="btn-ghost genai-settings-close" aria-label="Close settings" title="Close (Esc)" onClick={() => setSettingsOpen(false)}>
+                <Icon d={ICONS.close} />
+              </button>
+            )}
+          </div>
+          <SettingsTabs active={openTab} onChange={setSettingsTab} modelCount={modelRows.length} />
+          <div className="genai-settings-content" ref={settingsBox} role="tabpanel" id={`genai-panel-${openTab}`} aria-labelledby={`genai-tab-${openTab}`}>
+            {openTab === 'models' && (
+              <ModelCatalog
+                rows={modelRows}
+                catalog={modelCatalog}
+                status={catalogStatus}
+                chatModel={chatModel}
+                searchBox={catalogSearchBox}
+                syncing={catalogSync}
+                downloads={downloads}
+                download={download}
+                failedDownload={failedDownload}
+                allowed={allowed}
+                onSync={syncCatalog}
+                onDownload={startDownload}
+                onLoad={requestLoad}
+                onUnload={unloadChatModel}
+                onUseSpeech={switchSpeechModel}
+                onDelete={deleteModel}
+                onSeen={readCard}
+                cardsMissed={cardsMissed}
               />
-            </label>
-            <p className="hint">
-              A token is about three quarters of a word; a reply that reaches the limit stops there. Both settings apply to the chat
-              and the vision view, not to the benchmark, and this browser remembers them.
-            </p>
-          </SettingsCard>
+            )}
 
-          <SettingsCard id="models" icon="models" title="Models" summary={modelsSummary(status)} wide>
-            <p className="hint">{status?.disk ? `${formatBytes(status.disk.freeBytes)} free on the board. ` : ''}{keepsSeveral ? `Up to ${residentLimit(status)} chat models stay loaded, and the one in use answers;` : 'One chat model runs at a time;'} the speech model turns your voice into text.</p>
-            <ModelList
-              title="Chat and vision"
-              models={chatModels(status)}
-              status={status}
-              activeName={keepsSeveral && chatModel ? chatModel.name : undefined}
-              disabled={!allowed.changeChatModel}
-              onLoad={requestLoad}
-              onUnload={unloadChatModel}
-              onUse={keepsSeveral ? answerWith : undefined}
-              useOnlyLoaded
-              canDelete={(m) => deletableModel(m, status)}
-              deleteDisabled={!allowed.deleteModel}
-              onDelete={deleteModel}
-            />
-            <ModelList
-              title="Speech recognition"
-              models={speechModels(status)}
-              status={status}
-              disabled={!allowed.changeSpeechModel}
-              onUse={switchSpeechModel}
-              canDelete={(m) => deletableModel(m, status)}
-              deleteDisabled={!allowed.deleteModel}
-              onDelete={deleteModel}
-            />
-            {downloads.state !== 'unknown' && (
-              <div className="genai-model-group">
-                <h4 className="genai-model-group-title">Get more models</h4>
-                {downloads.state === 'disabled' ? (
-                  <p className="hint"><WithCode text={downloads.message} /></p>
-                ) : (
-                  <>
-                    <form className="genai-row" onSubmit={searchHub}>
-                      <input ref={hubSearchBox} type="search" className="search-input" value={hubQuery} onChange={(e) => setHubQuery(e.target.value)} placeholder="Qwen, Whisper, Llama" aria-label="Search Hugging Face models" />
-                      <button type="submit" className="btn-ghost" disabled={!allowed.searchModels}>Search Hugging Face</button>
-                    </form>
-                    {downloads.state === 'offline' && <p className="hint">{downloads.message}</p>}
-                    <DownloadProgress download={download} />
-                    <DownloadFailure failure={failedDownload} disabled={!allowed.downloadModel} onDownload={(repoId) => startDownload(repoId)} />
-                    {hubResults && hubResults.enabled !== false && (
-                      <ul className="genai-models" aria-label="Models on Hugging Face">
-                        {(hubResults.results || []).length === 0 && <li className="hint">No matching models.</li>}
-                        {(hubResults.results || []).map((r) => {
-                          const kind = modelKind(r)
-                          const name = friendlyModelName(r.repoId.split('/').pop())
-                          return (
-                            <li key={r.repoId} className="genai-model-row">
-                              <span className={`genai-kind genai-kind-${kind.key}`}>{kind.label}</span>
-                              <span className="genai-model-name" title={r.repoId}>{name}</span>
-                              <span className="genai-model-size">{r.sizeBytes ? formatBytes(r.sizeBytes) : ''}</span>
-                              {r.alreadyInCatalog ? <span className="genai-model-state genai-model-state-on">On the board</span>
-                                : r.unsupportedReason ? <span className="genai-model-state genai-model-state-unsupported" title={r.unsupportedReason}>Can't run here</span>
-                                  : <span className="genai-model-state genai-model-state-off">On Hugging Face</span>}
-                              <span className="genai-model-actions">
-                                {!r.alreadyInCatalog && (
-                                  <button type="button" className="btn-ghost genai-small" disabled={!allowed.downloadModel || Boolean(r.unsupportedReason)} title={r.unsupportedReason || r.repoId} aria-label={`Download ${name}`} onClick={() => startDownload(r.repoId)}>
-                                    Download
-                                  </button>
-                                )}
-                              </span>
-                            </li>
-                          )
-                        })}
-                      </ul>
+            {openTab === 'replies' && (
+              <div className="genai-settings-fields">
+                <section className="genai-settings-section" aria-labelledby="genai-replies-title">
+                  <h3 id="genai-replies-title">Replies</h3>
+                  <p className="hint">Applies to chat and vision, not to the benchmark. These preferences are saved in this browser.</p>
+                  <label className="genai-field">
+                    <span>System prompt</span>
+                    <textarea
+                      value={replySettings.systemPrompt}
+                      onChange={(e) => changeReplySettings({ systemPrompt: e.target.value })}
+                      // A field left empty shows the default again: that is what is sent.
+                      onBlur={() => { if (!replySettings.systemPrompt.trim()) changeReplySettings({ systemPrompt: DEFAULT_SYSTEM_PROMPT }) }}
+                      placeholder={DEFAULT_SYSTEM_PROMPT}
+                      rows={4}
+                      disabled={!allowed.changeReplySettings}
+                      aria-describedby="genai-system-prompt-note"
+                    />
+                  </label>
+                  <div className="genai-settings-between">
+                    <span id="genai-system-prompt-note" className="hint">{systemPromptNote(replySettings.systemPrompt)}</span>
+                    <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeReplySettings || replySettings.systemPrompt === DEFAULT_SYSTEM_PROMPT} onClick={() => changeReplySettings({ systemPrompt: DEFAULT_SYSTEM_PROMPT })}>
+                      Reset to default
+                    </button>
+                  </div>
+                  <label className="genai-field">
+                    <span className="genai-settings-between">Longest reply <span>{replySettings.maxTokens} tokens</span></span>
+                    <input
+                      type="range"
+                      min={MAX_TOKENS_LIMITS.min}
+                      max={MAX_TOKENS_LIMITS.max}
+                      step={MAX_TOKENS_LIMITS.step}
+                      value={replySettings.maxTokens}
+                      onChange={(e) => changeReplySettings({ maxTokens: clampMaxTokens(e.target.value) })}
+                      disabled={!allowed.changeReplySettings}
+                    />
+                  </label>
+                  <p className="hint">About {Math.round(replySettings.maxTokens * 0.75)} words. Replies stop when they reach this limit.</p>
+                  <SettingsSwitch
+                    label="Think first"
+                    note={thinkBlocked || 'Allow supported models more time to reason.'}
+                    checked={canThink && thinking}
+                    aria-disabled={canThink ? undefined : true}
+                    onChange={(e) => { if (canThink) setThinking(e.target.checked) }}
+                  />
+                </section>
+
+                <section className="genai-settings-section" aria-labelledby="genai-voice-title">
+                  <h3 id="genai-voice-title">Voice</h3>
+                  <p className="hint">Choose how you speak to the board and hear its replies.</p>
+                  <div className="genai-form">
+                    <label>
+                      <span>Voice engine</span>
+                      <select value={engine} onChange={(e) => { setEngine(e.target.value); setVoice('') }}>
+                        <option value="default">Automatic</option>
+                        {engines.map((e) => <option key={e.key} value={e.key}>{e.label || e.key}</option>)}
+                      </select>
+                    </label>
+                    {engine !== 'default' && engineVoices.length > 0 && (
+                      <label>
+                        <span>Voice</span>
+                        <select value={voice} onChange={(e) => setVoice(e.target.value)}>
+                          <option value="">Default</option>
+                          {engineVoices.map((v) => <option key={v.id} value={v.id}>{v.label || v.id}</option>)}
+                        </select>
+                      </label>
                     )}
+                    <label>
+                      <span>Language you speak</span>
+                      <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+                        {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <SettingsSwitch label="Read replies aloud" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
+                  {status?.asrModel && (
+                    <p className="genai-settings-notice">
+                      Speech recognition is using <b>{friendlyModelName(status.asrModel)}</b>. Manage speech models in the Models tab.
+                    </p>
+                  )}
+                </section>
+              </div>
+            )}
+
+            {openTab === 'documents' && (
+              <div className="genai-settings-fields">
+                <h3>Documents</h3>
+                <p className="hint">Give the board reference material to use in its answers.</p>
+                {docs.available ? (
+                  <>
+                    <SettingsSwitch
+                      label="Use my documents"
+                      note={why('toggleDocuments') || 'Search your documents when answering questions.'}
+                      checked={useDocs}
+                      aria-disabled={allowed.toggleDocuments ? undefined : true}
+                      onChange={(e) => chooseUseDocs(e.target.checked)}
+                    />
+                    <div className="genai-settings-card">
+                      <span className="genai-settings-card-icon"><Icon d={ICONS.documents} /></span>
+                      <div className="genai-settings-title">
+                        <strong>{documentsCard(docStatus).name}</strong>
+                        <p className="hint">{documentsCard(docStatus).detail}</p>
+                      </div>
+                      <button type="button" className="btn-ghost" disabled={!allowed.inspectDocuments || !(docStatus && docStatus.database)} title="The sections the board searches, with a filter" onClick={() => { if (allowed.inspectDocuments) setDocsViewOpen(true) }}>
+                        View sections
+                      </button>
+                    </div>
+                    {/* A search service that isn't running is said in full. */}
+                    {docStatus?.database && docStatus.service && docStatus.service !== 'ok' && <p className="genai-error">{documentsSummary(docStatus)}</p>}
+                    <input ref={docInput} type="file" accept=".md,text/markdown" hidden onChange={(e) => { runDocumentTask('Uploading', (o) => uploadDocument(e.target.files[0], o)); e.target.value = '' }} />
+                    <div className="genai-actions">
+                      <button type="button" className="btn-tonal" disabled={!allowed.documentTasks} onClick={() => docInput.current?.click()}>Upload Markdown</button>
+                      <button type="button" className="btn-ghost" disabled={!allowed.documentTasks} onClick={() => runDocumentTask('Resetting', resetDocuments)}>Restore default</button>
+                    </div>
+                    <p className="hint">Uploading a file replaces the current document. Supported format: .md</p>
+                    {docProgress && (
+                      <p className="hint" aria-live="polite">{docProgress.label}… {progressOutcome(docProgress.text).message}</p>
+                    )}
+                    <details className="genai-settings-fold">
+                      <summary>Remove documents</summary>
+                      <p className="hint">The board won't have reference material until you upload a file or restore the default.</p>
+                      <button type="button" className="btn-ghost danger" disabled={!allowed.documentTasks || !(docStatus && docStatus.database)} onClick={() => clearAllDocuments()}>Clear documents</button>
+                    </details>
                   </>
+                ) : (
+                  <p className="hint">{docs.reason}</p>
                 )}
               </div>
             )}
-          </SettingsCard>
 
-          <SettingsCard
-            id="voice"
-            icon="voice"
-            title="Voice"
-            summary={voiceSummary({ engine, voice, engines, languageLabel: language === 'auto' ? null : LANGUAGES.find((l) => l.value === language)?.label })}
-          >
-            <div className="genai-form">
-              <label>
-                <span>Voice engine</span>
-                <select value={engine} onChange={(e) => { setEngine(e.target.value); setVoice('') }}>
-                  <option value="default">Automatic</option>
-                  {engines.map((e) => <option key={e.key} value={e.key}>{e.label || e.key}</option>)}
-                </select>
-              </label>
-              {engine !== 'default' && engineVoices.length > 0 && (
-                <label>
-                  <span>Voice</span>
-                  <select value={voice} onChange={(e) => setVoice(e.target.value)}>
-                    <option value="">Default</option>
-                    {engineVoices.map((v) => <option key={v.id} value={v.id}>{v.label || v.id}</option>)}
-                  </select>
-                </label>
-              )}
-              <label>
-                <span>Language you speak</span>
-                <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-                  {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-                </select>
-              </label>
-            </div>
-          </SettingsCard>
-
-          <SettingsCard id="documents" icon="documents" title="Documents" summary={documentsCardSummary({ docs, docStatus })}>
-            {docs.available ? (
-              <>
-                <p className="hint">
-                  With <b>Use my documents</b> on, the board answers from these documents. Uploading a Markdown file
-                  replaces them; Reset brings back the default SiMa document.
-                </p>
-                {/* The summary line may be cut short: a search service that isn't running is said in full. */}
-                {docStatus?.database && docStatus.service && docStatus.service !== 'ok' && <p className="genai-error">{documentsSummary(docStatus)}</p>}
-                <input ref={docInput} type="file" accept=".md,text/markdown" hidden onChange={(e) => { runDocumentTask('Uploading', (o) => uploadDocument(e.target.files[0], o)); e.target.value = '' }} />
-                <div className="genai-actions">
-                  <button type="button" className="btn-tonal" disabled={!allowed.documentTasks} onClick={() => docInput.current?.click()}>Upload a Markdown file</button>
-                  <button type="button" className="btn-ghost" disabled={!allowed.documentTasks} onClick={() => runDocumentTask('Resetting', resetDocuments)}>Reset to the default</button>
-                  <button type="button" className="btn-ghost danger" disabled={!allowed.documentTasks || !(docStatus && docStatus.database)} onClick={() => clearAllDocuments()}>Clear</button>
-                  <button type="button" className="btn-ghost" disabled={!allowed.inspectDocuments || !(docStatus && docStatus.database)} title="The sections the board searches, with a filter" onClick={() => { if (allowed.inspectDocuments) setDocsViewOpen(true) }}>
-                    View documents
-                  </button>
+            {openTab === 'connection' && (
+              <div className="genai-settings-fields">
+                <h3>Connection</h3>
+                <p className="hint">Connect Insight to GenAI Studio running on your board.</p>
+                <div className="genai-settings-card">
+                  <div className="genai-settings-title">
+                    <strong>GenAI Studio</strong>
+                    <p className="hint">{addressSummary({ settings })}</p>
+                  </div>
+                  <span className={`genai-pill genai-pill-${backend.state}`}>{backend.state === 'ready' ? 'Connected' : STATE_LABELS[backend.state] || backend.state}</span>
                 </div>
-                {docProgress && (
-                  <p className="hint" aria-live="polite">{docProgress.label}… {progressOutcome(docProgress.text).message}</p>
+                {addressForm}
+                {mode === 'workspace' && (
+                  <details className="genai-settings-fold">
+                    <summary>Manage installation</summary>
+                    <p className="hint">Shows the setup steps on the board Insight is connected to: update GenAI Studio, run setup again or stop it.</p>
+                    <button type="button" className="btn-ghost" onClick={openSetup}>Open installation manager</button>
+                  </details>
                 )}
-              </>
-            ) : (
-              <p className="hint">{docs.reason}</p>
+                <details className="genai-settings-fold">
+                  <summary>Troubleshooting</summary>
+                  <p className="hint">
+                    If a model fails to load or replies stop, restart GenAI Studio on the board: <code>./run.sh stop</code>, then <code>{START_COMMAND}</code>.
+                    That frees the accelerator; then load the model again.
+                  </p>
+                  <button type="button" className="btn-ghost" onClick={copyRestartCommands}>Copy restart commands</button>
+                </details>
+              </div>
             )}
-          </SettingsCard>
-
-          <SettingsCard id="troubleshooting" icon="troubleshoot" title="Troubleshooting" summary="Restart GenAI Studio if a model load fails or replies stop" wide>
-            <p className="hint">
-              Restart GenAI Studio on the board: <code>./run.sh stop</code>, then <code>{START_COMMAND}</code>.
-              That frees the accelerator; then load the model again.
-            </p>
-          </SettingsCard>
+          </div>
         </section>
+        </div>
       )}
 
       <section className="panel genai-chat" aria-label="Chat">
@@ -3037,6 +3201,8 @@ function CardSpeech({ id, answer, speech }) {
 }
 
 function SolutionsOverlay({ model, sees, onClose }) {
+  const dialog = useRef(null)
+  useDialogFocus(dialog)
   const [open, setOpen] = useState(null)
   // The app waiting for "Open anyway" while the model can't serve it.
   const [askApp, setAskApp] = useState(null)
@@ -3104,15 +3270,18 @@ function SolutionsOverlay({ model, sees, onClose }) {
   }
 
   return (
-    <div className={open ? 'genai-solutions' : 'genai-bench'} role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
+    <div ref={dialog} className="genai-bench" role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
       {open ? (
         <>
-          <iframe ref={frame} className="genai-solutions-frame" title={open.name} src={solutionUrl(open.mode, model)} allow="camera; microphone; fullscreen" onLoad={watchFrameKeys} />
-          <div className="genai-solutions-actions">
-            <button type="button" ref={backButton} className="btn-ghost" onClick={() => setOpen(null)} title="Back to the solutions">Back</button>
-            <a className="btn-ghost" href={solutionUrl(open.mode, model)} target="_blank" rel="noopener" title="Open in a new tab">New tab</a>
-            <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
+          <div className="genai-bench-top genai-solutions-top">
+            <h2>{open.name}</h2>
+            <div className="genai-solutions-actions">
+              <button type="button" ref={backButton} className="btn-ghost" onClick={() => setOpen(null)} title="Back to the solutions">Back</button>
+              <a className="btn-ghost" href={solutionUrl(open.mode, model)} target="_blank" rel="noopener" title="Open in a new tab">New tab</a>
+              <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
+            </div>
           </div>
+          <iframe ref={frame} className="genai-solutions-frame" title={open.name} src={solutionUrl(open.mode, model)} allow="camera; microphone; fullscreen" onLoad={watchFrameKeys} />
         </>
       ) : (
         <>
@@ -3157,6 +3326,8 @@ function SolutionsOverlay({ model, sees, onClose }) {
 // memory beside them (no_room). The board unloads only what is chosen here,
 // because other clients may be using the others.
 function UnloadChoice({ ask, status, disabled, onCancel, onConfirm }) {
+  const dialog = useRef(null)
+  useDialogFocus(dialog)
   const { model, choice, already = [] } = ask
   const byName = new Map(chatModels(status).map((m) => [m.name, m]))
   const [picked, setPicked] = useState(() => new Set())
@@ -3183,7 +3354,7 @@ function UnloadChoice({ ask, status, disabled, onCancel, onConfirm }) {
     })
   }
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Make room for ${name}`}
+    <div ref={dialog} className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Make room for ${name}`}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}>
       <div className="modal-card genai-unload-card">
         <h3>Make room for {name}</h3>
@@ -3220,51 +3391,280 @@ function UnloadChoice({ ask, status, disabled, onCancel, onConfirm }) {
 // chat model that answers, when the board keeps several. useOnlyLoaded: Use is
 // offered for the other loaded models (chat); otherwise for models not in use
 // (speech).
-function ModelList({ title, models, status, activeName, disabled, onLoad, onUnload, onUse, useOnlyLoaded, canDelete, deleteDisabled, onDelete }) {
+// A setting that is on or off, with what it does under its name.
+function SettingsSwitch({ label, note, ...input }) {
   return (
-    <div className="genai-model-group">
-      <h4 className="genai-model-group-title">{title}</h4>
-      {models.length === 0 ? (
-        <p className="hint">None on the board yet.</p>
-      ) : (
-        <ul className="genai-models" aria-label={title}>
-          {models.map((m) => {
-            const row = modelRow(m, status, activeName)
-            return (
-              <li key={m.name} className={`genai-model-row${row.on ? ' genai-model-row-on' : ''}`}>
-                <span className={`genai-kind genai-kind-${row.kind.key}`}>{row.kind.label}</span>
-                <span className="genai-model-name" title={m.name}>{row.name}</span>
-                <span className="genai-model-size">{row.size}</span>
-                <span className={`genai-model-state genai-model-state-${row.state.key}`} title={row.state.key === 'unsupported' ? m.unsupportedReason || undefined : undefined}>
-                  {row.state.label}
-                </span>
-                <span className="genai-model-actions">
-                  {onLoad && !row.on && (
-                    <button type="button" className="btn-ghost genai-small" disabled={disabled || m.supported === false} title={m.unsupportedReason || (m.estimatedLoadS ? `About ${formatDuration(m.estimatedLoadS)} to load` : '')} aria-label={`Load ${row.name}`} onClick={() => onLoad(m)}>
-                      Load
-                    </button>
-                  )}
-                  {onUnload && row.on && (
-                    <button type="button" className="btn-ghost genai-small" disabled={disabled} aria-label={`Unload ${row.name}`} onClick={() => onUnload(m)}>Unload</button>
-                  )}
-                  {onUse && (useOnlyLoaded ? row.on && m.name !== activeName : !row.on) && (
-                    <button type="button" className="btn-ghost genai-small" disabled={disabled || m.supported === false} title={m.unsupportedReason || ''} aria-label={`Use ${row.name}`} onClick={() => onUse(m)}>Use</button>
-                  )}
-                  {onDelete && canDelete(m) && (
-                    <button type="button" className="btn-ghost genai-small danger" disabled={deleteDisabled} title="Delete it from the board to free its space" aria-label={`Delete ${row.name}`} onClick={() => onDelete(m)}>Delete</button>
-                  )}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
-      )}
+    <label className="genai-switch-row">
+      <span>
+        {label}
+        {note && <small>{note}</small>}
+      </span>
+      <input type="checkbox" role="switch" className="genai-switch" {...input} />
+    </label>
+  )
+}
+
+// Settings' areas; the arrow keys, Home and End move between them.
+function SettingsTabs({ active, onChange, modelCount }) {
+  const tabs = useRef([])
+  function onKeyDown(event, index) {
+    const last = SETTINGS_TABS.length - 1
+    const next = { ArrowRight: index === last ? 0 : index + 1, ArrowLeft: index === 0 ? last : index - 1, Home: 0, End: last }[event.key]
+    if (next === undefined) return
+    event.preventDefault()
+    onChange(SETTINGS_TABS[next].id)
+    tabs.current[next]?.focus()
+  }
+  return (
+    <div className="genai-settings-tabs" role="tablist" aria-label="Settings categories">
+      {SETTINGS_TABS.map((tab, index) => (
+        <button
+          key={tab.id}
+          ref={(el) => { tabs.current[index] = el }}
+          type="button"
+          role="tab"
+          id={`genai-tab-${tab.id}`}
+          className="genai-settings-tab"
+          aria-selected={tab.id === active}
+          aria-controls={`genai-panel-${tab.id}`}
+          tabIndex={tab.id === active ? 0 : -1}
+          onClick={() => onChange(tab.id)}
+          onKeyDown={(e) => onKeyDown(e, index)}
+        >
+          <Icon d={ICONS[tab.icon]} />
+          {tab.label}
+          {tab.id === 'models' && <span className="genai-settings-count">{modelCount}</span>}
+        </button>
+      ))}
     </div>
   )
 }
 
-// Why the last download failed; for a repo Hugging Face renamed, a button
-// downloads the new id (the board refuses to follow the rename on its own).
+// What can be done with a model from its row: download, load or unload it.
+function ModelActions({ row, activeName, allowed, canDownload, downloadNote, onDownload, onLoad, onUnload, onUseSpeech }) {
+  const { model, name } = row
+  if (!model) {
+    if (row.state.key === 'downloading') return null
+    return (
+      <button type="button" className="btn-tonal genai-small" disabled={!canDownload || Boolean(row.unsupportedReason)} title={row.unsupportedReason || downloadNote || `Download ${name} to your DevKit`} aria-label={`Download ${name}`} onClick={() => onDownload(row.repoId)}>
+        <Icon d={ICONS.download} />
+        Download
+      </button>
+    )
+  }
+  if (row.kind.key === 'speech') {
+    // The board refuses to unload the speech model in use: loading another replaces it.
+    if (row.on) return <button type="button" className="btn-ghost genai-small" disabled title="Load another speech model to replace this one" aria-label={`Unload ${name}`}>Unload</button>
+    return <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeSpeechModel || model.supported === false || model.complete === false} title={model.incompleteReason || model.unsupportedReason || ''} aria-label={`Load ${name}`} onClick={() => onUseSpeech(model)}>Load</button>
+  }
+  if (!row.on) {
+    return (
+      <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeChatModel || model.supported === false || model.complete === false} title={model.incompleteReason || model.unsupportedReason || (model.estimatedLoadS ? `About ${formatDuration(model.estimatedLoadS)} to load` : '')} aria-label={`Load ${name}`} onClick={() => onLoad(model)}>
+        Load
+      </button>
+    )
+  }
+  return (
+    <>
+      {/* Another model answers: Load on a loaded model makes this one answer, at once. */}
+      {model.name !== activeName && (
+        <button type="button" className="btn-tonal genai-small" disabled={!allowed.changeChatModel} title="Answer with this model" aria-label={`Load ${name}`} onClick={() => onLoad(model)}>Load</button>
+      )}
+      <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeChatModel} aria-label={`Unload ${name}`} onClick={() => onUnload(model)}>Unload</button>
+    </>
+  )
+}
+
+// A model in the catalog. Its card is asked for once its row comes near the view.
+function CatalogRow({ row, activeName, canReadCard, cardMissed, open, onToggle, download, status, allowed, onDelete, onSeen, actions }) {
+  const box = useRef(null)
+  // Waits for Hugging Face: the row watches again once a card can be read.
+  const needsCard = Boolean(canReadCard && row.repoId && !row.summary)
+  useEffect(() => {
+    if (!needsCard || !box.current) return undefined
+    const watch = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) onSeen(row.repoId)
+    }, { rootMargin: '200px' })
+    watch.observe(box.current)
+    return () => watch.disconnect()
+  }, [needsCard, row.repoId])
+
+  const downloading = row.state.key === 'downloading'
+  const pct = downloading && typeof download?.pct === 'number' ? download.pct : null
+  // A stalled download reports years: no estimate is better.
+  const eta = downloading && download?.etaS && download.etaS < 86400 ? `About ${formatDuration(download.etaS)} left` : undefined
+  return (
+    <article ref={box} className="genai-catalog-row" aria-label={row.name}>
+      <div className="genai-catalog-main">
+        <div className="genai-catalog-name">
+          <button type="button" className={`genai-catalog-expand${open ? ' genai-catalog-expand-open' : ''}`} aria-expanded={open} aria-controls={`genai-model-${row.key}`} aria-label={`${open ? 'Hide' : 'Show'} details for ${row.name}`} onClick={() => { onToggle(row.key); if (!open && needsCard) onSeen(row.repoId) }}>
+            <Icon d={ICONS.chevron} />
+          </button>
+          <div>
+            <strong>{row.name}</strong>
+            <small title={row.source}>{row.source}</small>
+          </div>
+        </div>
+        <span className="genai-catalog-type"><span className={`genai-kind genai-kind-${row.kind.key}`}>{row.kind.label}</span></span>
+        <span className="genai-catalog-size">{row.size || '—'}</span>
+        <span className={`genai-catalog-status genai-catalog-status-${row.state.key}`} title={eta || row.model?.incompleteReason || (row.state.key === 'unsupported' ? row.model?.unsupportedReason || row.unsupportedReason || undefined : undefined)}>
+          {row.state.label}{pct !== null ? ` ${pct}%` : ''}
+          {downloading && <ProgressBar pct={download?.pct} label={`Downloading ${row.repoId}`} />}
+        </span>
+        <div className="genai-catalog-action">
+          <ModelActions row={row} activeName={activeName} allowed={allowed} {...actions} />
+        </div>
+      </div>
+      <div className="genai-catalog-details" id={`genai-model-${row.key}`} hidden={!open}>
+        <p>{cardNote(row, { canRead: canReadCard, missed: cardMissed })}</p>
+        <div className="genai-actions">
+          {row.repoId && <a href={`https://huggingface.co/${row.repoId}`} target="_blank" rel="noreferrer">Model card on Hugging Face</a>}
+          {row.model && deletableModel(row.model, status) && (
+            <button type="button" className="btn-ghost genai-small danger" disabled={!allowed.deleteModel} title="Delete its files from the board to free the space" aria-label={`Remove ${row.name} from DevKit`} onClick={() => onDelete(row.model)}>
+              Remove from DevKit
+            </button>
+          )}
+        </div>
+      </div>
+    </article>
+  )
+}
+
+// Settings, Models: what the board holds, then what it can download in a list
+// that scrolls by itself, both under one search. Each model's card is behind
+// its arrow.
+function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, downloads, download, failedDownload, allowed, onSync, onDownload, onDelete, onSeen, cardsMissed, ...handlers }) {
+  const [query, setQuery] = useState('')
+  const [catalogQuery, setCatalogQuery] = useState('')
+  const [type, setType] = useState('all')
+  const [opened, setOpened] = useState(() => new Set())
+  const shown = filterRows(rows, { query, type })
+  const onBoard = shown.filter((r) => r.onBoard)
+  // The catalog's own search, beside its list: it leaves the board's list alone.
+  const offered = filterRows(shown.filter((r) => !r.onBoard), { query: catalogQuery })
+  const filtered = Boolean(query.trim()) || Boolean(catalogQuery.trim()) || type !== 'all'
+  const storage = storageSummary(status?.disk)
+  const downloadElsewhere = download && !rows.some((r) => r.repoId === download.repoId)
+  const actions = { ...handlers, onDownload, canDownload: allowed.downloadModel && downloads.state === 'available', downloadNote: downloads.message }
+
+  function clearFilters() {
+    setQuery('')
+    setCatalogQuery('')
+    setType('all')
+  }
+
+  function toggle(key) {
+    setOpened((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(key)) next.add(key)
+      return next
+    })
+  }
+
+  const list = (models) => models.map((row) => (
+    <CatalogRow key={row.key} row={row} activeName={chatModel?.name} canReadCard={downloads.state === 'available'} cardMissed={cardsMissed.has(row.repoId)} open={opened.has(row.key)} onToggle={toggle} download={download} status={status} allowed={allowed} onDelete={onDelete} onSeen={onSeen} actions={actions} />
+  ))
+  const columns = (
+    <div className="genai-catalog-columns" aria-hidden="true">
+      <span>Model</span><span>Type</span><span>Size</span><span>DevKit status</span><span>Action</span>
+    </div>
+  )
+
+  return (
+    <>
+      <div className="genai-catalog-overview">
+        <div>
+          <div className="genai-catalog-overview-title">
+            <Icon d={ICONS.models} />
+            <strong>{boardSummary(rows)}</strong>
+            <span className="genai-pill genai-pill-ready">{chatModel ? `${friendlyModelName(chatModel.name)} in use` : 'No chat model in use'}</span>
+          </div>
+          <p className="hint">{residencyNote(status)}</p>
+        </div>
+        {storage && (
+          <div className="genai-catalog-storage">
+            <span className="hint"><strong>{storage.free}</strong> free of {storage.total} on the DevKit</span>
+            <div className="genai-catalog-storage-track" aria-hidden="true"><i style={{ width: `${storage.usedPct}%` }} /></div>
+          </div>
+        )}
+      </div>
+
+      <div className="genai-catalog-search">
+        <div className="genai-catalog-searchbox">
+          <Icon d={ICONS.search} />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search models by name, task, or family…" aria-label="Search all models" />
+        </div>
+        <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Filter by model type">
+          <option value="all">All types</option>
+          <option value="chat">Chat</option>
+          <option value="vision">Vision</option>
+          <option value="speech">Speech</option>
+        </select>
+      </div>
+
+      <div className="genai-catalog-results">
+        <span aria-live="polite">{resultsLine(onBoard.length + offered.length, rows.length)}</span>
+        {filtered && <button type="button" className="btn-ghost genai-small" onClick={clearFilters}>Clear filters</button>}
+      </div>
+
+      <div className="genai-catalog-head">
+        <h3>On this DevKit</h3>
+      </div>
+      {columns}
+      <div className="genai-catalog-rows" aria-label="Models on this DevKit">
+        {onBoard.length ? list(onBoard) : (
+          <div className="genai-catalog-empty"><p className="hint">{filtered ? 'No models on this DevKit match these filters.' : 'No models on this DevKit yet.'}</p></div>
+        )}
+      </div>
+
+      <div className="genai-catalog-head genai-catalog-head-offer">
+        <div>
+          <h3>Model catalog</h3>
+          <p className="hint">Models from <strong>simaai</strong> on Hugging Face, ready to download to your DevKit.</p>
+        </div>
+        <div className="genai-catalog-searchbox">
+          <Icon d={ICONS.search} />
+          <input ref={searchBox} type="search" value={catalogQuery} onChange={(e) => setCatalogQuery(e.target.value)} placeholder="Search the catalog…" aria-label="Search model catalog" />
+        </div>
+        {downloads.state !== 'disabled' && downloads.state !== 'unknown' && (
+          <div className="genai-catalog-sync">
+            <button type="button" className={`btn-ghost${syncing ? ' genai-catalog-syncing' : ''}`} disabled={syncing || !allowed.searchModels} title="Refresh the list from Hugging Face" onClick={onSync}>
+              <Icon d={ICONS.sync} />
+              {syncing ? 'Syncing…' : 'Sync catalog'}
+            </button>
+            <span className="hint" aria-live="polite">{syncedLabel(catalog.syncedAt)}</span>
+          </div>
+        )}
+      </div>
+
+      {downloads.state === 'disabled' && <p className="hint"><WithCode text={downloads.message} /></p>}
+      {downloads.state === 'offline' && <p className="hint">{downloads.message}</p>}
+      {downloadElsewhere && <DownloadProgress download={download} />}
+      <DownloadFailure failure={failedDownload} disabled={!allowed.downloadModel} onDownload={(repoId) => onDownload(repoId)} />
+
+      {columns}
+      <div className="genai-catalog-rows genai-catalog-rows-scroll" aria-label="Models to download">
+        {offered.length ? list(offered) : (
+          <div className="genai-catalog-empty">
+            {filtered ? (
+              <>
+                <h4>No models match these filters</h4>
+                <p className="hint">Try a model family, such as Qwen, or clear the filters.</p>
+              </>
+            ) : <p className="hint">{catalog.syncedAt ? 'Every model in the catalog is on this DevKit.' : 'Sync the catalog to list the models this board can download.'}</p>}
+          </div>
+        )}
+      </div>
+
+      <p className="genai-catalog-foot hint">Download saves model files from Hugging Face to your DevKit. Load a downloaded model when you're ready to use it.</p>
+      <div className="genai-catalog-note">
+        <span>Browse and search the saved catalog even when Hugging Face is offline.</span>
+        <span>Sync refreshes the list; it doesn't download model files.</span>
+      </div>
+    </>
+  )
+}
+
 function DownloadFailure({ failure, disabled, onDownload }) {
   if (!failure) return null
   return (
@@ -3353,6 +3753,8 @@ const asSentence = (text) => (/[.!?…]$/.test(text) ? text : `${text}.`)
 // `ask` is the tab's: its requests belong to the board session, and it reads
 // the answers aloud when Read replies aloud is on.
 function VisionView({ model, allowed, busyReason, boardCam, cameras, camera, onCameraChange, ticket, ask, prepareSpeech, readAloud, onReadAloudChange, speechStats, speechError, onActivity, onFullscreen, onClose }) {
+  const dialog = useRef(null)
+  useDialogFocus(dialog)
   const sees = Boolean(model && model.supportsVision)
   const modelName = model ? model.name : null
   const [source, setSource] = useState('browser')          // 'browser' | 'board'
@@ -3565,7 +3967,7 @@ function VisionView({ model, allowed, busyReason, boardCam, cameras, camera, onC
 
   const busy = asking || looping
   return (
-    <div className="genai-vision" role="dialog" aria-modal="true" aria-label="Vision">
+    <div ref={dialog} className="genai-vision" role="dialog" aria-modal="true" aria-label="Vision">
       <div className="genai-bench-top genai-vision-top">
         <h2>Vision</h2>
         <p>
@@ -3662,6 +4064,8 @@ function VisionView({ model, allowed, busyReason, boardCam, cameras, camera, onC
 // View documents: what the board's document database holds (GET rag/inspect),
 // the source and its sections, with a filter, like the standalone Studio's.
 function DocumentsViewer({ ticket, onClose }) {
+  const dialog = useRef(null)
+  useDialogFocus(dialog)
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState('')
   const [query, setQuery] = useState('')
@@ -3693,7 +4097,7 @@ function DocumentsViewer({ ticket, onClose }) {
   const view = useMemo(() => inspectSummary(data), [data])
   const shown = useMemo(() => filterSections(view.sections, query), [view, query])
   return (
-    <div className="genai-bench" role="dialog" aria-modal="true" aria-label="Documents on the board">
+    <div ref={dialog} className="genai-bench" role="dialog" aria-modal="true" aria-label="Documents on the board">
       <div className="genai-bench-top">
         <h2>Documents</h2>
         <p>What the board searches when Use my documents is on.</p>

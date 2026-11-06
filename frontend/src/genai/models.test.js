@@ -63,14 +63,12 @@ test('a run tracks what its own loads leave loaded', () => {
   assert.deepEqual([...afterLoad(new Set(['a-chat']), 'b-vlm', {})], ['b-vlm'], 'without the list, nothing else is known to be loaded')
 })
 
-test('the Models card names the model in use and counts the loaded ones', async () => {
-  const { modelRow, modelsSummary } = await import('./settingsCards.js')
+test('a model row says which loaded model is in use', async () => {
+  const { modelRow } = await import('./settingsCards.js')
   const s = status(['a-chat', 'b-vlm', 'whisper'], { resident: ['b-vlm', 'a-chat'], maxResident: 2 })
   assert.equal(modelRow(catalog[1], s, 'b-vlm').state.label, 'In use')
   assert.equal(modelRow(catalog[0], s, 'b-vlm').state.label, 'Loaded')
   assert.equal(modelRow(catalog[0], s).state.label, 'Loaded', 'a board that keeps one says Loaded, as before')
-  assert.match(modelsSummary(s), /^2 chat models loaded/)
-  assert.equal(modelsSummary({ catalog: [catalog[0]], loaded: ['a-chat'] }), 'A loaded · 1 model on the board', 'one loaded model is named')
 })
 
 test('a chosen model the board unloaded is forgotten', () => {

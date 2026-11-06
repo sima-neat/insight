@@ -1,5 +1,5 @@
 // How the GenAI tab asks for a reply: the system prompt and the longest reply
-// (max_tokens), both set in Settings, Replies and remembered per browser.
+// (max_tokens), both set in Settings, Replies & voice and remembered per browser.
 // Kept free of React and DOM so `node --test` covers it.
 
 export const SYSTEM_PROMPT_KEY = 'neat-insight:genai-system-prompt'
@@ -9,7 +9,7 @@ export const MAX_TOKENS_KEY = 'neat-insight:genai-max-tokens'
 // request.max_tokens). The benchmark has its own setting.
 export const MAX_TOKENS_LIMITS = { min: 32, max: 2048, step: 32, default: 512 }
 
-// The tab's default system prompt. Settings, Replies shows it as the
+// The tab's default system prompt. Settings, Replies & voice shows it as the
 // field's text until the user writes their own.
 export const DEFAULT_SYSTEM_PROMPT =
   'You are a helpful assistant. Answer clearly and concisely. Use Markdown formatting when it helps. ' +
@@ -88,10 +88,4 @@ export function saveReplySettings(storage, { systemPrompt, maxTokens }) {
   } catch {
     // The setting still applies until the page is reloaded.
   }
-}
-
-// The Replies card's one line.
-export function replySummary({ systemPrompt, maxTokens } = {}) {
-  const prompt = isDefaultSystemPrompt(systemPrompt) ? 'Default system prompt' : 'Custom system prompt'
-  return `${prompt} · longest reply ${clampMaxTokens(maxTokens)} tokens`
 }

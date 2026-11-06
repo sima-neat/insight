@@ -43,6 +43,7 @@ import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './me
 import { createSentenceSplitter, speakablePieces } from './sentences.js'
 import {
   INSPECT_LIMIT,
+  documentsCard,
   documentsSummary,
   documentsSupport,
   filterSections,
@@ -62,7 +63,6 @@ import {
   clampMaxTokens,
   isDefaultSystemPrompt,
   loadReplySettings,
-  replySummary,
   saveReplySettings,
   systemPromptFor,
   systemPromptNote
@@ -78,7 +78,7 @@ import {
   hubReachOf,
   recommendedOffer
 } from './firstModel.js'
-import { STATE_LABELS, addressSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './settingsCards.js'
+import { STATE_LABELS, addressSummary, modelKind, modelRow } from './settingsCards.js'
 import { LOOP_PAUSE_MS, VISION_PRESETS, createVisionLoop, pause } from './visionLoop.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
 import { allowedActions, blockedReason } from './activity.js'
@@ -1450,9 +1450,6 @@ test('the system prompt field: the default, a custom prompt, and a cleared field
   assert.match(systemPromptNote(DEFAULT_SYSTEM_PROMPT), /^The default prompt/)
   assert.equal(systemPromptNote('  '), 'An empty prompt sends the default.')
   assert.equal(systemPromptNote('Be brief.'), 'Your prompt replaces the default.')
-  assert.equal(replySummary({ systemPrompt: DEFAULT_SYSTEM_PROMPT, maxTokens: 512 }), 'Default system prompt · longest reply 512 tokens')
-  assert.equal(replySummary({ systemPrompt: '', maxTokens: 512 }), 'Default system prompt · longest reply 512 tokens')
-  assert.equal(replySummary({ systemPrompt: 'Be brief.', maxTokens: 1024 }), 'Custom system prompt · longest reply 1024 tokens')
 
   // The view: the field shows the text itself, Reset puts the default back,
   // and a field left empty shows the default again when it loses focus.
@@ -1552,32 +1549,25 @@ test('Settings cards: one line each about how they are set now', () => {
   assert.equal(addressSummary({ settings: { url: 'https://10.0.0.5:5000', configuredUrl: null } }), '10.0.0.5:5000 (default)')
   assert.equal(addressSummary({ settings: { url: '', configuredUrl: 'https://[bad' } }), 'The saved address is not valid')
   assert.equal(addressSummary({ settings: null }), 'No address set')
+})
 
-  assert.equal(modelsSummary(null), 'Waiting for the board')
-  assert.equal(modelsSummary(STATUS), 'Qwen3 VL 4B loaded · 3 models on the board', 'chat, vision and speech models; not the search model')
-  assert.equal(modelsSummary({ ...STATUS, loaded: [] }), 'No chat model loaded · 3 models on the board')
-  assert.equal(modelsSummary({ ...STATUS, loading: { name: 'Qwen3-0.6B-Autoround-a16w4' } }), 'Loading Qwen3 0.6B · 3 models on the board')
-  assert.equal(modelsSummary(EMPTY_STATUS), 'No models on the board yet')
-  assert.equal(modelsSummary({ catalog: [STATUS.catalog[2]], loaded: [] }), 'No chat model loaded · 1 model on the board')
-
-  const engines = [{ key: 'piper-plus', label: 'Piper Plus', voices: [{ id: 'amy', label: 'Amy' }] }]
-  assert.equal(voiceSummary({}), 'Automatic voice · spoken language detected automatically')
-  assert.equal(voiceSummary({ engine: 'piper-plus', voice: 'amy', engines, languageLabel: 'English' }), 'Piper Plus (Amy) · you speak English')
-  assert.equal(voiceSummary({ engine: 'supertonic', engines: [] }), 'Supertonic · spoken language detected automatically', 'an engine the voice list does not describe')
-
-  assert.equal(documentsCardSummary({ docs: { available: false, reason: 'x' } }), 'Not available on this board')
-  assert.equal(documentsCardSummary({ docs: { available: true }, docStatus: null }), 'Checking the documents…')
-  assert.equal(documentsCardSummary({ docs: { available: true }, docStatus: { enabled: true, database: true, service: 'ok', meta: { chunks: 8, input: '/x/neat.md' } } }), '8 sections from neat.md')
+test('the document card names the file and what can be searched in it', () => {
+  assert.deepEqual(documentsCard(null), { name: 'Documents', detail: 'Checking the documents…' })
+  assert.equal(documentsCard({ enabled: true, database: false }).name, 'No documents')
+  assert.deepEqual(documentsCard({ enabled: true, database: true, meta: { chunks: 8, input: '/x/neat.md' } }), { name: 'neat.md', detail: '8 searchable sections' })
+  assert.deepEqual(documentsCard({ enabled: true, database: true, meta: { chunks: 1 } }), { name: 'Your documents', detail: '1 searchable section' })
+  assert.equal(documentsCard({ enabled: true, database: true }).detail, 'Ready to search')
 })
 
 test('a model row: its kind, size and whether it is in use', () => {
   const [vlm, small, whisper] = STATUS.catalog
   assert.deepEqual(modelRow(vlm, STATUS), { name: 'Qwen3 VL 4B', kind: { key: 'vision', label: 'Vision' }, size: '8.4 GB', state: { key: 'on', label: 'Loaded' }, on: true })
-  assert.deepEqual([modelRow(small, STATUS).kind.label, modelRow(small, STATUS).state.label, modelRow(small, STATUS).size], ['Chat', 'Not loaded', '1.4 GB'])
+  assert.deepEqual([modelRow(small, STATUS).kind.label, modelRow(small, STATUS).state.label, modelRow(small, STATUS).size], ['Chat', 'On DevKit', '1.4 GB'])
   assert.deepEqual([modelRow(whisper, STATUS).kind.label, modelRow(whisper, STATUS).state.label, modelRow(whisper, STATUS).size], ['Speech', 'In use', ''])
-  assert.equal(modelRow({ ...whisper, activeAsr: false }, { ...STATUS, asrModel: 'other' }).state.label, 'Not in use')
+  assert.equal(modelRow({ ...whisper, activeAsr: false }, { ...STATUS, asrModel: 'other' }).state.label, 'On DevKit')
   assert.equal(modelRow(small, { ...STATUS, loading: { name: small.name } }).state.label, 'Loading…')
   assert.equal(modelRow({ ...small, supported: false }, STATUS).state.key, 'unsupported')
+  assert.deepEqual(modelRow({ ...small, complete: false }, STATUS).state, { key: 'incomplete', label: 'Download incomplete' })
   // Hugging Face search results type their models llm, vlm or asr.
   assert.deepEqual(['llm', 'vlm', 'asr', undefined].map((type) => modelKind({ type }).label), ['Chat', 'Vision', 'Speech', 'Chat'])
 })

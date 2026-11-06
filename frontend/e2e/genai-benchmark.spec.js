@@ -107,6 +107,18 @@ test('the defaults run without changing anything, and each number is explained',
   await expect(panel.getByRole('button', { name: 'Download JSON' })).toBeEnabled()
 })
 
+test('the dialog keeps its size as results arrive, and scrolls instead', async ({ page }) => {
+  await mockBoard(page)
+  const panel = await openBenchmark(page)
+  const body = panel.locator('.genai-bench-body')
+  const before = (await body.boundingBox()).height
+
+  await panel.getByRole('button', { name: 'Run benchmark' }).click()
+  await expect(panel.getByRole('heading', { name: 'Results', exact: true })).toBeVisible()
+  expect((await body.boundingBox()).height).toBe(before)
+  expect(await body.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto')
+})
+
 test('a run that swaps the loaded model says so first', async ({ page }) => {
   const board = await mockBoard(page)
   const panel = await openBenchmark(page)
@@ -189,10 +201,11 @@ test('the Documents panel keeps its own layout', async ({ page }) => {
   await openBenchmark(page)
   await page.getByRole('dialog', { name: 'Benchmark' }).getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  await page.getByRole('region', { name: 'Documents' }).getByRole('button', { name: 'View documents' }).click()
+  await page.getByRole('tab', { name: 'Documents' }).click()
+  await page.getByRole('button', { name: 'View sections' }).click()
 
   const panel = page.getByRole('dialog', { name: 'Documents on the board' })
-  await expect(panel.locator('.genai-bench-body')).toHaveCSS('max-width', '1000px')
+  await expect(panel.locator('.genai-bench-body')).toHaveCSS('max-width', '1100px')
   await expect(panel.locator('.genai-bench-top p')).toHaveCSS('font-size', '13px')
   await expect(panel.locator('.genai-bench-top p')).toHaveCSS('margin-top', '0px')
   await expect(panel.getByRole('region', { name: 'Summary' })).toHaveCSS('border-top-width', '1px')

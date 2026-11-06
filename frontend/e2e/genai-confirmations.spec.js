@@ -198,7 +198,8 @@ for (const embedded of [false, true]) {
 
     test('deleting a model asks first, with Cancel focused; a click outside cancels', async () => {
       await ui.getByRole('button', { name: 'Settings', exact: true }).click()
-      const remove = ui.getByRole('button', { name: 'Delete Qwen2.5 VL 3B' })
+      await ui.getByRole('button', { name: 'Show details for Qwen2.5 VL 3B' }).click()
+      const remove = ui.getByRole('button', { name: 'Remove Qwen2.5 VL 3B from DevKit' })
       const ask = ui.getByRole('alertdialog', { name: 'Delete the model' })
 
       await remove.click()
@@ -221,7 +222,9 @@ for (const embedded of [false, true]) {
 
     test('clearing the documents asks first', async () => {
       await ui.getByRole('button', { name: 'Settings', exact: true }).click()
-      const clear = ui.getByRole('region', { name: 'Documents' }).getByRole('button', { name: 'Clear' })
+      await ui.getByRole('tab', { name: 'Documents' }).click()
+      await ui.getByText('Remove documents').click()
+      const clear = ui.getByRole('button', { name: 'Clear documents' })
       const ask = ui.getByRole('alertdialog', { name: 'Clear the documents' })
 
       await clear.click()
@@ -254,6 +257,10 @@ for (const embedded of [false, true]) {
       await solutions.getByRole('button', { name: /SiMaSentry-Med/ }).click()
       await ask.getByRole('button', { name: 'Open anyway' }).click()
       await expect(solutions.locator('iframe[title="SiMaSentry-Med"]')).toHaveCount(1)
+      // In the same dialog as the list, not over the whole window.
+      await expect(solutions.getByRole('heading', { name: 'SiMaSentry-Med' })).toBeVisible()
+      expect((await solutions.locator('iframe').boundingBox()).width).toBeLessThanOrEqual(1100)
+      await expect(solutions.getByRole('button', { name: 'Back' })).toBeVisible()
     })
   })
 }
