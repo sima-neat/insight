@@ -273,6 +273,118 @@ test('Settings, Benchmark, SiMaSentry and each of its apps are one dialog size',
   }
 })
 
+// Goes all the way round a dialog with Tab, then back past its first control, and says which
+// dialog held the focus at each press.
+async function tabRound(page, name, presses = 60) {
+  const held = []
+  const inside = () => page.evaluate((label) => {
+    const at = document.activeElement
+    return Boolean(at?.closest(`[role="dialog"][aria-label="${label}"]`))
+  }, name)
+  for (let i = 0; i < presses; i += 1) {
+    await page.keyboard.press('Tab')
+    held.push(await inside())
+  }
+  for (let i = 0; i < 5; i += 1) {
+    await page.keyboard.press('Shift+Tab')
+    held.push(await inside())
+  }
+  return held
+}
+
+test('Tab stays inside each GenAI dialog', async ({ page }) => {
+  await mockBoard(page)
+  await openGenAI(page)
+  await page.waitForTimeout(600)
+
+  await settingsButton(page).click()
+  await page.getByRole('tab', { name: 'Connection' }).click()
+  expect(await tabRound(page, 'GenAI settings', 20)).not.toContain(false)
+  await page.keyboard.press('Escape')
+
+  await page.getByRole('button', { name: 'Benchmark' }).click()
+  await expect(page.getByRole('dialog', { name: 'Benchmark' })).toBeVisible()
+  await page.keyboard.press('Tab')
+  expect(await tabRound(page, 'Benchmark', 20)).not.toContain(false)
+  await page.getByRole('dialog', { name: 'Benchmark' }).getByRole('button', { name: 'Close' }).click()
+
+  await page.getByRole('button', { name: 'SiMaSentry apps' }).click()
+  expect(await tabRound(page, 'SiMaSentry Solutions', 12)).not.toContain(false)
+})
+
+test('Documents over Settings keeps Tab to itself', async ({ page }) => {
+  await mockBoard(page)
+  await openGenAI(page)
+  await settingsButton(page).click()
+  await page.getByRole('tab', { name: 'Documents' }).click()
+  await page.getByRole('button', { name: 'View sections' }).click()
+  await expect(page.getByRole('dialog', { name: 'Documents on the board' })).toBeVisible()
+  await page.getByRole('dialog', { name: 'Documents on the board' }).getByRole('button', { name: 'Close' }).focus()
+  expect(await tabRound(page, 'Documents on the board', 12)).not.toContain(false)
+})
+
+test('Shift+Tab from the first control of Settings goes to its last, and Tab comes back', async ({ page }) => {
+  await mockBoard(page)
+  await openGenAI(page)
+  await settingsButton(page).click()
+  const close = page.getByRole('button', { name: 'Close settings' })
+  await expect(close).toBeFocused()
+
+  await page.keyboard.press('Shift+Tab')
+  await expect(close).not.toBeFocused()
+  expect(await page.evaluate(() => Boolean(document.activeElement.closest('[aria-label="GenAI settings"]')))).toBe(true)
+  await page.keyboard.press('Tab')
+  await expect(close).toBeFocused()
+})
+
+test('Tab out of a running SiMaSentry app comes back to the dialog', async ({ page }) => {
+  await mockBoard(page)
+  await openGenAI(page)
+  await page.getByRole('button', { name: 'SiMaSentry apps' }).click()
+  const solutions = page.getByRole('dialog', { name: 'SiMaSentry Solutions' })
+  await solutions.getByRole('button', { name: /SiMaSentry-Med/ }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Open anyway' }).click()
+  await expect(solutions.locator('iframe')).toHaveCount(1)
+  await expect(page.frameLocator('iframe').locator('body')).toBeVisible()
+
+  // Shift+Tab from Back wraps to the frame; enough presses leave it past its last control.
+  await solutions.getByRole('button', { name: 'Back' }).focus()
+  await page.keyboard.press('Shift+Tab')
+  expect(await page.evaluate(() => document.activeElement.tagName)).toBe('IFRAME')
+  // Past the frame's last control the browser may hold focus itself for a press (the page's
+  // body here), but never leaves it on a control behind the dialog.
+  const seen = []
+  for (let i = 0; i < 80; i += 1) {
+    await page.keyboard.press('Tab')
+    seen.push(await page.evaluate(() => {
+      const at = document.activeElement
+      if (at === document.body) return 'browser'
+      if (!at.closest('[aria-label="SiMaSentry Solutions"]')) return `behind: ${at.tagName} ${at.getAttribute('aria-label') || at.textContent.slice(0, 30)}`
+      return at.tagName === 'IFRAME' ? 'frame' : 'dialog'
+    }))
+  }
+  expect(seen.filter((where) => where.startsWith('behind'))).toEqual([])
+  expect(seen).toContain('dialog')
+})
+
+test('a question over Settings keeps Tab to itself, and Settings gets it back after', async ({ page }) => {
+  await mockBoard(page)
+  await openGenAI(page)
+  await settingsButton(page).click()
+  await row(page, 'Llama 3.2 3B').getByRole('button', { name: /Show details/ }).click()
+  await page.getByRole('button', { name: /Remove Llama 3.2 3B from DevKit/ }).click()
+  const question = page.getByRole('alertdialog')
+  await expect(question).toBeVisible()
+  for (let i = 0; i < 4; i += 1) {
+    await page.keyboard.press('Tab')
+    expect(await question.evaluate((box) => box.contains(document.activeElement))).toBe(true)
+  }
+  await question.getByRole('button', { name: 'Cancel' }).click()
+  await expect(question).toHaveCount(0)
+  await page.getByRole('button', { name: 'Close settings' }).focus()
+  expect(await tabRound(page, 'GenAI settings', 5)).not.toContain(false)
+})
+
 test('the board\'s models and the ones to download are separate lists, and only rows in view read a card', async ({ page }) => {
   const board = await mockBoard(page, { offered: 60 })
   await openGenAI(page)

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import { useDialogFocus } from './useDialogFocus.js'
 import ModelMarkdown from './ModelMarkdown.jsx'
 import { chatModels, friendlyModelName } from './genai/backendState.js'
 import {
@@ -49,6 +50,8 @@ function download(name, text, type) {
 // changing boards ends the run. boardNow(): which board the tab is on, so a stop only goes to the
 // board that runs the benchmark. onRunningChange tells the tab's rule table.
 export default function GenAIBenchmark({ status, ticket, boardNow, onClose, onModelsChanged, onRunningChange }) {
+  const dialog = useRef(null)
+  useDialogFocus(dialog)
   const models = chatModels(status)
   const loaded = new Set((status && status.loaded) || [])
   const [chosen, setChosen] = useState(() => defaultChoice(models, loaded))
@@ -282,7 +285,7 @@ export default function GenAIBenchmark({ status, ticket, boardNow, onClose, onMo
   const upNext = chosen.slice(current + 1)
 
   return (
-    <div className="genai-bench genai-bench-guided" role="dialog" aria-modal="true" aria-label="Benchmark">
+    <div ref={dialog} className="genai-bench genai-bench-guided" role="dialog" aria-modal="true" aria-label="Benchmark">
       <div className="genai-bench-top">
         <h2>Benchmark</h2>
         <button type="button" className="btn-ghost" onClick={onClose} disabled={running} title={running ? 'Stop the benchmark first' : 'Close (Esc)'}>Close</button>

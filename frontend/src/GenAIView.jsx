@@ -118,6 +118,7 @@ import {
 } from './genai/setup.js'
 import { acceptedAnswer, clearDocumentsQuestion, deleteModelQuestion, loadModelQuestion, solutionQuestion } from './genai/confirmations.js'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import { useDialogFocus } from './useDialogFocus.js'
 import ModelMarkdown from './ModelMarkdown.jsx'
 
 const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
@@ -483,6 +484,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // Browse models: + 1 each time it asks Settings to show the Hugging Face search.
   const [browseRequest, setBrowseRequest] = useState(0)
   const catalogSearchBox = useRef(null)
+  const settingsDialog = useRef(null)
   const settingsBox = useRef(null)
   const settingsClose = useRef(null)
   const catalogAutoSynced = useRef(false)
@@ -2015,6 +2017,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const needsAttention = backend.state !== 'ready' || voiceWarnings.length > 0 || studioOutdated
   // Settings opens over the chat. With no address yet it opens by itself, at the address.
   const showSettings = settingsOpen || backend.state === 'unconfigured'
+  useDialogFocus(settingsDialog, showSettings)
   const openTab = settingsOpen ? settingsTab : 'connection'
   // A model operation drops the status until the fresh one comes: the list keeps
   // the last one meanwhile, or every model would read as not downloaded.
@@ -2286,7 +2289,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
       )}
 
       {showSettings && (
-        <div className="genai-bench" role="dialog" aria-modal="true" aria-label="GenAI settings">
+        <div ref={settingsDialog} className="genai-bench" role="dialog" aria-modal="true" aria-label="GenAI settings">
         <section className="genai-settings">
           <div className="genai-settings-head">
             <div className="genai-settings-title">
@@ -3196,6 +3199,8 @@ function CardSpeech({ id, answer, speech }) {
 }
 
 function SolutionsOverlay({ model, sees, onClose }) {
+  const dialog = useRef(null)
+  useDialogFocus(dialog)
   const [open, setOpen] = useState(null)
   // The app waiting for "Open anyway" while the model can't serve it.
   const [askApp, setAskApp] = useState(null)
@@ -3263,7 +3268,7 @@ function SolutionsOverlay({ model, sees, onClose }) {
   }
 
   return (
-    <div className="genai-bench" role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
+    <div ref={dialog} className="genai-bench" role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
       {open ? (
         <>
           <div className="genai-bench-top genai-solutions-top">
@@ -3319,6 +3324,8 @@ function SolutionsOverlay({ model, sees, onClose }) {
 // memory beside them (no_room). The board unloads only what is chosen here,
 // because other clients may be using the others.
 function UnloadChoice({ ask, status, disabled, onCancel, onConfirm }) {
+  const dialog = useRef(null)
+  useDialogFocus(dialog)
   const { model, choice, already = [] } = ask
   const byName = new Map(chatModels(status).map((m) => [m.name, m]))
   const [picked, setPicked] = useState(() => new Set())
@@ -3345,7 +3352,7 @@ function UnloadChoice({ ask, status, disabled, onCancel, onConfirm }) {
     })
   }
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Make room for ${name}`}
+    <div ref={dialog} className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Make room for ${name}`}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}>
       <div className="modal-card genai-unload-card">
         <h3>Make room for {name}</h3>
@@ -3744,6 +3751,8 @@ const asSentence = (text) => (/[.!?…]$/.test(text) ? text : `${text}.`)
 // `ask` is the tab's: its requests belong to the board session, and it reads
 // the answers aloud when Read replies aloud is on.
 function VisionView({ model, allowed, busyReason, boardCam, cameras, camera, onCameraChange, ticket, ask, prepareSpeech, readAloud, onReadAloudChange, speechStats, speechError, onActivity, onFullscreen, onClose }) {
+  const dialog = useRef(null)
+  useDialogFocus(dialog)
   const sees = Boolean(model && model.supportsVision)
   const modelName = model ? model.name : null
   const [source, setSource] = useState('browser')          // 'browser' | 'board'
@@ -3956,7 +3965,7 @@ function VisionView({ model, allowed, busyReason, boardCam, cameras, camera, onC
 
   const busy = asking || looping
   return (
-    <div className="genai-vision" role="dialog" aria-modal="true" aria-label="Vision">
+    <div ref={dialog} className="genai-vision" role="dialog" aria-modal="true" aria-label="Vision">
       <div className="genai-bench-top genai-vision-top">
         <h2>Vision</h2>
         <p>
@@ -4053,6 +4062,8 @@ function VisionView({ model, allowed, busyReason, boardCam, cameras, camera, onC
 // View documents: what the board's document database holds (GET rag/inspect),
 // the source and its sections, with a filter, like the standalone Studio's.
 function DocumentsViewer({ ticket, onClose }) {
+  const dialog = useRef(null)
+  useDialogFocus(dialog)
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState('')
   const [query, setQuery] = useState('')
@@ -4084,7 +4095,7 @@ function DocumentsViewer({ ticket, onClose }) {
   const view = useMemo(() => inspectSummary(data), [data])
   const shown = useMemo(() => filterSections(view.sections, query), [view, query])
   return (
-    <div className="genai-bench" role="dialog" aria-modal="true" aria-label="Documents on the board">
+    <div ref={dialog} className="genai-bench" role="dialog" aria-modal="true" aria-label="Documents on the board">
       <div className="genai-bench-top">
         <h2>Documents</h2>
         <p>What the board searches when Use my documents is on.</p>
