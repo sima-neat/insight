@@ -1412,7 +1412,7 @@ test('the view sends the reply settings, and drops board camera and vision resul
     return view.slice(start, view.indexOf('\n  }\n', start))
   }
   const send = fn('function sendMessage(')
-  assert.match(send, /systemPromptFor\(\{ custom: replySettings\.systemPrompt/)
+  assert.match(fn('function requestMessages('), /systemPromptFor\(\{ custom: replySettings\.systemPrompt/)
   assert.match(send, /maxTokens: replySettings\.maxTokens/)
   assert.match(send, /visionBusy\.current\) return false/, 'a spoken question waits while the vision view asks')
   const ask = fn('async function askAboutPicture(')
