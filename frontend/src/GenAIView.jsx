@@ -206,7 +206,8 @@ const ICONS = {
   documents: 'M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6',
   troubleshoot: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5.6 5.6l3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6',
   download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
-  // Settings, Models.
+  // Settings.
+  close: 'M6 6l12 12M18 6L6 18',
   chevron: 'M9 5l7 7-7 7',
   search: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM16 16l5 5',
   check: 'M5 12l4 4L19 6',
@@ -465,6 +466,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const [browseRequest, setBrowseRequest] = useState(0)
   const catalogSearchBox = useRef(null)
   const settingsBox = useRef(null)
+  const settingsClose = useRef(null)
   const catalogAutoSynced = useRef(false)
   const catalogNow = useRef(modelCatalog)
   const lastStatus = useRef(null)
@@ -628,7 +630,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   useEffect(() => {
     const box = transcriptBox.current
     if (box && stickToBottom.current) box.scrollTop = box.scrollHeight
-  }, [messages, settingsOpen])   // a reply can arrive while Settings hides the chat
+  }, [messages])
 
   // The tab fills the window below Insight's header, as chat apps do: the
   // conversation takes the space and the composer sits at the bottom. CSS
@@ -1059,6 +1061,24 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     box?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     box?.focus({ preventScroll: true })
   }, [browseRequest, settingsOpen])
+
+  // As a dialog: the keyboard starts inside it and goes back where it was, and
+  // Esc closes it unless a question or the documents are open on top.
+  useEffect(() => {
+    if (!settingsOpen) return undefined
+    const opener = document.activeElement
+    if (!settingsClose.current?.closest('[role="dialog"]')?.contains(opener)) settingsClose.current?.focus()
+    return () => opener?.focus?.()
+  }, [settingsOpen])
+
+  useEffect(() => {
+    if (!settingsOpen || confirmAsk || unloadAsk || docsViewOpen) return undefined
+    function onKey(e) {
+      if (e.key === 'Escape') setSettingsOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [settingsOpen, confirmAsk, unloadAsk, docsViewOpen])
 
   // A tab starts at its top, whatever was scrolled to on the one before.
   useEffect(() => {
@@ -1762,7 +1782,6 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   function newChat() {
     if (!allowed.newChat) return
     resetConversation()
-    setSettingsOpen(false)
     composer.current?.focus()
   }
 
@@ -1862,8 +1881,6 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   }
 
   function tryTutorialAction(action) {
-    // Everything but Settings happens in the chat, which Settings takes the place of.
-    if (action !== 'settings') setSettingsOpen(false)
     if (action === 'example-question') tryPrompt('Explain what an AI accelerator does, in simple terms.')
     else if (action === 'example-translate') tryPrompt("Translate 'good morning, how are you?' into Spanish.")
     else if (action === 'camera') openCamera()
@@ -1885,7 +1902,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const voiceWarnings = usable ? voiceEngineWarnings(health) : []
   const studioOutdated = Boolean(setupStatus?.outdated) && mode === 'workspace'
   const needsAttention = backend.state !== 'ready' || voiceWarnings.length > 0 || studioOutdated
-  // Settings takes the chat's place. With no address yet it opens by itself, at the address.
+  // Settings opens over the chat. With no address yet it opens by itself, at the address.
   const showSettings = settingsOpen || backend.state === 'unconfigured'
   const openTab = settingsOpen ? settingsTab : 'connection'
   // A model operation drops the status until the fresh one comes: the list keeps
@@ -2148,17 +2165,22 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
       )}
 
       {showSettings && (
-        <section className="panel genai-settings" aria-label="GenAI settings" ref={settingsBox}>
+        <div className="genai-bench" role="dialog" aria-modal="true" aria-label="GenAI settings">
+        <section className="genai-settings">
           <div className="genai-settings-head">
             <div className="genai-settings-title">
               <h2>Settings</h2>
               <p>Manage your models and make GenAI Studio your own.</p>
             </div>
             <span className={`genai-pill genai-pill-${backend.state}`}>{backend.state === 'ready' ? 'DevKit connected' : STATE_LABELS[backend.state] || backend.state}</span>
-            {settingsOpen && <button type="button" className="btn-ghost genai-small" onClick={() => setSettingsOpen(false)}>Back to chat</button>}
+            {settingsOpen && (
+              <button type="button" ref={settingsClose} className="btn-ghost genai-settings-close" aria-label="Close settings" title="Close (Esc)" onClick={() => setSettingsOpen(false)}>
+                <Icon d={ICONS.close} />
+              </button>
+            )}
           </div>
           <SettingsTabs active={openTab} onChange={setSettingsTab} modelCount={modelRows.length} />
-          <div className="genai-settings-content" role="tabpanel" id={`genai-panel-${openTab}`} aria-labelledby={`genai-tab-${openTab}`}>
+          <div className="genai-settings-content" ref={settingsBox} role="tabpanel" id={`genai-panel-${openTab}`} aria-labelledby={`genai-tab-${openTab}`}>
             {openTab === 'models' && (
               <ModelCatalog
                 rows={modelRows}
@@ -2341,9 +2363,10 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
             )}
           </div>
         </section>
+        </div>
       )}
 
-      <section className="panel genai-chat" aria-label="Chat" hidden={showSettings}>
+      <section className="panel genai-chat" aria-label="Chat">
         {docsMidChat && useDocs && messages.length > 0 && (
           <div className="genai-docs-hint" role="status">
             <span>Earlier replies in this chat can win over your documents. Start a new chat to answer from them.</span>
@@ -2945,18 +2968,21 @@ function CatalogRow({ row, open, onToggle, download, status, allowed, onDelete, 
 // its arrow.
 function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, downloads, download, failedDownload, allowed, onSync, onDownload, onDelete, onSeen, ...handlers }) {
   const [query, setQuery] = useState('')
+  const [catalogQuery, setCatalogQuery] = useState('')
   const [type, setType] = useState('all')
   const [opened, setOpened] = useState(() => new Set())
   const shown = filterRows(rows, { query, type })
   const onBoard = shown.filter((r) => r.onBoard)
-  const offered = shown.filter((r) => !r.onBoard)
-  const filtered = Boolean(query.trim()) || type !== 'all'
+  // The catalog's own search, beside its list: it leaves the board's list alone.
+  const offered = filterRows(shown.filter((r) => !r.onBoard), { query: catalogQuery })
+  const filtered = Boolean(query.trim()) || Boolean(catalogQuery.trim()) || type !== 'all'
   const storage = storageSummary(status?.disk)
   const downloadElsewhere = download && !rows.some((r) => r.repoId === download.repoId)
   const actions = { ...handlers, onDownload, canDownload: allowed.downloadModel && downloads.state === 'available', downloadNote: downloads.message }
 
   function clearFilters() {
     setQuery('')
+    setCatalogQuery('')
     setType('all')
   }
 
@@ -2999,7 +3025,7 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, do
       <div className="genai-catalog-search">
         <div className="genai-catalog-searchbox">
           <Icon d={ICONS.search} />
-          <input ref={searchBox} type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search models by name, task, or family…" aria-label="Search saved model catalog" />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search models by name, task, or family…" aria-label="Search all models" />
         </div>
         <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Filter by model type">
           <option value="all">All types</option>
@@ -3010,7 +3036,7 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, do
       </div>
 
       <div className="genai-catalog-results">
-        <span aria-live="polite">{resultsLine(shown.length, rows.length)}</span>
+        <span aria-live="polite">{resultsLine(onBoard.length + offered.length, rows.length)}</span>
         {filtered && <button type="button" className="btn-ghost genai-small" onClick={clearFilters}>Clear filters</button>}
       </div>
 
@@ -3028,6 +3054,10 @@ function ModelCatalog({ rows, catalog, status, chatModel, searchBox, syncing, do
         <div>
           <h3>Model catalog</h3>
           <p className="hint">Models from <strong>simaai</strong> on Hugging Face, ready to download to your DevKit.</p>
+        </div>
+        <div className="genai-catalog-searchbox">
+          <Icon d={ICONS.search} />
+          <input ref={searchBox} type="search" value={catalogQuery} onChange={(e) => setCatalogQuery(e.target.value)} placeholder="Search the catalog…" aria-label="Search model catalog" />
         </div>
         {downloads.state !== 'disabled' && downloads.state !== 'unknown' && (
           <div className="genai-catalog-sync">

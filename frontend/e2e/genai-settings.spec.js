@@ -100,19 +100,25 @@ const modelMenu = (page) => page.locator('.genai-model-picker select')
 const settingsButton = (page) => page.getByRole('button', { name: 'Settings', exact: true })
 const row = (page, name) => page.getByRole('article', { name, exact: true })
 
-test('Settings takes the chat\'s place and Back to chat returns to it', async ({ page }) => {
+test('Settings opens over the chat, and its close button and Esc return to it', async ({ page }) => {
   await mockBoard(page)
   await openGenAI(page)
   await expect(page.getByRole('region', { name: 'Chat' })).toBeVisible()
 
   await settingsButton(page).click()
-  await expect(page.getByRole('region', { name: 'GenAI settings' })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Chat' })).toBeHidden()
+  const dialog = page.getByRole('dialog', { name: 'GenAI settings' })
+  await expect(dialog).toBeVisible()
+  await expect(page.locator('.genai-chat')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Close settings' })).toBeFocused()
   await expect(page.getByRole('tab', { name: /Models/ })).toHaveAttribute('aria-selected', 'true')
 
-  await page.getByRole('button', { name: 'Back to chat' }).click()
-  await expect(page.getByRole('region', { name: 'GenAI settings' })).toHaveCount(0)
-  await expect(page.getByRole('region', { name: 'Chat' })).toBeVisible()
+  await page.getByRole('button', { name: 'Close settings' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(settingsButton(page)).toBeFocused()
+
+  await settingsButton(page).click()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
 })
 
 test('the Model menu\'s Manage models opens the catalog and keeps the model', async ({ page }) => {
@@ -179,7 +185,7 @@ test('search and the filters narrow the list, and Clear filters brings it back',
   const count = page.getByText(/^Showing /)
   await expect(count).toHaveText('Showing all 6 models · Search filters this saved catalog')
 
-  await page.getByLabel('Search saved model catalog').fill('whisper')
+  await page.getByLabel('Search all models').fill('whisper')
   await expect(count).toHaveText('Showing 2 of 6 models · Search filters this saved catalog')
   await expect(row(page, 'Whisper medium')).toBeVisible()
   await expect(row(page, 'Whisper small')).toBeVisible()
@@ -190,6 +196,36 @@ test('search and the filters narrow the list, and Clear filters brings it back',
 
   await page.getByRole('button', { name: 'Clear filters' }).first().click()
   await expect(count).toHaveText('Showing all 6 models · Search filters this saved catalog')
+})
+
+test('the catalog has its own search, which leaves the board\'s list alone', async ({ page }) => {
+  await mockBoard(page)
+  await openGenAI(page)
+  await settingsButton(page).click()
+  const onBoard = page.getByLabel('Models on this DevKit')
+  const offered = page.getByLabel('Models to download')
+  await expect(offered.getByRole('article', { name: 'Whisper medium' })).toBeVisible()
+
+  await page.getByLabel('Search model catalog').fill('whisper')
+  await expect(offered.getByRole('article')).toHaveCount(1)
+  await expect(offered.getByRole('article', { name: 'Whisper medium' })).toBeVisible()
+  await expect(onBoard.getByRole('article')).toHaveCount(3)
+
+  await page.getByLabel('Search model catalog').fill('nothing like this')
+  await expect(page.getByText('No models match these filters')).toBeVisible()
+  await page.getByRole('button', { name: 'Clear filters' }).click()
+  await expect(page.getByLabel('Search model catalog')).toHaveValue('')
+  await expect(offered.getByRole('article', { name: 'Whisper medium' })).toBeVisible()
+})
+
+test('a dialog covers the whole window, above Insight\'s header', async ({ page }) => {
+  await mockBoard(page)
+  await openGenAI(page)
+  await page.waitForTimeout(600)
+  await settingsButton(page).click()
+  await page.waitForTimeout(600)
+  const box = await page.getByRole('dialog', { name: 'GenAI settings' }).boundingBox()
+  expect([box.x, box.y, box.width, box.height]).toEqual([0, 0, 1920, 1080])
 })
 
 test('the board\'s models and the ones to download are separate lists, and only rows in view read a card', async ({ page }) => {
@@ -296,8 +332,9 @@ test('a switch in Settings and its checkbox in the header are one setting', asyn
   await page.getByRole('tab', { name: 'Documents' }).click()
   await expect(page.getByText('neat.md')).toBeVisible()
   await expect(page.getByText('8 searchable sections')).toBeVisible()
-  await page.getByRole('checkbox', { name: 'Use my documents' }).check()
-  await expect(page.getByRole('switch', { name: /Use my documents/ })).toBeChecked()
+  await page.getByRole('switch', { name: /Use my documents/ }).check()
+  await page.getByRole('button', { name: 'Close settings' }).click()
+  await expect(page.getByRole('checkbox', { name: 'Use my documents' })).toBeChecked()
 })
 
 test('the arrow keys move between the tabs', async ({ page }) => {

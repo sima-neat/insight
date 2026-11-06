@@ -4958,17 +4958,32 @@ button:disabled {
   color: #5b3f8c;
 }
 
-/* Settings: a page in the chat's place, one tab per area. */
-.genai-settings {
-  /* .genai > * would hold it at its content size: it grows instead, as the chat does. */
-  flex: 1 1 0;
-  min-height: 360px;
-  overflow-y: auto;
-  padding: 0;
+/* The questions the GenAI tab asks, above its dialogs. */
+.genai .modal-backdrop {
+  z-index: 1100;
 }
 
-.genai-chat[hidden] {
-  display: none;
+/* Settings: a dialog over the chat, one tab per area. The tabs stay put while
+   a tab's content scrolls. */
+.genai-settings {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  max-width: 1100px;
+  flex: 1 1 auto;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.genai-settings-close {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
 }
 
 .genai-settings-head {
@@ -5004,6 +5019,7 @@ button:disabled {
   padding: 0 28px;
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
+  flex: none;
 }
 
 .genai-settings-tab {
@@ -5056,6 +5072,9 @@ button:disabled {
 }
 
 .genai-settings-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   padding: 24px 28px 28px;
 }
 
@@ -5263,6 +5282,11 @@ input.genai-switch[aria-disabled='true'] {
 
 .genai-catalog-head-offer {
   margin-top: 28px;
+}
+
+.genai-catalog-head-offer .genai-catalog-searchbox {
+  max-width: 320px;
+  margin-left: auto;
 }
 
 .genai-catalog-rows-scroll {
@@ -5592,8 +5616,15 @@ input.genai-switch[aria-disabled='true'] {
     text-align: left;
   }
 
-  .genai-catalog-search {
+  .genai-catalog-search,
+  .genai-catalog-head-offer {
     flex-wrap: wrap;
+  }
+
+  .genai-catalog-head-offer .genai-catalog-searchbox {
+    order: 1;
+    flex-basis: 100%;
+    max-width: none;
   }
 
   .genai-catalog-searchbox {
@@ -6457,10 +6488,6 @@ input.genai-switch[aria-disabled='true'] {
   font-size: 13px;
 }
 
-.genai-bench-body.genai-solutions-body {
-  max-width: 1000px;
-}
-
 .genai-solutions-model b {
   color: var(--ink);
 }
@@ -6568,13 +6595,37 @@ input.genai-switch[aria-disabled='true'] {
   }
 }
 
-/* Benchmark: a full-window panel over the tab. */
+/* Benchmark, Documents, Settings and the SiMaSentry list: a dialog over the
+   dimmed chat. Its body scrolls under the heading. */
 .genai-bench {
   position: fixed;
   inset: 0;
   z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  background: rgba(14, 25, 35, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+.genai-bench > .genai-bench-top {
+  flex: none;
+  width: 100%;
+  max-width: 1100px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.genai-bench > .genai-bench-body {
+  flex: 0 1 auto;
+  width: 100%;
+  min-height: 0;
+  max-width: 1100px;
   overflow-y: auto;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   background: var(--bg);
+  box-shadow: var(--shadow-md);
 }
 
 .genai-bench-top {
@@ -6647,9 +6698,13 @@ input.genai-switch[aria-disabled='true'] {
   flex: 1;
 }
 
-.genai-bench-guided .genai-bench-body {
-  grid-template-columns: minmax(0, 1fr);
+.genai-bench-guided > .genai-bench-top,
+.genai-bench-guided > .genai-bench-body {
   max-width: 760px;
+}
+
+.genai-bench-guided > .genai-bench-body {
+  grid-template-columns: minmax(0, 1fr);
   padding-top: 24px;
 }
 
