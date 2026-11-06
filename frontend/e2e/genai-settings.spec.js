@@ -29,6 +29,7 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0, loade
     searches: 0,
     cards: 0,
     cardsFail: false,
+    searchFails: false,
     finishDownload: null
   }
   await page.route(/\/api\/genai\//, async (route) => {
@@ -72,6 +73,7 @@ async function mockBoard(page, { hub = true, maxResident = 2, offered = 0, loade
     if (path === 'models/hub/search') {
       board.searches += 1
       if (!board.hub) return json(route, { enabled: false, results: [] })
+      if (board.searchFails) return json(route, { enabled: true, results: [], error: 'Hugging Face search failed' })
       return json(route, {
         enabled: true,
         results: [
@@ -537,6 +539,22 @@ test('with Hugging Face out of reach the saved catalog stays and downloads wait'
   await expect(page.getByText("The board can't reach Hugging Face.")).toBeVisible()
   await expect(row(page, 'Qwen3 VL 4B')).toContainText('4.2 GB')
   await expect(page.getByRole('button', { name: 'Download Qwen3 VL 4B' })).toBeDisabled()
+})
+
+test('a failed search keeps the saved catalog and says so', async ({ page }) => {
+  const board = await mockBoard(page)
+  await openGenAI(page)
+  await settingsButton(page).click()
+  await expect(row(page, 'Qwen3 VL 4B')).toBeVisible()
+
+  board.searchFails = true
+  await page.getByRole('button', { name: 'Sync catalog' }).click()
+  await expect(page.getByText('Sync failed: Hugging Face search failed')).toBeVisible()
+  await expect(row(page, 'Qwen3 VL 4B')).toBeVisible()
+
+  await page.reload()
+  await settingsButton(page).click()
+  await expect(row(page, 'Qwen3 VL 4B')).toBeVisible()
 })
 
 test('a switch in Settings and its checkbox in the header are one setting', async ({ page }) => {

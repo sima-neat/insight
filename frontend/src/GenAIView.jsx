@@ -1015,6 +1015,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
       if (!current()) return
       setHubReach((prev) => hubReachOf(results) || prev)
       if (results.enabled === false) return
+      // Every organization failing still answers 200: the saved catalog stays.
+      if (results.error) throw new Error(results.error)
       cardsAsked.current.clear()
       rememberCatalog(catalogFromSearch(results.results, catalogNow.current))
     } catch (error) {
