@@ -8881,3 +8881,187 @@ input.genai-switch[aria-disabled='true'] {
 .genai-unload-list .hint {
   margin-left: auto;
 }
+
+/* Compare side by side: a button opening a checkbox per loaded model, and a
+   card per model in the conversation. */
+.genai-compare-picker {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.genai-compare-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.genai-compare-on {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+}
+
+.genai-compare-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  display: grid;
+  gap: 4px;
+  min-width: 300px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.genai-compare-panel-title {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.genai-compare-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.genai-compare-option:hover {
+  background: var(--surface-soft);
+}
+
+.genai-compare-option input {
+  width: auto;
+  flex: none;
+  margin: 0;
+}
+
+.genai-compare-option-name {
+  flex: 1;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.genai-compare-panel .hint {
+  margin: 4px 0 0;
+}
+
+/* Compare's panels: one chat per model, side by side. */
+.genai-panels {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.genai-panels-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.genai-panels-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.genai-panels-mode select {
+  width: auto;
+}
+
+.genai-panels-title {
+  flex: 1;
+  min-width: 240px;
+  display: grid;
+  gap: 2px;
+}
+
+.genai-panels-title .hint {
+  margin: 0;
+}
+
+.genai-panels-grid {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--panels, 2), minmax(0, 1fr));
+  gap: 10px;
+}
+
+.genai-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.genai-panel header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.genai-panel header .genai-model-name {
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.genai-panel header > :not(.genai-model-name) {
+  flex: none;
+}
+
+.genai-panel-chat {
+  flex: 1 1 0;
+  min-height: 160px;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.genai-panel-composer {
+  display: grid;
+  gap: 6px;
+}
+
+.genai-panel-composer textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font: inherit;
+  resize: none;
+}
+
+@media (max-width: 900px) {
+  .genai-panels-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
