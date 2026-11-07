@@ -53,6 +53,19 @@ export function documentsSummary(status) {
   return `${sections}${file}${state}`
 }
 
+// The document card in Settings, Documents: the file, and what the board can
+// search in it.
+export function documentsCard(status) {
+  if (!status) return { name: 'Documents', detail: 'Checking the documents…' }
+  if (!status.database) return { name: 'No documents', detail: 'Upload Markdown or restore the default to get started.' }
+  const meta = status.meta || {}
+  const chunks = typeof meta.chunks === 'number' ? meta.chunks : null
+  return {
+    name: String(meta.input || '').split('/').pop() || 'Your documents',
+    detail: chunks === null ? 'Ready to search' : `${chunks} searchable section${chunks === 1 ? '' : 's'}`
+  }
+}
+
 // The Studio streams upload, reset and clear progress as text lines and ends
 // with a line starting ✅ or ❌.
 export function progressOutcome(text) {

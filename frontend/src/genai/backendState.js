@@ -8,6 +8,12 @@ export const SUPPORTED_API_VERSIONS = { min: 1, max: 1 }
 
 export const START_COMMAND = './run.sh'
 
+// GenAI Studio's /health always answers with a boolean `ok` and a `model_server` object, also
+// while its model server is still starting.
+function studioHealthShape(body) {
+  return typeof body.ok === 'boolean' && Boolean(body.model_server) && typeof body.model_server === 'object'
+}
+
 export function checkApiVersion(health) {
   const version = health ? health.api_version : undefined
   if (version === undefined || version === null) return { supported: true, version: null }
@@ -31,8 +37,8 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
   if (health.httpStatus === 503 && body.reason === 'not-configured') {
     return {
       state: 'unconfigured',
-      title: 'No board selected',
-      detail: 'Enter the address of the board that runs GenAI Studio.',
+      title: 'No GenAI Studio address',
+      detail: "Enter GenAI Studio's address on the board, for example https://192.168.1.20:5000.",
       // The settings panel opens on its own in this state.
       action: null
     }
@@ -42,7 +48,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'unconfigured',
       title: 'The saved board address is not valid',
-      detail: 'Enter the board address again, for example https://192.168.1.20:5000.',
+      detail: 'Enter the GenAI Studio address again, for example https://192.168.1.20:5000.',
       action: 'settings'
     }
   }
@@ -50,7 +56,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'error',
       title: "Insight's settings file can't be used",
-      detail: body.error || "Fix or remove Insight's cfg.json, then set the board address again.",
+      detail: body.error || "Fix or remove Insight's cfg.json, then set the GenAI Studio address again.",
       action: 'settings'
     }
   }
@@ -58,17 +64,18 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'unavailable',
       title: 'GenAI Studio is not running on the board',
-      detail: 'Insight can start it on the board, and install it there the first time. Or check the board address.',
+      detail: 'Insight can start it on the board, and install it there the first time. Or check the GenAI Studio address.',
       action: 'setup'
     }
   }
   // Something answered, so it is running; it just isn't a healthy GenAI Studio.
-  // A reply that isn't JSON (a web page, even with HTTP 200) is not the Studio.
-  if (health.unreadable) {
+  // A reply that isn't JSON (a web page, even with HTTP 200) is not the Studio, nor is JSON
+  // without GenAI Studio's health fields (its /health always has `ok` and `model_server`).
+  if (health.unreadable || (health.httpStatus === 200 && !studioHealthShape(body))) {
     return {
       state: 'error',
       title: "This address doesn't answer like GenAI Studio",
-      detail: `It answered HTTP ${health.httpStatus} with something other than GenAI Studio's reply. Check the board address: GenAI Studio listens on port 5000, for example https://192.168.1.20:5000.`,
+      detail: `It answered HTTP ${health.httpStatus} with something other than GenAI Studio's reply. Check the GenAI Studio address: GenAI Studio listens on port 5000, for example https://192.168.1.20:5000.`,
       action: 'settings'
     }
   }
@@ -76,7 +83,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     return {
       state: 'error',
       title: `GenAI Studio on the board answered with an error (HTTP ${health.httpStatus})`,
-      detail: body.error || 'Check the board address, or restart GenAI Studio on the board.',
+      detail: body.error || 'Check the GenAI Studio address, or restart GenAI Studio on the board.',
       action: 'settings'
     }
   }
@@ -136,6 +143,13 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
 // address, or no board is selected.
 export function offersSetup(state) {
   return state === 'unavailable' || state === 'unconfigured'
+}
+
+// GenAI Studio answers at the tab's address as itself: usable, or still starting its model
+// server or a model. An address that answers with an error, something else, or an API this
+// Insight can't use does not count.
+export function studioAnswers(state) {
+  return state === 'ready' || state === 'failed' || state === 'busy' || state === 'starting'
 }
 
 // Chat and speech run only when the backend is ready (a failed operation still

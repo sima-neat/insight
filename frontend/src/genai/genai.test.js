@@ -12,6 +12,7 @@ import {
   formatDuration,
   friendlyModelName,
   offersSetup,
+  studioAnswers,
   supportsThinking,
   thinkingModelOnBoard,
   voiceEngineWarnings,
@@ -22,18 +23,18 @@ import {
 import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } from './tutorial.js'
 import {
   SETUP_STORAGE_KEY,
-  bannerAction,
+  STEP_LABELS,
   canRunSetupAgain,
   canStopStudio,
   relayOnSetupBoard,
-  connectIcon,
-  lastLine,
   requestProblem,
   saveSetupOpen,
-  setupAction,
+  setupForBoard,
   setupOpenSaved,
+  setupPhase,
   setupStoppable,
-  stepIcon
+  setupView,
+  tabMode
 } from './setup.js'
 import { languageNames, latinLanguage, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
@@ -42,6 +43,7 @@ import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './me
 import { createSentenceSplitter, speakablePieces } from './sentences.js'
 import {
   INSPECT_LIMIT,
+  documentsCard,
   documentsSummary,
   documentsSupport,
   filterSections,
@@ -61,7 +63,6 @@ import {
   clampMaxTokens,
   isDefaultSystemPrompt,
   loadReplySettings,
-  replySummary,
   saveReplySettings,
   systemPromptFor,
   systemPromptNote
@@ -77,12 +78,12 @@ import {
   hubReachOf,
   recommendedOffer
 } from './firstModel.js'
-import { STATE_LABELS, boardSummary, documentsCardSummary, modelKind, modelRow, modelsSummary, voiceSummary } from './settingsCards.js'
+import { STATE_LABELS, addressSummary, modelKind, modelRow } from './settingsCards.js'
 import { LOOP_PAUSE_MS, VISION_PRESETS, createVisionLoop, pause } from './visionLoop.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
-import { allowedActions } from './activity.js'
+import { allowedActions, blockedReason } from './activity.js'
 import { anySignal, closedTicket, createBoardSession } from './boardSession.js'
-import { benchProgress, benchmarkCsv, benchmarkSupport, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, BENCH_LIMITS } from './benchmark.js'
+import { benchProgress, benchmarkCsv, benchmarkSupport, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, defaultChoice, firstWordTime, firstWordVerdict, resultBadge, resultsSummary, settingsText, speedVerdict, wordsPerSecondText, BENCH_LIMITS } from './benchmark.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -124,6 +125,12 @@ test('backend state: a board that answers with an error is running, not down', (
   assert.equal(studioError.state, 'error')
   assert.match(studioError.title, /answered with an error \(HTTP 500\)/)
   assert.equal(studioError.detail, 'Internal error in GenAI Studio')
+  // JSON that isn't GenAI Studio's health reply is not a GenAI Studio starting up.
+  for (const body of [{}, { status: 'ok' }, { ok: true }, { ok: false, model_server: 'down' }]) {
+    const other = deriveBackendState({ health: { httpStatus: 200, body } })
+    assert.deepEqual([other.state, other.title, other.action], ['error', "This address doesn't answer like GenAI Studio", 'settings'], JSON.stringify(body))
+  }
+  assert.equal(deriveBackendState({ health: { httpStatus: 200, body: { ok: false, model_server: { reachable: false } } } }).state, 'starting')
   const htmlPage = deriveBackendState({ health: { httpStatus: 200, body: {}, unreadable: true } })
   assert.equal(htmlPage.state, 'error')
   assert.equal(htmlPage.action, 'settings')
@@ -416,40 +423,148 @@ test('first-time setup is offered only while nothing answers at the board addres
   }
 })
 
-test('the setup button says what is left to do, and offers Retry after a failure', () => {
-  const status = (...states) => ({ active: false, steps: ['install', 'prepare', 'start'].map((id, i) => ({ id, state: states[i] })) })
-  assert.equal(setupAction(status('pending', 'pending', 'pending')).label, 'Install and start GenAI Studio')
-  assert.equal(setupAction(status('done', 'pending', 'pending')).label, 'Prepare and start GenAI Studio')
-  assert.equal(setupAction(status('done', 'done', 'pending')).label, 'Start GenAI Studio')
-  // An outdated GenAI Studio, still running, is replaced.
-  assert.equal(setupAction({ ...status('pending', 'pending', 'done'), outdated: true }).label, 'Update and start GenAI Studio')
-  assert.equal(bannerAction({ ...status('pending', 'pending', 'pending'), outdated: true }, 'https://127.0.0.1:5000').label, 'Set up GenAI Studio')
-  assert.equal(setupAction(status('done', 'failed', 'pending')).label, 'Retry')
-  assert.equal(setupAction(status('pending', 'blocked', 'pending')).label, 'Retry')
-  assert.equal(setupAction(status('done', 'done', 'done')), null, 'nothing left')
-  assert.equal(setupAction({ ...status('done', 'running', 'queued'), active: true }), null, 'a job runs')
-  assert.equal(setupAction({ ...status('done', 'failed', 'done'), active: true }).label, 'Retry', 'the job only keeps GenAI Studio running')
-  assert.equal(setupAction(null), null)
-  assert.equal(setupStoppable({ ...status('done', 'running', 'queued'), active: true }), true)
-  // Once GenAI Studio is starting or running, Stop GenAI Studio takes over.
-  assert.equal(setupStoppable({ ...status('done', 'done', 'running'), active: true }), false)
-  assert.equal(setupStoppable({ ...status('done', 'done', 'done'), active: true }), false)
-  assert.equal(setupStoppable(status('done', 'failed', 'pending')), false)
-  assert.equal(lastLine('Downloading\nInstalling voices\n\n'), 'Installing voices')
-  const local = { ...status('done', 'done', 'pending'), target: { mode: 'local', host: null } }
-  assert.deepEqual(bannerAction(local, 'https://127.0.0.1:5000'), { label: 'Start GenAI Studio', runNow: true })
-  assert.deepEqual(bannerAction(local, 'https://192.168.2.9:5000'), { label: 'Start GenAI Studio', runNow: false }, 'the tab points at another board')
-  assert.deepEqual(bannerAction(status('done', 'done', 'pending'), 'https://127.0.0.1:5000'), { label: 'Start GenAI Studio', runNow: false }, 'board unknown')
-  assert.deepEqual(bannerAction(status('pending', 'pending', 'pending')), { label: 'Set up GenAI Studio', runNow: false })
-  assert.deepEqual(bannerAction(status('done', 'failed', 'pending')), { label: 'Set up GenAI Studio', runNow: false }, 'a failure is shown first')
-  assert.deepEqual(bannerAction(null), { label: 'Set up GenAI Studio', runNow: false })
-  assert.equal(lastLine(''), '')
+// A setup state from the board: one step state per step, in order.
+const setupStatus = (...states) => ({ active: false, steps: ['install', 'prepare', 'start'].map((id, i) => ({ id, title: id, state: states[i] })) })
+
+test('setup tells not installed, installed but stopped and a disconnected board apart', () => {
+  const phase = (status, more = {}) => setupPhase({ status, ...more })
+  assert.equal(phase(setupStatus('pending', 'pending', 'pending')), 'missing')
+  assert.equal(phase({ ...setupStatus('pending', 'pending', 'done'), outdated: true }), 'outdated')
+  assert.equal(phase(setupStatus('done', 'pending', 'pending')), 'unprepared')
+  assert.equal(phase(setupStatus('done', 'done', 'pending')), 'studio-stopped', 'installed: start it, never install again')
+  assert.equal(phase(null), 'checking')
+  assert.equal(phase(setupStatus('done', 'done', 'pending'), { readError: { message: 'x', code: 'unreachable' } }), 'disconnected', 'an old state is not shown for an unreachable board')
+  for (const code of ['auth_failed', 'timeout', 'host_key_changed']) assert.equal(phase(null, { readError: { code } }), 'disconnected', code)
+  assert.equal(phase(null, { readError: { code: 'no_target' } }), 'no-board')
+  assert.equal(phase(null, { readError: { message: 'Insight did not answer.' } }), 'unreadable')
+  // Something runs: the step that runs names the page, also when GenAI Studio was started from a shell.
+  assert.equal(phase({ ...setupStatus('running', 'queued', 'queued'), active: true }), 'installing')
+  assert.equal(phase({ ...setupStatus('done', 'running', 'queued'), active: true }), 'preparing')
+  assert.equal(phase({ ...setupStatus('done', 'done', 'queued'), active: true }), 'starting')
+  assert.equal(phase(setupStatus('done', 'done', 'running')), 'starting')
+  // A failure, and a step stopped on purpose, which resumes.
+  assert.equal(phase(setupStatus('done', 'failed', 'pending')), 'failed')
+  assert.equal(phase(setupStatus('blocked', 'pending', 'pending')), 'failed')
+  const stopped = setupStatus('done', 'failed', 'pending')
+  stopped.steps[1].stopped = true
+  assert.equal(phase(stopped), 'stopped')
+  // Everything done: ready once the tab gets GenAI Studio's answer.
+  assert.equal(phase(setupStatus('done', 'done', 'done'), { reached: true }), 'ready')
+  assert.equal(phase(setupStatus('done', 'done', 'done')), 'connecting')
+  assert.equal(phase(setupStatus('done', 'done', 'done'), { elsewhere: true }), 'elsewhere')
+  // A GenAI Studio answering at another board's address is not the one setup made ready.
+  assert.equal(phase(setupStatus('done', 'done', 'done'), { reached: true, elsewhere: true }), 'elsewhere')
+  // An address that answers with an error page or an unsupported API is not ready either.
+  assert.equal(phase(setupStatus('done', 'done', 'done'), { unusable: { title: 'x' } }), 'unusable')
 })
 
-test('steps show a check, a spinner or a grey circle, and setup runs again only after warnings', () => {
-  assert.deepEqual(['done', 'running', 'queued', 'pending', 'failed', 'blocked'].map(stepIcon),
-    ['done', 'running', 'waiting', 'waiting', 'failed', 'failed'])
-  assert.deepEqual(['ready', 'busy', 'starting', 'unavailable'].map(connectIcon), ['done', 'running', 'waiting', 'waiting'])
+test('the chat opens only once a usable GenAI Studio answers', () => {
+  assert.equal(tabMode({}), 'checking')
+  assert.equal(tabMode({ checked: true }), 'setup', 'nothing answers')
+  assert.equal(tabMode({ checked: true, reached: true }), 'workspace')
+  assert.equal(tabMode({ inSetup: true, checked: true, reached: true }), 'setup', 'until Open Studio')
+  assert.equal(tabMode({ inSetup: true }), 'setup', 'a reload during setup')
+  // An address answering with a web page, an HTTP error or an unsupported API is not usable.
+  for (const state of ['error', 'incompatible']) {
+    assert.equal(tabMode({ checked: true, reached: studioAnswers(state) }), 'setup', state)
+  }
+})
+
+test('setup is ready only when the tab can use the GenAI Studio it answers with', () => {
+  for (const state of ['ready', 'failed', 'busy', 'starting']) assert.equal(studioAnswers(state), true, state)
+  for (const state of ['error', 'incompatible', 'unavailable', 'unconfigured']) assert.equal(studioAnswers(state), false, state)
+  const done = { ...setupStatus('done', 'done', 'done'), active: true }
+  const page = setupView({ status: done, unusable: { title: "This address doesn't answer like GenAI Studio", detail: 'Check the GenAI Studio address.', fixAddress: true } })
+  assert.deepEqual([page.phase, page.title, page.subtitle], ['unusable', "This address doesn't answer like GenAI Studio", 'Check the GenAI Studio address.'])
+  assert.deepEqual(page.action, { kind: 'connection', label: 'Connection settings' })
+  assert.deepEqual(page.steps[2].icon, 'failed')
+  assert.deepEqual(page.stop, { kind: 'stop-studio', label: 'Stop GenAI Studio' })
+  // No address at all: never "connecting"; the page says so and the address card is already open.
+  const none = deriveBackendState({ health: { httpStatus: 503, body: { reason: 'not-configured' } } })
+  assert.equal(none.title, 'No GenAI Studio address')
+  const noAddress = setupView({ status: done, unusable: { title: none.title, detail: none.detail, fixAddress: false } })
+  assert.deepEqual([noAddress.phase, noAddress.title, noAddress.action], ['unusable', 'No GenAI Studio address', null])
+  assert.equal(noAddress.steps[2].note, "Running, but this tab can't use it")
+  // An unsupported API version is fixed by updating, not by the address: no address button.
+  assert.equal(setupView({ status: done, unusable: { title: 'Unsupported', detail: 'Update Insight.', fixAddress: false } }).action, null)
+  const other = setupView({ status: done, reached: true, elsewhere: true })
+  assert.deepEqual([other.action.kind, other.steps[2].note], ['connection', 'Running, but this tab connects elsewhere'])
+})
+
+test('the setup page shows the next action and keeps stopping a secondary button', () => {
+  const action = (status, more = {}) => setupView({ status, ...more }).action
+  assert.deepEqual(action(setupStatus('pending', 'pending', 'pending')), { kind: 'run', label: 'Install GenAI Studio' })
+  assert.deepEqual(action({ ...setupStatus('pending', 'pending', 'done'), outdated: true }), { kind: 'run', label: 'Update GenAI Studio' })
+  assert.deepEqual(action(setupStatus('done', 'pending', 'pending')), { kind: 'run', label: 'Continue setup' })
+  assert.deepEqual(action(setupStatus('done', 'done', 'pending')), { kind: 'run', label: 'Start GenAI Studio' })
+  assert.deepEqual(action(setupStatus('done', 'failed', 'pending')), { kind: 'run', label: 'Retry' })
+  assert.deepEqual(action(null, { readError: { code: 'unreachable' } }), { kind: 'reconnect', label: 'Try connection again' })
+  assert.deepEqual(action(setupStatus('done', 'done', 'done'), { elsewhere: true }), { kind: 'connection', label: 'Connection settings' })
+  assert.equal(action({ ...setupStatus('done', 'running', 'queued'), active: true }), null, 'nothing to start while a step runs')
+  // Done: Open Studio leads on, and Stop GenAI Studio is the secondary button.
+  const ready = setupView({ status: { ...setupStatus('done', 'done', 'done'), active: true }, reached: true })
+  assert.deepEqual(ready.action, { kind: 'open', label: 'Open Studio' })
+  assert.deepEqual(ready.stop, { kind: 'stop-studio', label: 'Stop GenAI Studio' })
+  assert.deepEqual(setupView({ status: { ...setupStatus('done', 'running', 'queued'), active: true } }).stop, { kind: 'stop', label: 'Stop setup' })
+  assert.deepEqual(setupView({ status: { ...setupStatus('done', 'done', 'running'), active: true } }).stop, { kind: 'stop-studio', label: 'Stop setup' })
+  assert.deepEqual(setupView({ status: setupStatus('done', 'done', 'running') }).stop, { kind: 'stop-studio', label: 'Stop GenAI Studio' }, 'started from a shell')
+  assert.equal(setupView({ status: setupStatus('done', 'done', 'pending') }).stop, null)
+  assert.equal(setupView({ status: { ...setupStatus('done', 'failed', 'done'), active: true } }).stop, null, 'Retry stops GenAI Studio itself')
+})
+
+test('the setup checklist says each step\'s status in a few words', () => {
+  const rows = (status, more = {}) => setupView({ status, ...more }).steps.map((s) => [s.name, s.icon, s.note])
+  assert.deepEqual(rows(setupStatus('pending', 'pending', 'pending')), [
+    ['Install Neat Apps', 'waiting', 'Ready to install'],
+    ['Prepare speech and search', 'waiting', 'Waiting'],
+    ['Start and connect', 'waiting', 'Waiting']
+  ])
+  assert.deepEqual(rows({ ...setupStatus('done', 'running', 'queued'), active: true }), [
+    ['Install Neat Apps', 'done', 'Installed'],
+    ['Prepare speech and search', 'running', 'Preparing voices and search…'],
+    ['Start and connect', 'waiting', 'Next']
+  ])
+  assert.deepEqual(rows(setupStatus('done', 'done', 'pending')).map((r) => r[2]), ['Installed', 'Prepared', 'Not running'])
+  assert.deepEqual(rows(setupStatus('done', 'done', 'done')).map((r) => r.slice(1)), [['done', 'Installed'], ['done', 'Prepared'], ['running', 'Connecting this tab…']])
+  assert.deepEqual(rows(setupStatus('done', 'done', 'done'), { reached: true })[2].slice(1), ['done', 'Connected'])
+  assert.deepEqual(rows(setupStatus('failed', 'pending', 'pending')).map((r) => r.slice(1)), [['failed', 'Needs attention'], ['waiting', 'Waiting'], ['waiting', 'Waiting']])
+  const stopped = setupStatus('done', 'failed', 'pending')
+  stopped.steps[1].stopped = true
+  assert.deepEqual(rows(stopped)[1].slice(1), ['waiting', 'Stopped, ready to resume'])
+  assert.deepEqual(rows({ ...setupStatus('pending', 'pending', 'done'), outdated: true })[0].slice(1), ['waiting', 'Update available'])
+  for (const icon of ['done', 'running', 'waiting', 'failed']) assert.ok(STEP_LABELS[icon], icon)
+})
+
+test('the setup page keeps failures and their fixes visible and folds warnings away', () => {
+  const failed = setupStatus('done', 'failed', 'pending')
+  failed.steps[1].problem = { message: 'The board could not download what this step needs.', fixes: ['Check the internet.'], command: './setup.sh' }
+  const view = setupView({ status: failed })
+  assert.equal(view.problem, failed.steps[1].problem)
+  assert.equal(view.subtitle, 'Prepare speech and search did not finish.')
+  const blocked = setupStatus('blocked', 'pending', 'pending')
+  blocked.steps[0].problem = { message: '`sima-cli` was not found on the board.', fixes: ['Install sima-cli.'], command: null }
+  assert.match(setupView({ status: blocked }).subtitle, /can't run yet/)
+  // A quiet step's note and an outdated GenAI Studio's reason stay visible too.
+  const quiet = { ...setupStatus('done', 'running', 'queued'), active: true }
+  quiet.steps[1].stall = { message: 'No new output for 12 minutes.', fixes: [] }
+  assert.equal(setupView({ status: quiet }).stall.message, 'No new output for 12 minutes.')
+  const outdated = { ...setupStatus('pending', 'pending', 'done'), outdated: true }
+  outdated.steps[0].notice = { message: 'GenAI Studio on the board comes from Neat Apps `main`.', fixes: [] }
+  assert.equal(setupView({ status: outdated }).notice, outdated.steps[0].notice)
+  // Warnings: counted in the ready page's line, listed per step.
+  const warned = { ...setupStatus('done', 'done', 'done'), active: true }
+  warned.steps[1].warnings = [{ message: 'The Supertonic voices were skipped.', fix: null }]
+  const ready = setupView({ status: warned, reached: true })
+  assert.equal(ready.subtitle, 'Chat is ready. Setup finished with 1 warning: review it below.')
+  assert.deepEqual(ready.warnings, [{ id: 'prepare', name: 'Prepare speech and search', done: true, warnings: warned.steps[1].warnings }])
+  assert.equal(ready.steps[1].note, 'Prepared with 1 warning')
+  // A board Insight can't read: its message is the problem, with no checklist.
+  const unreadable = setupView({ status: null, readError: { message: 'Insight did not answer.', fixes: ['Reload.'] } })
+  assert.deepEqual([unreadable.problem.message, unreadable.steps], ['Insight did not answer.', []])
+  assert.deepEqual(setupView({ status: setupStatus('done', 'done', 'pending'), readError: { code: 'unreachable' } }).steps, [], 'no stale checklist')
+})
+
+test('setup can run again only after warnings', () => {
   const warned = { id: 'prepare', state: 'done', warnings: [{ message: 'The Supertonic voices were skipped.', fix: null }] }
   const steps = (prepare, start = 'done') => [{ id: 'install', state: 'done' }, prepare, { id: 'start', state: start }]
   assert.equal(canRunSetupAgain({ active: true, steps: steps(warned) }), true, 'the job only keeps GenAI Studio running')
@@ -457,6 +572,9 @@ test('steps show a check, a spinner or a grey circle, and setup runs again only 
   assert.equal(canRunSetupAgain({ active: true, steps: steps(warned, 'running') }), true, 'GenAI Studio still loading: it is stopped first')
   assert.equal(canRunSetupAgain({ active: true, steps: steps(warned, 'queued') }), false, 'a job is about to start it')
   assert.equal(canRunSetupAgain(null), false)
+  assert.equal(setupStoppable({ ...setupStatus('done', 'running', 'queued'), active: true }), true)
+  assert.equal(setupStoppable({ ...setupStatus('done', 'done', 'running'), active: true }), false, 'GenAI Studio is stopped instead')
+  assert.equal(setupStoppable(setupStatus('done', 'failed', 'pending')), false)
 })
 
 test('GenAI Studio can be stopped once it runs and no setup step is in progress', () => {
@@ -465,21 +583,36 @@ test('GenAI Studio can be stopped once it runs and no setup step is in progress'
   assert.equal(canStopStudio({ active: false, steps: steps('done') }), true, 'started from a shell on the board')
   assert.equal(canStopStudio({ active: true, steps: steps('running') }), true, 'still loading its voices')
   assert.equal(canStopStudio({ active: false, steps: steps('running') }), true, 'started from a shell, still loading')
-  assert.equal(setupAction({ active: false, steps: steps('running') }), null, 'nothing to start while it loads')
+  assert.equal(setupView({ status: { active: false, steps: steps('running') } }).action, null, 'nothing to start while it loads')
   assert.equal(canStopStudio({ active: true, steps: steps('queued', 'running') }), false, 'setup.sh is running')
   assert.equal(canStopStudio({ active: false, steps: steps('pending') }), false, 'not running')
   assert.equal(canStopStudio(null), false)
 })
 
-test('the one-click start only acts on the board the tab connects to', () => {
+test('setup knows whether the tab connects to the board setup acts on', () => {
   const ssh = { target: { mode: 'ssh', host: '192.168.2.3' } }
   assert.equal(relayOnSetupBoard('https://192.168.2.3:5000', ssh), true)
   assert.equal(relayOnSetupBoard('https://192.168.2.4:5000', ssh), false)
   assert.equal(relayOnSetupBoard('https://localhost:5000', { target: { mode: 'local', host: null } }), true)
   assert.equal(relayOnSetupBoard('https://[::1]:5000', { target: { mode: 'local', host: null } }), true)
+  const zoned = { target: { mode: 'ssh', host: 'FE80::1%eth0' } }
+  assert.equal(relayOnSetupBoard('https://[fe80::1%eth0]:5000', zoned), true)
+  assert.equal(relayOnSetupBoard('https://[fe80::1%25eth0]:5000', zoned), true)
+  assert.equal(relayOnSetupBoard('https://[fe80::1%eth1]:5000', zoned), false)
   assert.equal(relayOnSetupBoard('not a url', ssh), false)
   assert.equal(relayOnSetupBoard('', ssh), false)
   assert.equal(relayOnSetupBoard('https://192.168.2.3:5000', {}), false)
+  // URL lowercases the host; the board target keeps the case it was entered with.
+  assert.equal(relayOnSetupBoard('https://devkit.local:5000', { target: { mode: 'ssh', host: 'DevKit.Local' } }), true)
+  assert.equal(relayOnSetupBoard('https://[fe80::1]:5000', { target: { mode: 'ssh', host: 'FE80::1' } }), true)
+})
+
+test('a setup state read from a board no longer in Insight\'s header is dropped', () => {
+  assert.equal(setupForBoard({ generation: 3 }, 4), false, 'the previous board')
+  assert.equal(setupForBoard({ generation: 4 }, 4), true)
+  assert.equal(setupForBoard({ generation: 5 }, 4), true, 'a newer selection the header has not shown yet')
+  assert.equal(setupForBoard({ generation: 3 }, null), true, 'the header has not answered yet')
+  assert.equal(setupForBoard({}, 4), true)
 })
 
 test('a failed setup request says what happened and what to do', () => {
@@ -490,13 +623,13 @@ test('a failed setup request says what happened and what to do', () => {
     status: 409,
     body: { error: 'No board is selected.', code: 'no_target', hint: "Enter the board's address." }
   }))
-  assert.deepEqual(board, { message: 'No board is selected.', fixes: ["Enter the board's address."], detail: '' })
+  assert.deepEqual(board, { message: 'No board is selected.', fixes: ["Enter the board's address."], detail: '', code: 'no_target' })
   const launch = requestProblem(new GenaiError('x', { status: 502, body: { error: 'Could not start.', detail: 'mkdir: Permission denied' } }))
   assert.deepEqual(launch.fixes, [])
   assert.equal(launch.detail, 'mkdir: Permission denied')
 })
 
-test('a reload reopens the setup panel, and storage failures only lose that', () => {
+test('a reload keeps the user in setup, and storage failures only lose that', () => {
   const store = new Map()
   const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) }
   assert.equal(setupOpenSaved(storage), false)
@@ -697,6 +830,9 @@ test('capabilities gate their controls when idle', () => {
   assert.equal(allowedActions({ ...READY, hasAsr: false }).startRecording, false)
   assert.equal(allowedActions({ ...READY, hasDraft: false }).send, false)
   assert.equal(allowedActions({ ...READY, hasChatModel: false }).typeMessage, false)
+  // A spoken question goes to the chat model too: no model, no recording.
+  assert.equal(allowedActions({ ...READY, hasChatModel: false }).startRecording, false)
+  assert.equal(allowedActions({ ...READY, hasChatModel: false, recording: true }).stopRecording, true, 'a recording can always be stopped')
   assert.equal(allowedActions({ ...READY, usable: false }).readAloud, false)
 })
 
@@ -1276,7 +1412,7 @@ test('the view sends the reply settings, and drops board camera and vision resul
     return view.slice(start, view.indexOf('\n  }\n', start))
   }
   const send = fn('function sendMessage(')
-  assert.match(send, /systemPromptFor\(\{ custom: replySettings\.systemPrompt/)
+  assert.match(fn('function requestMessages('), /systemPromptFor\(\{ custom: replySettings\.systemPrompt/)
   assert.match(send, /maxTokens: replySettings\.maxTokens/)
   assert.match(send, /visionBusy\.current\) return false/, 'a spoken question waits while the vision view asks')
   const ask = fn('async function askAboutPicture(')
@@ -1314,9 +1450,6 @@ test('the system prompt field: the default, a custom prompt, and a cleared field
   assert.match(systemPromptNote(DEFAULT_SYSTEM_PROMPT), /^The default prompt/)
   assert.equal(systemPromptNote('  '), 'An empty prompt sends the default.')
   assert.equal(systemPromptNote('Be brief.'), 'Your prompt replaces the default.')
-  assert.equal(replySummary({ systemPrompt: DEFAULT_SYSTEM_PROMPT, maxTokens: 512 }), 'Default system prompt · longest reply 512 tokens')
-  assert.equal(replySummary({ systemPrompt: '', maxTokens: 512 }), 'Default system prompt · longest reply 512 tokens')
-  assert.equal(replySummary({ systemPrompt: 'Be brief.', maxTokens: 1024 }), 'Custom system prompt · longest reply 1024 tokens')
 
   // The view: the field shows the text itself, Reset puts the default back,
   // and a field left empty shows the default again when it loses focus.
@@ -1410,36 +1543,101 @@ test('the first model rules: one download at a time, not under a model operation
 
 test('Settings cards: one line each about how they are set now', () => {
   assert.equal(STATE_LABELS.unavailable, 'Not running')
-  assert.equal(boardSummary({ settings: { url: 'https://192.168.2.3:5000', configuredUrl: 'https://192.168.2.3:5000' }, state: 'ready' }), '192.168.2.3:5000 · Ready')
-  assert.equal(boardSummary({ settings: { url: 'https://10.0.0.5:5000', configuredUrl: null }, state: 'unavailable' }), '10.0.0.5:5000 (default) · Not running')
-  assert.equal(boardSummary({ settings: { url: '', configuredUrl: 'https://[bad' }, state: 'unconfigured' }), 'The saved address is not valid')
-  assert.equal(boardSummary({ settings: null }), 'No board selected')
+  // The address card says only where GenAI Studio is reached: whether it runs is the status
+  // label's (and the setup page's) job, and the board is Insight's header's.
+  assert.equal(addressSummary({ settings: { url: 'https://192.168.2.3:5000', configuredUrl: 'https://192.168.2.3:5000' } }), '192.168.2.3:5000')
+  assert.equal(addressSummary({ settings: { url: 'https://10.0.0.5:5000', configuredUrl: null } }), '10.0.0.5:5000 (default)')
+  assert.equal(addressSummary({ settings: { url: '', configuredUrl: 'https://[bad' } }), 'The saved address is not valid')
+  assert.equal(addressSummary({ settings: null }), 'No address set')
+})
 
-  assert.equal(modelsSummary(null), 'Waiting for the board')
-  assert.equal(modelsSummary(STATUS), 'Qwen3 VL 4B loaded · 3 models on the board', 'chat, vision and speech models; not the search model')
-  assert.equal(modelsSummary({ ...STATUS, loaded: [] }), 'No chat model loaded · 3 models on the board')
-  assert.equal(modelsSummary({ ...STATUS, loading: { name: 'Qwen3-0.6B-Autoround-a16w4' } }), 'Loading Qwen3 0.6B · 3 models on the board')
-  assert.equal(modelsSummary(EMPTY_STATUS), 'No models on the board yet')
-  assert.equal(modelsSummary({ catalog: [STATUS.catalog[2]], loaded: [] }), 'No chat model loaded · 1 model on the board')
-
-  const engines = [{ key: 'piper-plus', label: 'Piper Plus', voices: [{ id: 'amy', label: 'Amy' }] }]
-  assert.equal(voiceSummary({}), 'Automatic voice · spoken language detected automatically')
-  assert.equal(voiceSummary({ engine: 'piper-plus', voice: 'amy', engines, languageLabel: 'English' }), 'Piper Plus (Amy) · you speak English')
-  assert.equal(voiceSummary({ engine: 'supertonic', engines: [] }), 'Supertonic · spoken language detected automatically', 'an engine the voice list does not describe')
-
-  assert.equal(documentsCardSummary({ docs: { available: false, reason: 'x' } }), 'Not available on this board')
-  assert.equal(documentsCardSummary({ docs: { available: true }, docStatus: null }), 'Checking the documents…')
-  assert.equal(documentsCardSummary({ docs: { available: true }, docStatus: { enabled: true, database: true, service: 'ok', meta: { chunks: 8, input: '/x/neat.md' } } }), '8 sections from neat.md')
+test('the document card names the file and what can be searched in it', () => {
+  assert.deepEqual(documentsCard(null), { name: 'Documents', detail: 'Checking the documents…' })
+  assert.equal(documentsCard({ enabled: true, database: false }).name, 'No documents')
+  assert.deepEqual(documentsCard({ enabled: true, database: true, meta: { chunks: 8, input: '/x/neat.md' } }), { name: 'neat.md', detail: '8 searchable sections' })
+  assert.deepEqual(documentsCard({ enabled: true, database: true, meta: { chunks: 1 } }), { name: 'Your documents', detail: '1 searchable section' })
+  assert.equal(documentsCard({ enabled: true, database: true }).detail, 'Ready to search')
 })
 
 test('a model row: its kind, size and whether it is in use', () => {
   const [vlm, small, whisper] = STATUS.catalog
   assert.deepEqual(modelRow(vlm, STATUS), { name: 'Qwen3 VL 4B', kind: { key: 'vision', label: 'Vision' }, size: '8.4 GB', state: { key: 'on', label: 'Loaded' }, on: true })
-  assert.deepEqual([modelRow(small, STATUS).kind.label, modelRow(small, STATUS).state.label, modelRow(small, STATUS).size], ['Chat', 'Not loaded', '1.4 GB'])
+  assert.deepEqual([modelRow(small, STATUS).kind.label, modelRow(small, STATUS).state.label, modelRow(small, STATUS).size], ['Chat', 'On DevKit', '1.4 GB'])
   assert.deepEqual([modelRow(whisper, STATUS).kind.label, modelRow(whisper, STATUS).state.label, modelRow(whisper, STATUS).size], ['Speech', 'In use', ''])
-  assert.equal(modelRow({ ...whisper, activeAsr: false }, { ...STATUS, asrModel: 'other' }).state.label, 'Not in use')
+  assert.equal(modelRow({ ...whisper, activeAsr: false }, { ...STATUS, asrModel: 'other' }).state.label, 'On DevKit')
   assert.equal(modelRow(small, { ...STATUS, loading: { name: small.name } }).state.label, 'Loading…')
   assert.equal(modelRow({ ...small, supported: false }, STATUS).state.key, 'unsupported')
+  assert.deepEqual(modelRow({ ...small, complete: false }, STATUS).state, { key: 'incomplete', label: 'Download incomplete' })
   // Hugging Face search results type their models llm, vlm or asr.
   assert.deepEqual(['llm', 'vlm', 'asr', undefined].map((type) => modelKind({ type }).label), ['Chat', 'Vision', 'Speech', 'Chat'])
+})
+
+test('the benchmark tests something with no changes', () => {
+  const models = [{ name: 'a', supported: false }, { name: 'b' }, { name: 'c' }]
+  assert.deepEqual(defaultChoice(models, new Set(['c'])), ['c'])
+  assert.deepEqual(defaultChoice(models, new Set()), ['b'])
+  assert.deepEqual(defaultChoice([{ name: 'a', supported: false }], new Set()), [])
+  assert.deepEqual(defaultChoice([], new Set()), [])
+})
+
+test('the advanced options summary says what a run sends', () => {
+  assert.equal(settingsText({ runs: '5', maxTokens: '128', prompt: ' ' }), '5 runs · 128 tokens · standard prompt')
+  assert.equal(settingsText({ runs: '1', maxTokens: '9999', prompt: 'hi' }), '1 run · 2048 tokens · your prompt')
+})
+
+test('benchmark labels say whether a number is good', () => {
+  assert.deepEqual(firstWordTime(63.18), { value: '63', unit: 'ms' })
+  assert.deepEqual(firstWordTime(1640), { value: '1.6', unit: 'seconds' })
+  assert.equal(firstWordVerdict(999).label, 'Feels instant')
+  assert.equal(firstWordVerdict(1000).label, 'A short pause')
+  assert.equal(firstWordVerdict(3000).label, 'A short pause')
+  assert.equal(firstWordVerdict(3001).label, 'A noticeable wait')
+  assert.equal(speedVerdict(6).label, 'Faster than you can read')
+  assert.equal(speedVerdict(5.9).label, 'About reading speed')
+  assert.equal(speedVerdict(4).label, 'About reading speed')
+  assert.equal(speedVerdict(3.9).label, 'Slower than you can read')
+  assert.equal(wordsPerSecondText(18.6), 'About 14 words a second.')
+  assert.equal(wordsPerSecondText(1.4), 'About 1 word a second.')
+  assert.equal(wordsPerSecondText(0.5), 'Less than 1 word a second.')
+})
+
+test('the benchmark results read as a sentence', () => {
+  const row = (model, tps, ttft, runs = 5) => ({ model, runs, bestTps: tps, bestTtft: ttft })
+  assert.equal(resultsSummary([]), '')
+  assert.equal(resultsSummary([{ model: 'x', failed: 'no' }]), '')
+  assert.equal(resultsSummary([row('Phi-3', true, true)]), 'Each number is the average of 5 runs.')
+  assert.equal(resultsSummary([row('Phi-3', true, true, 1)]), 'Each number comes from 1 run.')
+  assert.equal(resultsSummary([row('Phi-3', true, true), row('Gemma', false, false)]), 'Phi 3 was the fastest on both numbers. Each number is the average of 5 runs.')
+  assert.equal(resultsSummary([row('Phi-3', true, false, 5), row('Gemma', false, true, 4)]), "Gemma started replying first and Phi 3 replied fastest. Each number is the average of that model's runs.")
+  assert.equal(resultsSummary([row('Phi-3', true, true), row('Gemma', true, false)]), 'Each number is the average of 5 runs.')
+  assert.equal(resultBadge(row('a', true, true), 1), '')
+  assert.equal(resultBadge(row('a', true, true), 2), 'Fastest')
+  assert.equal(resultBadge(row('a', true, false), 2), 'Fastest replies')
+  assert.equal(resultBadge(row('a', false, true), 2), 'Starts first')
+  assert.equal(resultBadge(row('a', false, false), 2), '')
+})
+
+test('a button that allowedActions turns off always says why, and one it allows says nothing', () => {
+  const flags = ['usable', 'hasChatModel', 'sees', 'hasAsr', 'hasMessages', 'hasDraft', 'cameraOpen', 'visionOpen', 'replying',
+    'recording', 'micOpening', 'transcribing', 'modelOp', 'benchmarking', 'documentTask', 'documentsAvailable', 'benchmarkAvailable',
+    'boardCameraAvailable', 'visionAsking', 'visionLoop', 'useDocuments']
+  const actions = ['exportChat', 'newChat', 'attachPicture', 'openCamera', 'openBoardCamera', 'openVision', 'startRecording', 'send', 'openBenchmark', 'toggleDocuments']
+  for (let bits = 0; bits < 2 ** flags.length; bits += 1) {
+    const state = Object.fromEntries(flags.map((flag, i) => [flag, Boolean(bits & (1 << i))]))
+    const allowed = allowedActions(state)
+    for (const action of actions) {
+      if (allowed[action] === (blockedReason(action, state) === '')) continue
+      assert.fail(`${action}: allowed ${allowed[action]}, reason "${blockedReason(action, state)}" in ${JSON.stringify(state)}`)
+    }
+  }
+})
+
+test('a disabled button names the first thing in the way', () => {
+  const ready = { usable: true, hasChatModel: true, sees: true, hasAsr: true, hasMessages: true, hasDraft: true, benchmarkAvailable: true, boardCameraAvailable: true }
+  assert.equal(blockedReason('send', { ...ready, usable: false, backendTitle: 'GenAI Studio is starting' }), 'GenAI Studio is starting')
+  assert.equal(blockedReason('attachPicture', { ...ready, sees: false }), 'Needs a vision model')
+  assert.equal(blockedReason('openVision', { ...ready, cameraOpen: true }), 'Close the camera panel first')
+  assert.equal(blockedReason('send', { ...ready, hasDraft: false }), 'Type a question first')
+  assert.equal(blockedReason('exportChat', { ...ready, hasMessages: false }), 'No messages to export yet')
+  assert.equal(blockedReason('openBenchmark', { ...ready, benchmarkAvailable: false, benchmarkReason: 'Update Apps on the board.' }), 'Update Apps on the board.')
 })

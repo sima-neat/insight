@@ -37,11 +37,31 @@ Insight 是圍繞您在驗證視覺應用程式時執行的開發工作來組織
 
 匯入媒體後，您可以篩選檔案清單、預覽選取的檔案、檢查其基本中繼資料，或刪除不再需要的檔案。請在設定串流來源之前使用「媒體來源」，以便了解有哪些檔案可用、Insight 偵測到哪種編解碼器，以及這些檔案是否可讀取。
 
-媒體庫會以資料夾的形式顯示。選取資料夾列會開啟該資料夾，並列出其子資料夾與影片。每個資料夾列都會顯示其中包含多少個可串流的影片（包含子資料夾中的影片），而麵包屑導覽下方的那一行則會針對您目前所在的資料夾顯示相同的計數。麵包屑導覽會顯示您目前所在的位置；點選其中任何一部分（包括**媒體根目錄**），即可返回該層級。篩選功能會搜尋目前的資料夾及其下的所有內容，並以相對於目前資料夾的路徑顯示相符結果。Insight 無法串流的檔案會以灰色列出，並標示**無法串流**標籤，因此您仍可預覽或刪除它們；串流來源中的指派對話方塊則會隱藏這些檔案，並以灰色顯示沒有可串流影片的資料夾。資料夾名稱只是您自訂的一般標籤，例如 `30FPS/` 或 `120FPS-720p-h264/`；Insight 絕不會從中讀取影片設定。在 Neat SDK 中，媒體庫位於 `/workspace/.insight-media/`，因此即使 SDK 重新啟動，媒體庫也會保留。上傳的檔案一律會放在媒體庫的最上層。
+**影片檔案**卡片會以資料夾的形式顯示媒體庫。選取資料夾列會開啟該資料夾，並列出其子資料夾與影片。每個資料夾列都會顯示其中包含多少個可串流的影片（包含子資料夾中的影片），而**影片檔案**標題旁則會針對您目前所在的資料夾顯示相同的計數。麵包屑導覽會顯示您目前所在的位置；點選其中任何一部分（包括**影片**），即可返回該層級。篩選功能會搜尋目前的資料夾及其下的所有內容，並以相對於目前資料夾的路徑顯示相符結果。Insight 無法串流的檔案會以灰色列出，並標示**無法串流**標籤，因此您仍可預覽或刪除它們；串流來源中的指派對話方塊則會隱藏這些檔案，並以灰色顯示沒有可串流影片的資料夾。資料夾名稱只是您自訂的一般標籤，例如 `30FPS/` 或 `120FPS-720p-h264/`；Insight 絕不會從中讀取影片設定。在 Neat SDK 中，媒體庫位於 `/workspace/.insight-media/`，因此即使 SDK 重新啟動，媒體庫也會保留。上傳的檔案一律會放在媒體庫的最上層。
 
 ![Insight 媒體來源檢視，顯示選取的影片預覽與媒體中繼資料。](../../images/insight-media-library.png)
 
 「媒體來源」在單一檢視中結合了匯入、檔案選取、預覽、中繼資料檢查與刪除動作。匯入的目錄素材會儲存在 `catalog/` 下，YouTube 片段則儲存在 `youtube/` 下，讓您能辨識檔案是如何進入媒體庫的。
+
+### 預覽相機
+
+連接到執行瀏覽器之電腦的網路攝影機或手機相機，可以在串流前先在此預覽。在 **相機** 下選取 **啟用相機存取**，並在瀏覽器詢問時允許存取；相機會列在按鈕下方。選取相機後，會以該相機的即時視訊取代所選檔案的預覽，並顯示相機名稱與瀏覽器回報的串流資訊：
+
+- **Active stream**（目前串流）：相機目前傳送的解析度與幀率，以及這是相機本身的模式，還是經過瀏覽器裁切或縮放。
+- **Camera capabilities**（相機能力）：相機回報的最大寬度、最大高度與最高幀率，各自分開顯示。這些是上限，而不是相機具有的模式：寬度與高度都回報 1920 的相機，不一定能以 1920×1920 擷取。
+
+瀏覽器未回報的值不會顯示。瀏覽器不會回報像素格式，因此不會顯示像素格式。
+
+預覽只在您的瀏覽器中執行。它不會指派串流槽位，也不會啟動或停止串流；若要串流該相機，請在「串流」中將它指派給槽位（請參閱下方的 **使用網路攝影機作為來源**）。若此瀏覽器分頁已在發布該相機，預覽會顯示該擷取畫面而不會再次開啟相機，因此串流的設定不會改變。選取其他相機或檔案、選取 **Stop preview**（停止預覽）、離開「媒體來源」或關閉分頁，都會釋放相機。
+
+若無法預覽相機，面板會說明原因：
+
+| 您看到的訊息 | 處理方式 |
+| --- | --- |
+| 相機權限遭拒（Camera permission was denied） | 在瀏覽器設定中允許 Insight 網站存取相機，然後選取 **Try again**（重試）。 |
+| 無法啟動相機（The camera could not be started） | 另一個應用程式正在使用相機。請關閉該應用程式，然後選取 **Try again**（重試）。 |
+| 該相機已無法使用（That camera is no longer available），或相機已停止傳送視訊（The camera stopped sending video） | 相機已中斷連接。請重新連接，然後選取 **Refresh cameras**（重新整理相機）。 |
+| 此頁面內嵌於不允許存取相機的框架中（This page is embedded in a frame that does not allow camera access） | Insight 顯示在另一個頁面（例如編輯器分頁）中，而該頁面未將相機存取權傳遞給它。請在獨立的瀏覽器分頁中開啟 Insight。 |
 
 ## 串流來源
 
@@ -73,16 +93,16 @@ Insight 會依據指派的媒體選擇編解碼器與傳輸選項：
 
 ### 使用網路攝影機作為來源
 
-連接到執行瀏覽器之電腦的網路攝影機可以作為即時來源，讓您無須先將檔案複製到開發板，就能以真實相機測試應用程式。
+連接到執行瀏覽器之電腦的網路攝影機可以作為即時來源，讓您無須先將檔案複製到開發板，就能以真實相機測試應用程式。若要先檢查相機，請在「媒體來源」中預覽（請參閱上方的 **預覽相機**）。
 
 1. 選取來源槽位的檔案欄位，並將 **srcN 的來源** 對話方塊切換至 **相機**。
-2. 在該處或 Media Sources 的 **本機相機** 下選取 **啟用相機存取**。瀏覽器會要求相機權限；Insight 無法替您授權。允許存取後，相機會列在該分頁中。
+2. 在該處或 Media Sources 的 **相機** 下選取 **啟用相機存取**。瀏覽器會要求相機權限；Insight 無法替您授權。允許存取後，相機會列在該分頁中。
 3. 選取相機並按 **指派**，再選取 **開始**。該列顯示 `[CAM]` 標記（影片檔案顯示 `[VID]`），瀏覽器將相機發布至 Insight，槽位顯示 `Live`。
 4. 使用 **複製 URL** 取得 RTSP URL，並像檔案來源一樣讓應用程式使用此 URL。
 
 相機清單會隨相機的連接與中斷而更新。網路攝影機來源只發布視訊，格式為 H.264。
 
-擷取進行中時，來源清單旁的預覽會顯示您的本機相機畫面。這不是開發板接收到的視訊，也不會呈現接收端應用程式所看到的延遲；若發布失敗，擷取會停止並清除預覽。
+擷取進行中時，來源清單旁的預覽會顯示您的相機畫面。這不是開發板接收到的視訊，也不會呈現接收端應用程式所看到的延遲；若發布失敗，擷取會停止並清除預覽。
 
 選取 **Stop**（停止）、拔除相機或關閉瀏覽器分頁都會結束串流，並將槽位恢復為 `Idle`。**Stop All**（全部停止）、**Reset**（重設）與 **Auto Assign**（自動指派）也會釋放所有網路攝影機，因為它們都會收回那些槽位：Reset 與 Auto Assign 也會清除相機選擇，因此之後請重新選取相機。網路攝影機發布期間，瀏覽器分頁必須保持開啟：它就是將視訊傳送到 Insight 的元件。基於同樣的原因，Insight 重新啟動後，網路攝影機來源絕不會恢復為 `Live`——請重新選取相機並再次啟動。
 
@@ -90,7 +110,7 @@ Insight 會依據指派的媒體選擇編解碼器與傳輸選項：
 
 | 您看到的訊息 | 處理方式 |
 | --- | --- |
-| 相機權限遭拒（Camera permission was denied） | 在瀏覽器設定中允許 Insight 網站存取相機，然後在「媒體來源」→ Local cameras（本機相機）下重新啟用相機存取。 |
+| 相機權限遭拒（Camera permission was denied） | 在瀏覽器設定中允許 Insight 網站存取相機，然後在「媒體來源」→ 相機下重新啟用相機存取。 |
 | 該相機已無法使用（That camera is no longer available） | 相機已中斷連接。選取 **Refresh cameras**（重新整理相機）並重新選取它。 |
 | 無法啟動相機（The camera could not be started） | 另一個應用程式正在使用相機。請關閉該應用程式後重試。 |
 | 無法連線到網路攝影機發布端點（Could not reach the webcam publish endpoint） | 瀏覽器無法連線到發布接聽程式。請信任 `webrtcWhip` 端點的憑證（開啟其 URL 一次以接受憑證），並確認連接埠可連線（請參閱 [連接埠與網路行為](ports-network.md)）。 |
@@ -356,23 +376,23 @@ GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、�
 ./run.sh
 ```
 
-第一次使用時，需要先在開發板上安裝 GenAI Studio。當分頁無法連線到 GenAI Studio 時，**Tutorial** 會詢問您是否第一次使用，橫幅中的按鈕也會開啟相同的面板：**Set up GenAI Studio**，或在已安裝時一鍵啟動的 **Start GenAI Studio**（當分頁的位址指向 Insight 連線的開發板時）。在 **Board** 設定中按 **Open GenAI Studio setup**，即使 GenAI Studio 正在執行，也能隨時開啟此面板。面板會在 Insight 連線的開發板上安裝 Apps（`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`，保留已安裝的 Core 和 Insight；develop 版本的 Insight 會安裝 `apps@develop`）、以 `setup.sh` 準備 GenAI Studio 一次（開發板需要網際網路連線，約 15 分鐘），再以 `./run.sh` 啟動。若 GenAI Studio 是從與此 Insight 不同的頻道安裝，或是為比開發板上更舊的 Neat Library 建置，就會視為過期：分頁會顯示此狀況（即使 GenAI Studio 正在執行），按 **Update and start GenAI Studio** 會停止它、安裝相符的 Apps（先前的檔案會移至 `/media/nvme/.prebuilt-apps-backup`，已下載的模型會保留）、重新準備並啟動。若 GenAI Studio 是為同一系列中另一個 Neat Library 建置版本所建置，只會在安裝步驟下方列出警告。每個步驟完成時顯示勾號，執行中顯示旋轉圖示，輪到之前顯示灰色圓圈。這些步驟在開發板上以單一工作執行，關閉頁面後仍會繼續；記錄檔位於 `~/.neat-insight/genai-setup/`。失敗的步驟會說明原因、處理方式和最後的輸出，旁邊附有 **Retry** 和可手動執行的指令。帶有警告完成的步驟會列出警告及處理方式；修正設定的警告後，**Run setup again** 會重新執行 `setup.sh` 並重新啟動 GenAI Studio。執行期間，面板的 **Start GenAI Studio** 按鈕會變成 **Stop GenAI Studio**，可在開發板上停止 GenAI Studio，從 shell 啟動的也一樣。數分鐘沒有新輸出的步驟會提示此情況，並可用 **Stop**（啟動步驟為 **Stop GenAI Studio**）停止。
+當分頁無法連線到或無法使用 GenAI Studio 時，只會顯示 Insight 所連線開發板（Insight 頁首中顯示的開發板）的設定頁面：在可用的 GenAI Studio 回應之前，不會顯示聊天、模型或設定。頁面列出三個步驟，各附簡短狀態：**Install Neat Apps**（`NEAT_APPS_SKIP_DEPENDENCIES=1 sima-cli neat install apps`，保留已安裝的 Core 和 Insight；從 develop 或 main 以外任何分支建置的 Insight 會安裝 `apps@develop`）、**Prepare speech and search**（執行一次 `setup.sh`：約 15 分鐘，開發板需要網際網路連線）以及 **Start and connect**（`./run.sh`，在此分頁收到 GenAI Studio 的回應後完成）。主要按鈕就是下一步要做的事：未安裝時為 **Install GenAI Studio**，已安裝但已停止時為 **Start GenAI Studio**，另有 **Continue setup**、失敗後的 **Retry**，以及 **Stop setup** 之後的 **Resume setup**。當 Insight 無法連線到開發板時，頁面會改為顯示開發板已中斷連線；請在 Board 選單中重新連線，再按 **Try connection again**。這些步驟在開發板上以單一工作執行，關閉頁面後仍會繼續，重新載入後會顯示目前進度。失敗的步驟會保持標示，並說明問題和處理方式；數分鐘沒有新輸出的步驟會提示此情況。每個步驟的記錄檔保存在開發板的 `~/.neat-insight/genai-setup/` 中。設定完成後，頁面會顯示 **GenAI Studio is ready**，按 **Open Studio** 即可開啟聊天。警告及其處理方式會收合在同一頁面中；修正設定的警告後，**Run setup again** 會重新執行 `setup.sh` 並重新啟動 GenAI Studio。**Stop GenAI Studio** 會在開發板上停止 GenAI Studio，從 shell 啟動的也一樣。**Connection settings** 只在 GenAI Studio 位址需要處理時出現：自訂位址、指向與 Insight 不同開發板的位址（頁面會提示此情況），或尚未設定位址。在 GenAI Studio 執行時，按 Settings 中 **Connection** 的 **Manage installation** 可開啟此頁面來更新、重新執行設定或停止它，按 **Back to Studio** 則返回聊天。若 GenAI Studio 是從與此 Insight 不同的頻道安裝，或是為比開發板上更舊的 Neat Library 建置，就會視為過期：分頁會顯示此狀況（即使 GenAI Studio 正在執行），按 **Update GenAI Studio** 會停止它、安裝相符的 Apps（先前的檔案會移至 `/media/nvme/.prebuilt-apps-backup`，已下載的模型會保留）、重新準備並啟動。若 GenAI Studio 是為同一系列中另一個 Neat Library 建置版本所建置，只會在安裝步驟下方列出警告。
 
 設定前須將 NVMe 掛載至 `/media/nvme`。Apps 與 Python 虛擬環境安裝於 `/media/nvme/prebuilt-apps`；下載快取與暫存檔案存放於 `/media/nvme/.cache/neat-genai-studio`。
 
-第一次開啟時，頁面頂端會顯示簡短的 **Tutorial**，逐一介紹各項功能；隨時可用頁首的 **Tutorial** 再次觀看。頁首包含狀態標籤、**Model** 選擇器及旁邊的 **New chat**（鉛筆）、**Read replies aloud**、**Think first**（對一律直接回答的模型停用）和 **Use my documents**。工具列包含 **Export chat**、**SiMaSentry Solutions**（盾牌）、**Benchmark**（儀表）、**Tutorial**、**Settings** 和 **Full screen**。
+聊天第一次開啟時（包括設定完成後），頁面頂端會顯示簡短的 **Tutorial**，逐一介紹各項功能；隨時可用頁首的 **Tutorial** 再次觀看。頁首包含狀態標籤、**Model** 選擇器及旁邊的 **New chat**（鉛筆）、**Read replies aloud**、**Think first**（對一律直接回答的模型停用）和 **Use my documents**。工具列包含 **Export chat**、**SiMaSentry Solutions**（盾牌）、**Benchmark**（儀表）、**Tutorial**、**Settings** 和 **Full screen**。
 
 狀態標籤以及需要處理時出現的橫幅，會顯示後端狀態和接下來應採取的動作：
 
-- **Not set up**：尚未選取開發板，設定會開啟。請輸入開發板位址，例如 `https://192.168.1.20:5000`。在開發板上，Insight 預設使用本機後端；在 Neat Development Environment 中則預設使用已配對的 DevKit。
-- **Not running**：開發板沒有回應。請用橫幅中的 **Start GenAI Studio** 啟動（第一次使用時為 **Set up GenAI Studio**），或檢查位址。
-- **Error**：開發板傳回錯誤，或該位址不是 GenAI Studio。橫幅會顯示開發板的訊息。
+- **Not set up**：尚未設定 GenAI Studio 位址，設定頁面會顯示位址欄位。請輸入開發板上 GenAI Studio 的位址，例如 `https://192.168.1.20:5000`。優先使用在 Insight 頁首輸入的開發板；否則在開發板上，Insight 預設使用本機後端，在 Neat Development Environment 中則預設使用已配對的 DevKit。
+- **Not running**：開發板沒有回應，分頁會顯示設定頁面：已安裝時用 **Start GenAI Studio** 啟動，第一次使用時則由此頁面安裝。或在 **Connection settings** 中檢查位址。
+- **Error**：開發板傳回錯誤，或該位址不是 GenAI Studio。設定頁面會顯示開發板的訊息；若問題出在位址，還會顯示 **Connection settings**。
 - **Starting**：後端有回應，但模型伺服器尚未就緒。
 - **Busy**：正在載入模型。聊天與語音會等待載入完成。
-- **Incompatible**：開發板的 GenAI Studio API 版本與此 Insight 不相容。請更新橫幅指定的那一方。
+- **Incompatible**：開發板的 GenAI Studio API 版本與此 Insight 不相容。設定頁面會指出需要更新的那一方。
 - **Ready**：可使用聊天與語音。開發板上載入失敗的語音也會在此回報。
 
-**No model yet**：當開發板沒有聊天或視覺模型（或只有無法執行的模型）時，聊天會直接說明，而不是讓訊息框維持灰色停用。**Download Qwen3 VL 4B** 會將視覺語言模型 `simaai/Qwen3-VL-4B-Instruct-Autoround-a16w4` 下載到開發板，並在按鈕下方顯示進度，然後載入模型；開發板查詢到下載大小後，按鈕會顯示該大小，若開發板的可用空間比它小則會發出警告。**Browse models** 會開啟 **Settings** 中 **Models** 的 Hugging Face 搜尋，列出開發板可下載的模型。若開發板不允許下載，聊天會提示在開發板上 GenAI Studio 的 `config.local.yaml` 中設定 `server.hub.allow_download: true`，然後重新啟動 GenAI Studio；若開發板無法連線到 Hugging Face，聊天也會說明，**Check again** 可重新檢查。如果 Hugging Face 已將模型改名，下載失敗時會顯示新的 ID，並提議改為下載該模型。
+**No model yet**：當開發板沒有聊天或視覺模型（或只有無法執行的模型）時，聊天會直接說明，而不是讓訊息框維持灰色停用。**Download Qwen3 VL 4B** 會將視覺語言模型 `simaai/Qwen3-VL-4B-Instruct-Autoround-a16w4` 下載到開發板，並在按鈕下方顯示進度，然後載入模型；開發板查詢到下載大小後，按鈕會顯示該大小，若開發板的可用空間比它小則會發出警告。**Browse models** 會開啟 **Settings** 中 **Models** 的目錄搜尋，列出開發板可下載的模型。若開發板不允許下載，聊天會提示在開發板上 GenAI Studio 的 `config.local.yaml` 中設定 `server.hub.allow_download: true`，然後重新啟動 GenAI Studio；若開發板無法連線到 Hugging Face，聊天也會說明，**Check again** 可重新檢查。如果 Hugging Face 已將模型改名，下載失敗時會顯示新的 ID，並提議改為下載該模型。
 
 **Chat** 是頁面中央的一段對話。可在訊息框輸入，或按下麥克風、說話後再按一次：語音會轉成文字並送出。使用可辨識影像的模型時，可附加照片、使用此瀏覽器的相機拍攝，或使用接在開發板上的相機拍攝：攝影機按鈕會列出開發板的相機（`/dev/videoN`），**Take a picture** 會將開發板拍攝的照片附加到下一則訊息。開發板相機需要可回報 `board_camera` 功能的 GenAI Studio；較舊版本會隱藏該按鈕，並在相機按鈕的提示中說明原因。回答會隨生成進度顯示，可用停止按鈕提前結束；**New chat** 會重新開始，讓模型忘記先前的對話。**Read aloud** 朗讀一則回答，**Stop speaking** 停止朗讀；**Read replies aloud** 朗讀每則回答，並在其餘內容仍在生成時，從第一句開始朗讀。第一次使用時，瀏覽器會要求麥克風和相機權限。
 
@@ -395,19 +415,18 @@ GenAI Studio 在開發板上執行。如下所述，可以在分頁中安裝、�
 
 **SiMaSentry Solutions** 會開啟三個透過 Insight 使用已載入聊天模型的示範應用程式：**SiMaSentry-Med**（臨床聊天與醫療影像檢視）、**SiMaSentry-Safe**（PPE 與危害檢查）和 **SiMaSentry-Sec**（安全監控影像分析與變化偵測）。其照片功能需要可辨識影像的模型。模型在開發板上執行，但這些應用程式的語音輸入使用瀏覽器本身的語音辨識，可能會將音訊傳送至線上服務（Chrome 會如此處理）。應用程式本身的 Home 按鈕、**Back** 或 Esc 可返回啟動器；**Close** 可返回聊天。
 
-**Benchmark** 可測量開發板上的聊天模型。選取一個或多個模型、執行次數（1 到 50）、回答的 token 長度（8 到 2048），以及選填的提示詞，然後按 **Run benchmark**。各模型依序執行，尚未載入的模型會先載入，這可能卸載聊天模型，因此完成後請從 **Model** 選單重新載入。執行期間會顯示進度和回答，**Stop** 可結束執行。結果會比較每秒 token 數（平均值、p90 和標準差）、首個 token 的延遲與回答長度，並醒目標示最快的數值；**Each run** 列出最後一個模型的各次執行。**Download CSV** 和 **Download JSON** 可儲存結果。
+**Benchmark** 可測量開發板上的聊天模型回答得多快：**Time to first word** 是回覆開始前要等待的時間，**Reply speed** 是回覆產生的速度，單位為每秒 token 數（一個 token 約為一個單字的 ¾）。已載入的聊天模型會預先選取，若沒有已載入的模型則選取第一個模型，因此不需變更任何設定就能按 **Run benchmark**；若要比較，請再選取其他模型。**Advanced options** 包含 **Runs**（1 到 50，預設 5）、**Output tokens**（8 到 2048，預設 128）和 **Prompt**。需要載入模型的執行會先告知，並列出會卸載的模型；之後請從 **Model** 選單重新載入該模型。各模型依序執行，執行時會顯示進度和回覆，**Stop** 可結束執行。結果會顯示每個模型的兩個數字，並以標籤說明在聊天中的感受：大致來說，不到 1 秒感覺是立即回應，而多數人每秒約可閱讀 5 個 token。**All numbers** 列出平均速度、p90 速度、變異量、首字時間、回覆長度和執行次數，標示最快的數值，並以一行說明每一項；**Each run** 列出最後一個模型的每次執行。**Run again** 會重複測試，**Change models** 會回到選擇畫面，**Download CSV** 和 **Download JSON** 則儲存結果。
 
-**Use my documents** 會根據開發板上的文件資料庫回答：開發板會尋找符合每個問題的段落，在模型回答前加入，並在回答下方註明所用章節（或表示沒有符合的內容）。**Settings** 中的 **Documents** 可查看資料庫內容、上傳 Markdown 檔案（取代現有文件）、重設為預設 SiMa 文件，或清空資料庫。**View documents** 會列出已匯入的來源檔案、章節（區塊）數，以及各章節的標題路徑與文字；可用 **Filter sections…** 尋找段落（最多前 2,000 個章節）。文件功能需要支援文件搜尋的 GenAI Studio，否則開關會停用並顯示原因。
+**Use my documents** 會根據開發板上的文件資料庫回答：開發板會尋找符合每個問題的段落，在模型回答前加入，並在回答下方註明所用章節（或表示沒有符合的內容）。**Settings** 中的 **Documents** 可查看資料庫內容、上傳 Markdown 檔案（取代現有文件）、重設為預設 SiMa 文件，或清空資料庫。**View sections** 會列出已匯入的來源檔案、章節（區塊）數，以及各章節的標題路徑與文字；可用 **Filter sections…** 尋找段落（最多前 2,000 個章節）。文件功能需要支援文件搜尋的 GenAI Studio，否則開關會停用並顯示原因。
 
-**Settings** 會為每個區域顯示一張卡片：**Board**、**Replies**、**Models**、**Voice**、**Documents** 和 **Troubleshooting**。每張卡片的標題都有一行摘要說明目前的設定，例如 `192.168.1.20:5000 · Ready`、`Default system prompt · longest reply 512 tokens` 或 `Qwen3 VL 4B loaded · 3 models on the board`。
+**Settings** 會以對話方塊開啟在聊天畫面上方（按 **×** 或 Esc 關閉），並有四個分頁。**Model** 選單底部的 **Manage models** 會開啟 **Models** 分頁。
 
-- **Board**：開發板位址。
-- **Replies**：**System prompt** 是每次聊天和 Vision 提問時一併傳送的指示。在您變更之前，欄位會顯示預設值："You are a helpful assistant. Answer clearly and concisely. Use Markdown formatting when it helps. Answer the question in the language it was asked in." 編輯後即取代預設值；**Reset to default** 會恢復預設值，欄位留空時會傳送預設值（不會傳送空白提示）。分頁仍會補上一句話說明訊息是否含有照片，避免小型視覺模型誤判。**Longest reply** 設定回答的最大 token 數（32 到 2048，預設為 512，與獨立版 GenAI Studio 相同），以 `max_tokens` 傳送，不影響有獨立設定的基準測試。此瀏覽器會記住這兩項設定。
-- **Models**：先顯示可用磁碟空間，再將開發板上的每個模型列為一行，包含類型（**Chat**、**Vision** 或 **Speech**）、大小和狀態（**Loaded**、語音模型的 **In use**、**Loading…**、**Not loaded** 或 **Can't run here**，原因顯示在工具提示中）。**Load**、**Unload** 和 **Use** 可變更使用中的模型，橫幅會顯示載入進度。**Delete** 會在確認後從開發板刪除已下載的模型檔案；僅適用於尚未載入且不是使用中語音模型的模型，若開發板拒絕，會顯示原因。**Get more models** 會搜尋 Hugging Face，**Download** 可將模型放到開發板上；若開發板不允許下載，會說明如何允許。
-- **Voice**：語音引擎、聲音和您說的語言。
-- **Documents**：請參閱上方的 **Use my documents**。
+- **Models**：先顯示開發板上的模型數量、使用中的模型、可保持載入的聊天模型數量和開發板的可用儲存空間，下方是兩份清單：**On this DevKit**，以及 Hugging Face 提供之模型的 **Model catalog**，後者可單獨捲動。每個模型都顯示類型（**Chat**、**Vision** 或 **Speech**）、大小和狀態（**In use**、**Loaded**、**Loading…**、**On DevKit**、**Not downloaded**、附進度的 **Downloading to DevKit**、**Download incomplete** 或 **Can't run here**，原因顯示在工具提示中）。第一次開啟時會填入目錄；**Sync catalog** 只需一次快速呼叫即可更新，不會下載模型檔案。模型的大小和說明會在該列出現時從卡片讀取。此瀏覽器會儲存清單，因此即使無法連線到 Hugging Face，仍可使用搜尋和類型篩選。目錄也有自己的搜尋框，不會影響 **On this DevKit** 清單。**Download** 可將模型放到開發板上；若開發板不允許下載，會說明如何允許。**Load** 和 **Unload** 可變更使用中的模型，橫幅會顯示載入進度。使用中的語音模型無法卸載，請載入另一個模型來取代。**Model** 選單可選擇由哪個已載入的聊天模型回答。按模型旁的箭頭可顯示說明和模型卡片連結；其中的 **Remove from DevKit** 會在確認後從開發板刪除已下載的模型檔案。僅適用於尚未載入且不是使用中語音模型的模型，若開發板拒絕，會顯示原因。
+- **Replies & voice**：**System prompt** 是每次聊天和 Vision 提問時一併傳送的指示。在您變更之前，欄位會顯示預設值："You are a helpful assistant. Answer clearly and concisely. Use Markdown formatting when it helps. Answer the question in the language it was asked in." 編輯後即取代預設值；**Reset to default** 會恢復預設值，欄位留空時會傳送預設值（不會傳送空白提示）。分頁仍會補上一句話說明訊息是否含有照片，避免小型視覺模型誤判。**Longest reply** 設定回答的最大 token 數（32 到 2048，預設為 512，與獨立版 GenAI Studio 相同），以 `max_tokens` 傳送，不影響有獨立設定的基準測試。此瀏覽器會記住這兩項設定。 **Think first** 和 **Read replies aloud** 與頁首的開關是同一項設定。語音引擎、聲音和您說的語言也在此選擇，並會顯示使用中的語音辨識模型。
+- **Documents**：包含 **Use my documents**、開發板搜尋的文件、**View sections**、**Upload Markdown**、**Restore default**，以及 **Remove documents** 下的 **Clear documents**。
+- **Connection**：分頁連線到 GenAI Studio 的位址（開發板的連接埠 5000）。開發板本身在 Insight 頁首中選擇。**Manage installation** 會開啟設定頁面，**Troubleshooting** 說明如何重新啟動 GenAI Studio，並提供 **Copy restart commands**。
 
-如果模型載入失敗或回答停止，請在開發板上重新啟動 GenAI Studio（先執行 `./run.sh stop`，再執行 `./run.sh`）；這會釋放加速器，之後即可重新載入模型。**Settings** 中的 **Troubleshooting** 也提供此說明。
+如果模型載入失敗或回答停止，請在開發板上重新啟動 GenAI Studio（先執行 `./run.sh stop`，再執行 `./run.sh`）；這會釋放加速器，之後即可重新載入模型。**Settings** 中 **Connection** 的 **Troubleshooting** 也提供此說明。
 
 ## 系統資訊
 

@@ -1,30 +1,30 @@
-/* SiMaSentry-Sec — air-gapped, dark-only SOC theme.
+/* SiMaSentry-Sec — air-gapped, in the same theme as SiMaSentry-Med.
    No @import, no @font-face, no remote URLs anywhere in this file. */
 
 :root {
-  --bg: #0a0e14;
-  --surface: #11161f;
-  --surface-2: #1a212e;
-  --surface-3: #232b3a;
-  --text: #e6edf3;
-  --text-muted: #8b949e;
-  --border: #232b3a;
-  --border-strong: #30363d;
+  --bg: #f6f9fc;
+  --surface: #ffffff;
+  --surface-2: #eef4fc;
+  --surface-3: #dde7f5;
+  --text: #0e1f33;
+  --text-muted: #4a5b75;
+  --border: #d0dceb;
+  --border-strong: #a8bbd4;
 
-  --accent: #00d9ff;
-  --accent-soft: rgba(0, 217, 255, 0.12);
-  --accent-contrast: #06101f;
+  --accent: #1976d2;
+  --accent-soft: #e3f2fd;
+  --accent-contrast: #ffffff;
 
-  --danger: #f85149;
-  --danger-soft: rgba(248, 81, 73, 0.14);
-  --warning-bg: rgba(240, 136, 62, 0.10);
-  --warning-fg: #f0883e;
-  --warning-border: rgba(240, 136, 62, 0.45);
+  --danger: #c2371d;
+  --danger-soft: #fde7e0;
+  --warning-bg: #e3f2fd;
+  --warning-fg: #0d47a1;
+  --warning-border: #90caf9;
 
-  --user-bubble: #0d2a3a;
-  --user-bubble-fg: #d3f3ff;
-  --assistant-bubble: #11161f;
-  --assistant-bubble-fg: #e6edf3;
+  --user-bubble: #1976d2;
+  --user-bubble-fg: #ffffff;
+  --assistant-bubble: #ffffff;
+  --assistant-bubble-fg: #11192a;
 
   --threat-info: #58a6ff;
   --threat-low: #3fb950;
@@ -32,8 +32,8 @@
   --threat-high: #f0883e;
   --threat-critical: #f85149;
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.65);
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow-2: 0 8px 24px rgba(15, 23, 42, 0.12);
 
   --radius-sm: 6px;
   --radius: 12px;
@@ -42,6 +42,33 @@
   --maxw: 960px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a121e;
+    --surface: #0f1a2c;
+    --surface-2: #15233a;
+    --surface-3: #1d2e4d;
+    --text: #e8eef7;
+    --text-muted: #94a4be;
+    --border: #1f3050;
+    --border-strong: #305078;
+    --accent: #5fa8ff;
+    --accent-soft: #14253e;
+    --accent-contrast: #051322;
+    --danger: #ff7d63;
+    --danger-soft: #3a1a13;
+    --warning-bg: #14253e;
+    --warning-fg: #c1dafe;
+    --warning-border: #305078;
+    --user-bubble: #1c5db5;
+    --user-bubble-fg: #f0f6ff;
+    --assistant-bubble: #182137;
+    --assistant-bubble-fg: #e9edf6;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.55);
+  }
 }
 
 * { box-sizing: border-box; }

@@ -10,8 +10,8 @@ on the board, and reinstalling it here would replace the server that started the
 GenAI Studio needs the Neat Library (Core), so a board without it is told to install
 Apps with its dependencies itself.
 
-The Apps installed is the channel of this Insight (a develop build installs
-`apps@develop`, any other build `apps` from main), so the tab and GenAI Studio come
+The Apps installed is the channel of this Insight (a release or main build installs
+`apps` from main, any other branch build `apps@develop`), so the tab and GenAI Studio come
 from the same line. A GenAI Studio from another channel, or one built for an older
 Neat Library than the board has, counts as not installed: the install step offers to
 replace it, and the job stops GenAI Studio and installs, prepares and starts it again.
@@ -66,13 +66,16 @@ MANUAL_COMMANDS = {
 
 
 def insight_channel() -> str:
-    """This Insight's channel from its package version: `0.0.0+develop.<sha>` is develop;
-    main, a release or an unknown build is main."""
+    """This Insight's channel from its package version: a release (`0.0.10`), a main build
+    (`0.0.0+main.<sha>`) or an unknown build is main; every other branch build, develop
+    (`0.0.0+develop.<sha>`) or a feature branch cut from it (`0.0.0+225.genai.setup.flow.<sha>`),
+    is develop."""
     try:
         version = metadata.version("neat-insight")
     except metadata.PackageNotFoundError:
         return "main"
-    return "develop" if version.partition("+")[2].split(".")[0] == "develop" else "main"
+    local = version.partition("+")[2]
+    return "main" if not local or local.rsplit(".", 1)[0] in ("main", "unknown") else "develop"
 
 
 def apps_target(channel=None) -> str:
@@ -126,8 +129,7 @@ _CAUSES = (
     (
         r"\b40[34]\b.*(latest\.tag|neat-apps)|(latest\.tag|neat-apps).*\b40[34]\b",
         "The Neat Apps package could not be downloaded.",
-        ["Check the board's internet access, then press Retry.",
-         "Or run the command below in a shell on the board to see the installer's full message."],
+        ["Check the board's internet access, then press Retry."],
     ),
     (
         r"dispatcher_unavailable|accelerator runtime is not available",
@@ -453,7 +455,7 @@ def diagnose(step: str, log: str, exit_code: str) -> dict:
     return _problem(
         step,
         "{} stopped with exit code {}.".format(TITLES[step], exit_code or "unknown"),
-        ["Its last output is below: fix what it reports, then press Retry."],
+        ["Its log on the board says why: fix what it reports, then press Retry."],
     )
 
 
@@ -494,8 +496,8 @@ def _stall(step: str, idle: int) -> dict:
         "prepare": "setup.sh prints nothing while it builds the document database or downloads a large model.",
         "start": "GenAI Studio prints nothing while its model server loads.",
     }[step]
-    again = ("If nothing changes, press Stop GenAI Studio, then Start GenAI Studio." if step == "start"
-             else "If nothing changes, press Stop, then Retry. Files already downloaded are kept.")
+    again = ("If nothing changes, stop GenAI Studio and start it again." if step == "start"
+             else "If nothing changes, press Stop setup, then Resume setup. Files already downloaded are kept.")
     return {
         "message": "No new output for {} minute{}.".format(minutes, "" if minutes == 1 else "s"),
         "fixes": [
@@ -541,7 +543,7 @@ def outdated_studio(fields: dict, channel: str):
 def _update_notice(reason: str, channel: str) -> dict:
     return {
         "message": reason,
-        "fixes": ["Press Update and start GenAI Studio. It stops GenAI Studio, installs Neat Apps "
+        "fixes": ["Press Update GenAI Studio. It stops GenAI Studio, installs Neat Apps "
                   "(`sima-cli neat install {}`) and runs setup again, which takes about 15 minutes. Downloaded models "
                   "are kept, and the previous files move to `/media/nvme/.prebuilt-apps-backup`.".format(apps_target(channel))],
         "command": None,
@@ -589,7 +591,7 @@ def describe(parsed: dict, channel=None) -> dict:
             record["exit"] = INTERRUPTED
         failed = record["exit"] not in ("", "0") and not _stopped_studio(step, record["exit"])
         entry = {"id": step, "title": TITLES[step], "description": DESCRIPTIONS[step], "log": record["log"],
-                 "problem": None, "stall": None, "warnings": [], "notice": None}
+                 "problem": None, "stall": None, "warnings": [], "notice": None, "stopped": False}
         if step == current and not (step == "start" and done["start"]):
             entry["state"] = "running"
             mtime = _int(record["mtime"])
@@ -605,6 +607,8 @@ def describe(parsed: dict, channel=None) -> dict:
         elif failed and step != "start":
             entry["state"] = "failed"
             entry["problem"] = diagnose(step, record["log"], record["exit"])
+            # Stopped on purpose (Stop setup, or the job was ended): the tab offers to resume it.
+            entry["stopped"] = record["exit"] == "143"
         elif done[step]:
             entry["state"] = "done"
         elif failed:
@@ -672,7 +676,7 @@ STOP_WAIT_SEC = 30.0
 
 def _busy() -> BoardError:
     return BoardError("setup_running", "GenAI Studio is already being set up on this board.",
-                      hint="Wait for the running step to finish, or press Stop first.")
+                      hint="Wait for the running step to finish, or press Stop setup first.")
 
 
 def _studio_running(state: dict) -> bool:
@@ -721,7 +725,7 @@ def run(session, redo=None) -> dict:
         if redo:
             if not state["installed"]:
                 raise BoardError("setup_blocked", "Neat Apps is not installed on this board yet.",
-                                 hint="Press Install and start GenAI Studio instead.", step="install")
+                                 hint="Press Install GenAI Studio instead.", step="install")
             if _step_in_progress(state):
                 raise _busy()
             # An outdated GenAI Studio is replaced, not prepared again.

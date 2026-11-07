@@ -1,11 +1,11 @@
-// The GenAI tab's tutorial: shown on the first visit and replayable from the
-// header. `target` names the control a step highlights; `action` names what
-// its "Try it" button does (the view decides how). While the tab can't reach
-// GenAI Studio, the first step offers to set it up (genai/setup.js).
+// The GenAI tab's tutorial: shown the first time the chat opens (after setup, if
+// it was needed) and replayable from the header. `target` names the control a step highlights;
+// `action` names what its "Try it" button does (the view decides how). While the
+// tab can't reach GenAI Studio it shows the setup page instead (genai/setup.js).
 
 export const TUTORIAL_STORAGE_KEY = 'neat-insight:genai-tutorial-seen'
 
-export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
+export function tutorialSteps({ canThink = false, thinkingModel = null, canCompare = false } = {}) {
   const steps = [
     {
       id: 'intro',
@@ -22,17 +22,29 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
       title: 'Choose a model',
       body:
         'The model at the top answers your messages. "Sees images" means it also understands pictures. ' +
-        'Loading a different model takes a few minutes; Settings, Models downloads new ones from Hugging Face, ' +
-        'and its Delete frees the space of one you no longer need.',
+        'Loading a different model takes a few minutes; Manage models in the menu downloads new ones from Hugging Face, ' +
+        'and Remove from DevKit, under a model\'s arrow, frees the space of one you no longer need.',
       target: 'model',
       action: null
     },
+    ...(canCompare
+      ? [{
+          id: 'compare',
+          title: 'Compare models side by side',
+          body:
+            'The board can keep several models loaded at once. With two loaded, open Compare and tick them: ' +
+            'each gets its own conversation, side by side. Prompt chooses whether you write to each one, or ' +
+            'send the same message to all of them at once.',
+          target: 'compare',
+          action: null
+        }]
+      : []),
     {
       id: 'ask',
       title: 'Ask anything',
       body:
         'Type in the message box and press Enter. The answer appears as it is written, with how fast it came ' +
-        'underneath; the stop button ends it early. New chat, next to the model, starts over. Settings, Replies ' +
+        'underneath; the stop button ends it early. New chat, next to the model, starts over. Settings, Replies & voice ' +
         'sets your own system prompt and how long a reply may be.',
       target: 'composer',
       action: 'example-question'
@@ -103,7 +115,7 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     body:
       'Turn on Use my documents and the board looks up the matching passages in its document database before ' +
       'answering, and says which ones it used. Settings, Documents uploads your own Markdown file or resets to ' +
-      'the default SiMa document, and View documents shows the sections the board searches.',
+      'the default SiMa document, and View sections shows the sections the board searches.',
     target: 'documents',
     action: null
   })
@@ -111,8 +123,8 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     id: 'benchmark',
     title: 'Measure the speed',
     body:
-      'The gauge opens the benchmark: choose one or more models, the number of runs and the reply length, and ' +
-      'compare time to first token and tokens per second. Download the results as CSV or JSON.',
+      'The gauge opens the benchmark: it times how long a model takes to start replying and how fast the reply ' +
+      'comes. The defaults are fine, so just run it. Download the results as CSV or JSON.',
     target: 'benchmark',
     action: null
   })
@@ -141,10 +153,10 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     id: 'help',
     title: 'When something is wrong',
     body:
-      'The label at the top left shows whether the board is ready. If it says Not running, start GenAI ' +
-      'Studio on the board; the first time, Set up GenAI Studio in the banner installs and starts it. ' +
-      'Settings holds the board address. If a model gets stuck, restart GenAI Studio on the board (Settings, ' +
-      'Troubleshooting says how). Replay this tutorial any time with Tutorial.',
+      'The label at the top left shows whether the board is ready. If GenAI Studio stops, this tab shows its ' +
+      'setup page, where Start GenAI Studio starts it again. Settings, Connection holds GenAI Studio\'s address and Manage ' +
+      'installation, which updates or stops it. If a model gets stuck, restart GenAI Studio on the board ' +
+      '(Troubleshooting, on the same tab, says how). Replay this tutorial any time with Tutorial.',
     target: 'status',
     action: 'settings'
   })
