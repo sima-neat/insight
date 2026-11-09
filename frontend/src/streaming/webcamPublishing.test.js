@@ -14,8 +14,19 @@ import {
   publishWebcamOffer,
   resolveDeleteUrl,
   selectH264Codecs,
+  captureModeIdsWithin,
   webcamCaptureConstraints,
 } from "./webcamPublishing.js";
+
+test("a camera is offered only the modes within its largest reported size and rate", () => {
+  const limits = (width, height, frameRate) => ({ width: { min: 1, max: width }, height: { min: 1, max: height }, frameRate: { min: 1, max: frameRate } });
+  assert.deepEqual(captureModeIdsWithin(limits(1920, 1080, 30)), ["1080p30", "720p30", "camera"]);
+  assert.deepEqual(captureModeIdsWithin(limits(1280, 720, 30)), ["720p30", "camera"]);
+  assert.deepEqual(captureModeIdsWithin(limits(1920, 1080, 15)), ["camera"]);
+  // Firefox and Safari report no limits, and Chrome reports none before permission.
+  assert.deepEqual(captureModeIdsWithin(undefined), ["1080p30", "720p30", "camera"]);
+  assert.deepEqual(captureModeIdsWithin({}), ["1080p30", "720p30", "camera"]);
+});
 
 test("a webcam publishes at 1920x1080 and 30 fps unless another mode is chosen", () => {
   const ideal = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
@@ -560,6 +571,16 @@ test("recordWebcamStopsOnExit swallows a fetch that throws as the page unloads",
   assert.deepEqual(recordWebcamStopsOnExit(sessions, fetchRequest), [1]);
 });
 
+// These devices report no limits, so every mode is offered.
+const ALL_MODES = ["1080p30", "720p30", "camera"];
+
+test("camerasFromDevices reads each camera's modes from its reported limits", () => {
+  const devices = [
+    { kind: "videoinput", deviceId: "hd", label: "HD", getCapabilities: () => ({ width: { max: 1280 }, height: { max: 720 }, frameRate: { max: 30 } }) },
+  ];
+  assert.deepEqual(camerasFromDevices(devices), [{ deviceId: "hd", label: "HD", captureModeIds: ["720p30", "camera"] }]);
+});
+
 test("camerasFromDevices lists a multi-sensor camera once, under its first name", () => {
   // As Chrome on Linux reported a laptop's RGB + IR camera and a USB webcam.
   const devices = [
@@ -569,8 +590,8 @@ test("camerasFromDevices lists a multi-sensor camera once, under its first name"
     { kind: "videoinput", deviceId: "rapoo", groupId: "g2", label: "Rapoo Camera: Rapoo Camera" },
   ];
   assert.deepEqual(camerasFromDevices(devices), [
-    { deviceId: "hp", label: "HP 5MP Camera: HP 5MP Camera" },
-    { deviceId: "rapoo", label: "Rapoo Camera: Rapoo Camera" },
+    { deviceId: "hp", label: "HP 5MP Camera: HP 5MP Camera", captureModeIds: ALL_MODES },
+    { deviceId: "rapoo", label: "Rapoo Camera: Rapoo Camera", captureModeIds: ALL_MODES },
   ]);
 });
 
@@ -581,8 +602,8 @@ test("camerasFromDevices skips entries without an id and numbers unnamed cameras
     { kind: "videoinput", deviceId: "b", label: "" },
   ];
   assert.deepEqual(camerasFromDevices(devices), [
-    { deviceId: "a", label: "Camera 1" },
-    { deviceId: "b", label: "Camera 2" },
+    { deviceId: "a", label: "Camera 1", captureModeIds: ALL_MODES },
+    { deviceId: "b", label: "Camera 2", captureModeIds: ALL_MODES },
   ]);
   assert.deepEqual(camerasFromDevices(undefined), []);
 });

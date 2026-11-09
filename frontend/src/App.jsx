@@ -3885,7 +3885,7 @@ export default function App() {
             currentValue={targetIsWebcam ? (targetCamera ? `${WEBCAM_OPTION_PREFIX}${targetCamera.deviceId}` : '') : (target.file || '')}
             currentCaptureMode={targetCamera?.captureMode}
             isWebcam={targetIsWebcam}
-            cameras={webcamDevices.map((device) => ({ value: `${WEBCAM_OPTION_PREFIX}${device.deviceId}`, label: device.label }))}
+            cameras={webcamDevices.map((device) => ({ value: `${WEBCAM_OPTION_PREFIX}${device.deviceId}`, label: device.label, captureModeIds: device.captureModeIds }))}
             cameraProbing={cameraProbing}
             cameraError={cameraError}
             onEnableCameras={enableCameraAccess}

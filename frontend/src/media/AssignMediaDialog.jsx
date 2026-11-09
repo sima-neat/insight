@@ -11,7 +11,8 @@ const STREAM_URL_PATTERN = /^rtsps?:\/\//i
 // cameras, and a Stream URL tab that pulls a network stream (issue #127). onAssign(value) and
 // onPull({url, username, password}) are awaited and may throw; '' clears the slot. A camera's value
 // goes to onAssign like a file path does, with its capture mode as onAssign(value, {captureMode}).
-// `currentValue` and `currentCaptureMode` are what the slot holds now.
+// A camera's `captureModeIds` limit the modes offered for it. `currentValue` and
+// `currentCaptureMode` are what the slot holds now.
 export default function AssignMediaDialog({
   sourceIndex,
   currentFile,
@@ -75,6 +76,11 @@ export default function AssignMediaDialog({
   }
 
   const canPull = STREAM_URL_PATTERN.test(url.trim()) && !busy
+  // Until a camera is picked, every mode is listed. When the picked camera cannot reach the chosen
+  // mode, its first listed mode is shown and assigned instead.
+  const pickedCameraModeIds = cameras.find((camera) => camera.value === pickedCamera)?.captureModeIds
+  const offeredModes = WEBCAM_CAPTURE_MODES.filter((m) => !pickedCameraModeIds || pickedCameraModeIds.includes(m.id))
+  const shownCaptureMode = offeredModes.some((m) => m.id === captureMode) ? captureMode : offeredModes[0].id
 
   const tab = (id, label) => (
     <button
@@ -146,11 +152,11 @@ export default function AssignMediaDialog({
               {cameraError && <p className="camera-optin-error" role="alert">{cameraError}</p>}
               <label className="pull-field">
                 <span>Resolution</span>
-                <select value={captureMode} onChange={(e) => setCaptureMode(e.target.value)} disabled={busy} data-testid="assign-capture-mode">
-                  {WEBCAM_CAPTURE_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                <select value={shownCaptureMode} onChange={(e) => setCaptureMode(e.target.value)} disabled={busy} data-testid="assign-capture-mode">
+                  {offeredModes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
                 </select>
               </label>
-              <p className="hint muted-text">A camera without this mode sends its nearest one.</p>
+              <p className="hint muted-text">Lists the modes within the camera's largest size and frame rate. A camera without the chosen mode sends its nearest one.</p>
             </div>
             <div className="modal-actions">
               {onEnableCameras && (
@@ -160,7 +166,7 @@ export default function AssignMediaDialog({
               )}
               {isWebcam && <button type="button" className="btn-ghost" onClick={() => commit('')} disabled={busy}>Clear</button>}
               <button type="button" onClick={close} disabled={busy}>Cancel</button>
-              <button type="button" className="btn-tonal" onClick={() => commit(pickedCamera, { captureMode })} disabled={busy || !pickedCamera || (pickedCamera === currentValue && captureMode === currentCaptureMode)} data-testid="assign-camera-submit">Assign</button>
+              <button type="button" className="btn-tonal" onClick={() => commit(pickedCamera, { captureMode: shownCaptureMode })} disabled={busy || !pickedCamera || (pickedCamera === currentValue && shownCaptureMode === currentCaptureMode)} data-testid="assign-camera-submit">Assign</button>
             </div>
           </div>
         )}

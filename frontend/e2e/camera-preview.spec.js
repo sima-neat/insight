@@ -79,6 +79,18 @@ function instrumentCameras() {
   }
 }
 
+// Makes the cameras report the given largest sizes and rates, in the order they are listed, the way
+// a real camera's getCapabilities() does. Chrome's fake cameras report up to 3840x2160 at 20 fps.
+function reportCameraLimits(limits) {
+  const reported = InputDeviceInfo.prototype.getCapabilities
+  const order = []
+  InputDeviceInfo.prototype.getCapabilities = function () {
+    if (!order.includes(this.deviceId)) order.push(this.deviceId)
+    const camera = limits[Math.min(order.indexOf(this.deviceId), limits.length - 1)]
+    return { ...reported.call(this), width: { min: 1, max: camera.width }, height: { min: 1, max: camera.height }, frameRate: { min: 1, max: camera.frameRate } }
+  }
+}
+
 // Opens Media Sources on the page, or in an SDK-like editor tab: code-server's page holding the
 // webview frame and its content frame, with VS Code's sandbox and allow attributes, which holds
 // Insight's frame. `allowCamera` adds allow="camera" to Insight's frame.
@@ -429,6 +441,7 @@ test('a webcam slot captures at the resolution chosen in the source dialog, 1920
     } catch {}
   })
   await page.addInitScript(instrumentCameras)
+  await page.addInitScript(reportCameraLimits, [{ width: 1920, height: 1080, frameRate: 30 }])
   await page.addInitScript(fakeWhipEndpoint)
   await page.goto(new URL('/streaming', test.info().project.use.baseURL).href)
   // The size the camera delivers, and the rate asked for: Chrome's fake camera sends at most 20 fps.
@@ -460,6 +473,32 @@ test('a webcam slot captures at the resolution chosen in the source dialog, 1920
   await page.getByRole('button', { name: 'Start src1', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.__cameraStreams.length)).toBe(2)
   expect(await captured(1)).toEqual({ width: 1280, height: 720, frameRate: 30 })
+})
+
+test('the source dialog offers a camera only the modes within its reported limits', async ({ page }) => {
+  await mockInsight(page)
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem('neat-insight:onboarding-seen', '1')
+    } catch {}
+  })
+  await page.addInitScript(reportCameraLimits, [{ width: 1920, height: 1080, frameRate: 30 }, { width: 1280, height: 720, frameRate: 30 }])
+  await page.goto(new URL('/streaming', test.info().project.use.baseURL).href)
+
+  const dialog = page.getByTestId('assign-dialog')
+  const modes = dialog.getByTestId('assign-capture-mode')
+  await page.getByTestId('source-file-1').click()
+  await dialog.getByTestId('assign-tab-camera').click()
+  await dialog.getByTestId('assign-enable-cameras').click()
+  await expect(dialog.getByTestId('assign-camera')).toHaveCount(2)
+  await dialog.getByTestId('assign-camera').first().click()
+  await expect(modes.locator('option')).toHaveText(['1920x1080 at 30 fps', '1280x720 at 30 fps', 'Camera default'])
+  await expect(modes).toHaveValue('1080p30')
+
+  // Picking a camera that cannot reach the chosen mode moves the choice to its first listed mode.
+  await dialog.getByTestId('assign-camera').nth(1).click()
+  await expect(modes.locator('option')).toHaveText(['1280x720 at 30 fps', 'Camera default'])
+  await expect(modes).toHaveValue('720p30')
 })
 
 test('cameras and video files sit in separate labelled cards, and the library starts at Videos', async ({ page }) => {

@@ -15,8 +15,19 @@ export const WEBCAM_CAPTURE_MODES = [
 ]
 export const DEFAULT_WEBCAM_CAPTURE_MODE = WEBCAM_CAPTURE_MODES[0].id
 
-// The getUserMedia constraints that publish a camera in a capture mode. An unknown mode, such as
-// one from an older assignment, falls back to the default.
+// The IDs of the capture modes within a camera's largest size and rate, from Chrome's
+// InputDeviceInfo.getCapabilities(). The browser reports only these maxima, not which sizes the
+// camera delivers at which rates, so a listed mode can still fall back to a nearer one. Without a
+// report, as in Firefox and Safari, every mode is listed.
+export function captureModeIdsWithin(capabilities) {
+  const within = (value, range) => !(range?.max < value)
+  return WEBCAM_CAPTURE_MODES
+    .filter((mode) => !mode.width || (within(mode.width, capabilities?.width) && within(mode.height, capabilities?.height) && within(mode.frameRate, capabilities?.frameRate)))
+    .map((mode) => mode.id)
+}
+
+// The getUserMedia constraints that publish a camera in a capture mode. An unknown mode falls back
+// to the default.
 export function webcamCaptureConstraints(deviceId, modeId = DEFAULT_WEBCAM_CAPTURE_MODE) {
   const mode = WEBCAM_CAPTURE_MODES.find((m) => m.id === modeId) || WEBCAM_CAPTURE_MODES[0]
   const video = { deviceId: { exact: deviceId } }
@@ -56,7 +67,11 @@ export function camerasFromDevices(devices) {
   for (const device of devices || []) {
     if (device.kind !== 'videoinput' || !device.deviceId || seen.has(device.deviceId)) continue
     seen.add(device.deviceId)
-    cameras.push({ deviceId: device.deviceId, label: device.label || `Camera ${cameras.length + 1}` })
+    cameras.push({
+      deviceId: device.deviceId,
+      label: device.label || `Camera ${cameras.length + 1}`,
+      captureModeIds: captureModeIdsWithin(device.getCapabilities?.()),
+    })
   }
   return cameras
 }
