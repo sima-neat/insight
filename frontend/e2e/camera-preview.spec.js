@@ -422,7 +422,7 @@ test('previewing a camera this tab is publishing reuses its capture and never in
   expect(writes, 'previewing never assigns, starts or stops a slot').toEqual(['/api/mediasrc/assign-webcam', '/api/mediasrc/start'])
 })
 
-test('a webcam slot captures at the resolution chosen in the source dialog, 1920x1080 by default', async ({ page }) => {
+test('a webcam slot captures at the resolution and bitrate chosen in the source dialog, 1920x1080 by default', async ({ page }) => {
   await mockInsight(page)
   const slot = { index: 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', type: 'file', allowed_transports: ['rtsp'], urls: {}, readers: [] }
   await page.route(/\/api\/mediasrc/, (route) => {
@@ -443,7 +443,16 @@ test('a webcam slot captures at the resolution chosen in the source dialog, 1920
   await page.addInitScript(instrumentCameras)
   await page.addInitScript(reportCameraLimits, [{ width: 1920, height: 1080, frameRate: 30 }])
   await page.addInitScript(fakeWhipEndpoint)
+  await page.addInitScript(() => {
+    window.__senderParameters = []
+    const apply = RTCRtpSender.prototype.setParameters
+    RTCRtpSender.prototype.setParameters = function (parameters) {
+      window.__senderParameters.push({ degradationPreference: parameters.degradationPreference, maxBitrate: parameters.encodings[0]?.maxBitrate })
+      return apply.call(this, parameters)
+    }
+  })
   await page.goto(new URL('/streaming', test.info().project.use.baseURL).href)
+  const senderSettings = () => page.evaluate(() => window.__senderParameters)
   // The size the camera delivers, and the rate asked for: Chrome's fake camera sends at most 20 fps.
   const captured = (n) => page.evaluate((i) => {
     const track = window.__cameraStreams[i].getVideoTracks()[0]
@@ -456,23 +465,30 @@ test('a webcam slot captures at the resolution chosen in the source dialog, 1920
   await dialog.getByTestId('assign-tab-camera').click()
   await dialog.getByTestId('assign-enable-cameras').click()
   await expect(dialog.getByTestId('assign-capture-mode')).toHaveValue('1080p30')
+  await expect(dialog.getByTestId('assign-bitrate')).toHaveValue('auto')
+  await expect(dialog.getByTestId('assign-bitrate').locator('option').first()).toHaveText('Auto, 8.1 Mbps')
   await dialog.getByTestId('assign-camera').first().click()
   await dialog.getByTestId('assign-camera-submit').click()
   await expect(dialog).toHaveCount(0)
   await page.getByRole('button', { name: 'Start src1', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.__cameraStreams.length)).toBe(1)
   expect(await captured(0)).toEqual({ width: 1920, height: 1080, frameRate: 30 })
+  await expect.poll(senderSettings).toEqual([{ degradationPreference: 'maintain-resolution', maxBitrate: 8087000 }])
 
   // Reopened, the dialog shows the slot's mode; another mode can be assigned to the same camera.
   await page.getByTestId('source-file-1').click()
   await expect(dialog.getByTestId('assign-capture-mode')).toHaveValue('1080p30')
   await expect(dialog.getByTestId('assign-camera-submit')).toBeDisabled()
   await dialog.getByTestId('assign-capture-mode').selectOption('720p30')
+  await dialog.getByTestId('assign-bitrate').selectOption('4mbps')
   await dialog.getByTestId('assign-camera-submit').click()
   await expect(dialog).toHaveCount(0)
   await page.getByRole('button', { name: 'Start src1', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.__cameraStreams.length)).toBe(2)
   expect(await captured(1)).toEqual({ width: 1280, height: 720, frameRate: 30 })
+  await expect.poll(async () => (await senderSettings())[1]).toEqual({ degradationPreference: 'maintain-resolution', maxBitrate: 4000000 })
+  await page.getByTestId('source-file-1').click()
+  await expect(dialog.getByTestId('assign-bitrate')).toHaveValue('4mbps')
 })
 
 test('the source dialog offers a camera only the modes within its reported limits', async ({ page }) => {

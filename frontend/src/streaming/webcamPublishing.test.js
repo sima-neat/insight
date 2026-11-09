@@ -47,12 +47,14 @@ test("a webcam publishes at 1920x1080 and 30 fps unless another mode is chosen",
   assert.deepEqual(webcamCaptureConstraints("cam1", "camera"), { video: { deviceId: { exact: "cam1" } } });
 });
 
-test("a webcam is sent at about 0.13 bits per pixel of its mode", () => {
-  assert.equal(webcamBitrateKbps("1080p30"), 8087);
-  assert.equal(webcamBitrateKbps("720p30"), 3594);
-  assert.equal(webcamBitrateKbps("2160p30"), 32348);
-  assert.equal(webcamBitrateKbps("camera"), webcamBitrateKbps("1080p30"));
-  assert.equal(webcamBitrateKbps("unknown"), webcamBitrateKbps("1080p30"));
+test("Auto sends a webcam at about 0.13 bits per pixel of its mode, a fixed choice at its rate", () => {
+  assert.equal(webcamBitrateKbps(), 8087);
+  assert.equal(webcamBitrateKbps("auto", "720p30"), 3594);
+  assert.equal(webcamBitrateKbps("auto", "2160p30"), 32348);
+  assert.equal(webcamBitrateKbps("auto", "camera"), 8087);
+  assert.equal(webcamBitrateKbps("auto", "unknown"), 8087);
+  assert.equal(webcamBitrateKbps("4mbps", "2160p30"), 4000);
+  assert.equal(webcamBitrateKbps("unknown", "720p30"), 3594);
 });
 
 test("the sender keeps the camera's size and may reach the mode's bitrate", async () => {
@@ -63,7 +65,7 @@ test("the sender keeps the camera's size and may reach the mode's bitrate", asyn
       applied = parameters;
     },
   };
-  await keepWebcamResolution(sender, "720p30");
+  await keepWebcamResolution(sender, 3594);
   assert.deepEqual(applied, {
     transactionId: "t1",
     degradationPreference: "maintain-resolution",
@@ -76,7 +78,7 @@ test("a browser that refuses the sender settings still publishes", async () => {
   console.warn = () => {};
   try {
     const sender = { getParameters: () => ({ encodings: [{}] }), setParameters: async () => { throw new Error("InvalidModificationError"); } };
-    await keepWebcamResolution(sender, "1080p30");
+    await keepWebcamResolution(sender, 8087);
   } finally {
     console.warn = warn;
   }
@@ -92,7 +94,7 @@ test("the answer's H.264 formats start at the mode's bitrate", () => {
     "",
   ].join("\r\n");
   assert.equal(
-    withWebcamBitrate(answer, "1080p30"),
+    withWebcamBitrate(answer, 8087),
     [
       "m=video 9 UDP/TLS/RTP/SAVPF 96 97",
       "a=rtpmap:96 H264/90000",

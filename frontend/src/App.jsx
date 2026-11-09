@@ -26,6 +26,7 @@ import {
   describeWebcamError,
   publishWebcamOffer,
   keepWebcamResolution,
+  webcamBitrateKbps,
   withWebcamBitrate,
   selectH264Codecs,
   webcamCaptureConstraints,
@@ -2074,7 +2075,7 @@ export default function App() {
   }
 
 
-  async function assignWebcamToSource(index, deviceId, label, captureMode, { publisherReleased = false, publisherSession = null } = {}) {
+  async function assignWebcamToSource(index, deviceId, label, capture, { publisherReleased = false, publisherSession = null } = {}) {
     // The caller has just invalidated the slot (teardown), so this generation
     // is the one this selection belongs to. Busy disables the select and Start
     // while the request is in flight, so two selections cannot race; the
@@ -2089,7 +2090,7 @@ export default function App() {
         body: JSON.stringify({ index, publisher_released: publisherReleased, publisher_session: publisherSession })
       })
       if ((webcamGenerationRef.current[index] || 0) !== generation) return
-      setWebcamAssignments((prev) => ({ ...prev, [index]: { deviceId, label, captureMode } }))
+      setWebcamAssignments((prev) => ({ ...prev, [index]: { deviceId, label, ...capture } }))
       await loadSources()
     } catch (e) {
       setError(e.message)
@@ -2121,7 +2122,7 @@ export default function App() {
 
   // Returns the assignment's promise: the assign dialog waits on it, and a failed
   // camera or file assignment rejects (after reporting) so the dialog stays open to retry.
-  function handleSourceSelectChange(index, value, { captureMode } = {}) {
+  function handleSourceSelectChange(index, value, capture = {}) {
     if (value.startsWith(WEBCAM_OPTION_PREFIX)) {
       const deviceId = value.slice(WEBCAM_OPTION_PREFIX.length)
       const device = webcamDevices.find((d) => d.deviceId === deviceId)
@@ -2130,7 +2131,7 @@ export default function App() {
       // the replacement is rejected because the path already has a publisher.
       const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
       teardownWebcamSession(index)
-      return assignWebcamToSource(index, deviceId, device?.label || 'Webcam', captureMode, claim)
+      return assignWebcamToSource(index, deviceId, device?.label || 'Webcam', capture, claim)
     }
     const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
     if (webcamAssignments[index]) {
@@ -2240,8 +2241,9 @@ export default function App() {
       // times it out.
       webcamSessionsRef.current.set(index, { pc, stream, deleteUrl, sessionId, watcher })
       if (superseded()) throw WEBCAM_START_SUPERSEDED
-      await pc.setRemoteDescription({ type: 'answer', sdp: withWebcamBitrate(answerSdp, assignment.captureMode) })
-      await keepWebcamResolution(sender, assignment.captureMode)
+      const kbps = webcamBitrateKbps(assignment.bitrate, assignment.captureMode)
+      await pc.setRemoteDescription({ type: 'answer', sdp: withWebcamBitrate(answerSdp, kbps) })
+      await keepWebcamResolution(sender, kbps)
 
       // Compare against the selection as it is now, not as it was when the
       // start began; installing this stream under another row's preview
@@ -3887,6 +3889,7 @@ export default function App() {
             currentFile={target.file || ''}
             currentValue={targetIsWebcam ? (targetCamera ? `${WEBCAM_OPTION_PREFIX}${targetCamera.deviceId}` : '') : (target.file || '')}
             currentCaptureMode={targetCamera?.captureMode}
+            currentBitrate={targetCamera?.bitrate}
             isWebcam={targetIsWebcam}
             cameras={webcamDevices.map((device) => ({ value: `${WEBCAM_OPTION_PREFIX}${device.deviceId}`, label: device.label, captureModeIds: device.captureModeIds }))}
             cameraProbing={cameraProbing}

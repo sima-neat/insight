@@ -46,22 +46,32 @@ export function webcamCaptureConstraints(deviceId, modeId = DEFAULT_WEBCAM_CAPTU
   return { video }
 }
 
-// The bitrate a webcam is sent at, in kbps, about 0.13 bits per pixel: 8100 kbps at 1080p30.
-// Chrome's defaults start a stream at a few hundred kbps and lower the size to fit it, so a camera
-// opened at 1920x1080 reached Insight at 320x180. Camera default sends at the default mode's rate.
-export function webcamBitrateKbps(modeId = DEFAULT_WEBCAM_CAPTURE_MODE) {
+// The bitrates a webcam can be sent at. Auto is about 0.13 bits per pixel of the capture mode:
+// 8100 kbps at 1080p30. Chrome's defaults start a stream at a few hundred kbps and lower the size to
+// fit it, so a camera opened at 1920x1080 reached Insight at 320x180.
+export const WEBCAM_BITRATES = [
+  { id: 'auto', label: 'Auto' },
+  ...[2, 4, 8, 16, 32].map((mbps) => ({ id: `${mbps}mbps`, label: `${mbps} Mbps`, kbps: mbps * 1000 })),
+]
+export const DEFAULT_WEBCAM_BITRATE = 'auto'
+
+// The bitrate in kbps for a bitrate choice and capture mode. Auto with Camera default, or an
+// unknown choice, uses the default mode's rate.
+export function webcamBitrateKbps(bitrateId = DEFAULT_WEBCAM_BITRATE, modeId = DEFAULT_WEBCAM_CAPTURE_MODE) {
+  const fixed = WEBCAM_BITRATES.find((b) => b.id === bitrateId)?.kbps
+  if (fixed) return fixed
   const mode = WEBCAM_CAPTURE_MODES.find((m) => m.id === modeId && m.width) || WEBCAM_CAPTURE_MODES.find((m) => m.id === DEFAULT_WEBCAM_CAPTURE_MODE)
   return Math.round((mode.width * mode.height * mode.frameRate * 0.13) / 1000)
 }
 
 // Keeps the camera's size when the bandwidth runs short, lowering the frame rate instead, and lets
-// the sender reach the mode's bitrate. Applied after the answer, when the sender has its encoding.
-// A browser that refuses the settings still publishes, with its own defaults and a console warning.
-export async function keepWebcamResolution(sender, modeId) {
+// the sender reach `kbps`. Applied after the answer, when the sender has its encoding. A browser
+// that refuses the settings still publishes, with its own defaults and a console warning.
+export async function keepWebcamResolution(sender, kbps) {
   try {
     const parameters = sender.getParameters()
     parameters.degradationPreference = 'maintain-resolution'
-    for (const encoding of parameters.encodings || []) encoding.maxBitrate = webcamBitrateKbps(modeId) * 1000
+    for (const encoding of parameters.encodings || []) encoding.maxBitrate = kbps * 1000
     await sender.setParameters(parameters)
   } catch (error) {
     console.warn('The browser kept its own webcam bitrate and size settings:', error)
@@ -69,10 +79,9 @@ export async function keepWebcamResolution(sender, modeId) {
 }
 
 // Adds Chrome's start and minimum bitrate to the H.264 formats of MediaMTX's answer, so the stream
-// starts at the mode's bitrate instead of climbing from a few hundred kbps. Other browsers ignore
-// these parameters.
-export function withWebcamBitrate(answerSdp, modeId) {
-  const kbps = webcamBitrateKbps(modeId)
+// starts at `kbps` instead of climbing from a few hundred kbps. Other browsers ignore these
+// parameters.
+export function withWebcamBitrate(answerSdp, kbps) {
   const hints = `x-google-start-bitrate=${kbps};x-google-min-bitrate=${Math.round(kbps / 2)}`
   const h264Payloads = new Set([...answerSdp.matchAll(/^a=rtpmap:(\d+) H264\/90000/gim)].map((match) => match[1]))
   return answerSdp.replace(/^a=fmtp:(\d+) (.*)$/gm, (line, payload, formats) => (h264Payloads.has(payload) ? `a=fmtp:${payload} ${formats.trimEnd()};${hints}` : line))
