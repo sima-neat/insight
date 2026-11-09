@@ -14,7 +14,18 @@ import {
   publishWebcamOffer,
   resolveDeleteUrl,
   selectH264Codecs,
+  webcamCaptureConstraints,
 } from "./webcamPublishing.js";
+
+test("a webcam publishes at 1920x1080 and 30 fps unless another mode is chosen", () => {
+  const ideal = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+  assert.deepEqual(webcamCaptureConstraints("cam1"), { video: { deviceId: { exact: "cam1" }, ...ideal } });
+  assert.deepEqual(webcamCaptureConstraints("cam1", "unknown"), { video: { deviceId: { exact: "cam1" }, ...ideal } });
+  assert.deepEqual(webcamCaptureConstraints("cam1", "720p30"), {
+    video: { deviceId: { exact: "cam1" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+  });
+  assert.deepEqual(webcamCaptureConstraints("cam1", "camera"), { video: { deviceId: { exact: "cam1" } } });
+});
 
 function fakePeerConnection(overrides = {}) {
   return {

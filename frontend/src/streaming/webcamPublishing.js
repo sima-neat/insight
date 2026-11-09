@@ -6,6 +6,28 @@
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// The capture modes a webcam source can ask its camera for, first the default. Each size and rate
+// is `ideal`, so a camera without that mode sends its nearest one instead of failing to start.
+export const WEBCAM_CAPTURE_MODES = [
+  { id: '1080p30', label: '1920x1080 at 30 fps', width: 1920, height: 1080, frameRate: 30 },
+  { id: '720p30', label: '1280x720 at 30 fps', width: 1280, height: 720, frameRate: 30 },
+  { id: 'camera', label: 'Camera default' },
+]
+export const DEFAULT_WEBCAM_CAPTURE_MODE = WEBCAM_CAPTURE_MODES[0].id
+
+// The getUserMedia constraints that publish a camera in a capture mode. An unknown mode, such as
+// one from an older assignment, falls back to the default.
+export function webcamCaptureConstraints(deviceId, modeId = DEFAULT_WEBCAM_CAPTURE_MODE) {
+  const mode = WEBCAM_CAPTURE_MODES.find((m) => m.id === modeId) || WEBCAM_CAPTURE_MODES[0]
+  const video = { deviceId: { exact: deviceId } }
+  if (mode.width) {
+    video.width = { ideal: mode.width }
+    video.height = { ideal: mode.height }
+    video.frameRate = { ideal: mode.frameRate }
+  }
+  return { video }
+}
+
 // Turn a getUserMedia or publish failure into something a user can act on.
 // Anything unrecognized falls through to the underlying message rather than a
 // generic string, because the publish errors below already read well.

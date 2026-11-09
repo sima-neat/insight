@@ -410,6 +410,58 @@ test('previewing a camera this tab is publishing reuses its capture and never in
   expect(writes, 'previewing never assigns, starts or stops a slot').toEqual(['/api/mediasrc/assign-webcam', '/api/mediasrc/start'])
 })
 
+test('a webcam slot captures at the resolution chosen in the source dialog, 1920x1080 by default', async ({ page }) => {
+  await mockInsight(page)
+  const slot = { index: 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', type: 'file', allowed_transports: ['rtsp'], urls: {}, readers: [] }
+  await page.route(/\/api\/mediasrc/, (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (request.method() === 'GET') return json(route, path === '/api/mediasrc' ? [slot] : {})
+    // Like Insight, an assignment leaves the slot stopped.
+    if (path === '/api/mediasrc/assign-webcam') Object.assign(slot, { type: 'webcam', state: 'stopped', urls: { whip: new URL('/whip-test/src1', request.url()).href } })
+    if (path === '/api/mediasrc/start') slot.state = 'playing'
+    if (path === '/api/mediasrc/stop') slot.state = 'stopped'
+    return json(route, { ok: true })
+  })
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem('neat-insight:onboarding-seen', '1')
+    } catch {}
+  })
+  await page.addInitScript(instrumentCameras)
+  await page.addInitScript(fakeWhipEndpoint)
+  await page.goto(new URL('/streaming', test.info().project.use.baseURL).href)
+  // The size the camera delivers, and the rate asked for: Chrome's fake camera sends at most 20 fps.
+  const captured = (n) => page.evaluate((i) => {
+    const track = window.__cameraStreams[i].getVideoTracks()[0]
+    const { width, height } = track.getSettings()
+    return { width, height, frameRate: track.getConstraints().frameRate }
+  }, n)
+
+  const dialog = page.getByTestId('assign-dialog')
+  await page.getByTestId('source-file-1').click()
+  await dialog.getByTestId('assign-tab-camera').click()
+  await dialog.getByTestId('assign-enable-cameras').click()
+  await expect(dialog.getByTestId('assign-capture-mode')).toHaveValue('1080p30')
+  await dialog.getByTestId('assign-camera').first().click()
+  await dialog.getByTestId('assign-camera-submit').click()
+  await expect(dialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Start src1', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => window.__cameraStreams.length)).toBe(1)
+  expect(await captured(0)).toEqual({ width: 1920, height: 1080, frameRate: 30 })
+
+  // Reopened, the dialog shows the slot's mode; another mode can be assigned to the same camera.
+  await page.getByTestId('source-file-1').click()
+  await expect(dialog.getByTestId('assign-capture-mode')).toHaveValue('1080p30')
+  await expect(dialog.getByTestId('assign-camera-submit')).toBeDisabled()
+  await dialog.getByTestId('assign-capture-mode').selectOption('720p30')
+  await dialog.getByTestId('assign-camera-submit').click()
+  await expect(dialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Start src1', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => window.__cameraStreams.length)).toBe(2)
+  expect(await captured(1)).toEqual({ width: 1280, height: 720, frameRate: 30 })
+})
+
 test('cameras and video files sit in separate labelled cards, and the library starts at Videos', async ({ page }) => {
   await mockInsight(page)
   const { ui } = await openMediaSources(page)

@@ -97,8 +97,10 @@ A webcam attached to the computer running your browser can be used as a live sou
 
 1. Select the file field of a source slot and switch the **Source for srcN** dialog to **Camera**.
 2. Select **Enable camera access**, there or under **Cameras** in Media Sources. The browser asks for camera permission; Insight cannot grant it for you. After you allow access, your cameras are listed in the tab.
-3. Select a camera and **Assign** it, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
+3. Select a camera and its **Resolution**, **Assign** it, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
 4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
+
+**Resolution** asks the camera for 1920x1080 at 30 fps by default; choose 1280x720 at 30 fps or **Camera default** instead. A camera without the chosen mode sends its nearest one, and the browser can lower the resolution it sends when the computer or network is busy. To change the resolution of an assigned camera, open the dialog again, choose another **Resolution**, select **Assign**, then **Start**.
 
 The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
 

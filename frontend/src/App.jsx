@@ -26,6 +26,7 @@ import {
   describeWebcamError,
   publishWebcamOffer,
   selectH264Codecs,
+  webcamCaptureConstraints,
 } from './streaming/webcamPublishing.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
@@ -2071,7 +2072,7 @@ export default function App() {
   }
 
 
-  async function assignWebcamToSource(index, deviceId, label, { publisherReleased = false, publisherSession = null } = {}) {
+  async function assignWebcamToSource(index, deviceId, label, captureMode, { publisherReleased = false, publisherSession = null } = {}) {
     // The caller has just invalidated the slot (teardown), so this generation
     // is the one this selection belongs to. Busy disables the select and Start
     // while the request is in flight, so two selections cannot race; the
@@ -2086,7 +2087,7 @@ export default function App() {
         body: JSON.stringify({ index, publisher_released: publisherReleased, publisher_session: publisherSession })
       })
       if ((webcamGenerationRef.current[index] || 0) !== generation) return
-      setWebcamAssignments((prev) => ({ ...prev, [index]: { deviceId, label } }))
+      setWebcamAssignments((prev) => ({ ...prev, [index]: { deviceId, label, captureMode } }))
       await loadSources()
     } catch (e) {
       setError(e.message)
@@ -2118,7 +2119,7 @@ export default function App() {
 
   // Returns the assignment's promise: the assign dialog waits on it, and a failed
   // camera or file assignment rejects (after reporting) so the dialog stays open to retry.
-  function handleSourceSelectChange(index, value) {
+  function handleSourceSelectChange(index, value, { captureMode } = {}) {
     if (value.startsWith(WEBCAM_OPTION_PREFIX)) {
       const deviceId = value.slice(WEBCAM_OPTION_PREFIX.length)
       const device = webcamDevices.find((d) => d.deviceId === deviceId)
@@ -2127,7 +2128,7 @@ export default function App() {
       // the replacement is rejected because the path already has a publisher.
       const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
       teardownWebcamSession(index)
-      return assignWebcamToSource(index, deviceId, device?.label || 'Webcam', claim)
+      return assignWebcamToSource(index, deviceId, device?.label || 'Webcam', captureMode, claim)
     }
     const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
     if (webcamAssignments[index]) {
@@ -2191,9 +2192,9 @@ export default function App() {
     let watcher = null
     try {
       // Video-only for now, per the ticket's initial scope.
-      const opening = navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: assignment.deviceId } }
-      })
+      const opening = navigator.mediaDevices.getUserMedia(
+        webcamCaptureConstraints(assignment.deviceId, assignment.captureMode)
+      )
       openingCapturesRef.current.set(assignment.deviceId, opening)
       try {
         stream = await opening
@@ -3882,6 +3883,7 @@ export default function App() {
             sourceIndex={assignTarget}
             currentFile={target.file || ''}
             currentValue={targetIsWebcam ? (targetCamera ? `${WEBCAM_OPTION_PREFIX}${targetCamera.deviceId}` : '') : (target.file || '')}
+            currentCaptureMode={targetCamera?.captureMode}
             isWebcam={targetIsWebcam}
             cameras={webcamDevices.map((device) => ({ value: `${WEBCAM_OPTION_PREFIX}${device.deviceId}`, label: device.label }))}
             cameraProbing={cameraProbing}
@@ -3890,7 +3892,7 @@ export default function App() {
             tree={mediaTree}
             // Through the row's select handler, so switching to or away from a camera
             // closes this tab's publisher and names its session, as the dropdown did.
-            onAssign={(value) => handleSourceSelectChange(assignTarget, value)}
+            onAssign={(value, options) => handleSourceSelectChange(assignTarget, value, options)}
             onPull={(payload) => pullSource(assignTarget, payload)}
             onClose={() => setAssignTarget(null)}
           />

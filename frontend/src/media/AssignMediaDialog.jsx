@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import FolderBrowser from './FolderBrowser.jsx'
 import { nearestExistingFolder, parentPath } from './mediaTree.js'
+import { DEFAULT_WEBCAM_CAPTURE_MODE, WEBCAM_CAPTURE_MODES } from '../streaming/webcamPublishing.js'
 
 const STREAM_URL_PATTERN = /^rtsps?:\/\//i
 
@@ -9,11 +10,13 @@ const STREAM_URL_PATTERN = /^rtsps?:\/\//i
 // the current file so a swap inside one category is one click away, a Camera tab for the browser's
 // cameras, and a Stream URL tab that pulls a network stream (issue #127). onAssign(value) and
 // onPull({url, username, password}) are awaited and may throw; '' clears the slot. A camera's value
-// goes to onAssign like a file path does. `currentValue` is what the slot holds now.
+// goes to onAssign like a file path does, with its capture mode as onAssign(value, {captureMode}).
+// `currentValue` and `currentCaptureMode` are what the slot holds now.
 export default function AssignMediaDialog({
   sourceIndex,
   currentFile,
   currentValue = currentFile,
+  currentCaptureMode = DEFAULT_WEBCAM_CAPTURE_MODE,
   isWebcam = false,
   cameras = [],
   cameraProbing = false,
@@ -29,6 +32,7 @@ export default function AssignMediaDialog({
   const [filter, setFilter] = useState('')
   const [picked, setPicked] = useState(isWebcam ? '' : (currentFile || ''))
   const [pickedCamera, setPickedCamera] = useState(isWebcam ? (currentValue || '') : '')
+  const [captureMode, setCaptureMode] = useState(currentCaptureMode)
   const [busy, setBusy] = useState(false)
   const [url, setUrl] = useState('')
   const [username, setUsername] = useState('')
@@ -48,10 +52,10 @@ export default function AssignMediaDialog({
     onClose()
   }
 
-  async function commit(value) {
+  async function commit(value, options) {
     setBusy(true)
     try {
-      await onAssign(value)
+      await onAssign(value, options)
       close()
     } catch {
       setBusy(false) // the assignment already surfaced the error; keep the dialog open
@@ -140,6 +144,13 @@ export default function AssignMediaDialog({
                 !cameraError && <p className="hint" data-testid="assign-no-cameras">No cameras enabled yet. Insight needs this browser's permission to use them.</p>
               )}
               {cameraError && <p className="camera-optin-error" role="alert">{cameraError}</p>}
+              <label className="pull-field">
+                <span>Resolution</span>
+                <select value={captureMode} onChange={(e) => setCaptureMode(e.target.value)} disabled={busy} data-testid="assign-capture-mode">
+                  {WEBCAM_CAPTURE_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </label>
+              <p className="hint muted-text">A camera without this mode sends its nearest one.</p>
             </div>
             <div className="modal-actions">
               {onEnableCameras && (
@@ -149,7 +160,7 @@ export default function AssignMediaDialog({
               )}
               {isWebcam && <button type="button" className="btn-ghost" onClick={() => commit('')} disabled={busy}>Clear</button>}
               <button type="button" onClick={close} disabled={busy}>Cancel</button>
-              <button type="button" className="btn-tonal" onClick={() => commit(pickedCamera)} disabled={busy || !pickedCamera || pickedCamera === currentValue} data-testid="assign-camera-submit">Assign</button>
+              <button type="button" className="btn-tonal" onClick={() => commit(pickedCamera, { captureMode })} disabled={busy || !pickedCamera || (pickedCamera === currentValue && captureMode === currentCaptureMode)} data-testid="assign-camera-submit">Assign</button>
             </div>
           </div>
         )}
