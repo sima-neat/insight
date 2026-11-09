@@ -6,21 +6,28 @@
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-// The capture modes a webcam source can ask its camera for, first the default. Each size and rate
-// is `ideal`, so a camera without that mode sends its nearest one instead of failing to start.
+// The capture modes a webcam source can ask its camera for, largest first. Each size and rate is
+// `ideal`, so a camera without that mode sends its nearest one instead of failing to start.
+const captureMode = (width, height, frameRate) => ({ id: `${height}p${frameRate}`, label: `${width}x${height} at ${frameRate} fps`, width, height, frameRate })
 export const WEBCAM_CAPTURE_MODES = [
-  { id: '1080p30', label: '1920x1080 at 30 fps', width: 1920, height: 1080, frameRate: 30 },
-  { id: '720p30', label: '1280x720 at 30 fps', width: 1280, height: 720, frameRate: 30 },
+  captureMode(3840, 2160, 30),
+  captureMode(2560, 1440, 30),
+  captureMode(1920, 1080, 60),
+  captureMode(1920, 1080, 30),
+  captureMode(1280, 720, 60),
+  captureMode(1280, 720, 30),
+  captureMode(640, 480, 30),
   { id: 'camera', label: 'Camera default' },
 ]
-export const DEFAULT_WEBCAM_CAPTURE_MODE = WEBCAM_CAPTURE_MODES[0].id
+export const DEFAULT_WEBCAM_CAPTURE_MODE = '1080p30'
 
 // The IDs of the capture modes within a camera's largest size and rate, from Chrome's
 // InputDeviceInfo.getCapabilities(). The browser reports only these maxima, not which sizes the
 // camera delivers at which rates, so a listed mode can still fall back to a nearer one. Without a
 // report, as in Firefox and Safari, every mode is listed.
 export function captureModeIdsWithin(capabilities) {
-  const within = (value, range) => !(range?.max < value)
+  // Rounded, because cameras report NTSC rates such as 29.97 for a 30 fps mode.
+  const within = (value, range) => !(Math.round(range?.max) < value)
   return WEBCAM_CAPTURE_MODES
     .filter((mode) => !mode.width || (within(mode.width, capabilities?.width) && within(mode.height, capabilities?.height) && within(mode.frameRate, capabilities?.frameRate)))
     .map((mode) => mode.id)
@@ -29,7 +36,7 @@ export function captureModeIdsWithin(capabilities) {
 // The getUserMedia constraints that publish a camera in a capture mode. An unknown mode falls back
 // to the default.
 export function webcamCaptureConstraints(deviceId, modeId = DEFAULT_WEBCAM_CAPTURE_MODE) {
-  const mode = WEBCAM_CAPTURE_MODES.find((m) => m.id === modeId) || WEBCAM_CAPTURE_MODES[0]
+  const mode = WEBCAM_CAPTURE_MODES.find((m) => m.id === modeId) || WEBCAM_CAPTURE_MODES.find((m) => m.id === DEFAULT_WEBCAM_CAPTURE_MODE)
   const video = { deviceId: { exact: deviceId } }
   if (mode.width) {
     video.width = { ideal: mode.width }

@@ -492,12 +492,12 @@ test('the source dialog offers a camera only the modes within its reported limit
   await dialog.getByTestId('assign-enable-cameras').click()
   await expect(dialog.getByTestId('assign-camera')).toHaveCount(2)
   await dialog.getByTestId('assign-camera').first().click()
-  await expect(modes.locator('option')).toHaveText(['1920x1080 at 30 fps', '1280x720 at 30 fps', 'Camera default'])
+  await expect(modes.locator('option')).toHaveText(['1920x1080 at 30 fps', '1280x720 at 30 fps', '640x480 at 30 fps', 'Camera default'])
   await expect(modes).toHaveValue('1080p30')
 
   // Picking a camera that cannot reach the chosen mode moves the choice to its first listed mode.
   await dialog.getByTestId('assign-camera').nth(1).click()
-  await expect(modes.locator('option')).toHaveText(['1280x720 at 30 fps', 'Camera default'])
+  await expect(modes.locator('option')).toHaveText(['1280x720 at 30 fps', '640x480 at 30 fps', 'Camera default'])
   await expect(modes).toHaveValue('720p30')
 })
 

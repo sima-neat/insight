@@ -100,7 +100,7 @@ A webcam attached to the computer running your browser can be used as a live sou
 3. Select a camera and its **Resolution**, **Assign** it, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
 4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
 
-**Resolution** asks the camera for 1920x1080 at 30 fps by default. You can choose 1280x720 at 30 fps or **Camera default** instead. The list shows only the modes within the largest size and frame rate the camera reports. A camera without the chosen mode sends its nearest one, and the browser can lower the resolution it sends when the computer or network is busy. To change the resolution of an assigned camera, open the dialog again, choose another **Resolution**, select **Assign**, then **Start**.
+**Resolution** asks the camera for 1920x1080 at 30 fps by default. You can instead choose another size and rate, from 3840x2160 down to 640x480 and up to 60 fps, or **Camera default**. The list shows only the modes within the largest size and frame rate the camera reports. A camera without the chosen mode sends its nearest one, and the browser can lower the resolution it sends when the computer or network is busy. To change the resolution of an assigned camera, open the dialog again, choose another **Resolution**, select **Assign**, then **Start**.
 
 The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
 

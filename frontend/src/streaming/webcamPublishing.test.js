@@ -18,14 +18,20 @@ import {
   webcamCaptureConstraints,
 } from "./webcamPublishing.js";
 
+// Every mode, largest first: what a camera that reports no limits is offered.
+const ALL_MODES = ["2160p30", "1440p30", "1080p60", "1080p30", "720p60", "720p30", "480p30", "camera"];
+
 test("a camera is offered only the modes within its largest reported size and rate", () => {
   const limits = (width, height, frameRate) => ({ width: { min: 1, max: width }, height: { min: 1, max: height }, frameRate: { min: 1, max: frameRate } });
-  assert.deepEqual(captureModeIdsWithin(limits(1920, 1080, 30)), ["1080p30", "720p30", "camera"]);
-  assert.deepEqual(captureModeIdsWithin(limits(1280, 720, 30)), ["720p30", "camera"]);
+  assert.deepEqual(captureModeIdsWithin(limits(3840, 2160, 60)), ALL_MODES);
+  assert.deepEqual(captureModeIdsWithin(limits(1920, 1080, 30)), ["1080p30", "720p30", "480p30", "camera"]);
+  assert.deepEqual(captureModeIdsWithin(limits(1280, 720, 60)), ["720p60", "720p30", "480p30", "camera"]);
+  // A 29.97 fps maximum, as cameras report a 30 fps mode, still reaches 30 fps.
+  assert.deepEqual(captureModeIdsWithin(limits(1920, 1080, 29.97)), ["1080p30", "720p30", "480p30", "camera"]);
   assert.deepEqual(captureModeIdsWithin(limits(1920, 1080, 15)), ["camera"]);
   // Firefox and Safari report no limits, and Chrome reports none before permission.
-  assert.deepEqual(captureModeIdsWithin(undefined), ["1080p30", "720p30", "camera"]);
-  assert.deepEqual(captureModeIdsWithin({}), ["1080p30", "720p30", "camera"]);
+  assert.deepEqual(captureModeIdsWithin(undefined), ALL_MODES);
+  assert.deepEqual(captureModeIdsWithin({}), ALL_MODES);
 });
 
 test("a webcam publishes at 1920x1080 and 30 fps unless another mode is chosen", () => {
@@ -571,14 +577,11 @@ test("recordWebcamStopsOnExit swallows a fetch that throws as the page unloads",
   assert.deepEqual(recordWebcamStopsOnExit(sessions, fetchRequest), [1]);
 });
 
-// These devices report no limits, so every mode is offered.
-const ALL_MODES = ["1080p30", "720p30", "camera"];
-
 test("camerasFromDevices reads each camera's modes from its reported limits", () => {
   const devices = [
     { kind: "videoinput", deviceId: "hd", label: "HD", getCapabilities: () => ({ width: { max: 1280 }, height: { max: 720 }, frameRate: { max: 30 } }) },
   ];
-  assert.deepEqual(camerasFromDevices(devices), [{ deviceId: "hd", label: "HD", captureModeIds: ["720p30", "camera"] }]);
+  assert.deepEqual(camerasFromDevices(devices), [{ deviceId: "hd", label: "HD", captureModeIds: ["720p30", "480p30", "camera"] }]);
 });
 
 test("camerasFromDevices lists a multi-sensor camera once, under its first name", () => {
