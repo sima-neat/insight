@@ -25,6 +25,8 @@ import {
   confirmWebcamPublishing,
   describeWebcamError,
   publishWebcamOffer,
+  keepWebcamResolution,
+  withWebcamBitrate,
   selectH264Codecs,
   webcamCaptureConstraints,
 } from './streaming/webcamPublishing.js'
@@ -2238,7 +2240,8 @@ export default function App() {
       // times it out.
       webcamSessionsRef.current.set(index, { pc, stream, deleteUrl, sessionId, watcher })
       if (superseded()) throw WEBCAM_START_SUPERSEDED
-      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
+      await pc.setRemoteDescription({ type: 'answer', sdp: withWebcamBitrate(answerSdp, assignment.captureMode) })
+      await keepWebcamResolution(sender, assignment.captureMode)
 
       // Compare against the selection as it is now, not as it was when the
       // start began; installing this stream under another row's preview

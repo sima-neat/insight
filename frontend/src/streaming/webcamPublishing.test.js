@@ -16,6 +16,9 @@ import {
   selectH264Codecs,
   captureModeIdsWithin,
   webcamCaptureConstraints,
+  keepWebcamResolution,
+  webcamBitrateKbps,
+  withWebcamBitrate,
 } from "./webcamPublishing.js";
 
 // Every mode, largest first: what a camera that reports no limits is offered.
@@ -42,6 +45,63 @@ test("a webcam publishes at 1920x1080 and 30 fps unless another mode is chosen",
     video: { deviceId: { exact: "cam1" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
   });
   assert.deepEqual(webcamCaptureConstraints("cam1", "camera"), { video: { deviceId: { exact: "cam1" } } });
+});
+
+test("a webcam is sent at about 0.13 bits per pixel of its mode", () => {
+  assert.equal(webcamBitrateKbps("1080p30"), 8087);
+  assert.equal(webcamBitrateKbps("720p30"), 3594);
+  assert.equal(webcamBitrateKbps("2160p30"), 32348);
+  assert.equal(webcamBitrateKbps("camera"), webcamBitrateKbps("1080p30"));
+  assert.equal(webcamBitrateKbps("unknown"), webcamBitrateKbps("1080p30"));
+});
+
+test("the sender keeps the camera's size and may reach the mode's bitrate", async () => {
+  let applied = null;
+  const sender = {
+    getParameters: () => ({ transactionId: "t1", encodings: [{ active: true }] }),
+    async setParameters(parameters) {
+      applied = parameters;
+    },
+  };
+  await keepWebcamResolution(sender, "720p30");
+  assert.deepEqual(applied, {
+    transactionId: "t1",
+    degradationPreference: "maintain-resolution",
+    encodings: [{ active: true, maxBitrate: 3594000 }],
+  });
+});
+
+test("a browser that refuses the sender settings still publishes", async () => {
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const sender = { getParameters: () => ({ encodings: [{}] }), setParameters: async () => { throw new Error("InvalidModificationError"); } };
+    await keepWebcamResolution(sender, "1080p30");
+  } finally {
+    console.warn = warn;
+  }
+});
+
+test("the answer's H.264 formats start at the mode's bitrate", () => {
+  const answer = [
+    "m=video 9 UDP/TLS/RTP/SAVPF 96 97",
+    "a=rtpmap:96 H264/90000",
+    "a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+    "a=rtpmap:97 rtx/90000",
+    "a=fmtp:97 apt=96",
+    "",
+  ].join("\r\n");
+  assert.equal(
+    withWebcamBitrate(answer, "1080p30"),
+    [
+      "m=video 9 UDP/TLS/RTP/SAVPF 96 97",
+      "a=rtpmap:96 H264/90000",
+      "a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f;x-google-start-bitrate=8087;x-google-min-bitrate=4044",
+      "a=rtpmap:97 rtx/90000",
+      "a=fmtp:97 apt=96",
+      "",
+    ].join("\r\n"),
+  );
 });
 
 function fakePeerConnection(overrides = {}) {

@@ -46,6 +46,38 @@ export function webcamCaptureConstraints(deviceId, modeId = DEFAULT_WEBCAM_CAPTU
   return { video }
 }
 
+// The bitrate a webcam is sent at, in kbps, about 0.13 bits per pixel: 8100 kbps at 1080p30.
+// Chrome's defaults start a stream at a few hundred kbps and lower the size to fit it, so a camera
+// opened at 1920x1080 reached Insight at 320x180. Camera default sends at the default mode's rate.
+export function webcamBitrateKbps(modeId = DEFAULT_WEBCAM_CAPTURE_MODE) {
+  const mode = WEBCAM_CAPTURE_MODES.find((m) => m.id === modeId && m.width) || WEBCAM_CAPTURE_MODES.find((m) => m.id === DEFAULT_WEBCAM_CAPTURE_MODE)
+  return Math.round((mode.width * mode.height * mode.frameRate * 0.13) / 1000)
+}
+
+// Keeps the camera's size when the bandwidth runs short, lowering the frame rate instead, and lets
+// the sender reach the mode's bitrate. Applied after the answer, when the sender has its encoding.
+// A browser that refuses the settings still publishes, with its own defaults and a console warning.
+export async function keepWebcamResolution(sender, modeId) {
+  try {
+    const parameters = sender.getParameters()
+    parameters.degradationPreference = 'maintain-resolution'
+    for (const encoding of parameters.encodings || []) encoding.maxBitrate = webcamBitrateKbps(modeId) * 1000
+    await sender.setParameters(parameters)
+  } catch (error) {
+    console.warn('The browser kept its own webcam bitrate and size settings:', error)
+  }
+}
+
+// Adds Chrome's start and minimum bitrate to the H.264 formats of MediaMTX's answer, so the stream
+// starts at the mode's bitrate instead of climbing from a few hundred kbps. Other browsers ignore
+// these parameters.
+export function withWebcamBitrate(answerSdp, modeId) {
+  const kbps = webcamBitrateKbps(modeId)
+  const hints = `x-google-start-bitrate=${kbps};x-google-min-bitrate=${Math.round(kbps / 2)}`
+  const h264Payloads = new Set([...answerSdp.matchAll(/^a=rtpmap:(\d+) H264\/90000/gim)].map((match) => match[1]))
+  return answerSdp.replace(/^a=fmtp:(\d+) (.*)$/gm, (line, payload, formats) => (h264Payloads.has(payload) ? `a=fmtp:${payload} ${formats.trimEnd()};${hints}` : line))
+}
+
 // Turn a getUserMedia or publish failure into something a user can act on.
 // Anything unrecognized falls through to the underlying message rather than a
 // generic string, because the publish errors below already read well.
