@@ -13,6 +13,9 @@ It provides:
 - Codec-aware media source control with RTSP and HTTP MJPEG streaming
 - System and application metrics dashboard
 
+The standalone [mediaserver](mediaserver/README.md) container serves prerecorded
+RTSP/TCP and HTTP MJPEG sources from a mounted media volume.
+
 User documentation for the software docs site is maintained in
 [`docs/index.md`](docs/index.md).
 

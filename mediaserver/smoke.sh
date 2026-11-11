@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+image="${1:?Usage: bash mediaserver/smoke.sh IMAGE}"
+media="$(docker volume create)"
+container=
+cleanup() {
+    if [[ -n "$container" ]]; then
+        docker rm -f "$container" >/dev/null
+    fi
+    docker volume rm "$media" >/dev/null
+}
+trap cleanup EXIT
+
+docker run --rm --user 0:0 --entrypoint ffmpeg \
+    -v "$media:/fixtures" "$image" -hide_banner -loglevel error \
+    -f lavfi -i testsrc2=size=160x120:rate=10 -t 2 -c:v libx264 -pix_fmt yuv420p /fixtures/0-avc.mp4
+docker run --rm --user 0:0 --entrypoint ffmpeg \
+    -v "$media:/fixtures" "$image" -hide_banner -loglevel error \
+    -f lavfi -i testsrc2=size=160x120:rate=10 -t 2 -c:v mjpeg -huffman default \
+    -force_duplicated_matrix 1 -pix_fmt yuvj420p /fixtures/1-mjpeg.avi
+container="$(docker run -d --read-only --tmpfs /tmp -v "$media:/media:ro" "$image")"
+
+if ! docker exec -i "$container" python3 - <<'PY'
+import json
+import subprocess
+import time
+from urllib.request import urlopen
+
+base = "http://127.0.0.1:8088"
+rtsp = "rtsp://127.0.0.1:8554/src0"
+
+
+def wait_for(predicate):
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        try:
+            with urlopen(base + "/healthz", timeout=2) as response:
+                state = json.load(response)
+            if predicate(state):
+                return
+        except OSError:
+            pass
+        time.sleep(0.25)
+    raise AssertionError("Expected health state did not arrive")
+
+
+wait_for(lambda state: state["rtsp"]["ready_sources"] == 2 and state["http"]["ready_sources"] == 1)
+with urlopen(base + "/streams.json", timeout=2) as response:
+    assert json.load(response)[0]["url"] == "/src0.mjpeg"
+
+with subprocess.Popen([
+    "ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp",
+    "-i", rtsp, "-t", "8", "-f", "null", "-",
+]) as player:
+    try:
+        with urlopen(base + "/src0.mjpeg", timeout=5) as stream:
+            assert stream.headers.get_content_type() == "multipart/x-mixed-replace"
+            assert stream.readline() == b"--frame\r\n"
+            assert stream.readline() == b"Content-Type: image/jpeg\r\n"
+            length = int(stream.readline().split(b":")[1])
+            assert stream.readline() == b"\r\n"
+            frame = stream.read(length)
+            assert frame.startswith(b"\xff\xd8") and frame.endswith(b"\xff\xd9")
+            wait_for(lambda state: state["rtsp"]["active_readers"] == 1 and state["http"]["active_readers"] == 1)
+        assert player.wait(timeout=20) == 0
+    finally:
+        if player.poll() is None:
+            player.kill()
+
+wait_for(lambda state: state["rtsp"]["active_readers"] == state["http"]["active_readers"] == 0)
+print("RTSP playback, HTTP MJPEG, and viewer lifecycle verified")
+PY
+then
+    docker logs "$container"
+    exit 1
+fi
+docker stop -t 10 "$container" >/dev/null
+[[ "$(docker inspect -f '{{.State.ExitCode}}' "$container")" == 0 ]]
