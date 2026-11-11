@@ -1,0 +1,22 @@
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp]
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+
+api: yes
+apiAddress: 127.0.0.1:9997
+authInternalUsers:
+  - user: any
+    ips: [127.0.0.1, "::1"]
+    permissions:
+      - action: publish
+      - action: api
+  - user: any
+    permissions:
+      - action: read
+
+pathDefaults:
+  overridePublisher: false
