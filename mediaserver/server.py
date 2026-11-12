@@ -117,6 +117,46 @@ def media_catalog(sources):
     return {"schema_version": 1, "sources": entries}
 
 
+def parse_authority(authority):
+    if not re.fullmatch(r"(?:[a-zA-Z0-9._-]+|\[[0-9a-fA-F:.]+\])(?::[0-9]+)?", authority):
+        raise ValueError("Invalid playback host or port")
+    parsed = urlsplit("//" + authority)
+    if parsed.port == 0:
+        raise ValueError("Invalid playback port")
+    return parsed
+
+
+def configured_origin(name, schemes):
+    value = os.environ.get(name)
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        parse_authority(parsed.netloc)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        if parsed.scheme not in schemes or value not in {origin, origin + "/"}:
+            raise ValueError("Expected an origin URL")
+    except ValueError as error:
+        raise ValueError(f"{name} must be an origin URL using {' or '.join(schemes)}") from error
+    return origin
+
+
+def playback_catalog(catalog, authority, origins):
+    request_host = parse_authority(authority)
+    rtsp_host = request_host.hostname
+    if ":" in rtsp_host:
+        rtsp_host = f"[{rtsp_host}]"
+    defaults = {"http": f"http://{authority}", "rtsp": f"rtsp://{rtsp_host}:{RTSP_PORT}"}
+    links = {key: [] for key in ("h264-rtsp", "h265-rtsp", "mjpeg-rtsp", "mjpeg-http")}
+    sources = []
+    for source in catalog["sources"]:
+        transport = source["transport"]
+        url = (origins[transport] or defaults[transport]) + source["path"]
+        links[f"{source['codec']}-{transport}"].append(url)
+        sources.append({**source, "url": url})
+    return {**catalog, "sources": sources, "links": links}
+
+
 def status_catalog(catalog):
     sources = catalog["sources"]
     return {
@@ -215,6 +255,10 @@ class MediaHTTPServer(ThreadingHTTPServer):
     def __init__(self, sources, shutdown, viewer_limit):
         self.sources = sources["http"]
         self.catalog = media_catalog(sources)
+        self.playback_origins = {
+            "rtsp": configured_origin("MEDIASERVER_RTSP_ORIGIN", ("rtsp",)),
+            "http": configured_origin("MEDIASERVER_HTTP_ORIGIN", ("http", "https")),
+        }
         self.players = {key: MJPEGSource(path, shutdown) for key, (path, _) in self.sources.items()}
         if viewer_limit < 1:
             raise ValueError("MEDIASERVER_HTTP_MAX_READERS must be positive")
@@ -267,7 +311,13 @@ class Handler(BaseHTTPRequestHandler):
             status = self.server.status
             self.send_json(status, 200 if status["state"] == "ready" else 503)
         elif path == "/media-sources.json":
-            self.send_json(self.server.catalog)
+            authority = self.headers.get("Host", f"{self.connection.getsockname()[0]}:{HTTP_PORT}")
+            try:
+                catalog = playback_catalog(self.server.catalog, authority, self.server.playback_origins)
+            except ValueError:
+                self.send_json({"error": "Invalid Host header"}, 400)
+            else:
+                self.send_json(catalog)
         elif path == "/streams.json":
             self.send_json([{
                 **info,
