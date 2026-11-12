@@ -19,6 +19,10 @@ docker run --rm --user 0:0 --entrypoint ffmpeg \
     -v "$media:/fixtures" "$image" -hide_banner -loglevel error \
     -f lavfi -i testsrc2=size=160x120:rate=10 -t 2 -c:v mjpeg -huffman default \
     -force_duplicated_matrix 1 -pix_fmt yuvj420p /fixtures/1-mjpeg.avi
+docker run --rm --user 0:0 --entrypoint ffmpeg \
+    -v "$media:/fixtures" "$image" -hide_banner -loglevel error \
+    -f lavfi -i testsrc2=size=160x120:rate=10 -t 2 -c:v libx265 \
+    -x265-params pools=1:frame-threads=1:log-level=error -pix_fmt yuv420p /fixtures/2-hevc.mp4
 container="$(docker run -d --read-only --tmpfs /tmp -v "$media:/media:ro" "$image")"
 
 if ! docker exec -i "$container" python3 - <<'PY'
@@ -28,7 +32,6 @@ import time
 from urllib.request import urlopen
 
 base = "http://127.0.0.1:8088"
-rtsp = "rtsp://127.0.0.1:8554/src0"
 
 
 def wait_for(predicate):
@@ -45,16 +48,35 @@ def wait_for(predicate):
     raise AssertionError("Expected health state did not arrive")
 
 
-wait_for(lambda state: state["rtsp"]["ready_sources"] == 2 and state["http"]["ready_sources"] == 1)
+wait_for(lambda state: state["rtsp"]["ready_sources"] == 3 and state["http"]["ready_sources"] == 1)
 with urlopen(base + "/streams.json", timeout=2) as response:
     assert json.load(response)[0]["url"] == "/src0.mjpeg"
 
+with urlopen(base + "/media-sources.json", timeout=2) as response:
+    assert response.headers.get_content_type() == "application/json"
+    catalog = json.load(response)
+assert catalog["schema_version"] == 1
+assert len(catalog["sources"]) == 4
+sources = {(source["transport"], source["id"]): source for source in catalog["sources"]}
+for transport, source_id, codec, path in [
+    ("rtsp", "src0", "h264", "/src0"),
+    ("rtsp", "src1", "mjpeg", "/src1"),
+    ("rtsp", "src2", "h265", "/src2"),
+    ("http", "src0", "mjpeg", "/src0.mjpeg"),
+]:
+    assert sources[transport, source_id] == {
+        "id": source_id, "transport": transport, "codec": codec, "path": path,
+        "width": 160, "height": 120, "fps": 10,
+    }
+
+rtsp = "rtsp://127.0.0.1:8554" + sources["rtsp", "src0"]["path"]
+mjpeg = base + sources["http", "src0"]["path"]
 with subprocess.Popen([
     "ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp",
     "-i", rtsp, "-t", "8", "-f", "null", "-",
 ]) as player:
     try:
-        with urlopen(base + "/src0.mjpeg", timeout=5) as stream:
+        with urlopen(mjpeg, timeout=5) as stream:
             assert stream.headers.get_content_type() == "multipart/x-mixed-replace"
             assert stream.readline() == b"--frame\r\n"
             assert stream.readline() == b"Content-Type: image/jpeg\r\n"
@@ -69,7 +91,7 @@ with subprocess.Popen([
             player.kill()
 
 wait_for(lambda state: state["rtsp"]["active_readers"] == state["http"]["active_readers"] == 0)
-print("RTSP playback, HTTP MJPEG, and viewer lifecycle verified")
+print("Media catalog, RTSP playback, HTTP MJPEG, and viewer lifecycle verified")
 PY
 then
     docker logs "$container"
