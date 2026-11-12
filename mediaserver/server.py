@@ -23,6 +23,8 @@ RTSP_PORT = 8554
 HTTP_PORT = 8088
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 FRAME_TIMEOUT = 10
+# Keep the forwarded status within the 8 KiB AWS IoT shadow state limit.
+MAX_REPORTED_SOURCES = 48
 
 
 def probe(path):
@@ -113,6 +115,17 @@ def media_catalog(sources):
                     break
             entries.append(entry)
     return {"schema_version": 1, "sources": entries}
+
+
+def status_catalog(catalog):
+    sources = catalog["sources"]
+    return {
+        "sources": [
+            {field: source[field] for field in ("id", "transport", "codec")}
+            for source in sources[:MAX_REPORTED_SOURCES]
+        ],
+        "catalog_truncated": len(sources) > MAX_REPORTED_SOURCES,
+    }
 
 
 def ffmpeg_input(path):
@@ -402,6 +415,7 @@ def main():
     next_report = started
     publishers = {}
     server = MediaHTTPServer(sources, shutdown, int(os.environ.get("MEDIASERVER_HTTP_MAX_READERS", "64")))
+    catalog_status = status_catalog(server.catalog)
     with tempfile.TemporaryDirectory() as tmpdir:
         config = Path(tmpdir) / "mediamtx.yml"
         template = Path(__file__).with_name("mediamtx.yml").read_text()
@@ -426,7 +440,8 @@ def main():
                 if reporter and time.monotonic() >= next_report:
                     client, topic, service_id = reporter
                     if client.is_connected():
-                        client.publish(topic, json.dumps({**server.status, "service_id": service_id}), qos=1)
+                        report = {**server.status, **catalog_status, "service_id": service_id}
+                        client.publish(topic, json.dumps(report), qos=1)
                     next_report = time.monotonic() + 30
                 shutdown.wait(2)
         finally:
