@@ -124,7 +124,7 @@ In the AWS IoT console's MQTT test client, subscribe to
 `insight/production/mediaservers/colo-media/status`. Start the container and
 look for a JSON snapshot within about 30 seconds of connecting.
 
-The reporter connects over mutual TLS and sends a QoS 1 snapshot every 30 seconds. The snapshot includes readiness, configured and ready source counts, active playback readers, byte counters, version, and uptime. RTSP publishers are excluded from reader counts. The HTTP byte counter accumulates JPEG payload bytes. The RTSP total sums MediaMTX path counters, which can reset when paths restart. Playback continues if the broker is unavailable.
+The reporter connects over mutual TLS and sends a QoS 1 snapshot every 30 seconds. The snapshot includes readiness, configured and ready source counts, active playback readers, byte counters, version, and uptime. Each snapshot also lists the first 48 catalog entries with their stream IDs, transports, and codecs. The `catalog_truncated` flag indicates when the HTTP discovery catalog contains more entries. RTSP publishers are excluded from reader counts. The HTTP byte counter accumulates JPEG payload bytes. The RTSP total sums MediaMTX path counters, which can reset when paths restart. Playback continues if the broker is unavailable.
 
 Saving snapshots to S3 requires a separate IoT Rule. For NeatOps, store the
 latest snapshot per service with the broker receipt timestamp so the dashboard
