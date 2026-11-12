@@ -19,6 +19,8 @@ from urllib.request import urlopen
 LOG = logging.getLogger("mediaserver")
 EXTENSIONS = {".mp4", ".m4v", ".mov", ".avi", ".mkv"}
 RTSP_CODECS = {"h264", "hevc", "mjpeg"}
+RTSP_PORT = 8554
+HTTP_PORT = 8088
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 FRAME_TIMEOUT = 10
 
@@ -84,6 +86,7 @@ def load_sources(root):
 
 
 def media_catalog(sources):
+    ports = {"rtsp": RTSP_PORT, "http": HTTP_PORT}
     entries = []
     for transport, streams in sources.items():
         for source_id, (_, info) in streams.items():
@@ -91,6 +94,7 @@ def media_catalog(sources):
             entry = {
                 "id": source_id,
                 "transport": transport,
+                "port": ports[transport],
                 "codec": "h265" if codec == "hevc" else codec,
                 "path": f"/{source_id}.mjpeg" if transport == "http" else f"/{source_id}",
             }
@@ -207,7 +211,7 @@ class MediaHTTPServer(ThreadingHTTPServer):
         self.viewers = 0
         self.bytes_sent = 0
         self.status = {"state": "starting"}
-        super().__init__(("0.0.0.0", 8088), Handler)
+        super().__init__(("0.0.0.0", HTTP_PORT), Handler)
 
     def get_request(self):
         connection, address = super().get_request()
@@ -416,7 +420,7 @@ def main():
                     if process is None or process.poll() is not None:
                         publishers[key] = subprocess.Popen([
                             *ffmpeg_input(path), "-rtsp_transport", "tcp", "-f", "rtsp",
-                            f"rtsp://127.0.0.1:8554/{key}",
+                            f"rtsp://127.0.0.1:{RTSP_PORT}/{key}",
                         ])
                 server.status = collect_status(server, sources["rtsp"], started)
                 if reporter and time.monotonic() >= next_report:
