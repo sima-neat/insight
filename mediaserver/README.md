@@ -32,6 +32,36 @@ For a stable deployment, put a `mediaserver.json` in the volume. Map the legacy 
 - MJPEG playback at `http://colo-http:8088/src0.mjpeg`. The HTTP index and `/streams.json` list sources.
 - `/healthz` returns the latest local status and responds with HTTP 503 during startup or when a configured source is unavailable. `MEDIASERVER_HTTP_MAX_READERS` sets the concurrent HTTP viewer limit (default 64).
 
+## Discover streams
+
+Fetch the combined RTSP and HTTP catalog from `GET /media-sources.json` on
+port 8088. On a Kerrigan-managed DevKit, read `http.discovery_url` from
+`/etc/colo-services.json`.
+
+```sh
+curl -fsS "$(jq -r .http.discovery_url /etc/colo-services.json)"
+```
+
+```json
+{
+  "schema_version": 1,
+  "sources": [
+    {"id": "src0", "transport": "rtsp", "codec": "h264", "path": "/src0", "width": 1280, "height": 720, "fps": 30},
+    {"id": "src0", "transport": "http", "codec": "mjpeg", "path": "/src0.mjpeg", "width": 1280, "height": 720, "fps": 29.97}
+  ]
+}
+```
+
+Each ID is unique within its transport. Use explicit manifest IDs for fixtures
+that need to stay stable when the mounted inventory changes. The codec names
+are `h264`, `h265`, and `mjpeg`. Dimensions and the numeric frame rate
+are included when available from the media probe.
+
+Build a playback URL by appending `path` to the configured origin for
+`transport`, using that service's own host and port. The catalog describes
+the media inventory loaded at startup. Check `/healthz` for current readiness.
+The existing `/streams.json` endpoint continues to list HTTP MJPEG sources.
+
 For Kerrigan-managed DevKits, allow TCP 8554 and 8088 to the deployed colo address in the effective DevKit egress policy. Verify the destination DNS and playback from a managed DevKit.
 
 ## IoT reporting

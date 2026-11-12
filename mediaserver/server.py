@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from fractions import Fraction
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -80,6 +81,34 @@ def load_sources(root):
             raise ValueError(f"Unsupported video codec for {protocol}/{source_id}")
         sources[protocol][source_id] = (path, info)
     return sources
+
+
+def media_catalog(sources):
+    entries = []
+    for transport, streams in sources.items():
+        for source_id, (_, info) in streams.items():
+            codec = info["codec_name"]
+            entry = {
+                "id": source_id,
+                "transport": transport,
+                "codec": "h265" if codec == "hevc" else codec,
+                "path": f"/{source_id}.mjpeg" if transport == "http" else f"/{source_id}",
+            }
+            for dimension in ("width", "height"):
+                if info.get(dimension, 0) > 0:
+                    entry[dimension] = info[dimension]
+            for rate in (info.get("avg_frame_rate"), info.get("r_frame_rate")):
+                if not rate:
+                    continue
+                try:
+                    fps = Fraction(rate)
+                except (ValueError, ZeroDivisionError):
+                    continue
+                if fps > 0:
+                    entry["fps"] = float(fps)
+                    break
+            entries.append(entry)
+    return {"schema_version": 1, "sources": entries}
 
 
 def ffmpeg_input(path):
@@ -167,8 +196,9 @@ class MediaHTTPServer(ThreadingHTTPServer):
     request_queue_size = 64
 
     def __init__(self, sources, shutdown, viewer_limit):
-        self.sources = sources
-        self.players = {key: MJPEGSource(path, shutdown) for key, (path, _) in sources.items()}
+        self.sources = sources["http"]
+        self.catalog = media_catalog(sources)
+        self.players = {key: MJPEGSource(path, shutdown) for key, (path, _) in self.sources.items()}
         if viewer_limit < 1:
             raise ValueError("MEDIASERVER_HTTP_MAX_READERS must be positive")
         self.slots = threading.BoundedSemaphore(viewer_limit)
@@ -219,6 +249,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/healthz":
             status = self.server.status
             self.send_json(status, 200 if status["state"] == "ready" else 503)
+        elif path == "/media-sources.json":
+            self.send_json(self.server.catalog)
         elif path == "/streams.json":
             self.send_json([{
                 **info,
@@ -365,7 +397,7 @@ def main():
     started = time.monotonic()
     next_report = started
     publishers = {}
-    server = MediaHTTPServer(sources["http"], shutdown, int(os.environ.get("MEDIASERVER_HTTP_MAX_READERS", "64")))
+    server = MediaHTTPServer(sources, shutdown, int(os.environ.get("MEDIASERVER_HTTP_MAX_READERS", "64")))
     with tempfile.TemporaryDirectory() as tmpdir:
         config = Path(tmpdir) / "mediamtx.yml"
         template = Path(__file__).with_name("mediamtx.yml").read_text()
