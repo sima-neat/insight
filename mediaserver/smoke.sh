@@ -58,19 +58,21 @@ with urlopen(base + "/media-sources.json", timeout=2) as response:
 assert catalog["schema_version"] == 1
 assert len(catalog["sources"]) == 4
 sources = {(source["transport"], source["id"]): source for source in catalog["sources"]}
-for transport, source_id, codec, path in [
-    ("rtsp", "src0", "h264", "/src0"),
-    ("rtsp", "src1", "mjpeg", "/src1"),
-    ("rtsp", "src2", "h265", "/src2"),
-    ("http", "src0", "mjpeg", "/src0.mjpeg"),
+for transport, source_id, port, codec, path in [
+    ("rtsp", "src0", 8554, "h264", "/src0"),
+    ("rtsp", "src1", 8554, "mjpeg", "/src1"),
+    ("rtsp", "src2", 8554, "h265", "/src2"),
+    ("http", "src0", 8088, "mjpeg", "/src0.mjpeg"),
 ]:
     assert sources[transport, source_id] == {
-        "id": source_id, "transport": transport, "codec": codec, "path": path,
+        "id": source_id, "transport": transport, "port": port, "codec": codec, "path": path,
         "width": 160, "height": 120, "fps": 10,
     }
 
-rtsp = "rtsp://127.0.0.1:8554" + sources["rtsp", "src0"]["path"]
-mjpeg = base + sources["http", "src0"]["path"]
+rtsp_source = sources["rtsp", "src0"]
+http_source = sources["http", "src0"]
+rtsp = f"rtsp://127.0.0.1:{rtsp_source['port']}{rtsp_source['path']}"
+mjpeg = f"http://127.0.0.1:{http_source['port']}{http_source['path']}"
 with subprocess.Popen([
     "ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp",
     "-i", rtsp, "-t", "8", "-f", "null", "-",

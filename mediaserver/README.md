@@ -46,8 +46,8 @@ curl -fsS "$(jq -r .http.discovery_url /etc/colo-services.json)"
 {
   "schema_version": 1,
   "sources": [
-    {"id": "src0", "transport": "rtsp", "codec": "h264", "path": "/src0", "width": 1280, "height": 720, "fps": 30},
-    {"id": "src0", "transport": "http", "codec": "mjpeg", "path": "/src0.mjpeg", "width": 1280, "height": 720, "fps": 29.97}
+    {"id": "src0", "transport": "rtsp", "port": 8554, "codec": "h264", "path": "/src0", "width": 1280, "height": 720, "fps": 30},
+    {"id": "src0", "transport": "http", "port": 8088, "codec": "mjpeg", "path": "/src0.mjpeg", "width": 1280, "height": 720, "fps": 29.97}
   ]
 }
 ```
@@ -57,9 +57,11 @@ that need to stay stable when the mounted inventory changes. The codec names
 are `h264`, `h265`, and `mjpeg`. Dimensions and the numeric frame rate
 are included when available from the media probe.
 
-Build a playback URL by appending `path` to the configured origin for
-`transport`, using that service's own host and port. The catalog describes
-the media inventory loaded at startup. Check `/healthz` for current readiness.
+Build a playback URL from `transport`, the configured hostname for that
+transport, `port`, and `path`. The port is the container's TCP listening port.
+Use the published port if the deployment maps it to a different host port.
+The catalog describes the media inventory loaded at startup. Check `/healthz`
+for current readiness.
 The existing `/streams.json` endpoint continues to list HTTP MJPEG sources.
 
 For Kerrigan-managed DevKits, allow TCP 8554 and 8088 to the deployed colo address in the effective DevKit egress policy. Verify the destination DNS and playback from a managed DevKit.
