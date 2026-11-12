@@ -29,7 +29,8 @@ if ! docker exec -i "$container" python3 - <<'PY'
 import json
 import subprocess
 import time
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 base = "http://127.0.0.1:8088"
 
@@ -57,6 +58,12 @@ with urlopen(base + "/media-sources.json", timeout=2) as response:
     catalog = json.load(response)
 assert catalog["schema_version"] == 1
 assert len(catalog["sources"]) == 4
+assert catalog["links"] == {
+    "h264-rtsp": ["rtsp://127.0.0.1:8554/src0"],
+    "h265-rtsp": ["rtsp://127.0.0.1:8554/src2"],
+    "mjpeg-rtsp": ["rtsp://127.0.0.1:8554/src1"],
+    "mjpeg-http": [base + "/src0.mjpeg"],
+}
 sources = {(source["transport"], source["id"]): source for source in catalog["sources"]}
 for transport, source_id, port, codec, path in [
     ("rtsp", "src0", 8554, "h264", "/src0"),
@@ -66,13 +73,23 @@ for transport, source_id, port, codec, path in [
 ]:
     assert sources[transport, source_id] == {
         "id": source_id, "transport": transport, "port": port, "codec": codec, "path": path,
-        "width": 160, "height": 120, "fps": 10,
+        "width": 160, "height": 120, "fps": 10, "url": catalog["links"][f"{codec}-{transport}"][0],
     }
 
-rtsp_source = sources["rtsp", "src0"]
-http_source = sources["http", "src0"]
-rtsp = f"rtsp://127.0.0.1:{rtsp_source['port']}{rtsp_source['path']}"
-mjpeg = f"http://127.0.0.1:{http_source['port']}{http_source['path']}"
+discovery = base + "/media-sources.json"
+with urlopen(Request(discovery, headers={"Host": "media.example:18088"}), timeout=2) as response:
+    mapped = json.load(response)["links"]
+assert mapped["mjpeg-http"] == ["http://media.example:18088/src0.mjpeg"]
+assert mapped["h264-rtsp"] == ["rtsp://media.example:8554/src0"]
+try:
+    urlopen(Request(discovery, headers={"Host": "user@media.example"}), timeout=2)
+except HTTPError as error:
+    assert error.code == 400
+else:
+    raise AssertionError("Invalid discovery Host was accepted")
+
+rtsp = catalog["links"]["h264-rtsp"][0]
+mjpeg = catalog["links"]["mjpeg-http"][0]
 with subprocess.Popen([
     "ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp",
     "-i", rtsp, "-t", "8", "-f", "null", "-",

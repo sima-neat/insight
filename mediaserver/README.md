@@ -39,30 +39,38 @@ port 8088. On a Kerrigan-managed DevKit, read `http.discovery_url` from
 `/etc/colo-services.json`.
 
 ```sh
-curl -fsS "$(jq -r .http.discovery_url /etc/colo-services.json)"
+curl -fsS "$(jq -r .http.discovery_url /etc/colo-services.json)" |
+  jq -r '.links["h264-rtsp"][]'
 ```
+
+The `links` object contains ready-to-use playback URLs. Each key is always
+present. A group with no configured sources has an empty array.
 
 ```json
 {
-  "schema_version": 1,
-  "sources": [
-    {"id": "src0", "transport": "rtsp", "port": 8554, "codec": "h264", "path": "/src0", "width": 1280, "height": 720, "fps": 30},
-    {"id": "src0", "transport": "http", "port": 8088, "codec": "mjpeg", "path": "/src0.mjpeg", "width": 1280, "height": 720, "fps": 29.97}
-  ]
+  "h264-rtsp": ["rtsp://media.example:8554/src0"],
+  "h265-rtsp": ["rtsp://media.example:8554/src1"],
+  "mjpeg-rtsp": ["rtsp://media.example:8554/src2"],
+  "mjpeg-http": ["http://media.example:8088/src0.mjpeg"]
 }
 ```
 
-Each ID is unique within its transport. Use explicit manifest IDs for fixtures
-that need to stay stable when the mounted inventory changes. The codec names
-are `h264`, `h265`, and `mjpeg`. Dimensions and the numeric frame rate
-are included when available from the media probe.
+The same response includes `schema_version` and `sources`. Each source has its
+own `url` alongside its ID, transport, codec, path, and container listener
+port. Dimensions and the numeric frame rate are included when available.
+Source IDs are unique within each transport. Use explicit manifest IDs for
+fixtures that need to stay stable when the mounted inventory changes.
 
-Build a playback URL from `transport`, the configured hostname for that
-transport, `port`, and `path`. The port is the container's TCP listening port.
-Use the published port if the deployment maps it to a different host port.
+By default, HTTP links use the host and port in the discovery request, and RTSP
+links use that hostname with TCP port 8554. Set `MEDIASERVER_RTSP_ORIGIN`
+(for example, `rtsp://colo-rtsp.example:9554`) or `MEDIASERVER_HTTP_ORIGIN`
+(for example, `https://colo-http.example`) when clients use different hosts,
+published ports, or an HTTPS proxy. Set these on the mediaserver container
+that serves discovery.
+
 The catalog describes the media inventory loaded at startup. Check `/healthz`
-for current readiness.
-The existing `/streams.json` endpoint continues to list HTTP MJPEG sources.
+for current readiness. The existing `/streams.json` endpoint continues to
+list HTTP MJPEG sources.
 
 For Kerrigan-managed DevKits, allow TCP 8554 and 8088 to the deployed colo address in the effective DevKit egress policy. Verify the destination DNS and playback from a managed DevKit.
 
