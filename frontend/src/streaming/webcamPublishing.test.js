@@ -14,7 +14,97 @@ import {
   publishWebcamOffer,
   resolveDeleteUrl,
   selectH264Codecs,
+  captureModeIdsWithin,
+  webcamCaptureConstraints,
+  keepWebcamResolution,
+  webcamBitrateKbps,
+  withWebcamBitrate,
 } from "./webcamPublishing.js";
+
+// Every mode, largest first: what a camera that reports no limits is offered.
+const ALL_MODES = ["2160p30", "1440p30", "1080p60", "1080p30", "720p60", "720p30", "480p30", "camera"];
+
+test("a camera is offered only the modes within its largest reported size and rate", () => {
+  const limits = (width, height, frameRate) => ({ width: { min: 1, max: width }, height: { min: 1, max: height }, frameRate: { min: 1, max: frameRate } });
+  assert.deepEqual(captureModeIdsWithin(limits(3840, 2160, 60)), ALL_MODES);
+  assert.deepEqual(captureModeIdsWithin(limits(1920, 1080, 30)), ["1080p30", "720p30", "480p30", "camera"]);
+  assert.deepEqual(captureModeIdsWithin(limits(1280, 720, 60)), ["720p60", "720p30", "480p30", "camera"]);
+  // A 29.97 fps maximum, as cameras report a 30 fps mode, still reaches 30 fps.
+  assert.deepEqual(captureModeIdsWithin(limits(1920, 1080, 29.97)), ["1080p30", "720p30", "480p30", "camera"]);
+  assert.deepEqual(captureModeIdsWithin(limits(1920, 1080, 15)), ["camera"]);
+  // Firefox and Safari report no limits, and Chrome reports none before permission.
+  assert.deepEqual(captureModeIdsWithin(undefined), ALL_MODES);
+  assert.deepEqual(captureModeIdsWithin({}), ALL_MODES);
+});
+
+test("a webcam publishes at 1920x1080 and 30 fps unless another mode is chosen", () => {
+  const ideal = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+  assert.deepEqual(webcamCaptureConstraints("cam1"), { video: { deviceId: { exact: "cam1" }, ...ideal } });
+  assert.deepEqual(webcamCaptureConstraints("cam1", "unknown"), { video: { deviceId: { exact: "cam1" }, ...ideal } });
+  assert.deepEqual(webcamCaptureConstraints("cam1", "720p30"), {
+    video: { deviceId: { exact: "cam1" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+  });
+  assert.deepEqual(webcamCaptureConstraints("cam1", "camera"), { video: { deviceId: { exact: "cam1" } } });
+});
+
+test("Auto sends a webcam at about 0.13 bits per pixel of its mode, a fixed choice at its rate", () => {
+  assert.equal(webcamBitrateKbps(), 8087);
+  assert.equal(webcamBitrateKbps("auto", "720p30"), 3594);
+  assert.equal(webcamBitrateKbps("auto", "2160p30"), 32348);
+  assert.equal(webcamBitrateKbps("auto", "camera"), 8087);
+  assert.equal(webcamBitrateKbps("auto", "unknown"), 8087);
+  assert.equal(webcamBitrateKbps("4mbps", "2160p30"), 4000);
+  assert.equal(webcamBitrateKbps("unknown", "720p30"), 3594);
+});
+
+test("the sender keeps the camera's size and may reach the mode's bitrate", async () => {
+  let applied = null;
+  const sender = {
+    getParameters: () => ({ transactionId: "t1", encodings: [{ active: true }] }),
+    async setParameters(parameters) {
+      applied = parameters;
+    },
+  };
+  await keepWebcamResolution(sender, 3594);
+  assert.deepEqual(applied, {
+    transactionId: "t1",
+    degradationPreference: "maintain-resolution",
+    encodings: [{ active: true, maxBitrate: 3594000 }],
+  });
+});
+
+test("a browser that refuses the sender settings still publishes", async () => {
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const sender = { getParameters: () => ({ encodings: [{}] }), setParameters: async () => { throw new Error("InvalidModificationError"); } };
+    await keepWebcamResolution(sender, 8087);
+  } finally {
+    console.warn = warn;
+  }
+});
+
+test("the answer's H.264 formats start at the mode's bitrate", () => {
+  const answer = [
+    "m=video 9 UDP/TLS/RTP/SAVPF 96 97",
+    "a=rtpmap:96 H264/90000",
+    "a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+    "a=rtpmap:97 rtx/90000",
+    "a=fmtp:97 apt=96",
+    "",
+  ].join("\r\n");
+  assert.equal(
+    withWebcamBitrate(answer, 8087),
+    [
+      "m=video 9 UDP/TLS/RTP/SAVPF 96 97",
+      "a=rtpmap:96 H264/90000",
+      "a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f;x-google-start-bitrate=8087;x-google-min-bitrate=4044",
+      "a=rtpmap:97 rtx/90000",
+      "a=fmtp:97 apt=96",
+      "",
+    ].join("\r\n"),
+  );
+});
 
 function fakePeerConnection(overrides = {}) {
   return {
@@ -549,6 +639,13 @@ test("recordWebcamStopsOnExit swallows a fetch that throws as the page unloads",
   assert.deepEqual(recordWebcamStopsOnExit(sessions, fetchRequest), [1]);
 });
 
+test("camerasFromDevices reads each camera's modes from its reported limits", () => {
+  const devices = [
+    { kind: "videoinput", deviceId: "hd", label: "HD", getCapabilities: () => ({ width: { max: 1280 }, height: { max: 720 }, frameRate: { max: 30 } }) },
+  ];
+  assert.deepEqual(camerasFromDevices(devices), [{ deviceId: "hd", label: "HD", captureModeIds: ["720p30", "480p30", "camera"] }]);
+});
+
 test("camerasFromDevices lists a multi-sensor camera once, under its first name", () => {
   // As Chrome on Linux reported a laptop's RGB + IR camera and a USB webcam.
   const devices = [
@@ -558,8 +655,8 @@ test("camerasFromDevices lists a multi-sensor camera once, under its first name"
     { kind: "videoinput", deviceId: "rapoo", groupId: "g2", label: "Rapoo Camera: Rapoo Camera" },
   ];
   assert.deepEqual(camerasFromDevices(devices), [
-    { deviceId: "hp", label: "HP 5MP Camera: HP 5MP Camera" },
-    { deviceId: "rapoo", label: "Rapoo Camera: Rapoo Camera" },
+    { deviceId: "hp", label: "HP 5MP Camera: HP 5MP Camera", captureModeIds: ALL_MODES },
+    { deviceId: "rapoo", label: "Rapoo Camera: Rapoo Camera", captureModeIds: ALL_MODES },
   ]);
 });
 
@@ -570,8 +667,8 @@ test("camerasFromDevices skips entries without an id and numbers unnamed cameras
     { kind: "videoinput", deviceId: "b", label: "" },
   ];
   assert.deepEqual(camerasFromDevices(devices), [
-    { deviceId: "a", label: "Camera 1" },
-    { deviceId: "b", label: "Camera 2" },
+    { deviceId: "a", label: "Camera 1", captureModeIds: ALL_MODES },
+    { deviceId: "b", label: "Camera 2", captureModeIds: ALL_MODES },
   ]);
   assert.deepEqual(camerasFromDevices(undefined), []);
 });

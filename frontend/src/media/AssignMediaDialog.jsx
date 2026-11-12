@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import FolderBrowser from './FolderBrowser.jsx'
 import { nearestExistingFolder, parentPath } from './mediaTree.js'
+import { DEFAULT_WEBCAM_BITRATE, DEFAULT_WEBCAM_CAPTURE_MODE, WEBCAM_BITRATES, WEBCAM_CAPTURE_MODES, webcamBitrateKbps } from '../streaming/webcamPublishing.js'
 
 const STREAM_URL_PATTERN = /^rtsps?:\/\//i
 
@@ -9,11 +10,15 @@ const STREAM_URL_PATTERN = /^rtsps?:\/\//i
 // the current file so a swap inside one category is one click away, a Camera tab for the browser's
 // cameras, and a Stream URL tab that pulls a network stream (issue #127). onAssign(value) and
 // onPull({url, username, password}) are awaited and may throw; '' clears the slot. A camera's value
-// goes to onAssign like a file path does. `currentValue` is what the slot holds now.
+// goes to onAssign like a file path does, with its capture mode and bitrate as
+// onAssign(value, {captureMode, bitrate}). A camera's `captureModeIds` limit the modes offered for
+// it. `currentValue`, `currentCaptureMode` and `currentBitrate` are what the slot holds now.
 export default function AssignMediaDialog({
   sourceIndex,
   currentFile,
   currentValue = currentFile,
+  currentCaptureMode = DEFAULT_WEBCAM_CAPTURE_MODE,
+  currentBitrate = DEFAULT_WEBCAM_BITRATE,
   isWebcam = false,
   cameras = [],
   cameraProbing = false,
@@ -29,6 +34,8 @@ export default function AssignMediaDialog({
   const [filter, setFilter] = useState('')
   const [picked, setPicked] = useState(isWebcam ? '' : (currentFile || ''))
   const [pickedCamera, setPickedCamera] = useState(isWebcam ? (currentValue || '') : '')
+  const [captureMode, setCaptureMode] = useState(currentCaptureMode)
+  const [bitrate, setBitrate] = useState(currentBitrate)
   const [busy, setBusy] = useState(false)
   const [url, setUrl] = useState('')
   const [username, setUsername] = useState('')
@@ -48,10 +55,10 @@ export default function AssignMediaDialog({
     onClose()
   }
 
-  async function commit(value) {
+  async function commit(value, options) {
     setBusy(true)
     try {
-      await onAssign(value)
+      await onAssign(value, options)
       close()
     } catch {
       setBusy(false) // the assignment already surfaced the error; keep the dialog open
@@ -71,6 +78,11 @@ export default function AssignMediaDialog({
   }
 
   const canPull = STREAM_URL_PATTERN.test(url.trim()) && !busy
+  // Until a camera is picked, every mode is listed. When the picked camera cannot reach the chosen
+  // mode, its first listed mode is shown and assigned instead.
+  const pickedCameraModeIds = cameras.find((camera) => camera.value === pickedCamera)?.captureModeIds
+  const offeredModes = WEBCAM_CAPTURE_MODES.filter((m) => !pickedCameraModeIds || pickedCameraModeIds.includes(m.id))
+  const shownCaptureMode = offeredModes.some((m) => m.id === captureMode) ? captureMode : offeredModes[0].id
 
   const tab = (id, label) => (
     <button
@@ -140,6 +152,20 @@ export default function AssignMediaDialog({
                 !cameraError && <p className="hint" data-testid="assign-no-cameras">No cameras enabled yet. Insight needs this browser's permission to use them.</p>
               )}
               {cameraError && <p className="camera-optin-error" role="alert">{cameraError}</p>}
+              <label className="pull-field">
+                <span>Resolution</span>
+                <select value={shownCaptureMode} onChange={(e) => setCaptureMode(e.target.value)} disabled={busy} data-testid="assign-capture-mode">
+                  {offeredModes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </label>
+              <p className="hint muted-text">Lists the modes within the camera's largest size and frame rate. A camera without the chosen mode sends its nearest one.</p>
+              <label className="pull-field">
+                <span>Bitrate</span>
+                <select value={bitrate} onChange={(e) => setBitrate(e.target.value)} disabled={busy} data-testid="assign-bitrate">
+                  {WEBCAM_BITRATES.map((b) => <option key={b.id} value={b.id}>{b.kbps ? b.label : `${b.label}, ${(webcamBitrateKbps(b.id, shownCaptureMode) / 1000).toFixed(1)} Mbps`}</option>)}
+                </select>
+              </label>
+              <p className="hint muted-text">The highest rate the browser sends the camera at. Insight re-encodes it for the stream URL.</p>
             </div>
             <div className="modal-actions">
               {onEnableCameras && (
@@ -149,7 +175,7 @@ export default function AssignMediaDialog({
               )}
               {isWebcam && <button type="button" className="btn-ghost" onClick={() => commit('')} disabled={busy}>Clear</button>}
               <button type="button" onClick={close} disabled={busy}>Cancel</button>
-              <button type="button" className="btn-tonal" onClick={() => commit(pickedCamera)} disabled={busy || !pickedCamera || pickedCamera === currentValue} data-testid="assign-camera-submit">Assign</button>
+              <button type="button" className="btn-tonal" onClick={() => commit(pickedCamera, { captureMode: shownCaptureMode, bitrate })} disabled={busy || !pickedCamera || (pickedCamera === currentValue && shownCaptureMode === currentCaptureMode && bitrate === currentBitrate)} data-testid="assign-camera-submit">Assign</button>
             </div>
           </div>
         )}

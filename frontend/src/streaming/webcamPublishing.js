@@ -6,6 +6,87 @@
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// The capture modes a webcam source can ask its camera for, largest first. Each size and rate is
+// `ideal`, so a camera without that mode sends its nearest one instead of failing to start.
+const captureMode = (width, height, frameRate) => ({ id: `${height}p${frameRate}`, label: `${width}x${height} at ${frameRate} fps`, width, height, frameRate })
+export const WEBCAM_CAPTURE_MODES = [
+  captureMode(3840, 2160, 30),
+  captureMode(2560, 1440, 30),
+  captureMode(1920, 1080, 60),
+  captureMode(1920, 1080, 30),
+  captureMode(1280, 720, 60),
+  captureMode(1280, 720, 30),
+  captureMode(640, 480, 30),
+  { id: 'camera', label: 'Camera default' },
+]
+export const DEFAULT_WEBCAM_CAPTURE_MODE = '1080p30'
+
+// The IDs of the capture modes within a camera's largest size and rate, from Chrome's
+// InputDeviceInfo.getCapabilities(). The browser reports only these maxima, not which sizes the
+// camera delivers at which rates, so a listed mode can still fall back to a nearer one. Without a
+// report, as in Firefox and Safari, every mode is listed.
+export function captureModeIdsWithin(capabilities) {
+  // Rounded, because cameras report NTSC rates such as 29.97 for a 30 fps mode.
+  const within = (value, range) => !(Math.round(range?.max) < value)
+  return WEBCAM_CAPTURE_MODES
+    .filter((mode) => !mode.width || (within(mode.width, capabilities?.width) && within(mode.height, capabilities?.height) && within(mode.frameRate, capabilities?.frameRate)))
+    .map((mode) => mode.id)
+}
+
+// The getUserMedia constraints that publish a camera in a capture mode. An unknown mode falls back
+// to the default.
+export function webcamCaptureConstraints(deviceId, modeId = DEFAULT_WEBCAM_CAPTURE_MODE) {
+  const mode = WEBCAM_CAPTURE_MODES.find((m) => m.id === modeId) || WEBCAM_CAPTURE_MODES.find((m) => m.id === DEFAULT_WEBCAM_CAPTURE_MODE)
+  const video = { deviceId: { exact: deviceId } }
+  if (mode.width) {
+    video.width = { ideal: mode.width }
+    video.height = { ideal: mode.height }
+    video.frameRate = { ideal: mode.frameRate }
+  }
+  return { video }
+}
+
+// The bitrates a webcam can be sent at. Auto is about 0.13 bits per pixel of the capture mode:
+// 8100 kbps at 1080p30. Chrome's defaults start a stream at a few hundred kbps and lower the size to
+// fit it, so a camera opened at 1920x1080 reached Insight at 320x180.
+export const WEBCAM_BITRATES = [
+  { id: 'auto', label: 'Auto' },
+  ...[2, 4, 8, 16, 32].map((mbps) => ({ id: `${mbps}mbps`, label: `${mbps} Mbps`, kbps: mbps * 1000 })),
+]
+export const DEFAULT_WEBCAM_BITRATE = 'auto'
+
+// The bitrate in kbps for a bitrate choice and capture mode. Auto with Camera default, or an
+// unknown choice, uses the default mode's rate.
+export function webcamBitrateKbps(bitrateId = DEFAULT_WEBCAM_BITRATE, modeId = DEFAULT_WEBCAM_CAPTURE_MODE) {
+  const fixed = WEBCAM_BITRATES.find((b) => b.id === bitrateId)?.kbps
+  if (fixed) return fixed
+  const mode = WEBCAM_CAPTURE_MODES.find((m) => m.id === modeId && m.width) || WEBCAM_CAPTURE_MODES.find((m) => m.id === DEFAULT_WEBCAM_CAPTURE_MODE)
+  return Math.round((mode.width * mode.height * mode.frameRate * 0.13) / 1000)
+}
+
+// Keeps the camera's size when the bandwidth runs short, lowering the frame rate instead, and lets
+// the sender reach `kbps`. Applied after the answer, when the sender has its encoding. A browser
+// that refuses the settings still publishes, with its own defaults and a console warning.
+export async function keepWebcamResolution(sender, kbps) {
+  try {
+    const parameters = sender.getParameters()
+    parameters.degradationPreference = 'maintain-resolution'
+    for (const encoding of parameters.encodings || []) encoding.maxBitrate = kbps * 1000
+    await sender.setParameters(parameters)
+  } catch (error) {
+    console.warn('The browser kept its own webcam bitrate and size settings:', error)
+  }
+}
+
+// Adds Chrome's start and minimum bitrate to the H.264 formats of MediaMTX's answer, so the stream
+// starts at `kbps` instead of climbing from a few hundred kbps. Other browsers ignore these
+// parameters.
+export function withWebcamBitrate(answerSdp, kbps) {
+  const hints = `x-google-start-bitrate=${kbps};x-google-min-bitrate=${Math.round(kbps / 2)}`
+  const h264Payloads = new Set([...answerSdp.matchAll(/^a=rtpmap:(\d+) H264\/90000/gim)].map((match) => match[1]))
+  return answerSdp.replace(/^a=fmtp:(\d+) (.*)$/gm, (line, payload, formats) => (h264Payloads.has(payload) ? `a=fmtp:${payload} ${formats.trimEnd()};${hints}` : line))
+}
+
 // Turn a getUserMedia or publish failure into something a user can act on.
 // Anything unrecognized falls through to the underlying message rather than a
 // generic string, because the publish errors below already read well.
@@ -34,7 +115,11 @@ export function camerasFromDevices(devices) {
   for (const device of devices || []) {
     if (device.kind !== 'videoinput' || !device.deviceId || seen.has(device.deviceId)) continue
     seen.add(device.deviceId)
-    cameras.push({ deviceId: device.deviceId, label: device.label || `Camera ${cameras.length + 1}` })
+    cameras.push({
+      deviceId: device.deviceId,
+      label: device.label || `Camera ${cameras.length + 1}`,
+      captureModeIds: captureModeIdsWithin(device.getCapabilities?.()),
+    })
   }
   return cameras
 }
