@@ -62,8 +62,11 @@ test('values, changes, durations, sizes, time ranges and statuses read as a deve
   assert.deepEqual([-1.507232237109984, 12.753877670471164, 0, -0.0002595591909001994, null].map(formatPercentDelta), ['−1.51%', '+12.8%', '±0%', '−<0.01%', '—'])
   assert.deepEqual([4.25, 45.6, 90, 7500, null, -1].map(formatSeconds), ['4.3 s', '46 s', '1 min 30 s', '2 h 5 min', '', ''])
   assert.deepEqual([0, 2048, 8 * 1024 ** 3, 1536 * 1024 ** 2, null, -1].map(formatBytes), ['0 B', '2 kB', '8 GB', '1.5 GB', '', ''])
-  assert.equal(formatTimeRange('2026-09-24T17:52:33Z', '2026-09-24T17:52:39Z', 'en-US'), 'Sep 24, 2026, 17:52:33–17:52:39')
-  assert.equal(formatTimeRange('2026-09-24T23:59:50Z', '2026-09-25T00:00:10Z', 'en-US'), 'Sep 24, 2026, 23:59:50 – Sep 25, 2026, 00:00:10')
+  // formatTimeRange prints local time, so the inputs are built in local time: the same
+  // strings then hold in every timezone, and a switch to UTC formatting would fail.
+  const local = (...parts) => new Date(...parts).toISOString()
+  assert.equal(formatTimeRange(local(2026, 8, 24, 17, 52, 33), local(2026, 8, 24, 17, 52, 39), 'en-US'), 'Sep 24, 2026, 17:52:33–17:52:39')
+  assert.equal(formatTimeRange(local(2026, 8, 24, 23, 59, 50), local(2026, 8, 25, 0, 0, 10), 'en-US'), 'Sep 24, 2026, 23:59:50 – Sep 25, 2026, 00:00:10')
   assert.equal(formatTimeRange('x', '2026-09-24T17:52:39Z'), '')
   assert.deepEqual(statusInfo('critical'), { label: 'Critical', tone: 'periph-danger' })
   assert.deepEqual(['ok', 'unavailable', 'nonsense'].map((status) => statusInfo(status).label), ['Normal', 'Not measured', 'Not measured'])
