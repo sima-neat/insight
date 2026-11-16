@@ -130,6 +130,17 @@ test('a Sentinel answer from another board generation is not shown', async ({ pa
 
 test('the Host tab shows host readings and the DevKit state is kept on the way back', async ({ page }) => {
   const calls = await mockBoard(page, { sentinel: failures.daemon_absent.body })
+  // Answered here too: a live /api/metrics reports nothing when a legacy REMOTE_DEVKIT is set but
+  // not connected, and the panel then shows a notice instead of readings.
+  await page.route(/\/api\/metrics(\?.*)?$/, (route) => json(route, {
+    cpu_load: 12.5,
+    memory: { total: 16_000_000_000, used: 6_400_000_000, percent: 40 },
+    mla_allocated_bytes: 0,
+    disk: { mount: '/home/sima', total: 500_000_000_000, used: 100_000_000_000, free: 400_000_000_000, percent: 20 },
+    temperature_celsius_avg: null,
+    REMOTE: false,
+    pipeline_status: {}
+  }))
   const devkit = await openStats(page)
   await expect(devkit.getByText('Not installed', { exact: true })).toBeVisible()
   const sentinelReads = calls.sentinel
@@ -137,7 +148,9 @@ test('the Host tab shows host readings and the DevKit state is kept on the way b
   const source = page.getByRole('tablist', { name: 'Stats source' })
   await source.getByRole('tab', { name: 'Host' }).click()
   const host = page.getByRole('tabpanel', { name: 'Host' })
-  await expect(host.getByRole('list', { name: 'Insight host readings' })).toBeVisible()
+  const readings = host.getByRole('list', { name: 'Insight host readings' })
+  await expect(readings.getByRole('listitem').filter({ hasText: 'CPU load' })).toContainText('12.5')
+  await expect(readings.getByRole('listitem').filter({ hasText: 'Disk' })).toContainText('/home/sima')
   await expect(devkit).toBeHidden()
 
   await source.getByRole('tab', { name: 'DevKit' }).click()
