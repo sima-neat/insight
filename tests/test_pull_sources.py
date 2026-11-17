@@ -347,29 +347,6 @@ class RegistryTests(unittest.TestCase):
         self.assertTrue(due.probing)
         self.assertEqual(registry.due_for_probe(now=100.0, interval=10.0), [])  # in flight now
 
-    def test_auth_failed_probe_leaves_a_pending_pause(self):
-        registry = pull_sources.PullRegistry()
-        record = self._record()
-        registry.put(record)
-        registry.apply_probe(record, pull_sources.ProbeResult("auth_failed", "rejected"), now=50.0)
-        self.assertEqual((record.pause_pending, record.pause_tried_at), (True, 50.0))
-        other = self._record(index=4)
-        registry.put(other)
-        registry.apply_probe(other, pull_sources.ProbeResult("unreachable", "refused"), now=50.0)
-        self.assertFalse(other.pause_pending)
-
-    def test_due_for_pause_is_paced_and_marks_records_in_flight(self):
-        registry = pull_sources.PullRegistry()
-        due = self._record(index=1, status="auth_failed", pause_pending=True, pause_tried_at=0.0)
-        recent = self._record(index=2, status="auth_failed", pause_pending=True, pause_tried_at=95.0)
-        paused = self._record(index=4, status="auth_failed", pause_tried_at=0.0)
-        for record in (due, recent, paused):
-            registry.put(record)
-        self.assertEqual(registry.due_for_pause(now=100.0, interval=10.0), [due])
-        self.assertTrue(due.pausing)
-        self.assertEqual(registry.due_for_pause(now=100.0, interval=10.0), [])  # in flight now
-        self.assertEqual(registry.due_for_probe(now=100.0, interval=10.0), [])  # never re-probed
-
     def test_apply_probe_writes_status_and_clears_in_flight(self):
         registry = pull_sources.PullRegistry()
         record = self._record(probing=True)
