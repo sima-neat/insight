@@ -676,15 +676,18 @@ export function validateBoardForm(values) {
 // read only applies while nothing newer has been sent or applied; a superseded read resolves to
 // whatever state won instead of its own out-of-date answer.
 // A quiet read is for polling: it never raises the loading state or an error (the next tick
-// retries), and it only calls onBoard, then onChanged, when the answer differs from what this
-// tab already shows, so an unchanged board causes no re-render. A quiet read sent while a normal
-// read is still loading supersedes it, so it answers as a normal read: otherwise the loading
-// state would stay raised and that read's error would be lost.
+// retries), and it only calls onBoard when the answer differs from what this tab already shows
+// or clears a shown error, so an unchanged board causes no re-render. A quiet read sent while a
+// normal read is still loading supersedes it, so it answers as a normal read: otherwise the
+// loading state would stay raised and that read's error would be lost. Any read that finds a
+// different board than the one this tab last had calls onChanged, so what follows the board
+// (the shell details) is reloaded whichever read noticed it first.
 export function createBoardSync({ fetchBoard, onBoard, onError, onLoading, onChanged }) {
   let latest = 0
   let newest = Promise.resolve(null)
   let current = null
   let loading = false
+  let errorShown = false
 
   function setLoading(value) {
     loading = value
@@ -704,17 +707,21 @@ export function createBoardSync({ fetchBoard, onBoard, onError, onLoading, onCha
     const promise = request.then(
       (data) => {
         if (seq !== latest) return newest
-        const same = JSON.stringify(data) === current
-        current = JSON.stringify(data)
-        if (!quiet || !same) onBoard(data)
+        const json = JSON.stringify(data)
+        const changed = current !== null && json !== current
+        const same = json === current
+        current = json
+        if (!quiet || !same || errorShown) onBoard(data)
+        errorShown = false
         if (!quiet) setLoading(false)
-        else if (!same) onChanged?.(data)
+        if (changed) onChanged?.(data)
         return data
       },
       (err) => {
         if (seq !== latest) return newest
         if (quiet) return null
         onError(err)
+        errorShown = true
         setLoading(false)
         return null
       }
@@ -728,6 +735,7 @@ export function createBoardSync({ fetchBoard, onBoard, onError, onLoading, onCha
     newest = Promise.resolve(data)
     current = JSON.stringify(data)
     onBoard(data)
+    errorShown = false
     setLoading(false)
     return data
   }

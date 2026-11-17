@@ -726,6 +726,45 @@ test('a failed quiet read that supersedes a loading read reports the error', asy
   assert.equal(state.loading, false)
 })
 
+test('a normal read that finds a board changed elsewhere reports the change', async () => {
+  const requests = []
+  const changes = []
+  const sync = createBoardSync({
+    fetchBoard: () => queued(requests),
+    onBoard: () => {},
+    onError: () => {},
+    onLoading: () => {},
+    onChanged: (data) => changes.push(data)
+  })
+  const first = sync.load()
+  requests[0].resolve(boardA)
+  await first
+  assert.deepEqual(changes, [], 'the first read is not a change')
+  const opened = sync.load() // e.g. Stats mounting before the next poll
+  requests[1].resolve(boardB)
+  await opened
+  const poll = sync.load({ quiet: true })
+  requests[2].resolve(boardB)
+  await poll
+  assert.deepEqual(changes, [boardB])
+})
+
+test('a quiet read clears an error a failed normal read left shown', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  const first = sync.load()
+  requests[0].resolve(boardA)
+  await first
+  const failed = sync.load()
+  requests[1].reject(new Error('network'))
+  await failed
+  assert.ok(state.error)
+  const poll = sync.load({ quiet: true })
+  requests[2].resolve({ ...boardA })
+  await poll
+  assert.equal(state.error, null)
+  assert.equal(state.loading, false)
+})
+
 function fakeControl(name, { disabled = false, connected = true } = {}) {
   return { name, disabled, isConnected: connected, focused: 0, focus() { this.focused += 1 } }
 }
