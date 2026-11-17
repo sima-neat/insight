@@ -30,7 +30,7 @@ class FakeMediamtx:
         self.fail_after_apply = False
         self.fail_clear = False
 
-    def snapshot(self):
+    def snapshot(self, fresh=False):
         return dict(self.paths) if self.available else None
 
     def external_info(self, path):
@@ -2857,6 +2857,66 @@ class PullSourceTests(_SourceFixture):
         self.probe_results.pop(CAM)
         record.probed_at = 0.0
         self.assertEqual(self._slot(3)["pull"]["status"], "connecting")
+
+    FREE_SRC3 = {"name": "src3", "confName": "src3", "source": None, "ready": False, "readyTime": None,
+                 "tracks": [], "bytesReceived": 0, "bytesSent": 0, "readers": []}
+
+    def _cached_client(self, api, calls):
+        """A real MediamtxClient whose clock does not move: its snapshot stays cached for the whole request.
+
+        `api` holds the paths and sessions MediaMTX reports; paths None means the API is down."""
+        def request(method, url, body=None):
+            calls.append((method, url))
+            endpoint = url.split("/v3/", 1)[1].split("?", 1)[0]
+            if api["paths"] is None:
+                raise OSError("connection refused")
+            if method != "GET":
+                return 200, b""
+            if endpoint == "paths/list":
+                return 200, json.dumps({"items": api["paths"]}).encode()
+            return 200, json.dumps({"items": api["sessions"].get(endpoint.split("/")[0], [])}).encode()
+        return mediamtx.MediamtxClient(request=request, clock=lambda: 1000.0)
+
+    def _pull_with(self, client, probe):
+        with mock.patch.object(app_module, "mediamtx_client", client), mock.patch.object(app_module, "probe_rtsp", probe):
+            return self._pull()
+
+    def test_publisher_arriving_during_the_probe_is_seen_despite_the_snapshot_cache(self):
+        # Issue #217: the check after the probe must not reuse the cached snapshot from before it.
+        api, calls = {"paths": [dict(self.FREE_SRC3)], "sessions": {}}, []
+
+        def probe_while_a_publisher_connects(url, timeout=2.0):
+            api["paths"] = [dict(self.FREE_SRC3, source={"type": "rtspSession", "id": "pub-3"}, ready=True,
+                                 readyTime="2026-11-17T06:00:00Z", tracks=["H264"], bytesReceived=1000)]
+            api["sessions"] = {"rtspsessions": [{"id": "pub-3", "remoteAddr": "172.19.0.1:47168", "state": "publish",
+                                                 "path": "src3", "query": "", "transport": "TCP"}]}
+            return app_module.pull_sources.ProbeResult("ok")
+
+        response = self._pull_with(self._cached_client(api, calls), probe_while_a_publisher_connects)
+        self.assertEqual(response.status_code, 409, response.get_json())
+        self.assertIn("src3", response.get_json()["error"])
+        self.assertEqual([c for c in calls if c[0] != "GET"], [])  # the pull was not configured
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_pull_is_refused_when_the_check_after_the_probe_cannot_reach_mediamtx(self):
+        api, calls = {"paths": [dict(self.FREE_SRC3)], "sessions": {}}, []
+
+        def probe_then_the_api_goes_down(url, timeout=2.0):
+            api["paths"] = None
+            return app_module.pull_sources.ProbeResult("ok")
+
+        response = self._pull_with(self._cached_client(api, calls), probe_then_the_api_goes_down)
+        self.assertEqual(response.status_code, 503, response.get_json())
+        self.assertIn("src3", response.get_json()["error"])
+        self.assertEqual([c for c in calls if c[0] != "GET"], [])
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_pull_still_succeeds_through_the_cached_client_when_the_slot_stays_free(self):
+        api, calls = {"paths": [dict(self.FREE_SRC3)], "sessions": {}}, []
+        response = self._pull_with(self._cached_client(api, calls), lambda url, timeout=2.0: app_module.pull_sources.ProbeResult("ok"))
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(len([c for c in calls if c[0] == "PATCH"]), 1)
+        self.assertIsNotNone(app_module.pull_registry.get(3))
 
     def test_background_probe_is_not_run_while_ready_or_within_interval(self):
         self._pull()

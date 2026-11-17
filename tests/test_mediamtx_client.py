@@ -185,6 +185,34 @@ class ClientTests(unittest.TestCase):
         client.snapshot()
         self.assertEqual(len(calls), first * 2)
 
+    def test_fresh_snapshot_skips_the_cache_and_refreshes_it(self):
+        # Issue #217: a check that needs current ownership cannot accept a cached answer.
+        calls, clock = [], FakeClock()
+        paths = [dict(PATHS[4])]  # src5, no publisher
+        client = mediamtx.MediamtxClient(request=_fake_request(paths=paths, sessions={}, calls=calls), clock=clock)
+        self.assertFalse(client.snapshot()["src5"].ready)
+        first = len(calls)
+        paths[0] = dict(PATHS[1], name="src5", confName="src5")  # a publisher arrives within the TTL
+        clock.now += 0.2
+        self.assertFalse(client.snapshot()["src5"].ready)  # the cached answer
+        self.assertEqual(len(calls), first)
+        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)
+        self.assertEqual(len(calls), first * 2)
+        self.assertTrue(client.snapshot()["src5"].ready)  # polls see the fresh answer too
+        self.assertEqual(len(calls), first * 2)
+
+    def test_fresh_snapshot_asks_during_the_backoff_and_never_returns_stale_data(self):
+        client, calls, clock, state = self._flaky_client()
+        self.assertIsNotNone(client.snapshot())
+        state["fail"] = True
+        clock.now += 1.5
+        self.assertIsNotNone(client.snapshot())  # one failed refresh keeps the last snapshot for polls
+        before = len(calls)
+        self.assertIsNone(client.snapshot(fresh=True))  # but it is not fresh evidence
+        self.assertGreater(len(calls), before)  # asked despite the backoff
+        state["fail"] = False
+        self.assertIsNotNone(client.snapshot(fresh=True))
+
     def test_snapshot_makes_one_call_per_session_kind(self):
         calls = []
         mediamtx.MediamtxClient(request=_fake_request(calls=calls), clock=FakeClock()).snapshot()

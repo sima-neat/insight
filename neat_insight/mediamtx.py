@@ -258,13 +258,17 @@ class MediamtxClient:
             raise MediamtxError(f"{endpoint} returned {status}")
         return json.loads(body)["items"]
 
-    def snapshot(self) -> Optional[dict]:
+    def snapshot(self, fresh: bool = False) -> Optional[dict]:
+        """The paths and their publishers; cached for SNAPSHOT_TTL_SECONDS for polling.
+
+        fresh=True is for a check that needs the current state: it always asks the API (also
+        during a backoff) and returns None when the API fails, never an older snapshot."""
         # The lock protects cache state only; the HTTP calls run unlocked so a slow/hung
         # API doesn't block other callers.
         now = self._clock()
         with self._lock:
-            fresh = self._snapshot_at is not None and now - self._snapshot_at < SNAPSHOT_TTL_SECONDS
-            if fresh or now < self._unavailable_until:
+            cached = self._snapshot_at is not None and now - self._snapshot_at < SNAPSHOT_TTL_SECONDS
+            if not fresh and (cached or now < self._unavailable_until):
                 return self._snapshot
         # A fetch that overlaps a kick may hold pre-kick data: fetch once more instead.
         for _ in range(2):
@@ -275,7 +279,8 @@ class MediamtxClient:
                 sessions = {endpoint: self._get_items(f"{endpoint}/list", missing_ok=True) for endpoint, _ in SESSION_KINDS.values()}
                 built = build_snapshot(paths, sessions)
             except Exception as exc:  # any unusable answer means "API unavailable", never a 500
-                return self._fetch_failed(now, exc)
+                last_good = self._fetch_failed(now, exc)
+                return None if fresh else last_good
             with self._lock:
                 if generation != self._generation:
                     continue
