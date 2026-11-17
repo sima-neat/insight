@@ -13,6 +13,7 @@ import {
   residencyNote,
   resultsLine,
   saveCatalog,
+  savedForOtherBoard,
   storageSummary,
   syncedLabel,
   withCard
@@ -29,6 +30,7 @@ const STATUS = {
 }
 const CATALOG = {
   syncedAt: 1000,
+  board: null,
   models: [
     { repoId: 'simaai/Qwen3-VL-4B-Instruct-Autoround-a16w4', org: 'simaai', type: 'vlm', sizeBytes: 4_200_000_000, summary: 'Sees images.' },
     { repoId: 'simaai/Qwen3-0.6B-Autoround-a16w4', org: 'simaai', type: 'llm', sizeBytes: null, summary: 'A compact chat model.' },
@@ -176,4 +178,27 @@ test('the last sync reads in everyday words', () => {
   assert.equal(syncedLabel(noon - 5000, noon), 'Last synced just now')
   assert.match(syncedLabel(noon - 3_600_000, noon), /^Last synced today at 11:00/)
   assert.match(syncedLabel(noon - 2 * 86_400_000, noon), /^Last synced Nov 3 at 12:00/)
+})
+
+test('a catalog remembers the board it was read from', () => {
+  const synced = catalogFromSearch([{ repoId: 'simaai/a', type: 'llm' }], EMPTY_CATALOG, 5, 'https://192.168.2.3:5000')
+  assert.equal(synced.board, 'https://192.168.2.3:5000')
+  const storage = memoryStorage()
+  saveCatalog(storage, synced)
+  assert.equal(loadCatalog(storage).board, 'https://192.168.2.3:5000')
+  assert.equal(withCard(synced, { repoId: 'simaai/a', sizeBytes: 1 }).board, 'https://192.168.2.3:5000')
+})
+
+test('a catalog saved before boards were noted loads without one', () => {
+  const storage = memoryStorage({ [CATALOG_KEY]: JSON.stringify({ syncedAt: 1000, models: CATALOG.models }) })
+  assert.equal(loadCatalog(storage).board, null)
+})
+
+test('a saved catalog is for another board unless it names the current one', () => {
+  const here = 'https://192.168.2.3:5000'
+  assert.equal(savedForOtherBoard({ ...CATALOG, board: here }, here), false)
+  assert.equal(savedForOtherBoard({ ...CATALOG, board: 'https://192.168.2.9:5000' }, here), true)
+  assert.equal(savedForOtherBoard({ ...CATALOG, board: null }, here), true)
+  // The board is not known yet: nothing to compare, so no sync is asked for.
+  assert.equal(savedForOtherBoard({ ...CATALOG, board: null }, null), false)
 })

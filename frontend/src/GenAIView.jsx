@@ -95,6 +95,7 @@ import {
   residencyNote,
   resultsLine,
   saveCatalog,
+  savedForOtherBoard,
   storageSummary,
   syncedLabel,
   withCard
@@ -1008,6 +1009,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     if (!allowed.searchModels || catalogSync) return
     const id = ++catalogSyncId.current
     const board = ticket()
+    const source = settingsNow.current?.url || null
     const current = () => id === catalogSyncId.current && board.live()
     setCatalogSync(true)
     try {
@@ -1018,7 +1020,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
       // Every organization failing still answers 200: the saved catalog stays.
       if (results.error) throw new Error(results.error)
       cardsAsked.current.clear()
-      rememberCatalog(catalogFromSearch(results.results, catalogNow.current))
+      rememberCatalog(catalogFromSearch(results.results, catalogNow.current, Date.now(), source))
     } catch (error) {
       if (current() && !isAbort(error)) onError?.(`Sync failed: ${error.message}`)
     } finally {
@@ -1128,14 +1130,17 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   }, [settingsTab])
 
   // The first look at the catalog fills it; after that, Sync catalog refreshes it.
+  // A list saved for another board (the board changed while this page was
+  // closed or in another tab) is refreshed once too; a failure keeps its rows.
   useEffect(() => {
     if (!settingsOpen || settingsTab !== 'models') return
-    if (modelCatalog.syncedAt && !catalogFromOtherBoard.current) return
+    if (modelCatalog.syncedAt && !catalogFromOtherBoard.current &&
+      !savedForOtherBoard(modelCatalog, settings?.url)) return
     if (downloads.state !== 'available' || !allowed.searchModels || catalogAutoSynced.current) return
     catalogAutoSynced.current = true
     catalogFromOtherBoard.current = false
     syncCatalog()
-  }, [settingsOpen, settingsTab, modelCatalog.syncedAt, downloads.state, allowed.searchModels])
+  }, [settingsOpen, settingsTab, modelCatalog.syncedAt, modelCatalog.board, settings?.url, downloads.state, allowed.searchModels])
 
   // The offer says how big the download is, and finds out early whether the
   // board can reach Hugging Face. Once per board; the size is only a nicety,
