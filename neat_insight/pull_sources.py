@@ -139,7 +139,8 @@ class _ResponseReader:
         if len(values) != 1:
             raise _InvalidResponse("conflicting Content-Length")
         value = values.pop()
-        if not re.fullmatch(r"[0-9]+", value) or int(value) > MAX_RESPONSE_BODY_BYTES:
+        # Digits are counted before int(): a few thousand of them make int() itself raise.
+        if not re.fullmatch(r"[0-9]{1,20}", value) or int(value) > MAX_RESPONSE_BODY_BYTES:
             raise _InvalidResponse("bad Content-Length")
         length = int(value)
         while len(self._buffer) < length:

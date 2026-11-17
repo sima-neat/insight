@@ -417,6 +417,12 @@ class ProbeResponseBodyTests(unittest.TestCase):
         result, _ = self._probe([head, b"deny", OK_200])
         self.assertEqual(result.status, "ok")
 
+    def test_content_length_too_long_for_int_is_an_invalid_response(self):
+        head = BASIC_401_HEAD + b"Content-Length: " + b"4" * 5000 + b"\r\n\r\n"
+        result, sock = self._probe([head, b"deny", OK_200])
+        self.assertEqual((result.status, result.error), ("unreachable", pull_sources.INVALID_RESPONSE_MESSAGE))
+        self.assertEqual(len(sock.sent), 1)
+
     def test_oversized_401_body_is_refused_without_reading_it(self):
         length = pull_sources.MAX_RESPONSE_BODY_BYTES + 1
         result, sock = self._probe([BASIC_401_HEAD + b"Content-Length: %d\r\n\r\n" % length, b"x" * 4096, OK_200])
