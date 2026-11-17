@@ -257,6 +257,11 @@ class PullRecord:
     # A MediaMTX call for this pull (configure, stop or pause) is in flight outside the
     # source lock; the record holds the slot meanwhile, and Stop asks to retry.
     changing: bool = False
+    # The credentials were rejected but MediaMTX has not confirmed the pause yet (its API
+    # failed): the clear is retried every PROBE_INTERVAL_SECONDS, without probing the camera.
+    pause_pending: bool = False
+    pause_tried_at: float = 0.0
+    pausing: bool = False
 
 
 class PullRegistry:
@@ -302,4 +307,18 @@ class PullRegistry:
             record.error = result.error
             record.probed_at = now
             record.probing = False
+            if result.status == "auth_failed":
+                record.pause_pending = True
+                record.pause_tried_at = now
             return True
+
+    def due_for_pause(self, now: float, interval: float = PROBE_INTERVAL_SECONDS) -> list:
+        """Pulls whose pause MediaMTX has not confirmed, once per interval; marks each in flight."""
+        due = []
+        with self._lock:
+            for record in self._records.values():
+                if not record.pause_pending or record.pausing or now - record.pause_tried_at < interval:
+                    continue
+                record.pausing = True
+                due.append(record)
+        return due

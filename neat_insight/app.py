@@ -2505,28 +2505,51 @@ def _run_pull_probe(record) -> None:
         if not pull_registry.apply_probe(record, result, time.monotonic()):
             return
         if result.status == "auth_failed":
-            # Stop mediamtx retrying with rejected credentials; the row stays "Auth failed" until Stop.
-            with _sources_lock:
-                # A Stop and a new Pull may have replaced this record since apply_probe, and a
-                # Stop or the setup may be talking to MediaMTX for it right now.
-                if pull_registry.get(record.index) is not record or record.changing:
-                    return
-                record.changing = True
-            logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
-            try:
-                mediamtx_client.clear_pull_source(f"src{record.index}")
-            except MediamtxError as exc:
-                logging.warning("src%s: could not pause the pull: %s", record.index, exc)
-            finally:
-                with _sources_lock:
-                    record.changing = False
+            _pause_pull(record)
     finally:
         record.probing = False  # never leave the record marked in flight, even if the probe raised
+
+
+def _pause_pull(record) -> None:
+    """Stop mediamtx retrying with rejected credentials; the row stays "Auth failed" until Stop.
+
+    Until MediaMTX confirms the clear, record.pause_pending stays set and _schedule_pull_probes
+    retries it, so an API outage cannot leave mediamtx reconnecting with the rejected URL."""
+    with _sources_lock:
+        # A Stop and a new Pull may have replaced this record since apply_probe, and a
+        # Stop or the setup may be talking to MediaMTX for it right now.
+        if pull_registry.get(record.index) is not record or record.changing:
+            return
+        record.changing = True
+    try:
+        mediamtx_client.clear_pull_source(f"src{record.index}")
+    except MediamtxError as exc:
+        logging.warning("src%s: camera at %s rejected the credentials; could not pause the pull yet, will retry: %s",
+                        record.index, record.host, exc)
+    else:
+        record.pause_pending = False
+        logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
+    finally:
+        with _sources_lock:
+            record.changing = False
+        record.pause_tried_at = time.monotonic()
+
+
+def _retry_pull_pause(record) -> None:
+    try:
+        _pause_pull(record)
+    finally:
+        record.pausing = False
 
 
 def _schedule_pull_probes(snapshot) -> None:
     """Re-probe pulled slots whose path is not ready so the row can say why (unreachable vs credentials)."""
     now = time.monotonic()
+    for record in pull_registry.due_for_pause(now):
+        if pull_probe_async:
+            threading.Thread(target=_retry_pull_pause, args=(record,), daemon=True).start()
+        else:
+            _retry_pull_pause(record)
     for record in pull_registry.due_for_probe(now):
         path = snapshot.get(f"src{record.index}")
         if path and path.ready:
