@@ -50,6 +50,34 @@ jobs:
           NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS: "1"
         run: python -m unittest discover -s tests -v
 
+  server:
+    name: Server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: Generated code matches openapi.yaml
+        run: go generate ./... && git diff --exit-code
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Tests
+        run: go test -race ./...
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
