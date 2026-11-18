@@ -6,8 +6,12 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
+
+	"github.com/oapi-codegen/runtime"
 )
 
 // Defines values for HealthStatus.
@@ -47,6 +51,95 @@ func (e HealthNetworkBrowserIceAddressSource) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// Defines values for ViewerUrlChannelLimitSource.
+const (
+	Devkit        ViewerUrlChannelLimitSource = "devkit"
+	LegacyDefault ViewerUrlChannelLimitSource = "legacy-default"
+	SdkPortMap    ViewerUrlChannelLimitSource = "sdk-port-map"
+)
+
+// Valid indicates whether the value is a known member of the ViewerUrlChannelLimitSource enum.
+func (e ViewerUrlChannelLimitSource) Valid() bool {
+	switch e {
+	case Devkit:
+		return true
+	case LegacyDefault:
+		return true
+	case SdkPortMap:
+		return true
+	default:
+		return false
+	}
+}
+
+// Channel defines model for Channel.
+type Channel struct {
+	Channel int `json:"channel"`
+
+	// Errors The latest problems, oldest first, each starting with its time.
+	Errors   []string        `json:"errors"`
+	Metadata ChannelMetadata `json:"metadata"`
+	Video    ChannelVideo    `json:"video"`
+
+	// Viewers Browsers connected to the channel's video.
+	Viewers int `json:"viewers"`
+}
+
+// ChannelList defines model for ChannelList.
+type ChannelList struct {
+	Channels []Channel `json:"channels"`
+
+	// Count How many channels Insight serves.
+	Count int `json:"count"`
+}
+
+// ChannelMetadata defines model for ChannelMetadata.
+type ChannelMetadata struct {
+	// Active A message arrived in the last 3 s.
+	Active bool `json:"active"`
+
+	// Invalid Datagrams that were no JSON object.
+	Invalid int        `json:"invalid"`
+	LastAt  *time.Time `json:"last_at,omitempty"`
+
+	// Matched Messages drawn on the frame their timestamp names.
+	Matched           int     `json:"matched"`
+	MessagesPerSecond float64 `json:"messages_per_second"`
+
+	// NoViewer Messages that arrived while no browser watched.
+	NoViewer int     `json:"no_viewer"`
+	Port     int     `json:"port"`
+	Received int     `json:"received"`
+	Sender   *string `json:"sender,omitempty"`
+
+	// Unmatched Timed messages that found no frame within 5 s: a timestamp in another unit or clock, or video that stopped.
+	Unmatched int `json:"unmatched"`
+}
+
+// ChannelVideo defines model for ChannelVideo.
+type ChannelVideo struct {
+	// Active Video arrived in the last 3 s.
+	Active        bool    `json:"active"`
+	BitsPerSecond float64 `json:"bits_per_second"`
+
+	// Codec H264 or H265; absent before any video, and for a payload type Insight does not play.
+	Codec *string `json:"codec,omitempty"`
+
+	// FramesPerSecond Whole pictures sent on to browsers.
+	FramesPerSecond float64    `json:"frames_per_second"`
+	Keyframes       int        `json:"keyframes"`
+	LastAt          *time.Time `json:"last_at,omitempty"`
+	Packets         int        `json:"packets"`
+	PayloadType     int        `json:"payload_type"`
+	Port            int        `json:"port"`
+
+	// Sender The address the last packet came from.
+	Sender *string `json:"sender,omitempty"`
+
+	// UnsupportedPackets Packets of a payload type Insight does not play (RTP/JPEG is planned).
+	UnsupportedPackets int `json:"unsupported_packets"`
 }
 
 // Error Every error answer has this shape.
@@ -92,11 +185,113 @@ type HealthNetwork struct {
 // HealthNetworkBrowserIceAddressSource defines model for HealthNetwork.BrowserIceAddressSource.
 type HealthNetworkBrowserIceAddressSource string
 
+// IngestChannel defines model for IngestChannel.
+type IngestChannel struct {
+	Active      bool `json:"active"`
+	Channel     int  `json:"channel"`
+	Diagnostics *struct {
+		MalformedPackets   *int      `json:"malformed_packets,omitempty"`
+		RecentErrors       *[]string `json:"recent_errors,omitempty"`
+		UnsupportedPackets *int      `json:"unsupported_packets,omitempty"`
+	} `json:"diagnostics,omitempty"`
+	FirstPacketAt *string `json:"first_packet_at,omitempty"`
+	LastPacketAt  *string `json:"last_packet_at,omitempty"`
+	Media         struct {
+		ClockRate int    `json:"clock_rate"`
+		Codec     string `json:"codec"`
+		IdrCount  int    `json:"idr_count"`
+		Kind      string `json:"kind"`
+		SeenSps   bool   `json:"seen_sps"`
+	} `json:"media"`
+	Metadata struct {
+		Active            bool    `json:"active"`
+		BitrateBps        float64 `json:"bitrate_bps"`
+		BytesReceived     int     `json:"bytes_received"`
+		FirstMessageAt    *string `json:"first_message_at,omitempty"`
+		InvalidJson       int     `json:"invalid_json"`
+		LastMessageAt     *string `json:"last_message_at,omitempty"`
+		MessageRateMps    float64 `json:"message_rate_mps"`
+		MessagesForwarded int     `json:"messages_forwarded"`
+		MessagesReceived  int     `json:"messages_received"`
+		RemoteAddr        *string `json:"remote_addr,omitempty"`
+		UdpPort           int     `json:"udp_port"`
+	} `json:"metadata"`
+	RemoteAddr *string `json:"remote_addr,omitempty"`
+	Rtp        struct {
+		BitrateBps      float64 `json:"bitrate_bps"`
+		BytesReceived   int     `json:"bytes_received"`
+		PacketRatePps   float64 `json:"packet_rate_pps"`
+		PacketsReceived int     `json:"packets_received"`
+		PayloadType     int     `json:"payload_type"`
+		Ssrc            int     `json:"ssrc"`
+	} `json:"rtp"`
+	UdpPort int `json:"udp_port"`
+	Webrtc  struct {
+		PeerCount int `json:"peer_count"`
+	} `json:"webrtc"`
+}
+
+// IngestStats defines model for IngestStats.
+type IngestStats struct {
+	ActiveTtlMs int             `json:"active_ttl_ms"`
+	Channels    []IngestChannel `json:"channels"`
+	Time        string          `json:"time"`
+}
+
+// SessionDescription defines model for SessionDescription.
+type SessionDescription struct {
+	Sdp string `json:"sdp"`
+
+	// Type offer or answer
+	Type string `json:"type"`
+}
+
+// ViewerUrl defines model for ViewerUrl.
+type ViewerUrl struct {
+	ChannelLimitSource ViewerUrlChannelLimitSource `json:"channel_limit_source"`
+	MaxVideoChannels   int                         `json:"max_video_channels"`
+	SdkChannelLimited  bool                        `json:"sdk_channel_limited"`
+	Url                string                      `json:"url"`
+}
+
+// ViewerUrlChannelLimitSource defines model for ViewerUrl.ChannelLimitSource.
+type ViewerUrlChannelLimitSource string
+
+// GetIngestStatsParams defines parameters for GetIngestStats.
+type GetIngestStatsParams struct {
+	All     *string `form:"all,omitempty" json:"all,omitempty"`
+	Verbose *string `form:"verbose,omitempty" json:"verbose,omitempty"`
+}
+
+// GetViewerUrlParams defines parameters for GetViewerUrl.
+type GetViewerUrlParams struct {
+	// Src Channels, comma separated; others are dropped.
+	Src *string `form:"src,omitempty" json:"src,omitempty"`
+
+	// Mode light or dark; anything else keeps the viewer's own theme.
+	Mode *string `form:"mode,omitempty" json:"mode,omitempty"`
+}
+
+// OfferChannelJSONRequestBody defines body for OfferChannel for application/json ContentType.
+type OfferChannelJSONRequestBody = SessionDescription
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListChannels The Viewer's channels and what arrives on them
+	// (GET /api/channels)
+	ListChannels(w http.ResponseWriter, r *http.Request)
+	// OfferChannel Watch a channel over WebRTC
+	// (POST /api/channels/{channel}/offer)
+	OfferChannel(w http.ResponseWriter, r *http.Request, channel int)
 	// GetHealth Whether Insight is up
 	// (GET /api/health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// GetIngestStats What arrives on each channel, in the old shape
+	// (GET /api/ingest/stats)
+	GetIngestStats(w http.ResponseWriter, r *http.Request, params GetIngestStatsParams)
+	// GetViewerUrl A link to the Viewer
+	// (GET /api/viewer-url)
+	GetViewerUrl(w http.ResponseWriter, r *http.Request, params GetViewerUrlParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -108,11 +303,143 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// ListChannels operation middleware
+func (siw *ServerInterfaceWrapper) ListChannels(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListChannels(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OfferChannel operation middleware
+func (siw *ServerInterfaceWrapper) OfferChannel(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "channel" -------------
+	var channel int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "channel", r.PathValue("channel"), &channel, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "channel", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OfferChannel(w, r, channel)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetIngestStats operation middleware
+func (siw *ServerInterfaceWrapper) GetIngestStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetIngestStatsParams
+
+	// ------------- Optional query parameter "all" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "all", r.URL.Query(), &params.All, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "all"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "all", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "verbose" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "verbose", r.URL.Query(), &params.Verbose, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "verbose"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "verbose", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetIngestStats(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetViewerUrl operation middleware
+func (siw *ServerInterfaceWrapper) GetViewerUrl(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetViewerUrlParams
+
+	// ------------- Optional query parameter "src" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "src", r.URL.Query(), &params.Src, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "src"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "src", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "mode" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "mode", r.URL.Query(), &params.Mode, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "mode"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "mode", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetViewerUrl(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -243,6 +570,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/health", wrapper.GetHealth)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/channels", wrapper.ListChannels)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/channels/{channel}/offer", wrapper.OfferChannel)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/ingest/stats", wrapper.GetIngestStats)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/viewer-url", wrapper.GetViewerUrl)
 
 	return m
 }

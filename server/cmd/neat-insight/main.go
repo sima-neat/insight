@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"insight/internal/certs"
+	"insight/internal/channels"
 	"insight/internal/config"
 	"insight/internal/legacy"
 	"insight/internal/spa"
@@ -83,6 +84,17 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	viewer, err := channels.Listen(ctx, channels.Options{
+		Count: cfg.Channels.Count, VideoBase: 9000, MetadataBase: 9100,
+		WebRTCPortStart: cfg.WebRTCPorts.Start, WebRTCPortEnd: cfg.WebRTCPorts.End,
+		ICEAddress: cfg.Network.BrowserICEAddress,
+	})
+	if err != nil {
+		return err
+	}
+	slog.Info("channels", "count", cfg.Channels.Count, "source", cfg.Channels.Source,
+		"webrtc", fmt.Sprintf("%d-%d", cfg.WebRTCPorts.Start, cfg.WebRTCPorts.End))
+
 	backend, err := legacy.Start(ctx, sup, legacy.Options{
 		Python: python, CertFile: pair.CertFile, KeyFile: pair.KeyFile, Output: os.Stdout,
 	})
@@ -95,6 +107,7 @@ func run() error {
 		Handler: web.NewHandler(web.Deps{
 			Config:         cfg,
 			Ready:          backend.Ready,
+			Channels:       viewer,
 			Legacy:         backend.Handler(),
 			LegacyPrefixes: legacy.Prefixes,
 			UI:             spa.Handler(spa.Files()),
@@ -125,6 +138,8 @@ func run() error {
 	stopping, cancelStopping := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelStopping()
 	sup.StopAll(stopping)
+	stop() // ends the channels' readers, if a signal has not already
+	viewer.Wait()
 	if errors.Is(serveErr, http.ErrServerClosed) {
 		return nil
 	}

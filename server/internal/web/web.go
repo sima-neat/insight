@@ -18,6 +18,8 @@ type Deps struct {
 	Config config.Config
 	// Ready says whether every service Insight runs is up.
 	Ready func() bool
+	// Channels are the Viewer's channels.
+	Channels ChannelSet
 	// Legacy serves the paths in LegacyPrefixes; nil answers them 404.
 	Legacy         http.Handler
 	LegacyPrefixes []string

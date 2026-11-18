@@ -27,8 +27,336 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+  /api/channels:
+    get:
+      operationId: listChannels
+      summary: The Viewer's channels and what arrives on them
+      description: >-
+        Every channel Insight serves (0 to count - 1), with the video and metadata its app sends
+        (docs/contracts.md) and the browsers watching it. Read from memory; poll it freely.
+      responses:
+        "200":
+          description: The channels.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelList"
+  /api/channels/{channel}/offer:
+    post:
+      operationId: offerChannel
+      summary: Watch a channel over WebRTC
+      description: >-
+        The browser's SDP offer in, Insight's answer out. The offer must be sent as
+        application/json, so a cross-site form cannot open a connection through a visitor's
+        browser. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec,
+        `codec_changed` when it changes); a 4xx is final (415 `codec_unsupported`: this browser
+        cannot decode the channel's codec).
+      parameters:
+        - name: channel
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionDescription"
+      responses:
+        "200":
+          description: The answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDescription"
+        "400": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/ingest/stats:
+    get:
+      operationId: getIngestStats
+      summary: What arrives on each channel, in the old shape
+      description: >-
+        Frozen: the SDK's network test and smoke test read these fields. Without `all`, only
+        channels receiving video now. `verbose` adds `diagnostics`. New code reads
+        `/api/channels`.
+      parameters:
+        - name: all
+          in: query
+          schema:
+            type: string
+        - name: verbose
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The channels.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestStats"
+  /api/viewer-url:
+    get:
+      operationId: getViewerUrl
+      summary: A link to the Viewer
+      description: >-
+        Frozen: the SDK's hosted setup and Neat apps' docs use it. The link opens the Viewer on
+        the channels in `src` (all by default) on the origin the browser used, or the hosted
+        public origin.
+      parameters:
+        - name: src
+          in: query
+          description: Channels, comma separated; others are dropped.
+          schema:
+            type: string
+        - name: mode
+          in: query
+          description: light or dark; anything else keeps the viewer's own theme.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The link.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ViewerUrl"
 components:
+  responses:
+    Error:
+      description: Refused; the body says why.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
   schemas:
+    SessionDescription:
+      type: object
+      required: [type, sdp]
+      properties:
+        type:
+          type: string
+          description: offer or answer
+        sdp:
+          type: string
+    ChannelList:
+      type: object
+      required: [count, channels]
+      properties:
+        count:
+          type: integer
+          description: How many channels Insight serves.
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Channel"
+    Channel:
+      type: object
+      required: [channel, video, metadata, viewers, errors]
+      properties:
+        channel:
+          type: integer
+        viewers:
+          type: integer
+          description: Browsers connected to the channel's video.
+        video:
+          $ref: "#/components/schemas/ChannelVideo"
+        metadata:
+          $ref: "#/components/schemas/ChannelMetadata"
+        errors:
+          type: array
+          description: The latest problems, oldest first, each starting with its time.
+          items:
+            type: string
+    ChannelVideo:
+      type: object
+      required: [port, active, payload_type, unsupported_packets, packets, bits_per_second, frames_per_second, keyframes]
+      properties:
+        port:
+          type: integer
+        active:
+          type: boolean
+          description: Video arrived in the last 3 s.
+        codec:
+          type: string
+          description: H264 or H265; absent before any video, and for a payload type Insight does not play.
+        payload_type:
+          type: integer
+        unsupported_packets:
+          type: integer
+          description: Packets of a payload type Insight does not play (RTP/JPEG is planned).
+        packets:
+          type: integer
+        bits_per_second:
+          type: number
+          format: double
+        frames_per_second:
+          type: number
+          format: double
+          description: Whole pictures sent on to browsers.
+        keyframes:
+          type: integer
+        last_at:
+          type: string
+          format: date-time
+        sender:
+          type: string
+          description: The address the last packet came from.
+    ChannelMetadata:
+      type: object
+      required: [port, active, received, messages_per_second, matched, unmatched, invalid, no_viewer]
+      properties:
+        port:
+          type: integer
+        active:
+          type: boolean
+          description: A message arrived in the last 3 s.
+        received:
+          type: integer
+        messages_per_second:
+          type: number
+          format: double
+        matched:
+          type: integer
+          description: Messages drawn on the frame their timestamp names.
+        unmatched:
+          type: integer
+          description: >-
+            Timed messages that found no frame within 5 s: a timestamp in another unit or clock,
+            or video that stopped.
+        invalid:
+          type: integer
+          description: Datagrams that were no JSON object.
+        no_viewer:
+          type: integer
+          description: Messages that arrived while no browser watched.
+        last_at:
+          type: string
+          format: date-time
+        sender:
+          type: string
+    IngestStats:
+      type: object
+      required: [time, active_ttl_ms, channels]
+      properties:
+        time:
+          type: string
+        active_ttl_ms:
+          type: integer
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngestChannel"
+    IngestChannel:
+      type: object
+      required: [channel, udp_port, active, rtp, media, metadata, webrtc]
+      properties:
+        channel:
+          type: integer
+        udp_port:
+          type: integer
+        active:
+          type: boolean
+        first_packet_at:
+          type: string
+        last_packet_at:
+          type: string
+        remote_addr:
+          type: string
+        rtp:
+          type: object
+          required: [ssrc, payload_type, packets_received, bytes_received, bitrate_bps, packet_rate_pps]
+          properties:
+            ssrc:
+              type: integer
+            payload_type:
+              type: integer
+            packets_received:
+              type: integer
+            bytes_received:
+              type: integer
+            bitrate_bps:
+              type: number
+              format: double
+            packet_rate_pps:
+              type: number
+              format: double
+        media:
+          type: object
+          required: [kind, codec, clock_rate, seen_sps, idr_count]
+          properties:
+            kind:
+              type: string
+            codec:
+              type: string
+            clock_rate:
+              type: integer
+            seen_sps:
+              type: boolean
+            idr_count:
+              type: integer
+        metadata:
+          type: object
+          required: [udp_port, active, messages_received, bytes_received, bitrate_bps, message_rate_mps, messages_forwarded, invalid_json]
+          properties:
+            udp_port:
+              type: integer
+            active:
+              type: boolean
+            first_message_at:
+              type: string
+            last_message_at:
+              type: string
+            remote_addr:
+              type: string
+            messages_received:
+              type: integer
+            bytes_received:
+              type: integer
+            bitrate_bps:
+              type: number
+              format: double
+            message_rate_mps:
+              type: number
+              format: double
+            messages_forwarded:
+              type: integer
+            invalid_json:
+              type: integer
+        webrtc:
+          type: object
+          required: [peer_count]
+          properties:
+            peer_count:
+              type: integer
+        diagnostics:
+          type: object
+          properties:
+            malformed_packets:
+              type: integer
+            unsupported_packets:
+              type: integer
+            recent_errors:
+              type: array
+              items:
+                type: string
+    ViewerUrl:
+      type: object
+      required: [url, max_video_channels, channel_limit_source, sdk_channel_limited]
+      properties:
+        url:
+          type: string
+        max_video_channels:
+          type: integer
+        channel_limit_source:
+          type: string
+          enum: [devkit, sdk-port-map, legacy-default]
+        sdk_channel_limited:
+          type: boolean
     Health:
       type: object
       required: [status, service, time, network]
