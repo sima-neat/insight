@@ -190,14 +190,6 @@ def _resolve_frontend_dist() -> Path:
 
 
 FRONTEND_DIST = _resolve_frontend_dist()
-VIEWER_CHANNEL_COUNT = 80
-# vf listens on 8081 inside the container. Flask reaches it there, never through the host port the SDK may remap.
-VF_BASE_URL = "https://127.0.0.1:8081"
-VF_STATS_TIMEOUT_SECONDS = 2.0
-# vf answers an offer only after ICE gathering completes, which grows with the number of interfaces.
-VF_OFFER_TIMEOUT_SECONDS = 8.0
-# An SDP offer is a few KiB; vf itself enforces no limit.
-VF_OFFER_MAX_BYTES = 64 * 1024
 
 app = Flask(__name__)
 app.register_blueprint(api_docs_bp)
@@ -725,100 +717,8 @@ def stream_neat_metrics():
     return response
 
 
-# API: proxy vf UDP/RTP ingest statistics for active inbound streams.
-@app.get("/api/ingest/stats")
-def ingest_stats():
-    """Return vf ingest stats for RTP (9000+) and metadata JSON over UDP (9100+); all=1 includes inactive channels and verbose=1 adds diagnostics."""
-    return _proxy_vf_stats("/ingest/stats", "vf ingest stats")
-
-
-# API: proxy vf WebRTC egress statistics for browser delivery and render diagnostics.
-@app.get("/api/egress/stats")
-def egress_stats():
-    """Return vf egress stats including RTCP/browser reports plus metadata DataChannel send counters; all=1 includes inactive peers and verbose=1 adds diagnostics."""
-    return _proxy_vf_stats("/egress/stats", "vf egress stats")
-
-
-def _open_vf(path: str, timeout: float, data: Optional[bytes] = None):
-    """Open ``path`` on vf, as a POST of ``data`` (JSON) when given, and return the response.
-
-    vf presents Insight's own certificate, whose subjects need not include 127.0.0.1, so the connection is
-    not verified; it never leaves the container.
-    """
-    headers = {"Content-Type": "application/json"} if data is not None else {}
-    vf_request = urllib.request.Request(f"{VF_BASE_URL}{path}", data=data, headers=headers)
-    return urllib.request.urlopen(vf_request, timeout=timeout, context=ssl._create_unverified_context())
-
-
-def _proxy_vf_stats(path: str, label: str):
-    query = urllib.parse.urlencode(
-        {
-            key: request.args[key]
-            for key in ("all", "verbose")
-            if key in request.args
-        }
-    )
-    if query:
-        path = f"{path}?{query}"
-
-    try:
-        with _open_vf(path, VF_STATS_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        return jsonify(payload)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-        return _json_error(f"{label} unavailable: {exc}", 502)
-
-
-def _text_response(text: str, status: int):
-    return Response(f"{text}\n", status=status, mimetype="text/plain")
-
-
-# API: relay a browser's WebRTC offer to vf so the viewer needs only Flask's origin.
-@app.post("/api/vf/offer")
-def vf_offer():
-    """Forward the JSON offer for ``channel`` (0-79) to vf and return vf's answer with its status code unchanged.
-
-    The viewer retries 5xx and no-status failures but treats any 4xx as permanent, so vf's own codes
-    pass through as they are and only this proxy's own failures to reach vf become 502 or 504.
-    """
-    channel = request.args.get("channel", "")
-    # At most two ASCII digits: str.isdigit() accepts others that int() would read as a channel, and int() raises
-    # on very long digit strings, which would surface as a retryable 500.
-    if not (re.fullmatch(r"[0-9]{1,2}", channel) and int(channel) < VIEWER_CHANNEL_COUNT):
-        return _text_response(f"Invalid channel index: expected 0-{VIEWER_CHANNEL_COUNT - 1}", 400)
-    # The viewer always sends JSON. A cross-site page can send a form or text/plain POST without a CORS preflight,
-    # so anything but JSON is refused before it can open a peer connection through a visitor's browser.
-    if request.mimetype != "application/json":
-        return _text_response("Offer must be sent as application/json", 415)
-    too_large = _text_response(f"Offer larger than {VF_OFFER_MAX_BYTES // 1024} KiB", 413)
-    if request.content_length is not None and request.content_length > VF_OFFER_MAX_BYTES:
-        return too_large
-    # A body without Content-Length (chunked) is only known to be small once read, so read one byte past the limit.
-    offer = request.stream.read(VF_OFFER_MAX_BYTES + 1)
-    if len(offer) > VF_OFFER_MAX_BYTES:
-        return too_large
-
-    try:
-        try:
-            with _open_vf(f"/offer?channel={int(channel)}", VF_OFFER_TIMEOUT_SECONDS, data=offer) as answer:
-                return Response(
-                    answer.read(),
-                    status=answer.status,
-                    content_type=answer.headers.get("Content-Type", "application/json"),
-                )
-        except urllib.error.HTTPError as refusal:
-            # vf's own refusal (http.Error): its status and text are the contract. Reading its body is
-            # inside the outer try, so a stall there is a timeout like any other.
-            return Response(
-                refusal.read(),
-                status=refusal.code,
-                content_type=refusal.headers.get("Content-Type", "text/plain; charset=utf-8"),
-            )
-    except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
-        reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
-        if isinstance(reason, TimeoutError):
-            return _text_response(f"vf did not answer within {VF_OFFER_TIMEOUT_SECONDS:g} s", 504)
-        return _text_response(f"vf unavailable: {reason}", 502)
+# The Viewer's routes (/api/channels, the offer, /api/ingest/stats, /api/viewer-url) are the new
+# server's (server/internal/channels), which replaced vf.
 
 
 def _is_streamable_media(name: str) -> bool:
@@ -1021,13 +921,6 @@ def _iter_neat_port_maps():
         logging.warning("Ignoring neat port map %s because its root is not an object", path)
 
 
-def _read_neat_port_map():
-    for data in _iter_neat_port_maps():
-        if "insightVideoChannels" in data:
-            return data
-    return {}
-
-
 def _read_exposed_ports_from_port_map():
     for data in _iter_neat_port_maps():
         rows = []
@@ -1036,47 +929,6 @@ def _read_exposed_ports_from_port_map():
         if rows:
             return rows
     return []
-
-
-def _resolve_video_channel_capacity():
-    """Return the viewer channel capacity and how it was selected."""
-    if is_sima_board():
-        return VIEWER_CHANNEL_COUNT, "devkit", False
-
-    port_map = _read_neat_port_map()
-    configured = port_map.get("insightVideoChannels")
-    if configured is None:
-        return VIEWER_CHANNEL_COUNT, "legacy-default", False
-    if (
-        not isinstance(configured, int)
-        or isinstance(configured, bool)
-        or not 1 <= configured <= VIEWER_CHANNEL_COUNT
-    ):
-        logging.warning(
-            "Ignoring invalid insightVideoChannels value %r; using legacy %d-channel behavior",
-            configured,
-            VIEWER_CHANNEL_COUNT,
-        )
-        return VIEWER_CHANNEL_COUNT, "legacy-default", False
-    return configured, "sdk-port-map", configured < VIEWER_CHANNEL_COUNT
-
-
-def _sanitize_viewer_sources(value, max_channels):
-    if value is None:
-        return list(range(max_channels))
-
-    channels = []
-    seen = set()
-    for item in str(value).split(","):
-        try:
-            channel = int(item.strip())
-        except (TypeError, ValueError):
-            continue
-        if channel < 0 or channel >= max_channels or channel in seen:
-            continue
-        seen.add(channel)
-        channels.append(channel)
-    return channels
 
 
 def _valid_port(value):
@@ -1128,7 +980,7 @@ def _resolve_webcam_ice_port():
     Unlike the WHIP listener, this port is embedded in the ICE candidate
     MediaMTX puts in its SDP answer, and Docker forwards a mapped port without
     rewriting it. The SDK therefore publishes this one identity-mapped, the way
-    it already does for vf's WebRTC range, and Insight binds whatever the port
+    it already does for the channels' WebRTC range, and Insight binds whatever the port
     map says so the advertised port and the open host port agree.
     """
     return _find_exposed_port(
@@ -4495,27 +4347,6 @@ def server_ip():
     return {"ip": get_lan_ip()}
 
 
-# API: build the URL of the viewer page for the requested source selection.
-@app.get("/api/viewer-url")
-def viewer_url():
-    """Accept query args mode and src; return the URL of the /viewer page on the origin the browser reached us on."""
-    max_channels, limit_source, sdk_limited = _resolve_video_channel_capacity()
-    channels = _sanitize_viewer_sources(request.args.get("src"), max_channels)
-    src = ",".join(str(channel) for channel in channels)
-    params = {"src": src, "max_channels": max_channels}
-    # Without a valid mode the page keeps the user's own theme.
-    mode = request.args.get("mode")
-    if mode in ("light", "dark"):
-        params = {"mode": mode, **params}
-    query = urllib.parse.urlencode(params)
-    return {
-        "url": _format_public_http_url("/viewer", query) or f"{request.host_url}viewer?{query}",
-        "max_video_channels": max_channels,
-        "channel_limit_source": limit_source,
-        "sdk_channel_limited": sdk_limited,
-    }
-
-
 preview.init_app(app)
 
 
@@ -4553,8 +4384,8 @@ def main():
     parser = argparse.ArgumentParser(description="Start the neat-insight server.")
     parser.add_argument("--port", type=int, default=9900, help="Port to run the server on (default: 9900)")
     # The new server (server/) runs this backend behind it while the rewrite moves its routes over:
-    # on loopback, over plain HTTP, with the certificate the new server resolved for vf, MediaMTX
-    # and webssh. Goes with this file at the end of the rewrite.
+    # on loopback, over plain HTTP, with the certificate the new server resolved for MediaMTX and
+    # webssh. Goes with this file at the end of the rewrite.
     parser.add_argument("--behind-proxy", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--cert", help=argparse.SUPPRESS)
     parser.add_argument("--key", help=argparse.SUPPRESS)
@@ -4588,7 +4419,7 @@ def main():
         neat_metrics_broker.stop()
         cleanup_processes(signum, frame)
 
-    # Ensure vf/mediamtx are also cleaned up on non-signal exits.
+    # Ensure mediamtx is also cleaned up on non-signal exits.
     atexit.register(lambda: cleanup_processes(exit_process=False))
 
     signal.signal(signal.SIGINT, _shutdown)

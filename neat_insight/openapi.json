@@ -156,44 +156,6 @@
         }
       }
     },
-    "/api/ingest/stats": {
-      "get": {
-        "tags": ["Diagnostics"],
-        "summary": "Get vf UDP and RTP ingest statistics",
-        "description": "Shows whether video RTP and metadata JSON are reaching vf before WebRTC delivery is considered. A healthy H.264 input normally has increasing packet and bitrate counters, observed SPS/PPS, and periodic IDR frames. Add `verbose=1` for payload types, NAL counts, sequence gaps, jitter estimates, malformed packets, and recent errors; add `all=1` to include inactive channels.",
-        "operationId": "getIngestStats",
-        "parameters": [
-          {"$ref": "#/components/parameters/AllChannels"},
-          {"$ref": "#/components/parameters/VerboseStats"}
-        ],
-        "responses": {
-          "200": {
-            "description": "Per-channel video RTP, metadata UDP, forwarding, media, and WebRTC attachment statistics.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
-          },
-          "502": {"$ref": "#/components/responses/BadGateway"}
-        }
-      }
-    },
-    "/api/egress/stats": {
-      "get": {
-        "tags": ["Diagnostics"],
-        "summary": "Get vf WebRTC egress statistics",
-        "description": "Use this after ingest statistics confirm that RTP is arriving but a browser does not decode, render, or remain connected. The response combines vf peer state, RTCP feedback, metadata DataChannel counters, and the latest browser `RTCPeerConnection.getStats()` report. Add `verbose=1` for recent peer errors and `all=1` to retain inactive peers.",
-        "operationId": "getEgressStats",
-        "parameters": [
-          {"$ref": "#/components/parameters/AllChannels"},
-          {"$ref": "#/components/parameters/VerboseStats"}
-        ],
-        "responses": {
-          "200": {
-            "description": "Per-channel and per-peer RTCP, browser decode/render, connection, and metadata DataChannel statistics.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
-          },
-          "502": {"$ref": "#/components/responses/BadGateway"}
-        }
-      }
-    },
     "/api/media-files": {
       "get": {
         "tags": ["Media library"],
@@ -1402,52 +1364,6 @@
         }
       }
     },
-    "/api/viewer-url": {
-      "get": {
-        "tags": ["Viewer"],
-        "summary": "Build a browser-reachable viewer URL",
-        "description": "Constructs the URL of Insight's own `/viewer` page, on the configured public origin when `/home/docker/.insight-config/launch-url` is present, otherwise on the scheme, host and port the request arrived on. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
-        "operationId": "getViewerUrl",
-        "parameters": [
-          {"name": "mode", "in": "query", "description": "Viewer color mode. Only `light` or `dark` is passed on; when absent or any other value, the URL carries no `mode` and the page keeps the user's own theme.", "schema": {"type": "string", "enum": ["light", "dark"]}},
-          {"name": "src", "in": "query", "description": "Comma-separated zero-based vf channel indexes. Invalid and out-of-capacity indexes are discarded.", "schema": {"type": "string"}, "example": "0,1,2,3"}
-        ],
-        "responses": {
-          "200": {"description": "Viewer URL plus the resolved SDK or DevKit channel capacity.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ViewerUrl"}}}}
-        }
-      }
-    },
-    "/api/vf/offer": {
-      "post": {
-        "tags": ["Viewer"],
-        "summary": "Relay a WebRTC offer to vf",
-        "description": "Forwards the browser's SDP offer to vf (`POST /offer` on the container's port 8081) and returns vf's reply with its status code, `Content-Type` and body unchanged, so the viewer needs only Insight's origin. The viewer treats a `4xx` as permanent and retries every other failure, so vf's `400` and `415` stay as vf sent them, vf's `503` (no video codec seen on the channel yet) stays retryable, and only this endpoint's own failures to reach vf are `502` (connection refused, TLS error) or `504` (no answer within 8 s). Media does not pass through this endpoint: the browser still needs UDP reach to vf's WebRTC port range. Error bodies are plain text.",
-        "operationId": "postVfOffer",
-        "parameters": [
-          {"name": "channel", "in": "query", "required": true, "description": "Zero-based vf channel index.", "schema": {"type": "integer", "minimum": 0, "maximum": 79}}
-        ],
-        "requestBody": {
-          "required": true,
-          "description": "The JSON-encoded session description of the browser's offer, at most 64 KiB, sent as `application/json` (a `charset` parameter is allowed). Any other `Content-Type` is refused with `415` before vf is called: a cross-site page can send forms and `text/plain` without a CORS preflight.",
-          "content": {
-            "application/json": {
-              "schema": {"type": "object", "required": ["type", "sdp"], "properties": {"type": {"type": "string", "enum": ["offer"]}, "sdp": {"type": "string"}}},
-              "example": {"type": "offer", "sdp": "v=0\r\n..."}
-            }
-          }
-        },
-        "responses": {
-          "200": {"description": "vf's answer, with all host ICE candidates inline.", "content": {"application/json": {"schema": {"type": "object", "required": ["type", "sdp"], "properties": {"type": {"type": "string", "enum": ["answer"]}, "sdp": {"type": "string"}}}}}},
-          "400": {"description": "`channel` is not an integer from 0 to 79 (rejected before vf is called), or vf rejected the channel or the SDP.", "content": {"text/plain": {"schema": {"type": "string"}}}},
-          "413": {"description": "The offer is larger than 64 KiB.", "content": {"text/plain": {"schema": {"type": "string"}}}},
-          "415": {"description": "The request's `Content-Type` is not `application/json` (rejected before vf is called), or, from vf, the browser does not support the channel's video codec.", "content": {"text/plain": {"schema": {"type": "string"}}}},
-          "500": {"description": "From vf: the peer connection could not be set up.", "content": {"text/plain": {"schema": {"type": "string"}}}},
-          "502": {"description": "vf could not be reached or its TLS handshake failed.", "content": {"text/plain": {"schema": {"type": "string"}}}},
-          "503": {"description": "From vf: the channel has no video codec yet, or the codec changed during negotiation. Retry.", "content": {"text/plain": {"schema": {"type": "string"}}}},
-          "504": {"description": "vf did not answer within 8 seconds.", "content": {"text/plain": {"schema": {"type": "string"}}}}
-        }
-      }
-    },
     "/api/workspace/root": {
       "get": {
         "tags": ["Workspace"],
@@ -1544,18 +1460,6 @@
   },
   "components": {
     "parameters": {
-      "AllChannels": {
-        "name": "all",
-        "in": "query",
-        "description": "Use `1` to include inactive channels or peers.",
-        "schema": {"type": "string", "enum": ["0", "1"], "default": "0"}
-      },
-      "VerboseStats": {
-        "name": "verbose",
-        "in": "query",
-        "description": "Use `1` to include expanded transport and error diagnostics.",
-        "schema": {"type": "string", "enum": ["0", "1"], "default": "0"}
-      },
       "MediaPath": {
         "name": "path",
         "in": "query",
@@ -1960,17 +1864,6 @@
           "started_or_running": {"type": "integer", "description": "Combined count of newly started and already-running targets."},
           "skipped_external": {"type": "array", "description": "Slots left untouched because an external publisher holds them.", "items": {"type": "integer"}},
           "skipped_pulled": {"type": "array", "description": "Slots left untouched because Insight is pulling a network stream into them.", "items": {"type": "integer"}}
-        }
-      },
-      "ViewerUrl": {
-        "type": "object",
-        "description": "Browser-reachable viewer page link and the channel-capacity decision used to construct it.",
-        "required": ["url", "max_video_channels", "channel_limit_source", "sdk_channel_limited"],
-        "properties": {
-          "url": {"type": "string", "format": "uri", "description": "URL of the `/viewer` page, including the source and capacity query parameters, and the mode when it was valid."},
-          "max_video_channels": {"type": "integer", "minimum": 1, "maximum": 80, "description": "Maximum zero-based viewer channel count available in this deployment."},
-          "channel_limit_source": {"type": "string", "enum": ["sdk-port-map", "devkit", "legacy-default"], "description": "Why the capacity was selected: explicit SDK port publication, unrestricted DevKit behavior, or the backward-compatible fallback."},
-          "sdk_channel_limited": {"type": "boolean", "description": "Whether SDK Docker port publication restricts the viewer below the 80-channel engine ceiling."}
         }
       },
       "WorkspaceKind": {

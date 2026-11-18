@@ -1,7 +1,6 @@
 import os
 import unittest
 import unittest.mock as mock
-import urllib.parse
 
 os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55581")
 
@@ -31,20 +30,6 @@ class RuntimePublicUrlTests(unittest.TestCase):
                 "browser_ice_address_source": "browser-ice-address",
                 "public_origin": "https://insight.example.com/",
             },
-        )
-
-    def test_viewer_uses_the_public_origin_without_an_internal_port(self):
-        with mock.patch.object(app_module, "runtime_network_config", self.config), \
-             mock.patch.object(app_module, "_read_neat_port_map", return_value={"insightVideoChannels": 4}):
-            response = self.client.get("/api/viewer-url?mode=dark&src=0,1", headers={"Host": "10.77.0.1:9900"})
-
-        url = response.get_json()["url"]
-        parsed = urllib.parse.urlsplit(url)
-        self.assertEqual(f"{parsed.scheme}://{parsed.netloc}", "https://insight.example.com")
-        self.assertEqual(parsed.path, "/viewer")
-        self.assertEqual(
-            urllib.parse.parse_qs(parsed.query),
-            {"mode": ["dark"], "src": ["0,1"], "max_channels": ["4"]},
         )
 
     def test_whip_and_mjpeg_use_the_public_origin_but_rtsp_does_not(self):

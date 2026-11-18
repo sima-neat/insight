@@ -110,23 +110,17 @@ class RuntimeNetworkConfigTests(unittest.TestCase):
             self.assertIsNone(config.public_origin)
 
 
-class MediaProcessEnvironmentTests(unittest.TestCase):
-    def test_browser_address_is_identical_for_vf_and_mediamtx(self):
+class MediamtxEnvironmentTests(unittest.TestCase):
+    def test_the_browser_address_reaches_mediamtx(self):
         with mock.patch.dict("os.environ", {"CONTAINER_HOST_IP": "10.77.0.1"}, clear=True):
-            vf_env, mtx_env = utils._media_process_environments(
-                "/cert.pem",
-                "/key.pem",
-                "54.12.34.56",
-            )
+            mtx_env = utils._mediamtx_environment("/cert.pem", "/key.pem", "54.12.34.56")
 
-        self.assertEqual(vf_env["NEAT_INSIGHT_BROWSER_ICE_ADDRESS"], "54.12.34.56")
         self.assertEqual(mtx_env["MTX_WEBRTCADDITIONALHOSTS"], "54.12.34.56")
 
     def test_no_override_preserves_mediamtx_container_host_fallback(self):
         with mock.patch.dict("os.environ", {"CONTAINER_HOST_IP": "10.77.0.1"}, clear=True):
-            vf_env, mtx_env = utils._media_process_environments("/cert.pem", "/key.pem")
+            mtx_env = utils._mediamtx_environment("/cert.pem", "/key.pem")
 
-        self.assertNotIn("NEAT_INSIGHT_BROWSER_ICE_ADDRESS", vf_env)
         self.assertEqual(mtx_env["MTX_WEBRTCADDITIONALHOSTS"], "10.77.0.1")
 
 

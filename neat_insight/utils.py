@@ -276,16 +276,14 @@ def _terminate_conflicting_ports(webcam_ice_port=None):
     # webcam WHIP signalling, its ICE media port for the video itself, and
     # MEDIAMTX_API_PORT/tcp (loopback) for its status API. Every port here is
     # freed by stopping its owner, so none may be one a Neat app listens on.
-    # vf uses 8081/tcp, 9000-9079/udp for RTP, and 9100-9179/udp for metadata.
+    # The channel ports (9000+N, 9100+N) are the new server's, which runs this
+    # backend: freeing them would stop the server itself.
     port_specs = [
         (8554, "TCP"),
         (8000, "UDP"),
         (WEBCAM_WHIP_PORT, "TCP"),
         (webcam_ice_port or WEBCAM_WHIP_ICE_PORT, "UDP"),
         (MEDIAMTX_API_PORT, "TCP"),
-        (8081, "TCP"),
-        *[(port, "UDP") for port in range(9000, 9080)],
-        *[(port, "UDP") for port in range(9100, 9180)],
     ]
     devkit_ip = get_devkit_sync_devkit_ip()
     if devkit_ip:
@@ -294,15 +292,9 @@ def _terminate_conflicting_ports(webcam_ice_port=None):
     _terminate_conflicting_port_specs(port_specs)
 
 
-def _media_process_environments(cert_file, key_file, browser_ice_address=None):
-    # The caller resolves the startup-scoped address once. Passing that same
-    # value to both subprocesses keeps playback and WHIP ICE candidates aligned.
-    vf_env = dict(os.environ)
-    if browser_ice_address:
-        vf_env["NEAT_INSIGHT_BROWSER_ICE_ADDRESS"] = browser_ice_address
-    else:
-        vf_env.pop("NEAT_INSIGHT_BROWSER_ICE_ADDRESS", None)
-
+def _mediamtx_environment(cert_file, key_file, browser_ice_address=None):
+    # The caller resolves the startup-scoped address once, as the server does for
+    # the channels, so playback and WHIP ICE candidates stay aligned.
     mtx_env = dict(os.environ)
     mtx_env["MTX_WEBRTCENCRYPTION"] = "yes"
     mtx_env["MTX_WEBRTCSERVERCERT"] = cert_file
@@ -319,7 +311,7 @@ def _media_process_environments(cert_file, key_file, browser_ice_address=None):
     if effective_ice_address:
         mtx_env["MTX_WEBRTCADDITIONALHOSTS"] = effective_ice_address
 
-    return vf_env, mtx_env
+    return mtx_env
 
 
 def _write_mediamtx_runtime_config(mtx_config):
@@ -340,13 +332,9 @@ def _write_mediamtx_runtime_config(mtx_config):
 def start_processes(ssl_context, webcam_ice_port=None, browser_ice_address=None):
     _terminate_conflicting_ports(webcam_ice_port)
     bin_dir = os.path.join(os.path.dirname(__file__), "bin")
-    is_windows = os.name == "nt"
-    vf = os.path.join(bin_dir, "vf.exe" if is_windows else "vf")
-    mtx = os.path.join(bin_dir, "mediamtx.exe" if is_windows else "mediamtx")
+    mtx = os.path.join(bin_dir, "mediamtx")
     mtx_config = os.path.join(bin_dir, "mediamtx.yml")
 
-    if not os.path.isfile(vf):
-        raise RuntimeError(f"vf binary not found at {vf}. Rebuild package with build.sh.")
     if not os.path.isfile(mtx):
         raise RuntimeError(f"mediamtx binary not found at {mtx}. Rebuild package with build.sh.")
     if not os.path.isfile(mtx_config):
@@ -358,26 +346,14 @@ def start_processes(ssl_context, webcam_ice_port=None, browser_ice_address=None)
     log_dir = os.path.join(bin_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
 
-    vf_log = open(os.path.join(log_dir, "vf.log"), "a")
     mtx_log = open(os.path.join(log_dir, "mediamtx.log"), "a")
-    process_logs.extend([vf_log, mtx_log])
-
-    # Start subprocesses and redirect logs
-    vf_env, mtx_env = _media_process_environments(cert_file, key_file, browser_ice_address)
-
-    vf_proc = subprocess.Popen(
-        [vf, "--cert", cert_file, "--key", key_file],
-        cwd=bin_dir,
-        stdout=vf_log,
-        stderr=subprocess.STDOUT,
-        env=vf_env,
-    )
-    processes.append(vf_proc)
+    process_logs.append(mtx_log)
+    mtx_env = _mediamtx_environment(cert_file, key_file, browser_ice_address)
 
     # MediaMTX reads any config key as an MTX_<UPPERCASE_KEY> env override, so
-    # the webcam WHIP listener can reuse the same cert/key already resolved
-    # for `vf` and the Flask app (mkcert-generated or SDK-provided) instead of
-    # needing its own baked into mediamtx.yml.
+    # the webcam WHIP listener can reuse the certificate the server resolved
+    # (mkcert-generated or SDK-provided) instead of needing its own baked into
+    # mediamtx.yml.
     # The ICE port ends up inside MediaMTX's SDP answer, and Docker forwards a
     # mapped port without rewriting what is written there. The SDK publishes it
     # identity-mapped and reports it in the port map; binding that same number
@@ -396,8 +372,6 @@ def start_processes(ssl_context, webcam_ice_port=None, browser_ice_address=None)
     processes.append(mtx_proc)
 
     time.sleep(0.25)
-    if vf_proc.poll() is not None:
-        raise RuntimeError(f"vf failed to start. Check {os.path.join(log_dir, 'vf.log')}")
     if mtx_proc.poll() is not None:
         raise RuntimeError(f"mediamtx failed to start. Check {os.path.join(log_dir, 'mediamtx.log')}")
 
