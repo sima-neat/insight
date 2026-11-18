@@ -49,10 +49,9 @@ setup(
         "neat_insight": [
             "openapi.json",
             "swagger_ui/*",
+            "bin/neat-insight",
             "bin/vf",
-            "bin/vf.exe",
             "bin/mediamtx",
-            "bin/mediamtx.exe",
             "bin/mediamtx.yml",
             "bin/ffmpeg_nodelay.so",
             "bin/static/*",
@@ -64,7 +63,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "neat-insight = neat_insight.app:main",
+            "neat-insight = neat_insight.launcher:main",
             "neat-insight-metadata-test = neat_insight.tools.metadata_test:main",
         ],
     },

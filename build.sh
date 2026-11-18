@@ -28,7 +28,8 @@ Options:
   --skip-frontend  Skip npm frontend build step
   --skip-shim      Skip the TCP_NODELAY shim; Linux wheels then run ffmpeg with Nagle enabled
   --target-platform  Build target platform:
-                     host (default), all, linux-aarch64, linux-amd64, macos-arm64, windows-amd64
+                     host (default), all, linux-aarch64, linux-amd64, macos-arm64
+                     (no Windows: the server needs Unix process groups)
   -h, --help       Show this help
 EOF
 }
@@ -317,8 +318,6 @@ resolve_target_from_host() {
         echo "linux-amd64"
     elif [[ "$OS" == "Darwin" ]]; then
         echo "macos-arm64"
-    elif [[ "$OS" == "Windows_NT" || "$OS" == MINGW* || "$OS" == MSYS* || "$OS" == CYGWIN* ]]; then
-        echo "windows-amd64"
     else
         echo "unsupported"
     fi
@@ -330,9 +329,9 @@ fi
 
 case "$TARGET_PLATFORM" in
     all)
-    TARGETS_TO_BUILD=("linux-aarch64" "linux-amd64" "macos-arm64" "windows-amd64")
+    TARGETS_TO_BUILD=("linux-aarch64" "linux-amd64" "macos-arm64")
     ;;
-    linux-aarch64|linux-amd64|macos-arm64|windows-amd64)
+    linux-aarch64|linux-amd64|macos-arm64)
     TARGETS_TO_BUILD=("$TARGET_PLATFORM")
     ;;
     *)
@@ -350,7 +349,6 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     SHIM_ELF_MACHINE=""
     VF_BIN_NAME="vf"
     MTX_BIN_NAME="mediamtx"
-    MTX_ARCHIVE_EXT="tar.gz"
     case "$target" in
         linux-aarch64)
         GOOS="linux"
@@ -383,17 +381,6 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
         TARGET="mediamtx_v${MTX_VERSION}_${PLATFORM}"
         WHEEL_PLAT_NAME="macosx_11_0_arm64"
         ;;
-
-        windows-amd64)
-        GOOS="windows"
-        GOARCH="amd64"
-        PLATFORM="windows_amd64"
-        TARGET="mediamtx_v${MTX_VERSION}_${PLATFORM}"
-        WHEEL_PLAT_NAME="win_amd64"
-        VF_BIN_NAME="vf.exe"
-        MTX_BIN_NAME="mediamtx.exe"
-        MTX_ARCHIVE_EXT="zip"
-        ;;
     esac
 
     echo "🛠 Building target: $target"
@@ -408,17 +395,13 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     mkdir -p "$INSIGHT_BIN"
 
     # ==== Download and Extract mediamtx ====
-    MTX_ARCHIVE="${TARGET}.${MTX_ARCHIVE_EXT}"
+    MTX_ARCHIVE="${TARGET}.tar.gz"
     MTX_URL="${MTX_BASE_URL}/${MTX_ARCHIVE}"
     echo "⬇️ Downloading mediamtx: $MTX_URL"
     curl -L "$MTX_URL" -o "$BUILD_DIR/$MTX_ARCHIVE"
 
     echo "📦 Extracting $MTX_ARCHIVE"
-    if [[ "$MTX_ARCHIVE_EXT" == "zip" ]]; then
-        unzip -o "$BUILD_DIR/$MTX_ARCHIVE" -d "$BUILD_DIR" > /dev/null
-    else
-        tar -xzf "$BUILD_DIR/$MTX_ARCHIVE" -C "$BUILD_DIR"
-    fi
+    tar -xzf "$BUILD_DIR/$MTX_ARCHIVE" -C "$BUILD_DIR"
     cp "$BUILD_DIR/$MTX_BIN_NAME" "$INSIGHT_BIN/$MTX_BIN_NAME"
     chmod +x "$INSIGHT_BIN/$MTX_BIN_NAME" || true
     rm "$BUILD_DIR/$MTX_ARCHIVE"
@@ -428,6 +411,8 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     chmod +x "$INSIGHT_BIN/$VF_BIN_NAME" || true
     cp -r webrtc/static "$INSIGHT_BIN/"
     cp webrtc/mediamtx.yml "$INSIGHT_BIN/"
+    # The Insight server, with the frontend's build embedded.
+    scripts/build-server.sh "$GOOS" "$GOARCH" "$INSIGHT_BIN/neat-insight" "$PACKAGE_VERSION"
 
     # ==== TCP_NODELAY preload shim (Linux wheels only) ====
     # LD_PRELOAD is a Linux mechanism, so macOS and Windows wheels ship without
