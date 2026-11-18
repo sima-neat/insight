@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -35,7 +36,11 @@ import (
 var version = "dev"
 
 // reservedPorts are ports Insight's own services take, which the UI cannot have.
-var reservedPorts = map[int]string{9901: "Insight's internal MediaMTX API port"}
+var reservedPorts = map[int]string{
+	8554: "MediaMTX's RTSP port, where apps read the sources",
+	8889: "MediaMTX's WHIP port, where browsers publish webcams",
+	9901: "Insight's internal MediaMTX API port",
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -75,11 +80,17 @@ func run() error {
 		return errors.New("NEAT_INSIGHT_PYTHON is not set: start Insight with the neat-insight command")
 	}
 
+	bin, err := binaryFolder()
+	if err != nil {
+		return err
+	}
 	sup, err := supervisor.New(filepath.Join(cfg.DataDir, "run"))
 	if err != nil {
 		return err
 	}
 	sup.StopLeftovers(10 * time.Second)
+	// Whatever ends the run, the children end with it (StopAll again does nothing more).
+	defer stopChildren(sup)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -95,6 +106,20 @@ func run() error {
 	slog.Info("channels", "count", cfg.Channels.Count, "source", cfg.Channels.Source,
 		"webrtc", fmt.Sprintf("%d-%d", cfg.WebRTCPorts.Start, cfg.WebRTCPorts.End))
 
+	srcs, err := startSources(cfg, pair, sup, bin)
+	if err != nil {
+		return err
+	}
+	var closeOnce sync.Once
+	closeSources := func() {
+		closeOnce.Do(func() {
+			closing, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			srcs.close(closing)
+		})
+	}
+	defer closeSources()
+
 	backend, err := legacy.Start(ctx, sup, legacy.Options{
 		Python: python, CertFile: pair.CertFile, KeyFile: pair.KeyFile, Output: os.Stdout,
 	})
@@ -108,6 +133,9 @@ func run() error {
 			Config:         cfg,
 			Ready:          backend.Ready,
 			Channels:       viewer,
+			Slots:          srcs.slots,
+			Library:        srcs.library,
+			Jobs:           srcs.jobs,
 			Legacy:         backend.Handler(),
 			LegacyPrefixes: legacy.Prefixes,
 			UI:             spa.Handler(spa.Files()),
@@ -134,14 +162,20 @@ func run() error {
 	if server.Shutdown(closing) != nil {
 		server.Close()
 	}
-	// The old backend stops its own children (vf, MediaMTX, the stream ffmpegs) when asked.
-	stopping, cancelStopping := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelStopping()
-	sup.StopAll(stopping)
+	// Then what the requests used: the slots' publishers and encodes, the relays, the jobs;
+	// then the children, MediaMTX and the old backend (which stops its own, webssh).
+	closeSources()
+	stopChildren(sup)
 	stop() // ends the channels' readers, if a signal has not already
 	viewer.Wait()
 	if errors.Is(serveErr, http.ErrServerClosed) {
 		return nil
 	}
 	return serveErr
+}
+
+func stopChildren(sup *supervisor.Supervisor) {
+	stopping, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	sup.StopAll(stopping)
 }

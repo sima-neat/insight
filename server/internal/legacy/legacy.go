@@ -21,15 +21,16 @@ import (
 	"insight/internal/supervisor"
 )
 
-// Prefixes are the paths the old backend serves.
-var Prefixes = []string{"/api/", "/stream/", "/media/", "/swagger-ui-assets/"}
+// Prefixes are the paths the old backend serves: the API routes the new server does not have
+// yet, and its API docs' assets.
+var Prefixes = []string{"/api/", "/swagger-ui-assets/"}
 
 // Options say how to run the old backend.
 type Options struct {
 	// Python is the interpreter of Insight's Python environment.
 	Python string
-	// CertFile and KeyFile are the certificate the old backend's own children (vf, MediaMTX,
-	// webssh) serve with.
+	// CertFile and KeyFile are the certificate the old backend's own child, webssh, serves
+	// with.
 	CertFile, KeyFile string
 	// Output receives the old backend's log lines.
 	Output io.Writer

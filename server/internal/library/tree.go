@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"slices"
 	"time"
 
 	"insight/internal/media"
@@ -204,4 +205,27 @@ func (l *Library) existingFile(rel string) (string, error) {
 		return "", notFound("There is no file %s in the media library.", rel)
 	}
 	return abs, nil
+}
+
+// StreamableFiles lists the library paths of the files a slot can stream, as Tree judges them
+// (by their probe, or by their extension while they are being probed), in path order: what
+// auto-assign hands out to the slots.
+func (l *Library) StreamableFiles() ([]string, error) {
+	root, err := l.Tree()
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	var walk func(Entry)
+	walk = func(e Entry) {
+		if !e.Folder && e.Streamable {
+			paths = append(paths, e.Path)
+		}
+		for _, child := range e.Children {
+			walk(child)
+		}
+	}
+	walk(root)
+	slices.Sort(paths)
+	return paths, nil
 }

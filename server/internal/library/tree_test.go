@@ -3,6 +3,7 @@ package library
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -155,5 +156,27 @@ func TestInfo(t *testing.T) {
 		if _, err := f.lib.Info(t.Context(), rel); code(err) != want {
 			t.Errorf("Info(%q) = %v, want %s", rel, err, want)
 		}
+	}
+}
+
+func TestStreamableFilesAreInPathOrder(t *testing.T) {
+	f := newFixture(t, nil)
+	f.write(t, "b.mp4", "x")
+	f.write(t, "a/z.mp4", "x")
+	f.write(t, "a/notes.txt", "x")
+	f.write(t, "a/vp9.webm", "x")
+	f.write(t, "A.mp4", "x")
+	for _, name := range []string{"b.mp4", "z.mp4", "A.mp4"} {
+		f.probes.set(name, h264())
+	}
+	f.probes.set("vp9.webm", media.Info{Kind: media.KindVideo, Codec: "vp9", CodecName: "vp9"})
+	probedTree(t, f.lib)
+
+	paths, err := f.lib.StreamableFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"A.mp4", "a/z.mp4", "b.mp4"}; !slices.Equal(paths, want) {
+		t.Fatalf("%q, want %q", paths, want)
 	}
 }

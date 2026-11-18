@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -59,10 +58,7 @@ func (h *handlers) ListChannels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) OfferChannel(w http.ResponseWriter, r *http.Request, channel int) {
-	// JSON only: a cross-site page can post a form or text without a CORS preflight, which must
-	// not open a connection through a visitor's browser.
-	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
-		apierr.Write(w, http.StatusUnsupportedMediaType, "json_only", "The offer must be sent as application/json.", "")
+	if !requireJSON(w, r, "The offer") {
 		return
 	}
 	var offer api.SessionDescription

@@ -6,26 +6,28 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for HealthStatus.
 const (
-	Ok       HealthStatus = "ok"
-	Starting HealthStatus = "starting"
+	HealthStatusOk       HealthStatus = "ok"
+	HealthStatusStarting HealthStatus = "starting"
 )
 
 // Valid indicates whether the value is a known member of the HealthStatus enum.
 func (e HealthStatus) Valid() bool {
 	switch e {
-	case Ok:
+	case HealthStatusOk:
 		return true
-	case Starting:
+	case HealthStatusStarting:
 		return true
 	default:
 		return false
@@ -34,19 +36,193 @@ func (e HealthStatus) Valid() bool {
 
 // Defines values for HealthNetworkBrowserIceAddressSource.
 const (
-	BrowserIceAddress HealthNetworkBrowserIceAddressSource = "browser-ice-address"
-	CONTAINERHOSTIP   HealthNetworkBrowserIceAddressSource = "CONTAINER_HOST_IP"
-	None              HealthNetworkBrowserIceAddressSource = "none"
+	HealthNetworkBrowserIceAddressSourceBrowserIceAddress HealthNetworkBrowserIceAddressSource = "browser-ice-address"
+	HealthNetworkBrowserIceAddressSourceCONTAINERHOSTIP   HealthNetworkBrowserIceAddressSource = "CONTAINER_HOST_IP"
+	HealthNetworkBrowserIceAddressSourceNone              HealthNetworkBrowserIceAddressSource = "none"
 )
 
 // Valid indicates whether the value is a known member of the HealthNetworkBrowserIceAddressSource enum.
 func (e HealthNetworkBrowserIceAddressSource) Valid() bool {
 	switch e {
-	case BrowserIceAddress:
+	case HealthNetworkBrowserIceAddressSourceBrowserIceAddress:
 		return true
-	case CONTAINERHOSTIP:
+	case HealthNetworkBrowserIceAddressSourceCONTAINERHOSTIP:
 		return true
-	case None:
+	case HealthNetworkBrowserIceAddressSourceNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for JobState.
+const (
+	JobStateCancelled JobState = "cancelled"
+	JobStateDone      JobState = "done"
+	JobStateFailed    JobState = "failed"
+	JobStateQueued    JobState = "queued"
+	JobStateRunning   JobState = "running"
+)
+
+// Valid indicates whether the value is a known member of the JobState enum.
+func (e JobState) Valid() bool {
+	switch e {
+	case JobStateCancelled:
+		return true
+	case JobStateDone:
+		return true
+	case JobStateFailed:
+		return true
+	case JobStateQueued:
+		return true
+	case JobStateRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MediaProbeKind.
+const (
+	Image   MediaProbeKind = "image"
+	Unknown MediaProbeKind = "unknown"
+	Video   MediaProbeKind = "video"
+)
+
+// Valid indicates whether the value is a known member of the MediaProbeKind enum.
+func (e MediaProbeKind) Valid() bool {
+	switch e {
+	case Image:
+		return true
+	case Unknown:
+		return true
+	case Video:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MediaUploadOnConflict.
+const (
+	Ask      MediaUploadOnConflict = "ask"
+	KeepBoth MediaUploadOnConflict = "keep_both"
+	Replace  MediaUploadOnConflict = "replace"
+)
+
+// Valid indicates whether the value is a known member of the MediaUploadOnConflict enum.
+func (e MediaUploadOnConflict) Valid() bool {
+	switch e {
+	case Ask:
+		return true
+	case KeepBoth:
+		return true
+	case Replace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlotKind.
+const (
+	SlotKindFile   SlotKind = "file"
+	SlotKindNone   SlotKind = "none"
+	SlotKindPull   SlotKind = "pull"
+	SlotKindWebcam SlotKind = "webcam"
+)
+
+// Valid indicates whether the value is a known member of the SlotKind enum.
+func (e SlotKind) Valid() bool {
+	switch e {
+	case SlotKindFile:
+		return true
+	case SlotKindNone:
+		return true
+	case SlotKindPull:
+		return true
+	case SlotKindWebcam:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlotState.
+const (
+	SlotStateExternal  SlotState = "external"
+	SlotStateFailed    SlotState = "failed"
+	SlotStateIdle      SlotState = "idle"
+	SlotStateLive      SlotState = "live"
+	SlotStatePreparing SlotState = "preparing"
+	SlotStateStarting  SlotState = "starting"
+)
+
+// Valid indicates whether the value is a known member of the SlotState enum.
+func (e SlotState) Valid() bool {
+	switch e {
+	case SlotStateExternal:
+		return true
+	case SlotStateFailed:
+		return true
+	case SlotStateIdle:
+		return true
+	case SlotStateLive:
+		return true
+	case SlotStatePreparing:
+		return true
+	case SlotStateStarting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlotAssignmentKind.
+const (
+	SlotAssignmentKindFile   SlotAssignmentKind = "file"
+	SlotAssignmentKindPull   SlotAssignmentKind = "pull"
+	SlotAssignmentKindWebcam SlotAssignmentKind = "webcam"
+)
+
+// Valid indicates whether the value is a known member of the SlotAssignmentKind enum.
+func (e SlotAssignmentKind) Valid() bool {
+	switch e {
+	case SlotAssignmentKindFile:
+		return true
+	case SlotAssignmentKindPull:
+		return true
+	case SlotAssignmentKindWebcam:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlotPullStatus.
+const (
+	SlotPullStatusAuthFailed       SlotPullStatus = "auth_failed"
+	SlotPullStatusConnecting       SlotPullStatus = "connecting"
+	SlotPullStatusLive             SlotPullStatus = "live"
+	SlotPullStatusNeedsCredentials SlotPullStatus = "needs_credentials"
+	SlotPullStatusStopped          SlotPullStatus = "stopped"
+	SlotPullStatusUnreachable      SlotPullStatus = "unreachable"
+)
+
+// Valid indicates whether the value is a known member of the SlotPullStatus enum.
+func (e SlotPullStatus) Valid() bool {
+	switch e {
+	case SlotPullStatusAuthFailed:
+		return true
+	case SlotPullStatusConnecting:
+		return true
+	case SlotPullStatusLive:
+		return true
+	case SlotPullStatusNeedsCredentials:
+		return true
+	case SlotPullStatusStopped:
+		return true
+	case SlotPullStatusUnreachable:
 		return true
 	default:
 		return false
@@ -72,6 +248,43 @@ func (e ViewerUrlChannelLimitSource) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// AutoAssignResult defines model for AutoAssignResult.
+type AutoAssignResult struct {
+	// Assigned The slots given a file.
+	Assigned int `json:"assigned"`
+
+	// Available The files there were to give.
+	Available       int   `json:"available"`
+	SkippedExternal []int `json:"skipped_external"`
+	SkippedPulled   []int `json:"skipped_pulled"`
+}
+
+// Catalog The published catalog of sample clips, as its index has it.
+type Catalog struct {
+	// Assets The files to import, as the index has them, each with its download url.
+	Assets      []Catalog_Assets_Item `json:"assets"`
+	BaseUrl     string                `json:"base_url"`
+	GeneratedAt *string               `json:"generated_at,omitempty"`
+	IndexUrl    string                `json:"index_url"`
+	Schema      *string               `json:"schema,omitempty"`
+
+	// Sources The videos the assets are made from, as the index has them.
+	Sources []map[string]interface{} `json:"sources"`
+}
+
+// Catalog_Assets_Item defines model for Catalog.assets.Item.
+type Catalog_Assets_Item struct {
+	Path                 string                 `json:"path"`
+	Url                  string                 `json:"url"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// CatalogImportRequest defines model for CatalogImportRequest.
+type CatalogImportRequest struct {
+	// Path An asset's path in the catalog.
+	Path string `json:"path"`
 }
 
 // Channel defines model for Channel.
@@ -142,18 +355,21 @@ type ChannelVideo struct {
 	UnsupportedPackets int `json:"unsupported_packets"`
 }
 
-// Error Every error answer has this shape.
+// Error Every error answer has this shape; some routes add fields beside `error`.
 type Error struct {
-	Error struct {
-		// Code A stable snake_case word the UI may branch on.
-		Code string `json:"code"`
+	Error ErrorDetail `json:"error"`
+}
 
-		// Hint What to do about it, when there is something to say.
-		Hint *string `json:"hint,omitempty"`
+// ErrorDetail defines model for ErrorDetail.
+type ErrorDetail struct {
+	// Code A stable snake_case word the UI may branch on.
+	Code string `json:"code"`
 
-		// Message A sentence the UI may show as it is.
-		Message string `json:"message"`
-	} `json:"error"`
+	// Hint What to do about it, when there is something to say.
+	Hint *string `json:"hint,omitempty"`
+
+	// Message A sentence the UI may show as it is.
+	Message string `json:"message"`
 }
 
 // Health defines model for Health.
@@ -238,12 +454,337 @@ type IngestStats struct {
 	Time        string          `json:"time"`
 }
 
+// Job Long work (an encode, a re-encode, a download) at one moment.
+type Job struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Error Once failed, why, as a sentence.
+	Error      *string    `json:"error,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Id         string     `json:"id"`
+
+	// Kind rendition, upload or catalog_import.
+	Kind     string      `json:"kind"`
+	Progress JobProgress `json:"progress"`
+
+	// Result Once done: what was saved (MediaSaved) for an upload or an import, `{rendition}` for a rendition.
+	Result    *map[string]interface{} `json:"result,omitempty"`
+	StartedAt *time.Time              `json:"started_at,omitempty"`
+	State     JobState                `json:"state"`
+	Title     string                  `json:"title"`
+}
+
+// JobState defines model for Job.State.
+type JobState string
+
+// JobList defines model for JobList.
+type JobList struct {
+	Jobs []Job `json:"jobs"`
+}
+
+// JobProgress defines model for JobProgress.
+type JobProgress struct {
+	Detail  string   `json:"detail"`
+	Percent *float64 `json:"percent,omitempty"`
+
+	// Phase encode, download, save and the like.
+	Phase string `json:"phase"`
+}
+
+// LibraryError The error shape, with what the media library adds.
+type LibraryError struct {
+	// Conflict What an upload's name clashes with.
+	Conflict *MediaConflict `json:"conflict,omitempty"`
+	Error    ErrorDetail    `json:"error"`
+
+	// Slots With in_use, the slots that use the files.
+	Slots *[]int `json:"slots,omitempty"`
+}
+
+// MediaConflict What an upload's name clashes with.
+type MediaConflict struct {
+	// Existing The library path that is taken.
+	Existing string `json:"existing"`
+
+	// Suggested The free name keep_both would save under.
+	Suggested string `json:"suggested"`
+}
+
+// MediaDeleteRequest defines model for MediaDeleteRequest.
+type MediaDeleteRequest struct {
+	Paths []string `json:"paths"`
+}
+
+// MediaDeleted defines model for MediaDeleted.
+type MediaDeleted struct {
+	Paths []string `json:"paths"`
+}
+
+// MediaEntry A folder or a file of the library.
+type MediaEntry struct {
+	// Children A folder's entries, folders first; absent for a file and an empty folder.
+	Children *[]MediaEntry `json:"children,omitempty"`
+	Folder   bool          `json:"folder"`
+
+	// Name The entry's own name; the root's is empty.
+	Name string `json:"name"`
+
+	// Path The library path; the root's is empty.
+	Path string `json:"path"`
+
+	// Probe Null while the file is being probed, and for a folder.
+	Probe   *MediaProbe `json:"probe"`
+	Probing *bool       `json:"probing,omitempty"`
+
+	// Streamable Whether a slot can stream the file: from its probe, else from its extension; for a folder, whether any file below it is.
+	Streamable bool `json:"streamable"`
+
+	// StreamableCount For a folder, the streamable files below it.
+	StreamableCount *int `json:"streamable_count,omitempty"`
+}
+
+// MediaFileInfo defines model for MediaFileInfo.
+type MediaFileInfo struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+
+	// Probe What ffprobe says about a file's first video stream.
+	Probe MediaProbe `json:"probe"`
+}
+
+// MediaProbe What ffprobe says about a file's first video stream.
+type MediaProbe struct {
+	// Codec h264, h265, mjpeg or ffprobe's name of another codec.
+	Codec *string `json:"codec,omitempty"`
+
+	// CodecName The codec as the UI shows it (H.264).
+	CodecName  *string  `json:"codec_name,omitempty"`
+	DurationMs *int64   `json:"duration_ms,omitempty"`
+	Fps        *float64 `json:"fps,omitempty"`
+
+	// FrameRate The rate as ffprobe writes it (30000/1001).
+	FrameRate   *string        `json:"frame_rate,omitempty"`
+	HasBFrames  *bool          `json:"has_b_frames,omitempty"`
+	Height      *int           `json:"height,omitempty"`
+	Kind        MediaProbeKind `json:"kind"`
+	PixelFormat *string        `json:"pixel_format,omitempty"`
+
+	// Problem Why ffprobe could not read the file.
+	Problem    *string `json:"problem,omitempty"`
+	Profile    *string `json:"profile,omitempty"`
+	Size       int64   `json:"size"`
+	Streamable bool    `json:"streamable"`
+	Width      *int    `json:"width,omitempty"`
+}
+
+// MediaProbeKind defines model for MediaProbe.Kind.
+type MediaProbeKind string
+
+// MediaSaved A file or folder that joined the library.
+type MediaSaved struct {
+	Folder *bool  `json:"folder,omitempty"`
+	Path   string `json:"path"`
+
+	// Reencoded The files re-encoded before they were saved.
+	Reencoded *[]string `json:"reencoded,omitempty"`
+
+	// Restarted The slots that streamed what it replaced, restarted on it.
+	Restarted *[]int `json:"restarted,omitempty"`
+
+	// Unassigned The slots whose file a replaced folder no longer has.
+	Unassigned *[]int    `json:"unassigned,omitempty"`
+	Warnings   *[]string `json:"warnings,omitempty"`
+}
+
+// MediaUpload defines model for MediaUpload.
+type MediaUpload struct {
+	File openapi_types.File `json:"file"`
+
+	// OnConflict What a taken name does; ask unless said.
+	OnConflict *MediaUploadOnConflict `json:"on_conflict,omitempty"`
+}
+
+// MediaUploadOnConflict What a taken name does; ask unless said.
+type MediaUploadOnConflict string
+
+// RenditionUsage defines model for RenditionUsage.
+type RenditionUsage struct {
+	Bytes int64 `json:"bytes"`
+	Count int   `json:"count"`
+
+	// InUse Those a slot streams or is about to.
+	InUse int `json:"in_use"`
+}
+
+// RenditionsCleared defines model for RenditionsCleared.
+type RenditionsCleared struct {
+	FreedBytes int64 `json:"freed_bytes"`
+
+	// Kept Kept because a slot streams them or is about to.
+	Kept    int `json:"kept"`
+	Removed int `json:"removed"`
+}
+
 // SessionDescription defines model for SessionDescription.
 type SessionDescription struct {
 	Sdp string `json:"sdp"`
 
 	// Type offer or answer
 	Type string `json:"type"`
+}
+
+// Slot One slot, srcN, as asked and as it stands.
+type Slot struct {
+	// ActiveFile What the slot's publisher streams, the file or its rendition (.renditions/...).
+	ActiveFile *string `json:"active_file,omitempty"`
+
+	// Codec h264, h265, mjpeg or another codec's name: the file's, or the stream's for a pull, a webcam or an external publisher; absent while unknown.
+	Codec *string `json:"codec,omitempty"`
+
+	// Error Why the slot failed, or why a pull is not live yet.
+	Error *string `json:"error,omitempty"`
+
+	// File A file slot's library path.
+	File *string `json:"file,omitempty"`
+
+	// Fps A file slot's output rate when it is not the file's own.
+	Fps *int `json:"fps,omitempty"`
+
+	// Job The rendition's encode, while the slot is preparing.
+	Job  *string  `json:"job,omitempty"`
+	Kind SlotKind `json:"kind"`
+
+	// N The slot's number, N of srcN.
+	N int `json:"n"`
+
+	// NativeFps The file's own rate in whole frames per second, once it is probed.
+	NativeFps *int `json:"native_fps,omitempty"`
+
+	// Publisher The stream a slot carries, while MediaMTX has one.
+	Publisher *SlotPublisher `json:"publisher,omitempty"`
+
+	// Pull A pull slot's camera, without credentials, and how its connection stands.
+	Pull    *SlotPull    `json:"pull,omitempty"`
+	Readers []SlotReader `json:"readers"`
+
+	// Run The user's Start; the slot is to run.
+	Run bool `json:"run"`
+
+	// State Derived: idle (stopped, nothing assigned, or a webcam no browser publishes), preparing (a rendition is encoded, see `job`), starting, live (MediaMTX has the stream), failed (see `error`), external (a publisher Insight did not start holds it).
+	State SlotState `json:"state"`
+
+	// Urls Where the slot's stream is reached, on the host the request used.
+	Urls SlotUrls `json:"urls"`
+}
+
+// SlotKind defines model for Slot.Kind.
+type SlotKind string
+
+// SlotState Derived: idle (stopped, nothing assigned, or a webcam no browser publishes), preparing (a rendition is encoded, see `job`), starting, live (MediaMTX has the stream), failed (see `error`), external (a publisher Insight did not start holds it).
+type SlotState string
+
+// SlotAssignment What to assign: `file` (with `file` and an optional `fps`), `pull` (with `url` and optional `username` and `password`, which replace credentials in the URL) or `webcam`.
+type SlotAssignment struct {
+	// File A library path.
+	File *string `json:"file,omitempty"`
+
+	// Fps The output rate; absent for the file's own.
+	Fps      *int               `json:"fps,omitempty"`
+	Kind     SlotAssignmentKind `json:"kind"`
+	Password *string            `json:"password,omitempty"`
+	Url      *string            `json:"url,omitempty"`
+	Username *string            `json:"username,omitempty"`
+}
+
+// SlotAssignmentKind defines model for SlotAssignment.Kind.
+type SlotAssignmentKind string
+
+// SlotFailure defines model for SlotFailure.
+type SlotFailure struct {
+	Code  string `json:"code"`
+	Error string `json:"error"`
+	N     int    `json:"n"`
+}
+
+// SlotList defines model for SlotList.
+type SlotList struct {
+	// Count How many slots there are (48).
+	Count int    `json:"count"`
+	Slots []Slot `json:"slots"`
+}
+
+// SlotPublisher The stream a slot carries, while MediaMTX has one.
+type SlotPublisher struct {
+	// Address The publisher's host; absent for a pull.
+	Address    *string  `json:"address,omitempty"`
+	BitrateBps *float64 `json:"bitrate_bps,omitempty"`
+	Codec      *string  `json:"codec,omitempty"`
+
+	// CodecSupported Whether Neat decodes the codec (H.264, H.265, MJPEG).
+	CodecSupported bool     `json:"codec_supported"`
+	Fps            *float64 `json:"fps,omitempty"`
+	Height         *int     `json:"height,omitempty"`
+
+	// Protocol rtsp, webrtc and the like; rtspSource or rtspsSource for a pulled camera.
+	Protocol string    `json:"protocol"`
+	Since    time.Time `json:"since"`
+	Width    *int      `json:"width,omitempty"`
+}
+
+// SlotPull A pull slot's camera, without credentials, and how its connection stands.
+type SlotPull struct {
+	Error  *string `json:"error,omitempty"`
+	Host   string  `json:"host"`
+	Path   string  `json:"path"`
+	Scheme string  `json:"scheme"`
+
+	// Status needs_credentials after a restart, which keeps no credentials.
+	Status SlotPullStatus `json:"status"`
+}
+
+// SlotPullStatus needs_credentials after a restart, which keeps no credentials.
+type SlotPullStatus string
+
+// SlotReader defines model for SlotReader.
+type SlotReader struct {
+	Address string `json:"address"`
+
+	// Label insight preview for Insight's own live preview.
+	Label    *string `json:"label,omitempty"`
+	Protocol string  `json:"protocol"`
+}
+
+// SlotStartRequest defines model for SlotStartRequest.
+type SlotStartRequest struct {
+	// Count How many file slots to start, at least 1.
+	Count int `json:"count"`
+}
+
+// SlotStartResult defines model for SlotStartResult.
+type SlotStartResult struct {
+	AlreadyRunning  []int         `json:"already_running"`
+	Errors          []SlotFailure `json:"errors"`
+	SkippedExternal []int         `json:"skipped_external"`
+	Started         []int         `json:"started"`
+}
+
+// SlotStopResult defines model for SlotStopResult.
+type SlotStopResult struct {
+	// SkippedExternal The slots an external publisher holds, whose streams go on.
+	SkippedExternal []int `json:"skipped_external"`
+
+	// Stopped The slots that were to run.
+	Stopped []int `json:"stopped"`
+}
+
+// SlotUrls Where the slot's stream is reached, on the host the request used.
+type SlotUrls struct {
+	// HttpMjpeg The HTTP MJPEG output (Frozen, `/stream/http/srcN.mjpg`), for an MJPEG stream.
+	HttpMjpeg *string `json:"http_mjpeg,omitempty"`
+	Rtsp      string  `json:"rtsp"`
+
+	// Whip Where a browser publishes a webcam slot's camera.
+	Whip *string `json:"whip,omitempty"`
 }
 
 // ViewerUrl defines model for ViewerUrl.
@@ -257,10 +798,37 @@ type ViewerUrl struct {
 // ViewerUrlChannelLimitSource defines model for ViewerUrl.ChannelLimitSource.
 type ViewerUrlChannelLimitSource string
 
+// JobID defines model for JobID.
+type JobID = string
+
+// MediaPath defines model for MediaPath.
+type MediaPath = string
+
+// SlotNumber defines model for SlotNumber.
+type SlotNumber = int
+
 // GetIngestStatsParams defines parameters for GetIngestStats.
 type GetIngestStatsParams struct {
 	All     *string `form:"all,omitempty" json:"all,omitempty"`
 	Verbose *string `form:"verbose,omitempty" json:"verbose,omitempty"`
+}
+
+// GetMediaFileParams defines parameters for GetMediaFile.
+type GetMediaFileParams struct {
+	// Path A library path, relative to the media folder, with "/".
+	Path MediaPath `form:"path" json:"path"`
+}
+
+// GetMediaInfoParams defines parameters for GetMediaInfo.
+type GetMediaInfoParams struct {
+	// Path A library path, relative to the media folder, with "/".
+	Path MediaPath `form:"path" json:"path"`
+}
+
+// PreviewMediaParams defines parameters for PreviewMedia.
+type PreviewMediaParams struct {
+	// Path A library path, relative to the media folder, with "/".
+	Path MediaPath `form:"path" json:"path"`
 }
 
 // GetViewerUrlParams defines parameters for GetViewerUrl.
@@ -272,11 +840,111 @@ type GetViewerUrlParams struct {
 	Mode *string `form:"mode,omitempty" json:"mode,omitempty"`
 }
 
+// ImportCatalogAssetJSONRequestBody defines body for ImportCatalogAsset for application/json ContentType.
+type ImportCatalogAssetJSONRequestBody = CatalogImportRequest
+
 // OfferChannelJSONRequestBody defines body for OfferChannel for application/json ContentType.
 type OfferChannelJSONRequestBody = SessionDescription
 
+// DeleteMediaJSONRequestBody defines body for DeleteMedia for application/json ContentType.
+type DeleteMediaJSONRequestBody = MediaDeleteRequest
+
+// UploadMediaMultipartRequestBody defines body for UploadMedia for multipart/form-data ContentType.
+type UploadMediaMultipartRequestBody = MediaUpload
+
+// StartSlotsJSONRequestBody defines body for StartSlots for application/json ContentType.
+type StartSlotsJSONRequestBody = SlotStartRequest
+
+// AssignSlotJSONRequestBody defines body for AssignSlot for application/json ContentType.
+type AssignSlotJSONRequestBody = SlotAssignment
+
+// Getter for additional properties for Catalog_Assets_Item. Returns the specified
+// element and whether it was found
+func (a Catalog_Assets_Item) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for Catalog_Assets_Item
+func (a *Catalog_Assets_Item) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for Catalog_Assets_Item to handle AdditionalProperties
+func (a *Catalog_Assets_Item) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["path"]; found {
+		err = json.Unmarshal(raw, &a.Path)
+		if err != nil {
+			return fmt.Errorf("error reading 'path': %w", err)
+		}
+		delete(object, "path")
+	}
+
+	if raw, found := object["url"]; found {
+		err = json.Unmarshal(raw, &a.Url)
+		if err != nil {
+			return fmt.Errorf("error reading 'url': %w", err)
+		}
+		delete(object, "url")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for Catalog_Assets_Item to handle AdditionalProperties
+func (a Catalog_Assets_Item) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["path"], err = json.Marshal(a.Path)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'path': %w", err)
+	}
+
+	object["url"], err = json.Marshal(a.Url)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'url': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// GetCatalog SiMa's published sample clips
+	// (GET /api/catalog)
+	GetCatalog(w http.ResponseWriter, r *http.Request)
+	// ImportCatalogAsset Download a catalog asset into the library
+	// (POST /api/catalog/imports)
+	ImportCatalogAsset(w http.ResponseWriter, r *http.Request)
 	// ListChannels The Viewer's channels and what arrives on them
 	// (GET /api/channels)
 	ListChannels(w http.ResponseWriter, r *http.Request)
@@ -289,6 +957,75 @@ type ServerInterface interface {
 	// GetIngestStats What arrives on each channel, in the old shape
 	// (GET /api/ingest/stats)
 	GetIngestStats(w http.ResponseWriter, r *http.Request, params GetIngestStatsParams)
+	// ListJobs The running and recent jobs
+	// (GET /api/jobs)
+	ListJobs(w http.ResponseWriter, r *http.Request)
+	// CancelJob Cancel a job
+	// (DELETE /api/jobs/{id})
+	CancelJob(w http.ResponseWriter, r *http.Request, id JobID)
+	// GetJob One job
+	// (GET /api/jobs/{id})
+	GetJob(w http.ResponseWriter, r *http.Request, id JobID)
+	// FollowJob A job's changes as Server-Sent Events
+	// (GET /api/jobs/{id}/events)
+	FollowJob(w http.ResponseWriter, r *http.Request, id JobID)
+	// GetMediaTree The media library as a tree, with each file's probe
+	// (GET /api/media)
+	GetMediaTree(w http.ResponseWriter, r *http.Request)
+	// DeleteMedia Delete files and folders of the library
+	// (POST /api/media/delete)
+	DeleteMedia(w http.ResponseWriter, r *http.Request)
+	// GetMediaFile One file of the library
+	// (GET /api/media/file)
+	GetMediaFile(w http.ResponseWriter, r *http.Request, params GetMediaFileParams)
+	// GetMediaInfo The full probe of one file
+	// (GET /api/media/info)
+	GetMediaInfo(w http.ResponseWriter, r *http.Request, params GetMediaInfoParams)
+	// PreviewMedia A library file as a moving MJPEG picture
+	// (GET /api/media/preview.mjpg)
+	PreviewMedia(w http.ResponseWriter, r *http.Request, params PreviewMediaParams)
+	// UploadMedia Upload a file or an archive into the library
+	// (POST /api/media/uploads)
+	UploadMedia(w http.ResponseWriter, r *http.Request)
+	// ClearRenditions Remove the renditions no slot streams
+	// (DELETE /api/renditions)
+	ClearRenditions(w http.ResponseWriter, r *http.Request)
+	// GetRenditionUsage What the frame-rate renditions take on the disk
+	// (GET /api/renditions)
+	GetRenditionUsage(w http.ResponseWriter, r *http.Request)
+	// ListSlots The sources src1 to src48 and how each stands
+	// (GET /api/slots)
+	ListSlots(w http.ResponseWriter, r *http.Request)
+	// AutoAssignSlots Give the library's files to the slots, one each
+	// (POST /api/slots/auto-assign)
+	AutoAssignSlots(w http.ResponseWriter, r *http.Request)
+	// ResetSlots Stop every slot and leave each with nothing assigned
+	// (POST /api/slots/reset)
+	ResetSlots(w http.ResponseWriter, r *http.Request)
+	// StartSlots Start the first file slots
+	// (POST /api/slots/start)
+	StartSlots(w http.ResponseWriter, r *http.Request)
+	// StopSlots Stop every slot
+	// (POST /api/slots/stop)
+	StopSlots(w http.ResponseWriter, r *http.Request)
+	// ClearSlot Leave a slot with nothing assigned, and stopped
+	// (DELETE /api/slots/{n})
+	ClearSlot(w http.ResponseWriter, r *http.Request, n SlotNumber)
+	// AssignSlot Assign a file, a camera to pull or a webcam to a slot
+	// (PUT /api/slots/{n})
+	AssignSlot(w http.ResponseWriter, r *http.Request, n SlotNumber)
+	// PreviewSlot A slot's live picture as MJPEG
+	// (GET /api/slots/{n}/preview.mjpg)
+	PreviewSlot(w http.ResponseWriter, r *http.Request, n SlotNumber)
+	// StartSlot Make a slot run
+	// (POST /api/slots/{n}/start)
+	StartSlot(w http.ResponseWriter, r *http.Request, n SlotNumber)
+	// StopSlot Make a slot stop
+	// (POST /api/slots/{n}/stop)
+	StopSlot(w http.ResponseWriter, r *http.Request, n SlotNumber)
+	// TakeOverSlot Disconnect the external publisher that holds a slot
+	// (POST /api/slots/{n}/take-over)
+	TakeOverSlot(w http.ResponseWriter, r *http.Request, n SlotNumber)
 	// GetViewerUrl A link to the Viewer
 	// (GET /api/viewer-url)
 	GetViewerUrl(w http.ResponseWriter, r *http.Request, params GetViewerUrlParams)
@@ -302,6 +1039,34 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// GetCatalog operation middleware
+func (siw *ServerInterfaceWrapper) GetCatalog(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCatalog(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ImportCatalogAsset operation middleware
+func (siw *ServerInterfaceWrapper) ImportCatalogAsset(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ImportCatalogAsset(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListChannels operation middleware
 func (siw *ServerInterfaceWrapper) ListChannels(w http.ResponseWriter, r *http.Request) {
@@ -394,6 +1159,493 @@ func (siw *ServerInterfaceWrapper) GetIngestStats(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetIngestStats(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListJobs operation middleware
+func (siw *ServerInterfaceWrapper) ListJobs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListJobs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelJob operation middleware
+func (siw *ServerInterfaceWrapper) CancelJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id JobID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetJob operation middleware
+func (siw *ServerInterfaceWrapper) GetJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id JobID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// FollowJob operation middleware
+func (siw *ServerInterfaceWrapper) FollowJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id JobID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.FollowJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMediaTree operation middleware
+func (siw *ServerInterfaceWrapper) GetMediaTree(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMediaTree(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMedia operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMedia(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMedia(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMediaFile operation middleware
+func (siw *ServerInterfaceWrapper) GetMediaFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMediaFileParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMediaFile(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMediaInfo operation middleware
+func (siw *ServerInterfaceWrapper) GetMediaInfo(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMediaInfoParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMediaInfo(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PreviewMedia operation middleware
+func (siw *ServerInterfaceWrapper) PreviewMedia(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PreviewMediaParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PreviewMedia(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UploadMedia operation middleware
+func (siw *ServerInterfaceWrapper) UploadMedia(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UploadMedia(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClearRenditions operation middleware
+func (siw *ServerInterfaceWrapper) ClearRenditions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClearRenditions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRenditionUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetRenditionUsage(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRenditionUsage(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSlots operation middleware
+func (siw *ServerInterfaceWrapper) ListSlots(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSlots(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AutoAssignSlots operation middleware
+func (siw *ServerInterfaceWrapper) AutoAssignSlots(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AutoAssignSlots(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResetSlots operation middleware
+func (siw *ServerInterfaceWrapper) ResetSlots(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetSlots(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartSlots operation middleware
+func (siw *ServerInterfaceWrapper) StartSlots(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartSlots(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopSlots operation middleware
+func (siw *ServerInterfaceWrapper) StopSlots(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopSlots(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClearSlot operation middleware
+func (siw *ServerInterfaceWrapper) ClearSlot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "n" -------------
+	var n SlotNumber
+
+	err = runtime.BindStyledParameterWithOptions("simple", "n", r.PathValue("n"), &n, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "n", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClearSlot(w, r, n)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AssignSlot operation middleware
+func (siw *ServerInterfaceWrapper) AssignSlot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "n" -------------
+	var n SlotNumber
+
+	err = runtime.BindStyledParameterWithOptions("simple", "n", r.PathValue("n"), &n, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "n", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AssignSlot(w, r, n)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PreviewSlot operation middleware
+func (siw *ServerInterfaceWrapper) PreviewSlot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "n" -------------
+	var n SlotNumber
+
+	err = runtime.BindStyledParameterWithOptions("simple", "n", r.PathValue("n"), &n, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "n", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PreviewSlot(w, r, n)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartSlot operation middleware
+func (siw *ServerInterfaceWrapper) StartSlot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "n" -------------
+	var n SlotNumber
+
+	err = runtime.BindStyledParameterWithOptions("simple", "n", r.PathValue("n"), &n, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "n", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartSlot(w, r, n)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopSlot operation middleware
+func (siw *ServerInterfaceWrapper) StopSlot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "n" -------------
+	var n SlotNumber
+
+	err = runtime.BindStyledParameterWithOptions("simple", "n", r.PathValue("n"), &n, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "n", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopSlot(w, r, n)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TakeOverSlot operation middleware
+func (siw *ServerInterfaceWrapper) TakeOverSlot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "n" -------------
+	var n SlotNumber
+
+	err = runtime.BindStyledParameterWithOptions("simple", "n", r.PathValue("n"), &n, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "n", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TakeOverSlot(w, r, n)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -574,6 +1826,31 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/channels/{channel}/offer", wrapper.OfferChannel)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/ingest/stats", wrapper.GetIngestStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/viewer-url", wrapper.GetViewerUrl)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/slots", wrapper.ListSlots)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/slots/{n}", wrapper.ClearSlot)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/slots/{n}", wrapper.AssignSlot)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/slots/{n}/start", wrapper.StartSlot)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/slots/{n}/stop", wrapper.StopSlot)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/slots/{n}/take-over", wrapper.TakeOverSlot)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/slots/{n}/preview.mjpg", wrapper.PreviewSlot)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/slots/start", wrapper.StartSlots)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/slots/stop", wrapper.StopSlots)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/slots/reset", wrapper.ResetSlots)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/slots/auto-assign", wrapper.AutoAssignSlots)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/renditions", wrapper.ClearRenditions)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/renditions", wrapper.GetRenditionUsage)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/media", wrapper.GetMediaTree)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/media/info", wrapper.GetMediaInfo)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/media/delete", wrapper.DeleteMedia)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/media/uploads", wrapper.UploadMedia)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/media/file", wrapper.GetMediaFile)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/media/preview.mjpg", wrapper.PreviewMedia)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/catalog", wrapper.GetCatalog)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/catalog/imports", wrapper.ImportCatalogAsset)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/jobs", wrapper.ListJobs)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/jobs/{id}", wrapper.CancelJob)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/jobs/{id}", wrapper.GetJob)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/jobs/{id}/events", wrapper.FollowJob)
 
 	return m
 }

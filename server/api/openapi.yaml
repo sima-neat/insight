@@ -5,6 +5,8 @@ info:
     The API of the Neat Insight server, which its web UI uses. This document is the source: the
     server's Go types and the frontend's TypeScript types are generated from it. Routes marked
     "Frozen" are used outside Insight (the Neat SDK, sima-cli) and keep their paths and fields.
+    One more is Frozen and served beside them: `GET /stream/http/srcN.mjpg`, a slot's HTTP MJPEG
+    output (docs/contracts.md, "Sources"), the same as `urls.http_mjpeg`.
   version: "1"
 paths:
   /api/health:
@@ -125,7 +127,518 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ViewerUrl"
+  /api/slots:
+    get:
+      operationId: listSlots
+      summary: The sources src1 to src48 and how each stands
+      description: >-
+        What each slot was asked to do (kind, file, frame rate, run) and how it stands, derived
+        from the world when it is listed: its publisher, MediaMTX's view of its stream, its
+        readers, the encode of its rendition. Read from memory; poll it freely. The URLs name
+        the host the request used.
+      responses:
+        "200":
+          description: The slots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotList"
+  /api/slots/{n}:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    put:
+      operationId: assignSlot
+      summary: Assign a file, a camera to pull or a webcam to a slot
+      description: >-
+        `{kind: "file", file, fps?}` streams a library file, at its own rate or at `fps` (a
+        rendition is encoded first when the slot starts and none is cached); a slot that
+        streamed a file keeps running with the new one, any other slot is stopped.
+        `{kind: "pull", url, username?, password?}` has MediaMTX pull a camera (rtsp:// or
+        rtsps://), after probing it: a camera that refuses the credentials is 422
+        `pull_auth_failed`, one that does not answer 502 `pull_unreachable`. The credentials
+        are kept in memory only. The slot starts pulling at once.
+        `{kind: "webcam"}` makes it a browser's webcam: the answer's `urls.whip` is where the
+        browser publishes. A slot an external publisher holds is 409 `slot_busy`. The body is
+        sent as application/json.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SlotAssignment"
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: clearSlot
+      summary: Leave a slot with nothing assigned, and stopped
+      description: An external publisher on the slot is left alone.
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/slots/{n}/start:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    post:
+      operationId: startSlot
+      summary: Make a slot run
+      description: >-
+        A file slot streams (after encoding its rendition, when it needs one: `state` is
+        `preparing` with the `job`), a pull slot pulls, a webcam slot takes a browser's camera.
+        Answers before the stream is live; `state` says how it goes. Starting a failed slot
+        tries again.
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/slots/{n}/stop:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    post:
+      operationId: stopSlot
+      summary: Make a slot stop
+      description: >-
+        Its publisher stops, its rendition's encode is cancelled (unless another slot waits for
+        it), its pull is cleared and its webcam's publisher disconnected. The assignment stays.
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/slots/{n}/take-over:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    post:
+      operationId: takeOverSlot
+      summary: Disconnect the external publisher that holds a slot
+      description: >-
+        So the slot's own assignment can run. The publisher may connect again at once, which
+        Insight does not prevent. 409 `not_external` when no external publisher holds it, 503
+        `mediamtx_unavailable` while MediaMTX does not answer.
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/slots/{n}/preview.mjpg:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    get:
+      operationId: previewSlot
+      summary: A slot's live picture as MJPEG
+      description: >-
+        At most 640 pixels wide, at the stream's own rate, from one shared relay however many
+        browsers watch it. 409 `slot_not_live` while the slot is not live; 429 when Insight
+        relays as many streams as it may.
+      responses:
+        "200":
+          description: The stream, one JPEG per part.
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/Error" }
+  /api/slots/start:
+    post:
+      operationId: startSlots
+      summary: Start the first file slots
+      description: >-
+        Starts the first `count` slots with a file assigned, in their order, that no external
+        publisher holds. Answers at once; each slot's `state` says how it goes. 409
+        `nothing_assigned` when no slot has a file. The body is sent as application/json.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SlotStartRequest"
+      responses:
+        "200":
+          description: What was started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotStartResult"
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+  /api/slots/stop:
+    post:
+      operationId: stopSlots
+      summary: Stop every slot
+      description: As each slot's stop does; external publishers go on.
+      responses:
+        "200":
+          description: What was stopped.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotStopResult"
+  /api/slots/reset:
+    post:
+      operationId: resetSlots
+      summary: Stop every slot and leave each with nothing assigned
+      description: External publishers go on.
+      responses:
+        "200":
+          description: What was stopped.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotStopResult"
+  /api/slots/auto-assign:
+    post:
+      operationId: autoAssignSlots
+      summary: Give the library's files to the slots, one each
+      description: >-
+        The streamable files in path order, one per slot from src1, every slot stopped. Slots
+        an external publisher holds or that pull a camera keep what they have, and so do their
+        files; slots beyond the files are cleared. A slot keeps its frame rate when it keeps
+        its file.
+      responses:
+        "200":
+          description: What was assigned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoAssignResult"
+        "500": { $ref: "#/components/responses/LibraryError" }
+  /api/renditions:
+    get:
+      operationId: getRenditionUsage
+      summary: What the frame-rate renditions take on the disk
+      responses:
+        "200":
+          description: The renditions' count and size.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenditionUsage"
+        "500": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: clearRenditions
+      summary: Remove the renditions no slot streams
+      description: Renditions a slot streams, or is about to, are kept.
+      responses:
+        "200":
+          description: What was removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenditionsCleared"
+        "500": { $ref: "#/components/responses/Error" }
+  /api/media:
+    get:
+      operationId: getMediaTree
+      summary: The media library as a tree, with each file's probe
+      description: >-
+        Folders first. A file's `probe` is null while it is being probed (`probing`), and then
+        says its codec, size, rate and whether a slot can stream it. Hidden files and macOS
+        archive metadata are left out. Read from a walk of the media folder at most a few
+        seconds old.
+      responses:
+        "200":
+          description: The library's root folder.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaEntry"
+        "500": { $ref: "#/components/responses/LibraryError" }
+  /api/media/info:
+    get:
+      operationId: getMediaInfo
+      summary: The full probe of one file
+      parameters:
+        - $ref: "#/components/parameters/MediaPath"
+      responses:
+        "200":
+          description: The file and its probe.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaFileInfo"
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+        "500": { $ref: "#/components/responses/LibraryError" }
+  /api/media/delete:
+    post:
+      operationId: deleteMedia
+      summary: Delete files and folders of the library
+      description: >-
+        Files, links (as links) and folders with what they hold. The whole request is refused,
+        nothing removed, when a path is not in the library (400) or a slot uses one of the
+        files (409 `in_use`, naming the `slots`). The body is sent as application/json.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MediaDeleteRequest"
+      responses:
+        "200":
+          description: What was removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaDeleted"
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+        "409": { $ref: "#/components/responses/LibraryError" }
+        "415": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/LibraryError" }
+  /api/media/uploads:
+    post:
+      operationId: uploadMedia
+      summary: Upload a file or an archive into the library
+      description: >-
+        multipart/form-data with one `file` and an optional `on_conflict`. A file the board
+        streams well is saved at once (201); one it would stream badly (B-frames, another codec
+        or profile, keyframes far apart) is re-encoded by a job first (202 with the job, whose
+        result is what was saved). An archive (ZIP, tar, gzipped tar) is unpacked into a folder
+        named after it. A taken name with `ask` is 409 `name_taken` with the `conflict`, before
+        any work. Replacing a file restarts the slots that streamed it.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/MediaUpload"
+      responses:
+        "201":
+          description: Saved in the library.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaSaved"
+        "202":
+          description: Being re-encoded; the job's result is what was saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "409": { $ref: "#/components/responses/LibraryError" }
+        "413": { $ref: "#/components/responses/LibraryError" }
+        "500": { $ref: "#/components/responses/LibraryError" }
+        "503": { $ref: "#/components/responses/LibraryError" }
+        "507": { $ref: "#/components/responses/LibraryError" }
+  /api/media/file:
+    get:
+      operationId: getMediaFile
+      summary: One file of the library
+      description: >-
+        For the browser to play or show, with range requests. Video and pictures are served as
+        what they are; anything else as a download.
+      parameters:
+        - $ref: "#/components/parameters/MediaPath"
+      responses:
+        "200":
+          description: The file.
+          content:
+            video/*:
+              schema:
+                type: string
+                format: binary
+            image/*:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: The part of the file the range asked for.
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+  /api/media/preview.mjpg:
+    get:
+      operationId: previewMedia
+      summary: A library file as a moving MJPEG picture
+      description: >-
+        Looped at its own rate, from one shared relay however many browsers watch it. 503
+        `ffmpeg_missing` without FFmpeg; 429 when Insight relays as many streams as it may.
+      parameters:
+        - $ref: "#/components/parameters/MediaPath"
+      responses:
+        "200":
+          description: The stream, one JPEG per part.
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/Error" }
+  /api/catalog:
+    get:
+      operationId: getCatalog
+      summary: SiMa's published sample clips
+      description: >-
+        The catalog's index as it is published, each asset with its download `url`; fetched
+        again when the last fetch is a few minutes old. 502 `catalog_unavailable` when it
+        cannot be fetched.
+      responses:
+        "200":
+          description: The catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Catalog"
+        "502": { $ref: "#/components/responses/LibraryError" }
+  /api/catalog/imports:
+    post:
+      operationId: importCatalogAsset
+      summary: Download a catalog asset into the library
+      description: >-
+        A job that downloads the asset at `path` into catalog/<source>/ and checks its size and
+        SHA-256 before it joins the library; a taken name is saved as name_2. The body is sent
+        as application/json.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CatalogImportRequest"
+      responses:
+        "202":
+          description: The job; its result is what was saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+        "415": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/LibraryError" }
+  /api/jobs:
+    get:
+      operationId: listJobs
+      summary: The running and recent jobs
+      description: >-
+        Renditions' encodes, uploads' re-encodes and catalog imports, oldest first. Finished
+        jobs are kept for 10 minutes.
+      responses:
+        "200":
+          description: The jobs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobList"
+  /api/jobs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    get:
+      operationId: getJob
+      summary: One job
+      responses:
+        "200":
+          description: The job as it is now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: cancelJob
+      summary: Cancel a job
+      description: >-
+        A queued job ends at once; a running one stays `running` until its work has cleaned up,
+        then is `cancelled`. Cancelling a finished job changes nothing.
+      responses:
+        "200":
+          description: The job after the call.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404": { $ref: "#/components/responses/Error" }
+  /api/jobs/{id}/events:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    get:
+      operationId: followJob
+      summary: A job's changes as Server-Sent Events
+      description: >-
+        One `data:` line of the job's JSON at once and after each change, the last one its
+        final state, after which the stream ends; a comment every 15 s keeps a quiet stream
+        open. A browser's EventSource reconnects when a stream ends, so close it on a final
+        state.
+      responses:
+        "200":
+          description: The events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404": { $ref: "#/components/responses/Error" }
 components:
+  parameters:
+    SlotNumber:
+      name: n
+      in: path
+      required: true
+      description: The slot's number, 1 to 48 (srcN).
+      schema:
+        type: integer
+    JobID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    MediaPath:
+      name: path
+      in: query
+      required: true
+      description: A library path, relative to the media folder, with "/".
+      schema:
+        type: string
   responses:
     Error:
       description: Refused; the body says why.
@@ -133,6 +646,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    LibraryError:
+      description: Refused; the body says why, with what the media library adds.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LibraryError"
   schemas:
     SessionDescription:
       type: object
@@ -390,19 +909,528 @@ components:
           description: The origin a shared proxy serves Insight under, or null.
     Error:
       type: object
-      description: Every error answer has this shape.
+      description: Every error answer has this shape; some routes add fields beside `error`.
       required: [error]
       properties:
         error:
+          $ref: "#/components/schemas/ErrorDetail"
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: A stable snake_case word the UI may branch on.
+        message:
+          type: string
+          description: A sentence the UI may show as it is.
+        hint:
+          type: string
+          description: What to do about it, when there is something to say.
+    SlotList:
+      type: object
+      required: [count, slots]
+      properties:
+        count:
+          type: integer
+          description: How many slots there are (48).
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/Slot"
+    Slot:
+      type: object
+      description: One slot, srcN, as asked and as it stands.
+      required: [n, kind, run, state, readers, urls]
+      properties:
+        n:
+          type: integer
+          description: The slot's number, N of srcN.
+        kind:
+          type: string
+          enum: [none, file, webcam, pull]
+        file:
+          type: string
+          description: A file slot's library path.
+        fps:
+          type: integer
+          description: A file slot's output rate when it is not the file's own.
+        native_fps:
+          type: integer
+          description: The file's own rate in whole frames per second, once it is probed.
+        codec:
+          type: string
+          description: >-
+            h264, h265, mjpeg or another codec's name: the file's, or the stream's for a pull, a
+            webcam or an external publisher; absent while unknown.
+        pull:
+          $ref: "#/components/schemas/SlotPull"
+        run:
+          type: boolean
+          description: The user's Start; the slot is to run.
+        state:
+          type: string
+          enum: [idle, preparing, starting, live, failed, external]
+          description: >-
+            Derived: idle (stopped, nothing assigned, or a webcam no browser publishes),
+            preparing (a rendition is encoded, see `job`), starting, live (MediaMTX has the
+            stream), failed (see `error`), external (a publisher Insight did not start holds it).
+        error:
+          type: string
+          description: Why the slot failed, or why a pull is not live yet.
+        job:
+          type: string
+          description: The rendition's encode, while the slot is preparing.
+        publisher:
+          $ref: "#/components/schemas/SlotPublisher"
+        readers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SlotReader"
+        urls:
+          $ref: "#/components/schemas/SlotUrls"
+        active_file:
+          type: string
+          description: What the slot's publisher streams, the file or its rendition (.renditions/...).
+    SlotPull:
+      type: object
+      description: A pull slot's camera, without credentials, and how its connection stands.
+      required: [scheme, host, path, status]
+      properties:
+        scheme:
+          type: string
+        host:
+          type: string
+        path:
+          type: string
+        status:
+          type: string
+          enum: [live, connecting, unreachable, auth_failed, needs_credentials, stopped]
+          description: needs_credentials after a restart, which keeps no credentials.
+        error:
+          type: string
+    SlotPublisher:
+      type: object
+      description: The stream a slot carries, while MediaMTX has one.
+      required: [protocol, since, codec_supported]
+      properties:
+        protocol:
+          type: string
+          description: rtsp, webrtc and the like; rtspSource or rtspsSource for a pulled camera.
+        address:
+          type: string
+          description: The publisher's host; absent for a pull.
+        since:
+          type: string
+          format: date-time
+        codec:
+          type: string
+        codec_supported:
+          type: boolean
+          description: Whether Neat decodes the codec (H.264, H.265, MJPEG).
+        width:
+          type: integer
+        height:
+          type: integer
+        fps:
+          type: number
+          format: double
+        bitrate_bps:
+          type: number
+          format: double
+    SlotReader:
+      type: object
+      required: [protocol, address]
+      properties:
+        protocol:
+          type: string
+        address:
+          type: string
+        label:
+          type: string
+          description: insight preview for Insight's own live preview.
+    SlotUrls:
+      type: object
+      description: Where the slot's stream is reached, on the host the request used.
+      required: [rtsp]
+      properties:
+        rtsp:
+          type: string
+        http_mjpeg:
+          type: string
+          description: The HTTP MJPEG output (Frozen, `/stream/http/srcN.mjpg`), for an MJPEG stream.
+        whip:
+          type: string
+          description: Where a browser publishes a webcam slot's camera.
+    SlotAssignment:
+      type: object
+      description: >-
+        What to assign: `file` (with `file` and an optional `fps`), `pull` (with `url` and
+        optional `username` and `password`, which replace credentials in the URL) or `webcam`.
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [file, pull, webcam]
+        file:
+          type: string
+          description: A library path.
+        fps:
+          type: integer
+          description: The output rate; absent for the file's own.
+        url:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+    SlotStartRequest:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+          description: How many file slots to start, at least 1.
+    SlotStartResult:
+      type: object
+      required: [started, already_running, skipped_external, errors]
+      properties:
+        started:
+          type: array
+          items:
+            type: integer
+        already_running:
+          type: array
+          items:
+            type: integer
+        skipped_external:
+          type: array
+          items:
+            type: integer
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SlotFailure"
+    SlotFailure:
+      type: object
+      required: [n, code, error]
+      properties:
+        n:
+          type: integer
+        code:
+          type: string
+        error:
+          type: string
+    SlotStopResult:
+      type: object
+      required: [stopped, skipped_external]
+      properties:
+        stopped:
+          type: array
+          description: The slots that were to run.
+          items:
+            type: integer
+        skipped_external:
+          type: array
+          description: The slots an external publisher holds, whose streams go on.
+          items:
+            type: integer
+    AutoAssignResult:
+      type: object
+      required: [assigned, available, skipped_external, skipped_pulled]
+      properties:
+        assigned:
+          type: integer
+          description: The slots given a file.
+        available:
+          type: integer
+          description: The files there were to give.
+        skipped_external:
+          type: array
+          items:
+            type: integer
+        skipped_pulled:
+          type: array
+          items:
+            type: integer
+    RenditionUsage:
+      type: object
+      required: [count, bytes, in_use]
+      properties:
+        count:
+          type: integer
+        bytes:
+          type: integer
+          format: int64
+        in_use:
+          type: integer
+          description: Those a slot streams or is about to.
+    RenditionsCleared:
+      type: object
+      required: [removed, freed_bytes, kept]
+      properties:
+        removed:
+          type: integer
+        freed_bytes:
+          type: integer
+          format: int64
+        kept:
+          type: integer
+          description: Kept because a slot streams them or is about to.
+    MediaEntry:
+      type: object
+      description: A folder or a file of the library.
+      required: [name, path, folder, streamable, probe]
+      properties:
+        name:
+          type: string
+          description: The entry's own name; the root's is empty.
+        path:
+          type: string
+          description: The library path; the root's is empty.
+        folder:
+          type: boolean
+        children:
+          type: array
+          description: A folder's entries, folders first; absent for a file and an empty folder.
+          items:
+            $ref: "#/components/schemas/MediaEntry"
+        streamable:
+          type: boolean
+          description: >-
+            Whether a slot can stream the file: from its probe, else from its extension; for a
+            folder, whether any file below it is.
+        streamable_count:
+          type: integer
+          description: For a folder, the streamable files below it.
+        probe:
+          nullable: true
+          description: Null while the file is being probed, and for a folder.
+          allOf:
+            - $ref: "#/components/schemas/MediaProbe"
+        probing:
+          type: boolean
+    MediaProbe:
+      type: object
+      description: What ffprobe says about a file's first video stream.
+      required: [kind, size, streamable]
+      properties:
+        kind:
+          type: string
+          enum: [video, image, unknown]
+        codec:
+          type: string
+          description: h264, h265, mjpeg or ffprobe's name of another codec.
+        codec_name:
+          type: string
+          description: The codec as the UI shows it (H.264).
+        profile:
+          type: string
+        pixel_format:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        fps:
+          type: number
+          format: double
+        frame_rate:
+          type: string
+          description: The rate as ffprobe writes it (30000/1001).
+        duration_ms:
+          type: integer
+          format: int64
+        size:
+          type: integer
+          format: int64
+        has_b_frames:
+          type: boolean
+        streamable:
+          type: boolean
+        problem:
+          type: string
+          description: Why ffprobe could not read the file.
+    MediaFileInfo:
+      type: object
+      required: [name, path, probe]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        probe:
+          $ref: "#/components/schemas/MediaProbe"
+    MediaDeleteRequest:
+      type: object
+      required: [paths]
+      properties:
+        paths:
+          type: array
+          items:
+            type: string
+    MediaDeleted:
+      type: object
+      required: [paths]
+      properties:
+        paths:
+          type: array
+          items:
+            type: string
+    MediaUpload:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+        on_conflict:
+          type: string
+          enum: [ask, keep_both, replace]
+          description: What a taken name does; ask unless said.
+    MediaSaved:
+      type: object
+      description: A file or folder that joined the library.
+      required: [path]
+      properties:
+        path:
+          type: string
+        folder:
+          type: boolean
+        reencoded:
+          type: array
+          description: The files re-encoded before they were saved.
+          items:
+            type: string
+        restarted:
+          type: array
+          description: The slots that streamed what it replaced, restarted on it.
+          items:
+            type: integer
+        unassigned:
+          type: array
+          description: The slots whose file a replaced folder no longer has.
+          items:
+            type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+    MediaConflict:
+      type: object
+      description: What an upload's name clashes with.
+      required: [existing, suggested]
+      properties:
+        existing:
+          type: string
+          description: The library path that is taken.
+        suggested:
+          type: string
+          description: The free name keep_both would save under.
+    LibraryError:
+      type: object
+      description: The error shape, with what the media library adds.
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        conflict:
+          $ref: "#/components/schemas/MediaConflict"
+        slots:
+          type: array
+          description: With in_use, the slots that use the files.
+          items:
+            type: integer
+    Catalog:
+      type: object
+      description: The published catalog of sample clips, as its index has it.
+      required: [index_url, base_url, sources, assets]
+      properties:
+        schema:
+          type: string
+        generated_at:
+          type: string
+        index_url:
+          type: string
+        base_url:
+          type: string
+        sources:
+          type: array
+          description: The videos the assets are made from, as the index has them.
+          items:
+            type: object
+            additionalProperties: true
+        assets:
+          type: array
+          description: The files to import, as the index has them, each with its download url.
+          items:
+            type: object
+            required: [path, url]
+            properties:
+              path:
+                type: string
+              url:
+                type: string
+            additionalProperties: true
+    CatalogImportRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: An asset's path in the catalog.
+    JobList:
+      type: object
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+    Job:
+      type: object
+      description: Long work (an encode, a re-encode, a download) at one moment.
+      required: [id, kind, title, state, progress, created_at]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: rendition, upload or catalog_import.
+        title:
+          type: string
+        state:
+          type: string
+          enum: [queued, running, done, failed, cancelled]
+        progress:
+          $ref: "#/components/schemas/JobProgress"
+        result:
           type: object
-          required: [code, message]
-          properties:
-            code:
-              type: string
-              description: A stable snake_case word the UI may branch on.
-            message:
-              type: string
-              description: A sentence the UI may show as it is.
-            hint:
-              type: string
-              description: What to do about it, when there is something to say.
+          description: >-
+            Once done: what was saved (MediaSaved) for an upload or an import, `{rendition}`
+            for a rendition.
+          additionalProperties: true
+        error:
+          type: string
+          description: Once failed, why, as a sentence.
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+    JobProgress:
+      type: object
+      required: [phase, detail]
+      properties:
+        percent:
+          type: number
+          format: double
+        phase:
+          type: string
+          description: encode, download, save and the like.
+        detail:
+          type: string

@@ -40,6 +40,8 @@ type Config struct {
 	Channels Channels
 	// WebRTCPorts is the UDP range browsers receive channel media from.
 	WebRTCPorts PortRange
+	// Published are the host ports MediaMTX's listeners are published on.
+	Published PublishedPorts
 }
 
 // Paths are the fixed places Config reads. Tests point them into a temporary folder.
@@ -99,6 +101,7 @@ func Load(port int, paths Paths, env Env, addrs AddressFinder) (Config, error) {
 		Network:     network,
 		Channels:    resolveChannels(place, ports, havePorts),
 		WebRTCPorts: resolveWebRTCPorts(ports, havePorts),
+		Published:   resolvePublishedPorts(ports, havePorts),
 	}, nil
 }
 

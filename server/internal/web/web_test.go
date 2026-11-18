@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"insight/internal/config"
+	"insight/internal/legacy"
 )
 
 func serve(t *testing.T, h http.Handler, method, target string) *httptest.ResponseRecorder {
@@ -65,26 +66,32 @@ func TestHealth(t *testing.T) {
 func TestRouting(t *testing.T) {
 	h := NewHandler(Deps{
 		Legacy:         marker("legacy"),
-		LegacyPrefixes: []string{"/api/", "/stream/", "/media/"},
+		LegacyPrefixes: legacy.Prefixes,
 		UI:             marker("ui"),
 		Now:            fixed,
 	})
-	cases := map[string]string{
-		"/":                      "ui",
-		"/viewer":                "ui",
-		"/api/mediasrc":          "legacy",
-		"/stream/http/src1.mjpg": "legacy",
-		"/media/clip.mp4":        "legacy",
-		"/mediafile":             "ui",
-		"/api/health":            "", // the new server's own
+	cases := []struct {
+		target, want string // "" is the new server's own answer, with status
+		status       int
+	}{
+		{"/", "ui", http.StatusOK},
+		{"/viewer", "ui", http.StatusOK},
+		{"/api/boards", "legacy", http.StatusOK},
+		{"/swagger-ui-assets/swagger-ui.css", "legacy", http.StatusOK},
+		{"/media", "ui", http.StatusOK}, // the Media page; files are /api/media/file
+		{"/media/clip.mp4", "ui", http.StatusOK},
+		{"/mediafile", "ui", http.StatusOK},
+		{"/api/health", "", http.StatusOK},
+		{"/stream/preview/src1.mjpg", "", http.StatusNotFound},
+		{"/stream/http/src1.jpg", "", http.StatusNotFound},
 	}
-	for target, want := range cases {
-		w := serve(t, h, http.MethodGet, target)
-		if want != "" && w.Body.String() != want {
-			t.Errorf("%s went to %q, want %q", target, w.Body.String(), want)
+	for _, c := range cases {
+		w := serve(t, h, http.MethodGet, c.target)
+		if c.want != "" && w.Body.String() != c.want {
+			t.Errorf("%s went to %q, want %q", c.target, w.Body.String(), c.want)
 		}
-		if want == "" && w.Code != http.StatusOK {
-			t.Errorf("%s answered %d", target, w.Code)
+		if w.Code != c.status {
+			t.Errorf("%s answered %d, want %d", c.target, w.Code, c.status)
 		}
 	}
 }

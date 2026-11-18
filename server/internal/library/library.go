@@ -185,9 +185,7 @@ func (l *Library) abs(rel string) string {
 	return filepath.Join(l.root, filepath.FromSlash(rel))
 }
 
-// stagePrefix starts the name of every staging folder. It differs from the old backend's
-// .upload-*, which the old backend sweeps whenever it starts, and it may restart while the
-// server stages an upload.
+// stagePrefix starts the name of every staging folder.
 const stagePrefix = ".staging-"
 
 // newStage makes a staging folder in the media folder.

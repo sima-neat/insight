@@ -69,6 +69,55 @@ func TestWebRTCPorts(t *testing.T) {
 	}
 }
 
+func TestPublishedPorts(t *testing.T) {
+	// What sima-cli writes (sima_cli/sdk/neat.py), the other entries left out.
+	sdk := `{"rtsp": {"tcp": {"host": 18554, "container": 8554}},
+		"webrtcWhip": {"protocol": "tcp", "host": 18889, "container": 8889},
+		"webrtcWhipIce": {"protocol": "udp", "host": 18189, "container": 18189}}`
+	cases := []struct {
+		name, portMap string // "" writes no file
+		want          PublishedPorts
+	}{
+		{"no port map", "", PublishedPorts{}},
+		{"the SDK's", sdk, PublishedPorts{RTSP: 18554, WHIP: 18889, WHIPICE: 18189}},
+		{"none named", `{"insightVideoChannels": 48}`, PublishedPorts{}},
+		{"rtsp without tcp", `{"rtsp": {"udp": {"host": 18554}}}`, PublishedPorts{}},
+		{"rtsp not an object", `{"rtsp": 18554, "webrtcWhip": {"host": 18889}}`, PublishedPorts{WHIP: 18889}},
+		{"a string", `{"webrtcWhip": {"host": "18889"}, "webrtcWhipIce": {"host": 18189}}`, PublishedPorts{WHIPICE: 18189}},
+		{"a fraction", `{"webrtcWhip": {"host": 18889.5}}`, PublishedPorts{}},
+		{"zero", `{"webrtcWhipIce": {"host": 0}}`, PublishedPorts{}},
+		{"too large", `{"rtsp": {"tcp": {"host": 65536}}}`, PublishedPorts{}},
+		{"null", `{"webrtcWhip": null}`, PublishedPorts{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			paths := testPaths(t)
+			if c.portMap != "" {
+				write(t, filepath.Join(paths.ConfigDir, "neat-port-map.json"), c.portMap)
+			}
+			cfg, err := Load(9900, paths, envOf(nil), noAddresses)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Published != c.want {
+				t.Fatalf("published %+v, want %+v", cfg.Published, c.want)
+			}
+		})
+	}
+}
+
+func TestAMalformedPublishedPortKeepsTheRestOfTheMap(t *testing.T) {
+	paths := testPaths(t)
+	write(t, filepath.Join(paths.ConfigDir, "neat-port-map.json"), `{"insightVideoChannels": 8, "rtsp": [1]}`)
+	cfg, err := Load(9900, paths, envOf(nil), noAddresses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Channels.Count != 8 || cfg.Published.RTSP != 0 {
+		t.Fatalf("channels %+v, published %+v", cfg.Channels, cfg.Published)
+	}
+}
+
 func TestNEATPortMapFileOverridesTheFolder(t *testing.T) {
 	paths := testPaths(t)
 	write(t, filepath.Join(paths.ConfigDir, "neat-port-map.json"), `{"insightVideoChannels": 4}`)
