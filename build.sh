@@ -4,10 +4,7 @@ set -e
 # ==== Configuration ====
 MTX_VERSION="1.12.1"
 BUILD_DIR="build"
-GO_TEMP_DIR="$BUILD_DIR/go_viewer"
 MTX_BASE_URL="https://github.com/bluenviron/mediamtx/releases/download/v${MTX_VERSION}"
-VF_OUTPUT="$BUILD_DIR/vf"
-MTX_OUTPUT="$BUILD_DIR/mediamtx_bin"
 INSIGHT_BIN="neat_insight/bin"
 DIST_DIR="dist"
 
@@ -288,16 +285,8 @@ if [[ "$TARGET_PLATFORM" == "all" && "$INSTALL_WHEEL" == "1" ]]; then
 fi
 
 mkdir -p "$BUILD_DIR"
-rm -rf "$GO_TEMP_DIR"
-mkdir -p "$GO_TEMP_DIR"
 
-# ==== Prepare Go build temp module ====
-cp webrtc/*.go "$GO_TEMP_DIR/"
-pushd "$GO_TEMP_DIR" > /dev/null
-go mod init viewer
-go mod tidy
-
-# ==== Detect Platform and Build Go App ====
+# ==== Detect the platform ====
 OS=$(uname -s)
 ARCH=$(uname -m)
 TARGET=""
@@ -341,13 +330,10 @@ case "$TARGET_PLATFORM" in
     ;;
 esac
 
-popd > /dev/null
-
 for target in "${TARGETS_TO_BUILD[@]}"; do
     SHIM_CC_CANDIDATES=()
     SHIM_CC_PACKAGE=""
     SHIM_ELF_MACHINE=""
-    VF_BIN_NAME="vf"
     MTX_BIN_NAME="mediamtx"
     case "$target" in
         linux-aarch64)
@@ -384,10 +370,6 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     esac
 
     echo "🛠 Building target: $target"
-    pushd "$GO_TEMP_DIR" > /dev/null
-    echo "🧱 Go build target GOOS=$GOOS GOARCH=$GOARCH"
-    GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -o "../$VF_BIN_NAME" .
-    popd > /dev/null
 
     # ==== Prepare neat_insight/bin ====
     echo "📂 Preparing neat_insight/bin for $target"
@@ -407,9 +389,6 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     rm "$BUILD_DIR/$MTX_ARCHIVE"
 
     # ==== Copy app assets ====
-    cp "$BUILD_DIR/$VF_BIN_NAME" "$INSIGHT_BIN/$VF_BIN_NAME"
-    chmod +x "$INSIGHT_BIN/$VF_BIN_NAME" || true
-    cp -r webrtc/static "$INSIGHT_BIN/"
     cp webrtc/mediamtx.yml "$INSIGHT_BIN/"
     # The Insight server, with the frontend's build embedded.
     scripts/build-server.sh "$GOOS" "$GOARCH" "$INSIGHT_BIN/neat-insight" "$PACKAGE_VERSION"
@@ -459,16 +438,6 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
             echo "❌ readelf is required to validate the Linux shim; install binutils."
             exit 1
         fi
-    fi
-
-    # Bundle the built frontend into the Python package for wheel installs.
-    if [[ -d "frontend/dist" ]]; then
-        echo "📦 Bundling frontend/dist into neat_insight/frontend_dist"
-        rm -rf neat_insight/frontend_dist
-        mkdir -p neat_insight/frontend_dist
-        cp -r frontend/dist/. neat_insight/frontend_dist/
-    else
-        echo "⚠️ frontend/dist not found. UI will not be bundled into wheel."
     fi
 
     # ==== Python Packaging ====

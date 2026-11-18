@@ -1,11 +1,5 @@
 __pycache__
 mediamtx
-vf
-# `vf` above is the Go binary; the Viewer's vf connection code is source.
-!frontend/src/app/viewer/vf/
-# vf's build makes its Go module afresh each time (build.sh); the server's (server/) is committed.
-/webrtc/go.mod
-/webrtc/go.sum
 .venv
 build/
 # The wheels; the server's embedded frontend build (server/internal/spa/dist) has its own rule.

@@ -9,7 +9,7 @@ DEV=$HOME/workspace/.insight-dev            # == /workspace/.insight-dev inside 
 C=${INSIGHT_SDK_CONTAINER:-$(docker ps --format '{{.Names}}' | grep -m1 'sima-neat-sdk' || true)}
 [[ -n "$C" ]] || { echo "SDK container not running (set INSIGHT_SDK_CONTAINER to pick one)"; exit 1; }
 
-# The server (bin/neat-insight) stops the old backend it runs, and that stops vf and MediaMTX.
+# The server (bin/neat-insight) stops the old backend it runs, and that stops MediaMTX.
 # A dev copy deployed before the server existed ran the backend from .venv/bin/neat-insight.
 stop_dev() {
   docker exec "$C" bash -c '
@@ -37,13 +37,13 @@ fi
 rsync -a --delete --exclude .venv --exclude node_modules --exclude .git --exclude .superpowers --exclude __pycache__ \
   --exclude 'neat_insight/bin' --exclude dev-insight.log --exclude DEPLOYED_COMMIT "$REPO/" "$DEV/"
 cp "$REPO/webrtc/mediamtx.yml" "$DEV/neat_insight/bin/mediamtx.yml"     # build.sh does this; the launcher reads bin/
-rsync -a --delete "$REPO/webrtc/static/" "$DEV/neat_insight/bin/static/"
+# An earlier deploy's bin/vf and bin/static stay: a deploy from main still runs them.
 case "$(docker exec "$C" uname -m)" in
   x86_64) ARCH=amd64 ;;
   aarch64) ARCH=arm64 ;;
   *) echo "unexpected container architecture"; exit 1 ;;
 esac
-# Built into the copy's bin/ beside vf; the frontend build is embedded in it.
+# Built into the copy's bin/; the frontend build is embedded in it.
 "$REPO/scripts/build-server.sh" linux "$ARCH" "$DEV/neat_insight/bin/neat-insight" "dev-$(git -C "$REPO" rev-parse --short HEAD)"
 git -C "$REPO" rev-parse HEAD > "$DEV/DEPLOYED_COMMIT"; git -C "$REPO" status --short >> "$DEV/DEPLOYED_COMMIT"
 

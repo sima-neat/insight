@@ -31,7 +31,7 @@ setup(
     author="Sima.ai",
     author_email="support@sima.ai",
     license="MIT",
-    packages=find_packages(exclude=["neat_insight.bin*", "neat_insight.bin.static*"]),
+    packages=find_packages(exclude=["neat_insight.bin*"]),
     include_package_data=True,
     zip_safe=False,
     install_requires=[
@@ -49,15 +49,11 @@ setup(
         "neat_insight": [
             "openapi.json",
             "swagger_ui/*",
+            # The server, with the web UI built in, and the MediaMTX it runs.
             "bin/neat-insight",
-            "bin/vf",
             "bin/mediamtx",
             "bin/mediamtx.yml",
             "bin/ffmpeg_nodelay.so",
-            "bin/static/*",
-            "bin/static/**/*",
-            "frontend_dist/*",
-            "frontend_dist/**/*",
             "tools/*",
         ]
     },
