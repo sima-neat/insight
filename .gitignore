@@ -1,5 +1,6 @@
 __pycache__
-mediamtx
+# A MediaMTX binary unpacked at the top (neat_insight/bin/ has its own rule below).
+/mediamtx
 .venv
 build/
 # The wheels; the server's embedded frontend build (server/internal/spa/dist) has its own rule.
