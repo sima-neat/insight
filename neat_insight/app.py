@@ -30,6 +30,7 @@ from typing import Any, List, Optional
 import psutil
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from PIL import Image
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
 if __name__ == "__main__" and (not globals().get("__package__")):
@@ -4551,10 +4552,18 @@ def main():
 
     parser = argparse.ArgumentParser(description="Start the neat-insight server.")
     parser.add_argument("--port", type=int, default=9900, help="Port to run the server on (default: 9900)")
+    # The new server (server/) runs this backend behind it while the rewrite moves its routes over:
+    # on loopback, over plain HTTP, with the certificate the new server resolved for vf, MediaMTX
+    # and webssh. Goes with this file at the end of the rewrite.
+    parser.add_argument("--behind-proxy", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--cert", help=argparse.SUPPRESS)
+    parser.add_argument("--key", help=argparse.SUPPRESS)
     args = parser.parse_args()
     # MediaMTX starts before the UI binds, so a UI port it already holds fails late.
     if args.port == MEDIAMTX_API_PORT:
         parser.error(f"--port {args.port} is Insight's internal MediaMTX API port; choose another port")
+    if args.behind_proxy and not (args.cert and args.key):
+        parser.error("--behind-proxy needs --cert and --key")
 
     runtime_network_config = load_runtime_network_config()
 
@@ -4562,7 +4571,10 @@ def main():
     reset_sources()
     _remove_stale_upload_stages()
 
-    ssl_context = check_and_generate_mkcert_certificate(args.port)
+    if args.behind_proxy:
+        ssl_context = (args.cert, args.key)
+    else:
+        ssl_context = check_and_generate_mkcert_certificate(args.port)
     server_ssl_context = ssl_context
     start_processes(
         ssl_context,
@@ -4581,6 +4593,14 @@ def main():
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+
+    if args.behind_proxy:
+        # The browser reached the new server over HTTPS under its own host name; links built
+        # here (MJPEG URLs, the viewer URL) must name those.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+        print(f"neat-insight backend on http://127.0.0.1:{args.port}, behind the new server")
+        app.run(host="127.0.0.1", port=args.port)
+        return
 
     print("\n" + "=" * 120)
     print("neat-insight server starting")
