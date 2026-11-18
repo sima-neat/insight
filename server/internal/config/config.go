@@ -36,6 +36,10 @@ type Config struct {
 	CertHost string
 	// Network is how browsers reach Insight.
 	Network Network
+	// Channels is how many viewer channels Insight serves.
+	Channels Channels
+	// WebRTCPorts is the UDP range browsers receive channel media from.
+	WebRTCPorts PortRange
 }
 
 // Paths are the fixed places Config reads. Tests point them into a temporary folder.
@@ -86,7 +90,16 @@ func Load(port int, paths Paths, env Env, addrs AddressFinder) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{Port: port, Place: place, DataDir: dataDir, CertHost: certHost, Network: network}, nil
+	ports, havePorts := loadPortMap(paths.ConfigDir, env)
+	return Config{
+		Port:        port,
+		Place:       place,
+		DataDir:     dataDir,
+		CertHost:    certHost,
+		Network:     network,
+		Channels:    resolveChannels(place, ports, havePorts),
+		WebRTCPorts: resolveWebRTCPorts(ports, havePorts),
+	}, nil
 }
 
 func detectPlace(paths Paths) (Place, error) {
