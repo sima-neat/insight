@@ -17,8 +17,8 @@ repo.
 - `neat_insight/`: the old Flask backend (the `/api/` endpoints, media, MJPEG previews), run by the
   server on a loopback port until the rewrite has replaced it, and the `neat-insight` command
   (`launcher.py`), which runs the server binary.
-- `webrtc/`: vf, the Go media and metadata server the Viewer gets its video from (replaced by the
-  server in the rewrite's second phase).
+- `webrtc/mediamtx.yml`: MediaMTX's configuration, all that is left of vf's folder (the server's
+  channels replaced vf); it moves with MediaMTX in the rewrite's third phase.
 - `docs/contracts.md`: what an app follows to show up in Insight (source URLs, channel ports, the
   metadata format with its JSON Schemas in `docs/schemas/metadata/`).
 - `UPSTREAM.md`: the `sima-neat/insight` baseline this repo was copied from. Backend changes from
@@ -273,7 +273,7 @@ merging.
   where `scripts/build-server.sh` looks for it to embed it in the server. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
-  `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns at
+  `/static/`, which the hosted mode's public origin routed to vf's old page. The initial-bundle budget warns at
   600 kB. The initial bundle measures 583.0 kB raw with kit 0.20.0 (main 20 kB, styles 96 kB; 582.8
   kB with kit 0.19.1, the shared chunk 465 kB, main 22 kB; 580.8 kB with kit 0.18.0; 579.2 kB before
   Stats used the kit's page tabs, whose directives are in the primary entry and so in the shared
@@ -309,10 +309,11 @@ merging.
   toast host is the kit entry that is there on purpose: the app root renders it. A new lazy page or
   dialog adds its selector.
 - **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`; the
-  video part is its `@sima/neat-ui/video` entry point) draws and knows nothing of vf:
+  video part is its `@sima/neat-ui/video` entry point) draws and knows nothing of the server:
   `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the matching frames;
   `neat-tile-grid` packs the tiles.
-  The app connects, in `src/app/viewer/`: `vf/` (a `VfConnection` per channel, via `/api/vf/offer`),
+  The app connects, in `src/app/viewer/`: `vf/` (a `VfConnection` per channel, via
+  `POST /api/channels/{n}/offer`; the folder keeps the old viewer's name),
   `settings/` (overlay settings, layout choices, and the regions of interest in `RoiStore`, which
   has its own storage names, `roi:global` and `roi:channel:<n>`; regions are display-only and never
   leave the browser), `viewer-tile.ts` (joins both to a kit tile), `channel-playback.ts`
@@ -343,10 +344,19 @@ the same arguments and names its interpreter in `NEAT_INSIGHT_PYTHON`.
   what a crashed run left behind (and only that: the PID must still run the same program and lead
   its own group).
 - **The old backend** (`internal/legacy`) is the first child: Flask with `--behind-proxy` on a free
-  loopback port, plain HTTP, the server's certificate passed to it for vf, MediaMTX and webssh.
+  loopback port, plain HTTP, the server's certificate passed to it for MediaMTX and webssh.
   Every `/api/`, `/stream/`, `/media/` and `/swagger-ui-assets/` request the server does not handle
   is passed to it, with the browser's host and `X-Forwarded-Proto: https`, streamed. Each phase of
-  the rewrite moves routes from it to the server; `/api/health` is the first.
+  the rewrite moves routes from it to the server: `/api/health` first, then the channels.
+- **Channels** (`internal/channels`) are the Viewer's path, which replaced vf: each binds UDP
+  9000+N (RTP) and 9100+N (metadata), assembles whole pictures (vf's rules: start flags, sequence
+  breaks, the H.265 gate), rewrites their sequence and timestamps onto one outgoing clock, matches
+  metadata to frames by the contract's rule (`docs/contracts.md`), and sends both to the browsers
+  watching over WebRTC (Pion; one shared track per channel and codec, NACKs answered). Routes:
+  `/api/channels`, `POST /api/channels/{n}/offer`, and the frozen `/api/ingest/stats` and
+  `/api/viewer-url`. The count and the WebRTC port range come from the SDK's port map, read once.
+  The connection tests need a network interface besides loopback (Pion gathers no loopback
+  candidates), so they fail inside a network sandbox.
 
 ## The vendored kit
 

@@ -108,7 +108,7 @@ Use this when you need to modify functionality.
 Prerequisites:
 - Python 3.10+
 - Node.js 24 and npm for the frontend (`.node-version`)
-- Go, the version `server/go.mod` names, for the server and vf
+- Go, the version `server/go.mod` names, for the server
 - A C compiler for each Linux target: `gcc` for the host, plus
   `gcc-aarch64-linux-gnu` or `gcc-x86-64-linux-gnu` to cross-build the other
   Linux wheel. Linux wheels bundle a small `LD_PRELOAD` shim
@@ -238,7 +238,7 @@ Keep it off channels a real pipeline feeds: two streams on one port garble each 
 
 ## Testing metadata
 
-`neat-insight` now ships a metadata test sender for vf metadata ports (`9100-9179`).
+`neat-insight` ships a metadata test sender for the channels' metadata ports (`9100+N`).
 
 Examples:
 

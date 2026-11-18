@@ -497,27 +497,29 @@ Places where the code, Core's docs and the apps disagree, or where this document
 what disagrees, the choice, and why.
 
 1. **Match tolerance.** The design draft said "within one frame"; vf matches within 90 ticks (1 ms)
-   and takes the closest (`webrtc/metadata_sync.go`). *Choice:* 90 ticks. *Why:* it is the most
+   and takes the closest (vf's `metadata_sync.go`, since removed). *Choice:* 90 ticks. *Why:* it is the most
    the rounding to milliseconds loses; a frame-wide window would match a neighboring frame at high
-   frame rates.
+   frame rates. *Now:* the server's channels match this way.
 2. **Stamping on arrival.** The design's default for the new backend is to stamp each message on
    arrival with `T × 90 + offset`. The kit draws a message only on a frame whose RTP timestamp
    equals `_insight.rtp_timestamp` exactly (`metadata-sync.ts`), and `T × 90` is up to 89 ticks
    below the frame's. *Choice:* the contract keeps the rule in [Matching](#matching-a-message-to-its-frame);
    the backend must stamp the matched frame's outgoing time, so it keeps recent frames' times per
    channel (no frame buffering), or the kit gains a tolerance. *Why:* the producer's side must not
-   change. The 5 s wait is today's vf value (also capped at 256 entries, about 2.5 s at 100
-   messages a second); under arrival stamping it moves to the browser's queue (300 entries).
+   change. The 5 s wait is vf's value (also capped at 256 entries, about 2.5 s at 100 messages a
+   second). *Now:* the server keeps the last 5 s of frames' times per channel and stamps a matched
+   message with its frame's outgoing time; no frames are held back.
 3. **Whole numbers written with a fraction.** vf decodes `timestamp` as an int64, so `12345.0`
    (Python's `json.dumps` of a float) fails the whole envelope and the message is drawn by arrival.
    JSON Schema counts `12345.0` as an integer. *Choice:* Insight accepts any whole number.
-   *Why:* one rule for the schema and the backend.
+   *Why:* one rule for the schema and the backend. *Now:* the server accepts them.
 4. **Silent loss on a wrong timestamp.** A float is drawn by arrival order, which hides the
    mistake; an integer in the wrong unit is held 5 s and dropped, visible only in
-   `expired_metadata` of verbose ingest stats. `neat_insight/tools/metadata_test.py` sends
+   `expired_metadata` of vf's verbose ingest stats. `neat_insight/tools/metadata_test.py` sends
    `time.time()` seconds. *Choice:* integer milliseconds as stated; Insight counts unmatched
    messages per channel and the tile says so (the design's "says so on the tile"; not built yet).
-   The test tool follows the contract when it is rewritten.
+   The test tool follows the contract when it is rewritten. *Now:* `/api/channels` counts
+   `unmatched` per channel; the tile does not say so yet.
 5. **Negative timestamps.** Core's `send_metadata` leaves `timestamp` out for a negative value;
    the apps' `support/object_detection/detection_egress.h` writes `-1` itself; vf treats a negative
    value as absent. *Choice:* negative means absent, and the schema allows any integer. *Why:* it
@@ -528,7 +530,7 @@ what disagrees, the choice, and why.
 7. **A producer's `_insight`.** vf overwrites `_insight` only on a matched message; an unmatched or
    untimestamped one keeps a producer's, and the kit trusts it. *Choice:* reserved; Insight removes
    it from every incoming message. *Why:* a producer must not be able to pick the frame by
-   Insight's internal clock.
+   Insight's internal clock. *Now:* the server removes it.
 8. **Other timing fields.** The high-density detector also sends top-level `rtp_timestamp`,
    `pts_ns`, `stream_id` and more (`detection_egress.h`). *Choice:* ignored; `timestamp` is the one
    key. *Why:* two ways to say one thing; `rtp_timestamp` is a third name beside `timestamp` and
@@ -537,15 +539,17 @@ what disagrees, the choice, and why.
    it. *Choice:* any JSON value, a string recommended, diagnostics only.
 10. **Trailing NUL bytes.** vf strips them from every message, for fixed-size padded senders; no
     sender in the public repos pads. *Choice:* not part of the contract; the new backend drops
-    the trimming unless a producer that needs it turns up.
+    the trimming unless a producer that needs it turns up. *Now:* the server does not trim.
 11. **RTP datagram size.** vf reads RTP into a 4 KiB buffer and truncates a larger datagram without
-    a sign (`webrtc/viewer.go`); Insight's older docs state "at most 4096 bytes". *Choice:* up to
-    65,507 bytes, about 1,400 recommended. *Why:* a truncation is a bug, not a limit anyone chose.
+    a sign; Insight's older docs state "at most 4096 bytes". *Choice:* up to 65,507 bytes, about
+    1,400 recommended. *Why:* a truncation is a bug, not a limit anyone chose. *Now:* the server
+    reads datagrams of any size.
 12. **RTP/JPEG (payload type 26).** Core's `video_sender.md` says Insight's viewer shows MJPEG
     "in releases after v0.0.8"; Core's `node.mdx` says it does not; USB-camera apps send it;
     insight-next's vf drops it, so the tile waits forever. Upstream insight added JPEG channels
     after insight-next's copy. *Choice:* planned, in a later phase; until then Insight's channel
-    list reports the unsupported payload type. Core's docs need an update outside Insight.
+    list reports the unsupported payload type (`/api/channels`: `payload_type`,
+    `unsupported_packets`). Core's docs need an update outside Insight.
 13. **Keyframe interval.** "At least every second" is the target. Core's `SimaEncodeOptions` leaves
     `gop_length` and `idr_interval` unset by default, which keeps the hardware encoder's own
     default (not documented as a value; `idr_interval = 0` means three times the frame rate).
@@ -559,7 +563,7 @@ what disagrees, the choice, and why.
     `9000-9079`; `sima-cli` publishes 4 channels by default, so a DevKit app on channel 4 or above
     gets no tile. *Choice:* channels `0` to `C − 1` as Insight resolves `C` (80 on a DevKit, the
     published count in the SDK), stated by `/api/viewer-url`. *Why:* one number everywhere, the
-    design's default.
+    design's default. *Now:* the server binds channels `0` to `C − 1` only.
 16. **Sources from 1, channels from 0.** One apps config comment names `/src0`
     (`single-stream-thermal-face-detector`). *Choice:* keep both numberings. *Why:* apps, docs and
     tests use both; this page says they are separate.
@@ -573,7 +577,7 @@ what disagrees, the choice, and why.
     beside Insight picks another port.
 19. **Liveness.** "Hide empty slots" counts video only, so a channel with metadata and no video is
     hidden. *Choice:* Insight's channel list reports video and metadata separately, so the Viewer
-    can say "metadata, no video".
+    can say "metadata, no video". *Now:* `/api/channels` does; the Viewer still hides by video.
 20. **Tracking in Core's docs.** `metadata_sender.md` says Insight's tracking overlay "is tracked
     separately in `sima-neat/insight#8`"; the Viewer draws `tracking`, and the tracking examples
     send it. *Choice:* part of version 1. Core's doc needs an update outside Insight.
