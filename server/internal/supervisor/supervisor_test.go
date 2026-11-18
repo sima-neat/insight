@@ -42,14 +42,24 @@ func alive(pid int) bool {
 	return ok
 }
 
-func TestCheckGroupTarget(t *testing.T) {
-	for _, pid := range []int{-5, -1, 0, 1, 4242} {
-		if err := checkGroupTarget(pid, 4242); !errors.Is(err, errUnsafeTarget) {
-			t.Errorf("pid %d was accepted", pid)
-		}
+func TestALongLineIsCutAndReadingGoesOn(t *testing.T) {
+	s, _ := New(t.TempDir())
+	// 2 MiB on one line, then a short one: the child must not block on its pipe.
+	p, err := s.Start(Spec{Name: "long", Path: sh(t), Args: []string{"-c", "head -c 2097152 /dev/zero | tr '\\0' x; echo; echo after"}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := checkGroupTarget(4243, 4242); err != nil {
-		t.Errorf("a child's pid was refused: %v", err)
+	select {
+	case <-p.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the child did not finish")
+	}
+	tail := p.Tail()
+	if len(tail) != 2 || len(tail[0]) != maxLine || tail[1] != "after" {
+		t.Fatalf("%d lines, the first %d bytes", len(tail), len(tail[0]))
+	}
+	if p.Status().LastExit != "exit status 0" {
+		t.Fatalf("exit %q", p.Status().LastExit)
 	}
 }
 

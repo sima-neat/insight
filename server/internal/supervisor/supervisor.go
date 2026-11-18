@@ -16,9 +16,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"insight/internal/procgroup"
 )
 
 // Spec says how to run one child.
@@ -159,7 +162,7 @@ func (p *Process) Stop(ctx context.Context) error {
 	p.mu.Unlock()
 
 	if running && cmd != nil {
-		if err := signalGroup(cmd.Process.Pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+		if err := procgroup.Signal(cmd.Process.Pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
 	}
@@ -170,7 +173,7 @@ func (p *Process) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 	}
 	if running && cmd != nil {
-		if err := signalGroup(cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		if err := procgroup.Signal(cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
 	}
@@ -187,7 +190,7 @@ func (p *Process) Stop(ctx context.Context) error {
 func (p *Process) launchLocked() (<-chan error, error) {
 	cmd := exec.Command(p.spec.Path, p.spec.Args...)
 	cmd.Env, cmd.Dir = p.spec.Env, p.spec.Dir
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	procgroup.Own(cmd)
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return nil, err
@@ -227,7 +230,7 @@ func (p *Process) watch(exited <-chan error) {
 		p.mu.Unlock()
 		// The group may still hold the child's own children; they go with it.
 		if cmd != nil {
-			_ = signalGroup(cmd.Process.Pid, syscall.SIGKILL)
+			_ = procgroup.Signal(cmd.Process.Pid, syscall.SIGKILL)
 		}
 		removePIDFile(p.pidFile)
 
@@ -264,12 +267,17 @@ func (p *Process) watch(exited <-chan error) {
 	}
 }
 
+// readLines reads the child's output to its end, line by line. A line longer than maxLine is
+// cut, never a reason to stop reading: a child whose pipe is no longer read blocks, or dies on
+// a closed pipe.
 func (p *Process) readLines(reader io.ReadCloser) {
 	defer reader.Close()
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	buffered := bufio.NewReaderSize(reader, 64*1024)
+	for {
+		line, err := readLine(buffered)
+		if err != nil && line == "" {
+			return
+		}
 		p.mu.Lock()
 		p.tail = append(p.tail, line)
 		if len(p.tail) > tailLines {
@@ -279,6 +287,27 @@ func (p *Process) readLines(reader io.ReadCloser) {
 		if p.spec.Output != nil {
 			fmt.Fprintf(p.spec.Output, "[%s] %s\n", p.spec.Name, line)
 		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// maxLine is how much of one output line is kept.
+const maxLine = 4096
+
+// readLine reads one line without its line ending, its first maxLine bytes only.
+func readLine(r *bufio.Reader) (string, error) {
+	var line []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if room := maxLine - len(line); room > 0 {
+			line = append(line, chunk[:min(len(chunk), room)]...)
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return strings.TrimRight(string(line), "\r\n"), err
 	}
 }
 

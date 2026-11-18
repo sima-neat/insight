@@ -11,28 +11,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"insight/internal/procgroup"
 )
-
-// errUnsafeTarget refuses a signal that could reach processes Insight did not start.
-var errUnsafeTarget = errors.New("refusing to signal this process group")
-
-// checkGroupTarget says whether pid may name a process group to signal: one Insight started,
-// which leads its own group. Zero and negative numbers would signal Insight's own group or
-// every process the user may signal; 1 is init; Insight's own PID is its own group.
-func checkGroupTarget(pid, self int) error {
-	if pid <= 1 || pid == self {
-		return fmt.Errorf("%w: %d", errUnsafeTarget, pid)
-	}
-	return nil
-}
-
-// signalGroup sends sig to the process group pid leads.
-func signalGroup(pid int, sig syscall.Signal) error {
-	if err := checkGroupTarget(pid, os.Getpid()); err != nil {
-		return err
-	}
-	return syscall.Kill(-pid, sig)
-}
 
 // A PID file holds "1 <pid> <program path>": the format, the child's PID, and the program it
 // ran, so a later start can tell it from an unrelated process that reuses the PID.
@@ -98,7 +79,7 @@ func (s *Supervisor) StopLeftovers(grace time.Duration) {
 }
 
 func stopLeftover(pid int, program string, grace time.Duration) error {
-	if err := checkGroupTarget(pid, os.Getpid()); err != nil {
+	if err := procgroup.CheckTarget(pid, os.Getpid()); err != nil {
 		return err
 	}
 	running, ok := processRuns(pid)
@@ -109,7 +90,7 @@ func stopLeftover(pid int, program string, grace time.Duration) error {
 		return nil // not a group leader: not a child Insight started
 	}
 	slog.Info("stopping a child a previous run left behind", "pid", pid, "program", program)
-	if err := signalGroup(pid, syscall.SIGTERM); err != nil {
+	if err := procgroup.Signal(pid, syscall.SIGTERM); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(grace)
@@ -119,5 +100,5 @@ func stopLeftover(pid int, program string, grace time.Duration) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return signalGroup(pid, syscall.SIGKILL)
+	return procgroup.Signal(pid, syscall.SIGKILL)
 }
