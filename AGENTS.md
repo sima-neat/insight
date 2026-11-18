@@ -271,9 +271,10 @@ merging.
   `/api/metrics` (System Info's "This computer") is read on open and on Refresh only.
 - **Build output.** `npm run build` writes the app to `frontend/dist` with `index.html` at its root,
   where `scripts/build-server.sh` looks for it to embed it in the server. Fonts and other media go to
-  `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
-  Insight's media library and would shadow them. Keep built files away from `/media/` and from
-  `/static/`, which the hosted mode's public origin routed to vf's old page. The initial-bundle budget warns at
+  `dist/assets/` instead of Angular's default `media/`, which the old backend's `/media/<path>`
+  route once shadowed (the library is `/api/media/...` now). Keep built files away from
+  `/stream/`, which the server keeps for the sources' MJPEG output, and from `/static/`, which the
+  hosted mode's public origin routed to vf's old page. The initial-bundle budget warns at
   600 kB. The initial bundle measures 583.0 kB raw with kit 0.20.0 (main 20 kB, styles 96 kB; 582.8
   kB with kit 0.19.1, the shared chunk 465 kB, main 22 kB; 580.8 kB with kit 0.18.0; 579.2 kB before
   Stats used the kit's page tabs, whose directives are in the primary entry and so in the shared
@@ -421,6 +422,7 @@ Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 | `npm run build`        | Production build into `frontend/dist`                                                               |
 | `npm run check:bundle` | Checks the built bundle: video, lazy pages and the two dialogs stay out of the initial one          |
 | `npm run e2e`          | Playwright end-to-end tests (`frontend/e2e`)                                                        |
+| `npm run api:types`    | Generates `src/app/api.generated.ts` from `server/api/openapi.yaml` (`check:api`, in lint, checks) |
 
 The server's checks run in `server/`: `gofmt -l .`, `go vet ./...`, `go test -race ./...`, and
 `go generate ./...` after a change to `api/openapi.yaml`. The tests against a real MediaMTX run
