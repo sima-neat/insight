@@ -9,20 +9,17 @@ import {
 } from 'rxjs';
 
 /**
- * What a streamed text request reports, in order: the request body's upload progress (an upload
- * only), each line of the response as the server prints it, and `done` once the response ended.
- * `total` is null when the browser cannot tell the size of the upload.
+ * What a streamed text request reports, in order: each line of the response as the server prints
+ * it, and `done` once the response ended.
  */
-export type StreamEvent =
-  | { kind: 'upload'; loaded: number; total: number | null }
-  | { kind: 'line'; text: string }
-  | { kind: 'done' };
+export type StreamEvent = { kind: 'line'; text: string } | { kind: 'done' };
 
 /**
- * A non-2xx answer or a failed connection of any API request. `message` is the server's `error`
- * or `message`; `body` is its JSON body untouched (null when there was none), so a caller can
- * read what the message does not carry, such as the `conflict` of an upload's 409. `status` is 0
- * when the server could not be reached.
+ * A non-2xx answer or a failed connection of any API request. `message` is the server's: the
+ * `error.message` of the server's error shape (`{error: {code, message, hint?}}`), or the `error`
+ * or `message` string the old backend's routes answer with. `body` is the JSON body untouched
+ * (null when there was none), so a caller can read what the message does not carry, such as the
+ * `conflict` of an upload's 409. `status` is 0 when the server could not be reached.
  */
 export class ApiRequestError extends Error {
   constructor(
@@ -33,13 +30,34 @@ export class ApiRequestError extends Error {
     super(message);
     this.name = 'ApiRequestError';
   }
+
+  /** The error shape's `code`, a stable word to branch on; null for an answer without one. */
+  get code(): string | null {
+    return this.detail('code');
+  }
+
+  /** The error shape's `hint`, what to do about it; null when the server gave none. */
+  get hint(): string | null {
+    return this.detail('hint');
+  }
+
+  private detail(field: 'code' | 'hint'): string | null {
+    const error = this.body?.['error'];
+    if (typeof error !== 'object' || error === null) return null;
+    const value = (error as Record<string, unknown>)[field];
+    return typeof value === 'string' && value ? value : null;
+  }
 }
 
 /**
  * The message to show for a failure: an `Error`'s message (an `ApiRequestError` carries the
- * server's), anything else as text. Every caller that reports a failure words it this way.
+ * server's, followed by its hint when it has one), anything else as text. Every caller that
+ * reports a failure words it this way.
  */
 export function messageOf(failure: unknown): string {
+  if (failure instanceof ApiRequestError && failure.hint) {
+    return `${failure.message} ${failure.hint}`;
+  }
   return failure instanceof Error ? failure.message : String(failure);
 }
 
@@ -55,9 +73,9 @@ export function splitLines(pending: string, chunk: string): { lines: string[]; p
 }
 
 /**
- * POSTs `body` (JSON for an object, multipart for a `FormData`) and reads the text response line
- * by line while it arrives. Flask prints progress into these responses and keeps answering 200
- * when the work fails, so the lines, not the status, say how it went (see `progress-lines.ts`).
+ * POSTs `body` as JSON and reads the text response line by line while it arrives: the old Flask
+ * backend's YouTube import prints its progress into it and keeps answering 200 when the work
+ * fails, so the lines, not the status, say how it went (see `progress-lines.ts`).
  *
  * Unsubscribing aborts the request, and the server stops its subprocesses when the connection
  * drops: that is how an import is cancelled.
@@ -65,7 +83,7 @@ export function splitLines(pending: string, chunk: string): { lines: string[]; p
 export function postStreamedText(
   http: HttpClient,
   url: string,
-  body: FormData | object,
+  body: object,
 ): Observable<StreamEvent> {
   return defer(() => {
     // `partialText` and the final body are both the whole text so far, not the part that is new:
@@ -88,8 +106,6 @@ export function postStreamedText(
       .pipe(
         mergeMap((event: HttpEvent<string>): StreamEvent[] => {
           switch (event.type) {
-            case HttpEventType.UploadProgress:
-              return [{ kind: 'upload', loaded: event.loaded, total: event.total ?? null }];
             case HttpEventType.DownloadProgress:
               return event.partialText === undefined ? [] : linesIn(event.partialText);
             case HttpEventType.Response: {
@@ -120,13 +136,26 @@ export function withRequestErrors<T>(): MonoTypeOperatorFunction<T> {
 
 function requestError(failure: HttpErrorResponse): ApiRequestError {
   const body = jsonBody(failure.error);
-  const message = body?.['error'] || body?.['message'];
-  if (typeof message === 'string' && message) {
+  const message = serverMessage(body);
+  if (message) {
     return new ApiRequestError(failure.status, message, body);
   }
   const fallback =
     failure.status === 0 ? 'Could not reach the server.' : `Request failed: ${failure.status}`;
   return new ApiRequestError(failure.status, fallback, body);
+}
+
+/**
+ * The message an error body carries: the server's error shape names it `error.message`; the old
+ * backend's routes answer `error` or `message` as a string. Null when there is none.
+ */
+function serverMessage(body: Record<string, unknown> | null): string | null {
+  const error = body?.['error'];
+  const message =
+    typeof error === 'object' && error !== null
+      ? (error as Record<string, unknown>)['message']
+      : error || body?.['message'];
+  return typeof message === 'string' && message ? message : null;
 }
 
 /**

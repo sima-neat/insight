@@ -33,7 +33,7 @@ import {
   timeout,
   timer,
 } from 'rxjs';
-import type { Slot } from '../../sources/api';
+import type { Slot } from '../../api.generated';
 import { EndsStream, filePreview, PreviewFrame } from '../../sources/preview-frame';
 import { isLive, previewSrc } from '../../sources/slot-row';
 
@@ -139,7 +139,7 @@ export class SlotPreview {
   /** The pause before the next automatic retry, while there is one. */
   private pause: Subscription | null = null;
 
-  private readonly index = computed(() => this.slot().index);
+  private readonly n = computed(() => this.slot().n);
   /**
    * A new one for each stream (set in the constructor, where the stream's key is watched) and for
    * each retry, so a restarted stream never asks for the URL of the one before: the browser might
@@ -147,12 +147,9 @@ export class SlotPreview {
    */
   private readonly token = signal(Date.now());
   /** The publisher's session, which a reconnect between two polls changes. */
-  private readonly since = computed(() => {
-    const slot = this.slot();
-    return (slot.state === 'external' ? slot.external?.since : slot.pull?.since) ?? null;
-  });
+  private readonly since = computed(() => this.slot().publisher?.since ?? null);
   protected readonly liveSrc = computed(() =>
-    isLive(this.slot()) ? previewSrc(this.slot().index, this.token(), this.since()) : null,
+    isLive(this.slot()) ? previewSrc(this.n(), this.token(), this.since()) : null,
   );
   /**
    * The live image, one or none, keyed by its URL: rendered with `@for` so a new URL is a new
@@ -174,7 +171,7 @@ export class SlotPreview {
    * does not change this.
    */
   private readonly stream = computed(() =>
-    isLive(this.slot()) ? `${this.index()}|${this.since()}` : null,
+    isLive(this.slot()) ? `${this.n()}|${this.since()}` : null,
   );
   /**
    * The automatic retries made on this stream, since its image last stayed up or the user asked
@@ -200,22 +197,27 @@ export class SlotPreview {
    */
   protected readonly file = computed(() => {
     const slot = this.slot();
-    return slot.state === 'stopped' ? filePreview(slot.file, slot.codec === 'mjpeg') : null;
+    return slot.kind === 'file' && !isLive(slot) && slot.file
+      ? filePreview(slot.file, slot.codec === 'mjpeg')
+      : null;
   });
   /** The webcam's own camera, until its stream is live. */
   protected readonly camera = computed(() =>
-    isLive(this.slot()) || this.slot().type !== 'webcam' ? null : this.localStream(),
+    isLive(this.slot()) || this.slot().kind !== 'webcam' ? null : this.localStream(),
   );
   /** What to say where there is nothing to show. */
   protected readonly idleText = computed(() => {
     const slot = this.slot();
-    if (slot.state === 'pulled') {
-      const pull = slot.pull;
-      if (pull?.status === 'auth_failed') return pull.error ?? '';
-      const reason = pull?.status === 'unreachable' && pull.error ? ` (${pull.error})` : '';
+    const pull = slot.pull;
+    if (slot.kind === 'pull' && pull) {
+      if (pull.status === 'auth_failed' || pull.status === 'needs_credentials') {
+        return pull.error ?? '';
+      }
+      if (pull.status === 'stopped') return 'Start this source to pull the camera.';
+      const reason = pull.status === 'unreachable' && pull.error ? ` (${pull.error})` : '';
       return `Waiting for the camera…${reason}`;
     }
-    if (slot.type === 'webcam') return 'Start this source to preview the live webcam.';
+    if (slot.kind === 'webcam') return 'Start this source to preview the live webcam.';
     return slot.file ? '' : 'Assign a media file to preview.';
   });
 
@@ -230,7 +232,7 @@ export class SlotPreview {
       if (isLive(slot)) return { label: 'Live', live: true };
       if (this.file()) return { label: 'File preview', live: false };
       if (this.camera()) return { label: 'Camera preview', live: false };
-      if (slot.state === 'pulled') return { label: 'Not live', live: false };
+      if (slot.kind === 'pull') return { label: 'Not live', live: false };
       return null;
     },
   );

@@ -1,6 +1,6 @@
 <app-preview-frame
   role="group"
-  [attr.aria-label]="'Preview of src' + slot().index"
+  [attr.aria-label]="'Preview of src' + slot().n"
   [attr.aria-describedby]="badge() ? badgeId : null"
   [file]="file()"
 >
@@ -9,7 +9,7 @@
       #live
       appEndsStream
       [src]="image.src"
-      [alt]="'Live preview of src' + slot().index"
+      [alt]="'Live preview of src' + slot().n"
       [class.waiting]="connecting()"
       (error)="failed(image.src)"
     />
@@ -36,8 +36,8 @@
   <!-- Announced when it appears; the bar itself is silent, as a progressbar is. -->
   <div class="connecting" role="status">
     @if (connecting()) {
-      <neat-progress [value]="null" [label]="'Connecting to src' + slot().index + '…'" />
-      <span>Connecting to src{{ slot().index }}…</span>
+      <neat-progress [value]="null" [label]="'Connecting to src' + slot().n + '…'" />
+      <span>Connecting to src{{ slot().n }}…</span>
     }
   </div>
   <!--

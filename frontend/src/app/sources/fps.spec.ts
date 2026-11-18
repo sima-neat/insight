@@ -2,17 +2,15 @@ import {
   allCommitsSucceeded,
   clock,
   customRate,
-  formatFpsProgress,
   FPS_MIN,
   FPS_STEP,
-  needsRendition,
   parseFps,
   stepFps,
-  withCommittedFps,
 } from './fps';
 
-// #170's `fps.test.js`, ported with its assertions unchanged. `renditionMayHaveChanged` and its
-// test are left out (ruling Q13): `SlotsService`'s `startedCustomFps` is the app's one rule for it.
+// #170's `fps.test.js`, ported with its assertions unchanged where the rule is still the app's.
+// The server now decides when a start needs a rendition (the slot is `preparing`), so #170's
+// `needsRendition` and `withCommittedFps` and their tests are gone.
 describe('fps', () => {
   it('constants match the backend minimum', () => {
     expect(FPS_MIN).toBe(1);
@@ -37,12 +35,11 @@ describe('fps', () => {
   });
 
   it('customRate is the override when it differs from the native rate, also an unknown one', () => {
-    expect(customRate({ fps: null, native_fps: 30 })).toBeNull();
+    expect(customRate({ native_fps: 30 })).toBeNull();
     expect(customRate({ fps: 30, native_fps: 30 })).toBeNull();
     expect(customRate({ fps: 15, native_fps: 30 })).toBe(15);
-    expect(customRate({ fps: null, native_fps: null })).toBeNull();
+    expect(customRate({})).toBeNull();
     // Unknown native rate (the server has not probed the file yet): the start encodes it.
-    expect(customRate({ fps: 15, native_fps: null })).toBe(15);
     expect(customRate({ fps: 15 })).toBe(15);
   });
 
@@ -59,41 +56,10 @@ describe('fps', () => {
     expect(clock(-3)).toBe('0:00');
   });
 
-  it('formatFpsProgress renders m:ss pairs', () => {
-    expect(formatFpsProgress({ seconds: 25, total: 60 })).toBe('0:25 / 1:00');
-    expect(formatFpsProgress({ seconds: 3725.4, total: null })).toBe('1:02:05');
-  });
-
-  it('needsRendition is true only for an fps that differs from the native rate', () => {
-    expect(needsRendition(null)).toBe(false);
-    expect(needsRendition({ fps: null, native_fps: 30 })).toBe(false);
-    expect(needsRendition({ fps: 30, native_fps: 30 })).toBe(false);
-    expect(needsRendition({ fps: 15, native_fps: 30 })).toBe(true);
-    expect(needsRendition({ fps: 15, native_fps: null })).toBe(true);
-  });
-
-  it('withCommittedFps applies a settled commit and leaves the row alone otherwise', () => {
-    // Codex review: Play must see the fps the stepper just committed, not the stale row.
-    const row = { index: 1, fps: 30, native_fps: 30 };
-    expect(withCommittedFps(row, { ok: true, fps: 15 })).toEqual({
-      index: 1,
-      fps: 15,
-      native_fps: 30,
-    });
-    expect(withCommittedFps(row, undefined)).toBe(row);
-    expect(withCommittedFps(row, { ok: false })).toBeNull();
-    expect(withCommittedFps(null, { ok: true, fps: 15 })).toBeNull();
-  });
-
   it('allCommitsSucceeded is false as soon as one pending commit failed', () => {
     // Codex review: Bulk Start must not post when any awaited FPS commit was refused.
     expect(allCommitsSucceeded([])).toBe(true);
-    expect(
-      allCommitsSucceeded([
-        { ok: true, fps: 15 },
-        { ok: true, fps: 20 },
-      ]),
-    ).toBe(true);
-    expect(allCommitsSucceeded([{ ok: true, fps: 15 }, { ok: false }])).toBe(false);
+    expect(allCommitsSucceeded([{ ok: true }, { ok: true }])).toBe(true);
+    expect(allCommitsSucceeded([{ ok: true }, { ok: false }])).toBe(false);
   });
 });

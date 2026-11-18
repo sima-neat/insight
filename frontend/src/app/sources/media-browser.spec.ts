@@ -1,4 +1,4 @@
-import type { MediaNode } from './api';
+import type { MediaEntry } from '../api.generated';
 import {
   hasFile,
   hiddenFileCount,
@@ -9,29 +9,18 @@ import {
   parentFolder,
   revealIn,
 } from './media-browser';
+import { mediaFile, mediaFolder } from './media.testing';
 
-const TREE: MediaNode[] = [
-  {
-    name: '/people',
-    path: 'people',
-    type: 'folder',
-    streamable_count: 1,
-    children: [
-      { name: 'walk.mp4', path: 'people/walk.mp4', type: 'file', streamable: true },
-      { name: 'notes.txt', path: 'people/notes.txt', type: 'file', streamable: false },
-      {
-        name: '/raw',
-        path: 'people/raw',
-        type: 'folder',
-        streamable_count: 0,
-        children: [
-          { name: 'a.png', path: 'people/raw/a.png', type: 'file', streamable: false },
-          { name: 'b.png', path: 'people/raw/b.png', type: 'file', streamable: false },
-        ],
-      },
-    ],
-  },
-  { name: 'cars.mp4', path: 'cars.mp4', type: 'file', streamable: true },
+const TREE: MediaEntry[] = [
+  mediaFolder('people', [
+    mediaFile('people/walk.mp4'),
+    mediaFile('people/notes.txt', false),
+    mediaFolder('people/raw', [
+      mediaFile('people/raw/a.png', false),
+      mediaFile('people/raw/b.png', false),
+    ]),
+  ]),
+  mediaFile('cars.mp4'),
 ];
 
 describe('media browser', () => {

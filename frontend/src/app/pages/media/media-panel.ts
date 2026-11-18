@@ -21,55 +21,58 @@ import {
 import { NeatConfirm, type NeatConfirmOptions } from '@sima/neat-ui/confirm';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import type { Slot } from '../../api.generated';
 import { holdFocus } from '../../hold-focus';
-import type { Slot } from '../../sources/api';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { filePreview, PreviewFrame } from '../../sources/preview-frame';
 import { SlotsService } from '../../sources/slots.service';
 import { slotName, SLOTS_NOT_CHECKED } from '../../sources/slot-row';
+import { messageOf } from '../../sources/stream-lines';
 import { mediaInfoRows } from './media-info';
 
 /**
- * #170's delete confirmation, naming the files, plus the slots that use them (spec, "In use"):
- * deleting a file clears and stops every slot assigned to it.
+ * #170's delete confirmation, naming the files. `checked` is false when the slots could not be
+ * fetched again before asking, so the files may be in use after all (the server then refuses).
  */
-export function deleteQuestion(
-  paths: readonly string[],
-  inUse: readonly Slot[],
-  checked: boolean,
-): NeatConfirmOptions {
+export function deleteQuestion(paths: readonly string[], checked: boolean): NeatConfirmOptions {
   const several = paths.length > 1;
   const files = several
     ? `${paths.length} media files: ${paths.join(', ')}`
     : `this media file ${paths[0]}`;
-  const slots =
-    inUse.length > 0
-      ? ` In use on ${inUse.map(slotName).join(', ')}; those slots are cleared.`
-      : '';
   const unchecked = checked ? '' : ` ${SLOTS_NOT_CHECKED}`;
   return {
     title: several ? 'Delete Files' : 'Delete File',
-    message: `Delete ${files}?${slots}${unchecked}`,
+    message: `Delete ${files}?${unchecked}`,
     confirmLabel: 'Delete',
     tone: 'danger',
   };
 }
 
 /**
+ * Why files the slots use are not deleted (spec, "In use"): Insight refuses to delete a file a
+ * slot is assigned, so the slots are named, to be cleared first.
+ */
+export function inUseMessage(paths: readonly string[], inUse: readonly Slot[]): string {
+  const files = paths.length > 1 ? 'These files are' : `${paths[0]} is`;
+  return `${files} in use on ${inUse.map(slotName).join(', ')}. Clear those slots, then delete again.`;
+}
+
+/**
  * Media's side panel (Inv-SM §1.1, "Selected Media"). For the selected file: its preview, what
- * the server knows about it (`/api/media-info`, in readable values) and Delete…. With files
- * ticked: "N selected", their paths and Delete…, which then acts on them rather than on the
- * selected file, as #170's did.
+ * ffprobe says about it (`/api/media/info`, in readable values) and Delete…. With files ticked:
+ * "N selected", their paths and Delete…, which then acts on them rather than on the selected file,
+ * as #170's did.
  *
- * Delete asks first, with the slots each file is assigned to as the server holds them now (they
- * are fetched again before asking), then deletes the files one after the other and reports the
- * first failure. The ticks go afterwards, whatever the outcome (#170); the selection goes when its
- * file was deleted.
+ * Delete first fetches the slots again: files a slot uses are not deleted (the server refuses
+ * them), so the panel says which slots to clear instead of asking. Otherwise it asks, then deletes
+ * the files in one request, which the server carries out whole or refuses whole (a slot may have
+ * taken a file meanwhile, and its message says so). The ticks go once the files are deleted, and
+ * the selection goes with its file; a refusal leaves both, to try again.
  *
  * When a delete or Clear removed the button that had the focus, the focus goes to what the panel
  * shows now, its heading or its note, so the keyboard stays in the panel rather than falling to
  * the page's body, and a screen reader says where it is. A focus the user has moved elsewhere
- * meanwhile (a delete takes a request per file) is left where it is.
+ * meanwhile is left where it is.
  */
 @Component({
   selector: 'app-media-panel',
@@ -130,9 +133,7 @@ export class MediaPanel {
   protected readonly preview = computed(() => {
     const path = this.selected();
     const info = this.info.hasValue() ? this.info.value() : null;
-    return path
-      ? filePreview(path, info?.type === 'video' && info.normalized_codec === 'mjpeg')
-      : null;
+    return path ? filePreview(path, info?.probe.codec === 'mjpeg') : null;
   });
 
   protected clearChecked(): void {
@@ -148,10 +149,14 @@ export class MediaPanel {
     this.asking = true;
     let confirmed: boolean;
     try {
-      // Asked with the slots as they are now; a failed fetch asks with the last known ones and
-      // says so (ruling Q16).
+      // Asked with the slots as they are now; a failed fetch asks anyway and says so (ruling Q16).
       const checked = await this.slots.recheck();
-      confirmed = await this.confirm.ask(deleteQuestion(paths, this.inUseOn(paths), checked));
+      const inUse = this.inUseOn(paths);
+      if (checked && inUse.length > 0) {
+        this.toasts.error(inUseMessage(paths, inUse));
+        return;
+      }
+      confirmed = await this.confirm.ask(deleteQuestion(paths, checked));
     } finally {
       this.asking = false;
     }
@@ -159,29 +164,26 @@ export class MediaPanel {
 
     this.deleting.set(true);
     try {
-      const { deleted, failed } = await this.library.delete(paths);
+      const deleted = await this.library.delete(paths);
       this.checked.set([]);
       const selected = this.selected();
       if (selected !== null && deleted.includes(selected)) this.selected.set(null);
-      if (failed.length > 0) {
-        this.toasts.error(`${failed[0].path}: ${failed[0].message}`);
-        this.toasts.status(`Removed ${deleted.length}/${paths.length} media file(s).`);
-      } else {
-        this.toasts.status(`Removed ${paths.length} media file(s).`);
-      }
+      this.toasts.status(`Removed ${deleted.length} media file(s).`);
       this.holdFocus();
+    } catch (failure) {
+      this.toasts.error(messageOf(failure));
     } finally {
       this.deleting.set(false);
     }
   }
 
-  /** The slots assigned to any of the files, each once, in index order. */
+  /** The slots assigned to any of the files, each once, in number order. */
   private inUseOn(paths: readonly string[]): Slot[] {
     const slots = new Map<number, Slot>();
     for (const path of paths) {
-      for (const slot of this.slots.assignedTo(path)) slots.set(slot.index, slot);
+      for (const slot of this.slots.assignedTo(path)) slots.set(slot.n, slot);
     }
-    return [...slots.values()].sort((a, b) => a.index - b.index);
+    return [...slots.values()].sort((a, b) => a.n - b.n);
   }
 
   /**

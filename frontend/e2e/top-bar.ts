@@ -1,5 +1,6 @@
 import { Page } from '@playwright/test';
 // Types only, erased at run time: the answers are checked against the shapes the app reads.
+import type { MediaEntry, Slot, SlotList } from '../src/app/api.generated';
 import type { BoardState } from '../src/app/board/api';
 import type { HostMetrics } from '../src/app/system-info/api';
 
@@ -93,26 +94,39 @@ export async function answerTopBar(page: Page): Promise<void> {
   );
 }
 
-/** The Streaming and Media pages' slots (`GET /api/mediasrc`): `count` stopped slots, none in use. */
-export function slotRows(count: number) {
+/** The Streaming and Media pages' slots (`GET /api/slots`): `count` idle slots, none in use. */
+export function slotRows(count: number): Slot[] {
   return Array.from({ length: count }, (_, i) => ({
-    index: i + 1,
-    file: '',
-    state: 'stopped',
-    transport: '',
-    codec: 'unknown',
-    type: 'file',
-    allowed_transports: [],
-    urls: {},
+    n: i + 1,
+    kind: 'none',
+    run: false,
+    state: 'idle',
     readers: [],
+    urls: { rtsp: `rtsp://127.0.0.1:8554/src${i + 1}` },
   }));
 }
 
-/** Answers the slots with `count` stopped ones; call it before the page loads. */
+/** Answers the slots with `count` idle ones; call it before the page loads. */
 export const answerSlots = (page: Page, count: number) =>
   page.route(
-    (url) => url.pathname === '/api/mediasrc',
-    (route) => route.fulfill({ json: slotRows(count) }),
+    (url) => url.pathname === '/api/slots',
+    (route) => route.fulfill({ json: { count: 48, slots: slotRows(count) } satisfies SlotList }),
+  );
+
+/** Answers the media library (`GET /api/media`) as empty: its root folder holds nothing. */
+export const answerEmptyLibrary = (page: Page) =>
+  page.route(
+    (url) => url.pathname === '/api/media',
+    (route) =>
+      route.fulfill({
+        json: {
+          name: '',
+          path: '',
+          folder: true,
+          streamable: false,
+          probe: null,
+        } satisfies MediaEntry,
+      }),
   );
 
 /**

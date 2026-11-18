@@ -1,11 +1,51 @@
-import type { CatalogAsset, CatalogSource } from './api';
+import type { Catalog } from '../api.generated';
 import { codecLabel } from './slot-row';
 
 /**
  * The media catalog as the import dialog's Catalog tab shows it (Inv-SM §1.1): labels, order,
  * search and the Resolution & FPS / Codec filter both browsing modes share. Pure functions over
- * the index `GET /api/media-catalog` returns.
+ * the index `GET /api/catalog` returns.
  */
+
+/**
+ * A video the catalog's assets are made from. The API passes the published index's sources on as
+ * they are, so their fields are the index's own, typed here as the index publishes them.
+ */
+export interface CatalogSource extends Readonly<Catalog['sources'][number]> {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly file: string;
+  readonly url: string;
+}
+
+/**
+ * One rendition in the published index, with the download `url` the server adds. As for the
+ * sources, the fields beyond `path` and `url` are the index's own.
+ */
+export interface CatalogAsset extends Readonly<Catalog['assets'][number]> {
+  readonly source_id: string;
+  readonly source_title: string;
+  /** For example `720p30`; `preview_320p30` is the preview clip, not an importable variant. */
+  readonly profile: string;
+  /** True for the preview clip a source's detail shows. */
+  readonly preview: boolean;
+  /** h264, hevc or mjpeg as the index names them. */
+  readonly codec: string;
+  readonly container: string;
+  readonly fps: number;
+  readonly target_height: number;
+  readonly bytes: number;
+  readonly sha256: string;
+  readonly width: number | null;
+  readonly height: number | null;
+}
+
+/** `GET /api/catalog`, its sources and assets typed as the published index has them. */
+export type CatalogIndex = Omit<Catalog, 'sources' | 'assets'> & {
+  readonly sources: readonly CatalogSource[];
+  readonly assets: readonly CatalogAsset[];
+};
 
 /** The profile of a source's preview clip, which is shown, never imported. */
 const PREVIEW_PROFILE = 'preview_320p30';

@@ -13,9 +13,10 @@ import {
 import { TestBed } from '@angular/core/testing';
 import { firstValueFrom, throwError } from 'rxjs';
 import {
+  ApiRequestError,
+  messageOf,
   postStreamedText,
   splitLines,
-  ApiRequestError,
   withRequestErrors,
   type StreamEvent,
 } from './stream-lines';
@@ -50,7 +51,7 @@ describe('splitLines', () => {
 });
 
 describe('postStreamedText', () => {
-  const URL = '/api/mediasrc/prepare';
+  const URL = '/api/import/youtube';
   let http: HttpClient;
   let controller: HttpTestingController;
   let events: StreamEvent[];
@@ -71,7 +72,7 @@ describe('postStreamedText', () => {
 
   afterEach(() => controller.verify());
 
-  function post(body: FormData | object = { index: 1 }): TestRequest {
+  function post(body: object = { url: 'https://youtu.be/abc' }): TestRequest {
     subscription = postStreamedText(http, URL, body).subscribe({
       next: (event) => events.push(event),
       error: (e: unknown) => (error = e),
@@ -88,75 +89,57 @@ describe('postStreamedText', () => {
     });
   const finish = (request: TestRequest, body: string) => request.flush(body);
 
-  it('posts with progress events and text as the response type', () => {
-    const body = new FormData();
-    const request = post(body);
+  it('posts JSON with progress events and text as the response type', () => {
+    const request = post({ url: 'https://youtu.be/xyz' });
 
     expect(request.request.method).toBe('POST');
-    expect(request.request.body).toBe(body);
+    expect(request.request.body).toEqual({ url: 'https://youtu.be/xyz' });
+    expect(request.request.detectContentTypeHeader()).toBe('application/json');
     expect(request.request.reportProgress).toBe(true);
     expect(request.request.responseType).toBe('text');
     request.flush('');
   });
 
-  it('sends an object as JSON', () => {
-    const request = post({ index: 3 });
-    expect(request.request.body).toEqual({ index: 3 });
-    expect(request.request.detectContentTypeHeader()).toBe('application/json');
-    request.flush('');
-  });
-
-  it('emits upload progress, then each line once even when a line spans two chunks, then done', () => {
+  it('emits each line once even when a line spans two chunks, then done', () => {
     const request = post();
 
-    request.event({ type: HttpEventType.UploadProgress, loaded: 512, total: 2048 });
-    request.event({ type: HttpEventType.UploadProgress, loaded: 2048, total: 2048 });
     // partialText is cumulative: every event repeats what the one before carried.
-    download(request, 'Preparing file 1/1: a.mp4\nOptimizing a.mp4: 4');
-    download(request, 'Preparing file 1/1: a.mp4\nOptimizing a.mp4: 42% (00:10 / 00:25)\nOptim');
+    download(request, 'Validating YouTube video: abc\nDownloading YouTube video: 4');
+    download(request, 'Validating YouTube video: abc\nDownloading YouTube video: 42%\nSav');
     download(
       request,
-      'Preparing file 1/1: a.mp4\nOptimizing a.mp4: 42% (00:10 / 00:25)\nOptimized a.mp4\n',
+      'Validating YouTube video: abc\nDownloading YouTube video: 42%\nSaved YouTube media to a.mp4\n',
     );
     finish(
       request,
-      'Preparing file 1/1: a.mp4\nOptimizing a.mp4: 42% (00:10 / 00:25)\nOptimized a.mp4\n',
+      'Validating YouTube video: abc\nDownloading YouTube video: 42%\nSaved YouTube media to a.mp4\n',
     );
 
     expect(events).toEqual([
-      { kind: 'upload', loaded: 512, total: 2048 },
-      { kind: 'upload', loaded: 2048, total: 2048 },
-      { kind: 'line', text: 'Preparing file 1/1: a.mp4' },
-      { kind: 'line', text: 'Optimizing a.mp4: 42% (00:10 / 00:25)' },
-      { kind: 'line', text: 'Optimized a.mp4' },
+      { kind: 'line', text: 'Validating YouTube video: abc' },
+      { kind: 'line', text: 'Downloading YouTube video: 42%' },
+      { kind: 'line', text: 'Saved YouTube media to a.mp4' },
       { kind: 'done' },
     ]);
     expect(completed).toBe(true);
   });
 
-  it('reports an unknown upload size as null', () => {
-    const request = post();
-    request.event({ type: HttpEventType.UploadProgress, loaded: 100 });
-    request.flush('');
-    expect(events[0]).toEqual({ kind: 'upload', loaded: 100, total: null });
-  });
-
   it('flushes a last line that has no line break when the response ends', () => {
     const request = post();
-    download(request, 'Saved archive\nUpload comp');
-    finish(request, 'Saved archive\nUpload complete.');
+    download(request, 'Saved YouTube media to a.mp4\nYouTube import comp');
+    finish(request, 'Saved YouTube media to a.mp4\nYouTube import complete.');
 
     expect(events).toEqual([
-      { kind: 'line', text: 'Saved archive' },
-      { kind: 'line', text: 'Upload complete.' },
+      { kind: 'line', text: 'Saved YouTube media to a.mp4' },
+      { kind: 'line', text: 'YouTube import complete.' },
       { kind: 'done' },
     ]);
   });
 
   it('reads the lines from the response when no download progress arrived', () => {
     const request = post();
-    request.flush('Rendition ready: a\n');
-    expect(events).toEqual([{ kind: 'line', text: 'Rendition ready: a' }, { kind: 'done' }]);
+    request.flush('YouTube import complete.\n');
+    expect(events).toEqual([{ kind: 'line', text: 'YouTube import complete.' }, { kind: 'done' }]);
   });
 
   it('does not emit a line twice when the response repeats what progress already carried', () => {
@@ -172,28 +155,25 @@ describe('postStreamedText', () => {
     expect(events).toEqual([{ kind: 'done' }]);
   });
 
-  it('errors with the JSON body of a 409 intact', () => {
-    const conflict = {
-      error: 'A file with this name exists.',
-      conflict: { existing: 'a.mp4', suggested: 'a_2.mp4' },
-    };
-    post().flush(JSON.stringify(conflict), { status: 409, statusText: 'Conflict' });
+  it('errors with the JSON body of a refusal intact', () => {
+    const refusal = { error: 'This video is a live stream.', live_status: 'is_live' };
+    post().flush(JSON.stringify(refusal), { status: 400, statusText: 'Bad Request' });
 
     expect(error).toBeInstanceOf(ApiRequestError);
     const failure = error as ApiRequestError;
-    expect(failure.status).toBe(409);
-    expect(failure.message).toBe('A file with this name exists.');
-    expect(failure.body).toEqual(conflict);
+    expect(failure.status).toBe(400);
+    expect(failure.message).toBe('This video is a live stream.');
+    expect(failure.body).toEqual(refusal);
     expect(events).toEqual([]);
     expect(completed).toBe(false);
   });
 
   it('errors with the server message of a 500', () => {
-    post().flush(JSON.stringify({ error: 'ffmpeg exploded' }), {
+    post().flush(JSON.stringify({ error: 'yt-dlp exploded' }), {
       status: 500,
       statusText: 'Internal Server Error',
     });
-    expect(error).toMatchObject({ status: 500, message: 'ffmpeg exploded' });
+    expect(error).toMatchObject({ status: 500, message: 'yt-dlp exploded' });
   });
 
   it('reads the message from `message` when there is no `error`', () => {
@@ -211,10 +191,10 @@ describe('postStreamedText', () => {
 
   it('errors when the connection fails, after the lines already read', () => {
     const request = post();
-    download(request, 'Encoding a.mp4 at 15 fps (libx264)...\nprogress 1.0');
+    download(request, 'Downloading YouTube video: 12%\nDownloading YouTube video: 1');
     request.error(new ProgressEvent('error'));
 
-    expect(events).toEqual([{ kind: 'line', text: 'Encoding a.mp4 at 15 fps (libx264)...' }]);
+    expect(events).toEqual([{ kind: 'line', text: 'Downloading YouTube video: 12%' }]);
     expect(error).toMatchObject({ status: 0, body: null, message: 'Could not reach the server.' });
   });
 
@@ -228,7 +208,7 @@ describe('postStreamedText', () => {
   });
 
   it('starts each subscription with a fresh line buffer', () => {
-    const lines$ = postStreamedText(http, URL, { index: 1 });
+    const lines$ = postStreamedText(http, URL, { url: 'https://youtu.be/abc' });
     const first: StreamEvent[] = [];
     const second: StreamEvent[] = [];
 
@@ -268,14 +248,38 @@ describe('withRequestErrors', () => {
       (error: unknown) => error,
     );
 
-  it('reads the body of an answer to a JSON request, which Angular has parsed already', async () => {
-    const body = { error: 'src2 is pulling.', reason: 'auth_failed' };
+  it("reads the server's error shape, which Angular has parsed already, with its code and hint", async () => {
+    const body = {
+      error: {
+        code: 'slot_busy',
+        message: 'src2 is in use by an external publisher (rtsp 10.0.0.9).',
+        hint: 'Use Take over to disconnect it.',
+      },
+    };
     const failure = await failureOf(
-      new HttpErrorResponse({ status: 400, statusText: 'Bad Request', error: body }),
+      new HttpErrorResponse({ status: 409, statusText: 'Conflict', error: body }),
     );
 
     expect(failure).toBeInstanceOf(ApiRequestError);
-    expect(failure).toMatchObject({ status: 400, message: 'src2 is pulling.', body });
+    expect(failure).toMatchObject({
+      status: 409,
+      message: 'src2 is in use by an external publisher (rtsp 10.0.0.9).',
+      code: 'slot_busy',
+      hint: 'Use Take over to disconnect it.',
+      body,
+    });
+    expect(messageOf(failure)).toBe(
+      'src2 is in use by an external publisher (rtsp 10.0.0.9). Use Take over to disconnect it.',
+    );
+  });
+
+  it("reads the old backend's error string, which has no code or hint", async () => {
+    const body = { error: 'Not a YouTube link.' };
+    const failure = await failureOf(new HttpErrorResponse({ status: 400, error: body }));
+
+    expect(failure).toMatchObject({ status: 400, message: 'Not a YouTube link.', body });
+    expect(failure).toMatchObject({ code: null, hint: null });
+    expect(messageOf(failure)).toBe('Not a YouTube link.');
   });
 
   it('falls back to the status when the answer was not JSON, and when no answer came', async () => {

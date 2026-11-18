@@ -576,8 +576,8 @@ export class FakePeripheralsBackend {
       (route) => route.fulfill({ contentType: 'audio/wav', body: SILENT_WAV }),
     );
     await page.route(
-      (url) => url.pathname === '/api/mediasrc',
-      (route) => route.fulfill({ json: [] }),
+      (url) => url.pathname === '/api/slots',
+      (route) => route.fulfill({ json: { count: 48, slots: [] } }),
     );
   }
 }

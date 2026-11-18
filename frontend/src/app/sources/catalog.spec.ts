@@ -1,5 +1,6 @@
-import type { CatalogAsset, CatalogSource } from './api';
 import {
+  type CatalogAsset,
+  type CatalogSource,
   assetMatchesSearch,
   assetsOfSource,
   catalogAssetLabel,

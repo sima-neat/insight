@@ -18,9 +18,9 @@ import {
 import { NeatFileBrowser } from '@sima/neat-ui/file-browser';
 import { NeatColumn } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import type { MediaEntry, Slot } from '../../api.generated';
 import { AsidePrefs } from '../../aside-prefs';
 import { CellText } from '../../cell-text';
-import type { MediaNode, Slot } from '../../sources/api';
 import { ImportDialogs } from '../../sources/import-dialog';
 import {
   hasFile,
@@ -42,7 +42,7 @@ import { messageOf } from '../../sources/stream-lines';
 /** "src3 · Live, src9 · Idle": the slots a file is assigned to, with their state as Streaming words it. */
 function inUseText(slots: readonly Slot[], encodes: ReadonlyMap<number, Progress>): string {
   return slots
-    .map((slot) => `${slotName(slot)} · ${slotState(slot, encodes.get(slot.index)).label}`)
+    .map((slot) => `${slotName(slot)} · ${slotState(slot, encodes.get(slot.n)).label}`)
     .join(', ');
 }
 
@@ -90,7 +90,7 @@ export class MediaPage {
    * delete that failed because the file had gone), so the panel does not describe a file that is
    * not there. The browser itself drops such files from `checked`.
    */
-  protected readonly selected = linkedSignal<readonly MediaNode[] | null, string | null>({
+  protected readonly selected = linkedSignal<readonly MediaEntry[] | null, string | null>({
     source: this.library.tree,
     computation: (tree, previous) => {
       const path = previous ? previous.value : this.session.media.selected;

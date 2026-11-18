@@ -10,15 +10,15 @@ import {
   recordWebcamStopsOnExit,
   resolveDeleteUrl,
   selectH264Codecs,
-  sessionIdFromResponse,
   type ClosableSession,
   type DeviceInfo,
   type WhipResponse,
 } from './webcam-publishing';
 
-// These are the 40 tests of #170's `webcamPublishing.test.js` (node:test) with their assertions
+// These are the tests of #170's `webcamPublishing.test.js` (node:test) with their assertions
 // unchanged: only the harness differs (Vitest's `expect`, and types where the original was plain
-// JavaScript).
+// JavaScript). The session id and release claims are gone with the claim protocol: a stop now
+// disconnects whatever publishes, so the exit stop names only the slot.
 
 /** What a `publishWebcamOffer` call needs of a peer connection; this one fails on waiting for gathering. */
 function fakePeerConnection(overrides: object = {}) {
@@ -44,18 +44,16 @@ function response({
   status = 201,
   body = 'v=0\r\n',
   location = null,
-  id = null,
 }: {
   ok?: boolean;
   status?: number;
   body?: string;
   location?: string | null;
-  id?: string | null;
 } = {}): WhipResponse {
   return {
     ok,
     status,
-    headers: { get: (name) => (name === 'Location' ? location : name === 'Id' ? id : null) },
+    headers: { get: (name) => (name === 'Location' ? location : null) },
     async text() {
       return body;
     },
@@ -520,35 +518,16 @@ describe('webcam publishing', () => {
     expect(calls).toBe(3); // retried as before
   });
 
-  it('the session id comes from the Id header, not the Location', async () => {
-    // Verified on MediaMTX v1.12.1: Location carries a separate resource
-    // secret; Id carries the session id the status API reports.
-    const { deleteUrl, sessionId } = await publishWebcamOffer(
+  it('the resource to delete is the Location, resolved against the WHIP URL', async () => {
+    const { deleteUrl } = await publishWebcamOffer(
       fakePeerConnection(),
       'https://insight.local:8889/cam1/whip',
-      async () =>
-        response({
-          location: '/cam1/whip/5fdd8139-d213-48c1-bef7-f95884810d15',
-          id: '52304a1c-28cc-41d7-8234-164aa9ebd9bb',
-        }),
+      async () => response({ location: '/cam1/whip/5fdd8139-d213-48c1-bef7-f95884810d15' }),
     );
 
     expect(deleteUrl).toBe(
       'https://insight.local:8889/cam1/whip/5fdd8139-d213-48c1-bef7-f95884810d15',
     );
-    expect(sessionId).toBe('52304a1c-28cc-41d7-8234-164aa9ebd9bb');
-  });
-
-  it('no Id header means no session id, so no release claim can be made', async () => {
-    const { sessionId } = await publishWebcamOffer(
-      fakePeerConnection(),
-      'https://insight.local:8889/cam1/whip',
-      async () => response({ location: '/cam1/whip/secret' }),
-    );
-
-    expect(sessionId).toBe(null);
-    expect(sessionIdFromResponse(undefined)).toBe(null);
-    expect(sessionIdFromResponse({ get: () => '  ' })).toBe(null);
   });
 
   it('a cancelled watcher ignores the close it caused', () => {
@@ -587,38 +566,35 @@ describe('webcam publishing', () => {
     expect(lost).toEqual(['failed']);
   });
 
-  it('recordWebcamStopsOnExit sends a keepalive session-bound stop per owned webcam', () => {
+  it("recordWebcamStopsOnExit sends a keepalive stop to each published slot's stop route", () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const fetchRequest = (url: string, init: RequestInit) => {
       calls.push({ url, init });
       return Promise.resolve();
     };
-    const sessions = new Map<number, { sessionId: string | null }>([
-      [1, { sessionId: 'sess-1' }],
-      [2, { sessionId: null }], // no id: nothing to record, skipped
-      [3, { sessionId: 'sess-3' }],
-    ]);
 
-    const stopped = recordWebcamStopsOnExit(sessions, fetchRequest);
+    const stopped = recordWebcamStopsOnExit(
+      new Map([
+        [1, {}],
+        [3, {}],
+      ]).keys(),
+      fetchRequest,
+    );
 
-    expect(stopped).toEqual([1, 3]); // only sessions this tab can name are stopped
-    expect(calls.length).toBe(2);
-    for (const { url, init } of calls) {
-      expect(url).toBe('/api/mediasrc/stop');
+    expect(stopped).toEqual([1, 3]);
+    expect(calls.map(({ url }) => url)).toEqual(['/api/slots/1/stop', '/api/slots/3/stop']);
+    for (const { init } of calls) {
       expect(init.method).toBe('POST');
       expect(init.keepalive).toBe(true); // must survive page unload
-      const body = JSON.parse(init.body as string);
-      expect(body.publisher_released).toBe(true);
-      expect(body.publisher_session).toBe(`sess-${body.index}`);
+      expect(init.body).toBeUndefined();
     }
   });
 
   it('recordWebcamStopsOnExit swallows a fetch that throws as the page unloads', () => {
-    const sessions = new Map([[1, { sessionId: 'sess-1' }]]);
     const fetchRequest = (): Promise<unknown> => {
       throw new Error('page is going away');
     };
-    expect(recordWebcamStopsOnExit(sessions, fetchRequest)).toEqual([1]);
+    expect(recordWebcamStopsOnExit([1], fetchRequest)).toEqual([1]);
   });
 
   it('camerasFromDevices lists a multi-sensor camera once, under its first name', () => {

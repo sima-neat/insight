@@ -1,31 +1,19 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { Slot } from './api';
+import type { Slot } from '../api.generated';
 import { CAMERA_MEDIA } from './camera-media';
 import { CamerasService } from './cameras.service';
 import { FakeCameraMedia, FakeCameraStream, FakePeer } from './cameras.testing';
 import { SlotsService } from './slots.service';
+import { fileSlot, webcamSlot } from './slots.testing';
 import { ApiRequestError } from './stream-lines';
 
 const DESK = { kind: 'videoinput', deviceId: 'cam-desk', label: 'Desk camera' };
 const LAPTOP = { kind: 'videoinput', deviceId: 'cam-laptop', label: 'Laptop camera' };
 
-const whipUrl = (index: number) => `https://insight.local:8889/cam${index}/whip`;
-
-/** A webcam slot in the shape `GET /api/mediasrc` answers. */
-function webcamSlot(index: number): Slot {
-  return {
-    index,
-    file: '',
-    state: 'stopped',
-    transport: '',
-    codec: 'h264',
-    type: 'webcam',
-    allowed_transports: ['rtsp'],
-    urls: { whip: whipUrl(index) },
-  };
-}
+/** Where `webcamSlot` says a browser publishes slot `n`. */
+const whipUrl = (n: number) => `https://10.0.0.2:8889/cam${n}/whip`;
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -39,21 +27,29 @@ function deferred<T = void>() {
 
 describe('CamerasService', () => {
   let media: FakeCameraMedia;
-  /** What the server holds: the slots `CamerasService` reads the publish URL from. */
+  /** What the server holds: the slots `CamerasService` reads the publish URL and the state from. */
   const slotList = signal<readonly Slot[] | null>(null);
+  /** The slot `n` as the server holds it now. */
+  const slotOf = (n: number) => slotList()!.find((slot) => slot.n === n)!;
+  /** Changes slot `n` on the fake server. */
+  const setSlot = (n: number, change: Partial<Slot>) =>
+    slotList.update((all) => all!.map((slot) => (slot.n === n ? { ...slot, ...change } : slot)));
   const slotsFake = {
     slots: slotList.asReadonly(),
     assignWebcam: vi.fn(),
-    assign: vi.fn(),
-    confirmWebcamStart: vi.fn(),
+    assignFile: vi.fn(),
+    assignPull: vi.fn(),
+    clear: vi.fn(),
+    start: vi.fn(),
     stop: vi.fn(),
+    refresh: vi.fn(),
     settleChange: vi.fn(),
   };
   const toasts = { error: vi.fn() };
   /** Every `fetch` the service made on its own (WHIP and MediaMTX's session, the exit stop). */
   let fetched: { url: string; init: RequestInit }[];
   /** How the WHIP endpoint answers; `'unreachable'` makes the request itself fail. */
-  let whip: { status: number; sessionId: string | null } | 'unreachable';
+  let whip: { status: number } | 'unreachable';
   /** The next WHIP offers wait for these, one each, in the order they are sent. */
   let whipGates: Promise<void>[];
 
@@ -62,15 +58,24 @@ describe('CamerasService', () => {
     media = new FakeCameraMedia();
     media.devices = [DESK, LAPTOP];
     slotList.set(Array.from({ length: 4 }, (_, i) => webcamSlot(i + 1)));
-    slotsFake.assignWebcam.mockReset().mockResolvedValue({ success: true });
-    slotsFake.assign.mockReset().mockResolvedValue({ success: true });
-    slotsFake.confirmWebcamStart.mockReset().mockResolvedValue({ success: true });
-    slotsFake.stop.mockReset().mockResolvedValue({ success: true });
+    slotsFake.assignWebcam.mockReset().mockImplementation(async (n: number) => slotOf(n));
+    slotsFake.assignFile
+      .mockReset()
+      .mockImplementation(async (n: number, file: string) => fileSlot(n, file));
+    slotsFake.assignPull.mockReset().mockImplementation(async (n: number) => slotOf(n));
+    slotsFake.clear.mockReset().mockImplementation(async (n: number) => slotOf(n));
+    slotsFake.start.mockReset().mockImplementation(async (n: number) => slotOf(n));
+    slotsFake.stop.mockReset().mockImplementation(async (n: number) => slotOf(n));
+    // MediaMTX has the stream by the first fetch after the offer, unless a test says otherwise.
+    slotsFake.refresh.mockReset().mockImplementation(async () => {
+      for (const slot of slotList()!)
+        if (slot.kind === 'webcam') setSlot(slot.n, { state: 'live' });
+    });
     slotsFake.settleChange.mockReset().mockResolvedValue(undefined);
     toasts.error.mockReset();
 
     fetched = [];
-    whip = { status: 201, sessionId: 'session-1' };
+    whip = { status: 201 };
     whipGates = [];
     let offersSent = 0;
     vi.stubGlobal(
@@ -83,11 +88,10 @@ describe('CamerasService', () => {
         const gate = whipGates.shift();
         if (gate) await gate;
         if (whip === 'unreachable') throw new TypeError('Failed to fetch');
-        const headers: Record<string, string> = {
-          Location: `${new URL(url).pathname}/resource-${offer}`,
-        };
-        if (whip.sessionId) headers['Id'] = whip.sessionId;
-        return new Response('v=0\r\nanswer', { status: whip.status, headers });
+        return new Response('v=0\r\nanswer', {
+          status: whip.status,
+          headers: { Location: `${new URL(url).pathname}/resource-${offer}` },
+        });
       }),
     );
 
@@ -116,6 +120,12 @@ describe('CamerasService', () => {
   async function publishDesk(service: CamerasService, slot = 1): Promise<void> {
     await service.assign(slot, DESK.deviceId);
     await service.publish(slot);
+  }
+
+  /** The server keeps the webcam slot from going live for this many fetches. */
+  function notLiveFor(fetches: number): void {
+    for (let i = 0; i < fetches; i++)
+      slotsFake.refresh.mockImplementationOnce(async () => undefined);
   }
 
   const posts = (suffix: string) =>
@@ -244,48 +254,44 @@ describe('CamerasService', () => {
   });
 
   describe('assigning a camera', () => {
-    it('registers the slot as a webcam on the server, then remembers the camera', async () => {
+    it('makes the slot a webcam on the server, then remembers the camera', async () => {
       const service = await create();
 
       await service.assign(2, 'cam-laptop');
 
-      expect(slotsFake.assignWebcam).toHaveBeenCalledWith({ index: 2 });
+      expect(slotsFake.assignWebcam).toHaveBeenCalledWith(2);
       expect(service.assignments().get(2)).toEqual({
         deviceId: 'cam-laptop',
         label: 'Laptop camera',
       });
     });
 
-    it('with no camera registers the slot as a webcam and leaves it with none', async () => {
+    it('with no camera makes the slot a webcam and leaves it with none', async () => {
       const service = await create();
       await service.assign(2, 'cam-laptop');
 
       await service.assign(2, null);
-      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith({ index: 2 });
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(2);
       expect(service.assignments().has(2)).toBe(false);
 
       // A publishing slot is ended first, as for another camera.
       await publishDesk(service);
       await service.assign(1, null);
       expect(peerOf().closed).toBe(true);
-      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith({
-        index: 1,
-        publisher_released: true,
-        publisher_session: 'session-1',
-      });
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1);
       expect(service.assignments().has(1)).toBe(false);
       expect(service.localStreams().has(1)).toBe(false);
     });
 
     it('holds the slot as changing while the request is in flight, and lets go on success and failure', async () => {
       const service = await create();
-      const answer = deferred<{ success: true }>();
+      const answer = deferred<Slot>();
       slotsFake.assignWebcam.mockReturnValueOnce(answer.promise);
 
       const assigning = service.assign(2, 'cam-laptop');
       expect(service.changingSlots().has(2)).toBe(true);
       expect(service.anyChanging()).toBe(true);
-      answer.resolve({ success: true });
+      answer.resolve(webcamSlot(2));
       await assigning;
       expect(service.changingSlots().size).toBe(0);
       expect(service.anyChanging()).toBe(false);
@@ -302,9 +308,9 @@ describe('CamerasService', () => {
       await service.assign(2, 'cam-laptop');
 
       slotsFake.assignWebcam.mockRejectedValueOnce(
-        new ApiRequestError(502, 'MediaMTX is unreachable.', null),
+        new ApiRequestError(503, 'MediaMTX does not answer.', null),
       );
-      await expect(service.assign(2, 'cam-desk')).rejects.toThrow('MediaMTX is unreachable.');
+      await expect(service.assign(2, 'cam-desk')).rejects.toThrow('MediaMTX does not answer.');
 
       expect(service.assignments().has(2)).toBe(false);
     });
@@ -323,7 +329,7 @@ describe('CamerasService', () => {
       expect(service.assignments().get(2)?.deviceId).toBe('cam-laptop');
     });
 
-    it('switching cameras on a publishing slot ends the session first and names it in the release claim', async () => {
+    it('switching cameras on a publishing slot ends the session first', async () => {
       const service = await create();
       await publishDesk(service);
 
@@ -331,23 +337,19 @@ describe('CamerasService', () => {
 
       expect(peerOf().closed).toBe(true);
       expect(streamOf().stopped).toBe(true);
-      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith({
-        index: 1,
-        publisher_released: true,
-        publisher_session: 'session-1',
-      });
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1);
       expect(service.localStreams().has(1)).toBe(false);
       expect(service.assignments().get(1)?.deviceId).toBe('cam-laptop');
     });
 
     it('a stop that lands while the assignment is in flight discards the assignment it would have made', async () => {
       const service = await create();
-      const answer = deferred<{ success: true }>();
+      const answer = deferred<Slot>();
       slotsFake.assignWebcam.mockReturnValueOnce(answer.promise);
 
       const assigning = service.assign(3, 'cam-desk');
       await service.release(3);
-      answer.resolve({ success: true });
+      answer.resolve(webcamSlot(3));
       await assigning;
 
       expect(service.assignments().has(3)).toBe(false);
@@ -355,19 +357,20 @@ describe('CamerasService', () => {
   });
 
   describe('publishing', () => {
-    it('opens the chosen camera, pins H.264, posts the offer to the slot and confirms the start with expect_type webcam', async () => {
+    it("starts the slot, opens the chosen camera, pins H.264, posts the offer to the slot's WHIP URL and waits for it to be live", async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
 
       await service.publish(1);
 
+      expect(slotsFake.start).toHaveBeenCalledWith(1);
       expect(media.opened[0].constraints).toEqual({ video: { deviceId: { exact: 'cam-desk' } } });
       expect(peerOf().pinnedCodecs?.map((codec) => codec.mimeType)).toEqual(['video/H264']);
       const offers = posts('/whip');
       expect(offers.map((call) => call.url)).toEqual([whipUrl(1)]);
       expect(offers[0].init.body).toBe('v=0\r\noffer');
       expect(peerOf().remoteDescription).toEqual({ type: 'answer', sdp: 'v=0\r\nanswer' });
-      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledWith(1);
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(1);
       expect(service.localStreams().get(1)).toBe(media.opened[0].stream);
       expect(service.changingSlots().size).toBe(0);
       expect(peerOf().closed).toBe(false);
@@ -380,9 +383,23 @@ describe('CamerasService', () => {
       );
 
       await service.assign(1, 'cam-desk');
-      slotList.set([{ ...webcamSlot(1), urls: {} }]);
+      setSlot(1, { urls: { rtsp: 'rtsp://10.0.0.2:8554/src1' } });
       await expect(service.publish(1)).rejects.toThrow(
         'No publish URL for this source; reassign the webcam and try again.',
+      );
+      expect(media.opened).toEqual([]);
+      expect(service.changingSlots().size).toBe(0);
+    });
+
+    it('a start the server refuses opens no camera, and reports its message', async () => {
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      slotsFake.start.mockRejectedValueOnce(
+        new ApiRequestError(409, 'src1 is in use by an external publisher (rtsp).', null),
+      );
+
+      await expect(service.publish(1)).rejects.toThrow(
+        'src1 is in use by an external publisher (rtsp).',
       );
       expect(media.opened).toEqual([]);
       expect(service.changingSlots().size).toBe(0);
@@ -402,86 +419,75 @@ describe('CamerasService', () => {
       expect(service.changingSlots().has(1)).toBe(false);
     });
 
-    it('keeps asking the server until MediaMTX reports the path, every 250 ms', async () => {
+    it('fetches the slots every 250 ms until MediaMTX has the stream', async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
-      slotsFake.confirmWebcamStart
-        .mockRejectedValueOnce(new ApiRequestError(409, 'Webcam is not publishing yet', null))
-        .mockRejectedValueOnce(new ApiRequestError(409, 'Webcam is not publishing yet', null));
+      notLiveFor(2);
 
       const publishing = service.publish(1);
       await vi.advanceTimersByTimeAsync(0);
-      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledTimes(1);
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(250);
-      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledTimes(2);
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
       await vi.advanceTimersByTimeAsync(250);
       await publishing;
 
-      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledTimes(3);
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(3);
       expect(peerOf().closed).toBe(false);
     });
 
-    it('asks every 250 ms without refetching between attempts, and fetches the slots once when the slot is live', async () => {
+    it('a fetch of the slots that fails is tried again, as a slot not live yet is', async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
-      for (let refusals = 0; refusals < 4; refusals++) {
-        slotsFake.confirmWebcamStart.mockRejectedValueOnce(
-          new ApiRequestError(409, 'Webcam is not publishing yet', null),
-        );
-      }
-      // A slow refetch would delay each step if the loop waited for one.
-      slotsFake.settleChange.mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 1000)),
+      slotsFake.refresh.mockRejectedValueOnce(
+        new ApiRequestError(0, 'Could not reach the server.', null),
       );
 
       const publishing = service.publish(1);
-      await vi.advanceTimersByTimeAsync(0);
-      for (const attempts of [1, 2, 3, 4]) {
-        expect(slotsFake.confirmWebcamStart).toHaveBeenCalledTimes(attempts);
-        await vi.advanceTimersByTimeAsync(250);
-      }
-      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledTimes(5);
-      expect(slotsFake.settleChange).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(250);
       await publishing;
 
-      expect(slotsFake.settleChange).toHaveBeenCalledTimes(1);
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
     });
 
-    it('gives up after 20 s with the last server message, and releases the camera and the path', async () => {
+    it('gives up after 20 s, and releases the camera and the path', async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
-      slotsFake.confirmWebcamStart.mockRejectedValue(
-        new ApiRequestError(409, 'Webcam is not publishing yet', null),
-      );
+      slotsFake.refresh.mockImplementation(async () => undefined);
 
       const publishing = service.publish(1);
-      const outcome = expect(publishing).rejects.toThrow('Webcam is not publishing yet');
+      const outcome = expect(publishing).rejects.toThrow(
+        'The webcam did not start publishing in time.',
+      );
       await vi.advanceTimersByTimeAsync(20_000);
       await outcome;
 
       expect(peerOf().closed).toBe(true);
       expect(streamOf().stopped).toBe(true);
-      expect(deletes().map((call) => call.url)).toEqual([
-        'https://insight.local:8889/cam1/whip/resource-1',
-      ]);
+      expect(deletes().map((call) => call.url)).toEqual([`${whipUrl(1)}/resource-1`]);
       expect(service.localStreams().has(1)).toBe(false);
       expect(slotsFake.settleChange).toHaveBeenCalled();
     });
 
-    it.each([
-      [410, 'src1 is no longer a webcam.'],
-      [502, 'MediaMTX is unreachable.'],
-    ])('a %s from the server ends the wait at once, with its message', async (status, message) => {
+    it('a slot that stops being a webcam meanwhile (another tab assigned it) ends the wait at once', async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
-      slotsFake.confirmWebcamStart.mockRejectedValue(new ApiRequestError(status, message, null));
+      slotsFake.refresh.mockImplementationOnce(async () => setSlot(1, fileSlot(1, 'a.mp4')));
 
-      await expect(service.publish(1)).rejects.toThrow(message);
+      await expect(service.publish(1)).rejects.toThrow('src1 is no longer a webcam source.');
 
-      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledTimes(1);
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(1);
       expect(peerOf().closed).toBe(true);
       expect(streamOf().stopped).toBe(true);
+    });
+
+    it('a start answered for a slot that is no webcam any more opens no camera', async () => {
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      slotsFake.start.mockResolvedValueOnce(fileSlot(1, 'a.mp4'));
+
+      await expect(service.publish(1)).rejects.toThrow('src1 is no longer a webcam source.');
+      expect(media.opened).toEqual([]);
     });
 
     it('describes a refused camera in terms the user can act on, and opens no connection', async () => {
@@ -523,7 +529,7 @@ describe('CamerasService', () => {
     it('a rejected offer reports the status', async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
-      whip = { status: 400, sessionId: null };
+      whip = { status: 400 };
 
       await expect(service.publish(1)).rejects.toThrow('Webcam publish was rejected (HTTP 400).');
     });
@@ -535,6 +541,7 @@ describe('CamerasService', () => {
       media.gate = gate.promise;
 
       const publishing = service.publish(1);
+      await vi.advanceTimersByTimeAsync(0);
       await service.release(1); // the user stopped the slot while the permission prompt was open
       gate.resolve();
       await expect(publishing).resolves.toBeUndefined();
@@ -559,10 +566,8 @@ describe('CamerasService', () => {
 
       expect(peerOf().closed).toBe(true);
       expect(streamOf().stopped).toBe(true);
-      expect(deletes().map((call) => call.url)).toEqual([
-        'https://insight.local:8889/cam1/whip/resource-1',
-      ]);
-      expect(slotsFake.confirmWebcamStart).not.toHaveBeenCalled();
+      expect(deletes().map((call) => call.url)).toEqual([`${whipUrl(1)}/resource-1`]);
+      expect(slotsFake.refresh).not.toHaveBeenCalled();
       expect(service.localStreams().has(1)).toBe(false);
     });
 
@@ -579,16 +584,14 @@ describe('CamerasService', () => {
       await expect(publishing).resolves.toBeUndefined();
 
       expect(service.localStreams().has(1)).toBe(false);
-      expect(slotsFake.confirmWebcamStart).not.toHaveBeenCalled();
+      expect(slotsFake.refresh).not.toHaveBeenCalled();
       expect(peerOf().closed).toBe(true);
     });
 
     it('a start replaced by a new one closes its own session and leaves the new one publishing', async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
-      slotsFake.confirmWebcamStart.mockRejectedValueOnce(
-        new ApiRequestError(409, 'Webcam is not publishing yet', null),
-      );
+      notLiveFor(1);
 
       const first = service.publish(1);
       await vi.advanceTimersByTimeAsync(0);
@@ -620,9 +623,7 @@ describe('CamerasService', () => {
 
       expect(media.peers).toHaveLength(2);
       expect(peerOf(0).closed).toBe(true);
-      expect(deletes().map((call) => call.url)).toEqual([
-        'https://insight.local:8889/cam1/whip/resource-1',
-      ]);
+      expect(deletes().map((call) => call.url)).toEqual([`${whipUrl(1)}/resource-1`]);
       // The second session is still the slot's: shown, publishing, and closable.
       expect(peerOf(1).closed).toBe(false);
       expect(service.localStreams().get(1)).toBe(media.opened[1].stream);
@@ -631,37 +632,31 @@ describe('CamerasService', () => {
       expect(media.opened[1].stream.stopped).toBe(true);
     });
 
-    it('a start abandoned while the server confirms stops asking', async () => {
+    it('a start abandoned while it waits for the stream stops asking', async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
-      slotsFake.confirmWebcamStart.mockRejectedValue(
-        new ApiRequestError(409, 'Webcam is not publishing yet', null),
-      );
+      slotsFake.refresh.mockImplementation(async () => undefined);
 
       const publishing = service.publish(1);
       await vi.advanceTimersByTimeAsync(300);
-      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledTimes(2);
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
       await service.release(1);
       await vi.advanceTimersByTimeAsync(250);
       await expect(publishing).resolves.toBeUndefined();
 
-      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledTimes(2);
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
       expect(peerOf().closed).toBe(true);
     });
   });
 
   describe('releasing', () => {
-    it('stops the slot naming the WHIP session, so a slot another browser took is left alone', async () => {
+    it('ends the session and stops the slot, which keeps its camera', async () => {
       const service = await create();
       await publishDesk(service);
 
       await service.release(1);
 
-      expect(slotsFake.stop).toHaveBeenCalledWith({
-        index: 1,
-        publisher_released: true,
-        publisher_session: 'session-1',
-      });
+      expect(slotsFake.stop).toHaveBeenCalledWith(1);
       expect(peerOf().closed).toBe(true);
       expect(streamOf().stopped).toBe(true);
       expect(service.localStreams().has(1)).toBe(false);
@@ -672,32 +667,32 @@ describe('CamerasService', () => {
     it('holds the slot as changing until the server has answered', async () => {
       const service = await create();
       await publishDesk(service);
-      const answer = deferred<{ success: true }>();
+      const answer = deferred<Slot>();
       slotsFake.stop.mockReturnValueOnce(answer.promise);
 
       const releasing = service.release(1);
       expect(service.changingSlots().has(1)).toBe(true);
       expect(peerOf().closed).toBe(true); // already closed: only the server's answer is awaited
-      answer.resolve({ success: true });
+      answer.resolve(webcamSlot(1, { run: false }));
       await releasing;
 
       expect(service.changingSlots().has(1)).toBe(false);
     });
 
-    it('a slot this tab does not publish gets a plain stop, which the server confirms with MediaMTX', async () => {
+    it('a slot this tab does not publish is stopped too, which disconnects whatever publishes it', async () => {
       const service = await create();
 
       await service.release(4);
 
-      expect(slotsFake.stop).toHaveBeenCalledWith({ index: 4 });
+      expect(slotsFake.stop).toHaveBeenCalledWith(4);
     });
 
-    it('a refused stop rejects with the server message and lets go of the slot', async () => {
+    it("a refused stop rejects with the server's message and lets go of the slot", async () => {
       const service = await create();
       await publishDesk(service);
-      slotsFake.stop.mockRejectedValueOnce(new ApiRequestError(409, 'src1 changed hands.', null));
+      slotsFake.stop.mockRejectedValueOnce(new ApiRequestError(404, 'There is no source 1.', null));
 
-      await expect(service.release(1)).rejects.toThrow('src1 changed hands.');
+      await expect(service.release(1)).rejects.toThrow('There is no source 1.');
 
       expect(service.changingSlots().size).toBe(0);
       expect(peerOf().closed).toBe(true); // this tab's side is over whatever the server says
@@ -705,75 +700,77 @@ describe('CamerasService', () => {
 
     it('overlapping changes on one slot keep it held until the last one is done', async () => {
       const service = await create();
-      const assigning = deferred<{ success: true }>();
-      const stopping = deferred<{ success: true }>();
+      const assigning = deferred<Slot>();
+      const stopping = deferred<Slot>();
       slotsFake.assignWebcam.mockReturnValueOnce(assigning.promise);
       slotsFake.stop.mockReturnValueOnce(stopping.promise);
 
       const first = service.assign(2, 'cam-desk');
       const second = service.release(2);
-      assigning.resolve({ success: true });
+      assigning.resolve(webcamSlot(2));
       await first;
       expect(service.changingSlots().has(2)).toBe(true);
-      stopping.resolve({ success: true });
+      stopping.resolve(webcamSlot(2, { run: false }));
       await second;
       expect(service.changingSlots().has(2)).toBe(false);
     });
 
-    it('converting a publishing slot to a file ends the session and passes the release claim', async () => {
+    it.each([
+      ['a file', (service: CamerasService) => service.assignFile(1, 'clips/a.mp4'), 'assignFile'],
+      [
+        'a pull',
+        (service: CamerasService) => service.assignPull(1, { url: 'rtsp://cam/stream' }),
+        'assignPull',
+      ],
+      ['nothing', (service: CamerasService) => service.clear(1), 'clear'],
+    ] as const)(
+      'assigning %s to a publishing slot ends the session and forgets its camera first',
+      async (_what, assign, method) => {
+        const service = await create();
+        await publishDesk(service);
+
+        await assign(service);
+
+        expect(slotsFake[method]).toHaveBeenCalledOnce();
+        expect(slotsFake[method].mock.calls[0][0]).toBe(1);
+        expect(peerOf().closed).toBe(true);
+        expect(service.assignments().has(1)).toBe(false);
+        expect(service.changingSlots().size).toBe(0);
+      },
+    );
+
+    it('holds the slot while a file is assigned to it', async () => {
       const service = await create();
-      await publishDesk(service);
+      const answer = deferred<Slot>();
+      slotsFake.assignFile.mockReturnValueOnce(answer.promise);
 
-      await service.assignFile({ index: 1, file: 'clips/a.mp4' });
-
-      expect(slotsFake.assign).toHaveBeenCalledWith({
-        index: 1,
-        file: 'clips/a.mp4',
-        publisher_released: true,
-        publisher_session: 'session-1',
-      });
-      expect(peerOf().closed).toBe(true);
-      expect(service.assignments().has(1)).toBe(false);
-      expect(service.changingSlots().size).toBe(0);
-    });
-
-    it('assigning a file to a slot without a session sends no claim, and holds the slot meanwhile', async () => {
-      const service = await create();
-      const answer = deferred<{ success: true }>();
-      slotsFake.assign.mockReturnValueOnce(answer.promise);
-
-      const assigning = service.assignFile({ index: 2, file: '', fps: null });
+      const assigning = service.assignFile(2, 'a.mp4');
       expect(service.changingSlots().has(2)).toBe(true);
-      answer.resolve({ success: true });
+      answer.resolve(fileSlot(2, 'a.mp4'));
       await assigning;
 
-      expect(slotsFake.assign).toHaveBeenCalledWith({ index: 2, file: '', fps: null });
+      expect(slotsFake.assignFile).toHaveBeenCalledWith(2, 'a.mp4');
       expect(service.changingSlots().has(2)).toBe(false);
     });
   });
 
   describe('releasing everything', () => {
-    it('closes every session and returns the claims the bulk request needs, only for sessions it can name', async () => {
+    it('closes every session, keeping the camera choices for a stop', async () => {
       const service = await create();
       await publishDesk(service, 1);
-      whip = { status: 201, sessionId: null };
       await service.assign(2, 'cam-laptop');
       await service.publish(2);
-      whip = { status: 201, sessionId: 'session-3' };
       await service.assign(3, 'cam-desk');
-      await service.publish(3);
 
-      const claims = service.releaseAll();
+      service.releaseAll();
 
-      expect(claims).toEqual([
-        { index: 1, session: 'session-1' },
-        { index: 3, session: 'session-3' },
-      ]);
       expect(media.peers.every((peer) => peer.closed)).toBe(true);
       expect(media.opened.every((opened) => opened.stream.stopped)).toBe(true);
       expect(service.localStreams().size).toBe(0);
       // Stop all keeps the choices; the server still holds those slots as webcams.
       expect(service.assignments().size).toBe(3);
+      // The bulk route stops the slots on the server; this sends nothing of its own.
+      expect(slotsFake.stop).not.toHaveBeenCalled();
     });
 
     it('clears the camera choices when the bulk action rewrites the slots', async () => {
@@ -792,34 +789,26 @@ describe('CamerasService', () => {
       const gate = deferred();
       media.gate = gate.promise;
       const publishing = service.publish(1);
+      await vi.advanceTimersByTimeAsync(0);
 
-      expect(service.releaseAll()).toEqual([]);
+      service.releaseAll();
       gate.resolve();
       await expect(publishing).resolves.toBeUndefined();
 
       expect(streamOf().stopped).toBe(true);
       expect(posts('/whip')).toEqual([]);
     });
-
-    it('returns no claims when nothing is published', async () => {
-      const service = await create();
-      expect(service.releaseAll()).toEqual([]);
-    });
   });
 
   describe('a lost connection', () => {
-    it('failed ends the session at once with a session-bound stop', async () => {
+    it('failed ends the session at once and stops the slot', async () => {
       const service = await create();
       await publishDesk(service);
 
       peerOf().changeConnectionState('failed');
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(slotsFake.stop).toHaveBeenCalledWith({
-        index: 1,
-        publisher_released: true,
-        publisher_session: 'session-1',
-      });
+      expect(slotsFake.stop).toHaveBeenCalledWith(1);
       expect(streamOf().stopped).toBe(true);
       expect(service.localStreams().has(1)).toBe(false);
     });
@@ -857,22 +846,22 @@ describe('CamerasService', () => {
     it('a stop the server refuses is reported in a toast, since no action is waiting for it', async () => {
       const service = await create();
       await publishDesk(service);
-      slotsFake.stop.mockRejectedValueOnce(new ApiRequestError(409, 'src1 changed hands.', null));
+      slotsFake.stop.mockRejectedValueOnce(new ApiRequestError(404, 'There is no source 1.', null));
 
       peerOf().changeConnectionState('failed');
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(toasts.error).toHaveBeenCalledWith('src1 changed hands.');
+      expect(toasts.error).toHaveBeenCalledWith('There is no source 1.');
       expect(service.changingSlots().size).toBe(0);
     });
   });
 
   describe('a camera that is removed', () => {
-    it('a removed device tears down its slot and sends a session-bound stop', async () => {
+    it('a removed device tears down its slot and stops it', async () => {
       const service = await create();
       await publishDesk(service, 1);
       await service.assign(2, 'cam-laptop');
-      const stopping = deferred<{ success: true }>();
+      const stopping = deferred<Slot>();
       slotsFake.stop.mockReturnValueOnce(stopping.promise);
 
       media.changeDevices([LAPTOP]);
@@ -880,13 +869,9 @@ describe('CamerasService', () => {
 
       expect(peerOf().closed).toBe(true);
       expect(streamOf().stopped).toBe(true);
-      expect(slotsFake.stop).toHaveBeenCalledWith({
-        index: 1,
-        publisher_released: true,
-        publisher_session: 'session-1',
-      });
+      expect(slotsFake.stop).toHaveBeenCalledWith(1);
       expect(service.changingSlots().has(1)).toBe(true); // held until the stop is answered
-      stopping.resolve({ success: true });
+      stopping.resolve(webcamSlot(1, { run: false }));
       await vi.advanceTimersByTimeAsync(0);
       expect(service.changingSlots().has(1)).toBe(false);
       expect(service.assignments().has(1)).toBe(false);
@@ -903,6 +888,7 @@ describe('CamerasService', () => {
       media.gate = gate.promise;
 
       const publishing = service.publish(1);
+      await vi.advanceTimersByTimeAsync(0);
       media.changeDevices([LAPTOP]);
       await vi.advanceTimersByTimeAsync(0);
       gate.resolve();
@@ -914,12 +900,10 @@ describe('CamerasService', () => {
       expect(service.assignments().has(1)).toBe(false);
     });
 
-    it('a removed device abandons a start that is waiting for the server, and sends a session-bound stop', async () => {
+    it('a removed device abandons a start that is waiting for the stream, and stops the slot', async () => {
       const service = await create();
       await service.assign(1, 'cam-desk');
-      slotsFake.confirmWebcamStart.mockRejectedValue(
-        new ApiRequestError(409, 'Webcam is not publishing yet', null),
-      );
+      slotsFake.refresh.mockImplementation(async () => undefined);
 
       const publishing = service.publish(1);
       await vi.advanceTimersByTimeAsync(300);
@@ -928,12 +912,8 @@ describe('CamerasService', () => {
       await expect(publishing).resolves.toBeUndefined();
 
       expect(peerOf().closed).toBe(true);
-      expect(slotsFake.stop).toHaveBeenCalledWith({
-        index: 1,
-        publisher_released: true,
-        publisher_session: 'session-1',
-      });
-      expect(slotsFake.confirmWebcamStart).toHaveBeenCalledTimes(2);
+      expect(slotsFake.stop).toHaveBeenCalledWith(1);
+      expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
     });
 
     it('a removed device only drops the choice for a slot this tab does not publish', async () => {
@@ -951,13 +931,13 @@ describe('CamerasService', () => {
       const service = await create();
       await publishDesk(service, 1);
       slotsFake.stop.mockRejectedValueOnce(
-        new ApiRequestError(502, 'MediaMTX is unreachable.', null),
+        new ApiRequestError(0, 'Could not reach the server.', null),
       );
 
       media.changeDevices([LAPTOP]);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(toasts.error).toHaveBeenCalledWith('MediaMTX is unreachable.');
+      expect(toasts.error).toHaveBeenCalledWith('Could not reach the server.');
     });
   });
 
@@ -970,7 +950,7 @@ describe('CamerasService', () => {
     const pagehide = (persisted: boolean) =>
       window.dispatchEvent(Object.assign(new Event('pagehide'), { persisted }));
 
-    it('a publish survives navigating away from Streaming and is released on pagehide', async () => {
+    it('a publish survives navigating away from Streaming and is stopped on pagehide', async () => {
       const page = TestBed.createComponent(StreamingPageStub);
       const service = page.componentInstance.cameras;
       await vi.advanceTimersByTimeAsync(0);
@@ -986,19 +966,12 @@ describe('CamerasService', () => {
 
       pagehide(false);
 
-      const stops = posts('/api/mediasrc/stop');
+      const stops = posts('/api/slots/1/stop');
       expect(stops).toHaveLength(1);
       expect(stops[0].init.keepalive).toBe(true);
-      expect(JSON.parse(stops[0].init.body as string)).toEqual({
-        index: 1,
-        publisher_released: true,
-        publisher_session: 'session-1',
-      });
       expect(peerOf().closed).toBe(true);
       expect(streamOf().stopped).toBe(true);
-      expect(deletes().map((call) => call.url)).toEqual([
-        'https://insight.local:8889/cam1/whip/resource-1',
-      ]);
+      expect(deletes().map((call) => call.url)).toEqual([`${whipUrl(1)}/resource-1`]);
       expect(service.localStreams().size).toBe(0);
     });
 
@@ -1008,20 +981,9 @@ describe('CamerasService', () => {
 
       pagehide(true);
 
-      expect(posts('/api/mediasrc/stop')).toEqual([]);
+      expect(posts('/stop')).toEqual([]);
       expect(peerOf().closed).toBe(false);
       expect(service.localStreams().has(1)).toBe(true);
-    });
-
-    it('sends no stop for a session it cannot name, and still closes it', async () => {
-      const service = await create();
-      whip = { status: 201, sessionId: null };
-      await publishDesk(service);
-
-      pagehide(false);
-
-      expect(posts('/api/mediasrc/stop')).toEqual([]);
-      expect(peerOf().closed).toBe(true);
     });
 
     it('closes what it publishes when the app is destroyed, and stops listening for pagehide', async () => {

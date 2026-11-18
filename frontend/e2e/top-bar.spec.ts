@@ -15,11 +15,7 @@ const showLabels = (page: Page) => page.getByRole('button', { name: 'Show labels
  * The page the System Info tests open the dialog from: Streaming with no slots, which asks for
  * nothing else. (Stats polls the board's Sentinel, and these tests are about the dialog.)
  */
-const answerEmptyStreaming = (page: Page) =>
-  page.route(
-    (url) => url.pathname === '/api/mediasrc',
-    (route) => route.fulfill({ json: [] }),
-  );
+const answerEmptyStreaming = (page: Page) => answerSlots(page, 0);
 
 /** The board a test sees unreachable: the long-named one, whose connection check failed. */
 const UNREACHABLE_BOARD: BoardState = {

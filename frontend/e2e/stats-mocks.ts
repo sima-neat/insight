@@ -291,8 +291,8 @@ export class FakeStatsBackend {
       },
     );
     await page.route(
-      (url) => url.pathname === '/api/mediasrc',
-      (route) => route.fulfill({ json: [] }),
+      (url) => url.pathname === '/api/slots',
+      (route) => route.fulfill({ json: { count: 48, slots: [] } }),
     );
   }
 

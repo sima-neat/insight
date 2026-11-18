@@ -32,12 +32,11 @@ import { NeatErrorNote, NeatField } from '@sima/neat-ui/field';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatProgress } from '@sima/neat-ui/progress';
 import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
-import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import type { Slot } from '../../api.generated';
 import { copyText } from '../../clipboard';
 import { PanelTitle } from '../../panel-title';
-import type { Slot, SlotTransport } from '../../sources/api';
 import { CamerasService } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
 import { customRate } from '../../sources/fps';
@@ -48,12 +47,12 @@ import { MediaPicker } from './media-picker';
 import { SlotControl } from './slot-control';
 import { SlotPreview } from './slot-preview';
 import {
-  codecLabel,
+  codecWarning,
   dimensionsText,
   externalChip,
   formatBitrate,
-  isAssigned,
   isLive,
+  isRunning,
   liveFor,
   protocolLabel,
   pullSourceText,
@@ -62,7 +61,6 @@ import {
   slotCodec,
   type SlotRow,
   slotOutput,
-  streamUrl,
 } from '../../sources/slot-row';
 import { messageOf } from '../../sources/stream-lines';
 import { type EmptySourceForm, SourcesSession } from '../sources-session';
@@ -76,8 +74,6 @@ const SOURCE_FORMS: NeatSegmentedOption<SourceForm>[] = [
   { value: 'url', label: 'Stream URL' },
 ];
 
-const TRANSPORT_LABELS: Record<SlotTransport, string> = { rtsp: 'RTSP', http: 'HTTP' };
-
 /** A pull accepts RTSP and RTSPS URLs only (#170). */
 const STREAM_URL = /^rtsps?:\/\//i;
 
@@ -85,7 +81,7 @@ const COPY_REFUSED = 'Could not copy the URL: the browser refused access to the 
 
 /** The slot's main action, one button whatever it is (see the template). */
 interface PrimaryAction {
-  readonly kind: 'start' | 'stop' | 'cancel' | 'takeOver' | 'stopPulling';
+  readonly kind: 'start' | 'stop' | 'cancel' | 'takeOver';
   readonly label: string;
   readonly variant: NeatButtonVariant;
   /**
@@ -100,6 +96,14 @@ interface PrimaryAction {
   readonly tooltip: string | null;
 }
 
+/** A URL the slot is reached at, as the details list it with its Copy. */
+interface StreamUrl {
+  readonly label: string;
+  readonly url: string;
+  /** The Copy button's accessible name. */
+  readonly copyLabel: string;
+}
+
 let nextPanelId = 0;
 
 /**
@@ -107,9 +111,16 @@ let nextPanelId = 0;
  * slot holds nothing, so it shows the form it was left on.
  */
 function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
-  if (slot.state === 'pulled') return 'url';
-  if (slot.type === 'webcam') return 'camera';
-  return slot.file ? 'file' : (left ?? 'file');
+  switch (slot.kind) {
+    case 'pull':
+      return 'url';
+    case 'webcam':
+      return 'camera';
+    case 'file':
+      return 'file';
+    default:
+      return left ?? 'file';
+  }
 }
 
 /**
@@ -117,13 +128,16 @@ function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
  * §1.2's Source Preview and assign dialog, now in one place). From the top:
  *
  * - the slot and its state, and its live preview (`SlotPreview`);
- * - its actions: Start and Stop; Cancel encoding while a rendition encodes; "Take over…" for an
- *   external publisher; Stop pulling for a pull;
+ * - its actions: Start and Stop, for a file, a webcam and a pulled camera alike (a stopped pull
+ *   keeps its camera, and Start pulls again); Cancel encoding while a rendition encodes; "Take
+ *   over…" for an external publisher;
  * - the source switch, File / Camera / Stream URL, which applies at once on a stopped slot (Camera
- *   registers it as a webcam, File and Stream URL clear a webcam, Stream URL a file as well) and
- *   asks first on a live one, whose stream it stops. A camera is assigned by clicking it;
- * - the output frame rate of a file slot, and its transport where the media allows a choice;
- * - the details: output, URL with Copy, live for, bitrate, readers, publisher or source.
+ *   makes it a webcam, File and Stream URL clear what it had) and asks first on a live one, whose
+ *   stream it stops. A camera is assigned by clicking it, a pull by its form; each form's Clear
+ *   leaves the slot with nothing assigned;
+ * - the output frame rate of a file slot;
+ * - the details: output, URLs with Copy, live for, bitrate, readers, publisher or camera, and why
+ *   the slot failed.
  *
  * Every assignment from here goes through `CamerasService` (ruling Q7), which ends this browser's
  * webcam on the slot first; a slot it is changing, or one with an action of this panel in flight
@@ -152,7 +166,6 @@ function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
     NeatNote,
     NeatProgress,
     NeatSegmented,
-    NeatSelect,
     NeatSelectList,
     NeatTooltip,
     PanelTitle,
@@ -186,99 +199,88 @@ export class SlotPanel {
   protected readonly fpsReasonId = `slot-panel-${nextPanelId++}-fps-reason`;
 
   protected readonly slot = computed(() => this.row().slot);
-  protected readonly index = computed(() => this.slot().index);
+  protected readonly n = computed(() => this.slot().n);
   protected readonly sourceForms = SOURCE_FORMS;
 
   /** The form for what the slot holds now, or for the one an empty slot was left on. */
   private readonly slotForm = computed(() =>
-    formFor(this.slot(), this.session.emptyForm(this.index())),
+    formFor(this.slot(), this.session.emptyForm(this.n())),
   );
   /** The form shown: the slot's, and the one a switch is changing to until the slot shows it. */
   protected readonly form = linkedSignal(this.slotForm);
 
   // What belongs to this slot alone starts afresh when the slot changes.
-  protected readonly url = linkedSignal({ source: this.index, computation: () => '' });
-  protected readonly username = linkedSignal({ source: this.index, computation: () => '' });
-  protected readonly password = linkedSignal({ source: this.index, computation: () => '' });
+  protected readonly url = linkedSignal({ source: this.n, computation: () => '' });
+  protected readonly username = linkedSignal({ source: this.n, computation: () => '' });
+  protected readonly password = linkedSignal({ source: this.n, computation: () => '' });
   /** The last pull's refusal, shown under the form (#170's dialog did) as well as in a toast. */
   protected readonly pullError = linkedSignal<number, string | null>({
-    source: this.index,
+    source: this.n,
     computation: () => null,
   });
-  private readonly fpsInvalid = linkedSignal({ source: this.index, computation: () => false });
+  private readonly fpsInvalid = linkedSignal({ source: this.n, computation: () => false });
   /** The camera assigned to this slot, by id: it changes only with this slot's assignment. */
   private readonly assignedCameraId = computed(
-    () => this.cameras.assignments().get(this.index())?.deviceId ?? null,
+    () => this.cameras.assignments().get(this.n())?.deviceId ?? null,
   );
   protected readonly pulling = signal(false);
   protected readonly pickerBusy = signal(false);
 
   /** The slot is changing, or an action of this panel on it is in flight: its controls wait. */
   protected readonly busy = computed(
-    () => this.control.busy().has(this.index()) || this.cameras.changingSlots().has(this.index()),
+    () => this.control.busy().has(this.n()) || this.cameras.changingSlots().has(this.n()),
   );
   /** A start of this slot is in flight: the slot's state says Starting…. */
-  private readonly starting = computed(() => this.control.starting().has(this.index()));
-  protected readonly encode = computed(() => this.slots.encodes().get(this.index()) ?? null);
-  protected readonly preparing = computed(() => this.control.preparing().has(this.index()));
+  private readonly starting = computed(() => this.control.starting().has(this.n()));
+  protected readonly encode = computed(() => this.slots.encodes().get(this.n()) ?? null);
   protected readonly localStream = computed(
-    () => this.cameras.localStreams().get(this.index()) ?? null,
+    () => this.cameras.localStreams().get(this.n()) ?? null,
   );
   protected readonly camera = computed<Camera | null>(
-    () => this.cameras.assignments().get(this.index()) ?? null,
+    () => this.cameras.assignments().get(this.n()) ?? null,
   );
-  /** An external publisher or a pull holds the slot, over whatever is assigned under it. */
-  protected readonly held = computed(() => {
-    const state = this.slot().state;
-    return state === 'external' || state === 'pulled';
-  });
-  protected readonly isWebcam = computed(() => this.slot().type === 'webcam');
-  protected readonly playing = computed(() => this.slot().state === 'playing');
-  /** Assigned, with a codec the streamer can send: what Start and Copy need (#170). */
-  protected readonly canStream = computed(
-    () => isAssigned(this.slot()) && this.slot().allowed_transports.length > 0,
-  );
+  /** An external publisher holds the slot, over whatever is assigned under it. */
+  protected readonly held = computed(() => this.slot().state === 'external');
+  protected readonly isWebcam = computed(() => this.slot().kind === 'webcam');
+  protected readonly isFile = computed(() => this.slot().kind === 'file');
+  protected readonly running = computed(() => isRunning(this.slot()));
+  /** A pull that came back from a restart without its credentials, which Insight never keeps. */
+  protected readonly needsUrl = computed(() => this.slot().pull?.status === 'needs_credentials');
 
   // Start.
   protected readonly startBlocker = computed<string | null>(() => {
-    if (this.isWebcam()) return this.camera() ? null : 'Select a webcam first';
-    if (!this.canStream()) return 'Codec must be detected before streaming';
-    return this.fpsInvalid() ? 'FPS must be a whole number of at least 1' : null;
+    switch (this.slot().kind) {
+      case 'none':
+        return 'Assign a source first';
+      case 'webcam':
+        return this.camera() ? null : 'Select a webcam first';
+      case 'pull':
+        return this.needsUrl() ? 'Enter the stream URL again first' : null;
+      default:
+        return this.fpsInvalid() ? 'FPS must be a whole number of at least 1' : null;
+    }
   });
   protected readonly startTooltip = computed(() => {
     const camera = this.camera();
     if (this.startBlocker()) return this.startBlocker();
-    return this.isWebcam() && camera
-      ? `Start publishing ${camera.label}`
-      : `Start src${this.index()}`;
+    return this.isWebcam() && camera ? `Start publishing ${camera.label}` : `Start src${this.n()}`;
   });
 
   protected readonly action = computed<PrimaryAction>(() => {
     const plain = { blocker: null, waiting: this.busy(), tooltip: null };
-    switch (this.slot().state) {
-      case 'external':
-        return { ...plain, kind: 'takeOver', label: 'Take over…', variant: 'danger', icon: null };
-      case 'pulled':
-        return {
-          ...plain,
-          kind: 'stopPulling',
-          label: 'Stop pulling',
-          variant: 'danger',
-          icon: 'stop',
-        };
+    if (this.held()) {
+      return { ...plain, kind: 'takeOver', label: 'Take over…', variant: 'danger', icon: null };
     }
     if (this.encode()) {
-      // Once the encode is over the start that follows it cannot be cancelled.
       return {
         ...plain,
         kind: 'cancel',
         label: 'Cancel encoding',
         variant: 'outlined',
         icon: null,
-        waiting: !this.preparing(),
       };
     }
-    if (this.playing()) {
+    if (this.running()) {
       return { ...plain, kind: 'stop', label: 'Stop', variant: 'danger', icon: 'stop' };
     }
     // The glyph turns while a start waits, not for any other change of the slot; the button keeps
@@ -295,47 +297,38 @@ export class SlotPanel {
   });
 
   // Frame rate (file slots).
-  protected readonly hasFrameRate = computed(() => !this.isWebcam() && !this.held());
   protected readonly fpsDisabled = computed(
-    () => !this.slot().file || !this.canStream() || this.slot().codec === 'mjpeg',
+    () => !this.slot().file || this.slot().codec === 'mjpeg',
   );
   /** Also while the slot is busy: a commit posts the file the slot has, and must not race a change. */
   protected readonly fpsLocked = computed(
-    () => this.playing() || this.encode() !== null || this.busy(),
+    () => this.running() || this.encode() !== null || this.busy(),
   );
   /** Why the rate cannot be changed, said under the stepper (#170 put it in a tooltip). */
   protected readonly fpsReason = computed(() => {
     const slot = this.slot();
     if (!slot.file) return 'Assign media before choosing a frame rate';
     if (slot.codec === 'mjpeg') return 'FPS changes are not supported for MJPEG sources';
-    if (this.playing()) return 'Stop the source to change its frame rate';
+    if (this.running()) return 'Stop the source to change its frame rate';
     return null;
   });
   protected readonly nativeRate = computed(() => customRate(this.slot()) === null);
   protected readonly nativeLabel = computed(() => {
     const native = this.slot().native_fps;
-    return native != null ? `Native (${native} fps)` : 'Native';
+    return native !== undefined ? `Native (${native} fps)` : 'Native';
   });
   protected readonly renditionHint = computed(() => {
     const native = this.slot().native_fps;
-    return native != null
+    return native !== undefined
       ? `Native ${native} fps. A different rate creates a rendition on start.`
       : 'A rate other than the native one creates a rendition on start.';
   });
-
-  // Transport (MJPEG files only, where the server allows RTSP or HTTP).
-  protected readonly transportOptions = computed<NeatSelectOption<SlotTransport>[]>(() =>
-    this.slot().allowed_transports.map((value) => ({ value, label: TRANSPORT_LABELS[value] })),
-  );
-  protected readonly transport = computed<SlotTransport | null>(
-    () => this.slot().transport || null,
-  );
 
   // The file form.
   protected readonly fileDetail = computed(() => {
     const slot = this.slot();
     if (!slot.file) return 'Not assigned';
-    return slot.native_fps != null ? `${slot.file} · ${slot.native_fps} fps` : slot.file;
+    return slot.native_fps !== undefined ? `${slot.file} · ${slot.native_fps} fps` : slot.file;
   });
 
   // The camera form.
@@ -355,61 +348,56 @@ export class SlotPanel {
 
   // Details.
   protected readonly output = computed(() => slotOutput(this.slot()));
-  /** The rendition a playing file slot streams, when it is not the file itself. */
+  /** The rendition a running file slot streams, when it is not the file itself. */
   protected readonly streamingRendition = computed(() => {
     const slot = this.slot();
-    return slot.state === 'playing' && slot.active_file && slot.active_file !== slot.file
+    return slot.kind === 'file' && slot.active_file && slot.active_file !== slot.file
       ? slot.active_file
       : null;
   });
   protected readonly renditionPending = computed(() => {
     const slot = this.slot();
     return (
+      slot.kind === 'file' &&
       !this.streamingRendition() &&
-      slot.state !== 'playing' &&
+      !this.running() &&
       this.encode() === null &&
       customRate(slot) !== null
     );
   });
-  protected readonly streamUrl = computed(() => streamUrl(this.slot()));
-  /**
-   * Where a camera or a pulled stream goes out, for the hints: the slot's RTSP URL, with the
-   * server's mapped port. Not `streamUrl`, which names the HTTP stream of an MJPEG file slot. The
-   * path alone until the server has said the URL.
-   */
-  protected readonly rtspUrl = computed(
-    () => this.slot().urls.rtsp ?? `rtsp://…/src${this.index()}`,
-  );
-  /** A held slot has a stream to copy whatever its assignment; otherwise it needs a codec. */
-  protected readonly canCopy = computed(
-    () => this.streamUrl() !== null && (this.held() || this.canStream()),
-  );
-  protected readonly readers = computed(() =>
-    this.slot().readers === undefined ? null : readersText(this.slot().readers),
-  );
-  /** The publisher or pull holding the slot, as #170's table showed it. */
+  /** Where readers open the slot: always its RTSP URL, and its HTTP MJPEG one for an MJPEG stream. */
+  protected readonly streamUrls = computed((): readonly StreamUrl[] => {
+    const { n, urls } = this.slot();
+    const rtsp: StreamUrl = {
+      label: 'URL',
+      url: urls.rtsp,
+      copyLabel: `Copy stream URL for src${n}`,
+    };
+    return urls.http_mjpeg
+      ? [rtsp, { label: 'HTTP', url: urls.http_mjpeg, copyLabel: `Copy HTTP URL for src${n}` }]
+      : [rtsp];
+  });
+  protected readonly readers = computed(() => readersText(this.slot().readers));
+  /** The publisher or the pulled camera holding the slot, as #170's table showed it. */
   protected readonly holder = computed(() => {
     const slot = this.slot();
-    const stream =
-      slot.state === 'external' ? slot.external : slot.state === 'pulled' ? slot.pull : undefined;
-    if (!stream) return null;
-    const dimensions = dimensionsText(stream);
-    const showWarning = slot.state === 'external' || slot.pull?.status === 'live';
+    if (!this.held() && slot.kind !== 'pull') return null;
+    const publisher = slot.publisher;
+    const dimensions = publisher ? dimensionsText(publisher) : '';
     return {
       // A pull names no codec until it is live: "-", as the list says.
       video: `${slotCodec(slot)}${dimensions ? ` · ${dimensions}` : ''}`,
-      warning:
-        showWarning && !stream.codec_supported
-          ? `${codecLabel(slot.codec)} cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.`
-          : null,
+      warning: codecWarning(slot),
       // Recomputed with each poll answer, every 2 s, which is when #170 ticked it too.
-      liveFor: liveFor(stream.since, Date.now()),
-      bitrate: formatBitrate(stream.bitrate_bps),
+      liveFor: liveFor(publisher?.since, Date.now()),
+      bitrate: formatBitrate(publisher?.bitrate_bps),
     };
   });
   protected readonly publisher = computed(() => {
-    const external = this.slot().external;
-    return external ? `${protocolLabel(external.protocol)} · ${external.address || '-'}` : null;
+    const publisher = this.slot().publisher;
+    return this.held() && publisher
+      ? `${protocolLabel(publisher.protocol)} · ${publisher.address || '-'}`
+      : null;
   });
   protected readonly pullSource = computed(() => {
     const pull = this.slot().pull;
@@ -418,6 +406,11 @@ export class SlotPanel {
   protected readonly pullStatus = computed(() => {
     const pull = this.slot().pull;
     return pull ? `${pullStatusLabel(pull)}${pull.error ? ` · ${pull.error}` : ''}` : null;
+  });
+  /** Why a file or webcam slot failed; a pull says it in its status. */
+  protected readonly problem = computed(() => {
+    const slot = this.slot();
+    return slot.kind !== 'pull' ? (slot.error ?? null) : null;
   });
 
   // Actions.
@@ -430,7 +423,6 @@ export class SlotPanel {
       case 'start':
         return this.start();
       case 'stop':
-      case 'stopPulling':
         return this.stop();
       case 'cancel':
         return this.cancelEncoding();
@@ -440,50 +432,46 @@ export class SlotPanel {
   }
 
   private async start(): Promise<void> {
-    const index = this.index();
-    await this.act(async () => {
-      if ((await this.control.start(index)) === 'cancelled') {
-        this.toasts.status(`Cancelled encoding for src${index}.`);
-      }
-    });
+    const n = this.n();
+    await this.act(() => this.control.start(n));
   }
 
   private async stop(): Promise<void> {
     const slot = this.slot();
-    await this.act(() => this.control.run<unknown>(slot.index, () => this.endStream(slot)));
+    await this.act(() => this.control.run<unknown>(slot.n, () => this.endStream(slot)));
   }
 
-  /** A webcam is this browser's to end; the cameras service stops it bound to its session. */
+  /** A webcam this browser publishes lets go of its camera too. */
   private endStream(slot: Slot): Promise<unknown> {
-    return slot.type === 'webcam'
-      ? this.cameras.release(slot.index)
-      : this.slots.stop({ index: slot.index });
+    return slot.kind === 'webcam' ? this.cameras.release(slot.n) : this.slots.stop(slot.n);
   }
 
-  private cancelEncoding(): void {
-    this.control.cancelEncoding(this.index());
+  private async cancelEncoding(): Promise<void> {
+    const n = this.n();
+    const cancelled = await this.act(() => this.control.cancelEncoding(n));
+    if (cancelled) this.toasts.status(`Cancelled encoding for src${n}.`);
   }
 
   private async takeOver(): Promise<void> {
     const slot = this.slot();
-    const name = `src${slot.index}`;
+    const name = `src${slot.n}`;
     const confirmed = await this.confirm.ask({
       title: `Disconnect external stream on ${name}?`,
       // #170's dialog: the publisher's chip, its readers, and what disconnecting does.
-      message: `${slot.external ? `${externalChip(slot.external)}. ` : ''}Readers: ${readersText(slot.readers)}. The publisher and all readers will be disconnected. ${name} becomes Idle and you can assign a file to it.`,
+      message: `${slot.publisher ? `${externalChip(slot.publisher)}. ` : ''}Readers: ${readersText(slot.readers)}. The publisher and all readers will be disconnected, and ${name} goes back to what it is assigned.`,
       confirmLabel: 'Disconnect',
       tone: 'danger',
     });
     if (!confirmed) return;
     await this.act(async () => {
-      await this.control.run(slot.index, () => this.slots.takeOver(slot.index));
+      await this.control.run(slot.n, () => this.slots.takeOver(slot.n));
       this.toasts.status(`Disconnected the external stream on ${name}.`);
     });
   }
 
   protected openPicker(): void {
     this.dialogs.open(this.pickerTemplate(), {
-      title: `Source for src${this.index()}`,
+      title: `Source for src${this.n()}`,
       size: 'large',
     });
   }
@@ -504,11 +492,11 @@ export class SlotPanel {
 
   /** The picker's Assign: the dialog closes once the file is assigned, and stays for a retry if not. */
   protected async assignPicked(dialog: NeatDialogRef, file: string): Promise<void> {
-    const index = this.index();
+    const n = this.n();
     this.pickerBusy.set(true);
     dialog.setDismissible(false);
     try {
-      await this.control.run(index, () => this.cameras.assignFile({ index, file }));
+      await this.control.run(n, () => this.cameras.assignFile(n, file));
       dialog.close();
     } catch (failure) {
       this.toasts.error(messageOf(failure));
@@ -519,17 +507,15 @@ export class SlotPanel {
   }
 
   /**
-   * Unassigns the file (`file: ''`). There is nothing to clear afterwards, so the focus goes on to
-   * Change….
+   * Leaves the slot with nothing assigned: its file, or its pulled camera. The slot then shows the
+   * form it was cleared from, and the focus goes on to what assigns it again.
    */
   protected async clear(): Promise<void> {
-    const index = this.index();
-    // An empty slot shows the File form, which is what a cleared one is.
-    this.session.rememberEmptyForm(index, 'file');
-    const cleared = await this.act(() =>
-      this.control.run(index, () => this.cameras.assignFile({ index, file: '' })),
-    );
-    if (cleared) this.focusAfterRender(() => this.changeButton());
+    const n = this.n();
+    const form = this.form();
+    if (form !== 'camera') this.session.rememberEmptyForm(n, form);
+    const cleared = await this.act(() => this.control.run(n, () => this.cameras.clear(n)));
+    if (cleared && form === 'file') this.focusAfterRender(() => this.changeButton());
   }
 
   protected async requestCameraAccess(): Promise<void> {
@@ -556,19 +542,16 @@ export class SlotPanel {
     }
     const slot = this.slot();
     const switched = await this.act(() =>
-      this.control.run(slot.index, async () => {
-        if (isLive(slot)) await this.endStream(slot);
-        await this.applyForm(slot, target);
-      }),
+      this.control.run(slot.n, () => this.applyForm(slot, target)),
     );
     if (!switched) return this.showForm(this.slotForm());
     // Remembered once it took, so that a refusal leaves what the empty slot was left on.
-    if (target !== 'camera') this.session.rememberEmptyForm(slot.index, target);
+    if (target !== 'camera') this.session.rememberEmptyForm(slot.n, target);
   }
 
   /** Whether the slot is another one, or shows another form or a hold, than when asked about. */
   private slotChangedSince(asked: Slot, form: SourceForm): boolean {
-    return this.slot().index !== asked.index || this.slotForm() !== form || this.held();
+    return this.slot().n !== asked.n || this.slotForm() !== form || this.held();
   }
 
   /**
@@ -582,9 +565,10 @@ export class SlotPanel {
   }
 
   private confirmStop(slot: Slot, target: SourceForm): Promise<boolean> {
-    const name = `src${slot.index}`;
+    const name = `src${slot.n}`;
     const label = SOURCE_FORMS.find((option) => option.value === target)!.label;
-    const lost = slot.type === 'webcam' ? 'camera' : slot.file;
+    const lost =
+      slot.kind === 'webcam' ? 'camera' : slot.kind === 'pull' ? 'stream URL' : slot.file;
     return this.confirm.ask({
       title: `Stop ${name}?`,
       message: `Switching to ${label} stops ${name} and removes its ${lost}.`,
@@ -594,23 +578,13 @@ export class SlotPanel {
   }
 
   /**
-   * What the switch changes on the server, for a slot that is stopped: Camera registers a webcam
-   * with no camera, which the list then picks; File and Stream URL clear a webcam, and Stream URL
-   * a file too. An empty slot, or a file slot switched to File, has nothing to change.
+   * What the switch changes on the server: Camera makes the slot a webcam with no camera, which
+   * the list then picks; File and Stream URL clear what the slot holds, which a live slot's
+   * stream stops with. An empty slot switched to File or Stream URL has nothing to change.
    */
   private async applyForm(slot: Slot, target: SourceForm): Promise<void> {
-    const webcam = slot.type === 'webcam';
-    switch (target) {
-      case 'camera':
-        if (!webcam) await this.cameras.assign(slot.index, null);
-        return;
-      case 'file':
-        if (webcam) await this.cameras.assignFile({ index: slot.index, file: '' });
-        return;
-      case 'url':
-        if (webcam || slot.file) await this.cameras.assignFile({ index: slot.index, file: '' });
-        return;
-    }
+    if (target === 'camera') await this.cameras.assign(slot.n, null);
+    else if (slot.kind !== 'none') await this.cameras.clear(slot.n);
   }
 
   /**
@@ -623,12 +597,12 @@ export class SlotPanel {
     const assigned = this.assignedCamera();
     if (camera.deviceId === assigned?.deviceId) return;
     if (this.busy()) return this.cameraList()?.selected.set(assigned);
-    const index = this.index();
-    const live = this.isWebcam() && this.playing();
+    const n = this.n();
+    const live = this.isWebcam() && isLive(this.slot());
     const done = await this.act(() =>
-      this.control.run(index, async () => {
-        await this.cameras.assign(index, camera.deviceId);
-        if (live) await this.control.start(index);
+      this.control.run(n, async () => {
+        await this.cameras.assign(n, camera.deviceId);
+        if (live) await this.control.start(n);
       }),
     );
     // A refusal leaves the camera the slot had; the list goes back to it.
@@ -645,27 +619,32 @@ export class SlotPanel {
     }
   }
 
+  /**
+   * Makes the slot pull the camera typed in, replacing what it had. The server checks the camera
+   * first: one that refuses the credentials or does not answer is not assigned.
+   */
   protected async pull(): Promise<void> {
     if (!this.canPull()) return;
-    const index = this.index();
+    const n = this.n();
     this.pulling.set(true);
     this.pullError.set(null);
     try {
-      const pulled = await this.control.run(index, () =>
-        this.slots.pull({
-          index,
+      const pulled = await this.control.run(n, () =>
+        this.cameras.assignPull(n, {
           url: this.url().trim(),
           username: this.username().trim(),
           password: this.password(),
         }),
       );
-      // A credential is kept no longer than it is needed.
+      // A credential is kept no longer than it is needed, and the form is done with.
+      this.url.set('');
+      this.username.set('');
       this.password.set('');
       // Named from the server's record, which carries no credentials, never from the typed URL.
       if (pulled.pull) {
-        this.toasts.status(`src${index} is pulling from ${pullSourceText(pulled.pull)}.`);
+        this.toasts.status(`src${n} is pulling from ${pullSourceText(pulled.pull)}.`);
       }
-      // The form goes with the pull; its main action, Stop pulling, stays.
+      // The pull runs at once; what comes next is its main action, Stop.
       this.focusAfterRender(() => this.primaryButton());
     } catch (failure) {
       this.pullError.set(messageOf(failure));
@@ -685,23 +664,7 @@ export class SlotPanel {
     this.fpsInvalid.set(invalid);
   }
 
-  /**
-   * Through `CamerasService.assignFile`, as every file assign from Streaming (Q7): the change holds
-   * the bulk actions until it lands. (A frame-rate commit is the one exception; see `commitFps`.)
-   */
-  protected async setTransport(transport: SlotTransport | null): Promise<void> {
-    const slot = this.slot();
-    if (transport === null || transport === slot.transport) return;
-    await this.act(() =>
-      this.control.run(slot.index, () =>
-        this.cameras.assignFile({ index: slot.index, file: slot.file, transport }),
-      ),
-    );
-  }
-
-  protected async copyUrl(): Promise<void> {
-    const url = this.streamUrl();
-    if (url === null) return;
+  protected async copyUrl(url: string): Promise<void> {
     try {
       await copyText(url);
       this.toasts.status(`Copied: ${url}`);

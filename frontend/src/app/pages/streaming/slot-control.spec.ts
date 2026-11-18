@@ -1,28 +1,12 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import { Observable, Subject } from 'rxjs';
-import type { AssignRequest, Slot, StartRequest, SuccessResponse } from '../../sources/api';
+import type { Slot } from '../../api.generated';
 import { CamerasService } from '../../sources/cameras.service';
 import { SlotsService } from '../../sources/slots.service';
-import { ApiRequestError, type StreamEvent } from '../../sources/stream-lines';
+import { fileSlot, webcamSlot } from '../../sources/slots.testing';
+import { ApiRequestError } from '../../sources/stream-lines';
 import { SlotControl } from './slot-control';
-
-function slot(index: number, overrides: Partial<Slot> = {}): Slot {
-  return {
-    index,
-    file: 'a.mp4',
-    state: 'stopped',
-    transport: 'rtsp',
-    codec: 'h264',
-    type: 'file',
-    allowed_transports: ['rtsp'],
-    urls: {},
-    fps: null,
-    native_fps: 30,
-    ...overrides,
-  };
-}
 
 /** Resolves or rejects when the test says. */
 function deferred<T>(): {
@@ -39,40 +23,17 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
-const OK: SuccessResponse = { success: true };
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve));
 
 class FakeSlots {
-  readonly slots = signal<readonly Slot[] | null>([slot(2)]);
-  /** The prepare runs the test drives: one subject per subscribe, and whether it was cancelled. */
-  readonly prepares: { lines: Subject<StreamEvent>; cancelled: boolean }[] = [];
-  readonly assign = vi.fn<(request: AssignRequest) => Promise<SuccessResponse>>(async () => OK);
-  readonly start = vi.fn<(request: StartRequest) => Promise<SuccessResponse>>(async () => OK);
-  readonly startAfterPrepare = vi.fn<(index: number) => Promise<SuccessResponse>>(async () => OK);
-  readonly prepare = vi.fn(
-    (index: number) =>
-      new Observable<StreamEvent>((subscriber) => {
-        void index;
-        const run = { lines: new Subject<StreamEvent>(), cancelled: false };
-        this.prepares.push(run);
-        let ended = false;
-        const subscription = run.lines.subscribe({
-          next: (event) => subscriber.next(event),
-          error: (failure: unknown) => {
-            ended = true;
-            subscriber.error(failure);
-          },
-          complete: () => {
-            ended = true;
-            subscriber.complete();
-          },
-        });
-        return () => {
-          if (!ended) run.cancelled = true;
-          subscription.unsubscribe();
-        };
-      }),
+  readonly slots = signal<readonly Slot[] | null>([fileSlot(2, 'a.mp4')]);
+  readonly assignFile = vi.fn<(n: number, file: string, fps?: number | null) => Promise<Slot>>(
+    async (n, file) => fileSlot(n, file),
   );
+  readonly start = vi.fn<(n: number) => Promise<Slot>>(async (n) =>
+    fileSlot(n, 'a.mp4', { run: true, state: 'starting' }),
+  );
+  readonly stop = vi.fn<(n: number) => Promise<Slot>>(async (n) => fileSlot(n, 'a.mp4'));
 }
 
 describe('SlotControl', () => {
@@ -95,115 +56,68 @@ describe('SlotControl', () => {
     control = TestBed.inject(SlotControl);
   });
 
-  /** The encode the slot's start began, with the server's lines fed in and the stream ended. */
-  function finishPrepare(...lines: string[]): void {
-    const run = slots.prepares.at(-1)!;
-    for (const text of lines) run.lines.next({ kind: 'line', text });
-    run.lines.next({ kind: 'done' });
-    run.lines.complete();
-  }
-
-  it('commits a frame rate with the file and transport the slot has (#170)', async () => {
-    await expect(control.commitFps(slot(2), 15)).resolves.toEqual({ ok: true, fps: 15 });
-    expect(slots.assign).toHaveBeenCalledWith({
-      index: 2,
-      file: 'a.mp4',
-      transport: 'rtsp',
-      fps: 15,
-    });
-    await control.commitFps(slot(2, { transport: '' }), null);
-    expect(slots.assign).toHaveBeenLastCalledWith({
-      index: 2,
-      file: 'a.mp4',
-      transport: 'rtsp',
-      fps: null,
-    });
+  it('commits a frame rate with the file the slot has (#170); none is the file’s own', async () => {
+    await expect(control.commitFps(fileSlot(2, 'a.mp4'), 15)).resolves.toEqual({ ok: true });
+    expect(slots.assignFile).toHaveBeenCalledWith(2, 'a.mp4', 15);
+    await control.commitFps(fileSlot(2, 'a.mp4', { fps: 15 }), null);
+    expect(slots.assignFile).toHaveBeenLastCalledWith(2, 'a.mp4', null);
   });
 
-  it('a start at the native rate starts the slot without preparing a rendition', async () => {
+  it('a file slot is started by the server, which encodes a rendition first when it needs one', async () => {
     await expect(control.start(2)).resolves.toBe('started');
-    expect(slots.start).toHaveBeenCalledWith({ index: 2 });
-    expect(slots.prepare).not.toHaveBeenCalled();
+    expect(slots.start).toHaveBeenCalledWith(2);
+    expect(cameras.publish).not.toHaveBeenCalled();
   });
 
-  it('a start waits for the slot’s pending frame-rate commit, then prepares the committed rate before starting', async () => {
-    const assigned = deferred<SuccessResponse>();
-    slots.assign.mockReturnValueOnce(assigned.promise);
-    void control.commitFps(slot(2), 15);
+  it('a start waits for the slot’s pending frame-rate commit, so the server starts the committed rate', async () => {
+    const assigned = deferred<Slot>();
+    slots.assignFile.mockReturnValueOnce(assigned.promise);
+    void control.commitFps(fileSlot(2, 'a.mp4'), 15);
     const started = control.start(2);
     await flush();
     // Nothing is sent before the commit has landed: the server would start the old rate.
-    expect(slots.prepare).not.toHaveBeenCalled();
     expect(slots.start).not.toHaveBeenCalled();
     expect(control.busy().has(2)).toBe(true);
 
-    assigned.resolve(OK);
-    await flush();
-    expect(slots.prepare).toHaveBeenCalledWith(2);
-    expect(control.preparing().has(2)).toBe(true);
-    finishPrepare('Encoding a.mp4 at 15 fps (libx264)...', 'Rendition ready: .renditions/a.mp4');
+    assigned.resolve(fileSlot(2, 'a.mp4', { fps: 15 }));
     await expect(started).resolves.toBe('started');
-    // The start that follows an encode holds the Encoding state until its own refetch.
-    expect(slots.startAfterPrepare).toHaveBeenCalledWith(2);
-    expect(slots.start).not.toHaveBeenCalled();
-    expect(control.preparing().has(2)).toBe(false);
+    expect(slots.start).toHaveBeenCalledWith(2);
     expect(control.busy().has(2)).toBe(false);
   });
 
   it('a refused commit is reported once, and the start waiting for it does nothing', async () => {
-    slots.assign.mockRejectedValueOnce(
+    slots.assignFile.mockRejectedValueOnce(
       new ApiRequestError(400, 'No codec level covers 900 fps.', null),
     );
-    const committed = control.commitFps(slot(2), 900);
+    const committed = control.commitFps(fileSlot(2, 'a.mp4'), 900);
     const started = control.start(2);
     await expect(committed).resolves.toEqual({ ok: false });
     await expect(started).resolves.toBe('skipped');
     expect(toasts.error).toHaveBeenCalledExactlyOnceWith('No codec level covers 900 fps.');
     expect(slots.start).not.toHaveBeenCalled();
-    expect(slots.prepare).not.toHaveBeenCalled();
   });
 
-  it('an encode that fails rejects with #170’s message, and the slot is not started', async () => {
-    slots.slots.set([slot(2, { fps: 15 })]);
-    const started = control.start(2);
-    await flush();
-    finishPrepare('Encoding a.mp4 at 15 fps (libx264)...', 'Error: disk full');
-    await expect(started).rejects.toThrow(
-      'Encoding src2 at 15 fps failed. Partial output was removed; the source file is unchanged. disk full',
-    );
-    expect(slots.startAfterPrepare).not.toHaveBeenCalled();
+  it('a refused start rejects with the server message', async () => {
+    slots.start.mockRejectedValueOnce(new ApiRequestError(409, 'src2 has nothing assigned.', null));
+    await expect(control.start(2)).rejects.toThrow('src2 has nothing assigned.');
     expect(control.busy().has(2)).toBe(false);
   });
 
-  it('a refused prepare rejects with the server message', async () => {
-    slots.slots.set([slot(2, { fps: 15 })]);
-    const started = control.start(2);
+  it('Cancel encoding stops the slot, which cancels its encode, with the slot busy meanwhile', async () => {
+    const stopped = deferred<Slot>();
+    slots.stop.mockReturnValueOnce(stopped.promise);
+    const cancelling = control.cancelEncoding(2);
     await flush();
-    slots.prepares[0].lines.error(
-      new ApiRequestError(409, 'src2 is pulling a network stream.', null),
-    );
-    await expect(started).rejects.toThrow('src2 is pulling a network stream.');
-    expect(control.preparing().has(2)).toBe(false);
-  });
+    expect(slots.stop).toHaveBeenCalledWith(2);
+    expect(control.busy().has(2)).toBe(true);
 
-  it('Cancel encoding stops the encode, and the start ends as cancelled without starting', async () => {
-    slots.slots.set([slot(2, { fps: 15 })]);
-    const started = control.start(2);
-    await flush();
-    expect(control.preparing().has(2)).toBe(true);
-
-    control.cancelEncoding(2);
-    expect(slots.prepares[0].cancelled).toBe(true);
-    await expect(started).resolves.toBe('cancelled');
-    expect(slots.startAfterPrepare).not.toHaveBeenCalled();
-    expect(control.preparing().has(2)).toBe(false);
+    stopped.resolve(fileSlot(2, 'a.mp4'));
+    await cancelling;
     expect(control.busy().has(2)).toBe(false);
-    // Nothing to cancel any more.
-    control.cancelEncoding(2);
   });
 
   it('a webcam slot is started by publishing its camera', async () => {
-    slots.slots.set([slot(3, { type: 'webcam', file: '' })]);
+    slots.slots.set([webcamSlot(3)]);
     await expect(control.start(3)).resolves.toBe('started');
     expect(cameras.publish).toHaveBeenCalledWith(3);
     expect(slots.start).not.toHaveBeenCalled();
@@ -212,18 +126,18 @@ describe('SlotControl', () => {
   it('starting marks the slot from the click until its start settles, whatever the outcome', async () => {
     expect(control.starting().has(2)).toBe(false);
 
-    const accepted = deferred<SuccessResponse>();
+    const accepted = deferred<Slot>();
     slots.start.mockReturnValueOnce(accepted.promise);
     const started = control.start(2);
     await flush();
     expect(control.starting().has(2)).toBe(true);
     // Only the slot being started.
     expect(control.starting().has(7)).toBe(false);
-    accepted.resolve(OK);
+    accepted.resolve(fileSlot(2, 'a.mp4', { run: true, state: 'starting' }));
     await expect(started).resolves.toBe('started');
     expect(control.starting().has(2)).toBe(false);
 
-    const refused = deferred<SuccessResponse>();
+    const refused = deferred<Slot>();
     slots.start.mockReturnValueOnce(refused.promise);
     const failed = control.start(2);
     await flush();
@@ -234,17 +148,17 @@ describe('SlotControl', () => {
   });
 
   it('a start is starting while it waits for a rate commit, and while a webcam publishes', async () => {
-    const assigned = deferred<SuccessResponse>();
-    slots.assign.mockReturnValueOnce(assigned.promise);
-    void control.commitFps(slot(2), 30);
+    const assigned = deferred<Slot>();
+    slots.assignFile.mockReturnValueOnce(assigned.promise);
+    void control.commitFps(fileSlot(2, 'a.mp4'), 30);
     const started = control.start(2);
     await flush();
     expect(control.starting().has(2)).toBe(true);
-    assigned.resolve(OK);
+    assigned.resolve(fileSlot(2, 'a.mp4'));
     await started;
     expect(control.starting().has(2)).toBe(false);
 
-    slots.slots.set([slot(3, { type: 'webcam', file: '' })]);
+    slots.slots.set([webcamSlot(3)]);
     const publishing = deferred<undefined>();
     cameras.publish.mockReturnValueOnce(publishing.promise);
     const published = control.start(3);
@@ -258,14 +172,14 @@ describe('SlotControl', () => {
   it('commitsSettled waits for every pending commit, and says whether all of them landed', async () => {
     await expect(control.commitsSettled()).resolves.toBe(true);
 
-    const first = deferred<SuccessResponse>();
-    const second = deferred<SuccessResponse>();
-    slots.assign.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    void control.commitFps(slot(2), 15);
-    void control.commitFps(slot(7), 20);
+    const first = deferred<Slot>();
+    const second = deferred<Slot>();
+    slots.assignFile.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    void control.commitFps(fileSlot(2, 'a.mp4'), 15);
+    void control.commitFps(fileSlot(7, 'b.mp4'), 20);
     let settled: boolean | undefined;
     void control.commitsSettled().then((result) => (settled = result));
-    first.resolve(OK);
+    first.resolve(fileSlot(2, 'a.mp4', { fps: 15 }));
     await flush();
     expect(settled).toBeUndefined();
     second.reject(new ApiRequestError(409, 'src7 changed.', null));
@@ -285,18 +199,18 @@ describe('SlotControl', () => {
   });
 
   it('run waits for a frame-rate commit on its way to the slot, so the two never race', async () => {
-    const assigned = deferred<SuccessResponse>();
-    slots.assign.mockReturnValueOnce(assigned.promise);
-    void control.commitFps(slot(2), 15);
+    const assigned = deferred<Slot>();
+    slots.assignFile.mockReturnValueOnce(assigned.promise);
+    void control.commitFps(fileSlot(2, 'a.mp4'), 15);
     const work = vi.fn(async () => 'done');
     const running = control.run(2, work);
     await flush();
     expect(work).not.toHaveBeenCalled();
     expect(control.busy().has(2)).toBe(true);
-    assigned.resolve(OK);
+    assigned.resolve(fileSlot(2, 'a.mp4', { fps: 15 }));
     await expect(running).resolves.toBe('done');
     // Another slot's work does not wait for it.
-    void control.commitFps(slot(2), 20);
+    void control.commitFps(fileSlot(2, 'a.mp4'), 20);
     await expect(control.run(7, async () => 'other')).resolves.toBe('other');
   });
 });

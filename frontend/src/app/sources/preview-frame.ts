@@ -27,8 +27,8 @@ export interface PreviewStream {
   readonly alt: string;
 }
 
-/** `/media/<path>` serves the library's files; each segment is encoded, the slashes kept. */
-const mediaUrl = (path: string) => `/media/${path.split('/').map(encodeURIComponent).join('/')}`;
+/** Where the server serves a library file, with range requests, for the browser to play or show. */
+const mediaUrl = (path: string) => `/api/media/file?path=${encodeURIComponent(path)}`;
 
 /**
  * How a library file is previewed (#170's Selected Media and Source Preview): MJPEG through the
@@ -43,7 +43,7 @@ export function filePreview(path: string, mjpeg: boolean): FilePreview | null {
   if (mjpeg || MJPEG_EXTENSIONS.has(extension)) {
     return {
       kind: 'image',
-      src: `/api/media-preview/mjpeg?path=${encodeURIComponent(path)}`,
+      src: `/api/media/preview.mjpg?path=${encodeURIComponent(path)}`,
       path,
     };
   }

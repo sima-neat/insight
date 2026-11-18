@@ -1,5 +1,5 @@
 import type { NeatFileBrowserLabels } from '@sima/neat-ui/file-browser';
-import type { MediaNode } from './api';
+import type { MediaEntry } from '../api.generated';
 
 /**
  * What the media library's `neat-file-browser` says, wherever it shows: Streaming's picker and the
@@ -38,16 +38,16 @@ export function parentFolder(path: string): string {
  * in its subfolders are not counted, since the note is about the listing on screen; a folder that
  * is not in the tree hides nothing.
  */
-export function hiddenFileCount(tree: readonly MediaNode[], folder: string): number {
-  let nodes: readonly MediaNode[] = tree;
+export function hiddenFileCount(tree: readonly MediaEntry[], folder: string): number {
+  let entries: readonly MediaEntry[] = tree;
   let path = '';
   for (const segment of folder ? folder.split('/') : []) {
     path = path ? `${path}/${segment}` : segment;
-    const next = nodes.find((node) => node.type === 'folder' && node.path === path);
-    if (next?.type !== 'folder') return 0;
-    nodes = next.children;
+    const next = entries.find((entry) => entry.folder && entry.path === path);
+    if (!next) return 0;
+    entries = next.children ?? [];
   }
-  return nodes.filter((node) => node.type === 'file' && !node.streamable).length;
+  return entries.filter((entry) => !entry.folder && !entry.streamable).length;
 }
 
 /** #170's note under a picker's listing, or null when it leaves nothing out. */
@@ -57,9 +57,9 @@ export function hiddenFilesNote(count: number): string | null {
 }
 
 /** Whether `path` is a file in the library's tree, at any depth. */
-export function hasFile(tree: readonly MediaNode[], path: string): boolean {
-  return tree.some((node) =>
-    node.type === 'file' ? node.path === path : hasFile(node.children, path),
+export function hasFile(tree: readonly MediaEntry[], path: string): boolean {
+  return tree.some((entry) =>
+    entry.folder ? hasFile(entry.children ?? [], path) : entry.path === path,
   );
 }
 
@@ -68,7 +68,7 @@ export function hasFile(tree: readonly MediaNode[], path: string): boolean {
  * archive's folder) opened. A browser falls back to the nearest folder that exists.
  */
 export function revealIn(
-  tree: readonly MediaNode[],
+  tree: readonly MediaEntry[],
   path: string,
 ): { folder: string; file: string | null } {
   return hasFile(tree, path)

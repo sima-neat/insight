@@ -1,4 +1,22 @@
-import { expect, Page, Request, test } from '@playwright/test';
+import { expect, Page, Request, Route, test } from '@playwright/test';
+import type {
+  AutoAssignResult,
+  MediaEntry,
+  RenditionUsage,
+  Slot,
+  SlotAssignment,
+  SlotStartResult,
+  SlotStopResult,
+} from '../src/app/api.generated';
+import {
+  fileSlot,
+  publisher,
+  pull,
+  slot,
+  slotList,
+  webcamSlot,
+} from '../src/app/sources/slots.testing';
+import { jobEvents, jobOf } from './jobs';
 import {
   DESKTOP,
   LAPTOP,
@@ -13,107 +31,101 @@ import { answerTopBar } from './top-bar';
 // The rail's board block reads the board on every page.
 test.beforeEach(({ page }) => answerTopBar(page));
 
-/** The fields of a `GET /api/mediasrc` slot these tests set; the rest take an unassigned slot's values. */
-type SlotAnswer = Record<string, unknown> & { index: number };
-
-const slot = (index: number, fields: Record<string, unknown> = {}): SlotAnswer => ({
-  index,
-  file: '',
-  state: 'stopped',
-  transport: '',
-  codec: 'unknown',
-  type: 'file',
-  fps: null,
-  native_fps: null,
-  active_file: null,
-  allowed_transports: [],
-  urls: { rtsp: `rtsp://127.0.0.1:8554/src${index}` },
-  readers: [],
-  ...fields,
-});
-
-const pull = (fields: Record<string, unknown>) => ({
-  scheme: 'rtsp',
-  host: '10.0.0.7:554',
-  path: '/stream1',
-  error: null,
-  since: null,
-  codec_supported: true,
-  width: null,
-  height: null,
-  fps: null,
-  bitrate_bps: null,
-  ...fields,
-});
+/** What MediaMTX reports of a pulled camera while it is live. */
+const PULLED = (fields: Parameters<typeof publisher>[0] = {}) =>
+  publisher({
+    protocol: 'rtspSource',
+    address: undefined,
+    width: 1280,
+    height: 720,
+    fps: 25,
+    ...fields,
+  });
 
 /**
- * What Flask answers on a board in use: a playing file, a file at a rate of its own, a webcam, an
- * external publisher with a codec Neat cannot decode, and pulls live, unreachable, refused and
- * connecting, then an idle file. The other 38 slots are unassigned.
+ * What the server answers on a board in use: a live file, a file at a rate of its own, a webcam
+ * no browser publishes, an external publisher with a codec Neat cannot decode, and pulls live,
+ * unreachable, refused and connecting, then an idle file. The other 39 slots are unassigned.
  */
-const SLOTS: SlotAnswer[] = Array.from({ length: 48 }, (_, i) => slot(i + 1));
-SLOTS[0] = slot(1, {
-  file: 'people/walk_720p30.mp4',
-  state: 'playing',
-  codec: 'h264',
-  transport: 'rtsp',
-  native_fps: 30,
+const SLOTS: Slot[] = Array.from({ length: 48 }, (_, i) => slot(i + 1));
+SLOTS[0] = fileSlot(1, 'people/walk_720p30.mp4', {
+  run: true,
+  state: 'live',
   active_file: 'people/walk_720p30.mp4',
-  allowed_transports: ['rtsp'],
+  publisher: publisher({ protocol: 'rtsp', address: '127.0.0.1' }),
 });
-SLOTS[1] = slot(2, { file: 'cars.mp4', codec: 'h265', transport: 'rtsp', native_fps: 25, fps: 15 });
-SLOTS[2] = slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp', readers: undefined });
+SLOTS[1] = fileSlot(2, 'cars.mp4', { codec: 'h265', native_fps: 25, fps: 15 });
+SLOTS[2] = webcamSlot(3);
 SLOTS[3] = slot(4, {
   state: 'external',
   codec: 'av1',
-  external: {
-    protocol: 'rtsp',
-    address: '192.168.1.20:41234',
-    since: '2026-10-24T08:00:00Z',
-    codec_supported: false,
-    width: 1280,
-    height: 720,
-    fps: 30,
-    bitrate_bps: 2_000_000,
-  },
+  publisher: publisher({ address: '192.168.1.20', codec: 'av1', codec_supported: false }),
 });
 SLOTS[4] = slot(5, {
-  file: 'under.mp4',
-  state: 'pulled',
+  kind: 'pull',
+  run: true,
+  state: 'live',
   codec: 'h264',
-  pull: pull({ status: 'live', width: 1920, height: 1080, fps: 25, since: '2026-10-24T08:00:00Z' }),
+  pull: pull({ status: 'live' }),
+  publisher: PULLED({ width: 1920, height: 1080 }),
 });
 SLOTS[5] = slot(6, {
-  state: 'pulled',
-  codec: 'none',
+  kind: 'pull',
+  run: true,
+  state: 'starting',
+  error: 'connection refused',
   pull: pull({ status: 'unreachable', host: '10.0.0.8:554', error: 'connection refused' }),
 });
 SLOTS[6] = slot(7, {
-  state: 'pulled',
-  codec: 'none',
+  kind: 'pull',
+  run: true,
+  state: 'failed',
+  error: 'The camera rejected the username or password',
   pull: pull({ status: 'auth_failed', error: 'The camera rejected the username or password' }),
 });
-SLOTS[7] = slot(8, { state: 'pulled', codec: 'none', pull: pull({ status: 'connecting' }) });
-SLOTS[8] = slot(9, {
-  file: 'idle.mp4',
-  codec: 'h264',
-  transport: 'rtsp',
-  native_fps: 30,
-  allowed_transports: ['rtsp'],
+SLOTS[7] = slot(8, {
+  kind: 'pull',
+  run: true,
+  state: 'starting',
+  pull: pull({ status: 'connecting' }),
 });
+SLOTS[8] = fileSlot(9, 'idle.mp4');
 
 /** What the server knows of a file once it is assigned: the codec probe's result and its rate. */
-const PROBED = {
-  codec: 'h264',
-  transport: 'rtsp',
-  native_fps: 30,
-  allowed_transports: ['rtsp'],
-};
+const PROBED = { codec: 'h264', native_fps: 30 };
 
-const TREE = [
-  { name: '/people', path: 'people', type: 'folder', streamable_count: 1, children: [] },
-  { name: 'cars.mp4', path: 'cars.mp4', type: 'file', streamable: true },
-];
+/** The encode of src2's 15 fps rendition, which its start waits for. */
+const ENCODE = 'encode-2';
+
+const file = (path: string): MediaEntry => ({
+  name: path.split('/').pop()!,
+  path,
+  folder: false,
+  streamable: true,
+  probe: { kind: 'video', codec: 'h264', size: 1_000_000, streamable: true },
+});
+
+/** `GET /api/media`: the library's root. */
+const TREE: MediaEntry = {
+  name: '',
+  path: '',
+  folder: true,
+  streamable: true,
+  streamable_count: 2,
+  probe: null,
+  children: [
+    {
+      name: 'people',
+      path: 'people',
+      folder: true,
+      streamable: true,
+      streamable_count: 1,
+      probe: null,
+      children: [],
+    },
+    file('cars.mp4'),
+  ],
+};
 
 /** A 1×1 PNG. */
 const PIXEL = Buffer.from(
@@ -122,188 +134,222 @@ const PIXEL = Buffer.from(
 );
 
 interface Mocked {
-  /** The bodies of the POSTs to `/api/mediasrc/<action>`, by action, bulk or single. */
-  readonly posts: Map<string, unknown[]>;
-  /** Makes `GET /api/mediasrc` fail from now on. */
+  /**
+   * What each action was sent, by action, in order: a slot's (`assign`, `clear`, `start`, `stop`,
+   * `take-over`) as its number with its body, the bulk ones (`start-bulk`, `stop-all`, `reset`,
+   * `auto-assign`) as their body, `{}` for none.
+   */
+  readonly calls: Map<string, unknown[]>;
+  /** Makes `GET /api/slots` fail from now on. */
   failSlots(): void;
+  /** Ends src2's rendition encode: its job is done, and the slot streams the rendition. */
+  finishEncode(): void;
 }
 
+/** A request's JSON body, `{}` when it has none. */
+const bodyOf = (request: Request): Record<string, unknown> =>
+  request.postData() ? (request.postDataJSON() as Record<string, unknown>) : {};
+
 /**
- * Insight's streaming API without a board: the slots above, three renditions, a small library,
- * and a bulk action answering with the server's message. The single-slot actions (assign, start,
- * stop, take over, pull) change the slots as the server would, so the page shows what it holds
- * after them. Every API the page calls is answered here, so whatever serves the app cannot change
- * what the tests see.
+ * Insight's streaming API without a board: the slots above, three renditions, a small library, and
+ * the bulk actions answering as the server would for them. The slot routes (assign, clear, start,
+ * stop, take over) change the slots as the server would, so the page shows what it holds after
+ * them; a start at another rate encodes its rendition as a job first. Every API the page calls is
+ * answered here, so whatever serves the app cannot change what the tests see. `edit` changes the
+ * slots before the page loads.
  */
-async function withMockedSlots(page: Page): Promise<Mocked> {
-  const posts = new Map<string, unknown[]>();
+async function withMockedSlots(page: Page, edit?: (slots: Slot[]) => void): Promise<Mocked> {
+  const calls = new Map<string, unknown[]>();
   // Each test starts from the board above and changes its own copy.
   const slots = structuredClone(SLOTS);
+  edit?.(slots);
   let failing = false;
-  const record = (action: string, request: Request) =>
-    posts.set(action, [...(posts.get(action) ?? []), request.postDataJSON()]);
-  // The answers say what the server would for the slots above: stop all and reset stop the pulls
-  // and leave the external publisher running, auto assign skips both, and a bulk start only
-  // targets slots with a file (src1, src2, src9; src5's file sits under a pull).
-  const bulk = (message: string, extra: object) => ({
-    success: true,
-    unconfirmed_webcams: [],
-    changed_sources: [],
-    message,
-    ...extra,
-  });
+  let encoded = false;
+  const record = (action: string, body: unknown) =>
+    calls.set(action, [...(calls.get(action) ?? []), body]);
 
   await page.route(
-    (url) => url.pathname === '/api/mediasrc',
+    (url) => url.pathname === '/api/slots',
     (route) =>
       failing
-        ? route.fulfill({ status: 500, json: { error: 'MediaMTX is not answering' } })
-        : route.fulfill({ json: slots }),
+        ? route.fulfill({
+            status: 500,
+            json: { error: { code: 'internal_error', message: 'MediaMTX is not answering.' } },
+          })
+        : route.fulfill({ json: slotList(slots) }),
   );
   await page.route(
-    (url) => url.pathname === '/api/mediasrc/renditions',
-    (route) => route.fulfill({ json: { count: 3, bytes: 1.2 * 1024 ** 3 } }),
+    (url) => url.pathname === '/api/renditions',
+    (route) =>
+      route.fulfill({
+        json: { count: 3, bytes: 1.2 * 1024 ** 3, in_use: 0 } satisfies RenditionUsage,
+      }),
   );
   await page.route(
-    (url) => url.pathname === '/api/media-files',
+    (url) => url.pathname === '/api/media',
     (route) => route.fulfill({ json: TREE }),
   );
   // The side panel's previews: a live slot's stream and a file. A still image stands in for both.
   await page.route(
-    (url) => url.pathname.startsWith('/stream/preview/') || url.pathname.startsWith('/media/'),
+    (url) =>
+      /^\/api\/slots\/\d+\/preview\.mjpg$/.test(url.pathname) ||
+      url.pathname === '/api/media/file' ||
+      url.pathname === '/api/media/preview.mjpg',
     (route) => route.fulfill({ contentType: 'image/png', body: PIXEL }),
   );
-  const answers: Record<string, object> = {
-    'start-bulk': {
-      success: true,
-      requested: 3,
-      targeted: 3,
+  // src2's encode: in progress, the stream ending without a final state so that the browser asks
+  // again soon, until the test finishes it.
+  await page.route(
+    (url) => url.pathname === `/api/jobs/${ENCODE}/events`,
+    (route) => {
+      const running = jobOf(ENCODE, 'rendition', {
+        progress: { phase: 'encode', detail: '00:10 / 00:25', percent: 40 },
+      });
+      return route.fulfill(
+        encoded
+          ? jobEvents([{ ...running, state: 'done', result: { rendition: '.renditions/x.mp4' } }])
+          : jobEvents([running], 200),
+      );
+    },
+  );
+
+  // The answers say what the server would for the slots above: stop all and reset leave the
+  // external publisher running, auto assign skips it and the pulls, and a bulk start only targets
+  // file slots (src1, src2, src9).
+  const bulk: Record<string, object> = {
+    start: {
       started: [9],
       already_running: [1],
+      skipped_external: [],
       errors: [
         {
-          index: 2,
-          error:
-            'Encoding src2 at 15 fps failed. Partial output was removed; the source file is unchanged.',
+          n: 2,
+          code: 'renditions_failed',
+          error: 'Encoding cars.mp4 at 15 fps failed: the disk is full.',
         },
       ],
-      skipped_external: [],
-      skipped_pulled: [5],
-      message: 'Started 1 source(s), 1 already running, 1 failed. Skipped pulled: src5.',
-      started_or_running: 2,
-    },
-    'stop-all': bulk('Stopped 6 source(s). External stream(s) left running: src4.', {
+    } satisfies SlotStartResult,
+    stop: { stopped: [1, 3, 5, 6, 7, 8], skipped_external: [4] } satisfies SlotStopResult,
+    reset: { stopped: [1, 3, 5, 6, 7, 8], skipped_external: [4] } satisfies SlotStopResult,
+    'auto-assign': {
+      assigned: 2,
+      available: 2,
       skipped_external: [4],
-      skipped_pulled: [],
-      stopped_count: 6,
-      stopped_pulled: [5, 6, 7, 8],
-    }),
-    reset: bulk('Reset all source assignments. External stream(s) left running: src4.', {
-      skipped_external: [4],
-      skipped_pulled: [],
-      stopped_pulled: [5, 6, 7, 8],
-    }),
-    'auto-assign-all': bulk(
-      'Assigned 2 source(s) with unique media file(s). Skipped external: src4. Skipped pulled: src5, src6, src7, src8.',
-      {
-        skipped_external: [4],
-        skipped_pulled: [5, 6, 7, 8],
-        assigned_count: 2,
-        source_count: 48,
-        available_files: 2,
-      },
-    ),
+      skipped_pulled: [5, 6, 7, 8],
+    } satisfies AutoAssignResult,
   };
-  for (const [action, answer] of Object.entries(answers)) {
+  const bulkActions: Record<string, string> = {
+    start: 'start-bulk',
+    stop: 'stop-all',
+    reset: 'reset',
+    'auto-assign': 'auto-assign',
+  };
+  for (const [path, answer] of Object.entries(bulk)) {
     await page.route(
-      (url) => url.pathname === `/api/mediasrc/${action}`,
+      (url) => url.pathname === `/api/slots/${path}`,
       (route) => {
-        record(action, route.request());
+        record(bulkActions[path], bodyOf(route.request()));
         return route.fulfill({ json: answer });
       },
     );
   }
 
-  // The single-slot actions: `change` updates the slot the request names and answers `answer`.
-  const slotAction = async (
-    action: string,
-    change: (target: SlotAnswer, body: Record<string, unknown>) => void,
-    answer: (target: SlotAnswer) => object,
-  ) =>
-    page.route(
-      (url) => url.pathname === `/api/mediasrc/${action}`,
-      (route) => {
-        record(action, route.request());
-        const body = route.request().postDataJSON() as { index: number };
-        const target = slots[body.index - 1];
-        change(target, body);
-        return route.fulfill({ json: answer(target) });
-      },
-    );
-  const ok = () => ({ success: true });
-  await slotAction(
-    'assign',
-    (target, { file }) => Object.assign(target, file ? { file, ...PROBED } : slot(target.index)),
-    ok,
+  // The routes of one slot: what each does to it, as the server would.
+  const change = (target: Slot, action: string, body: Record<string, unknown>): Slot => {
+    const n = target.n;
+    switch (action) {
+      case 'assign': {
+        const assignment = body as unknown as SlotAssignment;
+        if (assignment.kind === 'webcam') return webcamSlot(n);
+        if (assignment.kind === 'pull') {
+          const camera = new URL(assignment.url!);
+          return slot(n, {
+            kind: 'pull',
+            run: true,
+            state: 'live',
+            codec: 'h264',
+            pull: pull({ host: camera.host, path: camera.pathname }),
+            publisher: PULLED(),
+          });
+        }
+        // A slot that streamed a file goes on streaming the new one.
+        const run = target.kind === 'file' && target.run;
+        return fileSlot(n, assignment.file!, {
+          ...PROBED,
+          ...(assignment.fps ? { fps: assignment.fps } : {}),
+          run,
+          state: run ? 'live' : 'idle',
+        });
+      }
+      case 'clear':
+        return slot(n);
+      case 'start':
+        if (target.kind === 'pull') {
+          return {
+            ...target,
+            run: true,
+            state: 'live',
+            codec: 'h264',
+            pull: { ...target.pull!, status: 'live' },
+            publisher: PULLED(),
+          };
+        }
+        if (target.fps !== undefined && target.fps !== target.native_fps) {
+          return { ...target, run: true, state: 'preparing', job: ENCODE };
+        }
+        return {
+          ...target,
+          run: true,
+          state: 'live',
+          active_file: target.file,
+          publisher: publisher({ address: '127.0.0.1' }),
+        };
+      case 'stop':
+        return {
+          ...target,
+          run: false,
+          state: 'idle',
+          job: undefined,
+          active_file: undefined,
+          publisher: undefined,
+          ...(target.kind === 'pull'
+            ? { codec: undefined, pull: { ...target.pull!, status: 'stopped' } }
+            : {}),
+        };
+      default:
+        // Take over: the publisher goes, and the slot is what it is assigned.
+        return { ...slot(n), kind: target.kind, state: 'idle', publisher: undefined };
+    }
+  };
+  await page.route(
+    (url) => /^\/api\/slots\/\d+(\/(start|stop|take-over))?$/.test(url.pathname),
+    (route: Route) => {
+      const request = route.request();
+      const [, n, , verb] = /^\/api\/slots\/(\d+)(\/(start|stop|take-over))?$/.exec(
+        new URL(request.url()).pathname,
+      )!;
+      const action = verb ?? (request.method() === 'PUT' ? 'assign' : 'clear');
+      const body = bodyOf(request);
+      record(action, { n: Number(n), ...body });
+      const index = Number(n) - 1;
+      slots[index] = change(slots[index], action, body);
+      return route.fulfill({ json: slots[index] });
+    },
   );
-  // A webcam slot is registered with no device; the server answers with the slot it made.
-  await slotAction(
-    'assign-webcam',
-    (target) =>
-      Object.assign(target, {
-        type: 'webcam',
-        file: '',
-        state: 'stopped',
-        active_file: null,
-        pull: undefined,
-        codec: 'h264',
-        transport: 'rtsp',
-        native_fps: null,
-        allowed_transports: ['rtsp'],
-      }),
-    (target) => ({ success: true, source: target }),
-  );
-  await slotAction(
-    'start',
-    (target) => Object.assign(target, { state: 'playing', active_file: target['file'] }),
-    ok,
-  );
-  // Stopping releases a pull as well: the slot is idle and holds whatever it was assigned.
-  await slotAction(
-    'stop',
-    (target) =>
-      Object.assign(target, {
-        state: 'stopped',
-        active_file: null,
-        pull: undefined,
-        codec: target['file'] ? target['codec'] : 'unknown',
-      }),
-    ok,
-  );
-  await slotAction(
-    'takeover',
-    (target) => Object.assign(target, { state: 'stopped', external: undefined, codec: 'unknown' }),
-    (target) => ({ success: true, index: target.index }),
-  );
-  await slotAction(
-    'pull',
-    (target) =>
-      Object.assign(target, {
-        state: 'pulled',
-        codec: 'h264',
-        pull: pull({
-          status: 'live',
-          host: '10.0.0.9:554',
-          path: '/cam',
-          width: 1280,
-          height: 720,
-          fps: 25,
-          since: '2026-10-24T08:00:00Z',
-        }),
-      }),
-    (target) => target,
-  );
-  return { posts, failSlots: () => (failing = true) };
+  return {
+    calls,
+    failSlots: () => (failing = true),
+    finishEncode: () => {
+      encoded = true;
+      slots[1] = {
+        ...slots[1],
+        state: 'live',
+        job: undefined,
+        active_file: '.renditions/x.mp4',
+        publisher: publisher({ address: '127.0.0.1', fps: 15 }),
+      };
+    },
+  };
 }
 
 const listbox = (page: Page) => page.getByRole('listbox', { name: 'Streaming slots' });
@@ -316,6 +362,8 @@ const pageTools = (page: Page) => page.getByRole('group', { name: 'Page tools' }
 const tool = (page: Page, name: string) =>
   pageTools(page).getByRole('button', { name, exact: true });
 const panel = (page: Page) => page.getByRole('region', { name: 'Selected slot' });
+const panelButton = (page: Page, name: string) =>
+  panel(page).getByRole('button', { name, exact: true });
 const morePanel = (page: Page) => page.getByRole('dialog', { name: 'More actions', exact: true });
 /** A row of the ⋯ menu, which the menu is opened for. */
 async function menuItem(page: Page, name: string) {
@@ -435,7 +483,7 @@ test.describe('Streaming with mocked slots', () => {
 
     for (const { size } of VIEWPORTS) {
       await page.setViewportSize(size);
-      // A playing file, a file at its own rate, an external publisher and a pull.
+      // A live file, a file at another rate, an external publisher and a pull.
       for (const name of ['src1', 'src2', 'src4', 'src5']) {
         await row(page, name).click();
         await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText(name);
@@ -468,7 +516,7 @@ test.describe('Streaming with mocked slots', () => {
     const preview = (name: string) =>
       panel(page).getByRole('group', { name: `Preview of ${name}` });
 
-    // Live whatever the source: a playing file, an external publisher and a pull that receives.
+    // Live whatever the source: a live file, an external publisher and a pull that receives.
     for (const name of ['src1', 'src4', 'src5']) {
       await row(page, name).click();
       await expect(preview(name)).toHaveAccessibleDescription('Live');
@@ -485,9 +533,9 @@ test.describe('Streaming with mocked slots', () => {
     // A stopped file is its file; started it is live, and stopped it is the file again.
     await row(page, 'src9').click();
     await expect(preview('src9')).toHaveAccessibleDescription('File preview');
-    await panel(page).getByRole('button', { name: 'Start', exact: true }).click();
+    await panelButton(page, 'Start').click();
     await expect(preview('src9')).toHaveAccessibleDescription('Live');
-    await panel(page).getByRole('button', { name: 'Stop', exact: true }).click();
+    await panelButton(page, 'Stop').click();
     await expect(preview('src9')).toHaveAccessibleDescription('File preview');
   });
 
@@ -549,7 +597,7 @@ test.describe('Streaming with mocked slots', () => {
       await page.keyboard.press('Tab');
       await expect(page.getByRole('separator', { name: 'Resize side panel' })).toBeFocused();
       await page.keyboard.press('Tab');
-      await expect(panel(page).getByRole('button', { name: 'Stop', exact: true })).toBeFocused();
+      await expect(panelButton(page, 'Stop')).toBeFocused();
       await page.keyboard.press('Tab');
       await expect(panel(page).getByRole('radio', { name: 'File' })).toBeFocused();
       await page.keyboard.press('Tab');
@@ -572,8 +620,8 @@ test.describe('Streaming with mocked slots', () => {
 
       await row(page, 'src10').click();
       await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src10');
-      // Nothing to start before a file: Start says why.
-      await expect(panel(page).getByRole('button', { name: 'Start', exact: true })).toBeDisabled();
+      // Nothing to start before a source: Start says why.
+      await expect(panelButton(page, 'Start')).toBeDisabled();
 
       await panel(page).getByRole('button', { name: 'Change…' }).click();
       const picker = page.getByRole('dialog', { name: 'Source for src10' });
@@ -586,22 +634,22 @@ test.describe('Streaming with mocked slots', () => {
 
       // The dialog closes once the server has the file, and the slot shows what it knows of it.
       await expect(picker).toHaveCount(0);
-      expect(mocked.posts.get('assign')).toEqual([
-        expect.objectContaining({ index: 10, file: 'cars.mp4' }),
-      ]);
+      expect(mocked.calls.get('assign')).toEqual([{ n: 10, kind: 'file', file: 'cars.mp4' }]);
       await expect(panel(page)).toContainText('File: cars.mp4 · 30 fps');
       expect(await cells(page, 'src10')).toEqual(
         shownAt(size, ['src10', 'VID', 'cars.mp4', 'Idle', '30 fps', 'H.264']),
       );
 
-      await panel(page).getByRole('button', { name: 'Start', exact: true }).click();
-      await expect(panel(page).getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+      await panelButton(page, 'Start').click();
+      await expect(panelButton(page, 'Stop')).toBeVisible();
       await expect(panel(page)).toContainText('Live');
-      expect(mocked.posts.get('start')).toEqual([{ index: 10 }]);
+      expect(mocked.calls.get('start')).toEqual([{ n: 10 }]);
       expect((await cells(page, 'src10'))[3]).toBe('Live');
     });
 
-    test(`a stream is pulled into a slot and stopped at ${name}`, async ({ page }) => {
+    test(`a camera is pulled into a slot, stopped, started again and cleared at ${name}`, async ({
+      page,
+    }) => {
       const mocked = await withMockedSlots(page);
       await page.setViewportSize(size);
       await page.goto('/streaming');
@@ -609,44 +657,66 @@ test.describe('Streaming with mocked slots', () => {
 
       await row(page, 'src11').click();
       await panel(page).getByRole('radio', { name: 'Stream URL' }).click();
-      const pull = panel(page).getByRole('button', { name: 'Pull', exact: true });
+      const pullButton = panelButton(page, 'Pull');
       // Only RTSP and RTSPS URLs can be pulled.
       await panel(page).getByLabel('Stream URL', { exact: true }).fill('http://10.0.0.9/cam');
-      await expect(pull).toBeDisabled();
+      await expect(pullButton).toBeDisabled();
       await panel(page).getByLabel('Stream URL', { exact: true }).fill('rtsp://10.0.0.9:554/cam');
       await panel(page).getByLabel('Username').fill('operator');
       const password = panel(page).getByLabel('Password');
       await password.fill('s3cret');
-      await expect(pull).toBeEnabled();
-      await pull.click();
+      await expect(pullButton).toBeEnabled();
+      await pullButton.click();
 
       await expect(toast(page, 'src11 is pulling from rtsp://10.0.0.9:554/cam.')).toBeVisible();
-      expect(mocked.posts.get('pull')).toEqual([
-        { index: 11, url: 'rtsp://10.0.0.9:554/cam', username: 'operator', password: 's3cret' },
+      expect(mocked.calls.get('assign')).toEqual([
+        {
+          n: 11,
+          kind: 'pull',
+          url: 'rtsp://10.0.0.9:554/cam',
+          username: 'operator',
+          password: 's3cret',
+        },
       ]);
       expect(await cells(page, 'src11')).toEqual(
         shownAt(size, [
           'src11',
           'URL',
           '⇠ RTSP · 10.0.0.9:554 · 1280×720 · 25 fps',
-          'Pulled',
+          'Live',
           '25 fps',
           'H.264',
         ]),
       );
-
-      // The form goes with the pull, and its main action takes over the focus.
-      const stop = panel(page).getByRole('button', { name: 'Stop pulling' });
-      await expect(stop).toBeFocused();
-      await stop.click();
-      await expect(panel(page).getByRole('button', { name: 'Start', exact: true })).toBeVisible();
-      expect(mocked.posts.get('stop')).toEqual([{ index: 11 }]);
-      // The form comes back as it was, except that the password was not kept past the pull.
-      await expect(panel(page).getByLabel('Username')).toHaveValue('operator');
+      // The form is done with: nothing typed into it, the password least of all, is kept. The
+      // pull's main action, Stop, takes the focus.
+      await expect(panel(page).getByLabel('Username')).toHaveValue('');
       await expect(password).toHaveValue('');
+      await expect(panel(page)).toContainText('Camera: rtsp://10.0.0.9:554/cam');
+      const stop = panelButton(page, 'Stop');
+      await expect(stop).toBeFocused();
+
+      // Stop keeps the camera; Start pulls it again.
+      await stop.click();
+      await expect(panelButton(page, 'Start')).toBeVisible();
+      expect(mocked.calls.get('stop')).toEqual([{ n: 11 }]);
       expect(await cells(page, 'src11')).toEqual(
-        shownAt(size, ['src11', '', 'Not assigned', 'Idle', '', '-']),
+        shownAt(size, ['src11', 'URL', '⇠ RTSP · 10.0.0.9:554 · stopped', 'Idle', '', '-']),
       );
+      await panelButton(page, 'Start').click();
+      await expect(panelButton(page, 'Stop')).toBeVisible();
+      expect(mocked.calls.get('start')).toEqual([{ n: 11 }]);
+      expect((await cells(page, 'src11'))[3]).toBe('Live');
+
+      // Clear takes the camera away, and the slot is empty.
+      await panelButton(page, 'Clear').click();
+      await expect
+        .poll(() => cells(page, 'src11'))
+        .toEqual(shownAt(size, ['src11', '', 'Not assigned', 'Idle', '', '-']));
+      expect(mocked.calls.get('clear')).toEqual([{ n: 11 }]);
+      await expect(
+        panel(page).getByRole('radio', { name: 'Stream URL', checked: true }),
+      ).toBeVisible();
     });
 
     test(`the source switch applies at once on a stopped slot, and the keyboard stays on it at ${name}`, async ({
@@ -666,12 +736,12 @@ test.describe('Streaming with mocked slots', () => {
       await page.keyboard.press('ArrowRight');
       await expect(panel(page).getByRole('radio', { name: 'Camera', checked: true })).toBeVisible();
       await expect(camera).toBeFocused();
-      expect(mocked.posts.get('assign-webcam')).toEqual([{ index: 9 }]);
-      expect((await cells(page, 'src9'))[1]).toBe('CAM');
+      expect(mocked.calls.get('assign')).toEqual([{ n: 9, kind: 'webcam' }]);
+      await expect.poll(async () => (await cells(page, 'src9'))[1]).toBe('CAM');
 
       await file.click();
       await expect(panel(page).getByText('File: Not assigned')).toBeVisible();
-      expect(mocked.posts.get('assign')).toEqual([{ index: 9, file: '' }]);
+      expect(mocked.calls.get('clear')).toEqual([{ n: 9 }]);
       expect((await cells(page, 'src9'))[1]).toBe('');
     });
 
@@ -683,7 +753,7 @@ test.describe('Streaming with mocked slots', () => {
       await page.goto('/streaming');
       await expect(rows(page)).toHaveCount(48);
 
-      // src1 is playing a file.
+      // src1 is streaming a file.
       await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
       await panel(page).getByRole('radio', { name: 'Camera' }).click();
       const question = confirmDialog(page);
@@ -695,19 +765,17 @@ test.describe('Streaming with mocked slots', () => {
       await expect(question).toBeHidden();
       await expect(panel(page).getByRole('radio', { name: 'File', checked: true })).toBeVisible();
       await expect(panel(page)).toContainText('File: people/walk_720p30.mp4');
-      expect(mocked.posts.get('stop')).toBeUndefined();
-      expect(mocked.posts.get('assign-webcam')).toBeUndefined();
+      expect(mocked.calls.get('assign')).toBeUndefined();
       expect((await cells(page, 'src1'))[3]).toBe('Live');
 
       await panel(page).getByRole('radio', { name: 'Camera' }).click();
       await question.getByRole('button', { name: 'Stop and switch' }).click();
-      // The switch shows Camera at once; the row is a camera once the slot has been stopped and
-      // registered.
+      // Making the slot a webcam stops its file on the server: one request.
       await expect.poll(async () => (await cells(page, 'src1'))[1]).toBe('CAM');
-      expect(mocked.posts.get('stop')).toEqual([{ index: 1 }]);
-      expect(mocked.posts.get('assign-webcam')).toEqual([{ index: 1 }]);
+      expect(mocked.calls.get('assign')).toEqual([{ n: 1, kind: 'webcam' }]);
+      expect(mocked.calls.get('stop')).toBeUndefined();
       expect(await cells(page, 'src1')).toEqual(
-        shownAt(size, ['src1', 'CAM', 'Select a camera', 'Idle', '', 'H.264']),
+        shownAt(size, ['src1', 'CAM', 'Select a camera', 'Idle', '', '-']),
       );
     });
 
@@ -741,24 +809,114 @@ test.describe('Streaming with mocked slots', () => {
       await takeOver.click();
       await expect(confirmDialog(page)).toContainText('Disconnect external stream on src4?');
       await expect(confirmDialog(page)).toContainText(
-        'The publisher and all readers will be disconnected.',
+        'The publisher and all readers will be disconnected',
       );
       // Escape asks nothing of the server, and the focus returns to where it was.
       await page.keyboard.press('Escape');
       await expect(confirmDialog(page)).toHaveCount(0);
-      expect(mocked.posts.get('takeover')).toBeUndefined();
+      expect(mocked.calls.get('take-over')).toBeUndefined();
       await expect(takeOver).toBeFocused();
 
       await takeOver.click();
       await confirmDialog(page).getByRole('button', { name: 'Disconnect' }).click();
       await expect(toast(page, 'Disconnected the external stream on src4.')).toBeVisible();
-      expect(mocked.posts.get('takeover')).toEqual([{ index: 4 }]);
+      expect(mocked.calls.get('take-over')).toEqual([{ n: 4 }]);
       expect(await cells(page, 'src4')).toEqual(
         shownAt(size, ['src4', '', 'Not assigned', 'Idle', '', '-']),
       );
-      await expect(panel(page).getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+      await expect(panelButton(page, 'Start')).toBeVisible();
     });
   }
+
+  test('a start at another rate shows the rendition’s encode, and goes live once it is done', async ({
+    page,
+  }) => {
+    const mocked = await withMockedSlots(page);
+    await page.goto('/streaming');
+    await expect(rows(page)).toHaveCount(48);
+
+    await row(page, 'src2').click();
+    await expect(panel(page)).toContainText('(rendition will be created on start)');
+    await panelButton(page, 'Start').click();
+    expect(mocked.calls.get('start')).toEqual([{ n: 2 }]);
+
+    // The server encodes first; the job's events say how far it has got.
+    await expect(panel(page)).toContainText('Encoding rendition…');
+    await expect(panel(page)).toContainText('00:10 / 00:25');
+    await expect
+      .poll(() => cells(page, 'src2'))
+      .toEqual(['src2', 'VID', 'cars.mp4', 'Encoding', 'encoding 40%', 'H.265']);
+    await expect(panelButton(page, 'Cancel encoding')).toBeVisible();
+
+    mocked.finishEncode();
+    await expect(panelButton(page, 'Stop')).toBeVisible();
+    await expect.poll(async () => (await cells(page, 'src2'))[3]).toBe('Live');
+    await expect(panel(page)).toContainText('streaming rendition .renditions/x.mp4');
+    await expect(panel(page)).not.toContainText('Encoding rendition…');
+  });
+
+  test('Cancel encoding stops the slot, which ends its encode', async ({ page }) => {
+    const mocked = await withMockedSlots(page);
+    await page.goto('/streaming');
+    await expect(rows(page)).toHaveCount(48);
+
+    await row(page, 'src2').click();
+    await panelButton(page, 'Start').click();
+    await panelButton(page, 'Cancel encoding').click();
+
+    await expect(toast(page, 'Cancelled encoding for src2.')).toBeVisible();
+    expect(mocked.calls.get('stop')).toEqual([{ n: 2 }]);
+    await expect(panelButton(page, 'Start')).toBeVisible();
+    expect(await cells(page, 'src2')).toEqual([
+      'src2',
+      'VID',
+      'cars.mp4',
+      'Idle',
+      '15 fps · rendition',
+      'H.265',
+    ]);
+  });
+
+  test('a pull that lost its credentials in a restart asks for its URL again before it starts', async ({
+    page,
+  }) => {
+    const restarted =
+      'Insight keeps no camera credentials across a restart; enter the stream URL again.';
+    const mocked = await withMockedSlots(page, (slots) => {
+      slots[13] = slot(14, {
+        kind: 'pull',
+        error: restarted,
+        pull: pull({ status: 'needs_credentials', error: restarted }),
+      });
+    });
+    await page.goto('/streaming');
+    await expect(rows(page)).toHaveCount(48);
+
+    expect(await cells(page, 'src14')).toEqual([
+      'src14',
+      'URL',
+      '⇠ RTSP · 10.0.0.7:554 · stream URL needed again',
+      'Needs URL',
+      '',
+      '-',
+    ]);
+    await row(page, 'src14').click();
+    await expect(panelButton(page, 'Start')).toBeDisabled();
+    await expect(
+      panel(page).getByRole('radio', { name: 'Stream URL', checked: true }),
+    ).toBeVisible();
+    await expect(panel(page)).toContainText('Camera: rtsp://10.0.0.7:554/stream1');
+    await expect(panel(page).getByText(restarted).first()).toBeVisible();
+
+    await panel(page).getByLabel('Stream URL', { exact: true }).fill('rtsp://10.0.0.7:554/stream1');
+    await panel(page).getByLabel('Password').fill('s3cret');
+    await panelButton(page, 'Pull').click();
+    await expect(panelButton(page, 'Stop')).toBeVisible();
+    expect(mocked.calls.get('assign')).toEqual([
+      { n: 14, kind: 'pull', url: 'rtsp://10.0.0.7:554/stream1', username: '', password: 's3cret' },
+    ]);
+    expect((await cells(page, 'src14'))[3]).toBe('Live');
+  });
 
   test('a row carries the tint of its state chip’s tone; an idle row has none', async ({
     page,
@@ -814,18 +972,12 @@ test.describe('Streaming with mocked slots', () => {
       '15 fps · rendition',
       'H.265',
     ]);
-    expect(await cells(page, 'src3')).toEqual([
-      'src3',
-      'CAM',
-      'Select a camera',
-      'Idle',
-      '',
-      'H.264',
-    ]);
+    // A webcam names no codec until a browser publishes it.
+    expect(await cells(page, 'src3')).toEqual(['src3', 'CAM', 'Select a camera', 'Idle', '', '-']);
     expect(await cells(page, 'src4')).toEqual([
       'src4',
       'EXT',
-      '⇢ RTSP · 192.168.1.20:41234 · 1280×720 · 30 fps',
+      '⇢ RTSP · 192.168.1.20 · 1280×720 · 30 fps',
       'External',
       '30 fps',
       'AV1',
@@ -834,7 +986,7 @@ test.describe('Streaming with mocked slots', () => {
       'src5',
       'URL',
       '⇠ RTSP · 10.0.0.7:554 · 1920×1080 · 25 fps',
-      'Pulled',
+      'Live',
       '25 fps',
       'H.264',
     ]);
@@ -874,7 +1026,7 @@ test.describe('Streaming with mocked slots', () => {
     );
   });
 
-  test('In use shows assigned, external and pulled slots only', async ({ page }) => {
+  test('In use shows assigned and external slots only', async ({ page }) => {
     await withMockedSlots(page);
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
@@ -914,7 +1066,7 @@ test.describe('Streaming with mocked slots', () => {
     await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src5');
   });
 
-  test('Start… starts the chosen count and reports the server message', async ({ page }) => {
+  test('Start… starts the chosen count and reports what the server did', async ({ page }) => {
     const mocked = await withMockedSlots(page);
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
@@ -931,11 +1083,9 @@ test.describe('Streaming with mocked slots', () => {
     await dialog.getByRole('button', { name: 'Start', exact: true }).click();
 
     await expect(dialog).toHaveCount(0);
-    await expect(
-      toast(page, 'Started 1 source(s), 1 already running, 1 failed. Skipped pulled: src5.'),
-    ).toBeVisible();
+    await expect(toast(page, 'Started 1 source(s), 1 already running, 1 failed.')).toBeVisible();
     await expect(toast(page, 'Failed: src2')).toBeVisible();
-    expect(mocked.posts.get('start-bulk')).toEqual([{ count: 3 }]);
+    expect(mocked.calls.get('start-bulk')).toEqual([{ count: 3 }]);
 
     // It opens again at the count chosen last. Escape closes it, the menu with it, and the focus
     // is on ⋯ again.
@@ -953,8 +1103,9 @@ test.describe('Streaming with mocked slots', () => {
     await withMockedSlots(page);
     // No renditions: the last row is disabled.
     await page.route(
-      (url) => url.pathname === '/api/mediasrc/renditions',
-      (route) => route.fulfill({ json: { count: 0, bytes: 0 } }),
+      (url) => url.pathname === '/api/renditions',
+      (route) =>
+        route.fulfill({ json: { count: 0, bytes: 0, in_use: 0 } satisfies RenditionUsage }),
     );
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
@@ -1033,7 +1184,7 @@ test.describe('Streaming with mocked slots', () => {
       'Every slot goes back to unassigned. External streams are left running.',
     );
     await confirmDialog(page).getByRole('button', { name: 'Cancel' }).click();
-    expect(mocked.posts.get('reset')).toBeUndefined();
+    expect(mocked.calls.get('reset')).toBeUndefined();
 
     await morePanel(page).getByRole('button', { name: 'Reset' }).click();
     await confirmDialog(page).getByRole('button', { name: 'Reset' }).click();
@@ -1043,11 +1194,10 @@ test.describe('Streaming with mocked slots', () => {
     // Every slot is unassigned now, and the side panel shows the first, as #170 did.
     await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
     await expect(morePanel(page)).toHaveCount(0);
-    // No webcam was published from this browser, so none is named as released.
-    expect(mocked.posts.get('reset')).toEqual([{ released_webcams: [] }]);
+    expect(mocked.calls.get('reset')).toEqual([{}]);
   });
 
-  test('Stop all and Auto assign report the server message', async ({ page }) => {
+  test('Stop all and Auto assign report what the server did', async ({ page }) => {
     const mocked = await withMockedSlots(page);
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
@@ -1064,8 +1214,8 @@ test.describe('Streaming with mocked slots', () => {
         'Assigned 2 source(s) with unique media file(s). Skipped external: src4. Skipped pulled: src5, src6, src7, src8.',
       ),
     ).toBeVisible();
-    expect(mocked.posts.get('stop-all')).toEqual([{ released_webcams: [] }]);
-    expect(mocked.posts.get('auto-assign-all')).toEqual([{ released_webcams: [] }]);
+    expect(mocked.calls.get('stop-all')).toEqual([{}]);
+    expect(mocked.calls.get('auto-assign')).toEqual([{}]);
   });
 
   test('a failing slot poll keeps the last answer and says so', async ({ page }) => {

@@ -14,8 +14,10 @@ import { NeatInput } from '@sima/neat-ui/input';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import { CellText } from '../cell-text';
-import type { CatalogAsset, CatalogIndex, CatalogSource } from './api';
 import {
+  type CatalogAsset,
+  type CatalogIndex,
+  type CatalogSource,
   assetDimensions,
   assetMatchesSearch,
   assetsOfSource,

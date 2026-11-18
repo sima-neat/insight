@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input, model } from '@angular/core';
 import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
-import type { CatalogAsset } from './api';
-import { catalogCodecs, type CatalogFilter, catalogProfiles } from './catalog';
+import { type CatalogAsset, catalogCodecs, type CatalogFilter, catalogProfiles } from './catalog';
 import { codecLabel } from './slot-row';
 
 const ANY: NeatSelectOption<string> = { value: '', label: 'Any' };

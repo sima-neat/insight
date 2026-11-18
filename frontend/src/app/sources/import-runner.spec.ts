@@ -1,7 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { of } from 'rxjs';
-import type { CatalogAsset } from './api';
+import type { YoutubeImportRequest } from './api';
+import type { CatalogAsset } from './catalog';
 import { ImportRunner } from './import-runner';
 import {
   done,
@@ -9,13 +10,17 @@ import {
   FakeSlots,
   FakeToasts,
   fileSlot,
+  jobFailed,
   lines,
+  preparing,
   refuse,
+  saved,
+  sent,
   tick,
 } from './import.testing';
-import { MediaLibraryService } from './media-library.service';
+import { type LibraryEvent, MediaLibraryService } from './media-library.service';
 import { SlotsService } from './slots.service';
-import { ApiRequestError, type StreamEvent } from './stream-lines';
+import { ApiRequestError } from './stream-lines';
 
 const asset = (path: string): CatalogAsset => ({
   source_id: 'street',
@@ -33,6 +38,13 @@ const asset = (path: string): CatalogAsset => ({
   height: 720,
   url: '',
 });
+
+const YOUTUBE: YoutubeImportRequest = {
+  url: 'https://youtu.be/a',
+  target: '720p30',
+  clip_start: 0,
+  clip_duration: 60,
+};
 
 describe('ImportRunner', () => {
   let library: FakeLibrary;
@@ -57,6 +69,27 @@ describe('ImportRunner', () => {
     release = runner.hold();
   });
 
+  it('shows the bytes of an upload, then its re-encode, then reports what it saved', async () => {
+    const outcome = runner.upload([new File(['x'], 'a.mov')]);
+    sent(library.last, 50, 200);
+    expect(runner.progress()).toEqual({ title: 'Uploading media', detail: 'a.mov', percent: 25 });
+    sent(library.last, 50, null);
+    expect(runner.progress()?.percent).toBeNull();
+
+    preparing(library.last, {
+      progress: { phase: 'encode', detail: '00:04 / 00:10', percent: 40.2 },
+    });
+    expect(runner.progress()).toEqual({
+      title: 'Preparing media',
+      detail: 'a.mov - 00:04 / 00:10',
+      percent: 40,
+    });
+    saved(library.last, 'a.mp4', { reencoded: ['a.mp4'] });
+
+    await expect(outcome).resolves.toEqual({ ok: true, path: 'a.mp4' });
+    expect(toasts.status).toHaveBeenCalledWith('Uploaded and prepared 1 file(s).');
+  });
+
   it('an archive clashes on its folder and names the slots streaming files in it', async () => {
     slots.slots.set([
       fileSlot(2, 'clips/a.mp4'),
@@ -75,27 +108,25 @@ describe('ImportRunner', () => {
     runner.answer('replace');
     await tick();
     expect(library.last.body).toEqual({ name: 'clips.zip', onConflict: 'replace' });
-    lines(library.last, 'Saved archive; extracting into /data/media/clips', 'Archive extracted.');
-    lines(library.last, 'Restarted src2.', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'clips', { folder: true, restarted: [2] });
 
     await expect(outcome).resolves.toEqual({ ok: true, path: 'clips' });
   });
 
-  it('a slot a Replace could not restart is reported as a warning naming it; the upload succeeded', async () => {
-    const outcome = runner.upload([new File(['x'], 'a.mp4')]);
-    lines(
-      library.last,
-      'Uploaded to /data/media/a.mp4',
-      'Could not restart src4: MediaMTX is down',
-    );
-    expect(toasts.warning).toHaveBeenCalledWith('Could not restart src4: MediaMTX is down');
-    expect(toasts.error).not.toHaveBeenCalled();
-    lines(library.last, 'Upload complete.');
-    done(library.last);
+  it('warns of what saving changed beyond the library: a slot it could not restart, the slots a replaced folder cleared', async () => {
+    const outcome = runner.upload([new File(['x'], 'clips.zip')]);
+    saved(library.last, 'clips', {
+      folder: true,
+      warnings: ['Could not restart src4: MediaMTX is down'],
+      unassigned: [6, 8],
+    });
 
-    await expect(outcome).resolves.toEqual({ ok: true, path: 'a.mp4' });
-    expect(toasts.status).toHaveBeenCalledWith('Uploaded and prepared 1 file(s).');
+    await expect(outcome).resolves.toEqual({ ok: true, path: 'clips' });
+    expect(toasts.warning.mock.calls).toEqual([
+      ['Could not restart src4: MediaMTX is down'],
+      ['Cleared src6, src8: the replaced folder no longer has their files.'],
+    ]);
+    expect(toasts.error).not.toHaveBeenCalled();
     expect(runner.failure()).toBeNull();
   });
 
@@ -103,13 +134,23 @@ describe('ImportRunner', () => {
     const outcome = runner.upload([new File(['x'], 'a.mp4'), new File(['y'], 'b.mp4')]);
     library.last.events.error(new ApiRequestError(0, 'Could not reach the server.', null));
     await tick();
-    lines(library.last, 'Uploaded to /data/media/b.mp4');
-    done(library.last);
+    saved(library.last, 'b.mp4');
 
     await expect(outcome).resolves.toEqual({ ok: false, path: 'b.mp4' });
     const failure = 'Uploaded and prepared 1/2 file(s). a.mp4: Could not reach the server.';
     expect(runner.failure()).toBe(failure);
     expect(toasts.error).toHaveBeenCalledWith(failure);
+  });
+
+  it("a re-encode that fails fails its file with the server's sentence", async () => {
+    const outcome = runner.upload([new File(['x'], 'a.mov')]);
+    preparing(library.last);
+    jobFailed(library.last, 'FFmpeg failed: moov atom not found.');
+
+    await expect(outcome).resolves.toEqual({ ok: false, path: null });
+    expect(runner.failure()).toBe(
+      'Uploaded and prepared 0/1 file(s). a.mov: FFmpeg failed: moov atom not found.',
+    );
   });
 
   it('a clash still open when the dialog goes is skipped, and the toast says so', async () => {
@@ -138,37 +179,37 @@ describe('ImportRunner', () => {
     expect(toasts.status).not.toHaveBeenCalled();
   });
 
-  it('catalog imports run one after the other and stop at a failure', async () => {
+  it('catalog imports run one after the other, showing their download, and stop at a failure', async () => {
     const outcome = runner.importCatalog([asset('a.mp4'), asset('b.mp4'), asset('c.mp4')]);
     expect(runner.progress()).toEqual({
       title: 'Importing catalog asset 1/3',
       detail: '720p30 / 30 fps / H.264 / 1280x720',
       percent: null,
     });
-    lines(library.last, 'Downloading catalog asset: 50% (524288 / 1048576 bytes)');
+    preparing(library.last, {
+      kind: 'catalog_import',
+      progress: { phase: 'download', detail: '0.5 / 1.0 MB', percent: 50 },
+    });
     expect(runner.progress()).toEqual({
       title: 'Importing catalog asset 1/3',
       detail: '720p30 / 30 fps / H.264 / 1280x720 - 0.5 / 1.0 MB',
       percent: 50,
     });
-    lines(library.last, 'Saved catalog asset to catalog/street/a.mp4', 'Catalog import complete.');
-    done(library.last);
+    saved(library.last, 'catalog/street/a.mp4');
     await tick();
 
     expect(library.calls.map((call) => call.body)).toEqual(['a.mp4', 'b.mp4']);
-    lines(library.last, 'Checksum mismatch for catalog asset: expected aa, got bb');
-    done(library.last);
+    jobFailed(library.last, 'Size mismatch for street/b.mp4: expected 10 bytes, got 9.');
 
     await expect(outcome).resolves.toEqual({ ok: false, path: 'catalog/street/a.mp4' });
     expect(library.calls).toHaveLength(2);
-    expect(runner.failure()).toBe('Checksum mismatch for catalog asset: expected aa, got bb');
+    expect(runner.failure()).toBe('Size mismatch for street/b.mp4: expected 10 bytes, got 9.');
     expect(runner.busy()).toBe(false);
   });
 
   it('a new dialog starts without the failure of the work before', async () => {
     const outcome = runner.importCatalog([asset('a.mp4')]);
-    lines(library.last, 'Catalog import failed: HTTP Error 404: Not Found');
-    done(library.last);
+    library.last.events.error(new ApiRequestError(404, 'No such asset.', null));
     await outcome;
     expect(runner.failure()).not.toBeNull();
 
@@ -200,14 +241,15 @@ describe('ImportRunner', () => {
     // The toast goes without a word: the dialog shows the work again, to its outcome.
     expect(toast.dismiss).toHaveBeenCalledOnce();
     expect(toast.done).not.toHaveBeenCalled();
-    lines(library.last, 'Uploaded to /data/media/a.mp4', 'Optimizing a.mp4: 40% (00:04 / 00:10)');
+    preparing(library.last, {
+      progress: { phase: 'encode', detail: '00:04 / 00:10', percent: 40 },
+    });
     expect(toast.update).not.toHaveBeenCalledWith(
       'Preparing media 1/2 · a.mp4 - 00:04 / 00:10',
       40,
     );
     expect(runner.progress()?.percent).toBe(40);
-    lines(library.last, 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'a.mp4');
     await tick();
 
     refuse(library.last, 'b.mp4', 'b_2.mp4');
@@ -225,26 +267,52 @@ describe('ImportRunner', () => {
       throw new Error('toast host gone');
     });
     const outcome = runner.upload([new File(['x'], 'a.mp4')]);
-    lines(library.last, 'Could not restart src4: MediaMTX is down');
+    saved(library.last, 'a.mp4', { warnings: ['Could not restart src4: MediaMTX is down'] });
 
     await expect(outcome).resolves.toEqual({ ok: false, path: null });
     expect(runner.busy()).toBe(false);
     expect(runner.failure()).toBe('Uploaded and prepared 0/1 file(s). a.mp4: toast host gone');
   });
 
-  it('also when the request answers while it is being sent', async () => {
-    toasts.warning.mockImplementationOnce(() => {
-      throw new Error('toast host gone');
-    });
-    vi.spyOn(library, 'upload').mockReturnValueOnce(
-      of<StreamEvent>({ kind: 'line', text: 'Could not restart src4: MediaMTX is down' }),
-    );
+  it('fails a request that ended without saying what it saved, also one that ends while being sent', async () => {
+    vi.spyOn(library, 'upload').mockReturnValueOnce(of<LibraryEvent>());
 
     await expect(runner.upload([new File(['x'], 'a.mp4')])).resolves.toEqual({
       ok: false,
       path: null,
     });
+    expect(runner.failure()).toBe(
+      'Uploaded and prepared 0/1 file(s). a.mp4: The server did not say what it saved.',
+    );
     expect(runner.busy()).toBe(false);
+  });
+
+  it('a YouTube import reads its lines to the end and reports the first failure with its diagnostics', async () => {
+    const outcome = runner.importYoutube(YOUTUBE);
+    lines(library.last, 'Downloading YouTube video: 12%');
+    expect(runner.progress()).toEqual({
+      title: 'Downloading YouTube video',
+      detail: '720p30',
+      percent: 12,
+    });
+    lines(library.last, 'YouTube import failed: ERROR: unavailable', 'HTTP Error 403');
+    done(library.last);
+
+    await expect(outcome).resolves.toEqual({ ok: false, path: null });
+    expect(runner.failure()).toBe('YouTube import failed: ERROR: unavailable\nHTTP Error 403');
+  });
+
+  it('a YouTube import saves where its lines say, and is cancelled by aborting its request', async () => {
+    const first = runner.importYoutube(YOUTUBE);
+    lines(library.last, 'Saved YouTube media to youtube/a.mp4', 'YouTube import complete.');
+    done(library.last);
+    await expect(first).resolves.toEqual({ ok: true, path: 'youtube/a.mp4' });
+
+    const second = runner.importYoutube(YOUTUBE);
+    runner.cancel();
+    await expect(second).resolves.toEqual({ ok: false, path: null });
+    expect(library.last.unsubscribed).toBe(true);
+    expect(toasts.status).toHaveBeenCalledWith('YouTube import canceled.');
   });
 
   it('refuses to start while work runs', async () => {

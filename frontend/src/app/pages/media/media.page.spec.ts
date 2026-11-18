@@ -4,43 +4,29 @@ import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { NeatPage, NeatShell } from '@sima/neat-ui';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { MediaInfo, MediaNode, Slot } from '../../sources/api';
+import type { MediaEntry, MediaFileInfo, Slot } from '../../api.generated';
 import { ImportDialogs } from '../../sources/import-dialog';
 import { MediaLibraryService } from '../../sources/media-library.service';
+import { mediaFile, mediaFolder } from '../../sources/media.testing';
 import type { Progress } from '../../sources/progress-lines';
 import { SlotsService } from '../../sources/slots.service';
+import { fileSlot } from '../../sources/slots.testing';
 import { ApiRequestError } from '../../sources/stream-lines';
 import { FakeLocalStorage } from '../../fake-storage.testing';
 import { MediaPage } from './media.page';
 
-function slot(index: number, overrides: Partial<Slot> = {}): Slot {
-  return {
-    index,
-    file: '',
-    state: 'stopped',
-    transport: '',
-    codec: '',
-    type: 'file',
-    allowed_transports: [],
-    urls: {},
-    ...overrides,
-  };
-}
-
-const TREE: MediaNode[] = [
-  {
-    name: '/people',
-    path: 'people',
-    type: 'folder',
-    streamable_count: 1,
-    children: [{ name: 'walk.mp4', path: 'people/walk.mp4', type: 'file', streamable: true }],
-  },
-  { name: 'cars.mp4', path: 'cars.mp4', type: 'file', streamable: true },
-  { name: 'idle.mp4', path: 'idle.mp4', type: 'file', streamable: true },
-  { name: 'notes.txt', path: 'notes.txt', type: 'file', streamable: false },
+const TREE: MediaEntry[] = [
+  mediaFolder('people', [mediaFile('people/walk.mp4')]),
+  mediaFile('cars.mp4'),
+  mediaFile('idle.mp4'),
+  mediaFile('notes.txt', false),
 ];
 
-const INFO: MediaInfo = { filename: 'cars.mp4', size_bytes: 2048, type: 'unknown' };
+const INFO: MediaFileInfo = {
+  name: 'cars.mp4',
+  path: 'cars.mp4',
+  probe: { kind: 'unknown', size: 2048, streamable: false },
+};
 
 class FakeSlots {
   readonly slots = signal<readonly Slot[] | null>(null);
@@ -69,7 +55,7 @@ class FakeSlots {
 }
 
 class FakeLibrary {
-  readonly tree = signal<readonly MediaNode[] | null>(TREE);
+  readonly tree = signal<readonly MediaEntry[] | null>(TREE);
   readonly refresh = vi.fn(async () => undefined);
   readonly info = vi.fn(async () => INFO);
   readonly delete = vi.fn();
@@ -160,11 +146,11 @@ describe('MediaPage', () => {
 
   it('lists folders and files with the slots each file is assigned to', async () => {
     slots.slots.set([
-      slot(1, { file: 'idle.mp4' }),
-      slot(3, { file: 'cars.mp4', state: 'playing' }),
-      slot(5, { file: 'idle.mp4', state: 'playing' }),
-      slot(9, { file: 'cars.mp4' }),
-      slot(10, { file: 'idle.mp4', state: 'external' }),
+      fileSlot(1, 'idle.mp4', { run: true, state: 'preparing', job: 'job-1' }),
+      fileSlot(3, 'cars.mp4', { run: true, state: 'live' }),
+      fileSlot(5, 'idle.mp4', { run: true, state: 'live' }),
+      fileSlot(9, 'cars.mp4'),
+      fileSlot(10, 'idle.mp4', { state: 'external' }),
     ]);
     slots.encodes.set(new Map([[1, { title: 'Encoding', detail: '', percent: 10 }]]));
     await open();

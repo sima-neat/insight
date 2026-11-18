@@ -1,64 +1,44 @@
 import { HttpClient } from '@angular/common/http';
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { defer, finalize, firstValueFrom, Observable, tap, timeout, throwError } from 'rxjs';
-import { LatestOnly, visiblePoller } from '../polling';
+import { firstValueFrom, Observable, type Subscription, timeout, throwError } from 'rxjs';
 import type {
-  AssignRequest,
-  AssignWebcamRequest,
-  AssignWebcamResponse,
   AutoAssignResult,
-  BulkRequest,
-  BulkStartResult,
-  PullRequest,
-  ReleasedWebcam,
+  Job,
   RenditionsCleared,
   RenditionUsage,
-  ResetResult,
   Slot,
-  StartBulkRequest,
-  StartRequest,
-  StopAllResult,
-  StopRequest,
-  SuccessResponse,
-  TakeoverResponse,
-} from './api';
-import { customRate } from './fps';
-import { isProgressFailure, mergePrepareProgress, type Progress } from './progress-lines';
-import {
-  ApiRequestError,
-  postStreamedText,
-  withRequestErrors,
-  type StreamEvent,
-} from './stream-lines';
+  SlotAssignment,
+  SlotList,
+  SlotStartRequest,
+  SlotStartResult,
+  SlotStopResult,
+} from '../api.generated';
+import { LatestOnly, visiblePoller } from '../polling';
+import { JobEvents, jobProgress } from './jobs';
+import type { Progress } from './progress-lines';
+import { ApiRequestError, withRequestErrors } from './stream-lines';
 
-const SLOTS_URL = '/api/mediasrc';
-const RENDITIONS_URL = '/api/mediasrc/renditions';
+const SLOTS_URL = '/api/slots';
+const RENDITIONS_URL = '/api/renditions';
 const POLL_INTERVAL_MS = 2000;
 /** A fetch of the slots that has not answered by then counts as failed: it must not stall polling. */
 const FETCH_TIMEOUT_MS = 10_000;
-/** What an encode shows before the server's first line (#170's label). */
-const PREPARING: Progress = { title: 'Preparing rendition…', detail: '', percent: null };
-/** What a slot shows between its encode and its start's answer (#170's label and its 99 %). */
-const STARTING = { title: 'Starting stream…', percent: 99 } as const;
+/** What a slot's rendition encode is called while it runs, in the list and in the slot's panel. */
+const ENCODING_TITLE = 'Encoding rendition…';
+/** What an encode shows before its first event. */
+const PREPARING: Progress = { title: ENCODING_TITLE, detail: '', percent: null };
 
-/**
- * Whether `next` shows a slot streaming at a frame rate other than the file's, that did not
- * stream at that rate in `previous`: the server has just encoded, or reused, a rendition for it.
- */
-function startedCustomFps(previous: readonly Slot[] | null, next: readonly Slot[]): boolean {
-  /** The frame rate a playing slot streams at when it is not the file's own, else null. */
-  const customFps = (slot: Slot | undefined): number | null =>
-    slot?.state === 'playing' ? customRate(slot) : null;
-  return next.some((slot) => {
-    const fps = customFps(slot);
-    return fps !== null && fps !== customFps(previous?.find((old) => old.index === slot.index));
-  });
+/** A camera to pull: its RTSP or RTSPS URL, and credentials that replace any the URL holds. */
+export interface PullRequest {
+  readonly url: string;
+  readonly username?: string;
+  readonly password?: string;
 }
 
 /**
  * The 48 streaming slots, as one service for the whole app: Streaming shows and acts on them,
  * Media shows which files they use, and the pickers need the same answer. Page code never fetches
- * `/api/mediasrc` itself.
+ * `/api/slots` itself.
  *
  * **Polling.** The slots are polled every 2 s while at least one page holds a `watch()` and the
  * page is visible; a hidden tab asks again the moment it shows. A poll is skipped while a request
@@ -66,16 +46,21 @@ function startedCustomFps(previous: readonly Slot[] | null, next: readonly Slot[
  * that fails (or does not answer within 10 s) keeps the last answer and sets `unavailable` until
  * one succeeds: the next one tries again.
  *
- * **Actions.** Each maps to one endpoint and resolves with its response, or rejects with a
- * `ApiRequestError` carrying the server's message (its `body` keeps what the message does not,
- * such as the pull route's `reason`). Whatever the outcome, the slots are fetched again before the
- * action settles: another tab or a publisher may have changed the slot (a 409 or 410 says so), and
- * what the caller sees next must be what the server holds. A poll sent before an action settled
- * may have been answered from before it, so its answer is dropped.
+ * **Encodes.** A file slot started at a frame rate other than its file's is `preparing` while the
+ * server encodes its rendition, naming the encode's job. The service follows the job of every
+ * preparing slot an answer shows, whoever started it, and `encodes` says how far each has got;
+ * when a job ends, the slots and the rendition usage are fetched again.
+ *
+ * **Actions.** Each maps to one route and resolves with its answer, or rejects with an
+ * `ApiRequestError` carrying the server's message and code. Whatever the outcome, the slots are
+ * fetched again before the action settles: another tab or a publisher may have changed the slot,
+ * and what the caller sees next must be what the server holds. A poll sent before an action
+ * settled may have been answered from before it, so its answer is dropped.
  */
 @Injectable({ providedIn: 'root' })
 export class SlotsService {
   private readonly http = inject(HttpClient);
+  private readonly jobEvents = inject(JobEvents);
 
   private readonly slotsState = signal<readonly Slot[] | null>(null);
   /** The newest answer; null before the first one. */
@@ -93,13 +78,22 @@ export class SlotsService {
   /** The stored FPS renditions, as of the last `refreshRenditions()` or action that changes them. */
   readonly renditions = this.renditionsState.asReadonly();
 
-  private readonly encodesState = signal<ReadonlyMap<number, Progress>>(new Map());
+  private readonly jobsState = signal<ReadonlyMap<string, Job>>(new Map());
   /**
-   * The FPS renditions being encoded, by slot: how far each `prepare` has got, merged from the
-   * server's lines. The server knows nothing of an encode until it has finished (the slot stays
-   * stopped), so this is the only place it shows; the list and the slot's panel read it alike.
+   * How far the rendition encode of each preparing slot has got, by slot number, from its job's
+   * events; an encode whose first event has not come shows as just begun. The list and the slot's
+   * panel read it alike.
    */
-  readonly encodes = this.encodesState.asReadonly();
+  readonly encodes = computed<ReadonlyMap<number, Progress>>(() => {
+    const jobs = this.jobsState();
+    const encodes = new Map<number, Progress>();
+    for (const slot of this.slots() ?? []) {
+      if (slot.state !== 'preparing') continue;
+      const job = slot.job ? jobs.get(slot.job) : undefined;
+      encodes.set(slot.n, job ? jobProgress(job, ENCODING_TITLE) : PREPARING);
+    }
+    return encodes;
+  });
 
   private readonly slotsByFile = computed(() => {
     const byFile = new Map<string, Slot[]>();
@@ -111,6 +105,8 @@ export class SlotsService {
 
   private readonly latest = new LatestOnly();
   private readonly latestRenditions = new LatestOnly();
+  /** The encode jobs followed, by id, as long as an answer shows a slot preparing with them. */
+  private readonly follows = new Map<string, Subscription>();
   private inFlight = 0;
   private watchers = 0;
   private readonly poller = visiblePoller(POLL_INTERVAL_MS, () => {
@@ -154,8 +150,8 @@ export class SlotsService {
     const request = this.latest.next();
     this.inFlight++;
     try {
-      const slots = await firstValueFrom(
-        this.http.get<Slot[]>(SLOTS_URL).pipe(
+      const list = await firstValueFrom(
+        this.http.get<SlotList>(SLOTS_URL).pipe(
           timeout({
             first: FETCH_TIMEOUT_MS,
             with: () =>
@@ -165,11 +161,9 @@ export class SlotsService {
         ),
       );
       if (this.latest.accept(request)) {
-        const previous = this.slotsState();
-        this.slotsState.set(slots);
+        this.slotsState.set(list.slots);
         this.unavailableState.set(false);
-        // The usage changes when a stream starts at a custom rate, also one another tab started.
-        if (startedCustomFps(previous, slots)) void this.refreshRenditions().catch(() => undefined);
+        this.followEncodes(list.slots);
       }
     } catch (failure) {
       if (this.latest.isNewest(request)) this.unavailableState.set(true);
@@ -189,173 +183,133 @@ export class SlotsService {
   }
 
   /**
-   * The slots a media file is assigned to, in index order, whatever their state: running, idle,
-   * pulled or held by an external publisher (a pull or a takeover leaves the assignment under it).
-   * This is what "in use" means for deleting or replacing the file.
+   * The slots a media file is assigned to, in number order, whatever their state: running, idle,
+   * or held by an external publisher (which leaves the assignment under it). This is what "in use"
+   * means for deleting or replacing the file.
    */
   assignedTo(path: string): readonly Slot[] {
     return this.slotsByFile().get(path) ?? [];
   }
 
   /**
-   * The slots assigned to a file anywhere below `folder`, in index order: what replacing a folder
+   * The slots assigned to a file anywhere below `folder`, in number order: what replacing a folder
    * (an archive upload that clashes on its folder) touches.
    */
   assignedUnder(folder: string): readonly Slot[] {
     const prefix = `${folder}/`;
-    return (this.slots() ?? []).filter((slot) => slot.file.startsWith(prefix));
-  }
-
-  /** `file: ''` clears the slot. */
-  assign(request: AssignRequest): Promise<SuccessResponse> {
-    return this.act(this.http.post<SuccessResponse>(`${SLOTS_URL}/assign`, request));
-  }
-
-  assignWebcam(request: AssignWebcamRequest): Promise<AssignWebcamResponse> {
-    return this.act(this.http.post<AssignWebcamResponse>(`${SLOTS_URL}/assign-webcam`, request));
+    return (this.slots() ?? []).filter((slot) => slot.file?.startsWith(prefix));
   }
 
   /**
-   * Encodes the FPS rendition a slot needs before it starts. Cold: the request is sent on
-   * subscribe, and unsubscribing cancels the encode (the server stops FFmpeg and removes the
-   * partial file). Emits the server's lines (read them with `mergePrepareProgress` from
-   * `progress-lines.ts`); a refused request errors with the server's message. The slots and the
-   * rendition usage are fetched again however it ends. While it runs, `encodes` shows its progress.
+   * Makes the slot stream a library file, at `fps` or, without it, at the file's own rate. A slot
+   * that streamed a file keeps running with the new one; any other is stopped.
    */
-  prepare(index: number): Observable<StreamEvent> {
-    return defer(() => {
-      // Each run knows its entry by identity (a copy, never the shared constant), so a run that
-      // ends after a newer one began on the same slot leaves the newer run's progress alone.
-      const run = { progress: { ...PREPARING } };
-      this.setEncode(index, run.progress);
-      return postStreamedText(this.http, `${SLOTS_URL}/prepare`, { index }).pipe(
-        tap((event) => {
-          // A newer run on the slot has taken its entry over.
-          if (event.kind !== 'line' || this.encodes().get(index) !== run.progress) return;
-          const next = mergePrepareProgress(run.progress, event.text);
-          // A failure is the subscriber's to word; until the run ends it shows what it reached.
-          if (next === null || isProgressFailure(next)) return;
-          run.progress = next;
-          this.setEncode(index, next);
-        }),
-        // The slot shows as encoding until the slots are fetched again, so it does not flash idle
-        // between the encode's end and the answer that shows what the server did next.
-        finalize(() => {
-          void this.settleChange({ renditions: true }).then(() => {
-            if (this.encodes().get(index) === run.progress) this.setEncode(index, null);
-          });
+  assignFile(n: number, file: string, fps?: number | null): Promise<Slot> {
+    const body: SlotAssignment = fps == null ? { kind: 'file', file } : { kind: 'file', file, fps };
+    return this.assign(n, body);
+  }
+
+  /**
+   * Makes the slot pull a camera, which starts at once. The server probes the camera first and
+   * refuses one that rejects the credentials (`pull_auth_failed`) or does not answer
+   * (`pull_unreachable`). Answers with the slot, whose `pull` never carries credentials.
+   */
+  assignPull(n: number, pull: PullRequest): Promise<Slot> {
+    return this.assign(n, { kind: 'pull', ...pull });
+  }
+
+  /** Makes the slot a browser's webcam; the answer's `urls.whip` is where the browser publishes. */
+  assignWebcam(n: number): Promise<Slot> {
+    return this.assign(n, { kind: 'webcam' });
+  }
+
+  /** Leaves the slot with nothing assigned, and stopped. */
+  clear(n: number): Promise<Slot> {
+    return this.act(this.http.delete<Slot>(`${SLOTS_URL}/${n}`));
+  }
+
+  /**
+   * Makes the slot run. A file slot at a rate other than its file's is `preparing` while its
+   * rendition is encoded (see `encodes`); it answers before the stream is live.
+   */
+  start(n: number): Promise<Slot> {
+    return this.act(this.http.post<Slot>(`${SLOTS_URL}/${n}/start`, null));
+  }
+
+  /**
+   * Makes the slot stop, keeping what it is assigned: its encode is cancelled, its pull ended and
+   * whatever publishes its webcam disconnected.
+   */
+  stop(n: number): Promise<Slot> {
+    return this.act(this.http.post<Slot>(`${SLOTS_URL}/${n}/stop`, null));
+  }
+
+  /** Disconnects the external publisher holding a slot, so its own assignment can run. */
+  takeOver(n: number): Promise<Slot> {
+    return this.act(this.http.post<Slot>(`${SLOTS_URL}/${n}/take-over`, null));
+  }
+
+  /** Starts the first `count` file slots in number order that no external publisher holds. */
+  startBulk(count: number): Promise<SlotStartResult> {
+    const body: SlotStartRequest = { count };
+    return this.act(this.http.post<SlotStartResult>(`${SLOTS_URL}/start`, body));
+  }
+
+  /** Stops every slot; external publishers go on. */
+  stopAll(): Promise<SlotStopResult> {
+    return this.act(this.http.post<SlotStopResult>(`${SLOTS_URL}/stop`, null));
+  }
+
+  /** Stops every slot and leaves each with nothing assigned; external publishers go on. */
+  reset(): Promise<SlotStopResult> {
+    return this.act(this.http.post<SlotStopResult>(`${SLOTS_URL}/reset`, null));
+  }
+
+  /** Gives the library's streamable files to the slots, one each; pulls and external slots keep theirs. */
+  autoAssign(): Promise<AutoAssignResult> {
+    return this.act(this.http.post<AutoAssignResult>(`${SLOTS_URL}/auto-assign`, null));
+  }
+
+  /** Removes the renditions no slot streams or is about to. */
+  clearRenditions(): Promise<RenditionsCleared> {
+    return this.act(this.http.delete<RenditionsCleared>(RENDITIONS_URL), { renditions: true });
+  }
+
+  private assign(n: number, body: SlotAssignment): Promise<Slot> {
+    return this.act(this.http.put<Slot>(`${SLOTS_URL}/${n}`, body));
+  }
+
+  /**
+   * Follows the encode of each preparing slot in `slots`, and lets go of those no slot shows any
+   * more. A follow that ended stays until then, so an ended job is not followed again. When a job
+   * ends the slot moves on (to starting, failed or idle) and a rendition may have been added, so
+   * both are fetched again; a follow that failed leaves the slot to say how it stands.
+   */
+  private followEncodes(slots: readonly Slot[]): void {
+    const wanted = new Set(
+      slots.flatMap((slot) => (slot.state === 'preparing' && slot.job ? [slot.job] : [])),
+    );
+    for (const [id, follow] of this.follows) {
+      if (wanted.has(id)) continue;
+      follow.unsubscribe();
+      this.follows.delete(id);
+      this.jobsState.update((jobs) => withoutKey(jobs, id));
+    }
+    for (const id of wanted) {
+      if (this.follows.has(id)) continue;
+      this.follows.set(
+        id,
+        this.jobEvents.follow(id).subscribe({
+          next: (job) => this.jobsState.update((jobs) => new Map(jobs).set(id, job)),
+          complete: () => void this.settleChange({ renditions: true }),
+          error: () => undefined,
         }),
       );
-    });
-  }
-
-  /** A file slot that still lacks its rendition encodes it first, which is why the usage is fetched again. */
-  start(request: StartRequest): Promise<SuccessResponse> {
-    return this.act(this.http.post<SuccessResponse>(`${SLOTS_URL}/start`, request), {
-      renditions: true,
-    });
-  }
-
-  /**
-   * Starts a slot whose rendition `prepare` has just encoded. The slot shows "Starting stream…"
-   * under `encodes` until the answer to the start has been fetched, as #170 did, so it goes from
-   * Encoding to Live (or back to Idle after a refusal) without showing Idle in between: call it
-   * as the encode ends, while its entry still shows, and this one takes the entry over.
-   */
-  async startAfterPrepare(index: number): Promise<SuccessResponse> {
-    // The encode's detail stays ("1:00 / 1:00 · libx264"), as in #170.
-    const starting: Progress = { detail: '', ...this.encodes().get(index), ...STARTING };
-    this.setEncode(index, starting);
-    try {
-      return await this.start({ index });
-    } finally {
-      // A newer encode on the slot has taken its entry over.
-      if (this.encodes().get(index) === starting) this.setEncode(index, null);
     }
   }
 
   /**
-   * One attempt of the webcam start's confirm loop: asks the server to start the slot, only if it
-   * is still a webcam (410 otherwise). Unlike every other action it does not settle: the loop
-   * repeats every 250 ms while MediaMTX has not seen the path, and each refused attempt would
-   * otherwise wait for a refetch of the slots and the renditions before the next. The caller
-   * settles once, when the loop ends.
-   */
-  confirmWebcamStart(index: number): Promise<SuccessResponse> {
-    const body: StartRequest = { index, expect_type: 'webcam' };
-    return firstValueFrom(
-      this.http.post<SuccessResponse>(`${SLOTS_URL}/start`, body).pipe(withRequestErrors()),
-    );
-  }
-
-  /** Starts the first `count` assigned slots in index order, skipping external and pulled ones. */
-  startBulk(count: number): Promise<BulkStartResult> {
-    const body: StartBulkRequest = { count };
-    return this.act(this.http.post<BulkStartResult>(`${SLOTS_URL}/start-bulk`, body), {
-      renditions: true,
-    });
-  }
-
-  stop(request: StopRequest): Promise<SuccessResponse> {
-    return this.act(this.http.post<SuccessResponse>(`${SLOTS_URL}/stop`, request));
-  }
-
-  /**
-   * The bulk actions take the webcams this browser published and has closed already
-   * (`CamerasService` supplies them), so the server verifies those sessions instead of kicking them.
-   */
-  stopAll(releasedWebcams: readonly ReleasedWebcam[]): Promise<StopAllResult> {
-    return this.act(
-      this.http.post<StopAllResult>(`${SLOTS_URL}/stop-all`, this.bulkBody(releasedWebcams)),
-    );
-  }
-
-  reset(releasedWebcams: readonly ReleasedWebcam[]): Promise<ResetResult> {
-    return this.act(
-      this.http.post<ResetResult>(`${SLOTS_URL}/reset`, this.bulkBody(releasedWebcams)),
-    );
-  }
-
-  autoAssign(releasedWebcams: readonly ReleasedWebcam[]): Promise<AutoAssignResult> {
-    return this.act(
-      this.http.post<AutoAssignResult>(
-        `${SLOTS_URL}/auto-assign-all`,
-        this.bulkBody(releasedWebcams),
-      ),
-    );
-  }
-
-  /** Disconnects the external publisher holding a slot; the slot's own assignment reappears. */
-  takeOver(index: number): Promise<TakeoverResponse> {
-    return this.act(this.http.post<TakeoverResponse>(`${SLOTS_URL}/takeover`, { index }));
-  }
-
-  /** Pulls a network stream into the slot. Answers with the slot, enriched with its `pull`. */
-  pull(request: PullRequest): Promise<Slot> {
-    return this.act(this.http.post<Slot>(`${SLOTS_URL}/pull`, request));
-  }
-
-  clearRenditions(): Promise<RenditionsCleared> {
-    return this.act(this.http.post<RenditionsCleared>(`${RENDITIONS_URL}/clear`, {}), {
-      renditions: true,
-    });
-  }
-
-  private setEncode(index: number, progress: Progress | null): void {
-    this.encodesState.update((all) => {
-      const next = new Map(all);
-      if (progress) next.set(index, progress);
-      else next.delete(index);
-      return next;
-    });
-  }
-
-  private bulkBody(releasedWebcams: readonly ReleasedWebcam[]): BulkRequest {
-    return { released_webcams: [...releasedWebcams] };
-  }
-
-  /**
-   * Sends an action and settles after the slots (and, for an action that can change them, the
+   * Sends an action and settles after the slots (and, for an action that changes them, the
    * rendition usage) were fetched again. That fetch failing is not the action failing.
    */
   private async act<T>(call: Observable<T>, options: { renditions?: boolean } = {}): Promise<T> {
@@ -378,4 +332,11 @@ export class SlotsService {
     if (renditions) fetches.push(this.refreshRenditions());
     await Promise.allSettled(fetches);
   }
+}
+
+function withoutKey<K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> {
+  if (!map.has(key)) return map;
+  const next = new Map(map);
+  next.delete(key);
+  return next;
 }

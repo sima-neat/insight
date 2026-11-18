@@ -1,4 +1,14 @@
 import { expect, Page, test } from '@playwright/test';
+import type {
+  LibraryError,
+  MediaDeleted,
+  MediaEntry,
+  MediaFileInfo,
+  MediaSaved,
+  RenditionUsage,
+} from '../src/app/api.generated';
+import { fileSlot, slot, slotList } from '../src/app/sources/slots.testing';
+import { jobEvents, jobOf } from './jobs';
 import {
   DESKTOP,
   LAPTOP,
@@ -13,70 +23,70 @@ import { answerTopBar } from './top-bar';
 // The rail's board block reads the board on every page.
 test.beforeEach(({ page }) => answerTopBar(page));
 
-/** The fields of a `GET /api/mediasrc` slot these tests set; the rest take an unassigned slot's values. */
-const slot = (index: number, fields: Record<string, unknown> = {}) => ({
-  index,
-  file: '',
-  state: 'stopped',
-  transport: '',
-  codec: 'unknown',
-  type: 'file',
-  fps: null,
-  native_fps: null,
-  active_file: null,
-  allowed_transports: [],
-  urls: { rtsp: `rtsp://127.0.0.1:8554/src${index}` },
-  readers: [],
-  ...fields,
-});
-
 /** Two slots stream `people/walk.mp4` (one live, one idle) and one `cars.mp4`. */
 const SLOTS = Array.from({ length: 48 }, (_, i) => slot(i + 1));
-SLOTS[2] = slot(3, { file: 'people/walk.mp4', state: 'playing', codec: 'h264' });
-SLOTS[8] = slot(9, { file: 'people/walk.mp4', codec: 'h264' });
-SLOTS[4] = slot(5, { file: 'cars.mp4', codec: 'h265' });
+SLOTS[2] = fileSlot(3, 'people/walk.mp4', { run: true, state: 'live' });
+SLOTS[8] = fileSlot(9, 'people/walk.mp4');
+SLOTS[4] = fileSlot(5, 'cars.mp4', { codec: 'h265' });
 
-const file = (path: string, streamable = true) => ({
-  name: path.split('/').pop(),
+const file = (path: string, streamable = true): MediaEntry => ({
+  name: path.split('/').pop()!,
   path,
-  type: 'file',
+  folder: false,
   streamable,
+  probe: { kind: streamable ? 'video' : 'unknown', size: 10, streamable },
 });
 
-const TREE = [
-  {
-    name: '/people',
-    path: 'people',
-    type: 'folder',
-    streamable_count: 2,
-    children: [file('people/run.mp4'), file('people/walk.mp4')],
-  },
+const folder = (path: string, children: MediaEntry[]): MediaEntry => ({
+  name: path.split('/').pop()!,
+  path,
+  folder: true,
+  streamable: children.some((child) => child.streamable),
+  streamable_count: children.reduce(
+    (count, child) =>
+      count + (child.folder ? (child.streamable_count ?? 0) : child.streamable ? 1 : 0),
+    0,
+  ),
+  probe: null,
+  children,
+});
+
+const TREE: MediaEntry[] = [
+  folder('people', [file('people/run.mp4'), file('people/walk.mp4')]),
   file('cars.mp4'),
   file('notes.txt', false),
 ];
 
-const INFO: Record<string, object> = {
+const INFO: Record<string, MediaFileInfo> = {
   'people/walk.mp4': {
-    filename: 'walk.mp4',
-    size_bytes: 5_452_595,
-    type: 'video',
-    codec: 'H.264',
-    normalized_codec: 'h264',
-    width: 1280,
-    height: 720,
-    duration_ms: 134_000,
-    frame_rate: '30000/1001',
+    name: 'walk.mp4',
+    path: 'people/walk.mp4',
+    probe: {
+      kind: 'video',
+      codec: 'h264',
+      codec_name: 'H.264',
+      width: 1280,
+      height: 720,
+      duration_ms: 134_000,
+      frame_rate: '30000/1001',
+      size: 5_452_595,
+      streamable: true,
+    },
   },
   'cars.mp4': {
-    filename: 'cars.mp4',
-    size_bytes: 1_610_612_736,
-    type: 'video',
-    codec: 'H.265',
-    normalized_codec: 'h265',
-    width: 1920,
-    height: 1080,
-    duration_ms: 3_725_000,
-    frame_rate: '25/1',
+    name: 'cars.mp4',
+    path: 'cars.mp4',
+    probe: {
+      kind: 'video',
+      codec: 'h265',
+      codec_name: 'H.265',
+      width: 1920,
+      height: 1080,
+      duration_ms: 3_725_000,
+      frame_rate: '25/1',
+      size: 1_610_612_736,
+      streamable: true,
+    },
   },
 };
 
@@ -87,93 +97,118 @@ const PIXEL = Buffer.from(
 );
 
 interface Mocked {
-  /** The paths `/api/delete-media` was asked to delete, in order. */
-  readonly deleted: string[];
-  /** Makes `GET /api/mediasrc` fail from now on. */
+  /** What `POST /api/media/delete` was asked to delete, a request's paths each. */
+  readonly deletes: string[][];
+  /** Makes `GET /api/slots` fail from now on. */
   failSlots(): void;
   /** Puts a file into the library, as an upload or import does. */
   add(path: string): void;
+  /** Makes slot `n` use the file on the server, before any slot poll could have said so. */
+  assignOnServer(n: number, path: string): void;
 }
 
-/** `nodes` with the file at `segments` added, under the folders those name (each counts it). */
-function insert(nodes: object[], segments: string[], parent: string): object[] {
+/** `entries` with the file at `segments` added, under the folders those name. */
+function insert(entries: MediaEntry[], segments: string[], parent: string): MediaEntry[] {
   const [first, ...rest] = segments;
   const path = parent ? `${parent}/${first}` : first;
-  if (rest.length === 0) return [...nodes, file(path)];
-  const existing = nodes.find((node) => (node as { path: string }).path === path) as
-    { children: object[]; streamable_count: number } | undefined;
-  const folder = existing ?? {
-    name: `/${first}`,
-    path,
-    type: 'folder',
-    streamable_count: 0,
-    children: [],
-  };
-  const updated = {
-    ...folder,
-    streamable_count: folder.streamable_count + 1,
-    children: insert(folder.children, rest, path),
-  };
-  return existing ? nodes.map((node) => (node === existing ? updated : node)) : [...nodes, updated];
+  if (rest.length === 0) return [...entries, file(path)];
+  const existing = entries.find((entry) => entry.path === path);
+  const updated = folder(path, insert([...(existing?.children ?? [])], rest, path));
+  return existing
+    ? entries.map((entry) => (entry === existing ? updated : entry))
+    : [...entries, updated];
 }
 
 /**
  * Insight's media and slot APIs without a board: the library above, its files' info, the slots
- * that use them, and a delete that removes the file from the tree (and clears its slots), so the
- * page shows what the server would after it. Every API the page calls is answered here.
+ * that use them, and a delete that removes the files from the tree, or refuses them all while a
+ * slot uses one, as the server does, so the page shows what the server would after it. Every API
+ * the page calls is answered here.
  */
 async function withMockedMedia(page: Page): Promise<Mocked> {
-  const deleted: string[] = [];
+  const deletes: string[][] = [];
+  const deleted = new Set<string>();
   const added: string[] = [];
+  /** Files slots use that the slot list does not show yet, by slot. */
+  const unlisted = new Map<number, string>();
   let failing = false;
-  const remains = (node: { path: string }) => !deleted.includes(node.path);
-  const tree = () => [
-    ...TREE.filter(remains).map((node) =>
-      'children' in node ? { ...node, children: node.children.filter(remains) } : node,
-    ),
-    // An imported file lands in the folders its path names, as catalog and YouTube imports save it.
-    ...added.reduce<object[]>((nodes, path) => insert(nodes, path.split('/'), ''), []),
-  ];
+  const remaining = (entries: readonly MediaEntry[]): MediaEntry[] =>
+    entries
+      .filter((entry) => !deleted.has(entry.path))
+      .map((entry) => (entry.folder ? folder(entry.path, remaining(entry.children ?? [])) : entry));
+  // The root's name and path are empty.
+  const tree = (): MediaEntry =>
+    folder('', [
+      ...remaining(TREE),
+      // An imported file lands in the folders its path names, as catalog imports save it.
+      ...added.reduce<MediaEntry[]>((entries, path) => insert(entries, path.split('/'), ''), []),
+    ]);
 
   await page.route(
-    (url) => url.pathname === '/api/media-files',
+    (url) => url.pathname === '/api/media',
     (route) => route.fulfill({ json: tree() }),
   );
   await page.route(
-    (url) => url.pathname === '/api/media-info',
+    (url) => url.pathname === '/api/media/info',
     (route) => {
-      const { path } = route.request().postDataJSON() as { path: string };
-      return route.fulfill({
-        json: INFO[path] ?? { filename: path, size_bytes: 10, type: 'unknown' },
-      });
+      const path = new URL(route.request().url()).searchParams.get('path')!;
+      const info: MediaFileInfo = INFO[path] ?? {
+        name: path.split('/').pop()!,
+        path,
+        probe: { kind: 'unknown', size: 10, streamable: false },
+      };
+      return route.fulfill({ json: info });
     },
   );
   await page.route(
-    (url) => url.pathname === '/api/delete-media',
+    (url) => url.pathname === '/api/media/delete',
     (route) => {
-      deleted.push((route.request().postDataJSON() as { path: string }).path);
-      return route.fulfill({ json: { message: 'Deleted successfully' } });
+      const { paths } = route.request().postDataJSON() as { paths: string[] };
+      deletes.push(paths);
+      const using = [
+        ...SLOTS.filter((s) => s.file && paths.includes(s.file)).map((s) => s.n),
+        ...[...unlisted].filter(([, path]) => paths.includes(path)).map(([n]) => n),
+      ];
+      if (using.length > 0) {
+        const refusal: LibraryError = {
+          error: {
+            code: 'in_use',
+            message: `Files are used by ${using.map((n) => `src${n}`).join(', ')}.`,
+            hint: 'Clear those slots, then delete again.',
+          },
+          slots: using,
+        };
+        return route.fulfill({ status: 409, json: refusal });
+      }
+      paths.forEach((path) => deleted.add(path));
+      return route.fulfill({ json: { paths } satisfies MediaDeleted });
     },
   );
   await page.route(
-    (url) => url.pathname === '/api/mediasrc',
+    (url) => url.pathname === '/api/slots',
     (route) =>
       failing
-        ? route.fulfill({ status: 500, json: { error: 'MediaMTX is not answering' } })
-        : route.fulfill({
-            json: SLOTS.map((s) => (deleted.includes(s.file) ? slot(s.index) : s)),
-          }),
+        ? route.fulfill({
+            status: 500,
+            json: { error: { code: 'internal_error', message: 'MediaMTX is not answering.' } },
+          })
+        : route.fulfill({ json: slotList(SLOTS) }),
   );
   await page.route(
-    (url) => url.pathname === '/api/mediasrc/renditions',
-    (route) => route.fulfill({ json: { count: 0, bytes: 0 } }),
+    (url) => url.pathname === '/api/renditions',
+    (route) => route.fulfill({ json: { count: 0, bytes: 0, in_use: 0 } satisfies RenditionUsage }),
   );
   // The previews. A still image stands in for a video too.
   await page.route(
-    (url) => url.pathname.startsWith('/media/') || url.pathname.startsWith('/api/media-preview/'),
+    (url) => url.pathname === '/api/media/file' || url.pathname === '/api/media/preview.mjpg',
     (route) => route.fulfill({ contentType: 'image/png', body: PIXEL }),
   );
-  return { deleted, failSlots: () => (failing = true), add: (path) => added.push(path) };
+  return {
+    deletes,
+    failSlots: () => (failing = true),
+    add: (path) => added.push(path),
+    assignOnServer: (n, path) => unlisted.set(n, path),
+  };
 }
 
 const listbox = (page: Page) => page.getByRole('listbox', { name: 'Files' });
@@ -256,7 +291,10 @@ test.describe('Media with mocked APIs', () => {
 
     await row(page, 'walk.mp4').click();
     await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('people/walk.mp4');
-    await expect(panel(page).locator('video')).toHaveAttribute('src', '/media/people/walk.mp4');
+    await expect(panel(page).locator('video')).toHaveAttribute(
+      'src',
+      '/api/media/file?path=people%2Fwalk.mp4',
+    );
     await expect
       .poll(() => infoRows(page))
       .toEqual([
@@ -272,7 +310,7 @@ test.describe('Media with mocked APIs', () => {
   });
 
   for (const { name, size } of VIEWPORTS) {
-    test(`keyboard only: arrows select, Space ticks, Delete… asks with the slots it clears, Escape cancels, Delete deletes in order at ${name}`, async ({
+    test(`keyboard only: arrows select, Space ticks, Delete… asks, Escape cancels, Delete deletes them in one request at ${name}`, async ({
       page,
     }) => {
       const mocked = await withMockedMedia(page);
@@ -286,12 +324,14 @@ test.describe('Media with mocked APIs', () => {
       await page.keyboard.press('ArrowDown');
       await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('cars.mp4');
       await expect.poll(() => infoRows(page)).toContainEqual(['Duration', '1:02:05']);
+      // notes.txt, which no slot uses, is ticked.
+      await page.keyboard.press('ArrowDown');
       await page.keyboard.press('Space');
+      await page.keyboard.press('ArrowUp');
       await page.keyboard.press('ArrowUp');
       await page.keyboard.press('Enter');
       // In people: run.mp4, walk.mp4.
       await expect(row(page, 'run.mp4')).toHaveCount(1);
-      await page.keyboard.press('ArrowDown');
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('Space');
       await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('2 selected');
@@ -301,23 +341,60 @@ test.describe('Media with mocked APIs', () => {
       await page.keyboard.press('Enter');
       await expect(confirmDialog(page)).toContainText('Delete Files');
       await expect(confirmDialog(page)).toContainText(
-        'Delete 2 media files: cars.mp4, people/walk.mp4? In use on src3, src5, src9; those slots are cleared.',
+        'Delete 2 media files: notes.txt, people/run.mp4?',
       );
       await page.keyboard.press('Escape');
       await expect(confirmDialog(page)).toHaveCount(0);
-      expect(mocked.deleted).toEqual([]);
+      expect(mocked.deletes).toEqual([]);
       await expect(deleteButton).toBeFocused();
 
       await page.keyboard.press('Enter');
       await confirmDialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
       await expect(toast(page, 'Removed 2 media file(s).')).toBeVisible();
-      expect(mocked.deleted).toEqual(['cars.mp4', 'people/walk.mp4']);
-      // The library and the slots are fetched again: the file is gone, and its slots with it.
-      await expect(row(page, 'walk.mp4')).toHaveCount(0);
-      await expect(row(page, 'run.mp4')).toHaveCount(1);
+      expect(mocked.deletes).toEqual([['notes.txt', 'people/run.mp4']]);
+      // The library is fetched again: the files are gone.
+      await expect(row(page, 'run.mp4')).toHaveCount(0);
+      await expect(row(page, 'walk.mp4')).toHaveCount(1);
       await expect(panel(page).getByText('Select a file.')).toBeFocused();
     });
   }
+
+  test('a file a slot uses is not deleted: the panel names the slots instead of asking', async ({
+    page,
+  }) => {
+    const mocked = await withMockedMedia(page);
+    await page.goto('/media');
+    await row(page, 'people').getByRole('button', { name: 'Open people' }).click();
+    await row(page, 'walk.mp4').click();
+    await panel(page).getByRole('button', { name: 'Delete…' }).click();
+
+    await expect(
+      toast(page, 'people/walk.mp4 is in use on src3, src9. Clear those slots, then delete again.'),
+    ).toBeVisible();
+    await expect(confirmDialog(page)).toHaveCount(0);
+    expect(mocked.deletes).toEqual([]);
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('people/walk.mp4');
+  });
+
+  test('a delete the server refuses, as a slot took the file meanwhile, says why and keeps the file', async ({
+    page,
+  }) => {
+    const mocked = await withMockedMedia(page);
+    mocked.assignOnServer(12, 'people/run.mp4');
+    await page.goto('/media');
+    await row(page, 'people').getByRole('button', { name: 'Open people' }).click();
+    await row(page, 'run.mp4').click();
+    await panel(page).getByRole('button', { name: 'Delete…' }).click();
+    await confirmDialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
+
+    // The server's message, then its hint.
+    await expect(
+      toast(page, 'Files are used by src12. Clear those slots, then delete again.'),
+    ).toBeVisible();
+    expect(mocked.deletes).toEqual([['people/run.mp4']]);
+    await expect(row(page, 'run.mp4')).toHaveCount(1);
+    await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('people/run.mp4');
+  });
 
   test('Shift-click ticks a range from the selected row and Ctrl+A ticks every file, never a folder', async ({
     page,
@@ -364,7 +441,6 @@ test.describe('Media with mocked APIs', () => {
 
 const CATALOG = {
   schema: '1',
-  generated_at: null,
   index_url: 'https://artifacts.neat.sima.ai/media-assets/index.json',
   base_url: 'https://artifacts.neat.sima.ai/media-assets/',
   sources: [
@@ -435,25 +511,35 @@ test.describe('Import with mocked APIs', () => {
       await page.setViewportSize(size);
       const sent: (string | null)[] = [];
       await page.route(
-        (url) => url.pathname === '/api/upload/media',
+        (url) => url.pathname === '/api/media/uploads',
         async (route) => {
           const body = route.request().postData() ?? '';
           const choice = /name="on_conflict"\r\n\r\n(\w+)/.exec(body)?.[1] ?? null;
           sent.push(choice);
           if (choice === null) {
-            return route.fulfill({
-              status: 409,
-              json: {
-                error: 'A file with this name exists.',
-                conflict: { existing: 'cars.mp4', suggested: 'cars_2.mp4' },
-              },
-            });
+            const clash: LibraryError = {
+              error: { code: 'name_taken', message: 'cars.mp4 exists already.' },
+              conflict: { existing: 'cars.mp4', suggested: 'cars_2.mp4' },
+            };
+            return route.fulfill({ status: 409, json: clash });
           }
+          // The server re-encodes this one first: the answer is the job.
+          return route.fulfill({ status: 202, json: jobOf('upload-1', 'upload') });
+        },
+      );
+      await page.route(
+        (url) => url.pathname === '/api/jobs/upload-1/events',
+        (route) => {
           mocked.add('cars_2.mp4');
-          return route.fulfill({
-            contentType: 'text/plain',
-            body: 'Uploaded to /data/media/cars_2.mp4\nOptimized cars_2.mp4: H.264\nUpload complete.\n',
-          });
+          const saved: MediaSaved = { path: 'cars_2.mp4', reencoded: ['cars_2.mp4'] };
+          return route.fulfill(
+            jobEvents([
+              jobOf('upload-1', 'upload', {
+                progress: { phase: 'encode', detail: '00:05 / 00:10', percent: 50 },
+              }),
+              jobOf('upload-1', 'upload', { state: 'done', result: saved }),
+            ]),
+          );
         },
       );
       await page.goto('/media');
@@ -474,15 +560,23 @@ test.describe('Import with mocked APIs', () => {
     });
   }
 
-  test('a failure line keeps the dialog open and says what failed', async ({ page }) => {
+  test('a re-encode that fails keeps the dialog open and says what failed', async ({ page }) => {
     await withMockedMedia(page);
     await page.route(
-      (url) => url.pathname === '/api/upload/media',
+      (url) => url.pathname === '/api/media/uploads',
+      (route) => route.fulfill({ status: 202, json: jobOf('upload-2', 'upload') }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/jobs/upload-2/events',
       (route) =>
-        route.fulfill({
-          contentType: 'text/plain',
-          body: 'Uploaded to /data/media/bad.mp4\nFFmpeg conversion failed for bad.mp4: moov atom not found\nUpload complete.\n',
-        }),
+        route.fulfill(
+          jobEvents([
+            jobOf('upload-2', 'upload', {
+              state: 'failed',
+              error: 'Re-encoding bad.mp4 failed: moov atom not found.',
+            }),
+          ]),
+        ),
     );
     await page.goto('/media');
     await tool(page, 'Import…').click();
@@ -490,9 +584,7 @@ test.describe('Import with mocked APIs', () => {
 
     const alert = importDialog(page).getByRole('alert');
     await expect(alert).toContainText('Uploaded and prepared 0/1 file(s).');
-    await expect(alert).toContainText(
-      'bad.mp4: FFmpeg conversion failed for bad.mp4: moov atom not found',
-    );
+    await expect(alert).toContainText('bad.mp4: Re-encoding bad.mp4 failed: moov atom not found.');
     await expect(importDialog(page)).toBeVisible();
     // No longer busy: Escape closes it.
     await page.keyboard.press('Escape');
@@ -502,19 +594,33 @@ test.describe('Import with mocked APIs', () => {
   test('a catalog asset imports and is shown in the library', async ({ page }) => {
     const mocked = await withMockedMedia(page);
     await page.route(
-      (url) => url.pathname === '/api/media-catalog',
+      (url) => url.pathname === '/api/catalog',
       (route) => route.fulfill({ json: CATALOG }),
     );
     const imported: string[] = [];
     await page.route(
-      (url) => url.pathname === '/api/import/media-catalog',
+      (url) => url.pathname === '/api/catalog/imports',
       (route) => {
         imported.push((route.request().postDataJSON() as { path: string }).path);
-        mocked.add('catalog/street/street_720p30_30fps_h264.mp4');
-        return route.fulfill({
-          contentType: 'text/plain',
-          body: 'Downloading catalog asset: 100% (3145728 / 3145728 bytes)\nSaved catalog asset to catalog/street/street_720p30_30fps_h264.mp4\nCatalog import complete.\n',
-        });
+        return route.fulfill({ status: 202, json: jobOf('import-1', 'catalog_import') });
+      },
+    );
+    await page.route(
+      (url) => url.pathname === '/api/jobs/import-1/events',
+      (route) => {
+        const path = 'catalog/street/street_720p30_30fps_h264.mp4';
+        mocked.add(path);
+        return route.fulfill(
+          jobEvents([
+            jobOf('import-1', 'catalog_import', {
+              progress: { phase: 'download', detail: '3.0 / 3.0 MB', percent: 100 },
+            }),
+            jobOf('import-1', 'catalog_import', {
+              state: 'done',
+              result: { path } satisfies MediaSaved,
+            }),
+          ]),
+        );
       },
     );
     await page.goto('/media');
@@ -542,7 +648,7 @@ test.describe('Import with mocked APIs', () => {
     // one has to sit at the column's end to line up.
     const [street] = CATALOG.assets;
     await page.route(
-      (url) => url.pathname === '/api/media-catalog',
+      (url) => url.pathname === '/api/catalog',
       (route) =>
         route.fulfill({
           json: {
@@ -592,7 +698,7 @@ test.describe('Import with mocked APIs', () => {
   }) => {
     await withMockedMedia(page);
     await page.route(
-      (url) => url.pathname === '/api/media-catalog',
+      (url) => url.pathname === '/api/catalog',
       (route) => route.fulfill({ json: CATALOG }),
     );
     const height = () =>

@@ -7,7 +7,8 @@ import { NeatButton } from '@sima/neat-ui';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatSelect } from '@sima/neat-ui/select';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { CatalogAsset, CatalogIndex, YoutubePreview } from './api';
+import type { YoutubePreview } from './api';
+import type { CatalogAsset, CatalogIndex } from './catalog';
 import { ImportDialogs } from './import-dialog';
 import type { ImportKind } from './import-runner';
 import {
@@ -16,8 +17,12 @@ import {
   FakeSlots,
   FakeToasts,
   fileSlot,
+  jobFailed,
   lines,
+  preparing,
   refuse,
+  saved,
+  sent,
   tick,
 } from './import.testing';
 import { MediaLibraryService } from './media-library.service';
@@ -60,7 +65,6 @@ const asset = (overrides: Partial<CatalogAsset>): CatalogAsset => ({
 
 const CATALOG: CatalogIndex = {
   schema: '1',
-  generated_at: null,
   index_url: '',
   base_url: '',
   sources: [
@@ -241,7 +245,7 @@ describe('ImportDialog', () => {
   const clash = () => [...dialog()!.querySelectorAll('.clash p, .clash button')].map(text);
   const alert = () => text(dialog()!.querySelector('neat-error-note[role="alert"]'));
 
-  it('uploads files in order with byte progress, then processing lines, then closes on success', async () => {
+  it('uploads files in order with byte progress, then their re-encode, then closes on success', async () => {
     await open();
     expect(text(dialog()!.querySelector('h2'))).toBe('Import media');
     expect(text()).toContain(
@@ -252,11 +256,13 @@ describe('ImportDialog', () => {
     expect(library.calls.map((call) => call.body)).toEqual([
       { name: 'a.mp4', onConflict: undefined },
     ]);
-    library.last.events.next({ kind: 'upload', loaded: 50, total: 200 });
+    sent(library.last, 50, 200);
     await settle();
     expect(progress()).toEqual({ title: 'Uploading media 1/2 25%', detail: 'a.mp4', value: '25' });
 
-    lines(library.last, 'Uploaded to /data/media/a.mp4', 'Optimizing a.mp4: 40% (00:04 / 00:10)');
+    preparing(library.last, {
+      progress: { phase: 'encode', detail: '00:04 / 00:10', percent: 40 },
+    });
     await settle();
     expect(progress()).toEqual({
       title: 'Preparing media 1/2 40%',
@@ -268,16 +274,14 @@ describe('ImportDialog', () => {
     expect(dialog()).not.toBeNull();
     expect(dialog()!.querySelector('neat-drop-zone button')!.hasAttribute('disabled')).toBe(true);
 
-    lines(library.last, 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'a.mp4', { reencoded: ['a.mp4'] });
     await settle();
     expect(library.calls.map((call) => call.body)).toEqual([
       { name: 'a.mp4', onConflict: undefined },
       { name: 'b.mp4', onConflict: undefined },
     ]);
     expect(progress()!.title).toBe('Uploading media 2/2');
-    lines(library.last, 'Uploaded to /data/media/b.mp4', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'b.mp4');
     await settle();
 
     expect(dialog()).toBeNull();
@@ -303,8 +307,7 @@ describe('ImportDialog', () => {
     expect(document.activeElement).toBe(button('Keep both'));
     await click(button('Keep both'));
     expect(library.last.body).toEqual({ name: 'a.mp4', onConflict: 'keep_both' });
-    lines(library.last, 'Uploaded to /data/media/a_2.mp4', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'a_2.mp4');
     await settle();
 
     refuse(library.last, 'b.mp4', 'b_2.mp4');
@@ -312,8 +315,7 @@ describe('ImportDialog', () => {
     expect(clash()).toEqual(['b.mp4 already exists.', 'Replace', 'Keep both', 'Skip']);
     await click(button('Replace'));
     expect(library.last.body).toEqual({ name: 'b.mp4', onConflict: 'replace' });
-    lines(library.last, 'Uploaded to /data/media/b.mp4', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'b.mp4');
     await settle();
 
     refuse(library.last, 'c.mp4', 'c_2.mp4');
@@ -325,26 +327,17 @@ describe('ImportDialog', () => {
     expect(opener.result).toBe('b.mp4');
   });
 
-  it('a failure line keeps the dialog open and reports the file', async () => {
+  it('a failed re-encode keeps the dialog open and reports the file', async () => {
     await open();
     await drop('a.mp4');
-    lines(
-      library.last,
-      'Uploaded to /data/media/a.mp4',
-      'FFmpeg conversion failed for a.mp4: moov atom not found',
-      'Invalid data found when processing input',
-    );
-    await settle();
-    // Read on to the end: the server is still working.
-    expect(library.last.unsubscribed).toBe(false);
-    lines(library.last, 'Upload complete.');
-    done(library.last);
+    preparing(library.last);
+    jobFailed(library.last, 'Preparing a.mp4 for streaming failed: moov atom not found.');
     await settle();
 
     const failure =
-      'Uploaded and prepared 0/1 file(s). a.mp4: FFmpeg conversion failed for a.mp4: moov atom not found\nInvalid data found when processing input';
+      'Uploaded and prepared 0/1 file(s). a.mp4: Preparing a.mp4 for streaming failed: moov atom not found.';
     expect(dialog()).not.toBeNull();
-    expect(alert()).toBe(failure.replace('\n', ' '));
+    expect(alert()).toBe(failure);
     expect(toasts.error).toHaveBeenCalledWith(failure);
     expect(progress()).toBeNull();
     // Idle again: it may close, and drops are taken.
@@ -357,7 +350,7 @@ describe('ImportDialog', () => {
   it('leaving the page mid-upload continues it in a progress toast', async () => {
     await open();
     await drop('a.mp4');
-    library.last.events.next({ kind: 'upload', loaded: 1, total: 2 });
+    sent(library.last, 1, 2);
     await settle();
 
     // The browser's Back button: navigation closes even a dialog that is busy.
@@ -369,10 +362,11 @@ describe('ImportDialog', () => {
     expect(toast.title).toBe('Uploading media');
     expect(toast.update).toHaveBeenLastCalledWith('Uploading media · a.mp4', 50);
 
-    lines(library.last, 'Uploaded to /data/media/a.mp4', 'Optimizing a.mp4: 40% (00:04 / 00:10)');
+    preparing(library.last, {
+      progress: { phase: 'encode', detail: '00:04 / 00:10', percent: 40 },
+    });
     expect(toast.update).toHaveBeenLastCalledWith('Preparing media · a.mp4 - 00:04 / 00:10', 40);
-    lines(library.last, 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'a.mp4');
     await settle();
 
     expect(library.last.unsubscribed).toBe(false);
@@ -397,8 +391,7 @@ describe('ImportDialog', () => {
     await escape();
     expect(dialog()).not.toBeNull();
 
-    lines(library.last, 'Uploaded to /data/media/a.mp4', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'a.mp4');
     await settle();
     refuse(library.last, 'b.mp4', 'b_2.mp4');
     await settle();
@@ -425,9 +418,7 @@ describe('ImportDialog', () => {
     ]);
     await click(button('Replace'));
     expect(library.last.body).toEqual({ name: 'clips.zip', onConflict: 'replace' });
-    lines(library.last, 'Saved archive; extracting into /data/media/clips', 'Archive extracted.');
-    lines(library.last, 'Restarted src2.', 'Restarted src6.', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'clips', { folder: true, restarted: [2, 6] });
     await settle();
 
     expect(dialog()).toBeNull();
@@ -492,9 +483,8 @@ describe('ImportDialog', () => {
     expect(text()).toContain('1 asset(s) selected');
     await click(button('Import Selected'));
     expect(library.calls.map((call) => call.body)).toEqual(['street/1080_hevc.mp4']);
-    lines(library.last, 'Saved catalog asset to catalog/street/1080_hevc.mp4');
-    lines(library.last, 'Catalog import complete.');
-    done(library.last);
+    preparing(library.last, { kind: 'catalog_import' });
+    saved(library.last, 'catalog/street/1080_hevc.mp4');
     await settle();
 
     expect(dialog()).toBeNull();
@@ -599,15 +589,13 @@ describe('ImportDialog', () => {
     await click(button('Import Selected'));
     expect(library.calls.map((call) => call.body)).toEqual(['alley/720_hevc.mp4']);
     expect(progress()!.title).toBe('Importing catalog asset 1/2');
-    lines(library.last, 'Saved catalog asset to catalog/alley/720_hevc.mp4');
-    done(library.last);
+    saved(library.last, 'catalog/alley/720_hevc.mp4');
     await settle();
     expect(library.calls.map((call) => call.body)).toEqual([
       'alley/720_hevc.mp4',
       'street/1080_hevc.mp4',
     ]);
-    lines(library.last, 'Saved catalog asset to catalog/street/1080_hevc.mp4');
-    done(library.last);
+    saved(library.last, 'catalog/street/1080_hevc.mp4');
     await settle();
 
     expect(dialog()).toBeNull();

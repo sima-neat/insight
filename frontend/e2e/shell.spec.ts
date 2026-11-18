@@ -11,7 +11,7 @@ import {
 import type { BoardState } from '../src/app/board/api';
 import { FakePeripheralsBackend, HOST_KEY_CHANGED_BOARD } from './peripherals-mocks';
 import { FakeStatsBackend, STATS_BOARD } from './stats-mocks';
-import { answerSlots, answerTopBar, answerViewer, LONG_BOARD } from './top-bar';
+import { answerEmptyLibrary, answerSlots, answerTopBar, answerViewer, LONG_BOARD } from './top-bar';
 
 // The rail's board block reads the board on every page.
 test.beforeEach(({ page }) => answerTopBar(page));
@@ -197,10 +197,8 @@ test('the kit font loads', async ({ page }) => {
 
 test('a page keeps the kit page inset from the content area', async ({ page }) => {
   // Media, a page that stays: an empty library, and slots that answer, so no notice sits on top.
-  await page.route(
-    (url) => url.pathname === '/api/media-files' || url.pathname === '/api/mediasrc',
-    (route) => route.fulfill({ json: [] }),
-  );
+  await answerEmptyLibrary(page);
+  await answerSlots(page, 0);
   await page.goto('/media');
   const text = page.getByRole('navigation', { name: 'Current folder' });
   await expect(text).toBeVisible();
@@ -313,10 +311,7 @@ test.describe('phone width', () => {
       path: '/media',
       title: 'Media',
       answer: async (page, board) => {
-        await page.route(
-          (url) => url.pathname === '/api/media-files',
-          (route) => route.fulfill({ json: [] }),
-        );
+        await answerEmptyLibrary(page);
         await answerSlots(page, 0);
         await answerBoard(page, board);
       },

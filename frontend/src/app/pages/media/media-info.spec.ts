@@ -1,4 +1,5 @@
-import type { MediaInfo } from '../../sources/api';
+import type { MediaFileInfo } from '../../api.generated';
+import { videoInfo } from '../../sources/media.testing';
 import { formatDuration, formatFrameRate, mediaInfoRows } from './media-info';
 
 describe('formatFrameRate', () => {
@@ -10,7 +11,7 @@ describe('formatFrameRate', () => {
   });
 
   it('says "-" for a rate that is missing or not a rate', () => {
-    expect(formatFrameRate(null)).toBe('-');
+    expect(formatFrameRate(undefined)).toBe('-');
     expect(formatFrameRate('0/0')).toBe('-');
     expect(formatFrameRate('n/a')).toBe('-');
     expect(formatFrameRate('')).toBe('-');
@@ -26,31 +27,20 @@ describe('formatDuration', () => {
     expect(formatDuration(0)).toBe('0:00');
   });
 
-  it('reads the server’s duration_ms, which is ffprobe’s seconds times 1000 and rarely whole', () => {
-    // app.py: "duration_ms": duration * 1000, with duration a float of seconds ("134.033333").
-    expect(formatDuration(134.033333 * 1000)).toBe('2:14');
-    expect(formatDuration(3725.5 * 1000)).toBe('1:02:06');
+  it('rounds a duration that is not whole seconds', () => {
+    expect(formatDuration(134_033)).toBe('2:14');
+    expect(formatDuration(3_725_500)).toBe('1:02:06');
   });
 
   it('says "-" for a duration that is unknown', () => {
-    expect(formatDuration(null)).toBe('-');
+    expect(formatDuration(undefined)).toBe('-');
     expect(formatDuration(Number.NaN)).toBe('-');
   });
 });
 
 describe('mediaInfoRows', () => {
   it('lists a video’s info with readable values', () => {
-    const info: MediaInfo = {
-      filename: 'walk.mp4',
-      size_bytes: 5_452_595,
-      type: 'video',
-      codec: 'H.264',
-      normalized_codec: 'h264',
-      width: 1280,
-      height: 720,
-      duration_ms: 134_000,
-      frame_rate: '30/1',
-    };
+    const info = videoInfo('people/walk.mp4', { size: 5_452_595 });
     expect(mediaInfoRows(info)).toEqual([
       { label: 'Filename', value: 'walk.mp4' },
       { label: 'Size', value: '5.2 MB' },
@@ -63,17 +53,11 @@ describe('mediaInfoRows', () => {
     ]);
   });
 
-  it('names a codec Insight does not stream in capitals, and "-" for what the probe did not find', () => {
-    const info: MediaInfo = {
-      filename: 'clip.webm',
-      size_bytes: 512,
-      type: 'video',
-      codec: 'vp9',
-      normalized_codec: null,
-      width: null,
-      height: null,
-      duration_ms: null,
-      frame_rate: null,
+  it('names a codec the server gives no display name for in capitals, and "-" for what the probe did not find', () => {
+    const info: MediaFileInfo = {
+      name: 'clip.webm',
+      path: 'clip.webm',
+      probe: { kind: 'video', codec: 'vp9', size: 512, streamable: false },
     };
     expect(mediaInfoRows(info)).toEqual([
       { label: 'Filename', value: 'clip.webm' },
@@ -87,15 +71,11 @@ describe('mediaInfoRows', () => {
     ]);
   });
 
-  it('lists an image’s type, size, mode and format (#170)', () => {
-    const info: MediaInfo = {
-      filename: 'still.png',
-      size_bytes: 2_300_000_000,
-      type: 'image',
-      width: 640,
-      height: 480,
-      mode: 'RGB',
-      format: 'PNG',
+  it('lists an image’s type, size and dimensions', () => {
+    const info: MediaFileInfo = {
+      name: 'still.png',
+      path: 'still.png',
+      probe: { kind: 'image', size: 2_300_000_000, width: 640, height: 480, streamable: false },
     };
     expect(mediaInfoRows(info)).toEqual([
       { label: 'Filename', value: 'still.png' },
@@ -103,16 +83,20 @@ describe('mediaInfoRows', () => {
       { label: 'Type', value: 'Image' },
       { label: 'Width', value: '640' },
       { label: 'Height', value: '480' },
-      { label: 'Mode', value: 'RGB' },
-      { label: 'Format', value: 'PNG' },
     ]);
   });
 
-  it('lists only the name, size and type of a file the probe could not read', () => {
-    expect(mediaInfoRows({ filename: 'notes.txt', size_bytes: 2048, type: 'unknown' })).toEqual([
+  it('lists only the name, size and type of a file the probe could not read, and why', () => {
+    const info: MediaFileInfo = {
+      name: 'notes.txt',
+      path: 'notes.txt',
+      probe: { kind: 'unknown', size: 2048, streamable: false, problem: 'no video stream' },
+    };
+    expect(mediaInfoRows(info)).toEqual([
       { label: 'Filename', value: 'notes.txt' },
       { label: 'Size', value: '2.0 KB' },
       { label: 'Type', value: 'Unknown' },
+      { label: 'Problem', value: 'no video stream' },
     ]);
   });
 });

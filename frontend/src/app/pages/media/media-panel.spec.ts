@@ -3,37 +3,15 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { MediaInfo, Slot } from '../../sources/api';
-import { type DeleteOutcome, MediaLibraryService } from '../../sources/media-library.service';
+import type { MediaFileInfo, Slot } from '../../api.generated';
+import { MediaLibraryService } from '../../sources/media-library.service';
+import { videoInfo } from '../../sources/media.testing';
 import { SlotsService } from '../../sources/slots.service';
+import { fileSlot } from '../../sources/slots.testing';
 import { ApiRequestError } from '../../sources/stream-lines';
 import { MediaPanel } from './media-panel';
 
-function slot(index: number, overrides: Partial<Slot> = {}): Slot {
-  return {
-    index,
-    file: '',
-    state: 'stopped',
-    transport: '',
-    codec: '',
-    type: 'file',
-    allowed_transports: [],
-    urls: {},
-    ...overrides,
-  };
-}
-
-const VIDEO: MediaInfo = {
-  filename: 'walk.mp4',
-  size_bytes: 5_452_595,
-  type: 'video',
-  codec: 'H.264',
-  normalized_codec: 'h264',
-  width: 1280,
-  height: 720,
-  duration_ms: 134_000,
-  frame_rate: '30/1',
-};
+const VIDEO = videoInfo('people/walk.mp4', { size: 5_452_595 });
 
 /** `SlotsService` as the panel uses it: the slots set by the test, `refresh` answering with `next`. */
 class FakeSlots {
@@ -64,11 +42,10 @@ class FakeSlots {
 }
 
 class FakeLibrary {
-  readonly info = vi.fn<(path: string) => Promise<MediaInfo | null>>(async () => VIDEO);
-  readonly delete = vi.fn<(paths: readonly string[]) => Promise<DeleteOutcome>>(async (paths) => ({
-    deleted: [...paths],
-    failed: [],
-  }));
+  readonly info = vi.fn<(path: string) => Promise<MediaFileInfo | null>>(async () => VIDEO);
+  readonly delete = vi.fn<(paths: readonly string[]) => Promise<readonly string[]>>(
+    async (paths) => [...paths],
+  );
 }
 
 @Component({
@@ -162,23 +139,27 @@ describe('MediaPanel', () => {
       ['Duration', '2:14'],
       ['Frame rate', '30 fps'],
     ]);
-    expect(panel().querySelector('video')!.getAttribute('src')).toBe('/media/people/walk.mp4');
+    expect(panel().querySelector('video')!.getAttribute('src')).toBe(
+      '/api/media/file?path=people%2Fwalk.mp4',
+    );
     expect(button('Delete…')).toBeDefined();
   });
 
   it('previews a file the probe finds MJPEG through the MJPEG route', async () => {
-    library.info.mockResolvedValue({ ...VIDEO, codec: 'MJPEG', normalized_codec: 'mjpeg' });
+    library.info.mockResolvedValue(
+      videoInfo('clips/cam.avi', { codec: 'mjpeg', codec_name: 'MJPEG' }),
+    );
     await show('clips/cam.avi');
     expect(panel().querySelector('video')).toBeNull();
     expect(panel().querySelector('img')!.getAttribute('src')).toBe(
-      '/api/media-preview/mjpeg?path=clips%2Fcam.avi',
+      '/api/media/preview.mjpg?path=clips%2Fcam.avi',
     );
   });
 
   it('shows the info of the file selected last, and a failed probe as an Error row', async () => {
-    let resolveFirst!: (info: MediaInfo | null) => void;
+    let resolveFirst!: (info: MediaFileInfo | null) => void;
     library.info.mockImplementationOnce(() => new Promise((resolve) => (resolveFirst = resolve)));
-    library.info.mockRejectedValueOnce(new ApiRequestError(500, 'ffprobe is not installed', null));
+    library.info.mockRejectedValueOnce(new ApiRequestError(503, 'FFmpeg is not installed.', null));
     fixture = TestBed.createComponent(Host);
     host = fixture.componentInstance;
     host.selected.set('a.mp4');
@@ -187,20 +168,14 @@ describe('MediaPanel', () => {
     host.selected.set('b.mp4');
     fixture.detectChanges();
     // The answer for the file selected before arrives late; it is not shown for this one.
-    resolveFirst({ ...VIDEO, filename: 'a.mp4' });
+    resolveFirst(videoInfo('a.mp4'));
     await settle();
 
     expect(library.info.mock.calls).toEqual([['a.mp4'], ['b.mp4']]);
-    expect(infoRows()).toEqual([['Error', 'ffprobe is not installed']]);
+    expect(infoRows()).toEqual([['Error', 'FFmpeg is not installed.']]);
   });
 
-  it('Delete names the files and the slots that will be cleared; Cancel changes nothing', async () => {
-    // The slots as last polled, and what the server holds by the time Delete is pressed.
-    slots.slots.set([slot(3, { file: 'people/walk.mp4', state: 'playing' })]);
-    slots.next = [
-      slot(3, { file: 'people/walk.mp4', state: 'playing' }),
-      slot(9, { file: 'people/walk.mp4' }),
-    ];
+  it('Delete asks naming the file; Cancel changes nothing, Delete removes it', async () => {
     await show('people/walk.mp4');
 
     button('Delete…').click();
@@ -209,19 +184,14 @@ describe('MediaPanel', () => {
     expect(slots.refresh).toHaveBeenCalled();
     // It stays enabled while asking, so Cancel can give the focus back to it.
     expect(button('Delete…').disabled).toBe(false);
-    expect(confirmText()).toBe(
-      'Delete File | Delete this media file people/walk.mp4? In use on src3, src9; those slots are cleared.',
-    );
+    expect(confirmText()).toBe('Delete File | Delete this media file people/walk.mp4?');
     await answer('Cancel');
     expect(confirmDialog()).toBeNull();
     expect(library.delete).not.toHaveBeenCalled();
     expect(host.selected()).toBe('people/walk.mp4');
 
-    // A file no slot uses says nothing about slots.
-    slots.next = [];
     button('Delete…').click();
     await settleOverlay();
-    expect(confirmText()).toBe('Delete File | Delete this media file people/walk.mp4?');
     await answer('Delete');
     expect(library.delete).toHaveBeenCalledWith(['people/walk.mp4']);
     expect(toasts.status).toHaveBeenCalledWith('Removed 1 media file(s).');
@@ -231,15 +201,27 @@ describe('MediaPanel', () => {
     expect(document.activeElement).toBe(panel().querySelector('p'));
   });
 
-  it('checking several files shows N selected and deletes them in order, reporting the first failure', async () => {
-    slots.next = [slot(2, { file: 'b.mp4' }), slot(5, { file: 'a.mp4', state: 'playing' })];
-    library.delete.mockResolvedValue({
-      deleted: ['c.mp4'],
-      failed: [
-        { path: 'b.mp4', message: 'Invalid path' },
-        { path: 'a.mp4', message: 'Not found' },
-      ],
-    });
+  it('a file the slots use, as they are now, is not asked about: the panel names the slots to clear', async () => {
+    // The slots as last polled, and what the server holds by the time Delete is pressed.
+    slots.slots.set([fileSlot(3, 'people/walk.mp4', { run: true, state: 'live' })]);
+    slots.next = [
+      fileSlot(3, 'people/walk.mp4', { run: true, state: 'live' }),
+      fileSlot(9, 'people/walk.mp4'),
+    ];
+    await show('people/walk.mp4');
+
+    button('Delete…').click();
+    await settleOverlay();
+
+    expect(confirmDialog()).toBeNull();
+    expect(library.delete).not.toHaveBeenCalled();
+    expect(toasts.error).toHaveBeenCalledWith(
+      'people/walk.mp4 is in use on src3, src9. Clear those slots, then delete again.',
+    );
+    expect(host.selected()).toBe('people/walk.mp4');
+  });
+
+  it('checking several files shows N selected and deletes them in one request', async () => {
     await show('people/walk.mp4', ['b.mp4', 'c.mp4', 'a.mp4']);
 
     expect(panel().querySelector('h2')!.textContent!.trim()).toBe('3 selected');
@@ -252,20 +234,55 @@ describe('MediaPanel', () => {
 
     button('Delete…').click();
     await settleOverlay();
-    expect(confirmText()).toBe(
-      'Delete Files | Delete 3 media files: b.mp4, c.mp4, a.mp4? In use on src2, src5; those slots are cleared.',
-    );
+    expect(confirmText()).toBe('Delete Files | Delete 3 media files: b.mp4, c.mp4, a.mp4?');
     await answer('Delete');
 
     expect(library.delete).toHaveBeenCalledWith(['b.mp4', 'c.mp4', 'a.mp4']);
-    expect(toasts.error).toHaveBeenCalledWith('b.mp4: Invalid path');
-    expect(toasts.error).toHaveBeenCalledTimes(1);
-    expect(toasts.status).toHaveBeenCalledWith('Removed 1/3 media file(s).');
+    expect(toasts.status).toHaveBeenCalledWith('Removed 3 media file(s).');
     expect(host.checked()).toEqual([]);
     // The previewed file was not among them: it shows again.
     expect(host.selected()).toBe('people/walk.mp4');
     expect(panel().querySelector('h2')!.textContent!.trim()).toBe('people/walk.mp4');
     expect(document.activeElement).toBe(panel().querySelector('h2'));
+  });
+
+  it('several files of which the slots use some are not asked about either', async () => {
+    slots.next = [fileSlot(2, 'b.mp4'), fileSlot(5, 'a.mp4', { run: true, state: 'live' })];
+    await show(null, ['b.mp4', 'c.mp4', 'a.mp4']);
+
+    button('Delete…').click();
+    await settleOverlay();
+
+    expect(confirmDialog()).toBeNull();
+    expect(toasts.error).toHaveBeenCalledWith(
+      'These files are in use on src2, src5. Clear those slots, then delete again.',
+    );
+    expect(host.checked()).toEqual(['b.mp4', 'c.mp4', 'a.mp4']);
+  });
+
+  it('a delete the server refuses says why with its message and keeps the files ticked', async () => {
+    library.delete.mockRejectedValueOnce(
+      new ApiRequestError(409, 'a.mp4 is used by src12.', {
+        error: {
+          code: 'in_use',
+          message: 'a.mp4 is used by src12.',
+          hint: 'Clear those slots, then delete again.',
+        },
+        slots: [12],
+      }),
+    );
+    await show(null, ['a.mp4', 'b.mp4']);
+
+    button('Delete…').click();
+    await settleOverlay();
+    await answer('Delete');
+
+    expect(toasts.error).toHaveBeenCalledWith(
+      'a.mp4 is used by src12. Clear those slots, then delete again.',
+    );
+    expect(toasts.status).not.toHaveBeenCalled();
+    expect(host.checked()).toEqual(['a.mp4', 'b.mp4']);
+    expect(button('Delete…').disabled).toBe(false);
   });
 
   it('Clear N unticks the files and shows the selected file again', async () => {
@@ -277,7 +294,7 @@ describe('MediaPanel', () => {
   });
 
   it('holds Delete while a delete is under way', async () => {
-    let finish!: (outcome: DeleteOutcome) => void;
+    let finish!: (deleted: readonly string[]) => void;
     library.delete.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
     await show('a.mp4');
     button('Delete…').click();
@@ -285,7 +302,7 @@ describe('MediaPanel', () => {
     await answer('Delete');
     expect(button('Delete…').disabled).toBe(true);
 
-    finish({ deleted: ['a.mp4'], failed: [] });
+    finish(['a.mp4']);
     await settleOverlay();
     expect(text()).toBe('Select a file.');
   });
@@ -307,8 +324,8 @@ describe('MediaPanel', () => {
     expect(library.delete).not.toHaveBeenCalled();
   });
 
-  it('asks with the last known slots when they cannot be fetched again, and says so (Q16)', async () => {
-    slots.slots.set([slot(4, { file: 'a.mp4' })]);
+  it('asks when the slots cannot be fetched again, and says so (Q16): the server has the last word', async () => {
+    slots.slots.set([fileSlot(4, 'a.mp4')]);
     slots.refresh.mockRejectedValueOnce(
       new ApiRequestError(500, 'MediaMTX is not answering', null),
     );
@@ -317,14 +334,14 @@ describe('MediaPanel', () => {
     await settleOverlay();
 
     expect(confirmText()).toBe(
-      'Delete File | Delete this media file a.mp4? In use on src4; those slots are cleared. Could not check which slots use these files.',
+      'Delete File | Delete this media file a.mp4? Could not check which slots use these files.',
     );
     await answer('Delete');
     expect(library.delete).toHaveBeenCalledWith(['a.mp4']);
   });
 
   it('leaves the focus where the user moved it while the delete ran', async () => {
-    let finish!: (outcome: DeleteOutcome) => void;
+    let finish!: (deleted: readonly string[]) => void;
     library.delete.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
     const elsewhere = document.body.appendChild(document.createElement('button'));
     await show('a.mp4');
@@ -333,7 +350,7 @@ describe('MediaPanel', () => {
     await answer('Delete');
     elsewhere.focus();
 
-    finish({ deleted: ['a.mp4'], failed: [] });
+    finish(['a.mp4']);
     await settleOverlay();
     expect(text()).toBe('Select a file.');
     expect(document.activeElement).toBe(elsewhere);
