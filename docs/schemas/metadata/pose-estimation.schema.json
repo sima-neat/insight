@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "pose-estimation message",
+  "description": "Skeletons: named keypoints, the links between them and a box around the confident ones, in the pose's color. Version 1 of the contract in docs/contracts.md.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "pose-estimation" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "required": ["poses"],
+      "properties": {
+        "poses": {
+          "description": "Every pose of the frame: a person's body or a hand.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/pose" }
+        }
+      }
+    },
+    "pose": {
+      "type": "object",
+      "required": ["keypoints"],
+      "properties": {
+        "keypoints": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/keypoint" }
+        },
+        "id": {
+          "$ref": "envelope.schema.json#/$defs/id",
+          "description": "The pose's identity; it picks the color and shows in the caption."
+        },
+        "label": {
+          "$ref": "envelope.schema.json#/$defs/label",
+          "description": "Shown in the caption, 'pose' when absent. A class row in the viewer's settings styles poses by it."
+        },
+        "bbox": {
+          "$ref": "envelope.schema.json#/$defs/bbox",
+          "description": "Accepted and not drawn in version 1: the viewer boxes the confident keypoints instead."
+        },
+        "confidence": {
+          "$ref": "envelope.schema.json#/$defs/confidence",
+          "description": "Accepted and not drawn in version 1."
+        }
+      }
+    },
+    "keypoint": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "name": {
+          "description": "The keypoint's name. Links are drawn between COCO body names (nose to right_ankle) and MediaPipe hand names (wrist to pinky_tip); any other name is drawn as a point.",
+          "type": "string"
+        },
+        "x": { "description": "Video pixels from the left edge.", "type": "number" },
+        "y": { "description": "Video pixels from the top edge.", "type": "number" },
+        "confidence": {
+          "$ref": "envelope.schema.json#/$defs/confidence",
+          "description": "Fades the keypoint and its links; only keypoints above 0.3 count toward the pose's box."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Insight metadata message",
+  "description": "The envelope every metadata message has, whatever its type. Version 1 of the contract in docs/contracts.md. Unknown top-level fields are allowed and ignored. The $defs hold the parts the type schemas share.",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": {
+      "description": "Which overlay draws the message: object-detection, classification, tracking, pose-estimation or segmentation. Insight ignores a type it does not know.",
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "description": "The presentation time of the video frame the message describes, in whole milliseconds on the frame's RTP clock: pts_ns // 1_000_000 for a Neat sample. Leave it out when unknown; a negative value counts as absent. A message without one is drawn on the next frame shown.",
+      "type": "integer"
+    },
+    "frame_id": {
+      "description": "The producer's own frame identifier, for diagnostics only. Any JSON value; a string is recommended. Insight never matches by it."
+    },
+    "data": {
+      "description": "The payload, as the type defines it.",
+      "type": "object"
+    },
+    "_insight": false
+  },
+  "$comment": "_insight is reserved: Insight adds it to the messages it forwards to the browser, and a producer must not send it.",
+  "$defs": {
+    "bbox": {
+      "description": "An axis-aligned box [x, y, width, height] in pixels of the video frame, origin at the top-left corner, x to the right and y down. Fractions are allowed.",
+      "type": "array",
+      "prefixItems": [
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number", "minimum": 0 },
+        { "type": "number", "minimum": 0 }
+      ],
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "confidence": {
+      "description": "A score from 0 to 1, shown as a percentage.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "label": {
+      "description": "The class name. It picks the overlay color, so one class has one color.",
+      "type": "string"
+    },
+    "id": {
+      "description": "An identity the producer keeps stable from frame to frame, compared as a string.",
+      "type": ["string", "integer"]
+    }
+  }
+}
