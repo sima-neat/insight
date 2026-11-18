@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -114,6 +115,16 @@ func (s *Supervisor) Start(spec Spec) (*Process, error) {
 		return nil, err
 	}
 	s.mu.Lock()
+	// A child that has exited for good needs no stop; dropping it keeps the list from growing
+	// with every start of a short-lived child (a slot's publisher, an encode).
+	s.children = slices.DeleteFunc(s.children, func(c *Process) bool {
+		select {
+		case <-c.done:
+			return true
+		default:
+			return false
+		}
+	})
 	s.children = append(s.children, p)
 	s.mu.Unlock()
 	go p.watch(exited)
