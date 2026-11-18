@@ -1,34 +1,34 @@
 #!/usr/bin/env bash
-# Feeds a vf channel in the Neat SDK container with a test stream for the Viewer: an H.264 test
+# Feeds a Viewer channel in the Neat SDK container with a test stream for the Viewer: an H.264 test
 # pattern (640x480 at 15 fps, RTP payload type 96) on UDP 9000+N and object-detection metadata
 # matched to its frames on UDP 9100+N. The work happens in the container, in
-# vf_test_metadata.py beside this script, which says how the metadata is matched.
+# test_feed_metadata.py beside this script, which says how the metadata is matched.
 #
 # Usage, from the laptop:
-#   scripts/vf-test-feed.sh <channel> [--metadata-delay-ms <ms>]   runs until Ctrl-C
-#   scripts/vf-test-feed.sh stop [<channel>]                       stops that channel's feed, or all
+#   scripts/test-feed.sh <channel> [--metadata-delay-ms <ms>]   runs until Ctrl-C
+#   scripts/test-feed.sh stop [<channel>]                       stops that channel's feed, or all
 #
 # The container is the first running sima-neat-sdk* one, as for the sima-insight-dev-deploy skill;
 # INSIGHT_SDK_CONTAINER=<name> picks another. It needs ffmpeg and python3, which the SDK image has.
 set -euo pipefail
 
-SENDER=vf_test_metadata.py
+SENDER=test_feed_metadata.py
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # The sender runs from a copy at a fixed path, so `stop` can tell it from any other process.
-REMOTE_DIR=/tmp/neat-insight-vf-test-feed
+REMOTE_DIR=/tmp/neat-insight-test-feed
 REMOTE_SENDER=$REMOTE_DIR/$SENDER
 
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  scripts/vf-test-feed.sh <channel> [--metadata-delay-ms <ms>]   runs until Ctrl-C
-  scripts/vf-test-feed.sh stop [<channel>]                       stops that channel's feed, or all
+  scripts/test-feed.sh <channel> [--metadata-delay-ms <ms>]   runs until Ctrl-C
+  scripts/test-feed.sh stop [<channel>]                       stops that channel's feed, or all
 EOF
   exit "${1:-2}"
 }
 
 die() {
-  echo "vf-test-feed: $*" >&2
+  echo "test-feed: $*" >&2
   exit 1
 }
 
@@ -55,7 +55,7 @@ stop_feeds() {
   docker exec "$CONTAINER" pkill -TERM -f "$pattern" || status=$?
   ((status <= 1)) || die "could not stop the feed (pkill exited $status)"
   if ((status == 1)); then
-    echo "vf-test-feed: no feed was running${1:+ on channel $1}" >&2
+    echo "test-feed: no feed was running${1:+ on channel $1}" >&2
     return
   fi
   for _ in {1..50}; do
@@ -92,7 +92,7 @@ fi
 
 # Two senders on one port would interleave two streams into garbage.
 if docker exec "$CONTAINER" pgrep -f "$(feed_pattern "$channel")" >/dev/null; then
-  die "a feed already runs on channel $channel (scripts/vf-test-feed.sh stop $channel)"
+  die "a feed already runs on channel $channel (scripts/test-feed.sh stop $channel)"
 fi
 docker exec "$CONTAINER" mkdir -p "$REMOTE_DIR"
 docker cp --quiet "$SCRIPT_DIR/$SENDER" "$CONTAINER:$REMOTE_SENDER"

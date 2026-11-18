@@ -535,7 +535,7 @@ what disagrees, the choice, and why.
    `pts_ns`, `stream_id` and more (`detection_egress.h`). *Choice:* ignored; `timestamp` is the one
    key. *Why:* two ways to say one thing; `rtp_timestamp` is a third name beside `timestamp` and
    `_insight.rtp_timestamp`.
-9. **`frame_id`.** A string from Core, an integer from `scripts/vf_test_metadata.py`; nothing uses
+9. **`frame_id`.** A string from Core, an integer from `scripts/test_feed_metadata.py`; nothing uses
    it. *Choice:* any JSON value, a string recommended, diagnostics only.
 10. **Trailing NUL bytes.** vf strips them from every message, for fixed-size padded senders; no
     sender in the public repos pads. *Choice:* not part of the contract; the new backend drops

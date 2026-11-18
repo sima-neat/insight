@@ -402,8 +402,8 @@ test.describe('the Viewer without video', () => {
   });
 });
 
-/** `scripts/vf-test-feed.sh`, which runs the test feed in the SDK container. */
-const FEED = join(__dirname, '..', '..', 'scripts', 'vf-test-feed.sh');
+/** `scripts/test-feed.sh`, which runs the test feed in the SDK container. */
+const FEED = join(__dirname, '..', '..', 'scripts', 'test-feed.sh');
 
 /** Stops the feed on channel 0; returns once it is gone. */
 function stopFeed(): void {
@@ -421,7 +421,7 @@ async function startFeed(log: string): Promise<void> {
     const feed = spawn(FEED, ['0'], { detached: true, stdio: ['ignore', output, output] });
     await once(feed, 'spawn');
     // Later errors (signalling the child) must not take the test runner down with them.
-    feed.on('error', (error) => console.error(`vf-test-feed: ${error.message}`));
+    feed.on('error', (error) => console.error(`test-feed: ${error.message}`));
     feed.unref();
   } finally {
     // The child has its own copy of the descriptor.
@@ -449,7 +449,7 @@ const FEED_STATUS = /H\.264 · 640×480 · 1[45]\.\d fps/;
 const videoTile = (channelTile: Locator) => channelTile.locator('neat-video-tile');
 
 test.describe('a deployed build with the test feed on channel 0', () => {
-  test.skip(!deployed, 'needs INSIGHT_BASE_URL and scripts/vf-test-feed.sh 0 running');
+  test.skip(!deployed, 'needs INSIGHT_BASE_URL and scripts/test-feed.sh 0 running');
   // In order, in one worker: one test stops the feed the others watch.
   test.describe.configure({ mode: 'default' });
 
@@ -550,7 +550,7 @@ test.describe('a deployed build with the test feed on channel 0', () => {
     const kitTile = videoTile(tile(page, 0));
     await expect(kitTile).toHaveAttribute('data-state', 'playing', { timeout: 15_000 });
 
-    const log = testInfo.outputPath('vf-test-feed.log');
+    const log = testInfo.outputPath('test-feed.log');
     // The feed comes back whatever happens here: the next run needs it as this one found it.
     try {
       stopFeed();
@@ -562,7 +562,7 @@ test.describe('a deployed build with the test feed on channel 0', () => {
       await expect(kitTile).toHaveAttribute('data-state', 'playing', { timeout: 20_000 });
     } catch (error) {
       // Why the restarted feed did not play, if the script said: it runs detached.
-      console.error(`vf-test-feed.sh output:\n${readFileSync(log, 'utf8')}`);
+      console.error(`test-feed.sh output:\n${readFileSync(log, 'utf8')}`);
       throw error;
     }
     await expect(tile(page, 0)).toContainText(FEED_STATUS, { timeout: 10_000 });

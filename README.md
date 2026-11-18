@@ -181,7 +181,7 @@ INSIGHT_BASE_URL=https://127.0.0.1:9900 npm run e2e
 
 The Viewer's playback tests run only against a deployed build, and need the test feed below running
 on channel 0. One of them stops the feed and starts it again, detached; afterwards
-`scripts/vf-test-feed.sh stop 0` stops it.
+`scripts/test-feed.sh stop 0` stops it.
 
 ### Run the prototype in the Neat SDK container
 
@@ -217,11 +217,11 @@ webcam, a test stream) have to be started again; hard-reload the browser tab aft
 
 ### Test feed for the Viewer
 
-`scripts/vf-test-feed.sh` feeds one vf channel in the Neat SDK container with a test stream. Video
+`scripts/test-feed.sh` feeds one Viewer channel in the Neat SDK container with a test stream. Video
 goes to UDP `9000+N`: an H.264 test pattern at 640×480 and 15 fps, with a white square sweeping
 across it. Metadata goes to UDP `9100+N`: for every frame, an object-detection box around the
-square. Each message carries its frame's RTP time as its `timestamp`, so vf matches it to that frame
-(`scripts/vf_test_metadata.py` explains how), and a box that drifts off its square shows a sync
+square. Each message carries its frame's RTP time as its `timestamp`, so Insight matches it to that frame
+(`scripts/test_feed_metadata.py` explains how), and a box that drifts off its square shows a sync
 problem.
 
 Run it from the checkout on the laptop. It finds the container the way the dev deploy does
@@ -229,9 +229,9 @@ Run it from the checkout on the laptop. It finds the container the way the dev d
 image has.
 
 ```bash
-scripts/vf-test-feed.sh 0                          # channel 0, until Ctrl-C
-scripts/vf-test-feed.sh 0 --metadata-delay-ms 500  # metadata 500 ms behind its frames, like a slow model
-scripts/vf-test-feed.sh stop 0                     # from another terminal; `stop` alone stops every feed
+scripts/test-feed.sh 0                          # channel 0, until Ctrl-C
+scripts/test-feed.sh 0 --metadata-delay-ms 500  # metadata 500 ms behind its frames, like a slow model
+scripts/test-feed.sh stop 0                     # from another terminal; `stop` alone stops every feed
 ```
 
 Keep it off channels a real pipeline feeds: two streams on one port garble each other.

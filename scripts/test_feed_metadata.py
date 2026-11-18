@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""A test feed for one vf channel: an H.264 test pattern and object-detection metadata matched to it.
+"""A test feed for one Viewer channel: an H.264 test pattern and object-detection metadata matched to it.
 
-    python3 vf_test_metadata.py <channel> [--metadata-delay-ms <ms>]
+    python3 test_feed_metadata.py <channel> [--metadata-delay-ms <ms>]
 
 ffmpeg encodes `testsrc2` (640x480 at 15 fps) with a white square sweeping across it and sends it
-as RTP (payload type 96) to a loopback socket of this script, which forwards every packet to vf's
+as RTP (payload type 96) to a loopback socket of this script, which forwards every packet to Insight's
 video port 9000+N. For each frame (its RTP marker packet) it sends one object-detection message
-with a box around the square to vf's metadata port 9100+N.
+with a box around the square to Insight's metadata port 9100+N.
 
-The message's `timestamp` comes from the RTP timestamp of the frame it describes: vf matches a
+The message's `timestamp` comes from the RTP timestamp of the frame it describes: Insight matches a
 producer timestamp of T ms to the frame whose RTP timestamp is within 90 ticks of T*90 (Inv §2c).
 ffmpeg starts its RTP timestamps at a random value and has no option to choose it, so reading them
 off the relayed packets is the one way to know them. The box follows the square in the video, so a
 box that leaves its square on screen shows a frame-matching problem.
 
 `--metadata-delay-ms` holds each message back, as a slow model would, to provoke the Viewer's
-"Metadata late" notice. The feed runs until SIGINT or SIGTERM. Normally `vf-test-feed.sh` beside it
+"Metadata late" notice. The feed runs until SIGINT or SIGTERM. Normally `test-feed.sh` beside it
 starts and stops it inside the Neat SDK container; it needs only ffmpeg (with libx264) and Python 3.
 """
 
@@ -32,7 +32,7 @@ from typing import NamedTuple, Optional
 
 VIDEO_BASE_PORT = 9000
 METADATA_BASE_PORT = 9100
-CHANNELS = 80  # vf's channel slots
+CHANNELS = 80  # the most channels Insight serves
 
 WIDTH, HEIGHT, FPS = 640, 480, 15
 SQUARE = 96
@@ -85,7 +85,7 @@ def detection_message(rtp_timestamp: int, first_timestamp: int) -> dict:
     # Modulo 2^32 ticks, so the time survives the RTP timestamp's wrap. After 2^32 ticks of feed
     # (about 13 h 15 min) it restarts at 0 while ffmpeg's t runs on: the box then sweeps out of
     # phase with the square and frame_id starts again from 0, until the feed is restarted. The
-    # `timestamp`, and so vf's matching, does not depend on it.
+    # `timestamp`, and so Insight's matching, does not depend on it.
     seconds = ((rtp_timestamp - first_timestamp) & 0xFFFFFFFF) / RTP_CLOCK_RATE
     # The overlay filter places the square at whole (even) pixels; the margin covers the rounding.
     x = round(square_x(seconds))
@@ -118,7 +118,7 @@ def ffmpeg_command(relay_port: int) -> list:
     return [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-re", "-f", "lavfi", "-i", graph,
-        # Constrained baseline without B-frames is what vf negotiates with browsers (Inv §2a); a
+        # Constrained baseline without B-frames is what Insight offers browsers; a
         # keyframe with its SPS/PPS every second lets a viewer join at any time.
         "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
         "-profile:v", "baseline", "-pix_fmt", "yuv420p", "-bf", "0",
@@ -176,7 +176,7 @@ def run_feed(video_address, metadata_address, metadata_delay_s: float, stop: thr
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("channel", type=int, choices=range(CHANNELS), metavar="channel", help="vf channel, 0-79")
+    parser.add_argument("channel", type=int, choices=range(CHANNELS), metavar="channel", help="Viewer channel, 0-79")
     parser.add_argument(
         "--metadata-delay-ms",
         type=int,

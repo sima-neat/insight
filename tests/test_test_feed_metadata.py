@@ -10,14 +10,14 @@ import unittest
 from pathlib import Path
 
 # The feed is a standalone script copied into the SDK container, not part of the package.
-_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "vf_test_metadata.py"
-_spec = importlib.util.spec_from_file_location("vf_test_metadata", _SCRIPT)
+_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "test_feed_metadata.py"
+_spec = importlib.util.spec_from_file_location("test_feed_metadata", _SCRIPT)
 feed = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(feed)
 
 HAVE_FFMPEG = bool(shutil.which("ffmpeg"))
 if os.environ.get("NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS") and not HAVE_FFMPEG:
-    raise RuntimeError("ffmpeg is required for tests.test_vf_test_metadata (NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS is set)")
+    raise RuntimeError("ffmpeg is required for tests.test_test_feed_metadata (NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS is set)")
 
 
 def rtp_header(timestamp, marker=False, payload_type=96, sequence=1):
@@ -25,7 +25,7 @@ def rtp_header(timestamp, marker=False, payload_type=96, sequence=1):
 
 
 def rtp_distance(a, b):
-    """The distance vf's correlator measures between two RTP timestamps (metadata_sync.go)."""
+    """The distance the server's correlator measures between two RTP timestamps (server/internal/channels/correlate.go)."""
     delta = (a - b) & 0xFFFFFFFF
     return min(delta, 0x100000000 - delta)
 
@@ -64,7 +64,7 @@ class DetectionMessageTests(unittest.TestCase):
                 message = feed.detection_message(rtp_timestamp, first_timestamp=0)
                 self.assertIsInstance(message["timestamp"], int)
                 self.assertGreaterEqual(message["timestamp"], 0)
-                # vf: source = uint32(timestamp * 90), matched within ±90 ticks.
+                # The server: source = uint32(timestamp * 90), matched within ±90 ticks.
                 source = (message["timestamp"] * 90) & 0xFFFFFFFF
                 self.assertLessEqual(rtp_distance(source, rtp_timestamp), 90)
 
@@ -88,7 +88,7 @@ class DetectionMessageTests(unittest.TestCase):
                 self.assertTrue(0 <= x and x + width <= 640 and 0 <= y and y + height <= 480)
 
     def test_fits_one_legacy_metadata_datagram(self):
-        # vf takes a datagram that does not start with the chunk magic as a whole JSON message.
+        # The server takes a datagram that does not start with the chunk magic as a whole JSON message.
         encoded = feed.encode_message(feed.detection_message(0xFFFFFFFF, 0))
         self.assertLess(len(encoded), 1200)
         self.assertNotEqual(encoded[0], 0x4E)
@@ -128,7 +128,7 @@ class FeedTests(unittest.TestCase):
                     except BlockingIOError:
                         break
                     if sock is video:
-                        # As the muxer was told: vf reads one RTP packet per datagram.
+                        # As the muxer was told: the server reads one RTP packet per datagram.
                         self.assertLessEqual(len(data), 1200)
                         packet = feed.parse_rtp(data)
                         self.assertIsNotNone(packet)
