@@ -1,6 +1,6 @@
 # Upstream
 
-`insight-next` is a private copy of [`sima-neat/insight`](https://github.com/sima-neat/insight).
+`insight-next` is a copy of [`sima-neat/insight`](https://github.com/sima-neat/insight).
 
 - Upstream branch: `integration/sources-and-viewer` (PR #170)
 - Baseline commit: `829ec7c`, which contains `develop` at `9d335f0`

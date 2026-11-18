@@ -6,9 +6,9 @@ working around the rule.
 
 ## What this repo is
 
-`insight-next` is a private prototype that rebuilds the Neat Insight frontend in Angular on
-SiMa.ai's UI kit, `@sima/neat-ui` (repo `justin-guth-sima/neat-ui`). The design and its decisions
-are in `docs/superpowers/specs/2026-10-21-insight-overhaul-design.md`.
+`insight-next` is a prototype that rebuilds the Neat Insight frontend in Angular on SiMa.ai's
+UI kit, `@sima/neat-ui` (repo `justin-guth-sima/neat-ui`). Its design notes are kept outside the
+repo.
 
 - `frontend/`: the Angular app. Flask serves its build from `frontend/dist`.
 - `neat_insight/`: the Flask backend (the `/api/` endpoints, media, MJPEG previews) that also
