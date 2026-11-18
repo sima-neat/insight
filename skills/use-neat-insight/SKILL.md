@@ -75,10 +75,10 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 ## Operating Rules
 
 - Call `/api/health` first when connecting to a running neat-insight instance.
-- Use JSON request bodies for POST endpoints except `/api/upload/media`, which uses multipart form field `file` and an optional `on_conflict` (`ask`, `keep_both`, `replace`); a name that is already taken answers 409 unless `on_conflict` is set.
-- Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
-- Use `/api/mediasrc` to read source state before changing assignments or playback.
-- Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments and cached FPS renditions for deleted files, including files inside a deleted directory.
+- Send request bodies as JSON with `Content-Type: application/json` (the server refuses others with 415 `json_only`), except `/api/media/uploads`, which is multipart (`file`, optional `on_conflict`).
+- Treat file paths returned by media APIs as library paths, relative to the media folder. Do not send absolute host paths.
+- Read `/api/slots` before changing assignments or playback.
+- Clear or reassign the slots that use a file before deleting it: `/api/media/delete` refuses (409 `in_use`, naming the `slots`).
 - Peripherals never captures video: SiMa Sentinel on the board discovers the cameras and microphones (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog; only an explicit camera preview captures video and only an explicit microphone test records audio. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
 - Preview is the only Peripherals operation that touches the sensor, and only while it runs: over the board connection Insight runs `gst-launch-1.0` (`libcamerasrc` for MIPI, `v4l2src` on the `/dev/v4l/by-id` path for USB) that writes multipart JPEG (at most 640 px wide, up to 15 fps) to stdout, and relays it at the session's `stream_url` as `multipart/x-mixed-replace`. It uses no Viewer channel, UDP port, or PyNeat. Discovery never captures. A failed start carries the pipeline's stderr in `detail`. The session's `camera_fps` is the rate the camera runs at: a USB mode's own rate; for MIPI, Sentinel's `max_fps` from one Sentinel rescan after the first frame (no Insight scan is recorded and the preview keeps running), `null` until then or when Sentinel cannot report it.
 - Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; System Info's host readings (`/api/metrics`) still read the legacy REMOTE_DEVKIT target.
@@ -96,8 +96,8 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Open the Viewer on a channel before reading its counters. While no browser watches, metadata counts as `no_viewer` and is never matched, and `video.frames_per_second` stays `0`.
 - Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond (`docs/contracts.md`), so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
 - Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
-- A source with `state: "external"` is held by a publisher Insight did not start. Do not call start/assign/stop on it (409); call `/api/mediasrc/takeover` only when the user explicitly wants that stream disconnected. Bulk endpoints leave the external stream alone and report such slots in `skipped_external`; `reset` still clears the stored assignment of every slot.
-- A source with `state: "pulled"` is a network stream Insight pulls into the slot (session-only). Do not call start/assign/prepare/takeover on it (409); call stop only when the user wants the pull released. Stop All and Reset stop pulls too and report them in `stopped_pulled`; Auto Assign and Bulk Start skip such slots and report them in `skipped_pulled`. Never echo the URL a user gave for a pull with its credentials; the API never returns them.
+- A slot with `state: "external"` is held by a publisher Insight did not start. Assigning or starting it is 409 `slot_busy`; call `/api/slots/{n}/take-over` only when the user explicitly wants that stream disconnected. Bulk routes leave the external stream alone and report such slots in `skipped_external`; reset still clears the assignment of every slot.
+- A slot of `kind: "pull"` is a camera MediaMTX pulls. Stop keeps the camera and Start pulls again; delete the slot to forget it. Auto-assign leaves it alone (`skipped_pulled`). Never echo the URL a user gave for a pull with its credentials; the API never returns them.
 
 ## Health And Metrics
 
@@ -213,25 +213,48 @@ The message envelope, the five types (`object-detection`, `classification`, `tra
 - `auxiliary-visualization` is not a type of the contract; the Viewer ignores it like any unknown type.
 - Dropped segments and unknown types warn once per channel in the browser console. Check there first when an overlay does not render.
 
-## Media Sources
+## Media Library
+
+The media library is the folder the Media page shows and the slots stream from: `/workspace/.insight-media` in the SDK (it outlives the container), `~/neat-insight/media` on a DevKit, `~/.simaai/neat-insight/media` elsewhere. Every path is a library path: relative to that folder, with `/`. Hidden entries and macOS archive metadata are not part of the library. Errors carry `code`; a refused delete adds `slots`, a taken upload name adds `conflict`.
 
 | Method | Path | Request | Response |
 | --- | --- | --- | --- |
-| `GET` | `/api/media-files` | None | Recursive folder tree under the media directory; hidden files and macOS archive metadata are omitted. File nodes carry `streamable` (accepted by the media-source streamer), folder nodes carry `streamable_count`; the UI hides files with `streamable: false`. |
-| `POST` | `/api/upload/media` | Multipart form field `file`, optional `on_conflict` (`ask` default, `keep_both`, `replace`) | Streaming `text/plain` progress while saving a file or extracting `zip`, `tar`, `gz`, or `tar.gz` archives (into a folder named after the archive). A taken name (for an archive, its folder) answers 409 `{error, conflict: {existing, suggested}}` and saves nothing unless `on_conflict` is `keep_both` (saves as `name_2`) or `replace` (restarts file slots that were streaming the replaced file). The stream is HTTP 200 even on failure: look for `Failed to extract archive:` or `Failed to save upload:` and a missing `Upload complete.`; a `Could not restart srcN: …` line is only a warning. |
-| `POST` | `/api/delete-media` | JSON `{"path": "relative/path"}` | `{"message": "Deleted successfully"}`; clears media-source assignments and cached FPS renditions for deleted files (directories included). |
-| `POST` | `/api/media-info` | JSON `{"path": "relative/path"}` | File size plus image dimensions for JPG/PNG or video track metadata from ffprobe, including detected codec when available. |
-| `GET` | `/api/media-preview/mjpeg?path=<path>` | Query string | Multipart MJPEG preview for MJPEG media files that browsers cannot preview directly. |
-| `GET` | `/media/<path:filename>` | Relative media path | Raw media file content for preview or download. |
+| `GET` | `/api/media` | None | The tree from the root folder: `{name, path, folder, children?, streamable, streamable_count?, probe, probing?}`, folders first. A file's `probe` is `null` while it is being probed (`probing: true`); then it says `kind` (`video`, `image`, `unknown`), `codec` (`h264`, `h265`, `mjpeg` or ffprobe's name), `codec_name`, `profile`, `pixel_format`, `width`, `height`, `fps`, `frame_rate`, `duration_ms`, `size`, `has_b_frames`, `streamable` and, when ffprobe failed, `problem`. Poll it again for probes still running. |
+| `GET` | `/api/media/info?path=<path>` | Query | `{name, path, probe}`, probed now when the file changed. 400 `invalid_path` outside the library, 404 `not_found`. |
+| `POST` | `/api/media/delete` | JSON `{"paths": ["a.mp4", "folder"]}` | `{paths}`. Removes files, links and folders with what they hold. Refuses the whole request, removing nothing, when a path is not in the library (400) or a slot uses one of the files (409 `in_use`, with `slots`): clear or reassign those slots first. |
+| `POST` | `/api/media/uploads` | Multipart field `file`, optional `on_conflict` (`ask` default, `keep_both`, `replace`) | 201 with what was saved (`{path, folder?, reencoded?, restarted?, unassigned?, warnings?}`) when the board streams the file well; 202 with a job when it is re-encoded first (B-frames, another codec or profile, keyframes more than 4 s apart), whose `result` is what was saved. Archives (`zip`, `tar`, `tar.gz`, `tgz`) unpack into a folder named after them. A taken name with `ask` is 409 `name_taken` with `conflict: {existing, suggested}` and saves nothing; `keep_both` saves as `name_2`, `replace` restarts the slots that streamed the replaced file. 413 `too_large` above 8 GiB, 507 `no_space`. |
+| `GET` | `/api/media/file?path=<path>` | Query | The file, with range requests: video and pictures as themselves, anything else as a download. |
+| `GET` | `/api/media/preview.mjpg?path=<path>` | Query | The file as a looping `multipart/x-mixed-replace` MJPEG stream, one shared relay per file. 503 `ffmpeg_missing` without FFmpeg, 429 when Insight relays as many streams as it may. |
+| `GET` | `/api/catalog` | None | SiMa's published sample clips: the catalog index (`sources`, `assets`), each asset with its download `url`. 502 `catalog_unavailable` when it cannot be fetched. |
+| `POST` | `/api/catalog/imports` | JSON `{"path": "<asset path>"}` | 202 with a job that downloads the asset into `catalog/<source>/`, checks its size and SHA-256, and saves it (a taken name as `name_2`). |
+| `GET` | `/api/renditions` | None | `{count, bytes, in_use}` of the frame-rate renditions the slots keep in the library's hidden `.renditions` folder. |
+| `DELETE` | `/api/renditions` | None | `{removed, freed_bytes, kept}`: removes every rendition but those a slot streams or is about to. |
+
+YouTube imports are still the old backend's (`/api/import/youtube/validate`, `/api/import/youtube`) and save into the same library.
 
 Examples:
 
 ```bash
-curl -k https://127.0.0.1:9900/api/media-files
-curl -k -F "file=@sample.mp4" https://127.0.0.1:9900/api/upload/media
-curl -k -H "Content-Type: application/json" \
-  -d '{"path":"sample.mp4"}' \
-  https://127.0.0.1:9900/api/media-info
+curl -k https://127.0.0.1:9900/api/media
+curl -k -F "file=@sample.mp4" https://127.0.0.1:9900/api/media/uploads
+curl -k 'https://127.0.0.1:9900/api/media/info?path=sample.mp4'
+curl -k -H "Content-Type: application/json" -d '{"paths":["sample.mp4"]}' \
+  https://127.0.0.1:9900/api/media/delete
+```
+
+## Jobs
+
+Long work runs as a job that outlives the request that started it: a rendition's encode (`rendition`), an upload's re-encode (`upload`), a catalog download (`catalog_import`). A job is `{id, kind, title, state, progress: {percent?, phase, detail}, result?, error?, created_at, started_at?, finished_at?}`; `state` is `queued`, `running`, `done`, `failed` or `cancelled`. One encode, one re-encode and two downloads run at once; the rest wait `queued`. Finished jobs are kept for 10 minutes.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| `GET` | `/api/jobs` | `{jobs}`, oldest first. |
+| `GET` | `/api/jobs/{id}` | One job; 404 `job_not_found`. |
+| `GET` | `/api/jobs/{id}/events` | Server-Sent Events: one `data:` line of the job's JSON at once and after each change, the last its final state, then the stream ends. Close an `EventSource` on a final state, or it reconnects. |
+| `DELETE` | `/api/jobs/{id}` | Cancel: a queued job ends at once, a running one turns `cancelled` once its work has cleaned up. |
+
+```bash
+curl -k -N https://127.0.0.1:9900/api/jobs/<id>/events
 ```
 
 ## Standard Test Videos
@@ -248,7 +271,7 @@ https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4
 https://artifacts.sima-neat.com/assets/videos/480p30/video16.mp4
 ```
 
-When the user asks to prepare Insight media and `/api/media-files` returns no usable video files, download one or more standard videos to a temporary location and import them through the media upload API. Do not assume a host filesystem path is visible to Insight; use `/api/upload/media`.
+When the user asks to prepare Insight media and `/api/media` holds no streamable video, import clips from the catalog (`/api/catalog`, `/api/catalog/imports`), or download one or more standard videos to a temporary location and upload them. Do not assume a host filesystem path is visible to Insight; use `/api/media/uploads`.
 
 Example:
 
@@ -257,59 +280,62 @@ tmpdir="$(mktemp -d)"
 curl -fL "https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4" \
   -o "${tmpdir}/video01.mp4"
 curl -k -F "file=@${tmpdir}/video01.mp4" \
-  https://127.0.0.1:9900/api/upload/media
-curl -k https://127.0.0.1:9900/api/media-files
+  https://127.0.0.1:9900/api/media/uploads
+curl -k https://127.0.0.1:9900/api/media
 ```
 
-For multi-stream testing, import multiple files, then use `/api/mediasrc/auto-assign-all` and `/api/mediasrc/start-bulk`.
+For multi-stream testing, import several files, then call `/api/slots/auto-assign` and `/api/slots/start`.
 
-## Media Sources
+## Sources (Slots)
 
-Media sources are indexed source slots. Each source object includes an `index`, an assigned relative `file`, playback `state` (`playing`, `stopped`, `external` or `pulled`), selected `transport`, detected `codec`, `allowed_transports`, and generated stream `urls`. Each source also carries `readers` (current mediamtx readers) and, while external, an `external` object with protocol, address, since, codec_supported, width, height, fps and bitrate_bps; while pulled, a `pull` object with status (`connecting`, `live`, `unreachable`, `auth_failed`), scheme, host, path, error, since, codec_supported, width, height, fps and bitrate_bps.
+The sources are 48 slots, `src1` to `src48`, each published by MediaMTX (which Insight's server runs) as `rtsp://<host>:8554/srcN`. A slot streams a library file, a browser's webcam, or a camera MediaMTX pulls. Insight keeps only what was asked of each slot (`<data>/sources.json`); everything else is derived from the world when the slots are listed, so poll `/api/slots` (it is read from memory) rather than waiting on an answer. After a restart every slot is stopped, and a pull whose URL held credentials needs its URL again.
 
-Codec and transport are derived from the assigned media:
+A slot (`GET /api/slots` answers `{count, slots}`) is:
 
-- H.264 media uses RTSP/H.264.
-- HEVC/H.265 media uses RTSP/H.265.
-- MJPEG media can use RTSP/MJPEG or HTTP multipart MJPEG.
+| Field | Meaning |
+| --- | --- |
+| `n`, `kind` | Its number, and what feeds it: `none`, `file`, `webcam`, `pull`. |
+| `file`, `fps`, `native_fps` | A file slot's library path, its output rate when not the file's own, and the file's own rate once probed. |
+| `codec` | The file's or the stream's codec (`h264`, `h265`, `mjpeg`, or another); absent while unknown. |
+| `pull` | A pull's `scheme`, `host`, `path` (never credentials), `status` (`live`, `connecting`, `unreachable`, `auth_failed`, `needs_credentials`, `stopped`) and `error`. |
+| `run` | The user's Start: the slot is to run. |
+| `state` | `idle`, `preparing` (a rendition is encoded, see `job`), `starting`, `live`, `failed` (see `error`) or `external` (a publisher Insight did not start holds it). |
+| `publisher` | While MediaMTX has the stream: `protocol`, `address`, `since`, `codec`, `codec_supported`, `width`, `height`, `fps`, `bitrate_bps`. |
+| `readers` | Who reads the stream (`protocol`, `address`, `label: "insight preview"` for Insight's own). |
+| `urls` | `rtsp`, plus `http_mjpeg` for an MJPEG stream and `whip` for a webcam slot, on the host the request used (the public origin for HTTP and WHIP when one is configured). |
+| `active_file` | What the publisher streams: the file or its rendition (`.renditions/...`). |
 
 | Method | Path | Request | Behavior |
 | --- | --- | --- | --- |
-| `GET` | `/api/mediasrc/videos` | None | Return sorted relative media paths accepted by the media-source streamer. |
-| `GET` | `/api/mediasrc` | None | Return persisted source assignments, playback states, transport/codec data, allowed transports, and generated stream URLs. `native_fps` is null until the assigned file has been probed; the listing never waits for a probe but starts one in the background, so a later call shows it. |
-| `POST` | `/api/mediasrc/assign` | JSON `{"index": 1, "file": "video.mp4", "transport": "rtsp", "fps": 15}` | Assign or clear one source; if it was playing, restart with the new file. Transport is honored only when compatible with the detected codec. `fps` (any whole number from 1, or null for the source rate; a rate no codec level covers for the file's resolution fails at start or prepare) selects the output frame rate; changing `file` without `fps` resets it. Returns 409 for an external slot. |
-| `POST` | `/api/mediasrc/auto-assign-all` | None | Stop active sources, assign unique available videos to source slots in index order, and persist stopped assignments. Slots whose file changes lose their `fps` override. |
-| `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. Returns 409 for an external slot, or if the slot was stopped, reassigned, reset or unassigned while its FPS rendition was being prepared (start it again). |
-| `POST` | `/api/mediasrc/prepare` | JSON `{"index": 1}` | Create or reuse the FPS rendition `start` will stream when the slot's `fps` differs from the media's native rate; streams `text/plain` progress ending in `Rendition ready:`, `Reusing rendition:`, `Source frame rate matches`, or `Error:`. Renditions encode one at a time; a waiting prepare repeats `Waiting for another rendition to finish encoding…`. An encode needs the rendition's expected size plus 1 GB free, otherwise it ends in `Error:`. `start` does the same silently when `prepare` is skipped. |
-| `GET` | `/api/mediasrc/renditions` | None | Return `{"count": int, "bytes": int}` for all currently stored FPS renditions. |
-| `POST` | `/api/mediasrc/renditions/clear` | None | Delete every cached FPS rendition except one a playing source is currently streaming; returns `{"removed": int, "freed_bytes": int, "kept": [rel paths]}`. |
-| `POST` | `/api/mediasrc/start-bulk` | JSON `{"count": 4}` | Start the first `count` assigned sources in index order and report `started`, `already_running`, and `errors`. |
-| `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. Returns 409 for an external slot that carries no Insight stream. On a pulled slot it stops the pull: 502 when MediaMTX could not confirm it (the slot stays pulled; retry), 409 while the pull is still being set up (retry in a moment). |
-| `POST` | `/api/mediasrc/stop-all` | None | Stop every source and return how many were previously playing. |
-| `POST` | `/api/mediasrc/takeover` | JSON `{"index": 2}` | Disconnect the external publisher holding a slot (409 when the slot is not external, 502 when the mediamtx API is unreachable). |
-| `POST` | `/api/mediasrc/pull` | JSON `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` | Pull an existing RTSP/RTSPS stream into the slot (mediamtx forwards it unchanged). 400 with `reason: "auth_failed"` when the camera rejects the credentials, 409 when the slot is streaming, external or pulled, 502 when mediamtx refuses or cannot be reached while configuring the slot. `stop` releases it. |
-| `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments, including for an externally held slot; the external stream keeps running and its slot is listed in `skipped_external`. |
-| `GET` | `/stream/http/src<int:index>.mjpg` | None | Active HTTP multipart MJPEG stream for an HTTP/MJPEG source. |
-| `GET` | `/stream/http/src<int:index>.jpg` | None | One JPEG snapshot from an active HTTP/MJPEG source. |
-| `GET` | `/stream/preview/src<int:index>.mjpg` | None | Multipart MJPEG preview of any live slot at the source frame rate. Max 4 concurrent (429). |
+| `GET` | `/api/slots` | None | Every slot as it stands. |
+| `PUT` | `/api/slots/{n}` | JSON `{"kind": "file", "file": "video.mp4", "fps": 15}` | Assign a file, at its own rate without `fps`. A slot that streamed a file keeps running with the new one; any other is stopped. 400 `not_streamable` for a codec other than H.264, H.265 or MJPEG, `fps_not_supported` for a rate no codec level covers at the file's size. With an `fps` other than the file's own, Start encodes a rendition first (`state: "preparing"`, `job`), which needs its expected size plus 1 GB free. |
+| `PUT` | `/api/slots/{n}` | JSON `{"kind": "pull", "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` | Probe the camera, then have MediaMTX pull it (forwarded unchanged) and start. 422 `pull_auth_failed` when it refuses the credentials, 502 `pull_unreachable` when it does not answer. Credentials are kept in memory only. |
+| `PUT` | `/api/slots/{n}` | JSON `{"kind": "webcam"}` | A browser's webcam: the answer's `urls.whip` is where the browser publishes; MediaMTX re-encodes it onto `srcN`. |
+| `DELETE` | `/api/slots/{n}` | None | Nothing assigned, stopped. |
+| `POST` | `/api/slots/{n}/start` | None | Make it run; answers before the stream is live. Starting a failed slot tries again. 409 `nothing_assigned`, `pull_needs_credentials`. |
+| `POST` | `/api/slots/{n}/stop` | None | Stop it (publisher, encode, pull, webcam publisher); the assignment stays. |
+| `POST` | `/api/slots/{n}/take-over` | None | Disconnect the external publisher holding it. 409 `not_external`, 503 `mediamtx_unavailable`, 502 `mediamtx_failed`. |
+| `GET` | `/api/slots/{n}/preview.mjpg` | None | The live picture as MJPEG at most 640 px wide, one shared relay per slot; 409 `slot_not_live`. |
+| `POST` | `/api/slots/start` | JSON `{"count": 4}` | Start the first `count` file slots no external publisher holds: `{started, already_running, skipped_external, errors: [{n, code, error}]}`. |
+| `POST` | `/api/slots/stop` | None | Stop every slot: `{stopped, skipped_external}`. |
+| `POST` | `/api/slots/reset` | None | Stop every slot and clear it: `{stopped, skipped_external}`; external streams go on. |
+| `POST` | `/api/slots/auto-assign` | None | Give the library's streamable files, in path order, one per slot, every slot stopped: `{assigned, available, skipped_external, skipped_pulled}`. External and pulling slots keep what they have. |
+| `GET` | `/stream/http/srcN.mjpg` | None | Frozen: an MJPEG slot's stream as `multipart/x-mixed-replace; boundary=frame`, the same pictures for every reader (`urls.http_mjpeg`); 409 `not_mjpeg` or `slot_not_live`. |
 
 Common workflow:
 
 ```bash
-curl -k https://127.0.0.1:9900/api/mediasrc/videos
-curl -k -H "Content-Type: application/json" \
-  -d '{"index":1,"file":"sample.mp4"}' \
-  https://127.0.0.1:9900/api/mediasrc/assign
-curl -k -H "Content-Type: application/json" \
-  -d '{"index":1}' \
-  https://127.0.0.1:9900/api/mediasrc/start
-curl -k https://127.0.0.1:9900/api/mediasrc
+curl -k -X PUT -H "Content-Type: application/json" \
+  -d '{"kind":"file","file":"sample.mp4"}' \
+  https://127.0.0.1:9900/api/slots/1
+curl -k -X POST https://127.0.0.1:9900/api/slots/1/start
+curl -k https://127.0.0.1:9900/api/slots | jq '.slots[0] | {state, error, urls}'
 ```
 
 ```bash
-curl -k -H "Content-Type: application/json" \
-  -d '{"index":3,"url":"rtsp://192.168.1.10:554/stream1","username":"admin","password":"secret"}' \
-  https://127.0.0.1:9900/api/mediasrc/pull
+curl -k -X PUT -H "Content-Type: application/json" \
+  -d '{"kind":"pull","url":"rtsp://192.168.1.10:554/stream1","username":"admin","password":"secret"}' \
+  https://127.0.0.1:9900/api/slots/3
 ```
 
 If the consumer runs outside the SDK container, build RTSP URLs from the SDK port map rather than using the container-local default. For source `src1`, use:
@@ -318,7 +344,7 @@ If the consumer runs outside the SDK container, build RTSP URLs from the SDK por
 rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/src1
 ```
 
-Use `/api/mediasrc` to confirm source assignment and playback state after starting streams.
+`urls.rtsp` already names the `rtsp.tcp` host port of the port map, on the host the request used.
 
 ## Environment And Viewer
 
@@ -393,11 +419,11 @@ A `history.full: true` answer (a first read, a restart, a gap in polling, a rese
 
 ## Error Handling
 
-Most JSON API errors return `{"error": "message"}` with an HTTP error status. Routes the Go server serves (`/api/channels` and its offer among them) answer `{"error": {"code", "message", "hint"}}` instead, `hint` only when there is one; branch on `code`. Common statuses are:
+Most JSON API errors return `{"error": "message"}` with an HTTP error status. Routes the Go server serves (the channels, the slots, the media library, the jobs) answer `{"error": {"code", "message", "hint"}}` instead, `hint` only when there is one; branch on `code`. Common statuses are:
 
 - `400` for missing or invalid request fields.
-- `403` for unsafe media paths.
-- `404` for missing logs, media files, or media-source indexes.
+- `404` for missing logs, media files, slots or jobs.
+- `409` for a conflict with the current state: a busy slot (`slot_busy`), a file in use (`in_use`), a taken name (`name_taken`), a slot not live (`slot_not_live`).
 - `500` for local processing or stream startup failures.
 - `502` for unreachable or unreadable remote devkit build information, or an unreachable GenAI Studio board.
 - GenAI Studio relay errors carry a `reason`: `400 bad-request` for an invalid board address, `404 not-relayed`, `502 unreachable`, `503 not-configured` or `invalid-address`, and `500 cfg-unreadable` or `cfg-unwritable` when Insight's `cfg.json` cannot be read (nothing is changed or relayed) or saved.
@@ -409,6 +435,6 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Ro
   - `415 json_only`: the offer was not sent as `Content-Type: application/json`.
   - `413 offer_too_large`: the offer is larger than 64 KiB.
   - `400 invalid_offer`: the body is no JSON session description or no valid SDP offer. `400 no_such_channel`: `N` is not below the channel count (`400 invalid_request` when it is no integer).
-- `502` from `/api/mediasrc/pull` when mediamtx refuses or cannot be reached while configuring the slot.
+- `502 pull_unreachable` from `PUT /api/slots/{n}` when a camera does not answer; `502 mediamtx_failed` when MediaMTX refuses a call. Relayed MJPEG streams answer `429` at their cap, `502` when their ffmpeg fails, `504` when it sends no picture.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.

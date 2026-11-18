@@ -334,20 +334,49 @@ the same arguments and names its interpreter in `NEAT_INSIGHT_PYTHON`.
   `server/` writes the Go types and routing (`api/api.gen.go`, oapi-codegen, a `tool` in `go.mod`),
   and CI fails when they differ. A route is added to the YAML first, then implemented. Routes
   marked Frozen there are used outside Insight (the SDK, sima-cli) and keep their paths and fields.
+  Handlers may answer with a package's own types where they match the schema:
+  `internal/web/contract_test.go` sends requests to the real handlers and checks every request and
+  answer against the YAML (statuses documented, no field the schema does not name), and fails
+  while any operation of the YAML goes unanswered. A new route needs a call there.
 - **Errors have one shape**, `{"error": {"code", "message", "hint"?}}` (`internal/apierr`).
 - **Startup** (`cmd/neat-insight`): the configuration is resolved once (`internal/config`: where
-  Insight runs, its data folder, the hosted-mode files sima-cli writes), then the certificate
-  (`internal/certs`: the SDK's, a valid earlier one, or a new one from mkcert, which Insight never
-  installs), then the children.
+  Insight runs, its data folder, the hosted-mode files sima-cli writes, the SDK's port map), then
+  the certificate (`internal/certs`: the SDK's, a valid earlier one, or a new one from mkcert,
+  which Insight never installs), then the channels, MediaMTX, the sources and the old backend.
+  The programs Insight ships (`mediamtx`, its `mediamtx.yml`, `ffmpeg_nodelay.so`) are found beside
+  the server's binary (`neat_insight/bin/`); ffmpeg and ffprobe on `PATH`. Shutdown runs the other
+  way: the HTTP server, then the slots' publishers and encodes, the relays and the jobs, then the
+  children.
 - **Children** run under `internal/supervisor`: each in its own process group, stopped as a group,
   restarted with back-off when it is a service, its PID in `<data>/run/` so the next start stops
   what a crashed run left behind (and only that: the PID must still run the same program and lead
   its own group).
-- **The old backend** (`internal/legacy`) is the first child: Flask with `--behind-proxy` on a free
-  loopback port, plain HTTP, the server's certificate passed to it for MediaMTX and webssh.
-  Every `/api/`, `/stream/`, `/media/` and `/swagger-ui-assets/` request the server does not handle
-  is passed to it, with the browser's host and `X-Forwarded-Proto: https`, streamed. Each phase of
-  the rewrite moves routes from it to the server: `/api/health` first, then the channels.
+- **The old backend** (`internal/legacy`) is a child: Flask with `--behind-proxy` on a free
+  loopback port, plain HTTP, the server's certificate passed to it for webssh. Every `/api/` and
+  `/swagger-ui-assets/` request the server does not handle is passed to it, with the browser's
+  host and `X-Forwarded-Proto: https`, streamed. Each phase of the rewrite moves routes from it to
+  the server: `/api/health` first, then the channels, then the sources and the media library. It
+  no longer starts MediaMTX or frees its ports. The YouTube import (`/api/import/youtube*`) stays
+  there for now and saves into the same media folder.
+- **MediaMTX** (`internal/mediamtx`) is the server's child, restarted when it exits: its
+  configuration is the shipped `mediamtx.yml` rendered into `<data>/run/` with this run's API
+  password and publisher tag (readable by the owner only), and its WHIP listener serves the
+  server's certificate, offers the browser ICE address and binds the port map's `webrtcWhipIce`.
+  Its API (loopback 9901, the password) is the slots' only way to it.
+- **Sources** (`internal/slots`, routes `/api/slots...`, `/api/renditions`, and the Frozen
+  `/stream/http/srcN.mjpg`): the 48 slots `src1` to `src48`. Only what the user asked of each slot
+  is kept (`<data>/sources.json`); state is derived from the publishers the supervisor runs, a
+  MediaMTX snapshot a second and the jobs, and a reconcile step per slot makes the world match.
+  The URLs they show take the port map's `rtsp.tcp` and `webrtcWhip` host ports and the public
+  origin.
+- **The media library** (`internal/media` for paths, the tree and the probe cache;
+  `internal/library` for the routes' work, `/api/media...` and `/api/catalog...`): the media folder
+  is `/workspace/.insight-media` in the SDK, `<data>/media` elsewhere. The slots are its
+  `FileUser`, so it refuses to delete a file a slot plays and restarts the slots on a replaced one.
+- **MJPEG relays** (`internal/relay`): one ffmpeg per stream however many readers (a slot's
+  preview, a slot's HTTP MJPEG output, a file's preview), capped, stopped a few seconds after the
+  last reader, ended when it stalls. **Jobs** (`internal/jobs`, `/api/jobs...`): renditions'
+  encodes, uploads' re-encodes and catalog downloads, with progress as Server-Sent Events.
 - **Channels** (`internal/channels`) are the Viewer's path, which replaced vf: each binds UDP
   9000+N (RTP) and 9100+N (metadata), assembles whole pictures (vf's rules: start flags, sequence
   breaks, the H.265 gate), rewrites their sequence and timestamps onto one outgoing clock, matches
@@ -394,8 +423,9 @@ Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 | `npm run e2e`          | Playwright end-to-end tests (`frontend/e2e`)                                                        |
 
 The server's checks run in `server/`: `gofmt -l .`, `go vet ./...`, `go test -race ./...`, and
-`go generate ./...` after a change to `api/openapi.yaml`. The old backend's tests run from the
-repo root with `python -m unittest discover -s tests`. Run lint, the unit tests and the build
+`go generate ./...` after a change to `api/openapi.yaml`. The tests against a real MediaMTX run
+when `NEAT_INSIGHT_MEDIAMTX` names its program (CI downloads it), and skip otherwise. The old
+backend's tests run from the repo root with `python -m unittest discover -s tests`. Run lint, the unit tests and the build
 before opening a PR; CI (`.github/workflows/tests.yml`) runs the same.
 
 To try a branch in the Neat SDK container on `:9900`, run `scripts/deploy-sdk-dev.sh` from this
