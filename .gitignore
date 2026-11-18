@@ -3,11 +3,13 @@ mediamtx
 vf
 # `vf` above is the Go binary; the Viewer's vf connection code is source.
 !frontend/src/app/viewer/vf/
-go.mod
-go.sum
+# vf's build makes its Go module afresh each time (build.sh); the server's (server/) is committed.
+/webrtc/go.mod
+/webrtc/go.sum
 .venv
 build/
-dist/
+# The wheels; the server's embedded frontend build (server/internal/spa/dist) has its own rule.
+/dist/
 neat_insight.egg-info/
 neat_insight/bin/
 neat_insight/tools/mediadata_sender

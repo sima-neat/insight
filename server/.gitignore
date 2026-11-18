@@ -1,0 +1,3 @@
+# The frontend build the server embeds, copied in by the build.
+/internal/spa/dist/*
+!/internal/spa/dist/README.md

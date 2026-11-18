@@ -1,0 +1,80 @@
+openapi: 3.0.3
+info:
+  title: Neat Insight
+  description: >-
+    The API of the Neat Insight server, which its web UI uses. This document is the source: the
+    server's Go types and the frontend's TypeScript types are generated from it. Routes marked
+    "Frozen" are used outside Insight (the Neat SDK, sima-cli) and keep their paths and fields.
+  version: "1"
+paths:
+  /api/health:
+    get:
+      operationId: getHealth
+      summary: Whether Insight is up
+      description: >-
+        Frozen: the SDK's network test and other tools check `status == "ok"`. While Insight is
+        still starting its services, it answers 503 with `status: "starting"`.
+      responses:
+        "200":
+          description: Insight is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: Insight is still starting.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status, service, time, network]
+      properties:
+        status:
+          type: string
+          enum: [ok, starting]
+        service:
+          type: string
+          description: Always `neat-insight`.
+        time:
+          type: string
+          description: The server's time in UTC, ISO 8601 with a `Z`.
+        network:
+          $ref: "#/components/schemas/HealthNetwork"
+    HealthNetwork:
+      type: object
+      description: How browsers reach Insight, as resolved at start.
+      required: [browser_ice_address, browser_ice_address_source, public_origin]
+      properties:
+        browser_ice_address:
+          type: string
+          nullable: true
+          description: The address offered to browsers for WebRTC media, or null for the machine's own.
+        browser_ice_address_source:
+          type: string
+          enum: [browser-ice-address, CONTAINER_HOST_IP, none]
+        public_origin:
+          type: string
+          nullable: true
+          description: The origin a shared proxy serves Insight under, or null.
+    Error:
+      type: object
+      description: Every error answer has this shape.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: A stable snake_case word the UI may branch on.
+            message:
+              type: string
+              description: A sentence the UI may show as it is.
+            hint:
+              type: string
+              description: What to do about it, when there is something to say.
