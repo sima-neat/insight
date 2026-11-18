@@ -38,9 +38,6 @@ import psutil
 import ipaddress
 import socket
 
-from neat_insight.mediasrc import MEDIAMTX_API_PORT, WEBCAM_WHIP_ICE_PORT, WEBCAM_WHIP_PORT
-from neat_insight import mediamtx
-
 CERT_FILE = "cert.pem"
 KEY_FILE = "key.pem"
 CERT_HOST_ENV = "NFS_SERVER_HOST_IP"
@@ -168,11 +165,9 @@ def init_environment():
     if is_sima_board():
         user_root = _ensure_sima_board_neat_insight_home()
         media_dir = user_root / "media"
-        media_src_file = user_root / "media_sources.json"
     else:
         user_root = Path.home() / ".simaai" / "neat-insight"
         media_dir = _sdk_media_dir() or user_root / "media"
-        media_src_file = user_root / "media_sources.json"
 
         sima_mem_file = Path("/tmp/simaai-mem")
         if not sima_mem_file.exists():
@@ -183,24 +178,14 @@ def init_environment():
     media_dir.mkdir(parents=True, exist_ok=True)
     print(f"Insight media directory: {media_dir}")
 
-    # Ensure media source file exists
-    if not media_src_file.exists():
-        media_src_file.parent.mkdir(parents=True, exist_ok=True)
-        media_src_file.write_text("[]")
-
-    default_source_count = 48
-
     return {
         "MEDIA_DIR": media_dir,
-        "MEDIA_SRC_DATA_FILE": media_src_file,
-        "DEFAULT_SOURCE_COUNT": default_source_count,
         "OPTVIEW_DATA": user_root,
         "NEAT_INSIGHT_DATA": user_root,
     }
 
 processes = []
 process_logs = []
-runtime_files = []
 _cleanup_done = False
 webssh_proc = None
 
@@ -271,109 +256,15 @@ def _terminate_conflicting_port_specs(port_specs):
         time.sleep(0.2)
 
 
-def _terminate_conflicting_ports(webcam_ice_port=None):
-    # mediamtx uses 8554/tcp, a default UDP helper port 8000, 8889/tcp for
-    # webcam WHIP signalling, its ICE media port for the video itself, and
-    # MEDIAMTX_API_PORT/tcp (loopback) for its status API. Every port here is
-    # freed by stopping its owner, so none may be one a Neat app listens on.
-    # The channel ports (9000+N, 9100+N) are the new server's, which runs this
-    # backend: freeing them would stop the server itself.
-    port_specs = [
-        (8554, "TCP"),
-        (8000, "UDP"),
-        (WEBCAM_WHIP_PORT, "TCP"),
-        (webcam_ice_port or WEBCAM_WHIP_ICE_PORT, "UDP"),
-        (MEDIAMTX_API_PORT, "TCP"),
-    ]
-    devkit_ip = get_devkit_sync_devkit_ip()
-    if devkit_ip:
-        port_specs.append((get_webssh_port(), "TCP"))
+def free_webssh_port():
+    """Stop whatever listens on the webssh port when a DevKit is configured, so the shell can bind it.
 
-    _terminate_conflicting_port_specs(port_specs)
-
-
-def _mediamtx_environment(cert_file, key_file, browser_ice_address=None):
-    # The caller resolves the startup-scoped address once, as the server does for
-    # the channels, so playback and WHIP ICE candidates stay aligned.
-    mtx_env = dict(os.environ)
-    mtx_env["MTX_WEBRTCENCRYPTION"] = "yes"
-    mtx_env["MTX_WEBRTCSERVERCERT"] = cert_file
-    mtx_env["MTX_WEBRTCSERVERKEY"] = key_file
-    effective_ice_address = browser_ice_address
-    if not effective_ice_address:
-        host_ip = os.getenv("CONTAINER_HOST_IP", "").strip()
-        try:
-            parsed_host_ip = ipaddress.ip_address(host_ip) if host_ip else None
-        except ValueError:
-            parsed_host_ip = None
-        if parsed_host_ip and not parsed_host_ip.is_loopback and not parsed_host_ip.is_unspecified:
-            effective_ice_address = host_ip
-    if effective_ice_address:
-        mtx_env["MTX_WEBRTCADDITIONALHOSTS"] = effective_ice_address
-
-    return mtx_env
-
-
-def _write_mediamtx_runtime_config(mtx_config):
-    # The shipped config holds an unusable API password; mediamtx runs from a private copy
-    # carrying this run's password (mkstemp creates the file readable by the owner only).
-    with open(mtx_config, encoding="utf-8") as handle:
-        text = handle.read()
-    try:
-        rendered = mediamtx.render_config(text, mediamtx.API_PASSWORD)
-    except mediamtx.MediamtxError as exc:
-        raise RuntimeError(f"Invalid mediamtx config at {mtx_config}: {exc}. Rebuild package with build.sh.") from exc
-    fd, path = tempfile.mkstemp(prefix="neat-insight-mediamtx-", suffix=".yml")
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(rendered)
-    return path
-
-
-def start_processes(ssl_context, webcam_ice_port=None, browser_ice_address=None):
-    _terminate_conflicting_ports(webcam_ice_port)
-    bin_dir = os.path.join(os.path.dirname(__file__), "bin")
-    mtx = os.path.join(bin_dir, "mediamtx")
-    mtx_config = os.path.join(bin_dir, "mediamtx.yml")
-
-    if not os.path.isfile(mtx):
-        raise RuntimeError(f"mediamtx binary not found at {mtx}. Rebuild package with build.sh.")
-    if not os.path.isfile(mtx_config):
-        raise RuntimeError(f"mediamtx config not found at {mtx_config}.")
-
-    cert_file, key_file = ssl_context
-
-    # Ensure a log directory exists
-    log_dir = os.path.join(bin_dir, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-
-    mtx_log = open(os.path.join(log_dir, "mediamtx.log"), "a")
-    process_logs.append(mtx_log)
-    mtx_env = _mediamtx_environment(cert_file, key_file, browser_ice_address)
-
-    # MediaMTX reads any config key as an MTX_<UPPERCASE_KEY> env override, so
-    # the webcam WHIP listener can reuse the certificate the server resolved
-    # (mkcert-generated or SDK-provided) instead of needing its own baked into
-    # mediamtx.yml.
-    # The ICE port ends up inside MediaMTX's SDP answer, and Docker forwards a
-    # mapped port without rewriting what is written there. The SDK publishes it
-    # identity-mapped and reports it in the port map; binding that same number
-    # keeps the advertised port and the open host port in agreement.
-    if webcam_ice_port:
-        mtx_env["MTX_WEBRTCLOCALUDPADDRESS"] = f":{webcam_ice_port}"
-
-    mtx_runtime_config = _write_mediamtx_runtime_config(mtx_config)
-    runtime_files.append(mtx_runtime_config)
-    mtx_proc = subprocess.Popen(
-        [mtx, mtx_runtime_config],
-        stdout=mtx_log,
-        stderr=subprocess.STDOUT,
-        env=mtx_env,
-    )
-    processes.append(mtx_proc)
-
-    time.sleep(0.25)
-    if mtx_proc.poll() is not None:
-        raise RuntimeError(f"mediamtx failed to start. Check {os.path.join(log_dir, 'mediamtx.log')}")
+    Only that port: the streaming ports (MediaMTX's) and the channel ports are the new server's,
+    which runs this backend as its child, and freeing them would stop the server's own processes.
+    Every port freed here is freed by stopping its owner, so it may not be one a Neat app uses.
+    """
+    if get_devkit_sync_devkit_ip():
+        _terminate_conflicting_port_specs([(get_webssh_port(), "TCP")])
 
 
 def get_devkit_sync_devkit_ip():
@@ -519,13 +410,6 @@ def cleanup_processes(signum=None, frame=None, exit_process=True):
         except Exception:
             pass
     process_logs.clear()
-
-    for path in list(runtime_files):
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
-    runtime_files.clear()
 
     if exit_process:
         sys.exit(0)

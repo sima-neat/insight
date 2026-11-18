@@ -1,9 +1,7 @@
 import tempfile
 import unittest
-import unittest.mock as mock
 from pathlib import Path
 
-from neat_insight import utils
 from neat_insight.runtime_config import RuntimeNetworkConfig, load_runtime_network_config
 
 
@@ -108,20 +106,6 @@ class RuntimeNetworkConfigTests(unittest.TestCase):
             with self.subTest(value=value), self.assertLogs(level="WARNING"):
                 config = self._load(launch_url=value)
             self.assertIsNone(config.public_origin)
-
-
-class MediamtxEnvironmentTests(unittest.TestCase):
-    def test_the_browser_address_reaches_mediamtx(self):
-        with mock.patch.dict("os.environ", {"CONTAINER_HOST_IP": "10.77.0.1"}, clear=True):
-            mtx_env = utils._mediamtx_environment("/cert.pem", "/key.pem", "54.12.34.56")
-
-        self.assertEqual(mtx_env["MTX_WEBRTCADDITIONALHOSTS"], "54.12.34.56")
-
-    def test_no_override_preserves_mediamtx_container_host_fallback(self):
-        with mock.patch.dict("os.environ", {"CONTAINER_HOST_IP": "10.77.0.1"}, clear=True):
-            mtx_env = utils._mediamtx_environment("/cert.pem", "/key.pem")
-
-        self.assertEqual(mtx_env["MTX_WEBRTCADDITIONALHOSTS"], "10.77.0.1")
 
 
 if __name__ == "__main__":

@@ -28,16 +28,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # The MediaMTX integration tests run against the release build.sh bundles.
-      - name: Download MediaMTX
-        run: |
-          set -euo pipefail
-          version=$(sed -n 's/^MTX_VERSION="\(.*\)"$/\1/p' build.sh)
-          mkdir -p "$RUNNER_TEMP/mediamtx"
-          curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${version}/mediamtx_v${version}_linux_amd64.tar.gz" \
-            | tar -xz -C "$RUNNER_TEMP/mediamtx" mediamtx
-          echo "NEAT_INSIGHT_MEDIAMTX=$RUNNER_TEMP/mediamtx/mediamtx" >> "$GITHUB_ENV"
-
       - name: Install Insight
         run: |
           set -euo pipefail
@@ -46,7 +36,7 @@ jobs:
 
       - name: Python tests
         env:
-          # ffmpeg is installed above; a missing one must fail the FPS rendition tests, not skip them.
+          # ffmpeg is installed above; a missing one must fail the test-feed metadata tests, not skip them.
           NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS: "1"
         run: python -m unittest discover -s tests -v
 

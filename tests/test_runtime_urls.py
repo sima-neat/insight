@@ -8,7 +8,7 @@ from neat_insight import app as app_module
 from neat_insight.runtime_config import RuntimeNetworkConfig
 
 
-class RuntimePublicUrlTests(unittest.TestCase):
+class HealthNetworkTests(unittest.TestCase):
     def setUp(self):
         app_module.app.config.update(TESTING=True)
         self.client = app_module.app.test_client()
@@ -31,18 +31,6 @@ class RuntimePublicUrlTests(unittest.TestCase):
                 "public_origin": "https://insight.example.com/",
             },
         )
-
-    def test_whip_and_mjpeg_use_the_public_origin_but_rtsp_does_not(self):
-        with mock.patch.object(app_module, "runtime_network_config", self.config), \
-             mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=[]), \
-             app_module.app.test_request_context(headers={"Host": "10.77.0.1:9900"}):
-            whip = app_module._webcam_whip_url({"index": 2})
-            mjpeg = app_module._source_url({"index": 2}, "http")
-            rtsp = app_module._source_url({"index": 2}, "rtsp")
-
-        self.assertEqual(whip, "https://insight.example.com/cam2/whip")
-        self.assertEqual(mjpeg, "https://insight.example.com/stream/http/src2.mjpg")
-        self.assertEqual(rtsp, "rtsp://10.77.0.1:8554/src2")
 
 
 if __name__ == "__main__":

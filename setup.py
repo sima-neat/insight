@@ -37,7 +37,6 @@ setup(
     install_requires=[
         "flask",
         "certifi",
-        "pillow",
         "psutil",
         "pyzmq",
         "cryptography>=41.0.5,<45",

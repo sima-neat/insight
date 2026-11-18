@@ -395,7 +395,7 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
 
     # ==== TCP_NODELAY preload shim (Linux wheels only) ====
     # LD_PRELOAD is a Linux mechanism, so macOS and Windows wheels ship without
-    # it and mediasrc falls back to spawning ffmpeg unmodified.
+    # it and the server's slots fall back to running ffmpeg unmodified.
     if [[ -n "$SHIM_CC_PACKAGE" && "$SKIP_SHIM" == "1" ]]; then
         echo "⏭️ Skipping TCP_NODELAY shim (--skip-shim); this $target wheel will run ffmpeg with Nagle enabled"
     elif [[ -n "$SHIM_CC_PACKAGE" ]]; then
