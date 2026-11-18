@@ -66,6 +66,23 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
+      # The media, relay and MediaMTX tests run the real tools; without them they skip.
+      - name: Install FFmpeg
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Download MediaMTX
+        working-directory: .
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^MTX_VERSION="\(.*\)"$/\1/p' build.sh)
+          mkdir -p "$RUNNER_TEMP/mediamtx"
+          curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${version}/mediamtx_v${version}_linux_amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/mediamtx" mediamtx
+          echo "NEAT_INSIGHT_MEDIAMTX=$RUNNER_TEMP/mediamtx/mediamtx" >> "$GITHUB_ENV"
+
       - name: Formatting
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
 
