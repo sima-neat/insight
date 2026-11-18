@@ -10,10 +10,17 @@ working around the rule.
 UI kit, `@sima/neat-ui` (repo `justin-guth-sima/neat-ui`). Its design notes are kept outside the
 repo.
 
-- `frontend/`: the Angular app. Flask serves its build from `frontend/dist`.
-- `neat_insight/`: the Flask backend (the `/api/` endpoints, media, MJPEG previews) that also
-  serves the built frontend, falling back to `index.html` for client-side routes.
-- `webrtc/`: vf, the Go media and metadata server the Viewer gets its video from.
+- `frontend/`: the Angular app. The server embeds its build (`frontend/dist`).
+- `server/`: the new backend, one Go binary, which is being rewritten from scratch on
+  `feat/backend-rewrite` (see "The server" below). It listens on `--port`, serves the web UI and
+  the routes it implements, and runs the old backend behind it for the rest.
+- `neat_insight/`: the old Flask backend (the `/api/` endpoints, media, MJPEG previews), run by the
+  server on a loopback port until the rewrite has replaced it, and the `neat-insight` command
+  (`launcher.py`), which runs the server binary.
+- `webrtc/`: vf, the Go media and metadata server the Viewer gets its video from (replaced by the
+  server in the rewrite's second phase).
+- `docs/contracts.md`: what an app follows to show up in Insight (source URLs, channel ports, the
+  metadata format with its JSON Schemas in `docs/schemas/metadata/`).
 - `UPSTREAM.md`: the `sima-neat/insight` baseline this repo was copied from. Backend changes from
   upstream are ported by hand, and every port appends a line to its log.
 
@@ -263,7 +270,7 @@ merging.
   samples came after it than `history` allows. Only Stats polls Sentinel: nothing else does, and
   `/api/metrics` (System Info's "This computer") is read on open and on Refresh only.
 - **Build output.** `npm run build` writes the app to `frontend/dist` with `index.html` at its root,
-  where Flask (`_resolve_frontend_dist`) and `build.sh` look for it. Fonts and other media go to
+  where `scripts/build-server.sh` looks for it to embed it in the server. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`: Flask's `/media/<path>` route serves
   Insight's media library and would shadow them. Keep built files away from `/media/` and from
   `/static/`, which the hosted mode's public origin routes to vf. The initial-bundle budget warns at
@@ -316,6 +323,31 @@ merging.
 - **Unit tests** use the Angular CLI's runner (Vitest); end-to-end tests use Playwright
   (`frontend/e2e`).
 
+## The server
+
+`server/` is a Go module (its `go.mod` names the Go version). `neat-insight --port 9900` (the
+Python package's command, `neat_insight/launcher.py`) execs `neat_insight/bin/neat-insight` with
+the same arguments and names its interpreter in `NEAT_INSIGHT_PYTHON`.
+
+- **The API is described first.** `server/api/openapi.yaml` is the source; `go generate ./...` in
+  `server/` writes the Go types and routing (`api/api.gen.go`, oapi-codegen, a `tool` in `go.mod`),
+  and CI fails when they differ. A route is added to the YAML first, then implemented. Routes
+  marked Frozen there are used outside Insight (the SDK, sima-cli) and keep their paths and fields.
+- **Errors have one shape**, `{"error": {"code", "message", "hint"?}}` (`internal/apierr`).
+- **Startup** (`cmd/neat-insight`): the configuration is resolved once (`internal/config`: where
+  Insight runs, its data folder, the hosted-mode files sima-cli writes), then the certificate
+  (`internal/certs`: the SDK's, a valid earlier one, or a new one from mkcert, which Insight never
+  installs), then the children.
+- **Children** run under `internal/supervisor`: each in its own process group, stopped as a group,
+  restarted with back-off when it is a service, its PID in `<data>/run/` so the next start stops
+  what a crashed run left behind (and only that: the PID must still run the same program and lead
+  its own group).
+- **The old backend** (`internal/legacy`) is the first child: Flask with `--behind-proxy` on a free
+  loopback port, plain HTTP, the server's certificate passed to it for vf, MediaMTX and webssh.
+  Every `/api/`, `/stream/`, `/media/` and `/swagger-ui-assets/` request the server does not handle
+  is passed to it, with the browser's host and `X-Forwarded-Proto: https`, streamed. Each phase of
+  the rewrite moves routes from it to the server; `/api/health` is the first.
+
 ## The vendored kit
 
 `@sima/neat-ui` is never published to a registry. The app depends on a versioned tarball committed
@@ -351,13 +383,16 @@ Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 | `npm run check:bundle` | Checks the built bundle: video, lazy pages and the two dialogs stay out of the initial one          |
 | `npm run e2e`          | Playwright end-to-end tests (`frontend/e2e`)                                                        |
 
-The backend's tests run from the repo root with `python -m unittest discover -s tests`. Run lint,
-the unit tests and the build before opening a PR; CI (`.github/workflows/tests.yml`) runs the same.
+The server's checks run in `server/`: `gofmt -l .`, `go vet ./...`, `go test -race ./...`, and
+`go generate ./...` after a change to `api/openapi.yaml`. The old backend's tests run from the
+repo root with `python -m unittest discover -s tests`. Run lint, the unit tests and the build
+before opening a PR; CI (`.github/workflows/tests.yml`) runs the same.
 
-To try a branch in the Neat SDK container on `:9900`, use the `sima-insight-dev-deploy` skill and
-run its script under Node 24 from this checkout:
-`~/.local/share/fnm/fnm exec --using=24 -- ~/.claude/skills/sima-insight-dev-deploy/deploy.sh`
-(`deploy.sh --restore` brings back the stock service).
+To try a branch in the Neat SDK container on `:9900`, run `scripts/deploy-sdk-dev.sh` from this
+checkout with Node 24 and Go on `PATH` (`--no-frontend` skips the frontend build, `--restore`
+brings back the stock service). It builds the server for the container and starts it in the dev
+copy. The `sima-insight-dev-deploy` skill's own `deploy.sh` predates the server and does not build
+it.
 
 ## Quality bar
 

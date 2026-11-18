@@ -3,7 +3,9 @@
 > **Prototype.** `insight-next` is a copy of [`sima-neat/insight`](https://github.com/sima-neat/insight)
 > used to rebuild the Insight frontend in Angular on a new UI kit. It started from upstream commit `829ec7c`
 > with fresh history (see [`UPSTREAM.md`](UPSTREAM.md)), and the React frontend and the org-level release
-> workflows were removed. The Python backend and the Go viewer are unchanged for now and track upstream by hand.
+> workflows were removed. On this branch the backend is being rewritten from scratch as one Go server
+> (`server/`), which runs the old Python backend behind it until it has replaced it; what apps rely
+> on is in [`docs/contracts.md`](docs/contracts.md).
 > The rest of this README describes upstream Insight, and `docs/` still describes the upstream UI until the
 > Angular frontend reaches parity.
 
@@ -106,7 +108,7 @@ Use this when you need to modify functionality.
 Prerequisites:
 - Python 3.10+
 - Node.js 24 and npm for the frontend (`.node-version`)
-- Go 1.24+
+- Go, the version `server/go.mod` names, for the server and vf
 - A C compiler for each Linux target: `gcc` for the host, plus
   `gcc-aarch64-linux-gnu` or `gcc-x86-64-linux-gnu` to cross-build the other
   Linux wheel. Linux wheels bundle a small `LD_PRELOAD` shim
@@ -130,7 +132,8 @@ neat-insight --port 9900
 ```
 
 Useful build options:
-- `--target-platform <host|all|linux-aarch64|linux-amd64|macos-arm64|windows-amd64>`
+- `--target-platform <host|all|linux-aarch64|linux-amd64|macos-arm64>` (no Windows: the server
+  needs Unix process groups)
 - `--skip-frontend`
 - `--skip-shim` (Linux wheels then run ffmpeg with Nagle enabled)
 
@@ -149,10 +152,21 @@ npm run build                 # production build into frontend/dist
 npm run e2e                   # end-to-end tests
 ```
 
-The dev server serves the app alone, without the Flask backend, which is enough while the pages are
-placeholders. To see the build the way users do, run `npm run build` and start `neat-insight` from
-a source-tree install: Flask serves `frontend/dist` and falls back to `index.html` for client-side
-routes such as `/viewer`.
+The dev server serves the app alone, without the backend; the e2e tests mock what they need. To
+see the build the way users do, build the server with the frontend in it (`./build.sh`, or
+`scripts/build-server.sh linux amd64 neat_insight/bin/neat-insight` after `npm run build`) and
+start `neat-insight` from a source-tree install. The server serves the app and falls back to
+`index.html` for client-side routes such as `/viewer`.
+
+### Work on the server
+
+The server is a Go module in `server/` (see [`AGENTS.md`](AGENTS.md)). Run these in `server/`:
+
+```bash
+go test -race ./...           # tests
+go vet ./...                  # static checks
+go generate ./...             # after a change to api/openapi.yaml, the API's source
+```
 
 `npm run e2e` starts the dev server itself. The first run needs Chromium with its system libraries:
 `npx playwright install --with-deps chromium`. To test a build that is already running, for example
@@ -177,7 +191,7 @@ and puts the stock service back when you are done. The container sees `~/workspa
 `/workspace`; the script keeps a dev copy at `~/workspace/.insight-dev` with its own virtualenv and
 never touches `/opt/neat-insight` in the container.
 
-Once, to create the dev copy (`build.sh` needs Go and produces the viewer binaries under
+Once, to create the dev copy (`build.sh` needs Go and produces the server and viewer binaries under
 `neat_insight/bin/`):
 
 ```bash
@@ -187,8 +201,8 @@ rsync -a --exclude .git --exclude node_modules ./ ~/workspace/.insight-dev/
 docker exec "$C" bash -c 'cd /workspace/.insight-dev && python3 -m venv .venv && .venv/bin/pip install -e .'
 ```
 
-Then, after every change (Node.js 24 for the frontend build, which runs on the host because the
-container has no npm):
+Then, after every change (Node.js 24 for the frontend build and Go for the server, both on the host
+because the container has neither):
 
 ```bash
 scripts/deploy-sdk-dev.sh                 # build the frontend, sync, restart on https://localhost:9900
