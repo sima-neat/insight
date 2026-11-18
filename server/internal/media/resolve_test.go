@@ -128,3 +128,56 @@ func TestResolveLeavesALinkALink(t *testing.T) {
 		t.Fatalf("Resolve returned the link's target, not the link")
 	}
 }
+
+func TestResolveEntry(t *testing.T) {
+	root, _ := libraryWithLinks(t)
+	tests := []struct {
+		rel  string
+		want string // the path below root; "" when ResolveEntry must refuse it
+	}{
+		{"clip.mp4", "clip.mp4"},
+		{"./sub//deep.mp4", "sub/deep.mp4"},
+		{"sub", "sub"},
+		{"new.mp4", "new.mp4"},
+		{"link-sub/deep.mp4", "link-sub/deep.mp4"},
+		// The entry itself may lead anywhere: removing or replacing it touches only the link.
+		{"link-out.mp4", "link-out.mp4"},
+		{"link-out-dir", "link-out-dir"},
+		{"dangling.mp4", "dangling.mp4"},
+		{"loop-a", "loop-a"},
+		{"self", "self"},
+
+		{"", ""},
+		{".", ""},
+		{"/", ""},
+		{"/etc/passwd", ""},
+		{"..", ""},
+		{"../outside/secret.mp4", ""},
+		{"sub/../clip.mp4", ""},
+		{"clip\x00.mp4", ""},
+		{".renditions", ""},
+		{"sub/.upload-1", ""},
+		{"__MACOSX", ""},
+		// What lies before the entry must stay inside.
+		{"link-out-dir/secret.mp4", ""},
+		{"link-sibling/sibling.mp4", ""},
+		{"loop-a/clip.mp4", ""},
+	}
+	for _, test := range tests {
+		t.Run(test.rel, func(t *testing.T) {
+			got, err := ResolveEntry(root, test.rel)
+			if test.want == "" {
+				if !errors.Is(err, ErrInvalidPath) {
+					t.Fatalf("ResolveEntry(%q) = %q, %v; want ErrInvalidPath", test.rel, got, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveEntry(%q): %v", test.rel, err)
+			}
+			if want := filepath.Join(root, test.want); got != want {
+				t.Fatalf("ResolveEntry(%q) = %s, want %s", test.rel, got, want)
+			}
+		})
+	}
+}

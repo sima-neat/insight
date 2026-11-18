@@ -96,18 +96,26 @@ func (f *FFmpegProgress) Diagnostics() []string {
 // progress as a percent of duration (none when duration is 0) and as its detail. The phase is the
 // caller's. It returns what it followed, for the diagnostics of a failed run, and a read error.
 func FollowFFmpeg(r io.Reader, duration time.Duration, progress *Progress) (*FFmpegProgress, error) {
+	return FollowFFmpegWith(r, duration, func(f *FFmpegProgress) {
+		if percent, ok := f.Percent(); ok {
+			progress.SetPercent(percent)
+		}
+		progress.SetDetail(f.Detail())
+	})
+}
+
+// FollowFFmpegWith reads ffmpeg's output as FollowFFmpeg does, but hands each move of the output
+// time, and the end, to moved, for work that reports one run as part of a larger whole (one file
+// of several).
+func FollowFFmpegWith(r io.Reader, duration time.Duration, moved func(*FFmpegProgress)) (*FFmpegProgress, error) {
 	f := &FFmpegProgress{Duration: duration}
 	lines := bufio.NewScanner(r)
 	lines.Buffer(make([]byte, 0, maxLineBytes), maxLineBytes)
 	lines.Split(splitLines())
 	for lines.Scan() {
-		if !f.Line(lines.Text()) {
-			continue
+		if f.Line(lines.Text()) {
+			moved(f)
 		}
-		if percent, ok := f.Percent(); ok {
-			progress.SetPercent(percent)
-		}
-		progress.SetDetail(f.Detail())
 	}
 	if err := lines.Err(); err != nil {
 		return f, fmt.Errorf("reading ffmpeg's output: %w", err)

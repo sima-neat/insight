@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -54,6 +55,23 @@ func Resolve(root, rel string) (string, error) {
 		return "", fmt.Errorf("%w: %s leads out of the media folder", ErrInvalidPath, rel)
 	}
 	return full, nil
+}
+
+// ResolveEntry is Resolve for a path whose last entry is acted on itself, removed or replaced,
+// rather than read through: the path is checked as Resolve checks it, and every link before
+// the last entry must stay inside the media folder, but the entry may be a link that leads
+// anywhere or nowhere, since removing or replacing a link never touches its target.
+func ResolveEntry(root, rel string) (string, error) {
+	clean, err := cleanPath(rel)
+	if err != nil {
+		return "", err
+	}
+	if dir := path.Dir(clean); dir != "." {
+		if _, err := Resolve(root, dir); err != nil {
+			return "", err
+		}
+	}
+	return filepath.Join(filepath.Clean(root), filepath.FromSlash(clean)), nil
 }
 
 // cleanPath checks a library path's text and returns it without empty and "." components.

@@ -127,6 +127,36 @@ func TestCacheProbesOnceWhileTheFileStaysTheSame(t *testing.T) {
 	}
 }
 
+func TestCacheProbeAnswersAtOnceAndKeepsTheAnswer(t *testing.T) {
+	fake := newFakeProber()
+	c := NewCache(t.Context(), fake.probe)
+	dir := t.TempDir()
+	path := writeFile(t, dir, "clip.mp4", "x")
+
+	info, err := c.Probe(t.Context(), path)
+	if err != nil || info.Codec != "clip.mp4" {
+		t.Fatalf("Probe = %+v, %v", info, err)
+	}
+	if got, ok := c.Get(path); !ok || got.Codec != "clip.mp4" {
+		t.Fatalf("Get after Probe = %+v, %v", got, ok)
+	}
+	if _, err := c.Probe(t.Context(), path); err != nil || fake.callsOf(path) != 1 {
+		t.Fatalf("a second Probe probed again (%d calls): %v", fake.callsOf(path), err)
+	}
+
+	// A failed probe is an answer too, kept as Get keeps it.
+	bad := writeFile(t, dir, "bad.mp4", "x")
+	fake.fail[bad] = errors.New("ffprobe could not read bad.mp4: Invalid data")
+	info, err = c.Probe(t.Context(), bad)
+	if err != nil || info.Kind != KindUnknown || info.Problem == "" {
+		t.Fatalf("Probe of a bad file = %+v, %v", info, err)
+	}
+
+	if _, err := c.Probe(t.Context(), filepath.Join(dir, "missing.mp4")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Probe of a missing file: %v", err)
+	}
+}
+
 func TestCacheQueuesAFileOnce(t *testing.T) {
 	fake := newFakeProber()
 	fake.hold = true

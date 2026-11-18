@@ -133,17 +133,45 @@ func (c *Cache) work() {
 			delete(c.entries, abs)
 		case c.ctx.Err() != nil:
 			// Stopped, not failed: nothing to remember.
-		case err != nil:
-			c.entries[abs] = entry{
-				stamp:  st,
-				info:   Info{Kind: KindUnknown, Size: st.size, Problem: err.Error()},
-				failed: c.now(),
-			}
 		default:
-			c.entries[abs] = entry{stamp: st, info: info}
+			c.storeLocked(abs, st, info, err)
 		}
 		c.mu.Unlock()
 	}
+}
+
+// Probe returns what probing the file at abs says: the cached answer while the file has not
+// changed since (a failure too, as Get gives it), else the answer of a probe it runs at once, in
+// the calling goroutine and with its ctx, and keeps for Get. A failed probe is an Info of
+// KindUnknown whose Problem says why; the error is for a file that cannot be read at all, and
+// for ctx ending.
+func (c *Cache) Probe(ctx context.Context, abs string) (Info, error) {
+	if info, ok := c.Get(abs); ok {
+		return info, nil
+	}
+	st, err := stampOf(abs)
+	if err != nil {
+		return Info{}, err
+	}
+	info, err := c.probe(ctx, abs)
+	if ctx.Err() != nil {
+		return Info{}, ctx.Err()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.storeLocked(abs, st, info, err), nil
+}
+
+// storeLocked keeps what a probe of the file at abs, as it was at st, said, and returns it as
+// Get will.
+func (c *Cache) storeLocked(abs string, st stamp, info Info, err error) Info {
+	e := entry{stamp: st, info: info}
+	if err != nil {
+		e.info = Info{Kind: KindUnknown, Size: st.size, Problem: err.Error()}
+		e.failed = c.now()
+	}
+	c.entries[abs] = e
+	return e.info
 }
 
 // next takes the next queued path, or retires the calling worker when there is none or the
@@ -166,9 +194,15 @@ func (c *Cache) next() (string, bool) {
 
 // statOf is the stamp of the file at abs, following links; false when it cannot be read.
 func statOf(abs string) (stamp, bool) {
+	st, err := stampOf(abs)
+	return st, err == nil
+}
+
+// stampOf is the stamp of the file at abs, following links, or why it cannot be read.
+func stampOf(abs string) (stamp, error) {
 	info, err := os.Stat(abs)
 	if err != nil {
-		return stamp{}, false
+		return stamp{}, err
 	}
-	return stamp{size: info.Size(), mtime: info.ModTime().UnixNano()}, true
+	return stamp{size: info.Size(), mtime: info.ModTime().UnixNano()}, nil
 }
