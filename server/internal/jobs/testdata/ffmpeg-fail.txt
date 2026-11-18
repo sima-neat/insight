@@ -1,0 +1,17 @@
+x264 [error]: baseline profile doesn't support 4:4:4
+[libx264 @ 0x5d17afb42280] Error setting profile baseline.
+[vost#0:0/libx264 @ 0x5d17afb42280] Error while opening encoder - maybe incorrect parameters such as bit_rate, rate, width or height.
+Error while filtering: Invalid argument
+[out#0/mp4 @ 0x5d17afb42280] Nothing was written into output file, because at least one of its streams received no packets.
+frame=0
+fps=0.00
+stream_0_0_q=0.0
+bitrate=N/A
+total_size=0
+out_time_us=N/A
+out_time_ms=N/A
+out_time=N/A
+dup_frames=0
+drop_frames=0
+speed=N/A
+progress=end
