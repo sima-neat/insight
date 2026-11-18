@@ -1,8 +1,7 @@
 import { signal } from '@angular/core';
 import type { NeatFrameStats } from '@sima/neat-ui/video';
 import type { VfStatus } from './vf/channel-status';
-import type { VfSyncBuffer } from './vf/egress-report';
-import type { VfConnection } from './vf/vf-connection';
+import type { VfConnection, VfSyncBuffer } from './vf/vf-connection';
 import type { VfConnections } from './vf/vf-connections';
 
 /** A channel connection without WebRTC: its status is set by the test, its calls are recorded. */
@@ -20,7 +19,6 @@ export class FakeConnection {
   /** A receiver that takes the sync buffer, until a test says otherwise. */
   readonly syncBuffer = signal<VfSyncBuffer>({ supported: true, applied: true, targetMs: 300 });
   readonly syncBuffers: number[] = [];
-  readonly retentions: number[] = [];
   readonly frameStats: NeatFrameStats[] = [];
 
   constructor(readonly channel: number) {}
@@ -31,10 +29,6 @@ export class FakeConnection {
 
   setSyncBuffer(ms: number): void {
     this.syncBuffers.push(ms);
-  }
-
-  setMetadataRetention(ms: number): void {
-    this.retentions.push(ms);
   }
 
   reportFrameStats(stats: NeatFrameStats): void {

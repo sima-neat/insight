@@ -520,7 +520,7 @@ describe('ViewerInspector', () => {
     expect(status()).toContainEqual(['Late metadata', 'Not measured while off the grid']);
 
     // With no grid tile the preview's stats are the only ones: they feed the connection's status
-    // line and vf's egress report (vf-connection.spec covers what the connection makes of them).
+    // line (vf-connection.spec covers what the connection makes of them).
     const previewStats = { metadataMessagesPerSecond: 12 } as NeatFrameStats;
     previewTile()!.frameStats.emit(previewStats);
     expect(fake.connections.get(2)!.frameStats).toEqual([previewStats]);
@@ -529,7 +529,6 @@ describe('ViewerInspector', () => {
     await type(field('Video sync buffer'), '900');
     await type(field('Metadata retention'), '2000');
     expect(fake.connections.get(2)!.syncBuffers.at(-1)).toBe(900);
-    expect(fake.connections.get(2)!.retentions.at(-1)).toBe(2000);
     expect(previewTile()!.retentionMs()).toBe(2000);
 
     // Back on the grid, only the grid tile reports again.
@@ -719,11 +718,11 @@ describe('ViewerInspector', () => {
       page.injector.get(LayoutPrefs).setHideEmpty(true);
       await settle();
       TestBed.inject(HttpTestingController)
-        .expectOne('/api/ingest/stats')
+        .expectOne('/api/channels')
         .flush({
           channels: [
-            { channel: 3, active: true },
-            { channel: 5, active: true },
+            { channel: 3, video: { active: true } },
+            { channel: 5, video: { active: true } },
           ],
         });
       await settle();

@@ -3,29 +3,65 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { ChannelLiveness, liveChannels } from './channel-liveness';
 
-const STATS_URL = '/api/ingest/stats';
+const CHANNELS_URL = '/api/channels';
+const COUNT = 8;
 
-/** An ingest stats answer in vf's shape (webrtc/ingest_stats.go), cut to the fields read here. */
-const stats = (...live: number[]) => ({
-  time: '2026-10-22T12:00:00Z',
-  active_ttl_ms: 3000,
-  channels: live.map((channel) => ({ channel, udp_port: 9000 + channel, active: true })),
+/**
+ * A `/api/channels` answer as the server gives it (server/api/openapi.yaml): every channel, the
+ * `live` ones receiving video and metadata.
+ */
+const channelList = (...live: number[]) => ({
+  count: COUNT,
+  channels: Array.from({ length: COUNT }, (_, channel) => {
+    const active = live.includes(channel);
+    return {
+      channel,
+      viewers: active ? 1 : 0,
+      errors: [],
+      video: {
+        port: 9000 + channel,
+        active,
+        ...(active && { codec: 'H264', last_at: '2026-11-18T12:00:00Z', sender: '10.0.0.2:5000' }),
+        payload_type: active ? 96 : 0,
+        unsupported_packets: 0,
+        packets: active ? 4000 : 0,
+        bits_per_second: active ? 4_000_000 : 0,
+        frames_per_second: active ? 30 : 0,
+        keyframes: active ? 10 : 0,
+      },
+      metadata: {
+        port: 9100 + channel,
+        active,
+        received: active ? 300 : 0,
+        messages_per_second: active ? 30 : 0,
+        matched: active ? 290 : 0,
+        unmatched: 0,
+        invalid: 0,
+        no_viewer: 0,
+      },
+    };
+  }),
 });
 
 describe('liveChannels', () => {
-  it('takes the channels vf reports active', () => {
-    expect(liveChannels(stats(4, 0))).toEqual(new Set([4, 0]));
+  it('takes the channels whose video is active, out of every channel listed', () => {
+    expect(liveChannels(channelList(4, 0))).toEqual(new Set([0, 4]));
+    expect(liveChannels(channelList())).toEqual(new Set());
   });
 
   it('skips inactive and malformed entries, and reads a malformed answer as none live', () => {
     expect(
       liveChannels({
         channels: [
-          { channel: 1, active: false },
-          { channel: '2', active: true },
-          { channel: 3.5, active: true },
+          { channel: 1, video: { active: false } },
+          { channel: '2', video: { active: true } },
+          { channel: 3.5, video: { active: true } },
+          { channel: 4, video: null },
+          { channel: 5, active: true },
+          // Metadata alone is no video.
+          { channel: 7, video: { active: false }, metadata: { active: true } },
           null,
-          { channel: 6, active: true },
+          { channel: 6, video: { active: true } },
         ],
       }),
     ).toEqual(new Set([6]));
@@ -63,39 +99,39 @@ describe('ChannelLiveness', () => {
 
   it('asks nothing until enabled, then polls every 2 s', () => {
     vi.advanceTimersByTime(6000);
-    http.expectNone(STATS_URL);
+    http.expectNone(CHANNELS_URL);
     expect(liveness.live()).toBeNull();
 
     liveness.setEnabled(true);
-    http.expectOne(STATS_URL).flush(stats(1, 2));
+    http.expectOne(CHANNELS_URL).flush(channelList(1, 2));
     expect(liveness.live()).toEqual(new Set([1, 2]));
 
     vi.advanceTimersByTime(2000);
-    http.expectOne(STATS_URL).flush(stats(2));
+    http.expectOne(CHANNELS_URL).flush(channelList(2));
     expect(liveness.live()).toEqual(new Set([2]));
   });
 
   it('stops polling and forgets the live set when disabled', () => {
     liveness.setEnabled(true);
-    http.expectOne(STATS_URL).flush(stats(1));
+    http.expectOne(CHANNELS_URL).flush(channelList(1));
 
     liveness.setEnabled(false);
     expect(liveness.live()).toBeNull();
     vi.advanceTimersByTime(10_000);
-    http.expectNone(STATS_URL);
+    http.expectNone(CHANNELS_URL);
   });
 
   it('pauses while the page is hidden and asks again at once when it shows', () => {
     liveness.setEnabled(true);
-    http.expectOne(STATS_URL).flush(stats(1));
+    http.expectOne(CHANNELS_URL).flush(channelList(1));
 
     setVisibility('hidden');
     vi.advanceTimersByTime(10_000);
-    http.expectNone(STATS_URL);
+    http.expectNone(CHANNELS_URL);
     expect(liveness.live()).toEqual(new Set([1]));
 
     setVisibility('visible');
-    http.expectOne(STATS_URL).flush(stats(3));
+    http.expectOne(CHANNELS_URL).flush(channelList(3));
     expect(liveness.live()).toEqual(new Set([3]));
   });
 
@@ -103,17 +139,17 @@ describe('ChannelLiveness', () => {
     setVisibility('hidden');
     liveness.setEnabled(true);
     vi.advanceTimersByTime(4000);
-    http.expectNone(STATS_URL);
+    http.expectNone(CHANNELS_URL);
   });
 
   it('the latest response wins over an earlier one that arrives after it', () => {
     liveness.setEnabled(true);
-    const first = http.expectOne(STATS_URL);
+    const first = http.expectOne(CHANNELS_URL);
     vi.advanceTimersByTime(2000);
-    const second = http.expectOne(STATS_URL);
+    const second = http.expectOne(CHANNELS_URL);
 
-    second.flush(stats(2));
-    first.flush(stats(1));
+    second.flush(channelList(2));
+    first.flush(channelList(1));
 
     expect(liveness.live()).toEqual(new Set([2]));
   });
@@ -121,23 +157,23 @@ describe('ChannelLiveness', () => {
   it('is unavailable while the newest request failed, keeping the last answer, until the next one', () => {
     liveness.setEnabled(true);
     const badGateway = { status: 502, statusText: 'Bad Gateway' };
-    http.expectOne(STATS_URL).flush({ error: 'vf ingest stats unavailable' }, badGateway);
+    http.expectOne(CHANNELS_URL).flush(null, badGateway);
     expect(liveness.unavailable()).toBe(true);
     expect(liveness.live()).toBeNull();
 
     vi.advanceTimersByTime(2000);
-    http.expectOne(STATS_URL).flush(stats(1));
+    http.expectOne(CHANNELS_URL).flush(channelList(1));
     expect(liveness.unavailable()).toBe(false);
     expect(liveness.live()).toEqual(new Set([1]));
 
     // A failure after a good answer keeps that answer: one lost poll must not swing the grid.
     vi.advanceTimersByTime(2000);
-    http.expectOne(STATS_URL).flush({ error: 'vf ingest stats unavailable' }, badGateway);
+    http.expectOne(CHANNELS_URL).flush(null, badGateway);
     expect(liveness.unavailable()).toBe(true);
     expect(liveness.live()).toEqual(new Set([1]));
 
     vi.advanceTimersByTime(2000);
-    http.expectOne(STATS_URL).flush(stats(4));
+    http.expectOne(CHANNELS_URL).flush(channelList(4));
     expect(liveness.unavailable()).toBe(false);
     expect(liveness.live()).toEqual(new Set([4]));
 
@@ -148,9 +184,9 @@ describe('ChannelLiveness', () => {
 
   it('an older request that fails after a newer answer changes nothing', () => {
     liveness.setEnabled(true);
-    const first = http.expectOne(STATS_URL);
+    const first = http.expectOne(CHANNELS_URL);
     vi.advanceTimersByTime(2000);
-    http.expectOne(STATS_URL).flush(stats(2));
+    http.expectOne(CHANNELS_URL).flush(channelList(2));
 
     first.flush({ error: 'timeout' }, { status: 504, statusText: 'Gateway Timeout' });
 
@@ -160,20 +196,20 @@ describe('ChannelLiveness', () => {
 
   it('ignores an answer to a request sent before it was disabled', () => {
     liveness.setEnabled(true);
-    const stale = http.expectOne(STATS_URL);
+    const stale = http.expectOne(CHANNELS_URL);
     liveness.setEnabled(false);
 
-    stale.flush(stats(1));
+    stale.flush(channelList(1));
 
     expect(liveness.live()).toBeNull();
   });
 
   it('stops polling when destroyed', () => {
     liveness.setEnabled(true);
-    http.expectOne(STATS_URL).flush(stats(1));
+    http.expectOne(CHANNELS_URL).flush(channelList(1));
 
     TestBed.resetTestingModule();
     vi.advanceTimersByTime(10_000);
-    http.expectNone(STATS_URL);
+    http.expectNone(CHANNELS_URL);
   });
 });

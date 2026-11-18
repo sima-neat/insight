@@ -192,7 +192,7 @@ describe('ViewerState', () => {
   });
 
   it('holds the remembered first channel on screen until the user pages', () => {
-    // The channel list can arrive after the grid has measured (the limit, ingest stats).
+    // The channel list can arrive after the grid has measured (the limit, the live channels).
     const { list, state } = create([], { firstChannel: 12, selected: null });
     state.perPage.set(6);
     expect(state.page()).toBe(0);

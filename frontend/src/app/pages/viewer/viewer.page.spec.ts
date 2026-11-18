@@ -15,7 +15,7 @@ import { FakeResizeObserver, ViewerShell as Shell } from './viewer-page.testing'
 import { ViewerPage } from './viewer.page';
 
 const VIEWER_URL = '/api/viewer-url';
-const STATS_URL = '/api/ingest/stats';
+const CHANNELS_URL = '/api/channels';
 
 const range = (count: number, from = 0) =>
   Array.from({ length: count }, (_, index) => from + index);
@@ -628,7 +628,7 @@ describe('ViewerPage', () => {
     await click(toggle('Hide empty slots'));
     expect(toggle('Hide empty slots').getAttribute('aria-checked')).toBe('true');
     expect(storage.readStored('layout')).toMatchObject({ hideEmpty: true });
-    http.expectOne(STATS_URL).flush({ channels: [{ channel: 3, active: true }] });
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 3, video: { active: true } }] });
     await settle();
     expect(shown()).toEqual([3]);
   });
@@ -836,7 +836,7 @@ describe('ViewerPage', () => {
     });
   });
 
-  it('hide empty shows only channels live in /api/ingest/stats and stops polling when switched off', async () => {
+  it('hide empty shows only channels live in /api/channels and stops polling when switched off', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     sixPerPage();
     await open('/viewer');
@@ -848,10 +848,10 @@ describe('ViewerPage', () => {
     expect(shown()).toEqual(range(6));
     expect(fake.held()).toEqual(range(6));
     expect(fake.released).toEqual([]);
-    http.expectOne(STATS_URL).flush({
+    http.expectOne(CHANNELS_URL).flush({
       channels: [
-        { channel: 2, active: true },
-        { channel: 5, active: true },
+        { channel: 2, video: { active: true } },
+        { channel: 5, video: { active: true } },
       ],
     });
     await settle();
@@ -860,17 +860,17 @@ describe('ViewerPage', () => {
     expect([...fake.released].sort((a, b) => a - b)).toEqual([0, 1, 3, 4]);
 
     vi.advanceTimersByTime(2000);
-    http.expectOne(STATS_URL).flush({ channels: [{ channel: 5, active: true }] });
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 5, video: { active: true } }] });
     await settle();
     expect(shown()).toEqual([5]);
 
     await click(toggle('Hide empty slots'));
     expect(shown()).toEqual(range(6));
     vi.advanceTimersByTime(10_000);
-    http.expectNone(STATS_URL);
+    http.expectNone(CHANNELS_URL);
   });
 
-  it('with hide empty on, shows no channel and holds no connection until ingest stats answer', async () => {
+  it('with hide empty on, shows no channel and holds no connection until the channel list answers', async () => {
     storage.seed({ layout: { tileWidths: { 16: 300 }, hideEmpty: true } });
     await open('/viewer');
 
@@ -880,27 +880,25 @@ describe('ViewerPage', () => {
     expect(root().querySelector('.empty')).toBeNull();
     expect(notice()).toBe('');
 
-    http.expectOne(STATS_URL).flush({ channels: [{ channel: 3, active: true }] });
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 3, video: { active: true } }] });
     await settle();
     expect(shown()).toEqual([3]);
     expect(fake.held()).toEqual([3]);
   });
 
-  it('with ingest stats unavailable, hide empty shows every channel and says why', async () => {
+  it('with the channel list unavailable, hide empty shows every channel and says why', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     storage.seed({ layout: { tileWidths: { 16: 300 }, hideEmpty: true } });
     await open('/viewer');
     expect(notice()).toBe('');
 
-    http
-      .expectOne(STATS_URL)
-      .flush({ error: 'vf ingest stats unavailable' }, { status: 502, statusText: 'Bad Gateway' });
+    http.expectOne(CHANNELS_URL).flush(null, { status: 502, statusText: 'Bad Gateway' });
     await settle();
     expect(shown()).toEqual(range(6));
-    expect(notice()).toBe('Live channels unknown: ingest stats unavailable');
+    expect(notice()).toBe('Live channels unknown: the channel list is unavailable');
 
     vi.advanceTimersByTime(2000);
-    http.expectOne(STATS_URL).flush({ channels: [{ channel: 3, active: true }] });
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 3, video: { active: true } }] });
     await settle();
     expect(shown()).toEqual([3]);
     expect(notice()).toBe('');
@@ -910,24 +908,22 @@ describe('ViewerPage', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     storage.seed({ layout: { tileWidths: { 16: 300 }, hideEmpty: true } });
     await open('/viewer');
-    http.expectOne(STATS_URL).flush({ channels: [{ channel: 3, active: true }] });
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 3, video: { active: true } }] });
     await settle();
     expect(shown()).toEqual([3]);
 
     vi.advanceTimersByTime(2000);
-    http
-      .expectOne(STATS_URL)
-      .flush({ error: 'vf ingest stats unavailable' }, { status: 502, statusText: 'Bad Gateway' });
+    http.expectOne(CHANNELS_URL).flush(null, { status: 502, statusText: 'Bad Gateway' });
     await settle();
     expect(shown()).toEqual([3]);
     expect(fake.held()).toEqual([3]);
-    expect(notice()).toBe('Live channels unknown: ingest stats unavailable');
+    expect(notice()).toBe('Live channels unknown: the channel list is unavailable');
 
     vi.advanceTimersByTime(2000);
-    http.expectOne(STATS_URL).flush({
+    http.expectOne(CHANNELS_URL).flush({
       channels: [
-        { channel: 3, active: true },
-        { channel: 7, active: true },
+        { channel: 3, video: { active: true } },
+        { channel: 7, video: { active: true } },
       ],
     });
     await settle();

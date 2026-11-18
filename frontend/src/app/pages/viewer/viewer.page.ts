@@ -179,14 +179,14 @@ export class ViewerPage {
     return limit === null ? null : parseChannelIndices(this.params().src, limit);
   });
 
-  /** "Hide empty" is on and ingest stats have neither answered nor failed yet. */
+  /** "Hide empty" is on and the channel list has neither answered nor failed yet. */
   private readonly liveAwaited = computed(
     () => this.prefs.hideEmpty() && this.liveness.live() === null && !this.liveness.unavailable(),
   );
 
   /**
    * What the grid should show as far as it is known: the configured channels, only the live ones
-   * while "Hide empty" is on, and null while the first ingest stats answer is awaited. If stats fail
+   * while "Hide empty" is on, and null while the first channel list answer is awaited. If it fails
    * before any answer every channel is shown, with a notice: an empty grid would say no channel has
    * video, which nobody knows. After an answer a failed poll keeps that answer's channels.
    */
@@ -210,7 +210,7 @@ export class ViewerPage {
   });
 
   /**
-   * "Hide empty" is on but ingest stats are unavailable: the grid shows the last known live channels,
+   * "Hide empty" is on but the channel list is unavailable: the grid shows the last known live channels,
    * or every channel before any answer, and the page says why.
    */
   protected readonly liveUnknown = computed(
@@ -515,7 +515,7 @@ export class ViewerPage {
     this.session.lastVisit = {
       link,
       position: {
-        // A visit that left before showing any channel (the limit or the first ingest stats
+        // A visit that left before showing any channel (the limit or the first channel list
         // answer still pending, no live channel) did not move from where the last one was.
         firstChannel: this.state.pageChannels()[0] ?? previous.firstChannel,
         selected: this.state.selected(),
@@ -537,7 +537,7 @@ export class ViewerPage {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (answer) => this.serverLimit.set(normalizeMaxChannels(answer.max_video_channels)),
-        // The answer only limits the channels: without it, all of vf's slots, as before limits.
+        // The answer only limits the channels: without it, all of the slots, as before limits.
         error: () => this.serverLimit.set(MAX_CHANNELS),
       });
   }

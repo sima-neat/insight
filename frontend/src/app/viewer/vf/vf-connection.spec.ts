@@ -1,10 +1,35 @@
 import { computed, effect, Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { SAMPLE_FRAME_STATS, schemaViolations } from './egress-schema.testing';
+import type { NeatFrameStats } from '@sima/neat-ui/video';
 import { VfConnection } from './vf-connection';
 
 /** What the connection did, in order, across the fakes: proves when the offer is posted. */
 let calls: string[];
+
+/** Frame stats as a playing tile emits them. */
+const SAMPLE_FRAME_STATS: NeatFrameStats = {
+  timestampMatches: 120,
+  arrivalFallbacks: 3,
+  frameMisses: 2,
+  expired: 1,
+  evicted: 0,
+  untimestampedReceived: 4,
+  late: 5,
+  timestampedPending: 6,
+  arrivalPending: 7,
+  recentLatenessMedianMs: 41.5,
+  recentLatenessMaxMs: 88.25,
+  metadataMessagesPerSecond: 30,
+  video: {
+    readyState: 4,
+    paused: false,
+    currentTime: 12.345,
+    videoWidth: 1920,
+    videoHeight: 1080,
+    lastFrameAgeMs: 16,
+    active: true,
+  },
+};
 
 class FakeDataChannel {
   readyState: RTCDataChannelState = 'connecting';
@@ -31,15 +56,9 @@ class FakeDataChannel {
     this.onopen?.();
   }
 
-  /** vf's side: one text frame. */
+  /** The server's side: one text frame. */
   receive(text: string): void {
     this.onmessage?.(new MessageEvent('message', { data: text }));
-  }
-
-  reports(): Record<string, unknown>[] {
-    return this.sent
-      .map((text) => JSON.parse(text) as Record<string, unknown>)
-      .filter((message) => message['type'] === 'browser_egress_stats');
   }
 }
 
@@ -67,7 +86,7 @@ class FakePeerConnection {
   /** While set, getStats waits for it, as a slow browser would. */
   statsDelay: Promise<void> | null = null;
 
-  constructor(readonly config: RTCConfiguration) {
+  constructor(readonly config?: RTCConfiguration) {
     FakePeerConnection.instances.push(this);
   }
 
@@ -216,10 +235,11 @@ describe('VfConnection', () => {
     return FakePeerConnection.last;
   }
 
-  it('posts the offer to /api/vf/offer?channel=N right after setLocalDescription', async () => {
+  it('posts the offer to /api/channels/N/offer right after setLocalDescription', async () => {
     const pc = await open(4);
 
-    expect(pc.config).toStrictEqual({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    // No ICE server: the host and peer-reflexive candidates connect (see signaling.ts).
+    expect(pc.config?.iceServers ?? []).toStrictEqual([]);
     expect(pc.transceivers).toStrictEqual([{ kind: 'video', init: { direction: 'recvonly' } }]);
     expect(pc.channels.map(({ label, init }) => ({ label, init }))).toStrictEqual([
       { label: 'metadata', init: { ordered: true, maxRetransmits: 0 } },
@@ -227,7 +247,7 @@ describe('VfConnection', () => {
     expect(calls).toStrictEqual([
       'createOffer',
       'setLocalDescription',
-      'fetch /api/vf/offer?channel=4',
+      'fetch /api/channels/4/offer',
       'setRemoteDescription',
     ]);
     // Not held back until gathering completes (see signaling.ts).
@@ -278,7 +298,7 @@ describe('VfConnection', () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(FakePeerConnection.instances).toHaveLength(2);
     expect(FakePeerConnection.last.remoteDescription).toStrictEqual(ANSWER);
-    // Answered: no longer waiting for vf, though the first stats are a second away.
+    // Answered: no longer waiting for the server, though the first stats are a second away.
     expect(connection?.status().phase).toBe('connecting');
   });
 
@@ -383,52 +403,25 @@ describe('VfConnection', () => {
     expect(connection?.status().phase).toBe('connecting');
   });
 
-  it('sends one browser_egress_stats per inbound video report with integer u64 fields and every field of Inv §2c', async () => {
+  it('samples nothing before it is connected, and never sends on the data channel', async () => {
     const pc = await open(4);
-    // No stats before the peer connection is connected.
     pc.channel.readyState = 'open';
     await vi.advanceTimersByTimeAsync(1000);
-    expect(pc.channel.sent).toEqual([]);
     expect(connection?.status().phase).toBe('connecting');
 
     pc.connect();
-    connection!.setMetadataRetention(1500);
     connection!.reportFrameStats(SAMPLE_FRAME_STATS);
+    await vi.advanceTimersByTimeAsync(3000);
 
-    await vi.advanceTimersByTimeAsync(1000);
-    // The audio inbound-rtp report gets none; the video one gets exactly one.
-    let reports = pc.channel.reports();
-    expect(reports).toHaveLength(1);
-    expect(schemaViolations(reports[0], false)).toEqual([]);
-    expect(reports[0]).toMatchObject({
-      channel: 4,
-      connection: { connection_state: 'connected', ice_connection_state: 'connected' },
-      inbound_rtp: { frames_per_second: 30, frame_width: 1280, average_jitter_buffer_delay_ms: 50 },
-      data_channel: { state: 'open', metadata_messages_per_sec: 30 },
-      synchronization: {
-        video_sync_buffer_ms: 300,
-        metadata_retention_ms: 1500,
-        timestamp_matches: SAMPLE_FRAME_STATS.timestampMatches,
-      },
-      video: { ready_state: 4, active: true },
-    });
-
-    await vi.advanceTimersByTimeAsync(1000);
-    reports = pc.channel.reports();
-    expect(reports).toHaveLength(2);
-    // 500 kB/s for one second, measured between the two samples.
-    expect(reports[1]['inbound_rtp']).toMatchObject({ bitrate_bps: 4_000_000 });
-
-    // Nothing while the data channel is not open.
-    pc.channel.readyState = 'closing';
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(pc.channel.reports()).toHaveLength(2);
+    expect(connection?.status()).toMatchObject({ phase: 'connected', fps: 30, width: 1280 });
+    // The server reads nothing the browser sends on the metadata channel.
+    expect(pc.channel.sent).toEqual([]);
   });
 
   it('applies jitterBufferTarget on connect and on setSyncBuffer and reports supported=false when the receiver lacks it', async () => {
     const pc = await open();
     const receiver = pc.receiver as { jitterBufferTarget: number | null };
-    // vf's default video sync buffer (Inv §5b) until the page sets the channel's own.
+    // The default video sync buffer until the page sets the channel's own.
     expect(receiver.jitterBufferTarget).toBe(300);
     expect(connection?.syncBuffer()).toStrictEqual({
       supported: true,
@@ -485,7 +478,7 @@ describe('VfConnection', () => {
     expect(connection?.stream()).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
 
-    // A connection closed while waiting for vf does not come back.
+    // A connection closed while waiting for the server does not come back.
     respond = rejectedWith(503);
     connection = new VfConnection(4);
     await settle();
@@ -637,7 +630,7 @@ describe('VfConnection', () => {
       { injector: TestBed.inject(Injector) },
     );
     TestBed.tick();
-    // Status and stream change while vf keeps answering 503; the effect must not run again.
+    // Status and stream change while the server keeps answering 503; the effect must not run again.
     await vi.advanceTimersByTimeAsync(6000);
     TestBed.tick();
     expect(runs).toBe(1);

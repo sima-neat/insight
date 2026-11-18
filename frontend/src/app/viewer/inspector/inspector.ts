@@ -209,8 +209,8 @@ function describeLateness(reading: LatenessReading | null): string {
  * The preview is a second kit tile on the channel's one connection, held like the grid tile holds
  * it, so selecting a channel opens no second peer connection. While the channel has a grid tile,
  * that tile reports the channel's frame stats and lateness and the preview's are not used; once the
- * channel is paged off the grid, the preview's stats keep the connection's status line and vf's
- * egress report current, while lateness stays the grid tile's (R29).
+ * channel is paged off the grid, the preview's stats keep the connection's status line current,
+ * while lateness stays the grid tile's (R29).
  *
  * Escape inside the panel and the close button ask the page to close it, which returns focus to the grid.
  */

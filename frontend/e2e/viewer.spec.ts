@@ -4,7 +4,7 @@ import { closeSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, Locator, Page, test } from '@playwright/test';
 import { LAPTOP, pageOverflow, sidePanelToggle, TABLET, topBarSpill, VIEWPORTS } from './layout';
-import { answerTopBar } from './top-bar';
+import { answerTopBar, idleChannels, NO_VIDEO_YET, offeredChannel } from './top-bar';
 
 // The rail's board block reads the board on every page.
 test.beforeEach(({ page }) => answerTopBar(page));
@@ -12,7 +12,7 @@ test.beforeEach(({ page }) => answerTopBar(page));
 const deployed = !!process.env['INSIGHT_BASE_URL'];
 
 const SLOTS = 16;
-/** What Flask's `/api/viewer-url` answers on an SDK whose port map allows 16 channels. */
+/** What Insight's `/api/viewer-url` answers on an SDK whose port map allows 16 channels. */
 const VIEWER_URL_ANSWER = {
   url: `https://127.0.0.1:9900/viewer?src=${[...Array(SLOTS).keys()].join('%2C')}&max_channels=${SLOTS}`,
   max_video_channels: SLOTS,
@@ -20,34 +20,28 @@ const VIEWER_URL_ANSWER = {
   sdk_channel_limited: true,
 };
 
-/** What vf's ingest stats say while no channel receives anything. */
-const NO_INGEST = { time: '2026-10-22T12:00:00Z', active_ttl_ms: 3000, channels: [] };
-
 /**
- * The Viewer without vf: every offer gets vf's answer while no stream has arrived (503), ingest
- * stats list no channel, and Flask allows 16 channels. Every API the page calls is answered here,
- * so whatever serves the app (the dev server, a deployed build) cannot change what the tests see.
- * Resolves to the channels offered, in order, so a test can watch the retries.
+ * The Viewer without video: every offer gets the server's answer while no stream has arrived (503
+ * `no_video`), the channel list has no channel active, and 16 channels are allowed. Every API the
+ * page calls is answered here, so whatever serves the app (the dev server, a deployed build) cannot
+ * change what the tests see. Resolves to the channels offered, in order, so a test can watch the
+ * retries.
  */
-async function withoutVf(page: Page): Promise<number[]> {
+async function withoutVideo(page: Page): Promise<number[]> {
   const offers: number[] = [];
   await page.route(
     (url) => url.pathname === '/api/viewer-url',
     (route) => route.fulfill({ json: VIEWER_URL_ANSWER }),
   );
   await page.route(
-    (url) => url.pathname === '/api/ingest/stats',
-    (route) => route.fulfill({ json: NO_INGEST }),
+    (url) => url.pathname === '/api/channels',
+    (route) => route.fulfill({ json: idleChannels(SLOTS) }),
   );
   await page.route(
-    (url) => url.pathname === '/api/vf/offer',
+    (url) => offeredChannel(url) !== null,
     (route) => {
-      offers.push(Number(new URL(route.request().url()).searchParams.get('channel')));
-      return route.fulfill({
-        status: 503,
-        contentType: 'text/plain',
-        body: 'Video codec not available',
-      });
+      offers.push(offeredChannel(new URL(route.request().url()))!);
+      return route.fulfill(NO_VIDEO_YET);
     },
   );
   return offers;
@@ -118,11 +112,11 @@ async function settledLook<T>(page: Page, measure: () => Promise<T>): Promise<T>
   return measure();
 }
 
-test.describe('the Viewer without vf', () => {
+test.describe('the Viewer without video', () => {
   test('16 slots at 1366×768, 1920×1080 and 768×1024: every tile fully inside the grid, no page scroll', async ({
     page,
   }) => {
-    await withoutVf(page);
+    await withoutVideo(page);
     await page.setViewportSize(LAPTOP);
     await page.goto('/viewer');
 
@@ -152,7 +146,7 @@ test.describe('the Viewer without vf', () => {
   test('the size slider changes tiles per page and the choice survives reload for the same count', async ({
     page,
   }) => {
-    await withoutVf(page);
+    await withoutVideo(page);
     await page.setViewportSize(LAPTOP);
     await page.goto('/viewer');
     await expect(tiles(page)).toHaveCount(SLOTS);
@@ -179,7 +173,7 @@ test.describe('the Viewer without vf', () => {
   });
 
   test('bars off: no label, status or chip in any tile', async ({ page }) => {
-    await withoutVf(page);
+    await withoutVideo(page);
     await page.goto('/viewer');
     // With bars, a tile names its channel and says what it waits for.
     await expect(tile(page, 0)).toContainText('0');
@@ -196,7 +190,7 @@ test.describe('the Viewer without vf', () => {
   test('inspector open/close repacks without overflow and keeps the selected tile on screen', async ({
     page,
   }) => {
-    await withoutVf(page);
+    await withoutVideo(page);
     await page.setViewportSize(LAPTOP);
     await page.goto('/viewer');
     // A size chosen earlier for 16 channels, 400 px: three columns of three, on two pages.
@@ -241,7 +235,7 @@ test.describe('the Viewer without vf', () => {
   test('a click into the empty space around the tiles deselects, as Escape does', async ({
     page,
   }) => {
-    await withoutVf(page);
+    await withoutVideo(page);
     await page.setViewportSize(LAPTOP);
     await page.goto('/viewer');
 
@@ -262,7 +256,7 @@ test.describe('the Viewer without vf', () => {
   test('the inspector lists channel overrides, folded; bulk resets ask first and keep focus in the panel', async ({
     page,
   }) => {
-    await withoutVf(page);
+    await withoutVideo(page);
     await page.setViewportSize(LAPTOP);
     await page.goto('/viewer');
     await page.evaluate(() => {
@@ -333,7 +327,7 @@ test.describe('the Viewer without vf', () => {
     await page.clock.install({ time: 0 });
     await page.clock.pauseAt(1000);
     const settled = <T>(measure: () => Promise<T>) => settledLook(page, measure);
-    await withoutVf(page);
+    await withoutVideo(page);
     await page.setViewportSize(LAPTOP);
     await page.goto('/viewer');
     await expect.poll(() => settled(() => tiles(page).count())).toBe(SLOTS);
@@ -366,7 +360,7 @@ test.describe('the Viewer without vf', () => {
     await page.clock.install({ time: 0 });
     await page.clock.pauseAt(1000);
     const settled = <T>(measure: () => Promise<T>) => settledLook(page, measure);
-    await withoutVf(page);
+    await withoutVideo(page);
     await page.setViewportSize(LAPTOP);
     // `?kiosk` turns kiosk mode on without asking for fullscreen, which Escape would leave.
     await page.goto('/viewer?kiosk');
@@ -396,12 +390,12 @@ test.describe('the Viewer without vf', () => {
   });
 
   test('tiles show "Waiting for stream" while the offer returns 503', async ({ page }) => {
-    const offers = await withoutVf(page);
+    const offers = await withoutVideo(page);
     await page.goto('/viewer');
 
     await expect(tiles(page)).toHaveCount(SLOTS);
     await expect(tiles(page)).toContainText(Array(SLOTS).fill('Waiting for stream'));
-    // vf has no stream yet, which may change any moment: each channel asks again every 2 s.
+    // The server has no stream yet, which may change any moment: each channel asks again every 2 s.
     await expect
       .poll(() => offers.filter((channel) => channel === 0).length, { timeout: 5000 })
       .toBeGreaterThanOrEqual(2);
@@ -470,42 +464,38 @@ test.describe('a deployed build with the test feed on channel 0', () => {
     await expect.poll(() => overlayInk(channel), { timeout: 10_000 }).toBeGreaterThan(0);
   });
 
-  test('detections from the feed reach the browser matched to their frames', async ({
+  test('detections from the feed are matched to their frames while the page watches', async ({
     page,
     request,
   }) => {
-    // vf's peers on channel 0, as their browsers report them every second (Inv §2c).
-    const channel0Peers = async () => {
-      const response = await request.get('/api/egress/stats');
-      const stats = (await response.json()) as {
-        channels: {
-          channel: number;
-          peers: {
-            id: number;
-            browser?: { synchronization?: { timestamp_matches?: number } };
-          }[];
-        }[];
+    // Channel 0 as Insight's server counts it: the browsers watching, and the feed's messages it
+    // matched to the frame their timestamp names (a running total).
+    const channel0 = async () => {
+      const response = await request.get('/api/channels');
+      const answer = (await response.json()) as {
+        channels: { channel: number; viewers: number; metadata: { matched: number } }[];
       };
-      return stats.channels.find((entry) => entry.channel === 0)?.peers ?? [];
+      const entry = answer.channels.find((candidate) => candidate.channel === 0);
+      return { viewers: entry?.viewers ?? 0, matched: entry?.metadata.matched ?? 0 };
     };
-    // Another Viewer open on channel 0 has peers of its own; only this page's count. vf numbers a
-    // channel's peers in order and never reuses a number.
-    const earlier = new Set((await channel0Peers()).map((peer) => peer.id));
+    // Earlier tests (or another Viewer) may have watched channel 0: only what follows counts.
+    const before = (await channel0()).matched;
 
     await page.goto('/viewer?src=0');
     await expect(videoTile(tile(page, 0))).toHaveAttribute('data-state', 'playing', {
       timeout: 15_000,
     });
 
-    // vf matches the feed's timestamps only while a viewer is bound to the channel.
-    const timestampMatches = async () =>
-      Math.max(
-        0,
-        ...(await channel0Peers())
-          .filter((peer) => !earlier.has(peer.id))
-          .map((peer) => peer.browser?.synchronization?.timestamp_matches ?? 0),
-      );
-    await expect.poll(timestampMatches, { timeout: 10_000 }).toBeGreaterThan(0);
+    // The server matches the feed's timestamps only while a browser watches the channel.
+    await expect
+      .poll(
+        async () => {
+          const { viewers, matched } = await channel0();
+          return viewers >= 1 && matched > before;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
   });
 
   test('a region drawn on channel 0 in the ROI tab is listed, survives reload and can be deleted', async ({

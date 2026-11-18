@@ -3,20 +3,21 @@ import { DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LatestOnly, visiblePoller } from '../polling';
 
-const STATS_URL = '/api/ingest/stats';
+const CHANNELS_URL = '/api/channels';
 const POLL_INTERVAL_MS = 2000;
 
 /**
- * The channels an ingest stats answer reports active. Without `all=1` vf lists only channels that
- * received video in the last few seconds (`active_ttl_ms`), each with `active: true`; the flag is
- * still checked, and anything malformed is skipped, since this is another process's JSON.
+ * The channels a `/api/channels` answer says receive video. It lists every channel the server
+ * serves, live or not; a channel is live while its `video.active` is true (video arrived in the
+ * last 3 s). Anything malformed is skipped, since this is JSON from over the network.
  */
-export function liveChannels(stats: unknown): ReadonlySet<number> {
-  const channels = (stats as { channels?: unknown } | null)?.channels;
+export function liveChannels(answer: unknown): ReadonlySet<number> {
+  const channels = (answer as { channels?: unknown } | null)?.channels;
   const live = new Set<number>();
   if (!Array.isArray(channels)) return live;
   for (const entry of channels as unknown[]) {
-    const { channel, active } = (entry ?? {}) as { channel?: unknown; active?: unknown };
+    const { channel, video } = (entry ?? {}) as { channel?: unknown; video?: unknown };
+    const active = (video as { active?: unknown } | null | undefined)?.active;
     if (active === true && typeof channel === 'number' && Number.isInteger(channel)) {
       live.add(channel);
     }
@@ -25,13 +26,13 @@ export function liveChannels(stats: unknown): ReadonlySet<number> {
 }
 
 /**
- * Which channels vf receives video on, for the Viewer's "Hide empty". It polls Insight's
- * `/api/ingest/stats` proxy every 2 s, but only while enabled and while the page is visible: a
- * hidden tab shows nothing, so it asks again the moment it shows. A slow answer that arrives after
- * a newer one is dropped, so the newest answer always wins. When the newest request failed (vf down,
- * the proxy answering 502) `unavailable` says so until a request succeeds again, and `live` keeps
- * the last good answer: one lost poll must not swing the grid to every channel and back, opening
- * and closing connections each time.
+ * Which channels Insight's server receives video on, for the Viewer's "Hide empty". It polls
+ * `/api/channels` every 2 s, but only while enabled and while the page is visible: a hidden tab
+ * shows nothing, so it asks again the moment it shows. A slow answer that arrives after a newer
+ * one is dropped, so the newest answer always wins. When the newest request failed (the server
+ * unreachable or answering with an error) `unavailable` says so until a request succeeds again,
+ * and `live` keeps the last good answer: one lost poll must not swing the grid to every channel and
+ * back, opening and closing connections each time.
  *
  * Provided by the Viewer page, so polling ends with it.
  */
@@ -63,11 +64,11 @@ export class ChannelLiveness {
   private poll(): void {
     const request = this.latest.next();
     this.http
-      .get<unknown>(STATS_URL)
+      .get<unknown>(CHANNELS_URL)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (stats) => this.settle(request, liveChannels(stats)),
-        // vf down or too slow; the next poll tries again.
+        next: (answer) => this.settle(request, liveChannels(answer)),
+        // The server unreachable or too slow; the next poll tries again.
         error: () => this.settle(request, null),
       });
   }

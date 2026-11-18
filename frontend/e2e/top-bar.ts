@@ -116,7 +116,52 @@ export const answerSlots = (page: Page, count: number) =>
   );
 
 /**
- * Answers what the Viewer asks for on load: a 16-channel limit, no live ingest, and no stream to
+ * What Insight's server answers on `GET /api/channels` while nothing arrives: every one of its
+ * `count` channels listed (server/api/openapi.yaml), none of them active.
+ */
+export const idleChannels = (count: number) => ({
+  count,
+  channels: Array.from({ length: count }, (_, channel) => ({
+    channel,
+    viewers: 0,
+    errors: [],
+    video: {
+      port: 9000 + channel,
+      active: false,
+      payload_type: 0,
+      unsupported_packets: 0,
+      packets: 0,
+      bits_per_second: 0,
+      frames_per_second: 0,
+      keyframes: 0,
+    },
+    metadata: {
+      port: 9100 + channel,
+      active: false,
+      received: 0,
+      messages_per_second: 0,
+      matched: 0,
+      unmatched: 0,
+      invalid: 0,
+      no_viewer: 0,
+    },
+  })),
+});
+
+/** The channel a `POST /api/channels/<n>/offer` names, or null for any other path. */
+export function offeredChannel(url: URL): number | null {
+  const match = /^\/api\/channels\/(\d+)\/offer$/.exec(url.pathname);
+  return match === null ? null : Number(match[1]);
+}
+
+/** The server's answer to an offer while its channel has no video yet, which the Viewer retries. */
+export const NO_VIDEO_YET = {
+  status: 503,
+  json: { error: { code: 'no_video', message: 'No video has reached this channel yet.' } },
+};
+
+/**
+ * Answers what the Viewer asks for on load: a 16-channel limit, no live video, and no stream to
  * connect to (its tiles show their no-stream state). Call it before the page loads.
  */
 export async function answerViewer(page: Page): Promise<void> {
@@ -133,14 +178,11 @@ export async function answerViewer(page: Page): Promise<void> {
       }),
   );
   await page.route(
-    (url) => url.pathname === '/api/ingest/stats',
-    (route) =>
-      route.fulfill({
-        json: { time: '2026-10-22T12:00:00Z', active_ttl_ms: 3000, channels: [] },
-      }),
+    (url) => url.pathname === '/api/channels',
+    (route) => route.fulfill({ json: idleChannels(16) }),
   );
   await page.route(
-    (url) => url.pathname === '/api/vf/offer',
-    (route) => route.fulfill({ status: 503, contentType: 'text/plain', body: 'No stream' }),
+    (url) => offeredChannel(url) !== null,
+    (route) => route.fulfill(NO_VIDEO_YET),
   );
 }
