@@ -1,6 +1,7 @@
 package web
 
 import (
+	"log/slog"
 	"net/http"
 
 	"insight/api"
@@ -37,6 +38,11 @@ func (h *handlers) DeleteMedia(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		library.WriteError(w, err)
 		return
+	}
+	// The deleted files' FPS renditions are of no use now; a replaced file's go when its slots
+	// restart or at the next encode.
+	if err := h.deps.Slots.PruneRenditions(); err != nil {
+		slog.Warn("removing the renditions of deleted files", "error", err)
 	}
 	writeJSON(w, http.StatusOK, deleted)
 }

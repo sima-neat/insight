@@ -3,6 +3,7 @@ package slots
 import (
 	"context"
 	"fmt"
+	"log/slog"
 )
 
 // FileUser is what the media library asks of the slots when it deletes or replaces files
@@ -47,6 +48,10 @@ func (m *Manager) Restart(ctx context.Context, slots []int) []error {
 		if err := m.restart(ctx, n); err != nil {
 			errs[i] = fmt.Errorf("src%d: %w", n, err)
 		}
+	}
+	// The replaced file's old renditions are of no use now that its slots let go of them.
+	if err := m.PruneRenditions(); err != nil {
+		slog.Warn("removing the renditions of a replaced file", "error", err)
 	}
 	return errs
 }
