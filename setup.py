@@ -40,8 +40,6 @@ setup(
         "psutil",
         "pyzmq",
         "cryptography>=41.0.5,<45",
-        "paramiko",
-        "webssh>=1.6.3",
         "yt-dlp",
     ],
     package_data={

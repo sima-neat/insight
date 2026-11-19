@@ -24,9 +24,6 @@
 import os
 import sys
 import subprocess
-import signal
-import time
-import importlib.util
 from pathlib import Path
 import shutil
 import platform
@@ -34,8 +31,8 @@ import tempfile
 import ssl
 from datetime import datetime, timezone
 from collections import Counter
-import psutil
 import ipaddress
+import psutil
 import socket
 
 CERT_FILE = "cert.pem"
@@ -53,8 +50,6 @@ SDK_KEY_FILES = (
 EXCLUDED_EXTENSIONS = {'.so', '.lm', '.bin', '.a', '.o', '.elf', '.rpm', '.tar', '.zip', '.gz', '.bz2', '.xz', '.out', '.pyc'}
 EXCLUDED_FOLDERS = {'env', 'bin'}
 DEVKIT_SYNC_DEVKIT_IP_ENV = "DEVKIT_SYNC_DEVKIT_IP"
-WEBSSH_PORT_ENV = "NEAT_INSIGHT_WEBSSH_PORT"
-DEFAULT_WEBSSH_PORT = 8022
 SDK_RELEASE_FILE = Path("/etc/sdk-release")
 SDK_WORKSPACE = Path("/workspace")
 SDK_MEDIA_DIR_NAME = ".insight-media"
@@ -120,25 +115,6 @@ def _sdk_media_dir():
     return SDK_WORKSPACE / SDK_MEDIA_DIR_NAME
 
 
-def tail_lines(filename, num_lines, max_bytes):
-    with open(filename, 'rb') as f:
-        f.seek(0, os.SEEK_END)
-        end = f.tell()
-        size = 8192
-        block = bytearray()
-        lines = []
-
-        while end > 0 and len(lines) <= num_lines:
-            delta = min(size, end)
-            f.seek(end - delta)
-            block = f.read(delta) + block
-            lines = block.split(b'\n')
-            end -= delta
-
-        # Trim to last N lines, and max byte size
-        tail = b'\n'.join(lines[-num_lines:])
-        return tail[-max_bytes:].decode('utf-8', errors='ignore')
-
 def is_sima_board():
     for path in ["/etc/build", "/etc/buildinfo"]:
         build_file = Path(path)
@@ -184,88 +160,6 @@ def init_environment():
         "NEAT_INSIGHT_DATA": user_root,
     }
 
-processes = []
-process_logs = []
-_cleanup_done = False
-webssh_proc = None
-
-def _pids_listening_on(port, proto):
-    proto = proto.upper()
-    try:
-        result = subprocess.run(
-            ["lsof", "-nP", f"-ti{proto}:{port}"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        pids = []
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.isdigit():
-                pids.append(int(line))
-        if pids:
-            return pids
-    except Exception:
-        pass
-
-    try:
-        kind = "inet"
-        conn_type = socket.SOCK_STREAM if proto == "TCP" else socket.SOCK_DGRAM
-        pids = []
-        for conn in psutil.net_connections(kind=kind):
-            if conn.type != conn_type or not conn.laddr or conn.laddr.port != port:
-                continue
-            if proto == "TCP" and conn.status != psutil.CONN_LISTEN:
-                continue
-            if conn.pid:
-                pids.append(conn.pid)
-        return pids
-    except Exception:
-        return []
-
-
-def _pids_listening_on_ports(port_specs):
-    pids = set()
-    for port, proto in port_specs:
-        pids.update(_pids_listening_on(port, proto))
-    return pids
-
-
-def _terminate_pids(pids):
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except Exception:
-            pass
-
-    if pids:
-        time.sleep(1.0)
-
-
-def _terminate_conflicting_port_specs(port_specs):
-    pids = sorted(_pids_listening_on_ports(port_specs))
-    _terminate_pids(pids)
-    remaining_pids = sorted(_pids_listening_on_ports(port_specs))
-    for pid in remaining_pids:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except Exception:
-            pass
-
-    if remaining_pids:
-        time.sleep(0.2)
-
-
-def free_webssh_port():
-    """Stop whatever listens on the webssh port when a DevKit is configured, so the shell can bind it.
-
-    Only that port: the streaming ports (MediaMTX's) and the channel ports are the new server's,
-    which runs this backend as its child, and freeing them would stop the server's own processes.
-    Every port freed here is freed by stopping its owner, so it may not be one a Neat app uses.
-    """
-    if get_devkit_sync_devkit_ip():
-        _terminate_conflicting_port_specs([(get_webssh_port(), "TCP")])
-
 
 def get_devkit_sync_devkit_ip():
     value = os.getenv(DEVKIT_SYNC_DEVKIT_IP_ENV, "").strip()
@@ -280,139 +174,6 @@ def get_devkit_sync_devkit_ip():
         ) from exc
 
     return value
-
-
-def get_webssh_port():
-    configured = os.getenv(WEBSSH_PORT_ENV, "").strip()
-    if not configured:
-        return DEFAULT_WEBSSH_PORT
-
-    try:
-        port = int(configured)
-    except ValueError as exc:
-        raise RuntimeError(f"{WEBSSH_PORT_ENV} must be an integer, got: {configured}") from exc
-
-    if not 1 <= port <= 65535:
-        raise RuntimeError(f"{WEBSSH_PORT_ENV} must be between 1 and 65535, got: {port}")
-
-    return port
-
-
-def webssh_is_available():
-    try:
-        return importlib.util.find_spec("webssh.main") is not None
-    except ModuleNotFoundError:
-        return False
-
-
-def is_webssh_running():
-    return webssh_proc is not None and webssh_proc.poll() is None
-
-
-def _wait_for_tcp_listener(port, host="127.0.0.1", timeout_sec=5.0):
-    deadline = time.time() + timeout_sec
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=0.5):
-                return True
-        except OSError:
-            time.sleep(0.1)
-    return False
-
-
-def ensure_webssh_started(ssl_context):
-    global webssh_proc
-
-    # webssh is a generic SSH proxy: the board comes from the launch URL, so the caller decides which board
-    # (DEVKIT_SYNC_DEVKIT_IP, its SIMA_DEVKIT_IP fallback, or the selected board) and none is needed here.
-    if not webssh_is_available():
-        raise RuntimeError(
-            "webssh is not installed in the current neat-insight environment. "
-            "Install the package dependency and restart Insight."
-        )
-    if is_webssh_running():
-        return
-
-    cert_file, key_file = ssl_context
-    webssh_port = get_webssh_port()
-    _terminate_conflicting_port_specs([(webssh_port, "TCP")])
-
-    bin_dir = os.path.join(os.path.dirname(__file__), "bin")
-    log_dir = os.path.join(bin_dir, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    webssh_log = open(os.path.join(log_dir, "webssh.log"), "a")
-    process_logs.append(webssh_log)
-
-    try:
-        webssh_proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "webssh.main",
-                "--address=127.0.0.1",
-                "--port=0",
-                "--ssladdress=0.0.0.0",
-                f"--sslport={webssh_port}",
-                f"--certfile={cert_file}",
-                f"--keyfile={key_file}",
-                "--redirect=False",
-                "--fbidhttp=False",
-                "--policy=warning",
-                "--xheaders=False",
-            ],
-            cwd=bin_dir,
-            stdout=webssh_log,
-            stderr=subprocess.STDOUT,
-        )
-    except Exception:
-        process_logs.remove(webssh_log)
-        webssh_log.close()
-        raise
-    processes.append(webssh_proc)
-
-    if not _wait_for_tcp_listener(webssh_port):
-        if webssh_proc.poll() is None:
-            try:
-                webssh_proc.terminate()
-                webssh_proc.wait(timeout=2)
-            except Exception:
-                try:
-                    webssh_proc.kill()
-                except Exception as e:
-                    print(f"Warning: failed to kill webssh process during startup cleanup: {e}")
-        raise RuntimeError(f"webssh failed to start. Check {os.path.join(log_dir, 'webssh.log')}")
-
-def cleanup_processes(signum=None, frame=None, exit_process=True):
-    global _cleanup_done, webssh_proc
-    if _cleanup_done:
-        if exit_process:
-            sys.exit(0)
-        return
-    _cleanup_done = True
-
-    print("\n🧹 Shutting down subprocesses...")
-    for proc in list(processes):
-        try:
-            if proc.poll() is None:
-                proc.terminate()
-                proc.wait(timeout=3)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-    processes.clear()
-    webssh_proc = None
-
-    for log_file in list(process_logs):
-        try:
-            log_file.close()
-        except Exception:
-            pass
-    process_logs.clear()
-
-    if exit_process:
-        sys.exit(0)
 
 
 def get_certificate_host():
@@ -756,26 +517,6 @@ def check_and_generate_mkcert_certificate(port=DEFAULT_CERT_PORT):
 
     ssl_context = (cert_file, key_file)
     return ssl_context
-
-
-def parse_build_info(build_text, remote=False):
-    """
-    Parses content of a /etc/build file and returns MACHINE and SIMA_BUILD_VERSION
-    """
-    machine = None
-    sima_version = None
-
-    for line in build_text.splitlines():
-        if line.startswith('MACHINE'):
-            machine = line.split('=', 1)[1].strip()
-        elif line.startswith('SIMA_BUILD_VERSION'):
-            sima_version = line.split('=', 1)[1].strip()
-
-    return {
-        'MACHINE': machine or 'N/A',
-        'SIMA_BUILD_VERSION': sima_version or 'N/A',
-        'REMOTE': remote
-    }
 
 
 def is_installed(command):

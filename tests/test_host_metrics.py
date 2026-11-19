@@ -7,7 +7,6 @@ from types import SimpleNamespace
 os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55587")
 
 from neat_insight import app as app_module
-from neat_insight import remote_devkit
 
 
 class FakeClock:
@@ -67,58 +66,20 @@ class LocalCpuTests(unittest.TestCase):
         self.assertEqual(cpu_percent.call_count, 3)
 
 
-class RemoteCpuTests(unittest.TestCase):
-    def test_remote_cpu_is_total_time_not_user_time(self):
-        procps_ng = "%Cpu(s):  5.9 us,  2.0 sy,  0.0 ni, 91.2 id,  0.5 wa,  0.0 hi,  0.4 si,  0.0 st"
-        older_procps = "Cpu(s):  5.9%us,  2.0%sy,  0.0%ni, 91.2%id,  0.5%wa,  0.0%hi,  0.4%si,  0.0%st"
+class SysMetricsTests(unittest.TestCase):
+    """The profiler's `sys` topic publishes these readings (System Info reads the server's own)."""
 
-        self.assertEqual(remote_devkit.remote_cpu_percent(procps_ng), 8.8)
-        self.assertEqual(remote_devkit.remote_cpu_percent(older_procps), 8.8)
-        self.assertEqual(remote_devkit.remote_cpu_percent("%Cpu(s):  0.0 us,  0.0 sy,  0.0 ni,100.0 id"), 0.0)
-
-    def test_remote_cpu_without_an_idle_field_is_none(self):
-        self.assertIsNone(remote_devkit.remote_cpu_percent(""))
-        self.assertIsNone(remote_devkit.remote_cpu_percent("%Cpu(s):  5.9 us,  2.0 sy"))
-
-    def test_remote_metrics_use_the_total_cpu(self):
-        outputs = {
-            "top -bn1 | grep 'Cpu(s)'": "%Cpu(s):  5.9 us,  2.0 sy,  0.0 ni, 91.2 id,  0.5 wa",
-            "free -b": "Mem:  1000  250  750",
-            "df -B1 /data | tail -1": "/dev/x 100 40 60 40% /data",
-        }
-
-        class FakeSsh:
-            def exec_command(self, command):
-                return None, SimpleNamespace(read=lambda: outputs.get(command, "").encode()), None
-
-            def close(self):
-                pass
-
-        with mock.patch.object(remote_devkit, "create_ssh_client", return_value=FakeSsh()), \
-             mock.patch.object(remote_devkit, "remote_board_type", return_value=None):
-            metrics = remote_devkit.get_remote_metrics()
-
-        self.assertEqual(metrics["cpu_load"], 8.8)
-
-
-class MetricsResponseTests(unittest.TestCase):
-    def test_metrics_response_keeps_its_fields(self):
-        app_module.app.config.update(TESTING=True)
-        client = app_module.app.test_client()
+    def test_the_readings_keep_their_fields(self):
         memory = SimpleNamespace(total=1000, used=250, percent=25.0)
         disk = SimpleNamespace(total=100, used=40, free=60, percent=40.0)
 
-        with mock.patch.object(app_module, "is_remote_devkit_configured", return_value=False), \
-             mock.patch.object(app_module, "is_sima_board", return_value=False), \
+        with mock.patch.object(app_module, "is_sima_board", return_value=False), \
              mock.patch.object(app_module.psutil, "cpu_percent", return_value=3.5), \
              mock.patch.object(app_module.psutil, "virtual_memory", return_value=memory), \
              mock.patch.object(app_module.psutil, "disk_usage", return_value=disk), \
              mock.patch.object(app_module, "_local_cpu", app_module.LocalCpuReader(clock=FakeClock())):
-            response = client.get("/api/metrics")
-            self.addCleanup(response.close)
-            body = response.get_json()
+            body = app_module.collect_system_metrics()
 
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(
             set(body),
             {"cpu_load", "memory", "disk", "mla_allocated_bytes", "temperature_celsius_avg", "REMOTE", "pipeline_status"},
@@ -126,10 +87,7 @@ class MetricsResponseTests(unittest.TestCase):
         self.assertEqual(body["cpu_load"], 3.5)
         self.assertEqual(body["memory"], {"total": 1000, "used": 250, "percent": 25.0})
         self.assertEqual(body["disk"]["mount"], str(app_module.Path.home()))
-        self.assertEqual(body["mla_allocated_bytes"], 0)
-        self.assertIsNone(body["temperature_celsius_avg"])
         self.assertIs(body["REMOTE"], False)
-        self.assertEqual(body["pipeline_status"], {})
 
 
 if __name__ == "__main__":

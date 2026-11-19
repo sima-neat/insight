@@ -1,12 +1,8 @@
 import argparse
-import atexit
-import base64
 import concurrent.futures
-import ipaddress
 import json
 import logging
 import os
-import platform
 import queue
 import re
 import shutil
@@ -30,39 +26,19 @@ if __name__ == "__main__" and (not globals().get("__package__")):
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neat_insight import board
 from neat_insight.api_docs import api_docs_bp
 from neat_insight.genai_relay import genai_bp
-from neat_insight.board.target import sdk_env_target
-from neat_insight.peripherals import peripherals_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
-from neat_insight.sentinel import sentinel_bp
-from neat_insight.remote_devkit import (
-    get_remote_metrics,
-    is_remote_devkit_configured,
-    is_remote_devkit_connected,
-)
 from neat_insight.runtime_config import (
     legacy_runtime_network_config,
     load_runtime_network_config,
 )
-from neat_insight.remotefs import read_remote_file
-from neat_insight import preview
 from neat_insight.utils import (
     board_type,
     check_and_generate_mkcert_certificate,
-    cleanup_processes,
-    ensure_webssh_started,
-    free_webssh_port,
     get_certificate_access_url,
-    get_lan_ip,
-    get_webssh_port,
     init_environment,
-    is_webssh_running,
     is_sima_board,
-    parse_build_info,
-    tail_lines,
-    webssh_is_available,
 )
 from neat_insight.workspace import workspace_bp
 
@@ -124,118 +100,15 @@ app = Flask(__name__)
 app.register_blueprint(api_docs_bp)
 app.register_blueprint(workspace_bp)
 app.register_blueprint(genai_bp)
-board.init_app(app, env["NEAT_INSIGHT_DATA"], on_board=is_sima_board())
-app.register_blueprint(peripherals_bp)
-app.register_blueprint(sentinel_bp)
 neat_metrics_broker = NeatMetricsBroker()
 neat_metrics_broker.start()
 sys_metrics_publisher = None
 sys_metrics_lock = threading.Lock()
-server_ssl_context = None
 runtime_network_config = legacy_runtime_network_config()
-DEFAULT_DEVKIT_SSH_USERNAME = "sima"
-DEFAULT_DEVKIT_SSH_PASSWORD = "edgeai"
-
-ALLOWED_LOGS = {"EV74": "simaai_EV74.log", "syslog": "syslog"}
-LOG_DIR = "/var/log"
 
 
 def _json_error(message: str, status: int = 400):
     return jsonify({"error": message}), status
-
-
-def _request_host_name() -> str:
-    host = request.host.strip()
-    if host.startswith("["):
-        end = host.find("]")
-        if end > 0:
-            return host[1:end]
-    elif host.count(":") == 1:
-        name, maybe_port = host.rsplit(":", 1)
-        if maybe_port.isdigit():
-            host = name
-    return host or "127.0.0.1"
-
-
-def _bracket_ipv6(host):
-    """Wrap an IPv6 literal in brackets so it can carry a :port suffix."""
-    try:
-        if ipaddress.ip_address(host).version == 6:
-            return f"[{host}]"
-    except ValueError:
-        logging.debug("Host '%s' is not an IP literal; using host value as-is", host)
-    return host
-
-
-def _format_browser_https_url(host, port, path="", query=""):
-    if not host or not port:
-        return None
-    host = _bracket_ipv6(host)
-
-    url = f"https://{host}:{port}{path}"
-    return f"{url}?{query}" if query else url
-
-
-def _shell_target():
-    """The board the shell should open on: the one Insight is using, not a separate env var.
-
-    Falls back to DEVKIT_SYNC_DEVKIT_IP so a board that was never selected still has a shell.
-    """
-    try:
-        target = board.get_board_manager().target()
-    except Exception:  # noqa: BLE001 - the shell must not depend on board resolution succeeding
-        target = None
-    if target is not None and target.mode == "ssh" and target.host:
-        # The bundled password is only a promise the SDK makes for its paired default DevKit.
-        # Manual targets and SDK targets with an overridden account use the service account's
-        # SSH key and may have unrelated passwords, so never send the DevKit credential to them.
-        ssh_user = target.user or DEFAULT_DEVKIT_SSH_USERNAME
-        return (
-            target.host,
-            target.port or 22,
-            ssh_user,
-            target.source == "sdk-env" and ssh_user == DEFAULT_DEVKIT_SSH_USERNAME,
-        )
-    paired = sdk_env_target()
-    if not paired:
-        return None, 22, DEFAULT_DEVKIT_SSH_USERNAME, False
-    ssh_user = paired["user"]
-    return paired["host"], paired["port"], ssh_user, ssh_user == DEFAULT_DEVKIT_SSH_USERNAME
-
-
-def _build_devkit_shell_payload():
-    devkit_ip, ssh_port, ssh_user, credentials_prefilled = _shell_target()
-    configured = bool(devkit_ip)
-    webssh_port = get_webssh_port()
-    webssh_host_port = _resolve_webssh_host_port()
-    launch_url = None
-
-    if configured and credentials_prefilled:
-        password_b64 = base64.b64encode(DEFAULT_DEVKIT_SSH_PASSWORD.encode("utf-8")).decode("ascii")
-        params = urllib.parse.urlencode(
-            {
-                "hostname": devkit_ip,
-                "port": ssh_port,
-                "username": ssh_user,
-                "password": password_b64,
-                "title": f"DevKit {devkit_ip}",
-            }
-        )
-        launch_url = _format_browser_https_url(_request_host_name(), webssh_host_port, "/", params)
-
-    return {
-        "configured": configured,
-        "devkit_ip": devkit_ip or None,
-        "button_label": f"DevKit: {devkit_ip}" if configured else None,
-        "available": webssh_is_available(),
-        "running": is_webssh_running(),
-        "webssh_port": webssh_port,
-        "webssh_host_port": webssh_host_port,
-        "default_username": DEFAULT_DEVKIT_SSH_USERNAME,
-        "credentials_prefilled": credentials_prefilled,
-        "launch_supported": configured and credentials_prefilled,
-        "launch_url": launch_url,
-    }
 
 
 def _with_metrics_compat(metrics_payload):
@@ -283,18 +156,8 @@ _local_cpu = LocalCpuReader()
 
 
 def collect_system_metrics():
-    if is_remote_devkit_configured():
-        if is_remote_devkit_connected():
-            return _with_metrics_compat(get_remote_metrics())
-        return _with_metrics_compat({
-            "cpu_load": "",
-            "memory": {},
-            "mla_allocated_bytes": 0,
-            "disk": {},
-            "temperature_celsius_avg": 0,
-            "REMOTE": True,
-        })
-
+    """The host's readings for the profiler's `sys` topic (System Info reads the server's
+    /api/system/host)."""
     cpu_percent_total = _local_cpu.read()
     mem = psutil.virtual_memory()
     memory_usage = {"total": mem.total, "used": mem.used, "percent": mem.percent}
@@ -371,26 +234,6 @@ def health():
     }
 
 
-# API: retrieve recent board or service log lines by a whitelisted log name.
-@app.get("/api/logs/<logname>")
-def get_log(logname):
-    """Return up to the latest 10,000 lines for EV74 or syslog as text/plain, or 404 for unknown logs."""
-    if logname not in ALLOWED_LOGS:
-        return _json_error("Log not found", 404)
-
-    log_path = os.path.join(LOG_DIR, ALLOWED_LOGS[logname])
-    if not os.path.isfile(log_path):
-        return _json_error(f"{logname} log not found", 404)
-    return Response(tail_lines(log_path, 10000, 256 * 1024), mimetype="text/plain")
-
-
-# API: snapshot current host/devkit metrics.
-@app.get("/api/metrics")
-def metrics():
-    """Return CPU, memory, disk, temperature, MLA, remote, and pipeline-status compatible metrics."""
-    return collect_system_metrics()
-
-
 # API: stream neat metrics events to the browser over server-sent events.
 @app.get("/api/neat-metrics")
 def stream_neat_metrics():
@@ -411,262 +254,6 @@ def stream_neat_metrics():
 # server's (server/internal/channels), which replaced vf. So are the streaming sources (src1 to
 # src48), the media library with its previews and catalog imports, and MediaMTX
 # (server/internal/slots, library, relay, mediamtx); only the YouTube import below is still here.
-
-
-# API: report whether optional media inspection/streaming tools are installed.
-@app.get("/api/system/tools")
-def system_tools():
-    """Return booleans indicating whether media helper tools are available on PATH."""
-    return {
-        "ffmpeg": shutil.which("ffmpeg") is not None,
-        "ffprobe": shutil.which("ffprobe") is not None,
-        "gstreamer": shutil.which("gst-launch-1.0") is not None,
-    }
-
-
-def _missing_neat_sysinfo_payload():
-    """System Info's answer when the neat command is not installed.
-
-    It has the shape of a `neat --json` answer with every unknown value null or empty, so a client reads it the
-    same way, and `missing` names what could not be read. Nothing here is guessed: a version shown for software
-    that is not there would send someone looking for it.
-    """
-    return {
-        "schema": "sima.neat.status.v1",
-        "components": {},
-        "environment": {
-            "label": None,
-            "mode": None,
-            "sdkVersion": None,
-            "devkitBuildVersion": None,
-            "sysroot": None,
-        },
-        "exposedPorts": [],
-        "insight": {"serviceState": None, "venv": None, "webUiUrl": None},
-        "updateCheck": {"offline": None, "status": None},
-        "missing": ["neat"],
-    }
-
-
-def _coerce_port_value(value):
-    if value is None or value == "":
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return value
-
-
-def _port_protocol(name_parts, value):
-    protocol = value.get("protocol")
-    if protocol:
-        return str(protocol)
-    if name_parts and str(name_parts[-1]).lower() in {"tcp", "udp"}:
-        return str(name_parts[-1]).lower()
-    return ""
-
-
-def _collect_port_map_rows(name_parts, value, rows):
-    if not isinstance(value, dict):
-        return
-
-    name = ".".join(name_parts)
-    protocol = _port_protocol(name_parts, value)
-    if "host" in value:
-        rows.append(
-            {
-                "hostPortEnd": None,
-                "hostPortStart": _coerce_port_value(value.get("host")),
-                "name": name,
-                "protocol": protocol,
-            }
-        )
-        return
-
-    if "hostStart" in value or "hostEnd" in value:
-        rows.append(
-            {
-                "hostPortEnd": _coerce_port_value(value.get("hostEnd")),
-                "hostPortStart": _coerce_port_value(value.get("hostStart")),
-                "name": name,
-                "protocol": protocol,
-            }
-        )
-        return
-
-    for key, child in value.items():
-        _collect_port_map_rows([*name_parts, str(key)], child, rows)
-
-
-def _sysinfo_port_map_candidates():
-    paths = []
-    configured = os.getenv("NEAT_PORT_MAP_FILE", "").strip()
-    if configured:
-        paths.append(Path(configured))
-
-    paths.extend(
-        [
-            Path.home() / ".insight-config" / "neat-port-map.json",
-            Path("/workspace/.insight-config/neat-port-map.json"),
-            Path("/workspace/insight-config/neat-port-map.json"),
-            Path("/insight-config/neat-port-map.json"),
-        ]
-    )
-
-    for parent in (Path("/home"), Path("/Users")):
-        try:
-            paths.extend(user_dir / ".insight-config" / "neat-port-map.json" for user_dir in parent.iterdir() if user_dir.is_dir())
-        except OSError as exc:
-            logging.debug("Skipping port map search under %s: %s", parent, exc)
-
-    seen = set()
-    for path in paths:
-        key = str(path)
-        if key in seen:
-            continue
-        seen.add(key)
-        yield path
-
-
-def _iter_neat_port_maps():
-    for path in _sysinfo_port_map_candidates():
-        # The candidate list walks /home and /Users, so most of these belong to
-        # other users and stat() raises rather than returning False. Startup
-        # reads the port map, so an unreadable neighbour must not be fatal.
-        try:
-            if not path.is_file():
-                continue
-        except OSError as exc:
-            logging.debug("Skipping unreadable port map candidate %s: %s", path, exc)
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logging.debug("Failed to read neat port map %s: %s", path, exc)
-            continue
-
-        if isinstance(data, dict):
-            if data:
-                yield data
-            continue
-        logging.warning("Ignoring neat port map %s because its root is not an object", path)
-
-
-def _read_exposed_ports_from_port_map():
-    for data in _iter_neat_port_maps():
-        rows = []
-        for key, value in data.items():
-            _collect_port_map_rows([str(key)], value, rows)
-        if rows:
-            return rows
-    return []
-
-
-def _valid_port(value):
-    try:
-        port = int(value)
-    except (TypeError, ValueError):
-        return None
-    if 1 <= port <= 65535:
-        return port
-    return None
-
-
-def _find_exposed_port(ports, name, protocol=None):
-    if not isinstance(ports, list):
-        return None
-
-    for port in ports:
-        if not isinstance(port, dict):
-            continue
-
-        row_name = str(port.get("name") or "")
-        if row_name != name and not row_name.startswith(f"{name}."):
-            continue
-
-        if protocol:
-            row_protocol = str(port.get("protocol") or "").lower()
-            if row_protocol and row_protocol != protocol.lower():
-                continue
-
-        resolved = _valid_port(port.get("hostPortStart"))
-        if resolved:
-            return resolved
-
-    return None
-
-
-def _resolve_webssh_host_port():
-    return _find_exposed_port(_read_exposed_ports_from_port_map(), "webSSH", "tcp") or get_webssh_port()
-
-
-def _format_sysinfo_web_ui_url(host, port):
-    return _format_browser_https_url(host, port)
-
-
-def _enrich_sysinfo_payload(payload):
-    if not isinstance(payload, dict):
-        return payload
-
-    ports = payload.get("exposedPorts") if isinstance(payload.get("exposedPorts"), list) else []
-    if not ports:
-        ports = _read_exposed_ports_from_port_map()
-        if ports:
-            payload["exposedPorts"] = ports
-
-    insight = payload.get("insight")
-    if not isinstance(insight, dict):
-        insight = {}
-        payload["insight"] = insight
-
-    if not insight.get("webUiUrl"):
-        main_ui_port = _find_exposed_port(ports, "mainUI", "tcp")
-        host = os.getenv("CONTAINER_HOST_IP", "").strip() or _request_host_name()
-        web_ui_url = _format_sysinfo_web_ui_url(host, main_ui_port)
-        if web_ui_url:
-            insight["webUiUrl"] = web_ui_url
-
-    return payload
-
-
-@app.get("/api/sysinfo")
-def sysinfo():
-    """Return the structured system status reported by the neat command-line tool."""
-    def sysinfo_json(payload, status: int = 200):
-        response = jsonify(payload)
-        response.headers["Cache-Control"] = "no-store, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-        return response, status
-
-    def sysinfo_error(message: str, status: int = 400):
-        return sysinfo_json({"error": message}, status)
-
-    try:
-        result = subprocess.run(
-            ["neat", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except FileNotFoundError:
-        logging.warning("The neat command is not available on PATH; System Info reports it as missing.")
-        return sysinfo_json(_enrich_sysinfo_payload(_missing_neat_sysinfo_payload()))
-    except subprocess.TimeoutExpired:
-        return sysinfo_error("The neat command timed out while collecting system information.", 504)
-    except OSError as exc:
-        return sysinfo_error(f"Failed to run neat: {exc}", 500)
-
-    output = result.stdout.strip()
-    if result.returncode != 0:
-        detail = result.stderr.strip() or output or f"neat exited with status {result.returncode}"
-        return sysinfo_error(detail, 502)
-
-    try:
-        return sysinfo_json(_enrich_sysinfo_payload(json.loads(output)))
-    except json.JSONDecodeError as exc:
-        return sysinfo_error(f"neat returned invalid JSON: {exc}", 502)
 
 
 def _relative_media_label(path: Path) -> str:
@@ -1281,87 +868,6 @@ def import_youtube_media():
 
 
 # API: expose environment flags used by the frontend.
-@app.get("/api/envinfo")
-def envinfo():
-    """Return whether this process runs on a SiMa board and whether remote devkit mode is configured."""
-    return {"is_sima_board": is_sima_board(), "is_remote_devkit_configured": is_remote_devkit_configured()}
-
-
-# API: expose DevKit shell discovery and launch metadata for the browser.
-@app.get("/api/devkit-shell")
-def devkit_shell():
-    """Return whether DEVKIT_SYNC_DEVKIT_IP is configured plus the hosted webssh status and launch URL."""
-    try:
-        return _build_devkit_shell_payload()
-    except RuntimeError as exc:
-        return _json_error(str(exc), 500)
-
-
-# API: start the hosted webssh service on demand and return the DevKit shell launch URL.
-@app.post("/api/devkit-shell/start")
-def start_devkit_shell():
-    """Start webssh only when requested, then return the prefilled browser URL for the configured DevKit."""
-    global server_ssl_context
-
-    try:
-        payload = _build_devkit_shell_payload()
-    except RuntimeError as exc:
-        return _json_error(str(exc), 500)
-
-    if not payload["configured"]:
-        return _json_error("No DevKit is selected or paired with this SDK.", 404)
-    if not payload["launch_supported"]:
-        return _json_error("The browser shell is available only for the SDK-paired DevKit.", 409)
-    if server_ssl_context is None:
-        return _json_error("Insight TLS context is not initialized.", 500)
-
-    try:
-        ensure_webssh_started(server_ssl_context)
-    except RuntimeError as exc:
-        return _json_error(str(exc), 502)
-
-    payload = _build_devkit_shell_payload()
-    return payload
-
-
-# API: retrieve local or remote build information.
-@app.get("/api/buildinfo")
-def buildinfo():
-    """Return parsed SiMa build metadata from the board/devkit, or host platform details when no devkit is configured."""
-    build_paths = ["/etc/build", "/etc/buildinfo"]
-    if is_sima_board():
-        for path in build_paths:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return parse_build_info(f.read())
-            except Exception:
-                continue
-        return _json_error("Failed to read local build file", 500)
-
-    if is_remote_devkit_configured():
-        if is_remote_devkit_connected():
-            for path in build_paths:
-                try:
-                    text = read_remote_file(path).decode("utf-8", errors="replace")
-                    return parse_build_info(text, remote=True)
-                except Exception:
-                    continue
-            return _json_error("Failed to read remote build file", 502)
-        return _json_error("Remote device unreachable", 502)
-
-    return {"MACHINE": platform.machine(), "SIMA_BUILD_VERSION": platform.platform()}
-
-
-# API: identify the backend IP address browser-side viewers should use.
-@app.get("/api/server-ip")
-def server_ip():
-    """Return CONTAINER_HOST_IP when set, otherwise infer the reachable local IP or fall back to 127.0.0.1."""
-    return {"ip": get_lan_ip()}
-
-
-preview.init_app(app)
-
-
 # API: serve the built single-page application entrypoint.
 @app.get("/")
 def index():
@@ -1391,51 +897,37 @@ def spa(path):
 
 
 def main():
-    global runtime_network_config, server_ssl_context, sys_metrics_publisher
+    global runtime_network_config, sys_metrics_publisher
 
     parser = argparse.ArgumentParser(description="Start the neat-insight server.")
     parser.add_argument("--port", type=int, default=9900, help="Port to run the server on (default: 9900)")
     # The new server (server/) runs this backend behind it while the rewrite moves its routes over:
-    # on loopback, over plain HTTP, with the certificate the new server resolved, which webssh
-    # serves the DevKit shell with. Goes with this file at the end of the rewrite.
+    # on loopback, over plain HTTP. Goes with this file at the end of the rewrite.
     parser.add_argument("--behind-proxy", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--cert", help=argparse.SUPPRESS)
-    parser.add_argument("--key", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if args.behind_proxy and not (args.cert and args.key):
-        parser.error("--behind-proxy needs --cert and --key")
 
     runtime_network_config = load_runtime_network_config()
 
     ensure_sys_metrics_publisher_started()
 
-    if args.behind_proxy:
-        ssl_context = (args.cert, args.key)
-    else:
-        ssl_context = check_and_generate_mkcert_certificate(args.port)
-    server_ssl_context = ssl_context
-    free_webssh_port()
-
     def _shutdown(signum=None, frame=None):
         if sys_metrics_publisher:
             sys_metrics_publisher.stop()
         neat_metrics_broker.stop()
-        cleanup_processes(signum, frame)
-
-    # Ensure webssh is also cleaned up on non-signal exits.
-    atexit.register(lambda: cleanup_processes(exit_process=False))
+        sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
     if args.behind_proxy:
-        # The browser reached the new server over HTTPS under its own host name; links built
-        # here (the DevKit shell's launch URL, System Info's web UI URL) must name those.
+        # The browser reached the new server over HTTPS under its own host name, which the links
+        # built here must name.
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
         print(f"neat-insight backend on http://127.0.0.1:{args.port}, behind the new server")
         app.run(host="127.0.0.1", port=args.port)
         return
 
+    ssl_context = check_and_generate_mkcert_certificate(args.port)
     print("\n" + "=" * 120)
     print("neat-insight server starting")
     print(f"Access: {get_certificate_access_url(args.port)}")
