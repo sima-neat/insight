@@ -14,11 +14,12 @@ repo.
 - `server/`: the new backend, one Go binary, which is being rewritten from scratch on
   `feat/backend-rewrite` (see "The server" below). It listens on `--port`, serves the web UI and
   the routes it implements, and runs the old backend behind it for the rest.
-- `neat_insight/`: the old Flask backend (the `/api/` endpoints, media, MJPEG previews), run by the
-  server on a loopback port until the rewrite has replaced it, and the `neat-insight` command
-  (`launcher.py`), which runs the server binary.
+- `neat_insight/`: the old Flask backend, which keeps the few routes the server does not have yet
+  (see "The old backend" below), run by the server on a loopback port until the rewrite has
+  replaced it, and the `neat-insight` command (`launcher.py`), which runs the server binary.
 - `webrtc/mediamtx.yml`: MediaMTX's configuration, all that is left of vf's folder (the server's
-  channels replaced vf); it moves with MediaMTX in the rewrite's third phase.
+  channels replaced vf). The build copies it beside the server's binary, which renders it for
+  MediaMTX at start (see "MediaMTX" below).
 - `docs/contracts.md`: what an app follows to show up in Insight (source URLs, channel ports, the
   metadata format with its JSON Schemas in `docs/schemas/metadata/`).
 - `UPSTREAM.md`: the `sima-neat/insight` baseline this repo was copied from. Backend changes from
@@ -167,11 +168,14 @@ merging.
     one: `auth_failed`'s `ssh-copy-id` command with Copy, `host_key_changed`'s fingerprints with
     Trust new key… (which asks first), and the caller's own actions (Retry, Open board settings).
     The board dialog, Peripherals and Stats use it.
+  - `app-copy-command` is a command for the user to run elsewhere, with Copy: the one that
+    authorizes Insight's key (in `app-board-problem-notice`), the board dialog's `ssh` command
+    (Insight runs no shell of its own), and Stats' command for a missing or stopped Sentinel.
   - `app-board-settings-action` is a callout's "Open board settings"
     (`<app-board-settings-action neatCalloutActions />`), for a problem the board's settings fix;
     it opens the board dialog through `AppDialogs`. Peripherals' and Stats' notices use it.
   - `app-sentinel-failure` says why a Sentinel request failed: a danger callout, announced as an
-    alert, with `failureOf`'s title, the backend's message and hint, and Retry (`retry`) only
+    alert, with `failureOf`'s title, the server's message and hint, and Retry (`retry`) only
     where asking again can help; `busy` makes Retry read "Retrying…" and wait with the focus kept
     on it. Stats' Live, Runs and Compare views and the run panel use it; a board-coded failure has
     `app-board-problem-notice` instead.
@@ -214,30 +218,33 @@ merging.
   the dialogs, with the kit entries only they use, would cost every first paint for something most
   visits never open.
 - **The board** has one reader and writer, `BoardService` (root-provided): the rail's board block,
-  the board dialog, Peripherals and Stats read its state, and its actions (select, Check again,
-  trust a host key) answer with the fresh state; page code never fetches `/api/board` itself. It is
-  re-read when the window regains focus and after every action, never polled on a timer: `GET
-  /api/board` does not connect to the board, and the pages' own board traffic keeps its status
-  current. The one connection check of its own is on load: the first answered read of an app load
-  runs `test()` when a board is selected and its state is unknown, silently (a failure only lands in
-  the state, so the board block shows Error; an answer for another generation than the state's,
-  after a board change, is dropped). While a check is out (`checking`, Check again's too) the block
-  says Checking… where it would say Not checked. Answers arrive out of order, so a stale one is
-  dropped; every response that describes the board carries its `generation`, and an answer for
-  another generation is never applied.
+  the board dialog, Peripherals and Stats read its state, and its actions (select, Use default,
+  Check again, trust a host key) answer with the fresh state; page code never fetches `/api/boards`
+  itself. It is re-read when the window regains focus and after every action, never polled on a
+  timer: `GET /api/boards` does not connect to the board, and the pages' own board traffic keeps
+  its status current. The one connection check of its own is on load: the first answered read of
+  an app load runs `check()` when a board is selected and its state is unknown, silently (a failure
+  only lands in the state, so the board block shows Error; an answer for a board no longer
+  selected is not applied). While a check is out (`checking`, Check again's too) the block says
+  Checking… where it would say Not checked. Answers arrive out of order, so a read's answer is
+  dropped once a newer one or an action's has been applied. Every board route names the board by
+  its id (`boardUrl`, `/api/boards/{id}/...`), and a request for a board that is no longer selected
+  is answered 404 `not_found`: code that holds something of a board keeps the id it asked with and
+  drops what it holds when the id changes.
 - **Peripherals** splits its state by how long it lives. `PeripheralsService` (root) holds the
-  board's scan: the snapshot read from `GET /api/peripherals`, Refresh, and the scan of each visit
-  (`scanOnVisit`: whenever the page is entered with a board target, unless a camera preview is
-  running then, since a scan stops it; never on a timer). A visit's scan is silent when it
-  succeeds, and the preview a visit resumes starts after it, not when it failed.
+  board's scan: the snapshot read from `GET /api/boards/{id}/peripherals` (Sentinel's catalog as
+  the server answers it, made into the page's devices by `snapshotOf`), Refresh, and the scan of
+  each visit (`scanOnVisit`: whenever the page is entered with a board selected, unless a camera
+  preview is running then, since a scan stops it; never on a timer). A visit's scan is silent when
+  it succeeds, and the preview a visit resumes starts after it, not when it failed.
   `PeripheralsSession` (root) remembers where the user left the page. `CameraPreview` and
   `MicTest` are provided by the page, so they live exactly as long as it: leaving Peripherals stops
   the camera preview (the next visit starts it again, once), and a microphone recording is left to
-  finish on the board for the next visit to take up. The backend runs one preview and one test per
-  Insight; the controllers handle another tab holding them. A preview the page takes up (one
-  running on entry, or one a refused Start finds) goes through the page's `CameraPreview.onAdopt`,
-  which selects its camera and remembers its mode, so the page never leaves, and so stops, a
-  preview it just took up.
+  finish on the board for the next visit to take up. The server runs one preview and one test per
+  board, and stops them when the board is replaced; the controllers handle another tab holding
+  them. A preview the page takes up (one running on entry, or one a refused Start finds) goes
+  through the page's `CameraPreview.onAdopt`, which selects its camera and remembers its mode, so
+  the page never leaves, and so stops, a preview it just took up.
 - **Stats** has three views, each at its own address so that it can be bookmarked or shared: Live
   (`/stats`), Runs (`/stats/runs`) and Compare (`/stats/runs/compare?runs=<a>,<b>[,…]&baseline=<a>`,
   runs named by id). They are child routes without components of their own (`app.routes.ts`), so
@@ -247,68 +254,56 @@ merging.
   Compare's elapsed axis, `app-sentinel-failure`, the kit's table). The page splits its state by
   how long it lives, as Peripherals does. `SentinelTelemetry` and `SentinelRuns` are provided by
   the page, so they live exactly as long as it: leaving Stats stops every request to the board
-  (the state read, the metric polls, the trace and run reads), and because the backend holds the
-  history, coming back shows the full window at once. The metrics are polled only while Live shows
-  them (`SentinelTelemetry.setWatching`). `SentinelRuns` reads nothing until the state says
-  Sentinel answers (`setSentinelReady`); then it reads the trace being recorded every 30 s on
-  every view, since Record and the recording line sit in each view's toolbar, and the run list
-  every 30 s while Runs or Compare shows (`setRunsShown`), and at once when a trace read finds
-  another trace than before; its start, stop and delete send
-  `?generation=`, and an answer naming another generation reloads the board rather than applying.
-  Compare asks Sentinel for the comparison itself (`/api/sentinel/compare?raw=1`, the baseline
-  first), once the run list says every run is still on the board and finished. `SentinelInstall`
-  is root-provided, so an install (which takes minutes) outlives the page: leaving Stats and
-  coming back still finds it running, and its toast says when it ended. `StatsSession` (root)
-  keeps the chosen card and thermal group, the selected and ticked runs (by id, dropped on
-  another board) and Compare's series for the next visit.
-  The metric history is incremental: the first poll asks for the window (`history=240`), the next
-  ones pass `after` (the newest timestamp held) and `epoch` (which history it is of), and the
-  answer holds only the newer samples. An answer marked `full` replaces the window instead. The
-  backend sends one for a first poll (no `after`); when its history restarted, so the `epoch`
-  named is not its current one (another board, a daemon restart, a polling gap, a clock step, or
-  a reseed that added earlier samples); when it no longer holds the `after` sample; and when more
-  samples came after it than `history` allows. Only Stats polls Sentinel: nothing else does, and
-  `/api/metrics` (System Info's "This computer") is read on open and on Refresh only.
+  (the Sentinel health read, the metric polls, the trace and run reads), and because Sentinel
+  keeps its own recent samples, coming back shows the full window at once. The metrics are polled
+  only while Live shows them (`SentinelTelemetry.setWatching`). `SentinelRuns` reads nothing until
+  the state says Sentinel answers (`setSentinelReady`); then it reads the trace being recorded
+  every 30 s on every view, since Record and the recording line sit in each view's toolbar, and
+  the run list every 30 s while Runs or Compare shows (`setRunsShown`), and at once when a trace
+  read finds another trace than before; its start, stop and delete go to the board they were asked
+  for, by its id, so one that outlives a board switch is refused (404 `not_found`) rather than
+  made on the new board. Compare asks Sentinel for the comparison itself
+  (`/api/boards/{id}/sentinel/compare?raw=true`, the baseline first), once the run list says every
+  run is still on the board and finished. Insight installs and starts nothing on the board: where
+  Sentinel is missing or stopped, the page shows the command the error's hint names, with Copy
+  (`app-copy-command`), and Check again asks once more. `StatsSession` (root) keeps the chosen
+  card and thermal group, the selected and ticked runs (by id, dropped on another board) and
+  Compare's series for the next visit.
+  The metric history is incremental, from Sentinel's cache
+  (`/api/boards/{id}/sentinel/cache`): the first poll asks for the whole cache, the next ones pass
+  `after` (the newest timestamp held), and the answer holds only the newer samples. An answer
+  marked `full` replaces the window instead: one comes when there is no `after`, when the cache no
+  longer holds that sample (a daemon restart, a caller too far behind) and when the board's clock
+  stepped back. Only Stats polls Sentinel: nothing else does, and `/api/system/host` (System
+  Info's "This computer") is read on open and on Refresh only.
 - **Build output.** `npm run build` writes the app to `frontend/dist` with `index.html` at its root,
   where `scripts/build-server.sh` looks for it to embed it in the server. Fonts and other media go to
   `dist/assets/` instead of Angular's default `media/`, which the old backend's `/media/<path>`
   route once shadowed (the library is `/api/media/...` now). Keep built files away from
   `/stream/`, which the server keeps for the sources' MJPEG output, and from `/static/`, which the
-  hosted mode's public origin routed to vf's old page. The initial-bundle budget warns at
-  600 kB. The initial bundle measures 583.0 kB raw with kit 0.20.0 (main 20 kB, styles 96 kB; 582.8
-  kB with kit 0.19.1, the shared chunk 465 kB, main 22 kB; 580.8 kB with kit 0.18.0; 579.2 kB before
-  Stats used the kit's page tabs, whose directives are in the primary entry and so in the shared
-  chunk; 578.2 kB with kit 0.17.0; 579.3 kB while a start-up hook resumed the tab's webcams after a
-  reload; 577.7 kB with kit 0.16.2, 3 kB less since the kit dropped its unused toggle code; 580.9 kB
-  with kit 0.16.1; 580.4 kB with kit 0.16.0; 580.2 kB before the board's check on load; 579.0 kB
-  before Stats' recording dots, whose `neat-live-dot` is in the primary entry; 571.6 kB with kit
-  0.15.1; 571.4 kB with kit 0.14.1; 571.3 kB with kit 0.14.0; 569.7 kB with kit 0.13.0; 569.4 kB
-  with kit 0.12.2; 569.1 kB with kit 0.12.1; 568.8 kB with kit 0.12.0; 691.9 kB with kit 0.11.3 and
-  0.11.2, before the icons became plain Lucide drawings; 691.7 kB with kit 0.11.1; 691.5 kB with kit
-  0.11.0; 684.7 kB with kit 0.10.3; 672 kB with kit 0.10.0 before the board pill and System Info's
-  button; 650 kB with kit 0.9.0; 694 kB with kit 0.5.3, before the kit split into per-component
-  entries), most of it the kit's shell, the
-  toast host (rendered in the app root, so it is in main on purpose) and Angular with its router,
-  plus the XHR backend (`withXhr()`, 4 kB: only XHR reports the upload progress of imports); the
-  warning sits about 20 kB above that, so growth shows up early, and the 1 MB error ceiling stays.
-  (`angular.json` cannot hold comments, so the reason lives here.) The kit's video code is imported
+  hosted mode's public origin routed to vf's old page. The initial bundle measures about 606 kB
+  raw, most of it the kit's shell, the toast host (rendered in the app root, so it is in main on
+  purpose) and Angular with its router, plus the XHR backend (`withXhr()`, 4 kB: only XHR reports
+  the upload progress of imports). Its budget in `angular.json` warns at 620 kB, a little above
+  that, so growth shows up early, and the 1 MB error ceiling stays. The kit's video code is imported
   from `@sima/neat-ui/video`, only by the Viewer, so it loads with that route and stays out of the
   initial bundle. Streaming, Media, Peripherals and Stats are lazy routes too, and so are the kit
   entries only they use (`/file-browser`, `/select-list`, `/dialog`, Peripherals' `/level-meter` and
   the charts entry, `/charts`, which only Stats draws with and which brings d3's scale and shape
   modules: nothing outside Stats imports it, and a type-only import is erased). The board and System
   Info dialogs of the rail are imported on their first open (`AppDialogs`), with the kit entries
-  they bring (`/collapsible`, `/callout`, which Peripherals and the Viewer use too). `npm run
-  check:bundle` (after a build, and in CI) fails if any of that leaks into the initial bundle, or
-  goes missing from the build: its markers are the selectors of the Viewer's video tile, the four
-  lazy pages (`app-streaming-page`, `app-media-page`, `app-peripherals-page`, `app-stats-page`), the
-  parts only Stats uses (`app-stats-runs`, `app-stats-compare`, `app-run-panel`, `app-record-trace`,
-  `app-sentinel-failure`), the two dialogs (`app-board-dialog`, `app-system-info-dialog`) and those
-  kit entries, the charts entry's among them (`neat-time-chart`, `neat-stacked-chart`,
-  `neat-heatmap`, `neat-sparkline`, `neat-chart-card`) and the status chip (`neat-status-chip`: the
-  board block draws its state without it, so it loads with the pages and dialogs that show one). The
-  toast host is the kit entry that is there on purpose: the app root renders it. A new lazy page or
-  dialog adds its selector.
+  they bring (`/collapsible`, `/callout`, which Peripherals and Stats use too).
+  `npm run check:bundle` (after a build, and in CI) fails if any of that leaks into the initial
+  bundle, or goes missing from the build: its markers are the selectors of the Viewer's video
+  tile, the four lazy pages (`app-streaming-page`, `app-media-page`, `app-peripherals-page`,
+  `app-stats-page`), the parts only Stats uses (`app-stats-runs`, `app-stats-compare`,
+  `app-run-panel`, `app-record-trace`, `app-sentinel-failure`), the two dialogs
+  (`app-board-dialog`, `app-system-info-dialog`) and those kit entries, the charts entry's among
+  them (`neat-time-chart`, `neat-stacked-chart`, `neat-heatmap`, `neat-sparkline`,
+  `neat-chart-card`) and the status chip (`neat-status-chip`: the board block draws its state
+  without it, so it loads with the pages and dialogs that show one). The toast host is the kit
+  entry that is there on purpose: the app root renders it. A new lazy page or dialog adds its
+  selector.
 - **The Viewer** has three layers. The kit (`@sima/neat-ui`, vendored in `frontend/vendor/`; the
   video part is its `@sima/neat-ui/video` entry point) draws and knows nothing of the server:
   `neat-video-tile` plays a `NeatTileSource` and draws its metadata on the matching frames;
@@ -359,8 +354,8 @@ the same arguments and names its interpreter in `NEAT_INSIGHT_PYTHON`.
   phase of the rewrite moves routes from it to the server: `/api/health` first, then the
   channels, then the sources and the media library, then the board, Peripherals, Stats and System
   Info. It no longer starts MediaMTX or frees its ports, and runs no webssh. What it still serves:
-  the YouTube import (`/api/import/youtube*`, saving into the same media folder), the workspace,
-  GenAI Studio's relay and the profiler's `/api/neat-metrics`, and its own `/api/health`.
+  the YouTube import (`/api/import/youtube*`, saving into the same media folder) and its own
+  `/api/health`. Workspace, GenAI Studio's relay and the profiling stream were removed, not moved.
 - **MediaMTX** (`internal/mediamtx`) is the server's child, restarted when it exits: its
   configuration is the shipped `mediamtx.yml` rendered into `<data>/run/` with this run's API
   password and publisher tag (readable by the owner only), and its WHIP listener serves the

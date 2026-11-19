@@ -36,9 +36,7 @@ setup(
     zip_safe=False,
     install_requires=[
         "flask",
-        "certifi",
         "psutil",
-        "pyzmq",
         "cryptography>=41.0.5,<45",
         "yt-dlp",
     ],

@@ -124,19 +124,6 @@ def is_sima_board():
                     return True
     return False
 
-def board_type():
-    for path in ["/etc/build", "/etc/buildinfo"]:
-        build_file = Path(path)
-        if build_file.exists():
-            with open(build_file, "r") as f:
-                for line in f:
-                    if line.startswith("MACHINE"):
-                        # Example line: MACHINE = modalix
-                        parts = line.split("=")
-                        if len(parts) == 2:
-                            return parts[1].strip().lower()
-    return None
-
 def init_environment():
     if is_sima_board():
         user_root = _ensure_sima_board_neat_insight_home()
@@ -159,21 +146,6 @@ def init_environment():
         "OPTVIEW_DATA": user_root,
         "NEAT_INSIGHT_DATA": user_root,
     }
-
-
-def get_devkit_sync_devkit_ip():
-    value = os.getenv(DEVKIT_SYNC_DEVKIT_IP_ENV, "").strip()
-    if not value:
-        return ""
-
-    try:
-        ipaddress.ip_address(value)
-    except ValueError as exc:
-        raise RuntimeError(
-            f"{DEVKIT_SYNC_DEVKIT_IP_ENV} must be an IP address, got: {value}"
-        ) from exc
-
-    return value
 
 
 def get_certificate_host():

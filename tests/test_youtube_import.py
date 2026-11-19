@@ -1,7 +1,4 @@
-import os
 import unittest
-
-os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55581")
 
 from neat_insight import app as app_module
 

@@ -1,8 +1,5 @@
-import os
 import unittest
 import unittest.mock as mock
-
-os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55581")
 
 from neat_insight import app as app_module
 from neat_insight.runtime_config import RuntimeNetworkConfig

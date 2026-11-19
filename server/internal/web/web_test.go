@@ -76,7 +76,7 @@ func TestRouting(t *testing.T) {
 	}{
 		{"/", "ui", http.StatusOK},
 		{"/viewer", "ui", http.StatusOK},
-		{"/api/genai/health", "legacy", http.StatusOK},
+		{"/api/import/youtube/validate", "legacy", http.StatusOK},
 		{"/swagger-ui-assets/swagger-ui.css", "legacy", http.StatusOK},
 		{"/media", "ui", http.StatusOK}, // the Media page; files are /api/media/file
 		{"/media/clip.mp4", "ui", http.StatusOK},

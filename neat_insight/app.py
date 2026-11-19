@@ -1,12 +1,10 @@
 import argparse
-import concurrent.futures
 import json
 import logging
 import os
 import queue
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -17,7 +15,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
 
-import psutil
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -27,20 +24,15 @@ if __name__ == "__main__" and (not globals().get("__package__")):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from neat_insight.api_docs import api_docs_bp
-from neat_insight.genai_relay import genai_bp
-from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.runtime_config import (
     legacy_runtime_network_config,
     load_runtime_network_config,
 )
 from neat_insight.utils import (
-    board_type,
     check_and_generate_mkcert_certificate,
     get_certificate_access_url,
     init_environment,
-    is_sima_board,
 )
-from neat_insight.workspace import workspace_bp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("werkzeug")
@@ -98,124 +90,11 @@ FRONTEND_DIST = _resolve_frontend_dist()
 
 app = Flask(__name__)
 app.register_blueprint(api_docs_bp)
-app.register_blueprint(workspace_bp)
-app.register_blueprint(genai_bp)
-neat_metrics_broker = NeatMetricsBroker()
-neat_metrics_broker.start()
-sys_metrics_publisher = None
-sys_metrics_lock = threading.Lock()
 runtime_network_config = legacy_runtime_network_config()
 
 
 def _json_error(message: str, status: int = 400):
     return jsonify({"error": message}), status
-
-
-def _with_metrics_compat(metrics_payload):
-    metrics_payload.setdefault("pipeline_status", {})
-    return metrics_payload
-
-
-class LocalCpuReader:
-    """The host's CPU use in percent since the previous reading, without blocking.
-
-    psutil.cpu_percent(interval=None) answers from the CPU times it saw at the previous call, and
-    the first call of a process returns a meaningless 0.0, so the reader makes that call once on
-    creation. Two things would still make the reading wrong:
-
-    - psutil keeps that "previous call" per calling thread, and a thread's first call answers 0.0.
-      Flask answers every request on its own thread, so all calls go through one worker thread of
-      the reader's own and share a single baseline.
-    - The `sys` publisher (every 2 s) and the requests share the reader, so a reading is "since
-      whoever read last". A call within `min_interval_sec` of the previous one repeats its value
-      instead of measuring a window of a few milliseconds, which psutil warns is inaccurate.
-    """
-
-    def __init__(self, min_interval_sec=0.5, clock=time.monotonic):
-        self._min_interval_sec = min_interval_sec
-        self._clock = clock
-        self._lock = threading.Lock()
-        self._worker = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="cpu-reader")
-        self._read_at = None
-        self._value = None
-        self._call_psutil()
-
-    def _call_psutil(self):
-        return self._worker.submit(lambda: psutil.cpu_percent(interval=None)).result()
-
-    def read(self):
-        with self._lock:
-            now = self._clock()
-            if self._read_at is None or now - self._read_at >= self._min_interval_sec:
-                self._value = self._call_psutil()
-                self._read_at = now
-            return self._value
-
-
-_local_cpu = LocalCpuReader()
-
-
-def collect_system_metrics():
-    """The host's readings for the profiler's `sys` topic (System Info reads the server's
-    /api/system/host)."""
-    cpu_percent_total = _local_cpu.read()
-    mem = psutil.virtual_memory()
-    memory_usage = {"total": mem.total, "used": mem.used, "percent": mem.percent}
-
-    try:
-        target_path = env["NEAT_INSIGHT_DATA"] if is_sima_board() else Path.home()
-        disk = psutil.disk_usage(str(target_path))
-        disk_usage = {
-            "mount": str(target_path),
-            "total": disk.total,
-            "used": disk.used,
-            "free": disk.free,
-            "percent": disk.percent,
-        }
-    except Exception:
-        disk_usage = None
-
-    avg_temp = None
-    if is_sima_board() and board_type() == "davinci":
-        try:
-            with open("/sys/kernel/temperature_profile", "r", encoding="utf-8") as f:
-                temps = []
-                for line in f:
-                    if "Temperature" in line and " C" in line:
-                        t = int(line.split("is")[-1].replace("C", "").strip())
-                        temps.append(t)
-                if temps:
-                    avg_temp = sum(temps) / len(temps)
-        except Exception:
-            avg_temp = None
-
-    return _with_metrics_compat({
-        "cpu_load": cpu_percent_total,
-        "memory": memory_usage,
-        "mla_allocated_bytes": 0,
-        "disk": disk_usage,
-        "temperature_celsius_avg": avg_temp,
-        "REMOTE": False,
-    })
-
-
-def ensure_sys_metrics_publisher_started():
-    global sys_metrics_publisher
-    if sys_metrics_publisher is not None:
-        return
-    with sys_metrics_lock:
-        if sys_metrics_publisher is not None:
-            return
-        publish_hook = None
-        if not neat_metrics_broker.endpoint_uses_bind():
-            publish_hook = lambda payload, ts: neat_metrics_broker.publish_local_event("sys", payload, ts)
-        sys_metrics_publisher = PeriodicZmqPublisher(
-            payload_fn=collect_system_metrics,
-            topic="sys",
-            interval_sec=float(os.getenv("SYS_METRICS_INTERVAL_SEC", "2.0")),
-            publish_hook=publish_hook,
-        )
-        sys_metrics_publisher.start()
 
 
 # API: readiness probe for the neat-insight backend.
@@ -232,22 +111,6 @@ def health():
             "public_origin": runtime_network_config.public_origin,
         },
     }
-
-
-# API: stream neat metrics events to the browser over server-sent events.
-@app.get("/api/neat-metrics")
-def stream_neat_metrics():
-    """Open a text/event-stream response that emits JSON metrics events from the local metrics broker."""
-    ensure_sys_metrics_publisher_started()
-
-    def event_stream():
-        for event in neat_metrics_broker.subscribe():
-            yield f"data: {json.dumps(event)}\n\n"
-
-    response = Response(stream_with_context(event_stream()), mimetype="text/event-stream")
-    response.headers["Cache-Control"] = "no-cache"
-    response.headers["X-Accel-Buffering"] = "no"
-    return response
 
 
 # The Viewer's routes (/api/channels, the offer, /api/ingest/stats, /api/viewer-url) are the new
@@ -897,7 +760,7 @@ def spa(path):
 
 
 def main():
-    global runtime_network_config, sys_metrics_publisher
+    global runtime_network_config
 
     parser = argparse.ArgumentParser(description="Start the neat-insight server.")
     parser.add_argument("--port", type=int, default=9900, help="Port to run the server on (default: 9900)")
@@ -907,17 +770,6 @@ def main():
     args = parser.parse_args()
 
     runtime_network_config = load_runtime_network_config()
-
-    ensure_sys_metrics_publisher_started()
-
-    def _shutdown(signum=None, frame=None):
-        if sys_metrics_publisher:
-            sys_metrics_publisher.stop()
-        neat_metrics_broker.stop()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, _shutdown)
-    signal.signal(signal.SIGTERM, _shutdown)
 
     if args.behind_proxy:
         # The browser reached the new server over HTTPS under its own host name, which the links

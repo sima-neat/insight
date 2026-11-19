@@ -3,7 +3,7 @@
   "info": {
     "title": "Neat Insight API",
     "version": "1.0.0",
-    "description": "Neat Insight provides an HTTP control plane for importing media, discovering viewer URLs, inspecting runtime health, and browsing the active workspace. The same API drives the Insight web application and can be used from scripts, test automation, or development tools.\n\n## Before you begin\n\n- The default local endpoint is `https://127.0.0.1:9900`. Development installations normally use a locally generated certificate, so diagnostic clients may need to trust mkcert or use `curl -k`.\n- Call `GET /api/health` before a workflow to confirm that the backend is ready.\n- Media and workspace paths are always relative to their managed root. Absolute paths and traversal outside those roots are rejected.\n- vf viewer channel indexes are **zero-based**.\n- Operations that import media may return a streaming `text/plain` progress response. Read through the final line before deciding whether the operation succeeded.\n\n## Typical workflows\n\n1. **Import media:** validate a YouTube URL, then import a clip of it into the media library.\n2. **Open a viewer:** request `/api/viewer-url` so the URL reflects the current host and configured SDK channel capacity.\n3. **Troubleshoot delivery:** check ingest statistics first; if RTP reaches vf but the browser still fails, continue with egress statistics.\n4. **Inspect artifacts:** browse the workspace tree, search paths, and preview files or members inside MPK archives.\n\n## Security\n\nThe API has no application-level authentication. Expose it only on trusted development networks and place an authenticated gateway in front of it if broader access is required.",
+    "description": "Neat Insight provides an HTTP control plane for importing media, discovering viewer URLs, and inspecting runtime health. The same API drives the Insight web application and can be used from scripts, test automation, or development tools.\n\n## Before you begin\n\n- The default local endpoint is `https://127.0.0.1:9900`. Development installations normally use a locally generated certificate, so diagnostic clients may need to trust mkcert or use `curl -k`.\n- Call `GET /api/health` before a workflow to confirm that the backend is ready.\n- Media paths are always relative to their managed root. Absolute paths and traversal outside that root are rejected.\n- vf viewer channel indexes are **zero-based**.\n- Operations that import media may return a streaming `text/plain` progress response. Read through the final line before deciding whether the operation succeeded.\n\n## Typical workflows\n\n1. **Import media:** validate a YouTube URL, then import a clip of it into the media library.\n2. **Open a viewer:** request `/api/viewer-url` so the URL reflects the current host and configured SDK channel capacity.\n3. **Troubleshoot delivery:** check ingest statistics first; if RTP reaches vf but the browser still fails, continue with egress statistics.\n\n## Security\n\nThe API has no application-level authentication. Expose it only on trusted development networks and place an authenticated gateway in front of it if broader access is required.",
     "license": {
       "name": "Apache License 2.0",
       "identifier": "Apache-2.0"
@@ -18,21 +18,18 @@
   "security": [],
   "tags": [
     {"name": "API documentation", "description": "Open the embedded Swagger UI or download the authoritative OpenAPI 3.1 document for generators, validators, and external documentation systems."},
-    {"name": "Service and system", "description": "Confirm readiness and follow the profiler's metrics. System Info, the board, Peripherals and Stats are served by Insight's server (server/api/openapi.yaml)."},
-    {"name": "Diagnostics", "description": "Observe Insight, vf ingest, and WebRTC delivery. Start with the compact views for active channels, then add `all=1&verbose=1` when diagnosing inactive ports, packet loss, malformed RTP, missing keyframes, RTCP feedback, or browser decode problems."},
+    {"name": "Service and system", "description": "Confirm readiness. System Info, the board, Peripherals and Stats are served by Insight's server (server/api/openapi.yaml)."},
     {"name": "Media imports", "description": "Populate the media library with YouTube clips: validate a URL, then download and transcode a clip of it. The import streams human-readable progress."},
-    {"name": "Viewer", "description": "Generate the URL of the viewer page, reachable from the current browser and bounded to the configured channel capacity, and relay the viewer's WebRTC offers to vf. Viewer channel indexes are zero-based even though media-source slots are one-based."},
-    {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
-    {"name": "GenAI Studio", "description": "Reach the GenAI Studio backend running on a board (`run.sh`, port 5000 by default) through Insight, so the browser never calls the board directly. Configure the board address once, then call the Studio's own API under `/api/genai/`."}
+    {"name": "Viewer", "description": "Generate the URL of the viewer page, reachable from the current browser and bounded to the configured channel capacity, and relay the viewer's WebRTC offers to vf. Viewer channel indexes are zero-based even though media-source slots are one-based."}
   ],
   "x-tagGroups": [
     {
       "name": "Observe Insight",
-      "tags": ["Service and system", "Diagnostics", "Viewer"]
+      "tags": ["Service and system", "Viewer"]
     },
     {
       "name": "Automate Insight",
-      "tags": ["Media imports", "Workspace"]
+      "tags": ["Media imports"]
     },
     {
       "name": "API resources",
@@ -94,20 +91,6 @@
         }
       }
     },
-    "/api/neat-metrics": {
-      "get": {
-        "tags": ["Diagnostics"],
-        "summary": "Stream Neat metrics events",
-        "description": "Opens a long-lived server-sent events connection to the local metrics broker. Each SSE `data` field contains one JSON metrics event; clients should reconnect after network interruption and must not wait for the response body to terminate.",
-        "operationId": "streamNeatMetrics",
-        "responses": {
-          "200": {
-            "description": "A long-lived server-sent event stream. Each data field contains a JSON metrics event.",
-            "content": {"text/event-stream": {"schema": {"type": "string"}}}
-          }
-        }
-      }
-    },
     "/api/import/youtube/validate": {
       "post": {
         "tags": ["Media imports"],
@@ -152,180 +135,15 @@
           "400": {"$ref": "#/components/responses/BadRequest"}
         }
       }
-    },
-    "/api/genai/settings": {
-      "get": {
-        "tags": ["GenAI Studio"],
-        "summary": "Get the GenAI Studio board settings",
-        "description": "Returns the board address Insight relays GenAI calls to, whether it was configured or derived (`127.0.0.1` on a board, otherwise the paired DevKit's `DEVKIT_SYNC_DEVKIT_IP`).",
-        "operationId": "getGenaiSettings",
-        "responses": {
-          "200": {"description": "Board address in use and stored settings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}, "example": {"url": "https://192.168.2.3:5000", "configuredUrl": null, "defaultUrl": "https://192.168.2.3:5000"}}}},
-          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
-        }
-      },
-      "post": {
-        "tags": ["GenAI Studio"],
-        "summary": "Set the GenAI Studio board settings",
-        "description": "Sets or clears the board address. An empty string clears it; an omitted field is unchanged. The address must be `http(s)://host[:port]` with no path. Settings persist in Insight's `cfg.json`.",
-        "operationId": "setGenaiSettings",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettingsUpdate"}, "example": {"url": "https://192.168.2.3:5000"}}}},
-        "responses": {
-          "200": {"description": "Settings after the update.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "500": {"description": "Insight's `cfg.json` could not be read (`cfg-unreadable`; nothing is changed) or written (`cfg-unwritable`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
-        }
-      }
-    },
-    "/api/genai/{subpath}": {
-      "parameters": [{"name": "subpath", "in": "path", "required": true, "description": "A GenAI Studio API path: `health`, `voices`, or one under `v1/`, `audio/`, `models/`, `benchmark/`, `tts/`, `piperplus/`, `supertonic/`, `voices/`, `rag/`, `board-camera/`. `shutdown` and every other path are refused.", "schema": {"type": "string"}, "example": "v1/chat/completions"}],
-      "get": {
-        "tags": ["GenAI Studio"],
-        "summary": "Relay a GET to the board's GenAI Studio backend",
-        "description": "Forwards the request, with its query string, to the configured board and streams the response back unchanged: status, body, content type and the Studio's `X-*` headers. Server-sent event streams such as `models/logs/stream` pass through unbuffered, and binary answers such as the JPEG from `board-camera/snapshot?device=/dev/videoN` byte for byte. The board's self-signed certificate is accepted for the configured address only.",
-        "operationId": "relayGenaiGet",
-        "responses": {
-          "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
-          "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
-        }
-      },
-      "post": {
-        "tags": ["GenAI Studio"],
-        "summary": "Relay a POST to the board's GenAI Studio backend",
-        "description": "Forwards the request body as sent (JSON or multipart audio uploads) to the configured board and streams the response back, so streamed chat replies arrive token by token.",
-        "operationId": "relayGenaiPost",
-        "requestBody": {"required": false, "content": {"*/*": {"schema": {}}}},
-        "responses": {
-          "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
-          "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
-        }
-      }
-    },
-    "/api/workspace/root": {
-      "get": {
-        "tags": ["Workspace"],
-        "summary": "Get the active workspace root",
-        "description": "Reports the logical root used by all workspace endpoints and whether the conventional `/workspace` mount is active. Returned paths establish context for the browser but subsequent API requests must still use relative workspace paths.",
-        "operationId": "getWorkspaceRoot",
-        "responses": {
-          "200": {
-            "description": "Resolved workspace root and whether `/workspace` is active.",
-            "content": {"application/json": {"schema": {"type": "object", "required": ["name", "path", "hasWorkspaceDir"], "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "hasWorkspaceDir": {"type": "boolean"}}}}}
-          }
-        }
-      }
-    },
-    "/api/workspace/tree": {
-      "get": {
-        "tags": ["Workspace"],
-        "summary": "List a workspace folder or MPK archive folder",
-        "description": "Lists the immediate children of a workspace directory or a directory inside an MPK tar archive. Use an empty path for the root and `archive_mpk.tar.gz::member/path` for archive navigation. Results are sorted and classified so clients can build a lazy-loading file browser without extracting archives.",
-        "operationId": "getWorkspaceTree",
-        "parameters": [{"$ref": "#/components/parameters/WorkspacePath"}],
-        "responses": {
-          "200": {"description": "Folder path and sorted immediate children.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceTree"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "404": {"$ref": "#/components/responses/NotFound"},
-          "500": {"$ref": "#/components/responses/InternalError"}
-        }
-      }
-    },
-    "/api/workspace/search": {
-      "get": {
-        "tags": ["Workspace"],
-        "summary": "Search indexed workspace paths",
-        "description": "Performs a bounded, case-insensitive search across workspace filesystem names and relative paths. MPK archives are searchable as files, but members inside them are not indexed; browse an archive with the workspace tree endpoint instead. Results are ranked and capped at 200 entries. Supply `kind` to narrow broad queries to models, images, code, text, archives, executables, or binary files.",
-        "operationId": "searchWorkspace",
-        "parameters": [
-          {"name": "q", "in": "query", "description": "Case-insensitive filename or path fragment.", "schema": {"type": "string"}},
-          {"name": "kind", "in": "query", "description": "Optional node-kind filter.", "schema": {"$ref": "#/components/schemas/WorkspaceKind"}}
-        ],
-        "responses": {
-          "200": {"description": "Up to 200 ranked matches.", "content": {"application/json": {"schema": {"type": "object", "required": ["matches"], "properties": {"matches": {"type": "array", "items": {"allOf": [{"$ref": "#/components/schemas/WorkspaceNode"}, {"type": "object", "properties": {"score": {"type": "integer"}}}]}}}}}}}
-        }
-      }
-    },
-    "/api/workspace/file-info": {
-      "get": {
-        "tags": ["Workspace"],
-        "summary": "Get workspace path metadata",
-        "description": "Returns classification and filesystem metadata for one file, folder, archive, or MPK member without reading its content. Use this when a client needs size, modification time, or preview strategy before requesting the file-preview or raw-image endpoint.",
-        "operationId": "getWorkspaceFileInfo",
-        "parameters": [{"$ref": "#/components/parameters/RequiredWorkspacePath"}],
-        "responses": {
-          "200": {"description": "File, folder, or MPK archive-member metadata.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceNode"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "404": {"$ref": "#/components/responses/NotFound"},
-          "500": {"$ref": "#/components/responses/InternalError"}
-        }
-      }
-    },
-    "/api/workspace/raw": {
-      "get": {
-        "tags": ["Workspace"],
-        "summary": "Get raw workspace image content",
-        "description": "Returns original image bytes for an ordinary image file in the workspace filesystem. MPK archive-member paths are not supported by this endpoint. This route is intended for browser `<img>` sources and binary consumers; use the JSON file-preview endpoint for text and metadata. Non-image or inaccessible paths return an error rather than arbitrary file bytes.",
-        "operationId": "getWorkspaceRawFile",
-        "parameters": [{"$ref": "#/components/parameters/RequiredWorkspacePath"}],
-        "responses": {
-          "200": {"description": "Raw image bytes using the detected media type.", "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "404": {"$ref": "#/components/responses/NotFound"},
-          "500": {"$ref": "#/components/responses/InternalError"}
-        }
-      }
-    },
-    "/api/workspace/file": {
-      "get": {
-        "tags": ["Workspace"],
-        "summary": "Preview a workspace file or MPK archive member",
-        "description": "Returns node metadata together with a bounded text preview when the selected content is text-like. The `previewAvailable` and `truncated` flags tell clients whether content was returned and whether only a prefix is shown. Binary files remain discoverable but are not serialized into the JSON response.",
-        "operationId": "getWorkspaceFile",
-        "parameters": [{"$ref": "#/components/parameters/RequiredWorkspacePath"}],
-        "responses": {
-          "200": {"description": "Node metadata and a bounded text preview when the content is text-like.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceFilePreview"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "404": {"$ref": "#/components/responses/NotFound"},
-          "500": {"$ref": "#/components/responses/InternalError"}
-        }
-      }
     }
   },
   "components": {
-    "parameters": {
-      "WorkspacePath": {
-        "name": "path",
-        "in": "query",
-        "description": "Relative workspace path. MPK members use `archive_mpk.tar.gz::member/path`.",
-        "schema": {"type": "string", "default": ""}
-      },
-      "RequiredWorkspacePath": {
-        "name": "path",
-        "in": "query",
-        "required": true,
-        "description": "Relative workspace path. MPK members use `archive_mpk.tar.gz::member/path`.",
-        "schema": {"type": "string"}
-      }
-    },
     "responses": {
       "ProgressStream": {
         "description": "Streaming progress messages. Inspect the final lines to determine whether the operation completed or failed.",
         "content": {"text/plain": {"schema": {"type": "string"}}}
       },
-      "BadRequest": {"description": "Missing or invalid request data.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+      "BadRequest": {"description": "Missing or invalid request data.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
     },
     "schemas": {
       "Error": {
@@ -334,30 +152,6 @@
         "required": ["error"],
         "properties": {"error": {"type": "string", "description": "Human-readable failure reason suitable for logs and user-facing diagnostics."}},
         "example": {"error": "Missing index"}
-      },
-      "GenaiError": {
-        "type": "object",
-        "description": "Error from the GenAI relay itself (not from the board), with a machine-readable reason.",
-        "required": ["error", "reason"],
-        "properties": {"error": {"type": "string"}, "reason": {"type": "string", "enum": ["not-relayed", "not-configured", "invalid-address", "unreachable", "bad-request", "cfg-unreadable", "cfg-unwritable"]}},
-        "example": {"error": "GenAI Studio backend unreachable at https://192.168.2.3:5000: [Errno 61] Connection refused", "reason": "unreachable"}
-      },
-      "GenaiSettings": {
-        "type": "object",
-        "description": "Board address Insight relays GenAI calls to, and stored settings.",
-        "required": ["url", "configuredUrl", "defaultUrl"],
-        "properties": {
-          "url": {"type": "string", "description": "Address in use; empty when none is configured or derivable."},
-          "configuredUrl": {"type": ["string", "null"], "description": "Address set by the user, or null."},
-          "defaultUrl": {"type": ["string", "null"], "description": "Address used when none is configured, or null."}
-        }
-      },
-      "GenaiSettingsUpdate": {
-        "type": "object",
-        "description": "Fields to change; an empty string clears a value.",
-        "properties": {
-          "url": {"type": "string", "description": "`http(s)://host[:port]` of the board's GenAI Studio backend."}
-        }
       },
       "Health": {
         "type": "object",
@@ -396,51 +190,6 @@
               "target": {"type": "string", "enum": ["1080p30", "720p30", "480p30"], "description": "Insight-compatible resolution and frame-rate rendition to generate."},
               "clip_start": {"type": "number", "minimum": 0, "default": 0, "description": "Zero-based start offset in seconds."},
               "clip_duration": {"type": "number", "exclusiveMinimum": 0, "maximum": 300, "default": 300, "description": "Number of seconds to import, capped at five minutes."}
-            }
-          }
-        ]
-      },
-      "WorkspaceKind": {
-        "type": "string",
-        "description": "Content classification used for workspace icons, filtering, and preview selection.",
-        "enum": ["folder", "archive", "model", "image", "code", "text", "executable", "binary"]
-      },
-      "WorkspaceNode": {
-        "type": "object",
-        "description": "Metadata for one workspace filesystem entry or virtual member inside an MPK archive.",
-        "required": ["name", "path", "type", "kind"],
-        "properties": {
-          "name": {"type": "string", "description": "Display name of the filesystem entry or archive member."},
-          "path": {"type": "string", "description": "Relative workspace path accepted by other workspace endpoints; archive members use `archive::member` syntax."},
-          "type": {"type": "string", "enum": ["file", "folder"], "description": "Structural node type used to distinguish files from navigable folders. MPK archives have type `folder` and kind `archive`."},
-          "kind": {"$ref": "#/components/schemas/WorkspaceKind"},
-          "size": {"type": "integer", "minimum": 0, "description": "Content size in bytes when known."},
-          "mtime": {"type": "number", "description": "Unix modification timestamp."},
-          "archive": {"type": "string", "description": "Containing MPK archive path for a virtual member; omitted for ordinary filesystem entries."}
-        },
-        "additionalProperties": true
-      },
-      "WorkspaceTree": {
-        "type": "object",
-        "description": "One level of a lazily browsable workspace directory or MPK archive directory.",
-        "required": ["path", "children"],
-        "properties": {
-          "path": {"type": "string", "description": "Relative folder or archive-member directory that was listed."},
-          "archive": {"type": "string", "description": "Containing MPK archive when the listed directory is virtual."},
-          "children": {"type": "array", "description": "Sorted immediate children; descendants are loaded with subsequent tree requests.", "items": {"$ref": "#/components/schemas/WorkspaceNode"}}
-        }
-      },
-      "WorkspaceFilePreview": {
-        "description": "Workspace node metadata plus a bounded textual preview when the content type is safe to represent as text.",
-        "allOf": [
-          {"$ref": "#/components/schemas/WorkspaceNode"},
-          {
-            "type": "object",
-            "required": ["content", "truncated", "previewAvailable"],
-            "properties": {
-              "content": {"type": "string", "description": "Decoded text prefix, or an empty string when no text preview is available."},
-              "truncated": {"type": "boolean", "description": "Whether content continues beyond the returned bounded preview."},
-              "previewAvailable": {"type": "boolean", "description": "Whether the selected node was classified as safely previewable text."}
             }
           }
         ]
