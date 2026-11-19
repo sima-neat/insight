@@ -129,6 +129,10 @@ the board.
 - **Compare** overlays one series of the runs (total power, temperature, CPU, memory) against a
   **Baseline** run, with a summary per run, a **Per-metric comparison** table and **Export CSV**.
 
+![Runs with a run selected: its metrics in the side panel](images/ui-stats-runs.webp)
+
+![Compare: the CPU usage of a loaded run against an idle baseline, with a summary per run](images/ui-stats-compare.webp)
+
 ## The board
 
 The board block at the bottom of the rail names the selected board and whether Insight reaches it,
