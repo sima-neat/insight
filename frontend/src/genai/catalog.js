@@ -35,6 +35,13 @@ export function savedForOtherBoard(catalog, board) {
   return Boolean(board) && catalog.board !== board
 }
 
+// Whether opening the model list should sync the catalog. `board` must be the
+// address read when the list opens: another browser tab can switch the shared
+// board while this view keeps the settings it loaded earlier.
+export function catalogNeedsSync(catalog, board, { fromOtherBoard = false } = {}) {
+  return !catalog.syncedAt || fromOtherBoard || savedForOtherBoard(catalog, board)
+}
+
 export function saveCatalog(storage, catalog) {
   try {
     storage.setItem(CATALOG_KEY, JSON.stringify(catalog))

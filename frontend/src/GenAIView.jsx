@@ -89,13 +89,13 @@ import {
   cardNote,
   cardSummary,
   catalogFromSearch,
+  catalogNeedsSync,
   catalogRows,
   filterRows,
   loadCatalog,
   residencyNote,
   resultsLine,
   saveCatalog,
-  savedForOtherBoard,
   storageSummary,
   syncedLabel,
   withCard
@@ -1132,14 +1132,24 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // The first look at the catalog fills it; after that, Sync catalog refreshes it.
   // A list saved for another board (the board changed while this page was
   // closed or in another tab) is refreshed once too; a failure keeps its rows.
+  // The address is read again here: another tab can switch the shared board
+  // while this view still holds the settings it loaded earlier. Only the
+  // comparison uses it, so the board-switch handling above still sees the move.
   useEffect(() => {
-    if (!settingsOpen || settingsTab !== 'models') return
-    if (modelCatalog.syncedAt && !catalogFromOtherBoard.current &&
-      !savedForOtherBoard(modelCatalog, settings?.url)) return
-    if (downloads.state !== 'available' || !allowed.searchModels || catalogAutoSynced.current) return
-    catalogAutoSynced.current = true
-    catalogFromOtherBoard.current = false
-    syncCatalog()
+    if (!settingsOpen || settingsTab !== 'models') return undefined
+    if (downloads.state !== 'available' || !allowed.searchModels || catalogAutoSynced.current) return undefined
+    let cancelled = false
+    const decide = (board) => {
+      if (cancelled || catalogAutoSynced.current) return
+      if (!catalogNeedsSync(modelCatalog, board, { fromOtherBoard: catalogFromOtherBoard.current })) return
+      catalogAutoSynced.current = true
+      catalogFromOtherBoard.current = false
+      syncCatalog()
+    }
+    getSettings().then((s) => decide(s.url), () => decide(settings?.url))
+    return () => {
+      cancelled = true
+    }
   }, [settingsOpen, settingsTab, modelCatalog.syncedAt, modelCatalog.board, settings?.url, downloads.state, allowed.searchModels])
 
   // The offer says how big the download is, and finds out early whether the

@@ -7,6 +7,7 @@ import {
   cardNote,
   cardSummary,
   catalogFromSearch,
+  catalogNeedsSync,
   catalogRows,
   filterRows,
   loadCatalog,
@@ -192,6 +193,19 @@ test('a catalog remembers the board it was read from', () => {
 test('a catalog saved before boards were noted loads without one', () => {
   const storage = memoryStorage({ [CATALOG_KEY]: JSON.stringify({ syncedAt: 1000, models: CATALOG.models }) })
   assert.equal(loadCatalog(storage).board, null)
+})
+
+test('opening the model list syncs a catalog saved for the board another tab left', () => {
+  // Another tab switched the shared board. This view still holds the old address,
+  // so only the address read when the list opens shows the saved list is stale.
+  const oldBoard = 'https://192.168.2.3:5000'
+  const newBoard = 'https://192.168.2.9:5000'
+  const saved = { ...CATALOG, syncedAt: 1_000, board: oldBoard }
+  assert.equal(catalogNeedsSync(saved, oldBoard), false)  // the stale address hides it
+  assert.equal(catalogNeedsSync(saved, newBoard), true)   // the fresh one does not
+  assert.equal(catalogNeedsSync({ ...saved, syncedAt: null }, oldBoard), true)  // never synced
+  assert.equal(catalogNeedsSync(saved, oldBoard, { fromOtherBoard: true }), true)
+  assert.equal(catalogNeedsSync(saved, null), false)  // address unknown: no claim
 })
 
 test('a saved catalog is for another board unless it names the current one', () => {
