@@ -20,12 +20,16 @@ a phone the panel opens over the page.
 
 ## Media
 
+![Media with a file selected: the library on the left, its preview and details in the side panel](images/ui-media.webp)
+
 Media is the library of video files that sources play. **Import…** opens **Import media**:
 
 - **Local files**: choose or drop MP4, MOV, AVI, MKV or WebM files with H.264, H.265 or MJPEG
   video, or a `.zip` or `.tar.gz` of them. MP4 uploads are normalized for low-latency playback.
 - **Catalog**: SiMa's test videos, by asset type (filtered by resolution, frame rate and codec) or
   by name with each one's variants. Importing needs network access.
+
+![The Catalog tab of Import media, with one asset selected](images/ui-import-catalog.webp)
 
 The library is a folder tree with a breadcrumb and a filter that searches the current folder and
 everything beneath it. The **In use** column names the slots that play a file. Files Insight cannot
@@ -36,6 +40,8 @@ frame rate, and **Delete…**. Tick files to delete several at once; the ticks t
 gestures (Ctrl-click or Cmd-click, Shift-click, Ctrl+A or Cmd+A), here and in Stats' runs.
 
 ## Streaming
+
+![Streaming with slot src1 live: the slot list, and the slot's preview, source and URL in the side panel](images/ui-streaming.webp)
 
 Streaming lists the 48 source slots, `src1` to `src48`, with each one's kind, source, state, frame
 rate and codec. The toolbar shows **All 48** or only the slots **In use**. The **More actions** (⋯)
@@ -106,6 +112,8 @@ the rail, and **Compare**, opened from Runs; each has its own address to bookmar
 Sentinel is missing or stopped, the page shows the command that installs or starts it, to run on
 the board.
 
+![Stats Live: cards for temperature, power, CPU, memory and network, and the Thermal area in the side panel](images/ui-stats-live.webp)
+
 - **Live** shows cards for the hottest temperature, board power, CPU and memory use and network
   traffic, and **All metrics** below them. Select a card for its area (**Thermal**, **Power**,
   **System**, **Storage & Network**) in the side panel. **Pause** stops the updates, and **Export
@@ -124,6 +132,8 @@ with a dot in the state's color. Select it to open **Board**: the board's detail
 the `ssh` command to open a shell on it, and **Change board**, where you enter a board's address,
 SSH port and user, or go back to the default.
 
+![The Board dialog for a connected DevKit](images/ui-board.webp)
+
 Without a board you entered, Insight uses the board it runs on, or in the SDK the DevKit paired
 with `sima-cli sdk setup --devkit <ip>`. It connects with the SSH keys of the account that runs it
 and never asks for a password. When the board refuses the key, Insight shows the `ssh-copy-id`
@@ -131,6 +141,8 @@ command that authorizes it; when a reflashed board presents a new host key, Insi
 compare and trust it.
 
 ## System information
+
+![System information in the SDK](images/ui-system-info.webp)
 
 **System information** in the rail shows Insight's version and settings (its address, ports,
 data folder, certificate and channel count), the computer Insight runs on (CPU, memory, disk), and
