@@ -13,7 +13,6 @@ import {
   selectionTier,
   sizeOptions,
 } from './camera-modes';
-import { USB_PREVIEW_FORMATS } from './catalog';
 import {
   format,
   imx477,
@@ -218,10 +217,9 @@ describe('camera modes', () => {
     expect(cameraSummaryLine(imx568)).toBe(NOT_IN_OVERLAYS);
     // An Available camera says nothing: the mode menus carry the Available/Unsupported labels.
     expect(cameraSummaryLine(imx477)).toBe('');
-    // Whether another program holds the camera is not a scan fact: Sentinel's availability is passed
-    // through untouched and never becomes a sentence; a preview that cannot open the camera says so.
+    // Whether another program holds the camera is not a scan fact: a preview that cannot open the
+    // camera says so.
     expect(cameraSummaryLine(inUse)).toBe('');
-    expect(cameraSummaryLine({ ...imx477, availability: imx568.availability })).toBe('');
     // A USB camera is always Unsupported, so it gets no sentence.
     expect(cameraSummaryLine(usb)).toBe('');
     expect(cameraSummaryLine({ ...imx477, support: support('unsupported') })).toBe('Unsupported.');
@@ -249,12 +247,8 @@ describe('camera modes', () => {
     // mode in a format the preview reads.
     expect(block(usb, sel('MJPG', 1280, 720, 30))).toEqual(open);
     expect(block(usb, null).reason).toMatch(/no mode Insight can start/);
-    // A camera the scan says is in use is not blocked up front: the start reports a busy camera itself.
-    expect(block({ ...usb, availability: inUse.availability }, sel('YUYV', 640, 480, 15))).toEqual(
-      open,
-    );
 
-    // A USB format the preview does not read.
+    // A USB format the preview does not read: the server says the preview does not take it.
     const h264 = block(
       {
         ...usb,
@@ -268,7 +262,6 @@ describe('camera modes', () => {
     );
     expect(h264.blocked).toBe(true);
     expect(h264.reason).toMatch(/not H264\. Choose another format\.$/);
-    expect(Object.isFrozen(USB_PREVIEW_FORMATS)).toBe(true);
 
     expect(block(imx477, null).reason).toMatch(/no mode Insight can start/);
 
@@ -299,7 +292,8 @@ describe('camera modes', () => {
       'NV12 1280×720 cannot be previewed. Choose an Available mode.',
     );
 
-    // The scan's availability never blocks Start; a busy camera is reported by the start itself.
+    // A camera kept from an earlier scan once in use blocks nothing; a busy camera is reported by
+    // the start itself.
     expect(block({ ...inUse, modes_source: 'live' }, mipiMode)).toEqual(open);
 
     expect(

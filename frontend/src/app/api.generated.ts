@@ -673,7 +673,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Scan the board's cameras and microphones
-         * @description SiMa Sentinel rescans the board's MIPI and USB cameras and ALSA microphones and answers with its catalog, which is kept as the board's last scan, with what changed since the one before. Each camera mode carries Sentinel's own verdict (`available`, `reason`). A running preview stops first. A refresh that waited for another gets that one's scan.
+         * @description SiMa Sentinel rescans the board's MIPI and USB cameras and ALSA microphones; the devices it found are kept as the board's last scan, with what changed since the one before. Each camera mode carries Sentinel's own verdict (`tier`, `reason`) and whether the preview takes it (`previewable`). A running preview stops first. A refresh that waited for another gets that one's scan. 502 `sentinel_failed` for a catalog Insight cannot read.
          */
         readonly post: operations["refreshPeripherals"];
         readonly delete?: never;
@@ -721,7 +721,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Start a camera's live preview
-         * @description Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode must be one the last scan lists: for MIPI an NV12 mode Sentinel does not mark unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format, at a rate it advertises. 409 `preview_active` while one runs, `camera_in_use` when another process holds the camera (Insight never stops it), `no_scan` before a scan; 422 `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing` without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
+         * @description Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode must be one the last scan says is `previewable`: for MIPI an NV12 mode Sentinel does not mark unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format, at a rate it advertises. 409 `preview_active` while one runs, `camera_in_use` when another process holds the camera (Insight never stops it), `no_scan` before a scan; 422 `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing` without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
          */
         readonly post: operations["startCameraPreview"];
         readonly delete?: never;
@@ -1637,10 +1637,189 @@ export interface components {
             readonly scanned_at: string;
             /** @description How long Sentinel's scan took. */
             readonly scan_ms: number;
-            /** @description Sentinel's peripheral catalog as it wrote it: `revision`, `observed_at`, `devices` (cameras with their `modes`, each with Sentinel's `available` and `reason`; microphones with their `capture_target`), `errors` (a failed provider's devices are its last successful scan's) and `board` (the board's model and camera setup). */
-            readonly catalog: components["schemas"]["SentinelBody"];
+            /** @description The devices the scan found, cameras first, then microphones, then other kinds, each in Sentinel's order. */
+            readonly items: readonly components["schemas"]["PeripheralItem"][];
+            /** @description Sentinel's providers that failed in this scan; the devices of one are its last successful scan's. */
+            readonly issues: readonly components["schemas"]["PeripheralIssue"][];
+            /** @description The board's camera setup as Sentinel reads it from the device tree; null from a Sentinel that does not. */
+            readonly camera_setup: components["schemas"]["CameraSetup"] | null;
             /** @description What this scan found or missed against the one before; null for the first. */
             readonly changes: components["schemas"]["PeripheralChanges"] | null;
+        };
+        /** @description A device of a scan, told apart by `kind`; a kind Insight has no view for is an OtherItem. */
+        readonly PeripheralItem: components["schemas"]["CameraItem"] | components["schemas"]["MicrophoneItem"] | components["schemas"]["OtherItem"];
+        readonly CameraItem: {
+            /** @description Sentinel's id, stable across scans of one board. */
+            readonly id: string;
+            /** @enum {string} */
+            readonly kind: "camera";
+            /** @description mipi or usb; otherwise Sentinel's backend for it. */
+            readonly connection: string;
+            readonly name: string;
+            readonly model: string | null;
+            readonly device: components["schemas"]["CameraDevice"];
+            /** @description The camera's best verdict over all its modes. */
+            readonly support: components["schemas"]["DeviceSupport"];
+            /**
+             * @description `live` from this scan; `previous-scan` kept from a failed provider's last good scan (the camera may have been unplugged since); `unavailable` when no mode could be read.
+             * @enum {string}
+             */
+            readonly modes_source: "live" | "previous-scan" | "unavailable";
+            readonly formats: readonly components["schemas"]["CameraFormat"][];
+            /** @description The mode to preselect: 1920 wide when Available, else the widest Available size below, else the smallest, at its fastest Available rate; null when no mode is Available. */
+            readonly default_selection: components["schemas"]["PreviewMode"] | null;
+            readonly notes: readonly string[];
+            readonly errors: readonly components["schemas"]["DeviceError"][];
+        };
+        /** @description How the camera's device is reached: a MIPI camera's libcamera facts, a USB camera's V4L2 nodes and USB facts. A fact the board does not report is absent. */
+        readonly CameraDevice: {
+            /** @description libcamera's name for the camera; the stable way to name a MIPI camera. */
+            readonly camera_name?: string;
+            readonly media_device?: string;
+            readonly bus_info?: string;
+            /** @description The CSI receiver the sensor is attached to. */
+            readonly csi?: string;
+            /** @description `/dev/videoN`, whose number can change across reboots. */
+            readonly video_node?: string;
+            /** @description The `/dev/v4l/by-id/...` link, stable across reboots. */
+            readonly by_id?: string;
+            readonly usb?: components["schemas"]["UsbFacts"];
+        };
+        /** @description A device's USB facts; a fact it does not report is absent. */
+        readonly UsbFacts: {
+            readonly vendor_id?: string;
+            readonly product_id?: string;
+            readonly manufacturer?: string;
+            readonly product?: string;
+            readonly serial?: string;
+            /** @description The device's place on the bus; a camera's sysfs path, a microphone's ALSA name for it (`1-1.2`). */
+            readonly bus_path?: string;
+            /** @description A microphone's USB interface of the audio function. */
+            readonly interface?: string;
+            /**
+             * Format: double
+             * @description A camera's link speed in Mb/s (1.5, 12, 480, 5000...).
+             */
+            readonly speed_mbps?: number;
+        };
+        /** @description Sentinel's verdict on a camera, format or mode: available when Neat's CameraInput can use it. USB cameras are unsupported, yet previewable. */
+        readonly DeviceSupport: {
+            /** @enum {string} */
+            readonly tier: "available" | "unsupported";
+            /** @description Why it is not available; empty when it is. */
+            readonly reason: string;
+        };
+        /** @description A problem with one device, such as a camera without modes (`no_modes`). */
+        readonly DeviceError: {
+            readonly code: string;
+            readonly message: string;
+            readonly hint: string;
+        };
+        /** @description One pixel format of a camera, with the sizes it offers, in Sentinel's order. */
+        readonly CameraFormat: {
+            /** @description The V4L2 or libcamera FourCC, such as NV12 or MJPG. */
+            readonly format: string;
+            readonly label: string;
+            readonly support: components["schemas"]["DeviceSupport"];
+            /** @description The bounds of a stepwise or continuous size range; null for discrete sizes. */
+            readonly range: components["schemas"]["CameraFormatRange"] | null;
+            readonly sizes: readonly components["schemas"]["CameraSize"][];
+        };
+        readonly CameraFormatRange: {
+            readonly min_width: number;
+            readonly min_height: number;
+            readonly max_width: number;
+            readonly max_height: number;
+            readonly step_width: number;
+            readonly step_height: number;
+        };
+        /** @description One size of a format, with the frame rates it runs at, fastest first. */
+        readonly CameraSize: {
+            readonly width: number;
+            readonly height: number;
+            readonly fps: readonly components["schemas"]["CameraMode"][];
+        };
+        /** @description One mode: a frame rate of its size and format, with Sentinel's verdict on it, and whether the preview takes it (for MIPI, NV12 Sentinel does not refuse; for USB, MJPG or a raw format). The rates are the ones the camera advertises for the size (standard ones of a range); for a MIPI mode that advertises none, 30 fps up to the camera's own rate. */
+        readonly CameraMode: {
+            /**
+             * Format: double
+             * @description The rate, to a thousandth, as a preview's start takes it.
+             */
+            readonly value: number;
+            /** @enum {string} */
+            readonly tier: "available" | "unsupported";
+            /** @description Why the mode is not available; absent when it is. */
+            readonly reason?: string;
+            readonly previewable: boolean;
+        };
+        readonly MicrophoneItem: {
+            /** @description Sentinel's id, stable across scans of one board. */
+            readonly id: string;
+            /** @enum {string} */
+            readonly kind: "microphone";
+            /** @enum {string} */
+            readonly connection: "usb" | "onboard";
+            readonly name: string;
+            readonly device: components["schemas"]["MicrophoneDevice"];
+            /** @description The capture combinations the device reports; null when they cannot be read without opening it. */
+            readonly capture: readonly components["schemas"]["MicrophoneCapture"][] | null;
+            /** @description A fingerprint of what identifies the device behind the id (Sentinel's capture target and identity): a microphone listed again under its id with another record is another device. */
+            readonly record: string;
+            readonly notes: readonly string[];
+            readonly errors: readonly components["schemas"]["DeviceError"][];
+        };
+        /** @description A microphone's ALSA identity; a fact the card does not report is absent. */
+        readonly MicrophoneDevice: {
+            readonly card_index?: number;
+            readonly card_id?: string;
+            readonly card_name?: string;
+            readonly card_driver?: string;
+            readonly pcm_device?: number;
+            readonly pcm_node?: string;
+            /** @description `hw:CARD=<id>,DEV=<n>`. */
+            readonly alsa_name?: string;
+            readonly by_path?: string;
+            readonly by_id?: string;
+            readonly usb?: components["schemas"]["UsbFacts"];
+            /** @description The USB camera of the same scan this microphone belongs to (a webcam's). */
+            readonly part_of?: components["schemas"]["DeviceRef"];
+        };
+        /** @description One capture combination a microphone reports; a fact it does not report is absent. */
+        readonly MicrophoneCapture: {
+            readonly format?: string;
+            readonly channels?: number;
+            readonly bits?: number;
+            /** @description Discrete sample rates, in Hz. */
+            readonly rates: readonly number[];
+            /** @description A continuous range of sample rates, in Hz. */
+            readonly rate_range?: {
+                readonly min: number;
+                readonly max: number;
+            };
+            readonly channel_map?: readonly string[];
+        };
+        /** @description A device of a kind Insight has no view for, listed with its name and notes. */
+        readonly OtherItem: {
+            readonly id: string;
+            /** @description Sentinel's device type. */
+            readonly kind: string;
+            /** @description Sentinel's backend for it. */
+            readonly connection: string;
+            readonly name: string;
+            readonly notes: readonly string[];
+            readonly errors: readonly components["schemas"]["DeviceError"][];
+        };
+        /** @description A warning about the scan as a whole, such as a provider that failed. */
+        readonly PeripheralIssue: {
+            /** @description Sentinel's code for it. */
+            readonly code: string;
+            readonly message: string;
+            readonly hint: string;
+        };
+        readonly CameraSetup: {
+            readonly model: string | null;
+            /** @description The device-tree overlays that configure a camera sensor, such as `modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo`. */
+            readonly overlays: readonly string[];
         };
         readonly PeripheralChanges: {
             readonly added: readonly components["schemas"]["DeviceRef"][];
@@ -1941,6 +2120,22 @@ export type TraceRequest = components['schemas']['TraceRequest'];
 export type RunDeleted = components['schemas']['RunDeleted'];
 export type Peripherals = components['schemas']['Peripherals'];
 export type PeripheralScan = components['schemas']['PeripheralScan'];
+export type PeripheralItem = components['schemas']['PeripheralItem'];
+export type CameraItem = components['schemas']['CameraItem'];
+export type CameraDevice = components['schemas']['CameraDevice'];
+export type UsbFacts = components['schemas']['UsbFacts'];
+export type DeviceSupport = components['schemas']['DeviceSupport'];
+export type DeviceError = components['schemas']['DeviceError'];
+export type CameraFormat = components['schemas']['CameraFormat'];
+export type CameraFormatRange = components['schemas']['CameraFormatRange'];
+export type CameraSize = components['schemas']['CameraSize'];
+export type CameraMode = components['schemas']['CameraMode'];
+export type MicrophoneItem = components['schemas']['MicrophoneItem'];
+export type MicrophoneDevice = components['schemas']['MicrophoneDevice'];
+export type MicrophoneCapture = components['schemas']['MicrophoneCapture'];
+export type OtherItem = components['schemas']['OtherItem'];
+export type PeripheralIssue = components['schemas']['PeripheralIssue'];
+export type CameraSetup = components['schemas']['CameraSetup'];
 export type PeripheralChanges = components['schemas']['PeripheralChanges'];
 export type DeviceRef = components['schemas']['DeviceRef'];
 export type PreviewMode = components['schemas']['PreviewMode'];

@@ -4,15 +4,14 @@ import type {
   CameraFormatRange,
   CameraItem,
   CameraMode,
-  CameraModeChoice,
+  PreviewMode,
   CameraSize,
-  DeviceAvailability,
   DeviceSupport,
   PreviewSession,
   SupportTier,
 } from './api';
 
-// Camera items as `snapshotOf` builds them from a real DevKit scan, for the camera modes and the
+// Camera items as the server answers them for a real DevKit scan, for the camera modes and the
 // preview.
 
 export const NOT_IN_OVERLAYS = "IMX568 is not in this board's camera overlays.";
@@ -46,14 +45,12 @@ export const sel = (
   width: number,
   height: number,
   fps: number,
-): CameraModeChoice => ({
+): PreviewMode => ({
   format,
   width,
   height,
   fps,
 });
-
-export const available: DeviceAvailability = { state: 'available', reason: null };
 
 export const imx477: CameraItem = {
   id: 'camera:imx477 5-001a',
@@ -67,7 +64,6 @@ export const imx477: CameraItem = {
     bus_info: 'platform:csi2video@1',
     csi: 'csidev-40c3000.csi',
   },
-  availability: available,
   support: support('available'),
   modes_source: 'live',
   formats: [
@@ -91,7 +87,6 @@ export const imx568: CameraItem = {
     camera_name: 'econ-imx568-fpga 5-0042',
     media_device: '/dev/media0',
   },
-  availability: { state: 'unknown', reason: 'fuser is not installed on the board.' },
   support: support('unsupported', NOT_IN_OVERLAYS),
   modes_source: 'live',
   formats: [
@@ -124,7 +119,6 @@ export const inUse: CameraItem = {
   id: 'camera:imx477 6-001a',
   name: 'imx477 6-001a',
   device: { camera_name: 'imx477 6-001a' },
-  availability: { state: 'in_use', reason: null },
   modes_source: 'previous-scan',
 };
 
@@ -146,7 +140,6 @@ export const usb: CameraItem = {
       speed_mbps: 480,
     },
   },
-  availability: available,
   support: support('unsupported', USB_REASON),
   modes_source: 'live',
   formats: [

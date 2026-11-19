@@ -14,9 +14,7 @@ import type { DeviceError } from '../../peripherals/api';
   template: `
     @for (problem of errors(); track $index) {
       <neat-callout tone="danger" [heading]="problem.message">
-        @if (problem.hint) {
-          <p>{{ problem.hint }}</p>
-        }
+        <p>{{ problem.hint }}</p>
       </neat-callout>
     }
   `,

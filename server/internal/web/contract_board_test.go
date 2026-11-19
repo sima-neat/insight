@@ -25,7 +25,7 @@ import (
 const (
 	contractRun    = "20260924T175231.958Z-baseline"
 	contractCamera = "camera:imx477 5-001a"
-	contractMic    = "microphone:alsa:yeti"
+	contractMic    = "microphone:alsa:329f324bddfdde7b"
 )
 
 // sentinelAnswers are Sentinel's answers by route, as its public clients see them.
@@ -44,11 +44,15 @@ var sentinelAnswers = map[string]string{
 	"GET /v1/runs":                         `{"schema":1,"runs":[{"id":"` + contractRun + `","name":"baseline","ended_at":"2026-09-24T17:52:40Z"}]}`,
 }
 
-const contractCatalog = `{"schema":1,"revision":1,"observed_at":"2026-11-19T01:00:00Z","errors":[],"board":{"model":"Modalix"},"devices":[
-	{"id":"camera:imx477 5-001a","type":"camera","backend":"mipi","camera_name":"imx477 5-001a","max_fps":30,
-	 "modes":[{"format":"NV12","width":1920,"height":1080,"available":true}]},
-	{"id":"microphone:alsa:yeti","type":"microphone","backend":"alsa","name":"Yeti Nano",
-	 "capture_target":{"selector":"plughw:CARD=Nano,DEV=0"},"modes":[{"format":"S16_LE","channels":1,"rates_hz":[16000]}]}]}`
+// contractCatalog is a DevKit's catalog as its Sentinel wrote it: a MIPI IMX477, a USB C920 and
+// the C920's microphone, so that every part of the scan's answer is held to the document.
+var contractCatalog = func() string {
+	catalog, err := os.ReadFile("../../../tests/fixtures/sentinel-catalog-devkit-3.0.json")
+	if err != nil {
+		panic(err)
+	}
+	return string(catalog)
+}()
 
 // newBoards makes the board side of the contract: the local board, its Sentinel and programs,
 // the Peripherals manager and System Info.

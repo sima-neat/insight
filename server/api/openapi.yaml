@@ -710,10 +710,11 @@ paths:
       operationId: refreshPeripherals
       summary: Scan the board's cameras and microphones
       description: >-
-        SiMa Sentinel rescans the board's MIPI and USB cameras and ALSA microphones and answers
-        with its catalog, which is kept as the board's last scan, with what changed since the
-        one before. Each camera mode carries Sentinel's own verdict (`available`, `reason`).
-        A running preview stops first. A refresh that waited for another gets that one's scan.
+        SiMa Sentinel rescans the board's MIPI and USB cameras and ALSA microphones; the devices
+        it found are kept as the board's last scan, with what changed since the one before. Each
+        camera mode carries Sentinel's own verdict (`tier`, `reason`) and whether the preview
+        takes it (`previewable`). A running preview stops first. A refresh that waited for
+        another gets that one's scan. 502 `sentinel_failed` for a catalog Insight cannot read.
       responses:
         "200":
           description: The new scan.
@@ -754,9 +755,9 @@ paths:
         Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that
         writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its
         first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode
-        must be one the last scan lists: for MIPI an NV12 mode Sentinel does not mark
-        unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format, at a
-        rate it advertises. 409 `preview_active` while one runs, `camera_in_use` when another
+        must be one the last scan says is `previewable`: for MIPI an NV12 mode Sentinel does not
+        mark unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format,
+        at a rate it advertises. 409 `preview_active` while one runs, `camera_in_use` when another
         process holds the camera (Insight never stops it), `no_scan` before a scan; 422
         `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing`
         without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
@@ -2134,7 +2135,7 @@ components:
             - $ref: "#/components/schemas/PeripheralScan"
     PeripheralScan:
       type: object
-      required: [scanned_at, scan_ms, catalog, changes]
+      required: [scanned_at, scan_ms, items, issues, camera_setup, changes]
       properties:
         scanned_at:
           type: string
@@ -2142,19 +2143,366 @@ components:
         scan_ms:
           type: integer
           description: How long Sentinel's scan took.
-        catalog:
-          description: >-
-            Sentinel's peripheral catalog as it wrote it: `revision`, `observed_at`, `devices`
-            (cameras with their `modes`, each with Sentinel's `available` and `reason`;
-            microphones with their `capture_target`), `errors` (a failed provider's devices are
-            its last successful scan's) and `board` (the board's model and camera setup).
+        items:
+          type: array
+          description: The devices the scan found, cameras first, then microphones, then other kinds, each in Sentinel's order.
+          items:
+            $ref: "#/components/schemas/PeripheralItem"
+        issues:
+          type: array
+          description: Sentinel's providers that failed in this scan; the devices of one are its last successful scan's.
+          items:
+            $ref: "#/components/schemas/PeripheralIssue"
+        camera_setup:
+          nullable: true
+          description: The board's camera setup as Sentinel reads it from the device tree; null from a Sentinel that does not.
           allOf:
-            - $ref: "#/components/schemas/SentinelBody"
+            - $ref: "#/components/schemas/CameraSetup"
         changes:
           nullable: true
           description: What this scan found or missed against the one before; null for the first.
           allOf:
             - $ref: "#/components/schemas/PeripheralChanges"
+    PeripheralItem:
+      description: A device of a scan, told apart by `kind`; a kind Insight has no view for is an OtherItem.
+      oneOf:
+        - $ref: "#/components/schemas/CameraItem"
+        - $ref: "#/components/schemas/MicrophoneItem"
+        - $ref: "#/components/schemas/OtherItem"
+    CameraItem:
+      type: object
+      required: [id, kind, connection, name, model, device, support, modes_source, formats, default_selection, notes, errors]
+      properties:
+        id:
+          type: string
+          description: Sentinel's id, stable across scans of one board.
+        kind:
+          type: string
+          enum: [camera]
+        connection:
+          type: string
+          description: mipi or usb; otherwise Sentinel's backend for it.
+        name:
+          type: string
+        model:
+          type: string
+          nullable: true
+        device:
+          $ref: "#/components/schemas/CameraDevice"
+        support:
+          description: The camera's best verdict over all its modes.
+          allOf:
+            - $ref: "#/components/schemas/DeviceSupport"
+        modes_source:
+          type: string
+          enum: [live, previous-scan, unavailable]
+          description: >-
+            `live` from this scan; `previous-scan` kept from a failed provider's last good scan
+            (the camera may have been unplugged since); `unavailable` when no mode could be read.
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/CameraFormat"
+        default_selection:
+          nullable: true
+          description: >-
+            The mode to preselect: 1920 wide when Available, else the widest Available size below,
+            else the smallest, at its fastest Available rate; null when no mode is Available.
+          allOf:
+            - $ref: "#/components/schemas/PreviewMode"
+        notes:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceError"
+    CameraDevice:
+      type: object
+      description: >-
+        How the camera's device is reached: a MIPI camera's libcamera facts, a USB camera's V4L2
+        nodes and USB facts. A fact the board does not report is absent.
+      properties:
+        camera_name:
+          type: string
+          description: libcamera's name for the camera; the stable way to name a MIPI camera.
+        media_device:
+          type: string
+        bus_info:
+          type: string
+        csi:
+          type: string
+          description: The CSI receiver the sensor is attached to.
+        video_node:
+          type: string
+          description: "`/dev/videoN`, whose number can change across reboots."
+        by_id:
+          type: string
+          description: The `/dev/v4l/by-id/...` link, stable across reboots.
+        usb:
+          $ref: "#/components/schemas/UsbFacts"
+    UsbFacts:
+      type: object
+      description: A device's USB facts; a fact it does not report is absent.
+      properties:
+        vendor_id:
+          type: string
+        product_id:
+          type: string
+        manufacturer:
+          type: string
+        product:
+          type: string
+        serial:
+          type: string
+        bus_path:
+          type: string
+          description: The device's place on the bus; a camera's sysfs path, a microphone's ALSA name for it (`1-1.2`).
+        interface:
+          type: string
+          description: A microphone's USB interface of the audio function.
+        speed_mbps:
+          type: number
+          format: double
+          description: A camera's link speed in Mb/s (1.5, 12, 480, 5000...).
+    DeviceSupport:
+      type: object
+      description: >-
+        Sentinel's verdict on a camera, format or mode: available when Neat's CameraInput can use
+        it. USB cameras are unsupported, yet previewable.
+      required: [tier, reason]
+      properties:
+        tier:
+          type: string
+          enum: [available, unsupported]
+        reason:
+          type: string
+          description: Why it is not available; empty when it is.
+    DeviceError:
+      type: object
+      description: A problem with one device, such as a camera without modes (`no_modes`).
+      required: [code, message, hint]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        hint:
+          type: string
+    CameraFormat:
+      type: object
+      description: One pixel format of a camera, with the sizes it offers, in Sentinel's order.
+      required: [format, label, support, range, sizes]
+      properties:
+        format:
+          type: string
+          description: The V4L2 or libcamera FourCC, such as NV12 or MJPG.
+        label:
+          type: string
+        support:
+          $ref: "#/components/schemas/DeviceSupport"
+        range:
+          nullable: true
+          description: The bounds of a stepwise or continuous size range; null for discrete sizes.
+          allOf:
+            - $ref: "#/components/schemas/CameraFormatRange"
+        sizes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CameraSize"
+    CameraFormatRange:
+      type: object
+      required: [min_width, min_height, max_width, max_height, step_width, step_height]
+      properties:
+        min_width:
+          type: integer
+        min_height:
+          type: integer
+        max_width:
+          type: integer
+        max_height:
+          type: integer
+        step_width:
+          type: integer
+        step_height:
+          type: integer
+    CameraSize:
+      type: object
+      description: One size of a format, with the frame rates it runs at, fastest first.
+      required: [width, height, fps]
+      properties:
+        width:
+          type: integer
+        height:
+          type: integer
+        fps:
+          type: array
+          items:
+            $ref: "#/components/schemas/CameraMode"
+    CameraMode:
+      type: object
+      description: >-
+        One mode: a frame rate of its size and format, with Sentinel's verdict on it, and whether
+        the preview takes it (for MIPI, NV12 Sentinel does not refuse; for USB, MJPG or a raw
+        format). The rates are the ones the camera advertises for the size (standard ones of a
+        range); for a MIPI mode that advertises none, 30 fps up to the camera's own rate.
+      required: [value, tier, previewable]
+      properties:
+        value:
+          type: number
+          format: double
+          description: The rate, to a thousandth, as a preview's start takes it.
+        tier:
+          type: string
+          enum: [available, unsupported]
+        reason:
+          type: string
+          description: Why the mode is not available; absent when it is.
+        previewable:
+          type: boolean
+    MicrophoneItem:
+      type: object
+      required: [id, kind, connection, name, device, capture, record, notes, errors]
+      properties:
+        id:
+          type: string
+          description: Sentinel's id, stable across scans of one board.
+        kind:
+          type: string
+          enum: [microphone]
+        connection:
+          type: string
+          enum: [usb, onboard]
+        name:
+          type: string
+        device:
+          $ref: "#/components/schemas/MicrophoneDevice"
+        capture:
+          type: array
+          nullable: true
+          description: The capture combinations the device reports; null when they cannot be read without opening it.
+          items:
+            $ref: "#/components/schemas/MicrophoneCapture"
+        record:
+          type: string
+          description: >-
+            A fingerprint of what identifies the device behind the id (Sentinel's capture target
+            and identity): a microphone listed again under its id with another record is another
+            device.
+        notes:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceError"
+    MicrophoneDevice:
+      type: object
+      description: A microphone's ALSA identity; a fact the card does not report is absent.
+      properties:
+        card_index:
+          type: integer
+        card_id:
+          type: string
+        card_name:
+          type: string
+        card_driver:
+          type: string
+        pcm_device:
+          type: integer
+        pcm_node:
+          type: string
+        alsa_name:
+          type: string
+          description: "`hw:CARD=<id>,DEV=<n>`."
+        by_path:
+          type: string
+        by_id:
+          type: string
+        usb:
+          $ref: "#/components/schemas/UsbFacts"
+        part_of:
+          description: The USB camera of the same scan this microphone belongs to (a webcam's).
+          allOf:
+            - $ref: "#/components/schemas/DeviceRef"
+    MicrophoneCapture:
+      type: object
+      description: One capture combination a microphone reports; a fact it does not report is absent.
+      required: [rates]
+      properties:
+        format:
+          type: string
+        channels:
+          type: integer
+        bits:
+          type: integer
+        rates:
+          type: array
+          description: Discrete sample rates, in Hz.
+          items:
+            type: integer
+        rate_range:
+          type: object
+          description: A continuous range of sample rates, in Hz.
+          required: [min, max]
+          properties:
+            min:
+              type: integer
+            max:
+              type: integer
+        channel_map:
+          type: array
+          items:
+            type: string
+    OtherItem:
+      type: object
+      description: A device of a kind Insight has no view for, listed with its name and notes.
+      required: [id, kind, connection, name, notes, errors]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: Sentinel's device type.
+        connection:
+          type: string
+          description: Sentinel's backend for it.
+        name:
+          type: string
+        notes:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceError"
+    PeripheralIssue:
+      type: object
+      description: A warning about the scan as a whole, such as a provider that failed.
+      required: [code, message, hint]
+      properties:
+        code:
+          type: string
+          description: Sentinel's code for it.
+        message:
+          type: string
+        hint:
+          type: string
+    CameraSetup:
+      type: object
+      required: [model, overlays]
+      properties:
+        model:
+          type: string
+          nullable: true
+        overlays:
+          type: array
+          description: The device-tree overlays that configure a camera sensor, such as `modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo`.
+          items:
+            type: string
     PeripheralChanges:
       type: object
       required: [added, removed]

@@ -12,27 +12,26 @@ import { AppDialogs } from '../../app-dialogs';
 import { boardUrl, type BoardList } from '../../board/api';
 import { boardList, boardWith, DEVKIT, MANUAL } from '../../board/board.testing';
 import { FakeLocalStorage } from '../../fake-storage.testing';
-import type { CameraItem, MicrophoneItem, PreviewSession } from '../../peripherals/api';
+import type { OtherItem, PreviewSession } from '../../peripherals/api';
 import { CameraPreview } from '../../peripherals/camera-preview';
 import { previewSession, sel } from '../../peripherals/cameras.testing';
-import { snapshotOf } from '../../peripherals/catalog';
-import {
-  NO_SCAN,
-  SENTINEL_C270,
-  SENTINEL_IMX477,
-  SENTINEL_YETI,
-  sentinelScan,
-} from '../../peripherals/catalog.testing';
 import { MicTest } from '../../peripherals/mic-test';
 import { PeripheralsSession } from '../../peripherals/peripherals-session';
 import { previewStreamUrl, previewUrl } from '../../peripherals/preview-state';
+import {
+  C270 as usb,
+  IMX477 as imx477,
+  NO_SCAN,
+  scanAnswer,
+  YETI as webcamMic,
+} from '../../peripherals/scans.testing';
 import { PeripheralsPage } from './peripherals.page';
 
 const BOARDS_URL = '/api/boards';
 const REFRESH_URL = boardUrl(DEVKIT.id, 'peripherals/refresh');
 const START_URL = boardUrl(
   DEVKIT.id,
-  `cameras/${encodeURIComponent(SENTINEL_IMX477['id'] as string)}/preview`,
+  `cameras/${encodeURIComponent(imx477.id)}/preview`,
 );
 const MIC_TEST_URL = boardUrl(DEVKIT.id, 'microphones/test');
 /** Any board's peripherals read, and any board's preview read. */
@@ -49,13 +48,10 @@ const stopOf =
     request.method === 'POST' &&
     request.urlWithParams === `${previewUrl(session, '/stop')}?preview=${session.id}`;
 
-/** The scanned devices, as the page builds them from Sentinel's catalog. */
-const [imx477, usb, webcamMic] = snapshotOf(
-  { id: DEVKIT.id, label: DEVKIT.label },
-  sentinelScan([SENTINEL_IMX477, SENTINEL_C270, SENTINEL_YETI]),
-).items as [CameraItem, CameraItem, MicrophoneItem];
 /** The devices of a scan that found them all. */
-const ALL = [SENTINEL_C270, SENTINEL_IMX477, SENTINEL_YETI];
+const ALL = [usb, imx477, webcamMic];
+/** The server's hint for a problem of Sentinel's. */
+const STATUS_HINT = 'Check `systemctl status simaai-sentinel` on the board, then Refresh.';
 
 const mode30 = sel('NV12', 1920, 1080, 30);
 const live30 = previewSession();
@@ -167,7 +163,7 @@ describe('PeripheralsPage', () => {
   /** Opens Peripherals and answers what it reads as it opens. */
   async function visit({
     board = devkit,
-    peripherals = sentinelScan(ALL),
+    peripherals = scanAnswer(ALL),
     preview = null,
   }: {
     board?: BoardList;
@@ -314,17 +310,16 @@ describe('PeripheralsPage', () => {
 
   // A kind with no devices, not scanned yet, or with no view is greyed.
   it('a kind Insight has no view for is a muted heading even with devices, its rows Not supported yet', async () => {
-    const lidar = (id: string) => ({
+    const lidar = (id: string, notes: string[] = []): OtherItem => ({
       id,
-      type: 'lidar',
-      backend: 'ethernet',
+      kind: 'lidar',
+      connection: 'ethernet',
       name: `Ouster ${id}`,
+      notes,
+      errors: [],
     });
-    const noted = {
-      ...lidar('os-1'),
-      issues: [{ code: 'newer', reason: 'Reported by a newer SiMa Sentinel.' }],
-    };
-    await visit({ peripherals: sentinelScan([SENTINEL_IMX477, noted, lidar('os-2')]) });
+    const noted = lidar('os-1', ['Reported by a newer SiMa Sentinel.']);
+    await visit({ peripherals: scanAnswer([imx477, noted, lidar('os-2')]) });
     expect(groups()[2]).toEqual({
       heading: 'LiDAR · 2',
       muted: true,
@@ -390,7 +385,7 @@ describe('PeripheralsPage', () => {
     await visit({ peripherals: NO_SCAN });
     const [again] = posts(REFRESH_URL);
     expect(again).toBeDefined();
-    again.flush(sentinelScan([SENTINEL_IMX477]));
+    again.flush(scanAnswer([imx477]));
     await settle();
     answer('GET', BOARDS_URL, devkit);
     await settle();
@@ -398,13 +393,13 @@ describe('PeripheralsPage', () => {
 
     // Scanned already, and scanned again.
     await leave();
-    await visit({ peripherals: sentinelScan([SENTINEL_IMX477]) });
+    await visit({ peripherals: scanAnswer([imx477]) });
     expect(posts(REFRESH_URL)).toHaveLength(1);
   });
 
   it("a visit's scan is silent when it succeeds, and says so when it fails", async () => {
     await visit({ peripherals: NO_SCAN });
-    await endScan(sentinelScan([SENTINEL_IMX477]));
+    await endScan(scanAnswer([imx477]));
     expect(toasts.status).not.toHaveBeenCalled();
     expect(toasts.error).not.toHaveBeenCalled();
     expect(rowOf(imx477.name)).toBeDefined();
@@ -432,12 +427,12 @@ describe('PeripheralsPage', () => {
       mode: mode30,
       board: DEVKIT.id,
     };
-    await visit({ peripherals: sentinelScan([SENTINEL_C270, SENTINEL_IMX477]) });
+    await visit({ peripherals: scanAnswer([usb, imx477]) });
     const [scan] = posts(REFRESH_URL);
     expect(scan).toBeDefined();
     expect(posts(START_URL)).toHaveLength(0);
 
-    scan.flush(sentinelScan([SENTINEL_C270, SENTINEL_IMX477]));
+    scan.flush(scanAnswer([usb, imx477]));
     await settle();
     answer('GET', BOARDS_URL, devkit);
     await settle();
@@ -456,7 +451,7 @@ describe('PeripheralsPage', () => {
       mode: mode30,
       board: DEVKIT.id,
     };
-    await visit({ peripherals: sentinelScan([SENTINEL_C270, SENTINEL_IMX477]) });
+    await visit({ peripherals: scanAnswer([usb, imx477]) });
     posts(REFRESH_URL)[0].flush(unreachable, badGateway);
     await settle();
     answer('GET', BOARDS_URL, devkit);
@@ -472,13 +467,13 @@ describe('PeripheralsPage', () => {
       mode: mode30,
       board: DEVKIT.id,
     };
-    await visit({ peripherals: sentinelScan([SENTINEL_C270, SENTINEL_IMX477]) });
+    await visit({ peripherals: scanAnswer([usb, imx477]) });
     const [scan] = posts(REFRESH_URL);
     const started = pageInjector().get(CameraPreview).start(imx477, mode30, DEVKIT.id);
     answer('POST', START_URL, { preview: live30 });
     await started;
 
-    scan.flush(sentinelScan([SENTINEL_C270, SENTINEL_IMX477]));
+    scan.flush(scanAnswer([usb, imx477]));
     await settle();
     answer('GET', BOARDS_URL, devkit);
     await settle();
@@ -490,7 +485,7 @@ describe('PeripheralsPage', () => {
   it('Refresh shows Scanning… N s, stops the preview first and toasts the result', async () => {
     await visit({ preview: live30 });
     // The visit's own scan ended.
-    await endScan(sentinelScan(ALL));
+    await endScan(scanAnswer(ALL));
     expect(refreshButton().textContent!.trim()).toBe('Refresh');
     refreshButton().click();
     await settle();
@@ -520,7 +515,7 @@ describe('PeripheralsPage', () => {
     expect(posts(REFRESH_URL)).toHaveLength(0);
 
     scan.flush(
-      sentinelScan([SENTINEL_IMX477, SENTINEL_YETI], { scannedAt: '2026-10-25T10:00:33Z' }),
+      scanAnswer([imx477, webcamMic], { scanned_at: '2026-10-25T10:00:33Z' }),
     );
     await settle();
     answer('GET', BOARDS_URL, devkit);
@@ -537,7 +532,7 @@ describe('PeripheralsPage', () => {
   // Another tab, the board dialog or a re-read on focus switched the board.
   it('shows the board-changed banner and blocks preview while the snapshot is of another board', async () => {
     await visit({ preview: live30 });
-    await endScan(sentinelScan(ALL));
+    await endScan(scanAnswer(ALL));
     expect(chipOf(imx477.name)).toBe('Previewing');
 
     window.dispatchEvent(new Event('focus'));
@@ -568,7 +563,7 @@ describe('PeripheralsPage', () => {
       mode: mode30,
       board: DEVKIT.id,
     };
-    await visit({ board: manual, peripherals: sentinelScan([SENTINEL_IMX477]) });
+    await visit({ board: manual, peripherals: scanAnswer([imx477]) });
     expect(http.match(isStart)).toHaveLength(0);
     expect(TestBed.inject(PeripheralsSession).resume).toBeNull();
   });
@@ -586,9 +581,16 @@ describe('PeripheralsPage', () => {
     refreshButton().click();
     await settle();
     posts(REFRESH_URL)[0].flush(
-      sentinelScan([SENTINEL_IMX477], {
+      scanAnswer([imx477], {
         changes: { added: [{ id: imx477.id, name: 'imx477' }], removed: [] },
-        errors: [{ provider: 'board.overlays', code: 'c', reason: 'Camera overlays unknown.' }],
+        issues: [
+          {
+            code: 'c',
+            message:
+              "SiMa Sentinel could not read part of the board's camera setup: Camera overlays unknown.",
+            hint: STATUS_HINT,
+          },
+        ],
       }),
     );
     await settle();
@@ -616,8 +618,8 @@ describe('PeripheralsPage', () => {
     expect(answer('POST', stopOf(live30), { preview: null })).toBe(1);
     await settle();
 
-    await visit({ peripherals: sentinelScan([SENTINEL_C270, SENTINEL_IMX477]) });
-    await endScan(sentinelScan([SENTINEL_C270, SENTINEL_IMX477]));
+    await visit({ peripherals: scanAnswer([usb, imx477]) });
+    await endScan(scanAnswer([usb, imx477]));
     const [restart] = posts(START_URL);
     expect(restart.request.body).toEqual(mode30);
     expect(posts(START_URL)).toHaveLength(0);
@@ -647,7 +649,7 @@ describe('PeripheralsPage', () => {
     await settle();
     answer('GET', BOARDS_URL, devkit);
     await settle();
-    answer('GET', isLoad, sentinelScan([SENTINEL_IMX477]));
+    answer('GET', isLoad, scanAnswer([imx477]));
     await settle();
     // The running preview is not read, and nothing started, while the old start is out.
     http.expectNone(isPreviewRead);
@@ -660,7 +662,7 @@ describe('PeripheralsPage', () => {
     await settle();
     answer('GET', isPreviewRead, { preview: null });
     await settle();
-    await endScan(sentinelScan([SENTINEL_IMX477]));
+    await endScan(scanAnswer([imx477]));
     const [restart] = posts(START_URL);
     expect(restart.request.body).toEqual(mode30);
   });
@@ -937,7 +939,7 @@ describe('PeripheralsPage', () => {
     // A scan that answers says the peripherals were read after all: the failure goes.
     refreshButton().click();
     await settle();
-    posts(REFRESH_URL)[0].flush(sentinelScan([SENTINEL_IMX477]));
+    posts(REFRESH_URL)[0].flush(scanAnswer([imx477]));
     await settle();
     answer('GET', BOARDS_URL, devkit);
     await settle();
@@ -959,7 +961,7 @@ describe('PeripheralsPage', () => {
     // A rescan still listing it keeps it.
     refreshButton().click();
     await settle();
-    posts(REFRESH_URL)[0].flush(sentinelScan([SENTINEL_IMX477, SENTINEL_YETI]));
+    posts(REFRESH_URL)[0].flush(scanAnswer([imx477, webcamMic]));
     await settle();
     answer('GET', BOARDS_URL, devkit);
     await settle();
@@ -969,7 +971,7 @@ describe('PeripheralsPage', () => {
     refreshButton().click();
     await settle();
     posts(REFRESH_URL)[0].flush(
-      sentinelScan([SENTINEL_IMX477], {
+      scanAnswer([imx477], {
         changes: { added: [], removed: [{ id: webcamMic.id, name: 'Yeti Nano' }] },
       }),
     );
@@ -988,13 +990,13 @@ describe('PeripheralsPage', () => {
     // Coming back finds it where it was left.
     await leave();
     expect(TestBed.inject(PeripheralsSession).selectedId).toBe(webcamMic.id);
-    await visit({ peripherals: sentinelScan(ALL) });
+    await visit({ peripherals: scanAnswer(ALL) });
     expect(selectedRow()).toBe(rowOf('Yeti Nano'));
 
     // Gone from a later scan and not reported removed: the first device instead.
     refreshButton().click();
     await settle();
-    posts(REFRESH_URL)[0].flush(sentinelScan([SENTINEL_C270]));
+    posts(REFRESH_URL)[0].flush(scanAnswer([usb]));
     await settle();
     answer('GET', BOARDS_URL, devkit);
     await settle();
@@ -1016,8 +1018,14 @@ describe('PeripheralsPage', () => {
     await leave();
     await visit({ peripherals: NO_SCAN });
     posts(REFRESH_URL)[0].flush(
-      sentinelScan([], {
-        errors: [{ provider: 'board.overlays', code: 'a', reason: 'No overlays.' }],
+      scanAnswer([], {
+        issues: [
+          {
+            code: 'a',
+            message: "SiMa Sentinel could not read part of the board's camera setup: No overlays.",
+            hint: STATUS_HINT,
+          },
+        ],
       }),
     );
     await settle();

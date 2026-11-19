@@ -19,7 +19,6 @@ export function peripheralSnapshot(
   const { board, ...rest } = overrides;
   return {
     board: { id: DEVKIT.id, label: DEVKIT.label, ...board },
-    scan_id: scanned ? '42:2026-10-25T10:00:00Z' : null,
     scanned_at: scanned ? '2026-10-25T10:00:00Z' : null,
     ...(scanned ? { scan_ms: 3400 } : {}),
     items: items ?? [],

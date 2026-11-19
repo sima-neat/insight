@@ -325,7 +325,7 @@ describe('CameraPanel', () => {
     expect(statusLine()).toBe('Not running');
   });
 
-  it("a preview error shows the server's message and its recovery line", async () => {
+  it("a preview error shows the server's message and its hint", async () => {
     await settle();
     await startPreview();
     http
@@ -349,14 +349,6 @@ describe('CameraPanel', () => {
     expect(statusChip()).toEqual({ label: 'Could not start', tone: 'danger' });
     expect(statusLine()).toBe('');
     expect(mainButton().textContent!.trim()).toBe('Start preview');
-
-    // Without a hint, the recovery line is Insight's own for the code.
-    await startPreview();
-    http
-      .expectOne({ method: 'POST', url: START_URL })
-      .flush(failure('command_failed', 'The pipeline failed.'), badGateway);
-    await settle();
-    expect(callouts()[0].text).toContain('The preview pipeline could not start on the board.');
 
     // A connection failure offers the board settings.
     await startPreview();

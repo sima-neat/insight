@@ -29,7 +29,11 @@ describe('DeviceErrors', () => {
         message: 'SiMa Sentinel reported no modes for this camera.',
         hint: 'Run sima-sentinel status on the board.',
       },
-      { code: 'capture_unreadable', message: 'The capture formats could not be read.', hint: null },
+      {
+        code: 'capture_unreadable',
+        message: 'The capture formats could not be read.',
+        hint: 'Refresh once the device has started.',
+      },
     ]);
     await fixture.whenStable();
     // Callouts in a side panel, under its level 2 title.
@@ -39,7 +43,11 @@ describe('DeviceErrors', () => {
         body: 'Run sima-sentinel status on the board.',
         level: '3',
       },
-      { heading: 'The capture formats could not be read.', body: null, level: '3' },
+      {
+        heading: 'The capture formats could not be read.',
+        body: 'Refresh once the device has started.',
+        level: '3',
+      },
     ]);
   });
 });

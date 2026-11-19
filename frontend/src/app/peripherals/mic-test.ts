@@ -47,9 +47,7 @@ export type MicTestView = MicTestState & { micId: string | null };
  * recording; the microphone's panel takes it up again on return (`resume`).
  *
  * **Playback.** The panel gives the test its `<audio>` element (`attachAudio`). A finished
- * recording plays from 0 by itself and the test is done when it ends; Replay plays it again. The
- * meter follows the playback through the panel's playback level (`createPlaybackLevel`), not
- * through this class.
+ * recording plays from 0 by itself and the test is done when it ends; Replay plays it again.
  */
 @Injectable()
 export class MicTest {

@@ -19,8 +19,6 @@ const bare: OtherItem = {
   kind: 'future_sensor',
   connection: 'future',
   name: 'Future sensor',
-  device: {},
-  availability: { state: 'unknown', reason: null },
   notes: [],
   errors: [],
 };

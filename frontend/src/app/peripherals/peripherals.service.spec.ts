@@ -3,42 +3,41 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { Peripherals } from '../api.generated';
+import type { Peripherals, PeripheralItem } from './api';
 import { boardUrl } from '../board/api';
 import { BoardProblem } from '../board/board-error';
 import { BoardService } from '../board/board.service';
+import { imx477 } from './cameras.testing';
+import { yeti } from './microphones.testing';
 import { PeripheralsService } from './peripherals.service';
-
-const OBSERVED = '2026-11-19T01:00:00Z';
 
 /** Board `n`, as the boards answer names it. */
 const boardId = (n: number) => `ssh:sima@192.168.2.${n}:22`;
 const loadUrl = (n: number) => boardUrl(boardId(n), 'peripherals');
 const refreshUrl = (n: number) => boardUrl(boardId(n), 'peripherals/refresh');
 
-/** A device of Sentinel's catalog, with only what the service's toast counts. */
-function device(type: 'camera' | 'microphone', id: string): Record<string, unknown> {
-  return type === 'camera'
-    ? { id, type, backend: 'v4l2', model: id, modes: [] }
-    : { id, type, backend: 'alsa', connection: 'usb', name: id, modes: [] };
+/** A device of the kind the service's toast counts. */
+function device(kind: 'camera' | 'microphone', id: string): PeripheralItem {
+  return kind === 'camera' ? { ...imx477, id } : { ...yeti, id };
 }
 
-/**
- * The peripherals answer: no scan for `null`, otherwise a scan of Sentinel's catalog whose
- * revision a test tells scans apart by (`scanId`).
- */
-function answer(revision: number | null, devices: Record<string, unknown>[] = []): Peripherals {
-  if (revision === null) return { scan: null };
+/** When scan `n` ran, which a test tells scans apart by. */
+const scannedAt = (n: number) => `2026-11-19T01:00:0${n}Z`;
+
+/** The peripherals answer: no scan for `null`, otherwise scan `n`, which found `items`. */
+function answer(n: number | null, items: PeripheralItem[] = []): Peripherals {
+  if (n === null) return { scan: null };
   return {
     scan: {
-      scanned_at: OBSERVED,
+      scanned_at: scannedAt(n),
       scan_ms: 3400,
-      catalog: { revision, observed_at: OBSERVED, devices, errors: [], board: null },
+      items,
+      issues: [],
+      camera_setup: null,
       changes: null,
     },
   };
 }
-const scanId = (revision: number) => `${revision}:${OBSERVED}`;
 
 /** The error shape the server answers with. */
 const failure = (code: string, message: string, hint?: string) => ({
@@ -100,10 +99,10 @@ describe('PeripheralsService', () => {
     );
   }
 
-  /** Loads board `n`'s last scan, answered with `revision`. */
-  async function load(n: number, revision: number | null): Promise<void> {
+  /** Loads board `n`'s last scan, answered with scan `scan`. */
+  async function load(n: number, scan: number | null): Promise<void> {
     const loaded = service.load();
-    http.expectOne(loadUrl(n)).flush(answer(revision));
+    http.expectOne(loadUrl(n)).flush(answer(scan));
     await loaded;
   }
 
@@ -118,15 +117,14 @@ describe('PeripheralsService', () => {
     await first;
     expect(service.snapshot()).toMatchObject({
       board: { id: boardId(1), label: 'sima@192.168.2.1' },
-      scan_id: scanId(2),
-      scanned_at: OBSERVED,
+      scanned_at: scannedAt(2),
       scan_ms: 3400,
-      items: [{ id: 'c1', kind: 'camera', connection: 'usb' }],
+      items: [{ id: 'c1', kind: 'camera' }],
     });
 
     // Before the first scan the server answers none: the snapshot is the empty one.
     await load(1, null);
-    expect(service.snapshot()).toMatchObject({ scan_id: null, items: [] });
+    expect(service.snapshot()).toMatchObject({ scanned_at: null, items: [] });
 
     const failed = service.load();
     http.expectOne(loadUrl(1)).flush(failure('internal_error', 'Insight broke.'), badGateway);
@@ -146,7 +144,7 @@ describe('PeripheralsService', () => {
     await expect(newer2).rejects.toBeInstanceOf(BoardProblem);
     slow.flush(answer(3));
     await older2;
-    expect(service.snapshot()?.scan_id).toBeNull();
+    expect(service.snapshot()?.scanned_at).toBeNull();
   });
 
   it('load asks nothing without a board, and reads the boards again for one no longer selected', async () => {
@@ -185,7 +183,7 @@ describe('PeripheralsService', () => {
       answer(1, [device('camera', 'c1'), device('camera', 'c2'), device('microphone', 'm1')]),
     );
     await first;
-    expect(service.snapshot()?.scan_id).toBe(scanId(1));
+    expect(service.snapshot()?.scanned_at).toBe(scannedAt(1));
     expect(service.scanning()).toBeNull();
     expect(service.scanError()).toBeNull();
     expect(toasts.status).toHaveBeenCalledWith(
@@ -201,7 +199,7 @@ describe('PeripheralsService', () => {
     expect(service.scanError()).toBeInstanceOf(BoardProblem);
     expect(service.scanError()?.code).toBe('unreachable');
     expect(service.scanError()?.message).toBe(unreachable.error.message);
-    expect(service.snapshot()?.scan_id).toBe(scanId(1));
+    expect(service.snapshot()?.scanned_at).toBe(scannedAt(1));
     expect(service.scanning()).toBeNull();
     expect(boardReload).toHaveBeenCalledTimes(2);
     expect(toasts.status).toHaveBeenCalledTimes(1);
@@ -229,7 +227,7 @@ describe('PeripheralsService', () => {
     await scan;
     http.expectOne(loadUrl(1)).flush(answer(null));
     await loaded;
-    expect(service.snapshot()?.scan_id).toBe(scanId(1));
+    expect(service.snapshot()?.scanned_at).toBe(scannedAt(1));
   });
 
   it('scanOnVisit scans on every visit with a board, scanned snapshot or not, and a failed scan does not stop the next visit', async () => {
@@ -275,7 +273,7 @@ describe('PeripheralsService', () => {
     void service.scanOnVisit();
     refreshes()[0].flush(answer(1, [device('camera', 'c1')]));
     await tick();
-    expect(service.snapshot()?.scan_id).toBe(scanId(1));
+    expect(service.snapshot()?.scanned_at).toBe(scannedAt(1));
     expect(toasts.status).not.toHaveBeenCalled();
 
     void service.refresh();
@@ -303,7 +301,7 @@ describe('PeripheralsService', () => {
     old.flush(answer(1, [device('camera', 'c1')]));
     await tick();
     expect(service.snapshot()?.board.id).toBe(boardId(4));
-    expect(service.snapshot()?.scan_id).toBeNull();
+    expect(service.snapshot()?.scanned_at).toBeNull();
     expect(toasts.status).not.toHaveBeenCalled();
 
     const [scan] = refreshes();
@@ -311,7 +309,7 @@ describe('PeripheralsService', () => {
     scan.flush(answer(2, [device('camera', 'c1')]));
     await tick();
     expect(service.snapshot()?.board.id).toBe(boardId(4));
-    expect(service.snapshot()?.scan_id).toBe(scanId(2));
+    expect(service.snapshot()?.scanned_at).toBe(scannedAt(2));
     expect(toasts.status).not.toHaveBeenCalled();
   });
 
@@ -368,7 +366,7 @@ describe('PeripheralsService', () => {
     scan.flush(answer(5, [device('camera', 'c1')]));
     await tick();
     expect(refreshes()).toHaveLength(0);
-    expect(service.snapshot()?.scan_id).toBe(scanId(5));
+    expect(service.snapshot()?.scanned_at).toBe(scannedAt(5));
     expect(service.scanError()).toBeNull();
     expect(toasts.status).not.toHaveBeenCalled();
   });

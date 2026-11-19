@@ -76,6 +76,78 @@ func (e BoardTargetSource) Valid() bool {
 	}
 }
 
+// Defines values for CameraItemKind.
+const (
+	Camera CameraItemKind = "camera"
+)
+
+// Valid indicates whether the value is a known member of the CameraItemKind enum.
+func (e CameraItemKind) Valid() bool {
+	switch e {
+	case Camera:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CameraItemModesSource.
+const (
+	CameraItemModesSourceLive         CameraItemModesSource = "live"
+	CameraItemModesSourcePreviousScan CameraItemModesSource = "previous-scan"
+	CameraItemModesSourceUnavailable  CameraItemModesSource = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the CameraItemModesSource enum.
+func (e CameraItemModesSource) Valid() bool {
+	switch e {
+	case CameraItemModesSourceLive:
+		return true
+	case CameraItemModesSourcePreviousScan:
+		return true
+	case CameraItemModesSourceUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CameraModeTier.
+const (
+	CameraModeTierAvailable   CameraModeTier = "available"
+	CameraModeTierUnsupported CameraModeTier = "unsupported"
+)
+
+// Valid indicates whether the value is a known member of the CameraModeTier enum.
+func (e CameraModeTier) Valid() bool {
+	switch e {
+	case CameraModeTierAvailable:
+		return true
+	case CameraModeTierUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeviceSupportTier.
+const (
+	DeviceSupportTierAvailable   DeviceSupportTier = "available"
+	DeviceSupportTierUnsupported DeviceSupportTier = "unsupported"
+)
+
+// Valid indicates whether the value is a known member of the DeviceSupportTier enum.
+func (e DeviceSupportTier) Valid() bool {
+	switch e {
+	case DeviceSupportTierAvailable:
+		return true
+	case DeviceSupportTierUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthNetworkBrowserIceAddressSource.
 const (
 	HealthNetworkBrowserIceAddressSourceBrowserIceAddress HealthNetworkBrowserIceAddressSource = "browser-ice-address"
@@ -181,6 +253,39 @@ func (e MicTestState) Valid() bool {
 	case MicTestStateReady:
 		return true
 	case MicTestStateRecording:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MicrophoneItemConnection.
+const (
+	Onboard MicrophoneItemConnection = "onboard"
+	Usb     MicrophoneItemConnection = "usb"
+)
+
+// Valid indicates whether the value is a known member of the MicrophoneItemConnection enum.
+func (e MicrophoneItemConnection) Valid() bool {
+	switch e {
+	case Onboard:
+		return true
+	case Usb:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MicrophoneItemKind.
+const (
+	Microphone MicrophoneItemKind = "microphone"
+)
+
+// Valid indicates whether the value is a known member of the MicrophoneItemKind enum.
+func (e MicrophoneItemKind) Valid() bool {
+	switch e {
+	case Microphone:
 		return true
 	default:
 		return false
@@ -454,6 +559,99 @@ type BoardTargetMode string
 // BoardTargetSource Entered by hand, the board Insight runs on, or the DevKit the SDK is paired with.
 type BoardTargetSource string
 
+// CameraDevice How the camera's device is reached: a MIPI camera's libcamera facts, a USB camera's V4L2 nodes and USB facts. A fact the board does not report is absent.
+type CameraDevice struct {
+	BusInfo *string `json:"bus_info,omitempty"`
+
+	// ById The `/dev/v4l/by-id/...` link, stable across reboots.
+	ById *string `json:"by_id,omitempty"`
+
+	// CameraName libcamera's name for the camera; the stable way to name a MIPI camera.
+	CameraName *string `json:"camera_name,omitempty"`
+
+	// Csi The CSI receiver the sensor is attached to.
+	Csi         *string `json:"csi,omitempty"`
+	MediaDevice *string `json:"media_device,omitempty"`
+
+	// Usb A device's USB facts; a fact it does not report is absent.
+	Usb *UsbFacts `json:"usb,omitempty"`
+
+	// VideoNode `/dev/videoN`, whose number can change across reboots.
+	VideoNode *string `json:"video_node,omitempty"`
+}
+
+// CameraFormat One pixel format of a camera, with the sizes it offers, in Sentinel's order.
+type CameraFormat struct {
+	// Format The V4L2 or libcamera FourCC, such as NV12 or MJPG.
+	Format string `json:"format"`
+	Label  string `json:"label"`
+
+	// Range The bounds of a stepwise or continuous size range; null for discrete sizes.
+	Range *CameraFormatRange `json:"range"`
+	Sizes []CameraSize       `json:"sizes"`
+
+	// Support Sentinel's verdict on a camera, format or mode: available when Neat's CameraInput can use it. USB cameras are unsupported, yet previewable.
+	Support DeviceSupport `json:"support"`
+}
+
+// CameraFormatRange defines model for CameraFormatRange.
+type CameraFormatRange struct {
+	MaxHeight  int `json:"max_height"`
+	MaxWidth   int `json:"max_width"`
+	MinHeight  int `json:"min_height"`
+	MinWidth   int `json:"min_width"`
+	StepHeight int `json:"step_height"`
+	StepWidth  int `json:"step_width"`
+}
+
+// CameraItem defines model for CameraItem.
+type CameraItem struct {
+	// Connection mipi or usb; otherwise Sentinel's backend for it.
+	Connection string `json:"connection"`
+
+	// DefaultSelection The mode to preselect: 1920 wide when Available, else the widest Available size below, else the smallest, at its fastest Available rate; null when no mode is Available.
+	DefaultSelection *PreviewMode `json:"default_selection"`
+
+	// Device How the camera's device is reached: a MIPI camera's libcamera facts, a USB camera's V4L2 nodes and USB facts. A fact the board does not report is absent.
+	Device  CameraDevice   `json:"device"`
+	Errors  []DeviceError  `json:"errors"`
+	Formats []CameraFormat `json:"formats"`
+
+	// Id Sentinel's id, stable across scans of one board.
+	Id    string         `json:"id"`
+	Kind  CameraItemKind `json:"kind"`
+	Model *string        `json:"model"`
+
+	// ModesSource `live` from this scan; `previous-scan` kept from a failed provider's last good scan (the camera may have been unplugged since); `unavailable` when no mode could be read.
+	ModesSource CameraItemModesSource `json:"modes_source"`
+	Name        string                `json:"name"`
+	Notes       []string              `json:"notes"`
+
+	// Support The camera's best verdict over all its modes.
+	Support DeviceSupport `json:"support"`
+}
+
+// CameraItemKind defines model for CameraItem.Kind.
+type CameraItemKind string
+
+// CameraItemModesSource `live` from this scan; `previous-scan` kept from a failed provider's last good scan (the camera may have been unplugged since); `unavailable` when no mode could be read.
+type CameraItemModesSource string
+
+// CameraMode One mode: a frame rate of its size and format, with Sentinel's verdict on it, and whether the preview takes it (for MIPI, NV12 Sentinel does not refuse; for USB, MJPG or a raw format). The rates are the ones the camera advertises for the size (standard ones of a range); for a MIPI mode that advertises none, 30 fps up to the camera's own rate.
+type CameraMode struct {
+	Previewable bool `json:"previewable"`
+
+	// Reason Why the mode is not available; absent when it is.
+	Reason *string        `json:"reason,omitempty"`
+	Tier   CameraModeTier `json:"tier"`
+
+	// Value The rate, to a thousandth, as a preview's start takes it.
+	Value float64 `json:"value"`
+}
+
+// CameraModeTier defines model for CameraMode.Tier.
+type CameraModeTier string
+
 // CameraPreview defines model for CameraPreview.
 type CameraPreview struct {
 	Camera string `json:"camera"`
@@ -466,6 +664,21 @@ type CameraPreview struct {
 
 	// Viewer A browser shows the preview; its stream has one viewer.
 	Viewer bool `json:"viewer"`
+}
+
+// CameraSetup defines model for CameraSetup.
+type CameraSetup struct {
+	Model *string `json:"model"`
+
+	// Overlays The device-tree overlays that configure a camera sensor, such as `modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo`.
+	Overlays []string `json:"overlays"`
+}
+
+// CameraSize One size of a format, with the frame rates it runs at, fastest first.
+type CameraSize struct {
+	Fps    []CameraMode `json:"fps"`
+	Height int          `json:"height"`
+	Width  int          `json:"width"`
 }
 
 // Catalog The published catalog of sample clips, as its index has it.
@@ -512,11 +725,28 @@ type ChannelVideo struct {
 	Active bool `json:"active"`
 }
 
+// DeviceError A problem with one device, such as a camera without modes (`no_modes`).
+type DeviceError struct {
+	Code    string `json:"code"`
+	Hint    string `json:"hint"`
+	Message string `json:"message"`
+}
+
 // DeviceRef defines model for DeviceRef.
 type DeviceRef struct {
 	Id   string `json:"id"`
 	Name string `json:"name"`
 }
+
+// DeviceSupport Sentinel's verdict on a camera, format or mode: available when Neat's CameraInput can use it. USB cameras are unsupported, yet previewable.
+type DeviceSupport struct {
+	// Reason Why it is not available; empty when it is.
+	Reason string            `json:"reason"`
+	Tier   DeviceSupportTier `json:"tier"`
+}
+
+// DeviceSupportTier defines model for DeviceSupport.Tier.
+type DeviceSupportTier string
 
 // Error Every error answer has this shape; some routes add fields beside `error`.
 type Error struct {
@@ -831,6 +1061,69 @@ type MicTestRequest struct {
 	Seconds *int `json:"seconds,omitempty"`
 }
 
+// MicrophoneCapture One capture combination a microphone reports; a fact it does not report is absent.
+type MicrophoneCapture struct {
+	Bits       *int      `json:"bits,omitempty"`
+	ChannelMap *[]string `json:"channel_map,omitempty"`
+	Channels   *int      `json:"channels,omitempty"`
+	Format     *string   `json:"format,omitempty"`
+
+	// RateRange A continuous range of sample rates, in Hz.
+	RateRange *struct {
+		Max int `json:"max"`
+		Min int `json:"min"`
+	} `json:"rate_range,omitempty"`
+
+	// Rates Discrete sample rates, in Hz.
+	Rates []int `json:"rates"`
+}
+
+// MicrophoneDevice A microphone's ALSA identity; a fact the card does not report is absent.
+type MicrophoneDevice struct {
+	// AlsaName `hw:CARD=<id>,DEV=<n>`.
+	AlsaName   *string `json:"alsa_name,omitempty"`
+	ById       *string `json:"by_id,omitempty"`
+	ByPath     *string `json:"by_path,omitempty"`
+	CardDriver *string `json:"card_driver,omitempty"`
+	CardId     *string `json:"card_id,omitempty"`
+	CardIndex  *int    `json:"card_index,omitempty"`
+	CardName   *string `json:"card_name,omitempty"`
+
+	// PartOf The USB camera of the same scan this microphone belongs to (a webcam's).
+	PartOf    *DeviceRef `json:"part_of,omitempty"`
+	PcmDevice *int       `json:"pcm_device,omitempty"`
+	PcmNode   *string    `json:"pcm_node,omitempty"`
+
+	// Usb A device's USB facts; a fact it does not report is absent.
+	Usb *UsbFacts `json:"usb,omitempty"`
+}
+
+// MicrophoneItem defines model for MicrophoneItem.
+type MicrophoneItem struct {
+	// Capture The capture combinations the device reports; null when they cannot be read without opening it.
+	Capture    *[]MicrophoneCapture     `json:"capture"`
+	Connection MicrophoneItemConnection `json:"connection"`
+
+	// Device A microphone's ALSA identity; a fact the card does not report is absent.
+	Device MicrophoneDevice `json:"device"`
+	Errors []DeviceError    `json:"errors"`
+
+	// Id Sentinel's id, stable across scans of one board.
+	Id    string             `json:"id"`
+	Kind  MicrophoneItemKind `json:"kind"`
+	Name  string             `json:"name"`
+	Notes []string           `json:"notes"`
+
+	// Record A fingerprint of what identifies the device behind the id (Sentinel's capture target and identity): a microphone listed again under its id with another record is another device.
+	Record string `json:"record"`
+}
+
+// MicrophoneItemConnection defines model for MicrophoneItem.Connection.
+type MicrophoneItemConnection string
+
+// MicrophoneItemKind defines model for MicrophoneItem.Kind.
+type MicrophoneItemKind string
+
 // NeatComponent defines model for NeatComponent.
 type NeatComponent struct {
 	Channel         *string `json:"channel,omitempty"`
@@ -848,19 +1141,51 @@ type NeatComponent struct {
 	Version         *string `json:"version"`
 }
 
+// OtherItem A device of a kind Insight has no view for, listed with its name and notes.
+type OtherItem struct {
+	// Connection Sentinel's backend for it.
+	Connection string        `json:"connection"`
+	Errors     []DeviceError `json:"errors"`
+	Id         string        `json:"id"`
+
+	// Kind Sentinel's device type.
+	Kind  string   `json:"kind"`
+	Name  string   `json:"name"`
+	Notes []string `json:"notes"`
+}
+
 // PeripheralChanges defines model for PeripheralChanges.
 type PeripheralChanges struct {
 	Added   []DeviceRef `json:"added"`
 	Removed []DeviceRef `json:"removed"`
 }
 
+// PeripheralIssue A warning about the scan as a whole, such as a provider that failed.
+type PeripheralIssue struct {
+	// Code Sentinel's code for it.
+	Code    string `json:"code"`
+	Hint    string `json:"hint"`
+	Message string `json:"message"`
+}
+
+// PeripheralItem A device of a scan, told apart by `kind`; a kind Insight has no view for is an OtherItem.
+type PeripheralItem struct {
+	union json.RawMessage
+}
+
 // PeripheralScan defines model for PeripheralScan.
 type PeripheralScan struct {
-	// Catalog Sentinel's peripheral catalog as it wrote it: `revision`, `observed_at`, `devices` (cameras with their `modes`, each with Sentinel's `available` and `reason`; microphones with their `capture_target`), `errors` (a failed provider's devices are its last successful scan's) and `board` (the board's model and camera setup).
-	Catalog SentinelBody `json:"catalog"`
+	// CameraSetup The board's camera setup as Sentinel reads it from the device tree; null from a Sentinel that does not.
+	CameraSetup *CameraSetup `json:"camera_setup"`
 
 	// Changes What this scan found or missed against the one before; null for the first.
 	Changes *PeripheralChanges `json:"changes"`
+
+	// Issues Sentinel's providers that failed in this scan; the devices of one are its last successful scan's.
+	Issues []PeripheralIssue `json:"issues"`
+
+	// Items The devices the scan found, cameras first, then microphones, then other kinds, each in Sentinel's order.
+	Items []PeripheralItem `json:"items"`
 
 	// ScanMs How long Sentinel's scan took.
 	ScanMs    int       `json:"scan_ms"`
@@ -1221,6 +1546,23 @@ type Usage struct {
 	Used  int64 `json:"used"`
 }
 
+// UsbFacts A device's USB facts; a fact it does not report is absent.
+type UsbFacts struct {
+	// BusPath The device's place on the bus; a camera's sysfs path, a microphone's ALSA name for it (`1-1.2`).
+	BusPath *string `json:"bus_path,omitempty"`
+
+	// Interface A microphone's USB interface of the audio function.
+	Interface    *string `json:"interface,omitempty"`
+	Manufacturer *string `json:"manufacturer,omitempty"`
+	Product      *string `json:"product,omitempty"`
+	ProductId    *string `json:"product_id,omitempty"`
+	Serial       *string `json:"serial,omitempty"`
+
+	// SpeedMbps A camera's link speed in Mb/s (1.5, 12, 480, 5000...).
+	SpeedMbps *float64 `json:"speed_mbps,omitempty"`
+	VendorId  *string  `json:"vendor_id,omitempty"`
+}
+
 // ViewerUrl defines model for ViewerUrl.
 type ViewerUrl struct {
 	ChannelLimitSource ViewerUrlChannelLimitSource `json:"channel_limit_source"`
@@ -1528,6 +1870,94 @@ func (a SentinelCache) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(object)
+}
+
+// AsCameraItem returns the union data inside the PeripheralItem as a CameraItem
+func (t PeripheralItem) AsCameraItem() (CameraItem, error) {
+	var body CameraItem
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCameraItem overwrites any union data inside the PeripheralItem as the provided CameraItem
+func (t *PeripheralItem) FromCameraItem(v CameraItem) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCameraItem performs a merge with any union data inside the PeripheralItem, using the provided CameraItem
+func (t *PeripheralItem) MergeCameraItem(v CameraItem) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsMicrophoneItem returns the union data inside the PeripheralItem as a MicrophoneItem
+func (t PeripheralItem) AsMicrophoneItem() (MicrophoneItem, error) {
+	var body MicrophoneItem
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMicrophoneItem overwrites any union data inside the PeripheralItem as the provided MicrophoneItem
+func (t *PeripheralItem) FromMicrophoneItem(v MicrophoneItem) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMicrophoneItem performs a merge with any union data inside the PeripheralItem, using the provided MicrophoneItem
+func (t *PeripheralItem) MergeMicrophoneItem(v MicrophoneItem) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsOtherItem returns the union data inside the PeripheralItem as a OtherItem
+func (t PeripheralItem) AsOtherItem() (OtherItem, error) {
+	var body OtherItem
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromOtherItem overwrites any union data inside the PeripheralItem as the provided OtherItem
+func (t *PeripheralItem) FromOtherItem(v OtherItem) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeOtherItem performs a merge with any union data inside the PeripheralItem, using the provided OtherItem
+func (t *PeripheralItem) MergeOtherItem(v OtherItem) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t PeripheralItem) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *PeripheralItem) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
 }
 
 // ServerInterface represents all server handlers.

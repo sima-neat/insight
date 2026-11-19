@@ -91,9 +91,8 @@
 <!-- Under the Start row, which is the retry; it never replaces the row. -->
 @if (error(); as error) {
   <neat-callout tone="danger" announce="alert" [heading]="error.message">
-    <!-- One recovery line: the board's own hint when it sent one, Insight's otherwise. -->
-    @if (error.hint || error.action) {
-      <p>{{ error.hint || error.action }}</p>
+    @if (error.hint) {
+      <p>{{ error.hint }}</p>
     }
     @if (errorOpensBoard()) {
       <app-board-settings-action neatCalloutActions />

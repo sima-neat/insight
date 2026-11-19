@@ -6,13 +6,7 @@ import { problemOf } from '../board/board-error';
 import { BoardService } from '../board/board.service';
 import { visiblePoller } from '../polling';
 import { withRequestErrors } from '../sources/api-errors';
-import type {
-  CameraItem,
-  CameraModeChoice,
-  PreviewAnswer,
-  PreviewMode,
-  PreviewSession,
-} from './api';
+import type { CameraItem, PreviewAnswer, PreviewMode, PreviewSession } from './api';
 import {
   adoptedSelection,
   type CameraSelection,
@@ -138,14 +132,14 @@ export class CameraPreview {
    * (`previewBlock`'s `stale`): such a start is superseded from the outset, so its refusal would
    * not be shown.
    */
-  start(camera: CameraItem, mode: CameraModeChoice, board: string): Promise<void> {
+  start(camera: CameraItem, mode: PreviewMode, board: string): Promise<void> {
     const run = this.runStart(camera, mode, board);
     this.starts.add(run);
     void run.finally(() => this.starts.delete(run));
     return run;
   }
 
-  private async runStart(camera: CameraItem, mode: CameraModeChoice, board: string): Promise<void> {
+  private async runStart(camera: CameraItem, mode: PreviewMode, board: string): Promise<void> {
     const selection: CameraSelection = { ...mode, id: camera.id };
     this.shown.set({ cameraId: camera.id, selection });
     this.startedOn = board;
@@ -223,7 +217,7 @@ export class CameraPreview {
    * then a start); one still starting is restarted once it answers. Another camera's preview, or
    * the mode already streaming, is left alone.
    */
-  async changeMode(camera: CameraItem, mode: CameraModeChoice): Promise<void> {
+  async changeMode(camera: CameraItem, mode: PreviewMode): Promise<void> {
     const selection: CameraSelection = { ...mode, id: camera.id };
     if (this.shown().cameraId === camera.id) this.shown.set({ cameraId: camera.id, selection });
     const state = this.stateValue();

@@ -1,8 +1,7 @@
 import { DEVKIT } from '../board/board.testing';
 import type { MicrophoneItem, MicTestStatus } from './api';
-import { available } from './cameras.testing';
 
-// Microphone items as `snapshotOf` builds them from a real DevKit scan, for the device list and
+// Microphone items as the server answers them for a real DevKit scan, for the device list and
 // the microphone test.
 
 /** The Blue Yeti Nano; Sentinel reports no USB speed for a microphone. */
@@ -30,14 +29,12 @@ export const yeti: MicrophoneItem = {
       bus_path: '1-3.1',
     },
   },
-  availability: available,
   capture: [
     {
       format: 'S24_3LE',
       channels: 2,
       bits: 24,
       rates: [32000, 44100, 48000],
-      rate_range: null,
       channel_map: ['FL', 'FR'],
     },
   ],
@@ -60,7 +57,6 @@ export const onboardMic: MicrophoneItem = {
     pcm_node: '/dev/snd/pcmC1D0c',
     alsa_name: 'hw:CARD=simaaudio,DEV=0',
   },
-  availability: available,
   capture: null,
   record: '9a8b7c6d5e4f3a2b',
   notes: ['Capture formats cannot be read without opening the device.'],

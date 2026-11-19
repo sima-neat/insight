@@ -51,12 +51,12 @@
 }
 @if (error(); as error) {
   <neat-callout tone="danger" announce="alert" [heading]="error.message" [headingLevel]="4">
-    @if (errorAction()) {
-      <p>{{ errorAction() }}</p>
+    @if (error.hint) {
+      <p>{{ error.hint }}</p>
     }
   </neat-callout>
 }
-<!-- The recording plays here, through the playback level when one was made; never shown. -->
+<!-- The recording plays here; never shown. -->
 <audio #audio preload="auto" hidden></audio>
 
 <app-device-details [item]="microphone()" />

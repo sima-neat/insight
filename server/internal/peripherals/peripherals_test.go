@@ -139,11 +139,9 @@ func TestScans(t *testing.T) {
 		t.Fatalf("before a scan: %+v %v", answer, err)
 	}
 	first := f.refresh(t)
-	if first.Scan == nil || first.Scan.Changes != nil || string(first.Scan.Catalog["revision"]) != "3" {
+	if first.Scan == nil || first.Scan.Changes != nil || len(first.Scan.Items) != 3 || len(first.Scan.Issues) != 0 ||
+		*first.Scan.CameraSetup.Model != "SiMa.ai Modalix SoM 16Gig Board" {
 		t.Fatalf("the first scan: %+v", first.Scan)
-	}
-	if _, has := first.Scan.Catalog["schema"]; has {
-		t.Error("the catalog keeps Sentinel's schema marker")
 	}
 	if answer, _ := f.manager.Peripherals(f.Board); answer.Scan != first.Scan {
 		t.Error("the last scan is not answered from memory")

@@ -15,12 +15,11 @@ import type {
   CameraFormatRange,
   CameraItem,
   CameraMode,
-  CameraModeChoice,
+  PreviewMode,
   CameraSize,
   PreviewSession,
   SupportTier,
 } from './api';
-import { USB_PREVIEW_FORMATS } from './catalog';
 import { countLabel, tierInfo } from './devices';
 
 /** An entry of a mode menu, with the tier its label names when the menu mixes tiers. */
@@ -72,7 +71,7 @@ export function rateLabel(value: number | null | undefined): string {
  * Format and size only, for every camera: a MIPI mode's rate is not known until the camera runs
  * in it, so no camera's rate is named before it runs.
  */
-export function modeLabel(selection: CameraModeChoice | null): string {
+export function modeLabel(selection: PreviewMode | null): string {
   if (!selection) return '';
   return `${selection.format} ${sizeLabel(selection.width, selection.height)}`;
 }
@@ -149,13 +148,13 @@ export function blockedFormatSummary(
 /** The tier Sentinel gave the selected mode; '' when the camera does not list it. */
 export function selectionTier(
   camera: CameraItem,
-  selection: CameraModeChoice | null,
+  selection: PreviewMode | null,
 ): SupportTier | '' {
   return selectedMode(camera, selection)?.tier ?? '';
 }
 
 /** The selected mode as the camera lists it; null when it does not. */
-function selectedMode(camera: CameraItem, selection: CameraModeChoice | null): CameraMode | null {
+function selectedMode(camera: CameraItem, selection: PreviewMode | null): CameraMode | null {
   if (!selection) return null;
   const size = findSize(findFormat(camera, selection.format), selection.width, selection.height);
   return findFps(size, selection.fps);
@@ -169,8 +168,8 @@ function selectedMode(camera: CameraItem, selection: CameraModeChoice | null): C
  */
 export function resolveSelection(
   camera: CameraItem,
-  wanted: Partial<CameraModeChoice> | null,
-): CameraModeChoice | null {
+  wanted: Partial<PreviewMode> | null,
+): PreviewMode | null {
   const formats = camera.formats.filter(isSelectable);
   if (!formats.length) return null;
   const def = camera.default_selection;
@@ -193,16 +192,16 @@ export function resolveSelection(
 }
 
 /** The same mode: format, size and rate. */
-export function sameSelection(a: CameraModeChoice | null, b: CameraModeChoice | null): boolean {
+export function sameSelection(a: PreviewMode | null, b: PreviewMode | null): boolean {
   if (!a || !b) return a === b;
   return a.format === b.format && a.width === b.width && a.height === b.height && a.fps === b.fps;
 }
 
 /**
- * Why Start preview cannot start, the first that applies. A mode starts when the preview takes it
- * (`CameraMode.previewable`, the server's rule): a USB camera's in a format the preview reads, a
- * MIPI camera's in NV12 that Sentinel does not refuse. The scan's availability never blocks: a
- * busy camera is reported by the start.
+ * Why Start preview cannot start, the first that applies. A mode starts when the server says the
+ * preview takes it (`CameraMode.previewable`): a USB camera's in a format the preview reads (the
+ * only reason it refuses a rate the camera lists), a MIPI camera's in NV12 that Sentinel does not
+ * refuse. A busy camera is reported by the start.
  */
 export function previewBlock({
   camera,
@@ -212,7 +211,7 @@ export function previewBlock({
   target,
 }: {
   camera: CameraItem | null;
-  selection: CameraModeChoice | null;
+  selection: PreviewMode | null;
   /** The snapshot was scanned for another board. */
   stale?: boolean;
   /** The preview this page holds, of any camera. */
@@ -232,7 +231,7 @@ export function previewBlock({
   if (!selection) return blocked('This camera reports no mode Insight can start.');
   const mode = selectedMode(camera, selection);
   if (!mode?.previewable) {
-    if (camera.connection === 'usb' && !USB_PREVIEW_FORMATS.includes(selection.format)) {
+    if (camera.connection === 'usb') {
       return blocked(
         `Preview decodes MJPG and converts raw formats such as YUYV, not ${selection.format}. Choose another format.`,
       );

@@ -8,14 +8,13 @@ import { BoardService } from '../board/board.service';
 import { LatestOnly } from '../polling';
 import { withRequestErrors } from '../sources/api-errors';
 import type { Peripherals, PeripheralSnapshot, SnapshotBoard } from './api';
-import { snapshotOf } from './catalog';
 import { countLabel } from './devices';
 
 /**
  * The selected board's peripheral scan, for the whole app: Peripherals lists it, and the board
  * dialog reads the camera setup from it. Root-provided, so the scan outlives a visit to the page.
- * The server answers SiMa Sentinel's catalog as it wrote it; the device model the page shows is
- * built from it here (`snapshotOf`).
+ * The server answers the devices it built from SiMa Sentinel's catalog, which the page shows as
+ * they are.
  *
  * **Reads.** `GET .../peripherals` never contacts the board: it answers the server's last scan of
  * the board, or none before the first. Only the newest answer is applied, none sent before a scan
@@ -199,6 +198,12 @@ export class PeripheralsService {
     this.snapshotValue.set(snapshot);
     if (this.scanErrorBoard !== snapshot.board.id) this.scanErrorValue.set(null);
   }
+}
+
+/** The snapshot of `board` from its peripherals answer: the empty one before a scan. */
+function snapshotOf(board: SnapshotBoard, { scan }: Peripherals): PeripheralSnapshot {
+  if (scan) return { board, ...scan };
+  return { board, scanned_at: null, items: [], issues: [], changes: null, camera_setup: null };
 }
 
 /** The toast of a Refresh: "Scan complete: 2 cameras, 1 microphone on sima@192.168.2.2.". */

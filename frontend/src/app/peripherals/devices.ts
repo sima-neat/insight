@@ -9,10 +9,9 @@ import type { NeatSelectListGroup } from '@sima/neat-ui/select-list';
 import type { CameraSetup } from '../board/api';
 import type {
   CameraItem,
-  DeviceChanges,
   MicrophoneItem,
+  PeripheralChanges,
   PeripheralItem,
-  PeripheralIssue,
   PeripheralSnapshot,
   SupportTier,
   UsbFacts,
@@ -80,20 +79,14 @@ const TIERS: Record<SupportTier, DeviceChip> = {
   unsupported: { label: 'Unsupported', tone: 'neutral' },
 };
 
-const SEVERITIES: Record<PeripheralIssue['severity'], DeviceChip & { rank: number }> = {
-  error: { label: 'Error', tone: 'danger', rank: 0 },
-  warning: { label: 'Warning', tone: 'warning', rank: 1 },
-  info: { label: 'Info', tone: 'info', rank: 2 },
-};
-
 const PREVIEWING: DeviceChip = { label: 'Previewing', tone: 'info' };
 const TESTING: DeviceChip = { label: 'Testing', tone: 'info' };
 const LAST_SCAN: DeviceChip = { label: 'Last scan', tone: 'neutral' };
 const NOT_SUPPORTED: DeviceChip = { label: 'Not supported yet', tone: 'neutral' };
 
-/** A snapshot counts as scanned once a scan made it; the empty one before any has no `scan_id`. */
+/** A snapshot counts as scanned once a scan made it; the empty one before any has no `scanned_at`. */
 export function isScanned(snapshot: PeripheralSnapshot | null): snapshot is PeripheralSnapshot {
-  return snapshot !== null && snapshot.scan_id !== null;
+  return snapshot !== null && snapshot.scanned_at !== null;
 }
 
 export function isCamera(item: PeripheralItem): item is CameraItem {
@@ -112,11 +105,6 @@ export function countLabel(count: number, noun: string): string {
 /** A tier's label and tone; anything but the two tiers reads as Unsupported. */
 export function tierInfo(tier: SupportTier): DeviceChip {
   return TIERS[tier] ?? TIERS.unsupported;
-}
-
-/** A Sentinel issue's severity label, tone and sort rank; an unknown severity reads as Info. */
-export function severityInfo(severity: string): DeviceChip & { rank: number } {
-  return SEVERITIES[severity as PeripheralIssue['severity']] ?? SEVERITIES.info;
 }
 
 /**
@@ -235,19 +223,14 @@ export function deviceFacts(item: PeripheralItem): DeviceFact[] {
 }
 
 /** The change summary's lines: the devices gone since the last scan, then the new ones. */
-export function changeSummary(changes: DeviceChanges | null): string[] {
-  const names = (list: DeviceChanges['added']) =>
+export function changeSummary(changes: PeripheralChanges | null): string[] {
+  const names = (list: PeripheralChanges['added']) =>
     list.map((device) => device.name || device.id).join(', ');
   const lines: string[] = [];
   if (changes?.removed.length)
     lines.push(`Disconnected since last refresh: ${names(changes.removed)}`);
   if (changes?.added.length) lines.push(`New: ${names(changes.added)}`);
   return lines;
-}
-
-/** The issues, errors first, then warnings, then info; the scan's order within each. */
-export function sortIssues(issues: readonly PeripheralIssue[]): PeripheralIssue[] {
-  return [...issues].sort((a, b) => severityInfo(a.severity).rank - severityInfo(b.severity).rank);
 }
 
 /**
@@ -270,7 +253,8 @@ export function boardCameraSetup(
   snapshot: PeripheralSnapshot | null,
 ): CameraSetup | null {
   if (boardId === null || !isScanned(snapshot) || snapshot.board.id !== boardId) return null;
-  return snapshot.camera_setup;
+  const setup = snapshot.camera_setup;
+  return setup && { model: setup.model, overlays: [...setup.overlays] };
 }
 
 /** A kind's group label for a kind Insight has no name for: "gps_unit" reads "Gps units". */
@@ -384,8 +368,8 @@ function usbFacts(usb: UsbFacts | undefined): [string, string | number | null | 
 }
 
 /** "0: Nano (Yeti Nano)", from the parts the card reported; null with none. */
-function alsaCard(index: number | null, id: string | null, name: string | null): string | null {
-  const head = [index === null ? '' : String(index), id ?? ''].filter(Boolean).join(': ');
+function alsaCard(index?: number, id?: string, name?: string): string | null {
+  const head = [index === undefined ? '' : String(index), id ?? ''].filter(Boolean).join(': ');
   const text = [head, name ? `(${name})` : ''].filter(Boolean).join(' ');
   return text || null;
 }

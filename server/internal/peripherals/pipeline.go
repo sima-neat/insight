@@ -19,6 +19,9 @@ const (
 	jpegQuality  = 70
 )
 
+// mipiFormat is the format a MIPI camera's preview, and Neat's CameraInput, take.
+const mipiFormat = "NV12"
+
 // rawFormats are the V4L2 formats of a USB camera a preview converts, by the name GStreamer's
 // video/x-raw gives each.
 var rawFormats = map[string]string{
@@ -83,22 +86,19 @@ func invalidMode(hint, format string, args ...any) error {
 
 const modeHint = "Pick a format, size and frame rate the last scan lists for the camera."
 
-// previewable checks mode against camera d in the scan and gives what the pipeline opens. A
-// MIPI mode must be NV12 and not refused by Sentinel's verdict (one without a verdict may be
-// tried: the preview is the check); a USB camera may preview any mode it lists in MJPG or a raw
-// format GStreamer converts. Only sizes the camera lists one by one are previewed.
-func previewable(d device, m Mode) (previewSource, error) {
-	var connection string
-	switch d.Backend {
-	case "mipi":
-		connection = "mipi"
-	case "v4l2": // Sentinel's V4L2 provider reports USB cameras only
-		connection = "usb"
-	default:
-		return previewSource{}, invalidMode("Pick a MIPI or USB camera.", "%s cannot be previewed: only MIPI and USB cameras can.", d.name())
+// previewMode checks mode against camera d in the scan and gives its rate. It is the one rule of
+// which modes Insight's preview takes, which the scan's answer says per mode
+// (`CameraMode.previewable`) and a preview's start enforces. A MIPI mode must be NV12 and not
+// refused by Sentinel's verdict (one without a verdict may be tried: the preview is the check);
+// a USB camera may preview any mode it lists in MJPG or a raw format GStreamer converts. Only
+// sizes the camera lists one by one are previewed, at a rate it advertises for the size.
+func previewMode(d device, m Mode) (rate, error) {
+	connection := d.connection()
+	if connection != "mipi" && connection != "usb" {
+		return rate{}, invalidMode("Pick a MIPI or USB camera.", "%s cannot be previewed: only MIPI and USB cameras can.", d.name())
 	}
 	if m.Format == "" || m.Width <= 0 || m.Height <= 0 || !(m.FPS > 0) || math.IsInf(m.FPS, 0) {
-		return previewSource{}, invalidMode(modeHint, "A preview needs a format, a width and a height, and a frame rate above 0.")
+		return rate{}, invalidMode(modeHint, "A preview needs a format, a width and a height, and a frame rate above 0.")
 	}
 	label := fmt.Sprintf("%s %dx%d at %g fps", m.Format, m.Width, m.Height, m.FPS)
 	var listed *mode
@@ -109,25 +109,36 @@ func previewable(d device, m Mode) (previewSource, error) {
 		}
 	}
 	if listed == nil {
-		return previewSource{}, invalidMode(modeHint, "%s does not list %s %dx%d.", d.name(), m.Format, m.Width, m.Height)
+		return rate{}, invalidMode(modeHint, "%s does not list %s %dx%d.", d.name(), m.Format, m.Width, m.Height)
 	}
 	switch {
-	case connection == "mipi" && m.Format != "NV12":
-		return previewSource{}, invalidMode("Pick an NV12 mode.", "%s cannot be previewed: a MIPI camera's preview takes NV12.", label)
+	case connection == "mipi" && m.Format != mipiFormat:
+		return rate{}, invalidMode("Pick an NV12 mode.", "%s cannot be previewed: a MIPI camera's preview takes NV12.", label)
 	case connection == "mipi" && listed.Available != nil && !*listed.Available:
 		reason := listed.Reason
 		if reason == "" {
 			reason = "Sentinel marks it unavailable."
 		}
-		return previewSource{}, invalidMode("Pick a mode marked available.", "%s cannot be previewed: %s", label, reason)
+		return rate{}, invalidMode("Pick a mode marked available.", "%s cannot be previewed: %s", label, reason)
 	case connection == "usb" && m.Format != "MJPG" && rawFormats[m.Format] == "":
-		return previewSource{}, invalidMode("Pick an MJPG or raw mode.",
+		return rate{}, invalidMode("Pick an MJPG or raw mode.",
 			"%s cannot be previewed: the preview decodes MJPG and converts YUYV, NV12 and the other raw formats only.", label)
 	}
-	r, ok := listedRate(d, connection, *listed, m.FPS)
+	r, ok := listedRate(d, *listed, m.FPS)
 	if !ok {
-		return previewSource{}, invalidMode(modeHint, "%s is not a frame rate %s advertises for %dx%d.", strconv.FormatFloat(m.FPS, 'g', -1, 64), d.name(), m.Width, m.Height)
+		return rate{}, invalidMode(modeHint, "%s is not a frame rate %s advertises for %dx%d.", strconv.FormatFloat(m.FPS, 'g', -1, 64), d.name(), m.Width, m.Height)
 	}
+	return r, nil
+}
+
+// previewable checks mode against camera d in the scan (previewMode) and gives what the
+// pipeline opens.
+func previewable(d device, m Mode) (previewSource, error) {
+	r, err := previewMode(d, m)
+	if err != nil {
+		return previewSource{}, err
+	}
+	connection := d.connection()
 	source := d.CameraName
 	if connection == "usb" {
 		source = d.ByIDPath
@@ -141,7 +152,7 @@ func previewable(d device, m Mode) (previewSource, error) {
 	quoted, ok := gstQuoted(source)
 	if !ok {
 		return previewSource{}, apierr.Errorf(http.StatusUnprocessableEntity, "no_device",
-			"Refresh; if this persists, the camera's details in the catalog say what the board reported.",
+			"Refresh; if this persists, the camera's details say what the board reported.",
 			"%s reports no device Insight can open for a preview.", d.name())
 	}
 	return previewSource{connection: connection, source: quoted, format: m.Format, width: m.Width, height: m.Height, rate: r}, nil
@@ -150,43 +161,68 @@ func previewable(d device, m Mode) (previewSource, error) {
 // listedRate is fps as one of the rates the camera advertises for the mode's size, exactly. A
 // MIPI camera that advertises none takes any rate up to the one it reports running at, which
 // libcamera then negotiates.
-func listedRate(d device, connection string, m mode, fps float64) (rate, bool) {
+func listedRate(d device, m mode, fps float64) (rate, bool) {
 	near := func(a, b float64) bool { return math.Abs(a-b) <= b*1e-3 }
-	advertised := false
-	for _, entry := range m.FrameIntervals {
-		if entry.Width != m.Width || entry.Height != m.Height {
-			continue
-		}
-		for _, i := range entry.Intervals {
-			advertised = true
-			switch i.Type {
-			case "discrete":
-				if i.Numerator > 0 && i.Denominator > 0 {
-					// An interval is seconds per frame: the rate is its inverse.
-					if r := (rate{i.Denominator, i.Numerator}); near(fps, r.fps()) {
-						g := gcd(r.num, r.den)
-						return rate{r.num / g, r.den / g}, true
-					}
-				}
-			case "stepwise", "continuous":
-				if i.Minimum == nil || i.Maximum == nil || i.Minimum.Numerator <= 0 || i.Maximum.Numerator <= 0 {
-					continue
-				}
-				fastest := float64(i.Minimum.Denominator) / float64(i.Minimum.Numerator)
-				slowest := float64(i.Maximum.Denominator) / float64(i.Maximum.Numerator)
-				if fps >= slowest*(1-1e-3) && fps <= fastest*(1+1e-3) && onStep(i, fps) {
-					return rateOf(fps), true
-				}
+	intervals := m.intervals()
+	for _, i := range intervals {
+		switch i.Type {
+		case "discrete":
+			if r, ok := i.rate(); ok && near(fps, r.fps()) {
+				return r, true
+			}
+		case "stepwise", "continuous":
+			if i.takes(fps) {
+				return rateOf(fps), true
 			}
 		}
 	}
-	if advertised || connection != "mipi" {
+	if len(intervals) > 0 || d.connection() != "mipi" {
 		return rate{}, false
 	}
 	if d.MaxFPS > 0 && fps > d.MaxFPS*(1+1e-3) {
 		return rate{}, false
 	}
 	return rateOf(fps), true
+}
+
+// intervals are the frame intervals the mode advertises for its own size.
+func (m mode) intervals() []interval {
+	var list []interval
+	for _, entry := range m.FrameIntervals {
+		if entry.Width == m.Width && entry.Height == m.Height {
+			list = append(list, entry.Intervals...)
+		}
+	}
+	return list
+}
+
+// rate is a discrete interval's rate, reduced; false for one that names none.
+func (i interval) rate() (rate, bool) {
+	if i.Numerator <= 0 || i.Denominator <= 0 {
+		return rate{}, false
+	}
+	// An interval is seconds per frame: the rate is its inverse.
+	g := gcd(i.Denominator, i.Numerator)
+	return rate{i.Denominator / g, i.Numerator / g}, true
+}
+
+// bounds are a stepwise or continuous range's slowest and fastest rates; false for a range
+// without both.
+func (i interval) bounds() (slowest, fastest float64, ok bool) {
+	if i.Minimum == nil || i.Maximum == nil || i.Minimum.Numerator <= 0 || i.Maximum.Numerator <= 0 ||
+		i.Minimum.Denominator <= 0 || i.Maximum.Denominator <= 0 {
+		return 0, 0, false
+	}
+	// The longest period is the slowest rate.
+	return float64(i.Maximum.Denominator) / float64(i.Maximum.Numerator),
+		float64(i.Minimum.Denominator) / float64(i.Minimum.Numerator), true
+}
+
+// takes says whether a stepwise or continuous range holds fps, allowing for the driver's
+// rounding.
+func (i interval) takes(fps float64) bool {
+	slowest, fastest, ok := i.bounds()
+	return ok && fps >= slowest*(1-1e-3) && fps <= fastest*(1+1e-3) && onStep(i, fps)
 }
 
 // onStep says whether fps's period is the shortest one plus a whole number of steps, allowing

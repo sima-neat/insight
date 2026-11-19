@@ -17,7 +17,7 @@ import { BoardSettingsAction } from '../../board/board-settings-action';
 import { BoardService } from '../../board/board.service';
 import { ticking } from '../../clock';
 import { PanelTitle } from '../../panel-title';
-import type { CameraItem, CameraModeChoice } from '../../peripherals/api';
+import type { CameraItem, PreviewMode } from '../../peripherals/api';
 import {
   blockedFormatSummary,
   cameraSummaryLine,
@@ -37,7 +37,6 @@ import { PeripheralsSession } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import {
   PREVIEW_IDLE,
-  previewErrorInfo,
   type PreviewState,
   previewStatus,
   previewStreamUrl,
@@ -254,7 +253,7 @@ export class CameraPanel {
     return !action.stop && !action.waiting && this.block().blocked;
   });
 
-  protected readonly error = computed(() => previewErrorInfo(this.view().error));
+  protected readonly error = computed(() => this.view().error);
   protected readonly errorOpensBoard = computed(() => {
     const error = this.error();
     return error !== null && opensBoardSettings(error.code);
@@ -295,7 +294,7 @@ export class CameraPanel {
    * Remembers the mode the pickers resolve to for this camera. A preview that starts or streams
    * then restarts on it; `changeMode` leaves another camera's alone.
    */
-  private choose(wanted: Partial<CameraModeChoice>): void {
+  private choose(wanted: Partial<PreviewMode>): void {
     const camera = this.camera();
     const next = resolveSelection(camera, wanted);
     if (!next) return;

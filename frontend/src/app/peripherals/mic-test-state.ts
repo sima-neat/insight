@@ -3,8 +3,8 @@
  * `MicTest` composes them.
  *
  * Like a video call's "Test microphone": the board records until Stop (or the server's cap of
- * 30 s) while a meter shows the live level, then the recording plays back here with the meter
- * following the playback. The server runs one test per board.
+ * 30 s) while a meter shows the live level, then the recording plays back here. The server runs
+ * one test per board.
  */
 
 import { boardUrl } from '../board/api';
@@ -141,21 +141,6 @@ export function micTestAfterFailedStart(
 /** What to say about a finished recording: only when it needs attention. */
 export function micLevelNotice(level: MicLevel | null | undefined): string {
   return level?.silent ? SILENCE_NOTICE : '';
-}
-
-/** The recovery line under a test's error: the panel's own for the codes it knows. */
-export function micTestErrorAction(error: Pick<BoardProblem, 'code' | 'hint'> | null): string {
-  switch (error?.code) {
-    case 'microphone_in_use':
-      return 'Stop the application that is recording from it, then test again. Insight never stops it for you.';
-    case 'not_found':
-    case 'board_changed':
-      return 'Refresh, then test again.';
-    case 'tool_missing':
-      return 'Install alsa-utils on the board, then test again.';
-    default:
-      return error?.hint ?? '';
-  }
 }
 
 /** The one button's label and what pressing it does, for each state. */

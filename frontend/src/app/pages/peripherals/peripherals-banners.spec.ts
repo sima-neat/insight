@@ -7,7 +7,7 @@ import { AppDialogs } from '../../app-dialogs';
 import { BoardProblem } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
 import { boardList, boardWith, DEVKIT, FakeBoard } from '../../board/board.testing';
-import type { PeripheralSnapshot } from '../../peripherals/api';
+import type { PeripheralIssue, PeripheralSnapshot } from '../../peripherals/api';
 import { imx477, usb } from '../../peripherals/cameras.testing';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import { peripheralSnapshot } from '../../peripherals/snapshots.testing';
@@ -33,6 +33,15 @@ class Host {
 }
 
 const unreachable = new BoardProblem('Could not connect to sima@192.168.1.20.', 'unreachable', '');
+
+const STATUS_HINT = 'Check `systemctl status simaai-sentinel` on the board, then Refresh.';
+
+/** The server's warning about a Sentinel provider that failed. */
+const failedProvider = (provider: string): PeripheralIssue => ({
+  code: 'provider.failed',
+  message: `SiMa Sentinel's ${provider} provider failed: timed out`,
+  hint: STATUS_HINT,
+});
 
 /** Another board than the DevKit the snapshot is of. */
 const OTHER = { ...DEVKIT, id: 'ssh:sima@10.0.0.9:22', host: '10.0.0.9', label: 'sima@10.0.0.9' };
@@ -167,23 +176,14 @@ describe('PeripheralsBanners', () => {
     ]);
   });
 
-  it('the change summary is one status line per change; each issue is a callout, errors first, toned by severity', async () => {
+  it("the change summary is one status line per change; each of Sentinel's issues is a warning callout", async () => {
     peripherals.snapshot.set(
       peripheralSnapshot([imx477], {
         changes: {
           added: [{ id: imx477.id, name: 'imx477' }],
           removed: [{ id: usb.id, name: usb.name }],
         },
-        issues: [
-          { severity: 'info', code: 'a', message: 'USB hub reports low power.', hint: null },
-          {
-            severity: 'error',
-            code: 'b',
-            message: 'v4l2-ctl is missing.',
-            hint: 'Install v4l-utils.',
-          },
-          { severity: 'warning', code: 'c', message: 'Camera overlays unknown.', hint: null },
-        ],
+        issues: [failedProvider('camera.v4l2'), failedProvider('microphone.alsa')],
       }),
     );
     await settle();
@@ -195,13 +195,17 @@ describe('PeripheralsBanners', () => {
         role: 'status',
       },
       {
-        tone: 'danger',
-        heading: 'Error',
-        body: ['v4l2-ctl is missing.', 'Install v4l-utils.'],
+        tone: 'warning',
+        heading: 'Warning',
+        body: ["SiMa Sentinel's camera.v4l2 provider failed: timed out", STATUS_HINT],
         role: null,
       },
-      { tone: 'warning', heading: 'Warning', body: ['Camera overlays unknown.'], role: null },
-      { tone: 'info', heading: 'Info', body: ['USB hub reports low power.'], role: null },
+      {
+        tone: 'warning',
+        heading: 'Warning',
+        body: ["SiMa Sentinel's microphone.alsa provider failed: timed out", STATUS_HINT],
+        role: null,
+      },
     ]);
   });
 
@@ -209,9 +213,7 @@ describe('PeripheralsBanners', () => {
     peripherals.snapshot.set(
       peripheralSnapshot([imx477], {
         changes: { added: [{ id: imx477.id, name: 'imx477' }], removed: [] },
-        issues: [
-          { severity: 'warning', code: 'c', message: 'Camera overlays unknown.', hint: null },
-        ],
+        issues: [failedProvider('camera.v4l2')],
       }),
     );
     board.state.set(boardWith(OTHER));

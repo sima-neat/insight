@@ -120,10 +120,12 @@ type Scan struct {
 	ScannedAt time.Time `json:"scanned_at"`
 	// ScanMs is how long Sentinel's scan took.
 	ScanMs int64 `json:"scan_ms"`
-	// Catalog is Sentinel's catalog of the scan, as Sentinel wrote it: its revision, when it
-	// observed the devices, the devices with their modes and verdicts, the providers' errors and
-	// the board's camera setup.
-	Catalog sentinel.Body `json:"catalog"`
+	// Items are the devices the scan found (devices.go).
+	Items []Item `json:"items"`
+	// Issues are the providers that failed in the scan.
+	Issues []Issue `json:"issues"`
+	// CameraSetup is the board's, nil from a Sentinel that does not read it.
+	CameraSetup *CameraSetup `json:"camera_setup"`
 	// Changes say what the scan found or missed against the one before; nil for the first.
 	Changes *Changes `json:"changes"`
 
@@ -175,7 +177,8 @@ func (m *Manager) Refresh(ctx context.Context, b *board.Board) (Peripherals, err
 	if err != nil {
 		return Peripherals{}, err
 	}
-	scan := &Scan{ScannedAt: time.Now(), ScanMs: time.Since(started).Milliseconds(), Catalog: body, devices: parsed}
+	scan := &Scan{ScannedAt: time.Now(), ScanMs: time.Since(started).Milliseconds(), Items: parsed.items(),
+		Issues: parsed.issues(), CameraSetup: parsed.cameraSetup(), devices: parsed}
 	if previous != nil {
 		scan.Changes = changes(previous.devices, parsed)
 	}

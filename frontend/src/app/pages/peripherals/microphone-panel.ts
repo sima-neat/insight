@@ -31,9 +31,7 @@ import {
   micLevelNotice,
   micTestAction,
   micTestCaption,
-  micTestErrorAction,
 } from '../../peripherals/mic-test-state';
-import { createPlaybackLevel, type PlaybackLevel } from '../../peripherals/playback-level';
 import { DeviceDetails } from './device-details';
 import { DeviceErrors } from './device-errors';
 
@@ -85,14 +83,6 @@ export class MicrophonePanel {
   private readonly micTest = inject(MicTest);
   private readonly audio = viewChild.required<ElementRef<HTMLAudioElement>>('audio');
 
-  /**
-   * The playback's level for the meter, made on the first click that leads to a playback and
-   * kept for every playback in this panel's `<audio>`; null before.
-   */
-  private playback: PlaybackLevel | null = null;
-  /** Reads the playback's level for the meter, which calls it unbound once per frame. */
-  private readonly playbackLevel = (): number | null => this.playback?.read() ?? null;
-
   protected readonly partOf = computed(() => microphoneSubtitle(this.microphone()));
   /** One line per capture combination; null when the device does not report its formats. */
   protected readonly captureLines = computed(
@@ -134,19 +124,12 @@ export class MicrophonePanel {
     micTestCaption(this.view().status, this.micTest.elapsed()),
   );
   /**
-   * What the meter samples: the board's level while recording, the playback's while it plays;
-   * nothing otherwise, so the meter is dark and samples nothing.
+   * What the meter samples: the board's level while recording; nothing otherwise, so the meter is
+   * dark and samples nothing.
    */
-  protected readonly sample = computed(() => {
-    switch (this.view().status) {
-      case 'recording':
-        return this.micTest.level;
-      case 'playing':
-        return this.playbackLevel;
-      default:
-        return null;
-    }
-  });
+  protected readonly sample = computed(() =>
+    this.view().status === 'recording' ? this.micTest.level : null,
+  );
   /** The status lines for screen readers; the caption ticks, so it is not a live region. */
   protected readonly announcement = computed(() => {
     switch (this.view().status) {
@@ -168,7 +151,6 @@ export class MicrophonePanel {
     const { status, error } = this.view();
     return status === 'error' || status === 'recording' ? error : null;
   });
-  protected readonly errorAction = computed(() => micTestErrorAction(this.error()));
 
   constructor() {
     // On open, and for another device under this id or another board;
@@ -180,44 +162,22 @@ export class MicrophonePanel {
     // After the render that builds this panel: the panel it replaces lets go of its own element
     // when it goes, in that same render, so the order of the two never matters.
     afterNextRender(() => this.micTest.attachAudio(this.audio().nativeElement));
-    inject(DestroyRef).onDestroy(() => {
-      this.micTest.attachAudio(null);
-      this.playback?.close();
-    });
+    inject(DestroyRef).onDestroy(() => this.micTest.attachAudio(null));
   }
 
   protected act(): void {
     // A press while the stop is under way (aria-disabled) is ignored by `MicTest.stop`.
-    const action = this.action();
-    if (action.action === 'stop-playing') {
-      void this.micTest.stop();
-      return;
-    }
-    // A recording ends in a playback, which may start with no click of its own (a recording
-    // that reaches the board's 30 s): the level is made now, while a click lets audio start.
-    if (action.action === 'stop') {
-      this.preparePlayback();
+    if (this.action().action !== 'record') {
       void this.micTest.stop();
       return;
     }
     // The page shows device panels only once the board is read, so `shown` is there.
     const shown = this.shown();
     if (!shown) return;
-    this.preparePlayback();
     void this.micTest.start(this.microphone(), shown.board);
   }
 
   protected replay(): void {
-    // A finished recording taken up on open has had no click here before.
-    this.preparePlayback();
     this.micTest.replay();
-  }
-
-  /**
-   * Makes the playback level once, inside a click (`createPlaybackLevel`): a media element takes
-   * one Web Audio source in its lifetime, so one level serves every playback.
-   */
-  private preparePlayback(): void {
-    this.playback ??= createPlaybackLevel(this.audio().nativeElement);
   }
 }

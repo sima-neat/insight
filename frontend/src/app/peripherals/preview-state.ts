@@ -10,7 +10,7 @@
 import { boardUrl } from '../board/api';
 import { BoardProblem } from '../board/board-error';
 import type { DeviceChip } from './devices';
-import type { CameraModeChoice, PreviewSession } from './api';
+import type { PreviewMode, PreviewSession } from './api';
 import { rateLabel, sameSelection } from './camera-modes';
 
 export type PreviewStatus = 'idle' | 'starting' | 'live' | 'elsewhere' | 'stopping' | 'error';
@@ -53,7 +53,7 @@ export type PreviewEvent =
 export type PreviewEventOf<T extends PreviewEvent['type']> = Extract<PreviewEvent, { type: T }>;
 
 /** A mode as the page shows it for a camera: the camera's item id with the mode. */
-export interface CameraSelection extends CameraModeChoice {
+export interface CameraSelection extends PreviewMode {
   id: string;
 }
 
@@ -99,15 +99,6 @@ export interface PreviewTimer {
   stop(): void;
 }
 
-/** An error the preview shows, with one recovery line. */
-export interface PreviewErrorInfo {
-  code: string;
-  message: string;
-  /** The server's own hint; the panel shows it, or `action` when there is none. */
-  hint: string;
-  action: string;
-}
-
 /** How often a live preview's page reads the board's preview, which never contacts the board. */
 export const PREVIEW_POLL_MS = 2500;
 
@@ -124,19 +115,6 @@ const PREVIEW_STATUS: Record<PreviewStatus, DeviceChip> = {
   elsewhere: { label: 'In another tab', tone: 'info' },
   stopping: { label: 'Stopping…', tone: 'info' },
   error: { label: 'Could not start', tone: 'danger' },
-};
-
-/** The page's recovery lines for the codes whose answer may come without a hint. */
-const PREVIEW_ERROR_ACTIONS: Readonly<Record<string, string>> = {
-  camera_in_use:
-    'Stop that process on the board yourself, then start the preview again. Insight never stops it for you.',
-  preview_active: 'Stop the preview that is already running, then start this one.',
-  invalid_request: 'Choose a mode Insight lists as Available; this one was rejected.',
-  mode_adjusted:
-    'Pick the size libcamera streams at. The board lists the requested size, but its libcamera pipeline does not output it.',
-  command_failed: 'The preview pipeline could not start on the board.',
-  no_scan: 'Refresh, then start the preview again.',
-  not_found: 'Refresh, then start the preview again.',
 };
 
 /** The events of a stop. */
@@ -299,7 +277,7 @@ export async function runPreviewStart(
 export function previewNeedsRestart(
   state: PreviewState,
   cameraId: string,
-  next: CameraModeChoice | null,
+  next: PreviewMode | null,
 ): boolean {
   const session = state.session;
   if (!next || !session) return false;
@@ -423,22 +401,12 @@ export function sessionMatches(
   session: PreviewSession | null,
   cameraId: string | null,
   board?: string | null,
-  selection: CameraModeChoice | null = null,
+  selection: PreviewMode | null = null,
 ): boolean {
   if (!session || !cameraId) return false;
   if (session.camera !== cameraId) return false;
   if (otherBoard(session.board, board ?? null)) return false;
   return !selection || sameSelection(session.mode, selection);
-}
-
-export function previewErrorInfo(error: BoardProblem | null): PreviewErrorInfo | null {
-  if (!error) return null;
-  return {
-    code: error.code,
-    message: error.message,
-    hint: error.hint,
-    action: PREVIEW_ERROR_ACTIONS[error.code] ?? '',
-  };
 }
 
 /**

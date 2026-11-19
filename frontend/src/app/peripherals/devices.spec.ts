@@ -1,4 +1,3 @@
-import type { CameraSetup } from '../board/api';
 import { DEVKIT, MANUAL } from '../board/board.testing';
 import type {
   CameraItem,
@@ -8,7 +7,7 @@ import type {
   PeripheralSnapshot,
   SupportTier,
 } from './api';
-import { available, imx477, imx568, inUse, support, usb } from './cameras.testing';
+import { imx477, imx568, inUse, support, usb } from './cameras.testing';
 import {
   boardCameraSetup,
   changeSummary,
@@ -19,8 +18,6 @@ import {
   deviceRow,
   isSnapshotStale,
   resolveDeviceId,
-  severityInfo,
-  sortIssues,
   tierInfo,
 } from './devices';
 import { onboardMic, yeti } from './microphones.testing';
@@ -37,34 +34,12 @@ function other(kind: string, id: string, connection = 'i2c'): OtherItem {
     kind,
     connection,
     name: `${kind || 'device'} ${id}`,
-    device: {},
-    availability: available,
     notes: [],
     errors: [],
   };
 }
 
 const snapshot = peripheralSnapshot([usb, imx477, yeti, imx568, inUse], {
-  issues: [
-    {
-      severity: 'info',
-      code: 'no_usb_power',
-      message: 'USB hub reports low power.',
-      hint: 'Use a powered hub.',
-    },
-    {
-      severity: 'error',
-      code: 'tool_missing',
-      message: 'v4l2-ctl is missing.',
-      hint: 'Install v4l-utils on the board.',
-    },
-    {
-      severity: 'warning',
-      code: 'no_fuser',
-      message: 'Availability is unknown.',
-      hint: 'Install psmisc.',
-    },
-  ],
   changes: {
     added: [{ id: usb.id, name: usb.name }],
     removed: [{ id: 'mipi:gone', name: 'imx219' }],
@@ -161,18 +136,14 @@ describe('the device model', () => {
     });
   });
 
-  it('a device with an unknown connection is listed, not dropped', () => {
+  it('a camera with an unknown connection is listed, not dropped', () => {
     const gmsl: CameraItem = { ...imx568, id: 'gmsl:cam', connection: 'gmsl' };
-    const bluetooth: MicrophoneItem = { ...yeti, id: 'bt:mic', connection: 'bluetooth' };
-    expect(
-      idsByGroup(peripheralSnapshot([gmsl, usb, imx477, bluetooth, onboardMic, yeti])),
-    ).toEqual({
+    expect(idsByGroup(peripheralSnapshot([gmsl, usb, imx477, onboardMic, yeti]))).toEqual({
       camera: [imx477.id, usb.id, gmsl.id],
-      microphone: [yeti.id, onboardMic.id, bluetooth.id],
+      microphone: [yeti.id, onboardMic.id],
       lidar: [],
     });
     expect(deviceRow(gmsl, idle).connection).toBe('Gmsl');
-    expect(deviceRow(bluetooth, idle).connection).toBe('Bluetooth');
   });
 
   it('a row names its kind icon, the name and subtitle, and the connection', () => {
@@ -318,14 +289,7 @@ describe('the device model', () => {
     // A card that reports less says less; card 0 is a card index like any other.
     const bare: MicrophoneItem = {
       ...onboardMic,
-      device: {
-        card_index: 0,
-        card_id: null,
-        card_name: null,
-        card_driver: '',
-        pcm_device: 0,
-        pcm_node: null,
-      },
+      device: { card_index: 0, pcm_device: 0 },
     };
     expect(deviceFacts(bare)).toEqual([{ term: 'ALSA card', value: '0' }]);
     expect(deviceFacts(other('radar', 'r1'))).toEqual([]);
@@ -355,13 +319,7 @@ describe('the device model', () => {
     expect(resolveDeviceId(mics, imx477.id)).toBe(yeti.id);
   });
 
-  it('issues sort by severity and changes read as sentences', () => {
-    expect(sortIssues(snapshot.issues).map((issue) => issue.severity)).toEqual([
-      'error',
-      'warning',
-      'info',
-    ]);
-    expect(snapshot.issues.map((issue) => issue.severity)).toEqual(['info', 'error', 'warning']);
+  it('changes read as sentences', () => {
     expect(changeSummary(snapshot.changes)).toEqual([
       'Disconnected since last refresh: imx219',
       'New: HD Webcam C270',
@@ -370,32 +328,27 @@ describe('the device model', () => {
       'Disconnected since last refresh: mipi:gone',
     ]);
     expect(changeSummary(null)).toEqual([]);
-    expect(['error', 'warning', 'info'].map((s) => severityInfo(s))).toEqual([
-      { label: 'Error', tone: 'danger', rank: 0 },
-      { label: 'Warning', tone: 'warning', rank: 1 },
-      { label: 'Info', tone: 'info', rank: 2 },
-    ]);
   });
 
   it('a snapshot is stale only when it was scanned for another board', () => {
     expect(isSnapshotStale(DEVKIT.id, snapshot)).toBe(false);
     expect(isSnapshotStale(MANUAL.id, snapshot)).toBe(true);
-    expect(isSnapshotStale(MANUAL.id, { ...snapshot, scan_id: null })).toBe(false);
+    expect(isSnapshotStale(MANUAL.id, { ...snapshot, scanned_at: null })).toBe(false);
     expect(isSnapshotStale(null, snapshot)).toBe(false);
     expect(isSnapshotStale(MANUAL.id, null)).toBe(false);
   });
 
   it('the camera setup belongs to the board that was scanned', () => {
-    const cameraSetup: CameraSetup = {
+    const cameraSetup = {
       model: 'SiMa.ai Modalix SoM 16Gig Board',
       overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo'],
     };
     const scanned = peripheralSnapshot([], { camera_setup: cameraSetup });
-    expect(boardCameraSetup(DEVKIT.id, scanned)).toBe(cameraSetup);
+    expect(boardCameraSetup(DEVKIT.id, scanned)).toEqual(cameraSetup);
     // The selected board changed since the scan.
     expect(boardCameraSetup(MANUAL.id, scanned)).toBeNull();
     // Not scanned yet.
-    expect(boardCameraSetup(DEVKIT.id, { ...scanned, scan_id: null })).toBeNull();
+    expect(boardCameraSetup(DEVKIT.id, { ...scanned, scanned_at: null })).toBeNull();
     // An older Sentinel.
     expect(boardCameraSetup(DEVKIT.id, { ...scanned, camera_setup: null })).toBeNull();
     expect(boardCameraSetup(null, scanned)).toBeNull();

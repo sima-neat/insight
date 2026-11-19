@@ -1,5 +1,4 @@
 import { BoardProblem, problemOf } from '../board/board-error';
-import { ApiRequestError } from '../sources/api-errors';
 import type { PreviewSession } from './api';
 import { resolveSelection } from './camera-modes';
 import { imx477, imx568, previewSession, sel } from './cameras.testing';
@@ -9,7 +8,6 @@ import {
   nextPreviewState,
   PREVIEW_IDLE,
   type PreviewEvent,
-  previewErrorInfo,
   previewNeedsRestart,
   type PreviewStartDeps,
   previewStatus,
@@ -138,7 +136,7 @@ describe('preview state', () => {
     expect(ended.session).toBeNull();
     expect(ended.error?.message).toBe('The preview stream stopped.');
     // A stopped stream always offers a way back.
-    expect(previewErrorInfo(ended.error)?.hint).toBeTruthy();
+    expect(ended.error?.hint).toBeTruthy();
   });
 
   it("a live preview's status read ends it once the board no longer runs this session", async () => {
@@ -621,34 +619,6 @@ describe('preview state', () => {
     expect(sessionMatches(liveSession, imx568.id, BOARD)).toBe(false);
     expect(sessionMatches(liveSession, imx477.id)).toBe(true);
     expect(sessionMatches(null, imx477.id, BOARD)).toBe(false);
-  });
-
-  it('every preview failure carries a recovery action and nothing destructive', () => {
-    const info = (error: Record<string, unknown>, status: number) =>
-      previewErrorInfo(problemOf(new ApiRequestError(status, String(error['message']), { error })));
-    expect(previewErrorInfo(null)).toBeNull();
-
-    const busy = info(
-      {
-        message: 'The camera is already open.',
-        code: 'camera_in_use',
-        hint: 'Stop the application using the camera, then start the preview.',
-      },
-      409,
-    );
-    expect(busy?.hint).toBe('Stop the application using the camera, then start the preview.');
-    expect(busy?.action).toMatch(/Insight never stops it for you/);
-
-    const other = info({ message: 'A preview is already running.', code: 'preview_active' }, 409);
-    expect(other?.action).toMatch(/Stop the preview that is already running/);
-
-    expect(info({ message: 'x', code: 'invalid_request' }, 400)?.action).toMatch(
-      /^Choose a mode Insight lists as Available; /,
-    );
-    expect(info({ message: 'x', code: 'no_scan' }, 409)?.action).toBe(
-      'Refresh, then start the preview again.',
-    );
-    expect(info({ message: 'x', code: 'unreachable' }, 502)?.action).toBe('');
   });
 
   it("the preview stream is the board's preview route, naming the camera and the preview", () => {

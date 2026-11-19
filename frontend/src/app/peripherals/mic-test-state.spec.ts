@@ -11,7 +11,6 @@ import {
   micTestAfterFailedStart,
   micTestAudioUrl,
   micTestCaption,
-  micTestErrorAction,
   micTestToResume,
   nextMicTestState,
   readMicTest,
@@ -38,7 +37,6 @@ describe('mic-test-state', () => {
           channels: 2,
           bits: 24,
           rates: [44100, 48000, 88200, 96000],
-          rate_range: null,
           channel_map: ['FL', 'FR'],
         },
         {
@@ -46,7 +44,6 @@ describe('mic-test-state', () => {
           channels: 1,
           bits: 16,
           rates: [16000],
-          rate_range: null,
           channel_map: ['MONO'],
         },
         {
@@ -55,7 +52,6 @@ describe('mic-test-state', () => {
           bits: 24,
           rates: [],
           rate_range: { min: 8000, max: 48000 },
-          channel_map: null,
         },
         {
           format: 'S16_LE',
@@ -63,7 +59,6 @@ describe('mic-test-state', () => {
           bits: 16,
           rates: [11025],
           rate_range: { min: 11025, max: 96000 },
-          channel_map: null,
         },
       ],
     });
@@ -77,16 +72,7 @@ describe('mic-test-state', () => {
     // A field the kernel did not print is left out, not shown empty.
     expect(
       captureModes({
-        capture: [
-          {
-            format: null,
-            channels: null,
-            bits: null,
-            rates: [],
-            rate_range: null,
-            channel_map: null,
-          },
-        ],
+        capture: [{ rates: [] }],
       })?.[0]?.badges,
     ).toEqual([]);
     // Every combination keeps its own row.
@@ -102,9 +88,6 @@ describe('mic-test-state', () => {
       name: 'USB Device 0x1234:0x5678',
       device: {
         card_index: 3,
-        card_id: null,
-        card_name: null,
-        card_driver: null,
         pcm_device: 0,
         pcm_node: '/dev/snd/pcmC3D0c',
         usb: { vendor_id: '1234', product_id: '5678', bus_path: '1-2' },
@@ -225,11 +208,6 @@ describe('mic-test-state', () => {
     );
     expect(micLevelNotice({ silent: false, peak_dbfs: -9, rms_dbfs: -20 })).toBe('');
     expect(micLevelNotice(null)).toBe('');
-    expect(micTestErrorAction(problem('microphone_in_use'))).toMatch(/never stops it/);
-    expect(micTestErrorAction(problem('tool_missing'))).toMatch(/alsa-utils/);
-    expect(micTestErrorAction(problem('command_failed', 'Failed.', 'See detail.'))).toBe(
-      'See detail.',
-    );
     // The caption's clock is the app's one clock, `clock()` from `sources/fps.ts`.
     for (const [seconds, text] of [
       [0, '0:00'],

@@ -20,7 +20,6 @@ import {
   MIC_TEST_MAX_FAILURES,
   MIC_TEST_POLL_MS,
   micTestAction,
-  micTestErrorAction,
 } from './mic-test-state';
 import { micTestStatus, onboardMic, readyTest, testAudioUrl, yeti } from './microphones.testing';
 
@@ -371,7 +370,7 @@ describe('MicTest', () => {
     expect(micTest.state()).toMatchObject({ status: 'playing', test: readyTest() });
     expect(audio.src).toBe(new URL(testAudioUrl('t1'), document.baseURI).href);
     expect(play).toHaveBeenCalledTimes(1);
-    // While it plays, the meter follows the playback level, not the recording's.
+    // The recording's level is over once it is in.
     expect(micTest.level()).toBeNull();
     // Nothing is read once the recording is in.
     await vi.advanceTimersByTimeAsync(MIC_TEST_POLL_MS * 5);
@@ -463,7 +462,6 @@ describe('MicTest', () => {
       code: 'microphone_in_use',
       message: 'Open in arecord (pid 812).',
     });
-    expect(micTestErrorAction(error)).toMatch(/Insight never stops it for you/);
     expect(micTestAction(status(), micTest.stopping()).label).toBe('Test microphone');
 
     // Refused because the board records already, for another microphone: the refusal stands.
@@ -524,7 +522,6 @@ describe('MicTest', () => {
         hint: 'Test again and speak.',
       },
     });
-    expect(micTestErrorAction(micTest.state().error)).toBe('Test again and speak.');
 
     // A status error that means the test is gone ends it at once, with no retries.
     await startRecording();
@@ -537,7 +534,6 @@ describe('MicTest', () => {
       });
     await settle();
     expect(micTest.state()).toMatchObject({ status: 'error', error: { code: 'board_changed' } });
-    expect(micTestErrorAction(micTest.state().error)).toBe('Refresh, then test again.');
   });
 
   it('a silent recording plays and is done with its level, for the panel to warn about', async () => {
