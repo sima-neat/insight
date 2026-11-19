@@ -42,6 +42,9 @@ type Config struct {
 	WebRTCPorts PortRange
 	// Published are the host ports MediaMTX's listeners are published on.
 	Published PublishedPorts
+	// ExposedPorts are every port the port map says the SDK container publishes, for System
+	// Info; none outside the SDK.
+	ExposedPorts []ExposedPort
 }
 
 // Paths are the fixed places Config reads. Tests point them into a temporary folder.
@@ -92,16 +95,17 @@ func Load(port int, paths Paths, env Env, addrs AddressFinder) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	ports, havePorts := loadPortMap(paths.ConfigDir, env)
+	ports, exposed, havePorts := loadPortMap(paths.ConfigDir, env)
 	return Config{
-		Port:        port,
-		Place:       place,
-		DataDir:     dataDir,
-		CertHost:    certHost,
-		Network:     network,
-		Channels:    resolveChannels(place, ports, havePorts),
-		WebRTCPorts: resolveWebRTCPorts(ports, havePorts),
-		Published:   resolvePublishedPorts(ports, havePorts),
+		Port:         port,
+		Place:        place,
+		DataDir:      dataDir,
+		CertHost:     certHost,
+		Network:      network,
+		Channels:     resolveChannels(place, ports, havePorts),
+		WebRTCPorts:  resolveWebRTCPorts(ports, havePorts),
+		Published:    resolvePublishedPorts(ports, havePorts),
+		ExposedPorts: exposed,
 	}, nil
 }
 

@@ -617,8 +617,656 @@ paths:
               schema:
                 type: string
         "404": { $ref: "#/components/responses/Error" }
+  /api/boards:
+    get:
+      operationId: listBoards
+      summary: The boards Insight knows and the selected one
+      description: >-
+        The board entered by hand (saved in the data folder), the board Insight runs on, and the
+        DevKit the SDK is paired with (`DEVKIT_SYNC_DEVKIT_*`), in the order the selection
+        prefers them; the selected one is the first, with its last connection result, its
+        identity once read, and the `ssh` command that opens a shell on it. Never connects.
+        Peripherals and Stats use the selected board, named by its `id` in their paths; any
+        other id is 404 `not_found`.
+      responses:
+        "200":
+          description: The boards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+    post:
+      operationId: selectBoard
+      summary: Enter a board and select it
+      description: >-
+        Saves `{host, port?, user?}` (port 22 and user `sima` by default) as the board entered
+        by hand, which is then selected. Insight signs in with the SSH keys of the account it
+        runs as; it never takes a password. A different board than the selected one replaces
+        it: its preview and microphone test stop.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BoardSelection"
+      responses:
+        "200":
+          description: The boards after the selection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+        "400": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    delete:
+      operationId: forgetBoard
+      summary: Forget the board entered by hand
+      description: >-
+        The selection falls back to the board Insight runs on, else the SDK's DevKit. Only the
+        entered board can be forgotten: another known board is 409 `not_entered`, an id Insight
+        does not know 404 `not_found`.
+      responses:
+        "200":
+          description: The boards afterwards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/check:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    post:
+      operationId: checkBoard
+      summary: Connect to the selected board and read its identity
+      description: >-
+        Reads its host name, machine and build. A failure is also kept in the board's status:
+        502 `unreachable` or `auth_failed` (with the `command` that authorizes Insight's key),
+        409 `host_key_changed` (with both fingerprints in `host_key`), 504 `timeout`.
+      responses:
+        "200":
+          description: The boards, the selected one connected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/trust-host-key:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    post:
+      operationId: trustBoardHostKey
+      summary: Trust the new host key of a reflashed board
+      description: >-
+        `{fingerprint}` must be the key the board presented when it was refused
+        (`host_key.presented` of `host_key_changed`), which the user confirmed. Insight keeps
+        its own known_hosts, not the user's. The board is replaced (the trusted key may be
+        another board's), so check it again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrustHostKeyRequest"
+      responses:
+        "200":
+          description: The boards afterwards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/peripherals:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      operationId: getPeripherals
+      summary: The board's last peripheral scan
+      description: From memory; `scan` is null before the first Refresh. Never contacts the board.
+      responses:
+        "200":
+          description: The last scan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Peripherals"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/peripherals/refresh:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    post:
+      operationId: refreshPeripherals
+      summary: Scan the board's cameras and microphones
+      description: >-
+        SiMa Sentinel rescans the board's MIPI and USB cameras and ALSA microphones and answers
+        with its catalog, which is kept as the board's last scan, with what changed since the
+        one before. Each camera mode carries Sentinel's own verdict (`available`, `reason`).
+        A running preview stops first. A refresh that waited for another gets that one's scan.
+      responses:
+        "200":
+          description: The new scan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Peripherals"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/cameras/preview:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      operationId: getCameraPreview
+      summary: The camera preview running on the board
+      description: From memory; null when none runs. One preview runs on a board at a time.
+      responses:
+        "200":
+          description: The preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewAnswer"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/cameras/{camera}/preview:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/CameraID"
+    post:
+      operationId: startCameraPreview
+      summary: Start a camera's live preview
+      description: >-
+        Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that
+        writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its
+        first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode
+        must be one the last scan lists: for MIPI an NV12 mode Sentinel does not mark
+        unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format, at a
+        rate it advertises. 409 `preview_active` while one runs, `camera_in_use` when another
+        process holds the camera (Insight never stops it), `no_scan` before a scan; 422
+        `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing`
+        without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreviewMode"
+      responses:
+        "200":
+          description: The running preview; open its stream within 15 s.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewAnswer"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "415": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/cameras/{camera}/preview.mjpg:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/CameraID"
+      - $ref: "#/components/parameters/PreviewID"
+    get:
+      operationId: streamCameraPreview
+      summary: The running preview's pictures as MJPEG
+      description: >-
+        One viewer per preview (409 `preview_active` for a second): the preview stops when this
+        answer ends, and after 10 s (two frame periods of a slower mode, at most 60 s) without
+        a picture.
+      responses:
+        "200":
+          description: The stream, one JPEG per part.
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/cameras/{camera}/preview/stop:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/CameraID"
+      - $ref: "#/components/parameters/PreviewID"
+    post:
+      operationId: stopCameraPreview
+      summary: Stop a camera's preview
+      description: >-
+        Kills the pipeline on the board, which releases the camera. A preview of another camera,
+        or another than `preview` names, goes on. Stopping a preview that ended already is no
+        error.
+      responses:
+        "200":
+          description: The board's preview afterwards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewAnswer"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/microphones/test:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      operationId: getMicrophoneTest
+      summary: The board's microphone test
+      description: >-
+        From memory, so poll it while it records (its `level_dbfs` and `elapsed_ms`); then its
+        `level`, or `error`. Null before the first test.
+      responses:
+        "200":
+          description: The test.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MicTestAnswer"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/microphones/{microphone}/test:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/MicrophoneID"
+    post:
+      operationId: startMicrophoneTest
+      summary: Record from a microphone
+      description: >-
+        Records with `arecord` on the board from the ALSA device the last scan names, in 16 bits
+        at 48 kHz (or the nearest rate below that the device has) and at most 2 channels, until
+        stopped or for `seconds` (1 to 30; 30 without a body). Answers at once; read the test
+        for its level and result. One test records on a board at a time (409 `test_running`).
+        A test whose device is busy ends `failed` with `microphone_in_use`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MicTestRequest"
+      responses:
+        "202":
+          description: The test, recording.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MicTestAnswer"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "415": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/microphones/{microphone}/test/stop:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/MicrophoneID"
+      - $ref: "#/components/parameters/MicTestID"
+    post:
+      operationId: stopMicrophoneTest
+      summary: End a microphone test now
+      description: >-
+        What was recorded so far is the result, which the answer carries (a test stopped before
+        0.1 s of audio fails with `stopped_early`). With `test`, a stop meant for an earlier test
+        stops nothing.
+      responses:
+        "200":
+          description: The test, finished.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MicTestAnswer"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/microphones/{microphone}/test.wav:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/MicrophoneID"
+      - $ref: "#/components/parameters/MicTestID"
+    get:
+      operationId: getMicrophoneTestAudio
+      summary: A finished test's recording as WAV
+      description: With range requests, which an audio element sends. 404 once another test replaced it.
+      responses:
+        "200":
+          description: The recording.
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Part of the recording.
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "404": { $ref: "#/components/responses/Error" }
+        "416": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/sentinel/health:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      operationId: getSentinelHealth
+      summary: Whether Sentinel runs on the board
+      description: >-
+        Sentinel's `/v1/health` (its version, cached samples, collector errors, active trace),
+        and when its service started. Without Sentinel: 502 `sentinel_missing` (not installed:
+        the hint has the command that installs it), `sentinel_stopped` (installed, not running),
+        `sentinel_denied`, `sentinel_schema` (another API schema), `sentinel_outdated`,
+        `sentinel_failed`.
+      responses:
+        "200":
+          description: Sentinel's health.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SentinelHealth"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/metrics:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      operationId: getSentinelMetrics
+      summary: Sentinel's metric definitions
+      description: >-
+        `/v1/metrics` as Sentinel answers it: each metric's key, label, short label, unit,
+        group, description and warn and critical thresholds.
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/samples/latest:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      operationId: getSentinelLatestSample
+      summary: Sentinel's newest sample
+      description: '`/v1/samples/latest`: `{version, updated_at, sample: {timestamp, values}}`; an unmeasured metric is null.'
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/cache:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - name: after
+        in: query
+        required: false
+        description: The timestamp of the newest sample the caller holds.
+        schema:
+          type: string
+    get:
+      operationId: getSentinelCache
+      summary: Sentinel's cache, the Live view's source
+      description: >-
+        `/v1/cache`: the metric definitions, the newest sample and Sentinel's recent samples
+        (240, about 8 minutes), oldest first. With `after` the caller holds the samples up to
+        that one: the answer holds only the newer ones, with `full` false. It holds them all,
+        with `full` true, to replace the caller's, when there is no `after`, when the cache no
+        longer holds it (a daemon restarted, or the caller fell too far behind), and when the
+        board's clock stepped back (the history starts again there).
+      responses:
+        "200":
+          description: The cache.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SentinelCache"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/traces/active:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      operationId: getSentinelActiveTrace
+      summary: The trace being recorded
+      description: '`/v1/traces/active`: `{trace, summary}`, both null when nothing records.'
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/traces:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    post:
+      operationId: startSentinelTrace
+      summary: Start recording a named trace
+      description: >-
+        `{name, note?, tags?}`: a name of at most 80 bytes of UTF-8, without control characters
+        or a comma (runs are compared by a comma-separated list), a note of at most 512
+        characters, at most 16 tags of 1 to 80. 409 `trace_conflict` when a trace records or
+        the name is taken. Sentinel answers `{trace}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TraceRequest"
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "413": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/traces/stop:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - name: trace
+        in: query
+        required: false
+        description: Stop only this trace, by its id; another one active is 409 `trace_conflict`.
+        schema:
+          type: string
+    post:
+      operationId: stopSentinelTrace
+      summary: Stop and save the active trace
+      description: Sentinel answers the finished trace and its run's summary, `{trace, summary}`.
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/runs:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      operationId: listSentinelRuns
+      summary: The runs Sentinel holds
+      description: >-
+        `/v1/runs`: `{runs}`, each `{id, name, started_at, ended_at, duration_ms, samples,
+        energy_joules}`; a run still recording has a null `ended_at`. Runs are files on the
+        board; Insight keeps none.
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/runs/{run}:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - name: run
+        in: path
+        required: true
+        description: A run's id or name (the delete takes its id).
+        schema:
+          type: string
+    get:
+      operationId: getSentinelRun
+      summary: One run in full
+      description: '`/v1/runs/{run}`: `{metadata, metrics, samples}`; 404 `not_found` for a run Sentinel does not hold.'
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+    delete:
+      operationId: deleteSentinelRun
+      summary: Delete a finished run
+      description: >-
+        By its id, which must have the form of Sentinel's ids (`20260924T175231.958Z-baseline`)
+        and be one Sentinel lists: Sentinel's API cannot delete, so Insight runs `simaai-sentinel
+        runs delete <id>` on the board as the board's user, then reads the runs again to
+        confirm. 400 for another id, 404 `not_found`, 409 `trace_conflict` for a run still
+        recording, 502 `tool_missing` without Sentinel's CLI, `sentinel_denied`.
+      responses:
+        "200":
+          description: The run that went and Sentinel's runs afterwards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunDeleted"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/compare:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - name: runs
+        in: query
+        required: true
+        description: 2 to 8 runs' ids or names, comma-separated; the first is the baseline.
+        schema:
+          type: string
+      - name: raw
+        in: query
+        required: false
+        description: Add every run's samples.
+        schema:
+          type: boolean
+    get:
+      operationId: compareSentinelRuns
+      summary: Compare runs against a baseline
+      description: >-
+        `/v1/compare`: `{baseline_id, generated_at, runs, summaries, baseline_deltas_pct}`, the
+        runs in full with `raw`.
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/system:
+    get:
+      operationId: getSystem
+      summary: System Info
+      description: >-
+        Insight's version and build, where it runs, and the ports and addresses it resolved at
+        start; and what `neat --json` says about this machine (environment, components with
+        their versions and updates, the Insight service, the update check, the ports the SDK
+        publishes), allowlisted: never its code UI section or passwords. neat runs once at
+        start and again with `refresh` (up to 15 s, as it checks online for updates); a plain
+        read answers from memory, with `neat.state` `reading` until the first run ends.
+      parameters:
+        - name: refresh
+          in: query
+          required: false
+          description: Run neat again first (or wait for the run in progress).
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: System Info.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemInfo"
+  /api/system/host:
+    get:
+      operationId: getSystemHost
+      summary: This computer's CPU, memory and disk
+      description: >-
+        The machine Insight runs on, not the board: CPU use since the reading before (a read
+        within 0.5 s repeats it), memory used of total, and the disk of Insight's data folder.
+        Read from /proc without blocking.
+      responses:
+        "200":
+          description: The readings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostReadings"
 components:
   parameters:
+    BoardID:
+      name: id
+      in: path
+      required: true
+      description: >-
+        The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port
+        ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`.
+      schema:
+        type: string
+    CameraID:
+      name: camera
+      in: path
+      required: true
+      description: The camera's id in the scan's catalog, URL-escaped.
+      schema:
+        type: string
+    MicrophoneID:
+      name: microphone
+      in: path
+      required: true
+      description: The microphone's id in the scan's catalog, URL-escaped.
+      schema:
+        type: string
+    PreviewID:
+      name: preview
+      in: query
+      required: false
+      description: The preview's `id`; with it, a request meant for an earlier preview does nothing.
+      schema:
+        type: string
+    MicTestID:
+      name: test
+      in: query
+      required: false
+      description: The test's `id`; with it, a request meant for an earlier test does nothing.
+      schema:
+        type: string
     SlotNumber:
       name: n
       in: path
@@ -640,6 +1288,18 @@ components:
       schema:
         type: string
   responses:
+    BoardError:
+      description: Refused or failed; the body says why, with what a board's failure adds.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BoardError"
+    SentinelBody:
+      description: Sentinel's answer as it gave it, without its schema marker.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SentinelBody"
     Error:
       description: Refused; the body says why.
       content:
@@ -1434,3 +2094,534 @@ components:
           description: encode, download, save and the like.
         detail:
           type: string
+    BoardError:
+      type: object
+      description: The error shape, with what a board's failure adds.
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        host_key:
+          $ref: "#/components/schemas/HostKeyChange"
+        command:
+          type: string
+          description: With auth_failed, the shell command that authorizes Insight's key on the board.
+    HostKeyChange:
+      type: object
+      description: With host_key_changed, the key Insight trusts and the one the board presented.
+      required: [host, expected, presented]
+      properties:
+        host:
+          type: string
+          description: The board's name in known_hosts, "host" or "[host]:port".
+        expected:
+          type: string
+          description: The trusted key's SHA256 fingerprint.
+        presented:
+          type: string
+          description: The presented key's, which trust-host-key takes.
+    BoardList:
+      type: object
+      required: [boards, selected]
+      properties:
+        boards:
+          type: array
+          description: Every known board, the selected one first.
+          items:
+            $ref: "#/components/schemas/BoardTarget"
+        selected:
+          nullable: true
+          description: The selected board; null when none is entered, found or paired.
+          allOf:
+            - $ref: "#/components/schemas/SelectedBoard"
+    BoardTarget:
+      type: object
+      required: [id, mode, source, label]
+      properties:
+        id:
+          type: string
+        mode:
+          type: string
+          enum: [ssh, local]
+          description: ssh reaches the board over SSH; local is the board Insight runs on.
+        source:
+          type: string
+          enum: [manual, on-board, sdk-env]
+          description: Entered by hand, the board Insight runs on, or the DevKit the SDK is paired with.
+        host:
+          type: string
+        port:
+          type: integer
+        user:
+          type: string
+        label:
+          type: string
+          description: '"This board", or user@host with :port off port 22.'
+    SelectedBoard:
+      type: object
+      required: [id, label, status, identity]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        status:
+          $ref: "#/components/schemas/BoardStatus"
+        identity:
+          nullable: true
+          description: What the last successful check read; null before one.
+          allOf:
+            - $ref: "#/components/schemas/BoardIdentity"
+        ssh:
+          type: string
+          description: The command that opens a shell on the board, for an SSH board ("ssh -p 2222 sima@192.168.1.20").
+    BoardStatus:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [unknown, connected, error]
+          description: unknown until a check or a failure; error while the last contact failed.
+        checked_at:
+          type: string
+          format: date-time
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        host_key:
+          $ref: "#/components/schemas/HostKeyChange"
+        command:
+          type: string
+          description: With auth_failed, the command that authorizes Insight's key.
+    BoardIdentity:
+      type: object
+      required: [hostname, machine, build, host_key]
+      properties:
+        hostname:
+          type: string
+        machine:
+          type: string
+          description: /etc/build's MACHINE, "modalix".
+        build:
+          type: string
+          description: /etc/build's SIMA_BUILD_VERSION.
+        host_key:
+          type: string
+          description: The SHA256 fingerprint of the board's SSH host key; "" for the local board.
+    BoardSelection:
+      type: object
+      required: [host]
+      properties:
+        host:
+          type: string
+          description: An IP address or a host name.
+        port:
+          type: integer
+          description: 1 to 65535; 22 when absent.
+        user:
+          type: string
+          description: sima when absent.
+    TrustHostKeyRequest:
+      type: object
+      required: [fingerprint]
+      properties:
+        fingerprint:
+          type: string
+    SentinelBody:
+      type: object
+      description: >-
+        One of Sentinel's answers as it gave it, without its schema marker; its fields are
+        Sentinel's (its API is the one its public clients use).
+      additionalProperties: true
+    SentinelHealth:
+      type: object
+      required: [health, started_at]
+      properties:
+        health:
+          $ref: "#/components/schemas/SentinelBody"
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When Sentinel's service started, on Insight's clock; null when systemd does not say.
+    SentinelCache:
+      type: object
+      description: >-
+        Sentinel's `/v1/cache`: `version`, `metrics` (the definitions), `latest` (the newest
+        sample), `samples` (oldest first, each `{timestamp, values}`) and `errors`, with
+        `full`.
+      required: [samples, full]
+      properties:
+        samples:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        full:
+          type: boolean
+          description: The samples replace what the caller holds; false, they follow its `after`.
+      additionalProperties: true
+    TraceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        note:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    RunDeleted:
+      type: object
+      required: [deleted, runs]
+      properties:
+        deleted:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        runs:
+          $ref: "#/components/schemas/SentinelBody"
+    Peripherals:
+      type: object
+      required: [scan]
+      properties:
+        scan:
+          nullable: true
+          description: The last scan; null before the first.
+          allOf:
+            - $ref: "#/components/schemas/PeripheralScan"
+    PeripheralScan:
+      type: object
+      required: [scanned_at, scan_ms, catalog, changes]
+      properties:
+        scanned_at:
+          type: string
+          format: date-time
+        scan_ms:
+          type: integer
+          description: How long Sentinel's scan took.
+        catalog:
+          description: >-
+            Sentinel's peripheral catalog as it wrote it: `revision`, `observed_at`, `devices`
+            (cameras with their `modes`, each with Sentinel's `available` and `reason`;
+            microphones with their `capture_target`), `errors` (a failed provider's devices are
+            its last successful scan's) and `board` (the board's model and camera setup).
+          allOf:
+            - $ref: "#/components/schemas/SentinelBody"
+        changes:
+          nullable: true
+          description: What this scan found or missed against the one before; null for the first.
+          allOf:
+            - $ref: "#/components/schemas/PeripheralChanges"
+    PeripheralChanges:
+      type: object
+      required: [added, removed]
+      properties:
+        added:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceRef"
+        removed:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceRef"
+    DeviceRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    PreviewMode:
+      type: object
+      required: [format, width, height, fps]
+      properties:
+        format:
+          type: string
+          description: A V4L2 format the scan lists for the camera (NV12, MJPG, YUYV, ...).
+        width:
+          type: integer
+        height:
+          type: integer
+        fps:
+          type: number
+          format: double
+          description: A rate the camera advertises for the size (the inverse of a frame interval), to a thousandth.
+    PreviewAnswer:
+      type: object
+      required: [preview]
+      properties:
+        preview:
+          nullable: true
+          description: The running preview; null when none runs.
+          allOf:
+            - $ref: "#/components/schemas/CameraPreview"
+    CameraPreview:
+      type: object
+      required: [id, camera, mode, started_at, camera_fps, viewer]
+      properties:
+        id:
+          type: string
+        camera:
+          type: string
+        mode:
+          $ref: "#/components/schemas/PreviewMode"
+        started_at:
+          type: string
+          format: date-time
+        camera_fps:
+          type: number
+          format: double
+          nullable: true
+          description: The rate the camera runs at; for MIPI null until Sentinel read it, a few seconds in.
+        viewer:
+          type: boolean
+          description: A browser shows the preview; its stream has one viewer.
+    MicTestRequest:
+      type: object
+      properties:
+        seconds:
+          type: integer
+          description: 1 to 30; 30 when absent.
+    MicTestAnswer:
+      type: object
+      required: [test]
+      properties:
+        test:
+          nullable: true
+          description: The board's latest test; null before the first.
+          allOf:
+            - $ref: "#/components/schemas/MicTest"
+    MicTest:
+      type: object
+      required: [id, microphone, state, device, format, elapsed_ms]
+      properties:
+        id:
+          type: string
+        microphone:
+          type: string
+        state:
+          type: string
+          enum: [recording, ready, failed]
+        device:
+          type: string
+          description: The ALSA device arecord records from.
+        format:
+          type: object
+          required: [rate, channels, bits, seconds]
+          properties:
+            rate:
+              type: integer
+            channels:
+              type: integer
+            bits:
+              type: integer
+            seconds:
+              type: integer
+        elapsed_ms:
+          type: integer
+          description: How much was recorded.
+        level_dbfs:
+          type: number
+          format: double
+          description: While recording, the newest 50 ms's peak; absent for digital silence.
+        level:
+          $ref: "#/components/schemas/MicLevel"
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    MicLevel:
+      type: object
+      description: What a finished recording picked up.
+      required: [peak_dbfs, rms_dbfs, silent]
+      properties:
+        peak_dbfs:
+          type: number
+          format: double
+          nullable: true
+        rms_dbfs:
+          type: number
+          format: double
+          nullable: true
+        silent:
+          type: boolean
+          description: Its typical level is below -60 dBFS (one click does not count).
+    SystemInfo:
+      type: object
+      required: [insight, neat]
+      properties:
+        insight:
+          $ref: "#/components/schemas/SystemInsight"
+        neat:
+          $ref: "#/components/schemas/SystemNeat"
+    SystemInsight:
+      type: object
+      required: [version, build, place, data_dir, port, web_ui_url, network, ports]
+      properties:
+        version:
+          type: string
+        build:
+          type: object
+          required: [go_version, platform]
+          properties:
+            go_version:
+              type: string
+            platform:
+              type: string
+            revision:
+              type: string
+            time:
+              type: string
+            modified:
+              type: boolean
+        place:
+          type: string
+          enum: [board, sdk, host]
+        data_dir:
+          type: string
+        port:
+          type: integer
+        web_ui_url:
+          type: string
+          description: The public origin when a proxy serves Insight, else the address the request came to.
+        network:
+          type: object
+          required: [certificate_host, browser_ice_address_source]
+          properties:
+            certificate_host:
+              type: string
+            browser_ice_address:
+              type: string
+            browser_ice_address_source:
+              type: string
+            public_origin:
+              type: string
+            url_routing:
+              type: string
+        ports:
+          type: object
+          required: [channels, channels_source, webrtc_start, webrtc_end, rtsp, whip, whip_ice]
+          properties:
+            channels:
+              type: integer
+            channels_source:
+              type: string
+            webrtc_start:
+              type: integer
+            webrtc_end:
+              type: integer
+            rtsp:
+              type: integer
+              description: The host port the SDK publishes RTSP on; 0 where none is named.
+            whip:
+              type: integer
+            whip_ice:
+              type: integer
+    SystemNeat:
+      type: object
+      required: [state, exposed_ports]
+      properties:
+        state:
+          type: string
+          enum: [reading, ready, missing, failed]
+        read_at:
+          type: string
+          format: date-time
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        environment:
+          type: object
+          properties:
+            mode: { type: string, nullable: true, description: "elxr-sdk or modalix-board." }
+            label: { type: string, nullable: true }
+            sdkVersion: { type: string, nullable: true }
+            devkitBuildVersion: { type: string, nullable: true }
+            sysroot: { type: string, nullable: true }
+        components:
+          type: object
+          description: By component id (core, pyneat, runtime, insight, modelCompiler, ...).
+          additionalProperties:
+            $ref: "#/components/schemas/NeatComponent"
+        insight:
+          type: object
+          properties:
+            serviceState: { type: string, nullable: true }
+            venv: { type: string, nullable: true }
+            webUiUrl: { type: string, nullable: true }
+        update_check:
+          type: object
+          properties:
+            offline: { type: boolean, nullable: true }
+            status: { type: string, nullable: true }
+            errors:
+              type: array
+              items:
+                type: string
+        exposed_ports:
+          type: array
+          description: The ports the SDK container publishes, neat's, else the port map's.
+          items:
+            type: object
+            required: [name, hostPortStart, hostPortEnd]
+            properties:
+              name: { type: string }
+              protocol: { type: string }
+              hostPortStart: { type: integer, nullable: true }
+              hostPortEnd: { type: integer, nullable: true }
+    NeatComponent:
+      type: object
+      required: [name, version]
+      properties:
+        name: { type: string, nullable: true }
+        version: { type: string, nullable: true }
+        detail: { type: string, nullable: true }
+        channel: { type: string, nullable: true }
+        tag: { type: string, nullable: true }
+        channelAssumed: { type: boolean, nullable: true }
+        latestTag: { type: string, nullable: true }
+        latestVersion: { type: string, nullable: true }
+        metadataUrl: { type: string, nullable: true }
+        updateAvailable: { type: boolean, nullable: true }
+        installed: { type: boolean, nullable: true }
+        serviceState: { type: string, nullable: true }
+        venv: { type: string, nullable: true }
+    HostReadings:
+      type: object
+      required: [cpu_percent, memory, disk]
+      properties:
+        cpu_percent:
+          type: number
+          format: double
+          nullable: true
+        memory:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Usage"
+        disk:
+          nullable: true
+          description: The disk of Insight's data folder.
+          allOf:
+            - $ref: "#/components/schemas/Usage"
+    Usage:
+      type: object
+      required: [total, used, percent]
+      properties:
+        total:
+          type: integer
+          format: int64
+          description: Bytes.
+        used:
+          type: integer
+          format: int64
+        percent:
+          type: number
+          format: double
+        path:
+          type: string
+          description: A disk's folder.

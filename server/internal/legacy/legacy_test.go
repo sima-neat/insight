@@ -52,7 +52,7 @@ func TestTheOldBackendIsStartedAndProxied(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer sup.StopAll(context.Background())
-	backend, err := Start(ctx, sup, Options{Python: os.Args[0], CertFile: "c.pem", KeyFile: "k.pem"})
+	backend, err := Start(ctx, sup, Options{Python: os.Args[0]})
 	if err != nil {
 		t.Fatal(err)
 	}

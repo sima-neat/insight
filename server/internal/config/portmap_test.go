@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -129,5 +130,29 @@ func TestNEATPortMapFileOverridesTheFolder(t *testing.T) {
 	}
 	if cfg.Channels.Count != 8 {
 		t.Fatalf("count %d", cfg.Channels.Count)
+	}
+}
+
+func TestExposedPorts(t *testing.T) {
+	paths := testPaths(t)
+	write(t, filepath.Join(paths.ConfigDir, "neat-port-map.json"), `{
+		"schema": "sima.neat.port-map.v1", "insightVideoChannels": 4,
+		"mainUI": {"tcp": {"host": 19900, "container": 9900}},
+		"webrtcWhipIce": {"protocol": "udp", "host": 18189, "container": 18189},
+		"webRTC": {"protocol": "udp", "hostStart": 40000, "hostEnd": 40200, "containerStart": 40000, "containerEnd": 40200},
+		"rtsp": {"tcp": {"host": "18554"}}
+	}`)
+	cfg, err := Load(9900, paths, envOf(nil), noAddresses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ExposedPort{
+		{Name: "mainUI.tcp", Protocol: "tcp", Start: 19900},
+		{Name: "rtsp.tcp", Protocol: "tcp"},
+		{Name: "webRTC", Protocol: "udp", Start: 40000, End: 40200},
+		{Name: "webrtcWhipIce", Protocol: "udp", Start: 18189},
+	}
+	if !slices.Equal(cfg.ExposedPorts, want) {
+		t.Fatalf("exposed %+v, want %+v", cfg.ExposedPorts, want)
 	}
 }

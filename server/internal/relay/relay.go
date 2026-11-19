@@ -124,7 +124,7 @@ func (r *Relays) Serve(w http.ResponseWriter, req *http.Request, key, source str
 				w.Header().Set("Content-Type", ContentType)
 				w.Header().Set("Cache-Control", "no-store, max-age=0")
 				w.WriteHeader(http.StatusOK)
-				if _, err := io.WriteString(w, openingBoundary); err != nil {
+				if _, err := io.WriteString(w, OpeningBoundary); err != nil {
 					return
 				}
 			}
@@ -259,9 +259,9 @@ func (r *Relays) start(s *stream, source string) {
 func (r *Relays) run(s *stream, proc *producer) {
 	defer r.finished()
 	stall := time.AfterFunc(r.opts.StallTimeout, func() { r.end(s, errStalled) })
-	err := readFrames(proc.stdout, func(jpeg []byte) {
+	err := ReadFrames(proc.stdout, func(jpeg []byte) {
 		stall.Reset(r.opts.StallTimeout)
-		s.publish(appendPart(nil, jpeg))
+		s.publish(AppendPart(nil, jpeg))
 	})
 	stall.Stop()
 	proc.stop() // a producer that closed its output but runs on is done too

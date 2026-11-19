@@ -44,7 +44,7 @@ import (
 
 func init() {
 	// The streams' and files' types, read as the binary strings the document says they are.
-	for _, contentType := range []string{"multipart/x-mixed-replace", "image/jpeg", "video/mp4"} {
+	for _, contentType := range []string{"multipart/x-mixed-replace", "image/jpeg", "video/mp4", "audio/wav"} {
 		openapi3filter.RegisterBodyDecoder(contentType, openapi3filter.FileBodyDecoder)
 	}
 	openapi3filter.RegisterBodyDecoder("text/event-stream", openapi3filter.PlainBodyDecoder)
@@ -149,6 +149,8 @@ func TestTheAPIAnswersAsItsDocumentSays(t *testing.T) {
 	c.ok(c.send(http.MethodDelete, "/api/jobs/"+job.ID, ""))
 	c.refused(c.get("/api/jobs/nothing"), 404, "job_not_found")
 
+	c.boardRoutes()
+
 	c.allAnswered()
 }
 
@@ -216,12 +218,14 @@ func newContract(t *testing.T) *contract {
 	must(t, err)
 
 	viewer := &fakeChannels{states: make([]channels.State, 2), answer: channels.Description{Type: "answer", SDP: "v=0"}}
+	boards, devices, info, host := newBoards(t)
 	c.srv = httptest.NewServer(NewHandler(Deps{
 		Config: config.Config{
 			Network:  config.Network{BrowserICEAddressSource: "none"},
 			Channels: config.Channels{Count: 2, Source: "sdk-port-map", Limited: true},
 		},
 		Channels: viewer, Slots: manager, Library: lib, Jobs: runner, UI: marker("ui"), Now: time.Now,
+		Boards: boards.Registry, Peripherals: devices, System: info, Host: host,
 	}))
 	t.Cleanup(c.srv.Close)
 	return c

@@ -12,10 +12,13 @@ import (
 
 	"insight/api"
 	"insight/internal/apierr"
+	"insight/internal/board"
 	"insight/internal/config"
 	"insight/internal/jobs"
 	"insight/internal/library"
+	"insight/internal/peripherals"
 	"insight/internal/slots"
+	"insight/internal/system"
 )
 
 // Deps is what the handlers need.
@@ -30,6 +33,13 @@ type Deps struct {
 	Slots   *slots.Manager
 	Library *library.Library
 	Jobs    *jobs.Runner
+	// Boards are the known boards and the selected one; Peripherals that board's scans,
+	// camera previews and microphone tests.
+	Boards      *board.Registry
+	Peripherals *peripherals.Manager
+	// System is System Info, Host this computer's readings.
+	System *system.Reader
+	Host   *system.HostReader
 	// Legacy serves the paths in LegacyPrefixes; nil answers them 404.
 	Legacy         http.Handler
 	LegacyPrefixes []string

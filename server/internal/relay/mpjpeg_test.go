@@ -25,7 +25,7 @@ func mpjpeg(pictures ...string) string {
 func readAll(t *testing.T, stream string) ([]string, error) {
 	t.Helper()
 	var pictures []string
-	err := readFrames(strings.NewReader(stream), func(jpeg []byte) { pictures = append(pictures, string(jpeg)) })
+	err := ReadFrames(strings.NewReader(stream), func(jpeg []byte) { pictures = append(pictures, string(jpeg)) })
 	return pictures, err
 }
 
@@ -81,9 +81,9 @@ func TestReadFramesRefusesWhatIsNotMpjpeg(t *testing.T) {
 
 func TestAppendPartIsAMultipartPart(t *testing.T) {
 	pictures := []string{"\xff\xd8one\xff\xd9", "\xff\xd8\r\ntwo\r\n\xff\xd9"}
-	body := []byte(openingBoundary)
+	body := []byte(OpeningBoundary)
 	for _, picture := range pictures {
-		body = appendPart(body, []byte(picture))
+		body = AppendPart(body, []byte(picture))
 	}
 	reader := multipart.NewReader(bytes.NewReader(body), Boundary)
 	for _, want := range pictures {

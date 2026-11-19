@@ -29,9 +29,6 @@ var Prefixes = []string{"/api/", "/swagger-ui-assets/"}
 type Options struct {
 	// Python is the interpreter of Insight's Python environment.
 	Python string
-	// CertFile and KeyFile are the certificate the old backend's own child, webssh, serves
-	// with.
-	CertFile, KeyFile string
 	// Output receives the old backend's log lines.
 	Output io.Writer
 	// Port is the loopback port it listens on; 0 picks a free one.
@@ -58,10 +55,10 @@ func Start(ctx context.Context, sup *supervisor.Supervisor, opts Options) (*Back
 		Name: "legacy-backend",
 		Path: opts.Python,
 		Args: []string{"-c", "from neat_insight.app import main; main()",
-			"--port", strconv.Itoa(port), "--behind-proxy", "--cert", opts.CertFile, "--key", opts.KeyFile},
+			"--port", strconv.Itoa(port), "--behind-proxy"},
 		Env:     append(os.Environ(), "PYTHONUNBUFFERED=1"),
 		Restart: true,
-		// It stops vf, MediaMTX and the stream ffmpegs before exiting.
+		// It stops its profiler's publisher before exiting.
 		Grace:  15 * time.Second,
 		Output: opts.Output,
 	})

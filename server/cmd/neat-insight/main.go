@@ -23,12 +23,15 @@ import (
 	"syscall"
 	"time"
 
+	"insight/internal/board"
 	"insight/internal/certs"
 	"insight/internal/channels"
 	"insight/internal/config"
 	"insight/internal/legacy"
+	"insight/internal/peripherals"
 	"insight/internal/spa"
 	"insight/internal/supervisor"
+	"insight/internal/system"
 	"insight/internal/web"
 )
 
@@ -120,9 +123,24 @@ func run() error {
 	}
 	defer closeSources()
 
-	backend, err := legacy.Start(ctx, sup, legacy.Options{
-		Python: python, CertFile: pair.CertFile, KeyFile: pair.KeyFile, Output: os.Stdout,
+	// The board: the one entered (saved in the data folder), else the board Insight runs on,
+	// else the SDK's DevKit; signed in with the service account's keys, its host keys pinned in
+	// Insight's own known_hosts.
+	boards := board.NewRegistry(board.Config{
+		SavedFile:  filepath.Join(cfg.DataDir, "board-target.json"),
+		KnownHosts: filepath.Join(cfg.DataDir, "known_hosts"),
+		SSHDir:     filepath.Join(paths.Home, ".ssh"),
+		OnBoard:    cfg.Place == config.Board,
+		Env:        os.Getenv,
 	})
+	defer boards.Close()
+	devices := peripherals.New(peripherals.Timing{})
+	defer devices.Close()
+	if selected, err := boards.Selected(); err == nil {
+		slog.Info("board", "selected", selected.Target().Label(), "source", selected.Target().Source)
+	}
+
+	backend, err := legacy.Start(ctx, sup, legacy.Options{Python: python, Output: os.Stdout})
 	if err != nil {
 		return err
 	}
@@ -136,6 +154,10 @@ func run() error {
 			Slots:          srcs.slots,
 			Library:        srcs.library,
 			Jobs:           srcs.jobs,
+			Boards:         boards,
+			Peripherals:    devices,
+			System:         system.New(system.Options{Version: version, Config: cfg}),
+			Host:           system.NewHostReader("/proc", cfg.DataDir),
 			Legacy:         backend.Handler(),
 			LegacyPrefixes: legacy.Prefixes,
 			UI:             spa.Handler(spa.Files()),
@@ -162,8 +184,11 @@ func run() error {
 	if server.Shutdown(closing) != nil {
 		server.Close()
 	}
-	// Then what the requests used: the slots' publishers and encodes, the relays, the jobs;
-	// then the children, MediaMTX and the old backend (which stops its own, webssh).
+	// Then what the requests used: the board's preview and microphone test and its connection,
+	// the slots' publishers and encodes, the relays, the jobs; then the children, MediaMTX and
+	// the old backend.
+	devices.Close()
+	boards.Close()
 	closeSources()
 	stopChildren(sup)
 	stop() // ends the channels' readers, if a signal has not already

@@ -16,6 +16,66 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for BoardStatusState.
+const (
+	BoardStatusStateConnected BoardStatusState = "connected"
+	BoardStatusStateError     BoardStatusState = "error"
+	BoardStatusStateUnknown   BoardStatusState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the BoardStatusState enum.
+func (e BoardStatusState) Valid() bool {
+	switch e {
+	case BoardStatusStateConnected:
+		return true
+	case BoardStatusStateError:
+		return true
+	case BoardStatusStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BoardTargetMode.
+const (
+	Local BoardTargetMode = "local"
+	Ssh   BoardTargetMode = "ssh"
+)
+
+// Valid indicates whether the value is a known member of the BoardTargetMode enum.
+func (e BoardTargetMode) Valid() bool {
+	switch e {
+	case Local:
+		return true
+	case Ssh:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BoardTargetSource.
+const (
+	Manual  BoardTargetSource = "manual"
+	OnBoard BoardTargetSource = "on-board"
+	SdkEnv  BoardTargetSource = "sdk-env"
+)
+
+// Valid indicates whether the value is a known member of the BoardTargetSource enum.
+func (e BoardTargetSource) Valid() bool {
+	switch e {
+	case Manual:
+		return true
+	case OnBoard:
+		return true
+	case SdkEnv:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthStatus.
 const (
 	HealthStatusOk       HealthStatus = "ok"
@@ -84,19 +144,19 @@ func (e JobState) Valid() bool {
 
 // Defines values for MediaProbeKind.
 const (
-	Image   MediaProbeKind = "image"
-	Unknown MediaProbeKind = "unknown"
-	Video   MediaProbeKind = "video"
+	MediaProbeKindImage   MediaProbeKind = "image"
+	MediaProbeKindUnknown MediaProbeKind = "unknown"
+	MediaProbeKindVideo   MediaProbeKind = "video"
 )
 
 // Valid indicates whether the value is a known member of the MediaProbeKind enum.
 func (e MediaProbeKind) Valid() bool {
 	switch e {
-	case Image:
+	case MediaProbeKindImage:
 		return true
-	case Unknown:
+	case MediaProbeKindUnknown:
 		return true
-	case Video:
+	case MediaProbeKindVideo:
 		return true
 	default:
 		return false
@@ -118,6 +178,27 @@ func (e MediaUploadOnConflict) Valid() bool {
 	case KeepBoth:
 		return true
 	case Replace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MicTestState.
+const (
+	MicTestStateFailed    MicTestState = "failed"
+	MicTestStateReady     MicTestState = "ready"
+	MicTestStateRecording MicTestState = "recording"
+)
+
+// Valid indicates whether the value is a known member of the MicTestState enum.
+func (e MicTestState) Valid() bool {
+	switch e {
+	case MicTestStateFailed:
+		return true
+	case MicTestStateReady:
+		return true
+	case MicTestStateRecording:
 		return true
 	default:
 		return false
@@ -229,6 +310,51 @@ func (e SlotPullStatus) Valid() bool {
 	}
 }
 
+// Defines values for SystemInsightPlace.
+const (
+	Board SystemInsightPlace = "board"
+	Host  SystemInsightPlace = "host"
+	Sdk   SystemInsightPlace = "sdk"
+)
+
+// Valid indicates whether the value is a known member of the SystemInsightPlace enum.
+func (e SystemInsightPlace) Valid() bool {
+	switch e {
+	case Board:
+		return true
+	case Host:
+		return true
+	case Sdk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemNeatState.
+const (
+	SystemNeatStateFailed  SystemNeatState = "failed"
+	SystemNeatStateMissing SystemNeatState = "missing"
+	SystemNeatStateReading SystemNeatState = "reading"
+	SystemNeatStateReady   SystemNeatState = "ready"
+)
+
+// Valid indicates whether the value is a known member of the SystemNeatState enum.
+func (e SystemNeatState) Valid() bool {
+	switch e {
+	case SystemNeatStateFailed:
+		return true
+	case SystemNeatStateMissing:
+		return true
+	case SystemNeatStateReading:
+		return true
+	case SystemNeatStateReady:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ViewerUrlChannelLimitSource.
 const (
 	Devkit        ViewerUrlChannelLimitSource = "devkit"
@@ -259,6 +385,105 @@ type AutoAssignResult struct {
 	Available       int   `json:"available"`
 	SkippedExternal []int `json:"skipped_external"`
 	SkippedPulled   []int `json:"skipped_pulled"`
+}
+
+// BoardError The error shape, with what a board's failure adds.
+type BoardError struct {
+	// Command With auth_failed, the shell command that authorizes Insight's key on the board.
+	Command *string     `json:"command,omitempty"`
+	Error   ErrorDetail `json:"error"`
+
+	// HostKey With host_key_changed, the key Insight trusts and the one the board presented.
+	HostKey *HostKeyChange `json:"host_key,omitempty"`
+}
+
+// BoardIdentity defines model for BoardIdentity.
+type BoardIdentity struct {
+	// Build /etc/build's SIMA_BUILD_VERSION.
+	Build string `json:"build"`
+
+	// HostKey The SHA256 fingerprint of the board's SSH host key; "" for the local board.
+	HostKey  string `json:"host_key"`
+	Hostname string `json:"hostname"`
+
+	// Machine /etc/build's MACHINE, "modalix".
+	Machine string `json:"machine"`
+}
+
+// BoardList defines model for BoardList.
+type BoardList struct {
+	// Boards Every known board, the selected one first.
+	Boards []BoardTarget `json:"boards"`
+
+	// Selected The selected board; null when none is entered, found or paired.
+	Selected *SelectedBoard `json:"selected"`
+}
+
+// BoardSelection defines model for BoardSelection.
+type BoardSelection struct {
+	// Host An IP address or a host name.
+	Host string `json:"host"`
+
+	// Port 1 to 65535; 22 when absent.
+	Port *int `json:"port,omitempty"`
+
+	// User sima when absent.
+	User *string `json:"user,omitempty"`
+}
+
+// BoardStatus defines model for BoardStatus.
+type BoardStatus struct {
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+
+	// Command With auth_failed, the command that authorizes Insight's key.
+	Command *string      `json:"command,omitempty"`
+	Error   *ErrorDetail `json:"error,omitempty"`
+
+	// HostKey With host_key_changed, the key Insight trusts and the one the board presented.
+	HostKey *HostKeyChange `json:"host_key,omitempty"`
+
+	// State unknown until a check or a failure; error while the last contact failed.
+	State BoardStatusState `json:"state"`
+}
+
+// BoardStatusState unknown until a check or a failure; error while the last contact failed.
+type BoardStatusState string
+
+// BoardTarget defines model for BoardTarget.
+type BoardTarget struct {
+	Host *string `json:"host,omitempty"`
+	Id   string  `json:"id"`
+
+	// Label "This board", or user@host with :port off port 22.
+	Label string `json:"label"`
+
+	// Mode ssh reaches the board over SSH; local is the board Insight runs on.
+	Mode BoardTargetMode `json:"mode"`
+	Port *int            `json:"port,omitempty"`
+
+	// Source Entered by hand, the board Insight runs on, or the DevKit the SDK is paired with.
+	Source BoardTargetSource `json:"source"`
+	User   *string           `json:"user,omitempty"`
+}
+
+// BoardTargetMode ssh reaches the board over SSH; local is the board Insight runs on.
+type BoardTargetMode string
+
+// BoardTargetSource Entered by hand, the board Insight runs on, or the DevKit the SDK is paired with.
+type BoardTargetSource string
+
+// CameraPreview defines model for CameraPreview.
+type CameraPreview struct {
+	Camera string `json:"camera"`
+
+	// CameraFps The rate the camera runs at; for MIPI null until Sentinel read it, a few seconds in.
+	CameraFps *float64    `json:"camera_fps"`
+	Id        string      `json:"id"`
+	Mode      PreviewMode `json:"mode"`
+	StartedAt time.Time   `json:"started_at"`
+
+	// Viewer A browser shows the preview; its stream has one viewer.
+	Viewer bool `json:"viewer"`
 }
 
 // Catalog The published catalog of sample clips, as its index has it.
@@ -355,6 +580,12 @@ type ChannelVideo struct {
 	UnsupportedPackets int `json:"unsupported_packets"`
 }
 
+// DeviceRef defines model for DeviceRef.
+type DeviceRef struct {
+	Id   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // Error Every error answer has this shape; some routes add fields beside `error`.
 type Error struct {
 	Error ErrorDetail `json:"error"`
@@ -400,6 +631,27 @@ type HealthNetwork struct {
 
 // HealthNetworkBrowserIceAddressSource defines model for HealthNetwork.BrowserIceAddressSource.
 type HealthNetworkBrowserIceAddressSource string
+
+// HostKeyChange With host_key_changed, the key Insight trusts and the one the board presented.
+type HostKeyChange struct {
+	// Expected The trusted key's SHA256 fingerprint.
+	Expected string `json:"expected"`
+
+	// Host The board's name in known_hosts, "host" or "[host]:port".
+	Host string `json:"host"`
+
+	// Presented The presented key's, which trust-host-key takes.
+	Presented string `json:"presented"`
+}
+
+// HostReadings defines model for HostReadings.
+type HostReadings struct {
+	CpuPercent *float64 `json:"cpu_percent"`
+
+	// Disk The disk of Insight's data folder.
+	Disk   *Usage `json:"disk"`
+	Memory *Usage `json:"memory"`
+}
 
 // IngestChannel defines model for IngestChannel.
 type IngestChannel struct {
@@ -607,6 +859,114 @@ type MediaUpload struct {
 // MediaUploadOnConflict What a taken name does; ask unless said.
 type MediaUploadOnConflict string
 
+// MicLevel What a finished recording picked up.
+type MicLevel struct {
+	PeakDbfs *float64 `json:"peak_dbfs"`
+	RmsDbfs  *float64 `json:"rms_dbfs"`
+
+	// Silent Its typical level is below -60 dBFS (one click does not count).
+	Silent bool `json:"silent"`
+}
+
+// MicTest defines model for MicTest.
+type MicTest struct {
+	// Device The ALSA device arecord records from.
+	Device string `json:"device"`
+
+	// ElapsedMs How much was recorded.
+	ElapsedMs int          `json:"elapsed_ms"`
+	Error     *ErrorDetail `json:"error,omitempty"`
+	Format    struct {
+		Bits     int `json:"bits"`
+		Channels int `json:"channels"`
+		Rate     int `json:"rate"`
+		Seconds  int `json:"seconds"`
+	} `json:"format"`
+	Id string `json:"id"`
+
+	// Level What a finished recording picked up.
+	Level *MicLevel `json:"level,omitempty"`
+
+	// LevelDbfs While recording, the newest 50 ms's peak; absent for digital silence.
+	LevelDbfs  *float64     `json:"level_dbfs,omitempty"`
+	Microphone string       `json:"microphone"`
+	State      MicTestState `json:"state"`
+}
+
+// MicTestState defines model for MicTest.State.
+type MicTestState string
+
+// MicTestAnswer defines model for MicTestAnswer.
+type MicTestAnswer struct {
+	// Test The board's latest test; null before the first.
+	Test *MicTest `json:"test"`
+}
+
+// MicTestRequest defines model for MicTestRequest.
+type MicTestRequest struct {
+	// Seconds 1 to 30; 30 when absent.
+	Seconds *int `json:"seconds,omitempty"`
+}
+
+// NeatComponent defines model for NeatComponent.
+type NeatComponent struct {
+	Channel         *string `json:"channel,omitempty"`
+	ChannelAssumed  *bool   `json:"channelAssumed,omitempty"`
+	Detail          *string `json:"detail,omitempty"`
+	Installed       *bool   `json:"installed,omitempty"`
+	LatestTag       *string `json:"latestTag,omitempty"`
+	LatestVersion   *string `json:"latestVersion,omitempty"`
+	MetadataUrl     *string `json:"metadataUrl,omitempty"`
+	Name            *string `json:"name"`
+	ServiceState    *string `json:"serviceState,omitempty"`
+	Tag             *string `json:"tag,omitempty"`
+	UpdateAvailable *bool   `json:"updateAvailable,omitempty"`
+	Venv            *string `json:"venv,omitempty"`
+	Version         *string `json:"version"`
+}
+
+// PeripheralChanges defines model for PeripheralChanges.
+type PeripheralChanges struct {
+	Added   []DeviceRef `json:"added"`
+	Removed []DeviceRef `json:"removed"`
+}
+
+// PeripheralScan defines model for PeripheralScan.
+type PeripheralScan struct {
+	// Catalog Sentinel's peripheral catalog as it wrote it: `revision`, `observed_at`, `devices` (cameras with their `modes`, each with Sentinel's `available` and `reason`; microphones with their `capture_target`), `errors` (a failed provider's devices are its last successful scan's) and `board` (the board's model and camera setup).
+	Catalog SentinelBody `json:"catalog"`
+
+	// Changes What this scan found or missed against the one before; null for the first.
+	Changes *PeripheralChanges `json:"changes"`
+
+	// ScanMs How long Sentinel's scan took.
+	ScanMs    int       `json:"scan_ms"`
+	ScannedAt time.Time `json:"scanned_at"`
+}
+
+// Peripherals defines model for Peripherals.
+type Peripherals struct {
+	// Scan The last scan; null before the first.
+	Scan *PeripheralScan `json:"scan"`
+}
+
+// PreviewAnswer defines model for PreviewAnswer.
+type PreviewAnswer struct {
+	// Preview The running preview; null when none runs.
+	Preview *CameraPreview `json:"preview"`
+}
+
+// PreviewMode defines model for PreviewMode.
+type PreviewMode struct {
+	// Format A V4L2 format the scan lists for the camera (NV12, MJPG, YUYV, ...).
+	Format string `json:"format"`
+
+	// Fps A rate the camera advertises for the size (the inverse of a frame interval), to a thousandth.
+	Fps    float64 `json:"fps"`
+	Height int     `json:"height"`
+	Width  int     `json:"width"`
+}
+
 // RenditionUsage defines model for RenditionUsage.
 type RenditionUsage struct {
 	Bytes int64 `json:"bytes"`
@@ -623,6 +983,50 @@ type RenditionsCleared struct {
 	// Kept Kept because a slot streams them or is about to.
 	Kept    int `json:"kept"`
 	Removed int `json:"removed"`
+}
+
+// RunDeleted defines model for RunDeleted.
+type RunDeleted struct {
+	Deleted struct {
+		Id   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"deleted"`
+
+	// Runs One of Sentinel's answers as it gave it, without its schema marker; its fields are Sentinel's (its API is the one its public clients use).
+	Runs SentinelBody `json:"runs"`
+}
+
+// SelectedBoard defines model for SelectedBoard.
+type SelectedBoard struct {
+	Id string `json:"id"`
+
+	// Identity What the last successful check read; null before one.
+	Identity *BoardIdentity `json:"identity"`
+	Label    string         `json:"label"`
+
+	// Ssh The command that opens a shell on the board, for an SSH board ("ssh -p 2222 sima@192.168.1.20").
+	Ssh    *string     `json:"ssh,omitempty"`
+	Status BoardStatus `json:"status"`
+}
+
+// SentinelBody One of Sentinel's answers as it gave it, without its schema marker; its fields are Sentinel's (its API is the one its public clients use).
+type SentinelBody map[string]interface{}
+
+// SentinelCache Sentinel's `/v1/cache`: `version`, `metrics` (the definitions), `latest` (the newest sample), `samples` (oldest first, each `{timestamp, values}`) and `errors`, with `full`.
+type SentinelCache struct {
+	// Full The samples replace what the caller holds; false, they follow its `after`.
+	Full                 bool                     `json:"full"`
+	Samples              []map[string]interface{} `json:"samples"`
+	AdditionalProperties map[string]interface{}   `json:"-"`
+}
+
+// SentinelHealth defines model for SentinelHealth.
+type SentinelHealth struct {
+	// Health One of Sentinel's answers as it gave it, without its schema marker; its fields are Sentinel's (its API is the one its public clients use).
+	Health SentinelBody `json:"health"`
+
+	// StartedAt When Sentinel's service started, on Insight's clock; null when systemd does not say.
+	StartedAt *time.Time `json:"started_at"`
 }
 
 // SessionDescription defines model for SessionDescription.
@@ -787,6 +1191,113 @@ type SlotUrls struct {
 	Whip *string `json:"whip,omitempty"`
 }
 
+// SystemInfo defines model for SystemInfo.
+type SystemInfo struct {
+	Insight SystemInsight `json:"insight"`
+	Neat    SystemNeat    `json:"neat"`
+}
+
+// SystemInsight defines model for SystemInsight.
+type SystemInsight struct {
+	Build struct {
+		GoVersion string  `json:"go_version"`
+		Modified  *bool   `json:"modified,omitempty"`
+		Platform  string  `json:"platform"`
+		Revision  *string `json:"revision,omitempty"`
+		Time      *string `json:"time,omitempty"`
+	} `json:"build"`
+	DataDir string `json:"data_dir"`
+	Network struct {
+		BrowserIceAddress       *string `json:"browser_ice_address,omitempty"`
+		BrowserIceAddressSource string  `json:"browser_ice_address_source"`
+		CertificateHost         string  `json:"certificate_host"`
+		PublicOrigin            *string `json:"public_origin,omitempty"`
+		UrlRouting              *string `json:"url_routing,omitempty"`
+	} `json:"network"`
+	Place SystemInsightPlace `json:"place"`
+	Port  int                `json:"port"`
+	Ports struct {
+		Channels       int    `json:"channels"`
+		ChannelsSource string `json:"channels_source"`
+
+		// Rtsp The host port the SDK publishes RTSP on; 0 where none is named.
+		Rtsp        int `json:"rtsp"`
+		WebrtcEnd   int `json:"webrtc_end"`
+		WebrtcStart int `json:"webrtc_start"`
+		Whip        int `json:"whip"`
+		WhipIce     int `json:"whip_ice"`
+	} `json:"ports"`
+	Version string `json:"version"`
+
+	// WebUiUrl The public origin when a proxy serves Insight, else the address the request came to.
+	WebUiUrl string `json:"web_ui_url"`
+}
+
+// SystemInsightPlace defines model for SystemInsight.Place.
+type SystemInsightPlace string
+
+// SystemNeat defines model for SystemNeat.
+type SystemNeat struct {
+	// Components By component id (core, pyneat, runtime, insight, modelCompiler, ...).
+	Components  *map[string]NeatComponent `json:"components,omitempty"`
+	Environment *struct {
+		DevkitBuildVersion *string `json:"devkitBuildVersion,omitempty"`
+		Label              *string `json:"label,omitempty"`
+
+		// Mode elxr-sdk or modalix-board.
+		Mode       *string `json:"mode,omitempty"`
+		SdkVersion *string `json:"sdkVersion,omitempty"`
+		Sysroot    *string `json:"sysroot,omitempty"`
+	} `json:"environment,omitempty"`
+	Error *ErrorDetail `json:"error,omitempty"`
+
+	// ExposedPorts The ports the SDK container publishes, neat's, else the port map's.
+	ExposedPorts []struct {
+		HostPortEnd   *int    `json:"hostPortEnd"`
+		HostPortStart *int    `json:"hostPortStart"`
+		Name          string  `json:"name"`
+		Protocol      *string `json:"protocol,omitempty"`
+	} `json:"exposed_ports"`
+	Insight *struct {
+		ServiceState *string `json:"serviceState,omitempty"`
+		Venv         *string `json:"venv,omitempty"`
+		WebUiUrl     *string `json:"webUiUrl,omitempty"`
+	} `json:"insight,omitempty"`
+	ReadAt      *time.Time      `json:"read_at,omitempty"`
+	State       SystemNeatState `json:"state"`
+	UpdateCheck *struct {
+		Errors  *[]string `json:"errors,omitempty"`
+		Offline *bool     `json:"offline,omitempty"`
+		Status  *string   `json:"status,omitempty"`
+	} `json:"update_check,omitempty"`
+}
+
+// SystemNeatState defines model for SystemNeat.State.
+type SystemNeatState string
+
+// TraceRequest defines model for TraceRequest.
+type TraceRequest struct {
+	Name string    `json:"name"`
+	Note *string   `json:"note,omitempty"`
+	Tags *[]string `json:"tags,omitempty"`
+}
+
+// TrustHostKeyRequest defines model for TrustHostKeyRequest.
+type TrustHostKeyRequest struct {
+	Fingerprint string `json:"fingerprint"`
+}
+
+// Usage defines model for Usage.
+type Usage struct {
+	// Path A disk's folder.
+	Path    *string `json:"path,omitempty"`
+	Percent float64 `json:"percent"`
+
+	// Total Bytes.
+	Total int64 `json:"total"`
+	Used  int64 `json:"used"`
+}
+
 // ViewerUrl defines model for ViewerUrl.
 type ViewerUrl struct {
 	ChannelLimitSource ViewerUrlChannelLimitSource `json:"channel_limit_source"`
@@ -798,14 +1309,74 @@ type ViewerUrl struct {
 // ViewerUrlChannelLimitSource defines model for ViewerUrl.ChannelLimitSource.
 type ViewerUrlChannelLimitSource string
 
+// BoardID defines model for BoardID.
+type BoardID = string
+
+// CameraID defines model for CameraID.
+type CameraID = string
+
 // JobID defines model for JobID.
 type JobID = string
 
 // MediaPath defines model for MediaPath.
 type MediaPath = string
 
+// MicTestID defines model for MicTestID.
+type MicTestID = string
+
+// MicrophoneID defines model for MicrophoneID.
+type MicrophoneID = string
+
+// PreviewID defines model for PreviewID.
+type PreviewID = string
+
 // SlotNumber defines model for SlotNumber.
 type SlotNumber = int
+
+// StreamCameraPreviewParams defines parameters for StreamCameraPreview.
+type StreamCameraPreviewParams struct {
+	// Preview The preview's `id`; with it, a request meant for an earlier preview does nothing.
+	Preview *PreviewID `form:"preview,omitempty" json:"preview,omitempty"`
+}
+
+// StopCameraPreviewParams defines parameters for StopCameraPreview.
+type StopCameraPreviewParams struct {
+	// Preview The preview's `id`; with it, a request meant for an earlier preview does nothing.
+	Preview *PreviewID `form:"preview,omitempty" json:"preview,omitempty"`
+}
+
+// GetMicrophoneTestAudioParams defines parameters for GetMicrophoneTestAudio.
+type GetMicrophoneTestAudioParams struct {
+	// Test The test's `id`; with it, a request meant for an earlier test does nothing.
+	Test *MicTestID `form:"test,omitempty" json:"test,omitempty"`
+}
+
+// StopMicrophoneTestParams defines parameters for StopMicrophoneTest.
+type StopMicrophoneTestParams struct {
+	// Test The test's `id`; with it, a request meant for an earlier test does nothing.
+	Test *MicTestID `form:"test,omitempty" json:"test,omitempty"`
+}
+
+// GetSentinelCacheParams defines parameters for GetSentinelCache.
+type GetSentinelCacheParams struct {
+	// After The timestamp of the newest sample the caller holds.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
+// CompareSentinelRunsParams defines parameters for CompareSentinelRuns.
+type CompareSentinelRunsParams struct {
+	// Runs 2 to 8 runs' ids or names, comma-separated; the first is the baseline.
+	Runs string `form:"runs" json:"runs"`
+
+	// Raw Add every run's samples.
+	Raw *bool `form:"raw,omitempty" json:"raw,omitempty"`
+}
+
+// StopSentinelTraceParams defines parameters for StopSentinelTrace.
+type StopSentinelTraceParams struct {
+	// Trace Stop only this trace, by its id; another one active is 409 `trace_conflict`.
+	Trace *string `form:"trace,omitempty" json:"trace,omitempty"`
+}
 
 // GetIngestStatsParams defines parameters for GetIngestStats.
 type GetIngestStatsParams struct {
@@ -831,6 +1402,12 @@ type PreviewMediaParams struct {
 	Path MediaPath `form:"path" json:"path"`
 }
 
+// GetSystemParams defines parameters for GetSystem.
+type GetSystemParams struct {
+	// Refresh Run neat again first (or wait for the run in progress).
+	Refresh *bool `form:"refresh,omitempty" json:"refresh,omitempty"`
+}
+
 // GetViewerUrlParams defines parameters for GetViewerUrl.
 type GetViewerUrlParams struct {
 	// Src Channels, comma separated; others are dropped.
@@ -839,6 +1416,21 @@ type GetViewerUrlParams struct {
 	// Mode light or dark; anything else keeps the viewer's own theme.
 	Mode *string `form:"mode,omitempty" json:"mode,omitempty"`
 }
+
+// SelectBoardJSONRequestBody defines body for SelectBoard for application/json ContentType.
+type SelectBoardJSONRequestBody = BoardSelection
+
+// StartCameraPreviewJSONRequestBody defines body for StartCameraPreview for application/json ContentType.
+type StartCameraPreviewJSONRequestBody = PreviewMode
+
+// StartMicrophoneTestJSONRequestBody defines body for StartMicrophoneTest for application/json ContentType.
+type StartMicrophoneTestJSONRequestBody = MicTestRequest
+
+// StartSentinelTraceJSONRequestBody defines body for StartSentinelTrace for application/json ContentType.
+type StartSentinelTraceJSONRequestBody = TraceRequest
+
+// TrustBoardHostKeyJSONRequestBody defines body for TrustBoardHostKey for application/json ContentType.
+type TrustBoardHostKeyJSONRequestBody = TrustHostKeyRequest
 
 // ImportCatalogAssetJSONRequestBody defines body for ImportCatalogAsset for application/json ContentType.
 type ImportCatalogAssetJSONRequestBody = CatalogImportRequest
@@ -937,8 +1529,167 @@ func (a Catalog_Assets_Item) MarshalJSON() ([]byte, error) {
 	return json.Marshal(object)
 }
 
+// Getter for additional properties for SentinelCache. Returns the specified
+// element and whether it was found
+func (a SentinelCache) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for SentinelCache
+func (a *SentinelCache) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for SentinelCache to handle AdditionalProperties
+func (a *SentinelCache) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["full"]; found {
+		err = json.Unmarshal(raw, &a.Full)
+		if err != nil {
+			return fmt.Errorf("error reading 'full': %w", err)
+		}
+		delete(object, "full")
+	}
+
+	if raw, found := object["samples"]; found {
+		err = json.Unmarshal(raw, &a.Samples)
+		if err != nil {
+			return fmt.Errorf("error reading 'samples': %w", err)
+		}
+		delete(object, "samples")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for SentinelCache to handle AdditionalProperties
+func (a SentinelCache) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["full"], err = json.Marshal(a.Full)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'full': %w", err)
+	}
+
+	if a.Samples != nil {
+		object["samples"], err = json.Marshal(a.Samples)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'samples': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListBoards The boards Insight knows and the selected one
+	// (GET /api/boards)
+	ListBoards(w http.ResponseWriter, r *http.Request)
+	// SelectBoard Enter a board and select it
+	// (POST /api/boards)
+	SelectBoard(w http.ResponseWriter, r *http.Request)
+	// ForgetBoard Forget the board entered by hand
+	// (DELETE /api/boards/{id})
+	ForgetBoard(w http.ResponseWriter, r *http.Request, id BoardID)
+	// GetCameraPreview The camera preview running on the board
+	// (GET /api/boards/{id}/cameras/preview)
+	GetCameraPreview(w http.ResponseWriter, r *http.Request, id BoardID)
+	// StartCameraPreview Start a camera's live preview
+	// (POST /api/boards/{id}/cameras/{camera}/preview)
+	StartCameraPreview(w http.ResponseWriter, r *http.Request, id BoardID, camera CameraID)
+	// StreamCameraPreview The running preview's pictures as MJPEG
+	// (GET /api/boards/{id}/cameras/{camera}/preview.mjpg)
+	StreamCameraPreview(w http.ResponseWriter, r *http.Request, id BoardID, camera CameraID, params StreamCameraPreviewParams)
+	// StopCameraPreview Stop a camera's preview
+	// (POST /api/boards/{id}/cameras/{camera}/preview/stop)
+	StopCameraPreview(w http.ResponseWriter, r *http.Request, id BoardID, camera CameraID, params StopCameraPreviewParams)
+	// CheckBoard Connect to the selected board and read its identity
+	// (POST /api/boards/{id}/check)
+	CheckBoard(w http.ResponseWriter, r *http.Request, id BoardID)
+	// GetMicrophoneTest The board's microphone test
+	// (GET /api/boards/{id}/microphones/test)
+	GetMicrophoneTest(w http.ResponseWriter, r *http.Request, id BoardID)
+	// StartMicrophoneTest Record from a microphone
+	// (POST /api/boards/{id}/microphones/{microphone}/test)
+	StartMicrophoneTest(w http.ResponseWriter, r *http.Request, id BoardID, microphone MicrophoneID)
+	// GetMicrophoneTestAudio A finished test's recording as WAV
+	// (GET /api/boards/{id}/microphones/{microphone}/test.wav)
+	GetMicrophoneTestAudio(w http.ResponseWriter, r *http.Request, id BoardID, microphone MicrophoneID, params GetMicrophoneTestAudioParams)
+	// StopMicrophoneTest End a microphone test now
+	// (POST /api/boards/{id}/microphones/{microphone}/test/stop)
+	StopMicrophoneTest(w http.ResponseWriter, r *http.Request, id BoardID, microphone MicrophoneID, params StopMicrophoneTestParams)
+	// GetPeripherals The board's last peripheral scan
+	// (GET /api/boards/{id}/peripherals)
+	GetPeripherals(w http.ResponseWriter, r *http.Request, id BoardID)
+	// RefreshPeripherals Scan the board's cameras and microphones
+	// (POST /api/boards/{id}/peripherals/refresh)
+	RefreshPeripherals(w http.ResponseWriter, r *http.Request, id BoardID)
+	// GetSentinelCache Sentinel's cache, the Live view's source
+	// (GET /api/boards/{id}/sentinel/cache)
+	GetSentinelCache(w http.ResponseWriter, r *http.Request, id BoardID, params GetSentinelCacheParams)
+	// CompareSentinelRuns Compare runs against a baseline
+	// (GET /api/boards/{id}/sentinel/compare)
+	CompareSentinelRuns(w http.ResponseWriter, r *http.Request, id BoardID, params CompareSentinelRunsParams)
+	// GetSentinelHealth Whether Sentinel runs on the board
+	// (GET /api/boards/{id}/sentinel/health)
+	GetSentinelHealth(w http.ResponseWriter, r *http.Request, id BoardID)
+	// GetSentinelMetrics Sentinel's metric definitions
+	// (GET /api/boards/{id}/sentinel/metrics)
+	GetSentinelMetrics(w http.ResponseWriter, r *http.Request, id BoardID)
+	// ListSentinelRuns The runs Sentinel holds
+	// (GET /api/boards/{id}/sentinel/runs)
+	ListSentinelRuns(w http.ResponseWriter, r *http.Request, id BoardID)
+	// DeleteSentinelRun Delete a finished run
+	// (DELETE /api/boards/{id}/sentinel/runs/{run})
+	DeleteSentinelRun(w http.ResponseWriter, r *http.Request, id BoardID, run string)
+	// GetSentinelRun One run in full
+	// (GET /api/boards/{id}/sentinel/runs/{run})
+	GetSentinelRun(w http.ResponseWriter, r *http.Request, id BoardID, run string)
+	// GetSentinelLatestSample Sentinel's newest sample
+	// (GET /api/boards/{id}/sentinel/samples/latest)
+	GetSentinelLatestSample(w http.ResponseWriter, r *http.Request, id BoardID)
+	// StartSentinelTrace Start recording a named trace
+	// (POST /api/boards/{id}/sentinel/traces)
+	StartSentinelTrace(w http.ResponseWriter, r *http.Request, id BoardID)
+	// GetSentinelActiveTrace The trace being recorded
+	// (GET /api/boards/{id}/sentinel/traces/active)
+	GetSentinelActiveTrace(w http.ResponseWriter, r *http.Request, id BoardID)
+	// StopSentinelTrace Stop and save the active trace
+	// (POST /api/boards/{id}/sentinel/traces/stop)
+	StopSentinelTrace(w http.ResponseWriter, r *http.Request, id BoardID, params StopSentinelTraceParams)
+	// TrustBoardHostKey Trust the new host key of a reflashed board
+	// (POST /api/boards/{id}/trust-host-key)
+	TrustBoardHostKey(w http.ResponseWriter, r *http.Request, id BoardID)
 	// GetCatalog SiMa's published sample clips
 	// (GET /api/catalog)
 	GetCatalog(w http.ResponseWriter, r *http.Request)
@@ -1026,6 +1777,12 @@ type ServerInterface interface {
 	// TakeOverSlot Disconnect the external publisher that holds a slot
 	// (POST /api/slots/{n}/take-over)
 	TakeOverSlot(w http.ResponseWriter, r *http.Request, n SlotNumber)
+	// GetSystem System Info
+	// (GET /api/system)
+	GetSystem(w http.ResponseWriter, r *http.Request, params GetSystemParams)
+	// GetSystemHost This computer's CPU, memory and disk
+	// (GET /api/system/host)
+	GetSystemHost(w http.ResponseWriter, r *http.Request)
 	// GetViewerUrl A link to the Viewer
 	// (GET /api/viewer-url)
 	GetViewerUrl(w http.ResponseWriter, r *http.Request, params GetViewerUrlParams)
@@ -1039,6 +1796,855 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListBoards operation middleware
+func (siw *ServerInterfaceWrapper) ListBoards(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBoards(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SelectBoard operation middleware
+func (siw *ServerInterfaceWrapper) SelectBoard(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SelectBoard(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ForgetBoard operation middleware
+func (siw *ServerInterfaceWrapper) ForgetBoard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ForgetBoard(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCameraPreview operation middleware
+func (siw *ServerInterfaceWrapper) GetCameraPreview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCameraPreview(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartCameraPreview operation middleware
+func (siw *ServerInterfaceWrapper) StartCameraPreview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "camera" -------------
+	var camera CameraID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "camera", r.PathValue("camera"), &camera, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "camera", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartCameraPreview(w, r, id, camera)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StreamCameraPreview operation middleware
+func (siw *ServerInterfaceWrapper) StreamCameraPreview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "camera" -------------
+	var camera CameraID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "camera", r.PathValue("camera"), &camera, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "camera", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StreamCameraPreviewParams
+
+	// ------------- Optional query parameter "preview" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "preview", r.URL.Query(), &params.Preview, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "preview"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "preview", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StreamCameraPreview(w, r, id, camera, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopCameraPreview operation middleware
+func (siw *ServerInterfaceWrapper) StopCameraPreview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "camera" -------------
+	var camera CameraID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "camera", r.PathValue("camera"), &camera, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "camera", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StopCameraPreviewParams
+
+	// ------------- Optional query parameter "preview" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "preview", r.URL.Query(), &params.Preview, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "preview"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "preview", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopCameraPreview(w, r, id, camera, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckBoard operation middleware
+func (siw *ServerInterfaceWrapper) CheckBoard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckBoard(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMicrophoneTest operation middleware
+func (siw *ServerInterfaceWrapper) GetMicrophoneTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMicrophoneTest(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartMicrophoneTest operation middleware
+func (siw *ServerInterfaceWrapper) StartMicrophoneTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "microphone" -------------
+	var microphone MicrophoneID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "microphone", r.PathValue("microphone"), &microphone, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "microphone", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartMicrophoneTest(w, r, id, microphone)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMicrophoneTestAudio operation middleware
+func (siw *ServerInterfaceWrapper) GetMicrophoneTestAudio(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "microphone" -------------
+	var microphone MicrophoneID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "microphone", r.PathValue("microphone"), &microphone, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "microphone", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMicrophoneTestAudioParams
+
+	// ------------- Optional query parameter "test" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "test", r.URL.Query(), &params.Test, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "test"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "test", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMicrophoneTestAudio(w, r, id, microphone, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopMicrophoneTest operation middleware
+func (siw *ServerInterfaceWrapper) StopMicrophoneTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "microphone" -------------
+	var microphone MicrophoneID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "microphone", r.PathValue("microphone"), &microphone, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "microphone", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StopMicrophoneTestParams
+
+	// ------------- Optional query parameter "test" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "test", r.URL.Query(), &params.Test, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "test"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "test", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopMicrophoneTest(w, r, id, microphone, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPeripherals operation middleware
+func (siw *ServerInterfaceWrapper) GetPeripherals(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPeripherals(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshPeripherals operation middleware
+func (siw *ServerInterfaceWrapper) RefreshPeripherals(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshPeripherals(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSentinelCache operation middleware
+func (siw *ServerInterfaceWrapper) GetSentinelCache(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSentinelCacheParams
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSentinelCache(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompareSentinelRuns operation middleware
+func (siw *ServerInterfaceWrapper) CompareSentinelRuns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CompareSentinelRunsParams
+
+	// ------------- Required query parameter "runs" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "runs", r.URL.Query(), &params.Runs, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "runs"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "runs", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "raw" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "raw", r.URL.Query(), &params.Raw, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "raw"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "raw", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompareSentinelRuns(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSentinelHealth operation middleware
+func (siw *ServerInterfaceWrapper) GetSentinelHealth(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSentinelHealth(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSentinelMetrics operation middleware
+func (siw *ServerInterfaceWrapper) GetSentinelMetrics(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSentinelMetrics(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSentinelRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListSentinelRuns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSentinelRuns(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSentinelRun operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSentinelRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "run" -------------
+	var run string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "run", r.PathValue("run"), &run, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "run", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSentinelRun(w, r, id, run)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSentinelRun operation middleware
+func (siw *ServerInterfaceWrapper) GetSentinelRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "run" -------------
+	var run string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "run", r.PathValue("run"), &run, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "run", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSentinelRun(w, r, id, run)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSentinelLatestSample operation middleware
+func (siw *ServerInterfaceWrapper) GetSentinelLatestSample(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSentinelLatestSample(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartSentinelTrace operation middleware
+func (siw *ServerInterfaceWrapper) StartSentinelTrace(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartSentinelTrace(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSentinelActiveTrace operation middleware
+func (siw *ServerInterfaceWrapper) GetSentinelActiveTrace(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSentinelActiveTrace(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopSentinelTrace operation middleware
+func (siw *ServerInterfaceWrapper) StopSentinelTrace(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StopSentinelTraceParams
+
+	// ------------- Optional query parameter "trace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "trace", r.URL.Query(), &params.Trace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "trace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "trace", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopSentinelTrace(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TrustBoardHostKey operation middleware
+func (siw *ServerInterfaceWrapper) TrustBoardHostKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id BoardID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TrustBoardHostKey(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetCatalog operation middleware
 func (siw *ServerInterfaceWrapper) GetCatalog(w http.ResponseWriter, r *http.Request) {
@@ -1655,6 +3261,53 @@ func (siw *ServerInterfaceWrapper) TakeOverSlot(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetSystem operation middleware
+func (siw *ServerInterfaceWrapper) GetSystem(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSystemParams
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "refresh", r.URL.Query(), &params.Refresh, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "refresh"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSystem(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSystemHost operation middleware
+func (siw *ServerInterfaceWrapper) GetSystemHost(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSystemHost(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetViewerUrl operation middleware
 func (siw *ServerInterfaceWrapper) GetViewerUrl(w http.ResponseWriter, r *http.Request) {
 
@@ -1851,6 +3504,34 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/jobs/{id}", wrapper.CancelJob)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/jobs/{id}", wrapper.GetJob)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/jobs/{id}/events", wrapper.FollowJob)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards", wrapper.ListBoards)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards", wrapper.SelectBoard)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/boards/{id}", wrapper.ForgetBoard)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/check", wrapper.CheckBoard)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/trust-host-key", wrapper.TrustBoardHostKey)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/peripherals", wrapper.GetPeripherals)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/peripherals/refresh", wrapper.RefreshPeripherals)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/cameras/preview", wrapper.GetCameraPreview)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/cameras/{camera}/preview", wrapper.StartCameraPreview)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/cameras/{camera}/preview.mjpg", wrapper.StreamCameraPreview)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/cameras/{camera}/preview/stop", wrapper.StopCameraPreview)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/microphones/test", wrapper.GetMicrophoneTest)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/microphones/{microphone}/test", wrapper.StartMicrophoneTest)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/microphones/{microphone}/test/stop", wrapper.StopMicrophoneTest)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/microphones/{microphone}/test.wav", wrapper.GetMicrophoneTestAudio)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/health", wrapper.GetSentinelHealth)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/metrics", wrapper.GetSentinelMetrics)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/samples/latest", wrapper.GetSentinelLatestSample)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/cache", wrapper.GetSentinelCache)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/traces/active", wrapper.GetSentinelActiveTrace)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/sentinel/traces", wrapper.StartSentinelTrace)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/sentinel/traces/stop", wrapper.StopSentinelTrace)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/runs", wrapper.ListSentinelRuns)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/boards/{id}/sentinel/runs/{run}", wrapper.DeleteSentinelRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/runs/{run}", wrapper.GetSentinelRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/compare", wrapper.CompareSentinelRuns)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/system", wrapper.GetSystem)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/system/host", wrapper.GetSystemHost)
 
 	return m
 }

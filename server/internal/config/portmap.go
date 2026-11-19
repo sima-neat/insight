@@ -1,12 +1,15 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 )
 
 // MaxChannels is how many channels Insight can serve: video on UDP 9000+N and metadata on
@@ -43,6 +46,14 @@ type PublishedPorts struct {
 	WHIPICE int
 }
 
+// ExposedPort is a port the SDK container publishes, as the port map names it: Name is its
+// path in the map ("mainUI", "rtsp.tcp"), Start its host port, End the last of a range or 0.
+// A value the map gives as no whole number is 0.
+type ExposedPort struct {
+	Name, Protocol string
+	Start, End     int
+}
+
 // portMap is the part of sima-cli's port map (schema sima.neat.port-map.v1) Insight reads. The
 // published ports stay raw until they are read, so that one malformed entry costs only itself.
 type portMap struct {
@@ -57,26 +68,85 @@ type portMap struct {
 }
 
 // loadPortMap reads the port map sima-cli writes for the SDK container: NEAT_PORT_MAP_FILE when
-// set, else neat-port-map.json in the configuration folder. A missing file is no port map; a
-// broken one is logged and ignored, as the defaults then hold.
-func loadPortMap(configDir string, env Env) (portMap, bool) {
+// set, else neat-port-map.json in the configuration folder, and lists every port it publishes.
+// A missing file is no port map; a broken one is logged and ignored, as the defaults then hold.
+func loadPortMap(configDir string, env Env) (portMap, []ExposedPort, bool) {
 	path := env("NEAT_PORT_MAP_FILE")
 	if path == "" {
 		path = filepath.Join(configDir, portMapFile)
 	}
 	content, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return portMap{}, false
+		return portMap{}, nil, false
 	}
 	var parsed portMap
+	var whole map[string]any
 	if err == nil {
 		err = json.Unmarshal(content, &parsed)
 	}
+	if err == nil {
+		decoder := json.NewDecoder(bytes.NewReader(content))
+		decoder.UseNumber()
+		err = decoder.Decode(&whole)
+	}
 	if err != nil {
 		slog.Warn("ignoring the port map", "file", path, "error", err)
-		return portMap{}, false
+		return portMap{}, nil, false
 	}
-	return parsed, true
+	var exposed []ExposedPort
+	collectPorts(nil, whole, &exposed)
+	return parsed, exposed, true
+}
+
+// collectPorts lists the ports under value, at path in the map, in the order of their names: an
+// object with "host" is one port, one with "hostStart" or "hostEnd" a range, and any other
+// object is looked into. The protocol is the entry's "protocol", else a last name tcp or udp.
+func collectPorts(path []string, value any, into *[]ExposedPort) {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	port := ExposedPort{Name: strings.Join(path, ".")}
+	if protocol, ok := object["protocol"].(string); ok {
+		port.Protocol = protocol
+	} else if len(path) > 0 {
+		if last := strings.ToLower(path[len(path)-1]); last == "tcp" || last == "udp" {
+			port.Protocol = last
+		}
+	}
+	if host, ok := object["host"]; ok && len(path) > 0 {
+		port.Start = wholeNumber(host)
+		*into = append(*into, port)
+		return
+	}
+	_, hasStart := object["hostStart"]
+	_, hasEnd := object["hostEnd"]
+	if (hasStart || hasEnd) && len(path) > 0 {
+		port.Start, port.End = wholeNumber(object["hostStart"]), wholeNumber(object["hostEnd"])
+		*into = append(*into, port)
+		return
+	}
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		collectPorts(append(slices.Clip(path), key), object[key], into)
+	}
+}
+
+// wholeNumber is value as a whole number, 0 when it is none.
+func wholeNumber(value any) int {
+	number, ok := value.(json.Number)
+	if !ok {
+		return 0
+	}
+	n, err := number.Int64()
+	if err != nil || n < 0 || n > 65535 {
+		return 0
+	}
+	return int(n)
 }
 
 func resolveChannels(place Place, ports portMap, havePorts bool) Channels {

@@ -32,10 +32,11 @@ var (
 	errNotJPEG   = errors.New("a part that is not a JPEG")
 )
 
-// readFrames reads a producer's output and calls frame with each picture, a new slice each
-// time. It returns nil when the output ends (a picture cut off by the end included), and an
-// error when the output is not mpjpeg.
-func readFrames(r io.Reader, frame func(jpeg []byte)) error {
+// ReadFrames reads mpjpeg output (a producer's, or a board's GStreamer multipartmux, which
+// writes the same parts) and calls frame with each picture, a new slice each time. It returns
+// nil when the output ends (a picture cut off by the end included), and an error when the
+// output is not mpjpeg.
+func ReadFrames(r io.Reader, frame func(jpeg []byte)) error {
 	in := bufio.NewReaderSize(r, 64<<10)
 	for {
 		line, err := readLine(in)
@@ -123,17 +124,18 @@ func endOfOutput(err error) error {
 	return err
 }
 
-// openingBoundary begins the relay's response; each part ends with the next boundary.
-const openingBoundary = "--" + Boundary + "\r\n"
+// OpeningBoundary begins a response of the relay's parts (AppendPart); each part ends with the
+// next boundary.
+const OpeningBoundary = "--" + Boundary + "\r\n"
 
-// appendPart appends jpeg as one part of the relay's response: its headers, the picture and the
+// AppendPart appends jpeg as one part of the relay's response: its headers, the picture and the
 // boundary after it. The boundary goes out with the picture, as ffmpeg's muxer writes it,
 // because a reader (a browser, Go's mime/multipart) knows a part has ended only at the next
 // boundary: sent with the next picture, it would hold each picture back by one.
-func appendPart(dst, jpeg []byte) []byte {
+func AppendPart(dst, jpeg []byte) []byte {
 	dst = append(dst, "Content-Type: image/jpeg\r\nContent-Length: "...)
 	dst = strconv.AppendInt(dst, int64(len(jpeg)), 10)
 	dst = append(dst, "\r\n\r\n"...)
 	dst = append(dst, jpeg...)
-	return append(dst, "\r\n"+openingBoundary...)
+	return append(dst, "\r\n"+OpeningBoundary...)
 }

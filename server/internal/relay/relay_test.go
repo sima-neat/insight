@@ -390,7 +390,7 @@ func (w *stuckWriter) WriteHeader(int)     {}
 func (w *stuckWriter) Flush()              {}
 
 func (w *stuckWriter) Write(b []byte) (int, error) {
-	if string(b) == openingBoundary {
+	if string(b) == OpeningBoundary {
 		return len(b), nil
 	}
 	w.mu.Lock()
@@ -442,7 +442,7 @@ func TestASlowReaderSkipsPicturesAndHoldsBackNoOne(t *testing.T) {
 	numbers := make([]int, 0, len(parts))
 	for _, part := range parts {
 		_, jpeg, _ := bytes.Cut(part, []byte("\r\n\r\n"))
-		numbers = append(numbers, pictureNumber(t, bytes.TrimSuffix(jpeg, []byte("\r\n"+openingBoundary))))
+		numbers = append(numbers, pictureNumber(t, bytes.TrimSuffix(jpeg, []byte("\r\n"+OpeningBoundary))))
 	}
 	// Its first write blocked; the next picture it got was one of the latest, not the one after.
 	if numbers[2] <= numbers[0]+2 {
