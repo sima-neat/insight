@@ -1,24 +1,12 @@
 import { computed, getDebugNode, signal } from '@angular/core';
 import { NeatRailItem } from '@sima/neat-ui';
 import type { PeripheralSnapshot } from '../peripherals/api';
-import type { BoardState, BoardTarget, ShellInfo } from './api';
+import { selectedTarget, type BoardList, type BoardTarget, type SelectedBoard } from './api';
 import type { BoardProblem } from './board-error';
 
-/** A board state in the shape `GET /api/board` answers, with what a test does not care about filled in. */
-export function boardState(overrides: Partial<BoardState> = {}): BoardState {
-  return {
-    target: null,
-    saved: null,
-    defaults: { on_board: false, sdk_env: null },
-    generation: 1,
-    status: { state: 'unknown', checked_at: null, error: null },
-    board: null,
-    ...overrides,
-  };
-}
-
-/** The SDK-paired DevKit as `GET /api/board` names it. */
+/** The SDK-paired DevKit as `GET /api/boards` names it. */
 export const DEVKIT: BoardTarget = {
+  id: 'ssh:sima@192.168.1.20:22',
   mode: 'ssh',
   source: 'sdk-env',
   host: '192.168.1.20',
@@ -27,36 +15,76 @@ export const DEVKIT: BoardTarget = {
   label: 'sima@192.168.1.20',
 };
 
-/** The shell details of the SDK-paired DevKit with webssh installed: Open shell can sign in by itself. */
-export function shellInfo(overrides: Partial<ShellInfo> = {}): ShellInfo {
+/** The board Insight runs on, as `GET /api/boards` names it. */
+export const LOCAL: BoardTarget = {
+  id: 'local',
+  mode: 'local',
+  source: 'on-board',
+  label: 'This board',
+};
+
+/** A board entered by hand on another port, as `GET /api/boards` names it. */
+export const MANUAL: BoardTarget = {
+  id: 'ssh:sima@10.0.0.5:2222',
+  mode: 'ssh',
+  source: 'manual',
+  host: '10.0.0.5',
+  port: 2222,
+  user: 'sima',
+  label: 'sima@10.0.0.5:2222',
+};
+
+/** `target` as the selected board, not checked yet, with what a test does not care about filled in. */
+export function selectedBoard(
+  target: BoardTarget = DEVKIT,
+  overrides: Partial<SelectedBoard> = {},
+): SelectedBoard {
+  const ssh =
+    target.mode === 'ssh'
+      ? `ssh ${target.port && target.port !== 22 ? `-p ${target.port} ` : ''}${target.user}@${target.host}`
+      : undefined;
   return {
-    configured: true,
-    devkit_ip: '192.168.1.20',
-    button_label: 'DevKit: 192.168.1.20',
-    available: true,
-    running: false,
-    webssh_port: 8022,
-    webssh_host_port: 8022,
-    default_username: 'sima',
-    credentials_prefilled: true,
-    launch_supported: true,
-    launch_url: 'https://localhost:8022/?hostname=192.168.1.20',
+    id: target.id,
+    label: target.label,
+    status: { state: 'unknown' },
+    identity: null,
+    ...(ssh ? { ssh } : {}),
     ...overrides,
   };
 }
 
+/**
+ * The boards in the shape `GET /api/boards` answers: `selected` the first of `boards` unless
+ * given (null for none), and no board at all by default.
+ */
+export function boardList(
+  boards: readonly BoardTarget[] = [],
+  selected: SelectedBoard | null = boards.length ? selectedBoard(boards[0]) : null,
+): BoardList {
+  return { boards, selected };
+}
+
+/** The boards with `target` selected and its selection's `overrides` (status, identity). */
+export function boardWith(
+  target: BoardTarget = DEVKIT,
+  overrides: Partial<SelectedBoard> = {},
+): BoardList {
+  return boardList([target], selectedBoard(target, overrides));
+}
+
 /** `BoardService` with its state set by the test and its calls recorded. */
 export class FakeBoard {
-  readonly state = signal<BoardState | null>(null);
+  readonly state = signal<BoardList | null>(null);
   readonly error = signal<BoardProblem | null>(null);
   readonly checking = signal(false);
-  readonly generation = computed(() => this.state()?.generation ?? null);
+  readonly selected = computed(() => this.state()?.selected ?? null);
+  readonly id = computed(() => this.selected()?.id ?? null);
+  readonly target = computed(() => selectedTarget(this.state()));
   readonly reload = vi.fn(async () => undefined);
-  readonly select = vi.fn<() => Promise<BoardState>>();
-  readonly test = vi.fn<() => Promise<BoardState>>();
-  readonly trustHostKey = vi.fn<() => Promise<BoardState>>();
-  readonly shellInfo = vi.fn<() => Promise<ShellInfo | null>>(async () => null);
-  readonly startShell = vi.fn<() => Promise<ShellInfo>>();
+  readonly select = vi.fn<() => Promise<BoardList>>();
+  readonly forget = vi.fn<() => Promise<BoardList>>();
+  readonly check = vi.fn<() => Promise<BoardList>>();
+  readonly trustHostKey = vi.fn<() => Promise<BoardList>>();
 }
 
 /**

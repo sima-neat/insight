@@ -1,6 +1,6 @@
 import { BoardProblem } from '../board/board-error';
 import { clock } from '../sources/fps';
-import type { MicrophoneItem, MicTestResponse } from './api';
+import type { MicrophoneItem, MicTestStatus } from './api';
 import { deviceRow } from './devices';
 import {
   captureModes,
@@ -9,6 +9,7 @@ import {
   micStartMayHaveRun,
   micTestAction,
   micTestAfterFailedStart,
+  micTestAudioUrl,
   micTestCaption,
   micTestErrorAction,
   micTestToResume,
@@ -16,10 +17,9 @@ import {
   readMicTest,
   sampleRateLabel,
 } from './mic-test-state';
-import { micTestStatus, onboardMic, readyTest, yeti } from './microphones.testing';
+import { micTestStatus, onboardMic, readyTest, testAudioUrl, yeti } from './microphones.testing';
 
-const problem = (code: string, message = code, hint = '') =>
-  new BoardProblem(message, code, hint, { code });
+const problem = (code: string, message = code, hint = '') => new BoardProblem(message, code, hint);
 const noActivity = { previewing: null, testing: null };
 
 describe('mic-test-state', () => {
@@ -116,7 +116,7 @@ describe('mic-test-state', () => {
   it('microphone test: record, play back, replay, and never a late answer out of turn', () => {
     const recording = nextMicTestState(MIC_TEST_IDLE, { type: 'record' });
     expect(recording.status).toBe('recording');
-    const test = readyTest({ token: 'a', audio_url: '/x.wav' });
+    const test = readyTest({ id: 'a' });
     const playing = nextMicTestState(recording, { type: 'recorded', test });
     expect(playing).toEqual({ status: 'playing', test, error: null }); // playback starts by itself
     const done = nextMicTestState(playing, { type: 'played' });
@@ -137,12 +137,11 @@ describe('mic-test-state', () => {
   });
 
   it('microphone test: a failed stop keeps the test recording, so Stop can be retried and the recording is taken up', () => {
-    // Codex 4263048526: a failed stop turned the test into an error, and the board's recording was then ignored.
     const recording = nextMicTestState(MIC_TEST_IDLE, { type: 'record' });
     const error = problem('network', 'Could not reach Insight.');
     const stopFailed = nextMicTestState(recording, { type: 'stop-failed', error });
     expect(stopFailed).toEqual({ status: 'recording', test: null, error });
-    const test = readyTest({ token: 'a', audio_url: '/x.wav' });
+    const test = readyTest({ id: 'a' });
     expect(nextMicTestState(stopFailed, { type: 'recorded', test })).toEqual({
       status: 'playing',
       test,
@@ -153,8 +152,8 @@ describe('mic-test-state', () => {
   });
 
   it("microphone test: a detail mounted mid-test takes up the board's test for its own microphone", () => {
-    const recording = micTestStatus({ token: 't', elapsed_ms: 1200, level_dbfs: -20 });
-    const ready = readyTest({ token: 't', audio_url: '/t.wav' });
+    const recording = micTestStatus({ id: 't', elapsed_ms: 1200, level_dbfs: -20 });
+    const ready = readyTest({ id: 't' });
     expect(micTestToResume(yeti.id, recording)).toBe(recording);
     // A recording finished while another mic was shown is kept.
     expect(micTestToResume(yeti.id, ready)).toBe(ready);
@@ -178,8 +177,8 @@ describe('mic-test-state', () => {
   });
 
   it('microphone test: a start whose answer was lost takes up the recording it began', () => {
-    const recording = micTestStatus({ token: 'new', elapsed_ms: 400, level_dbfs: -30 });
-    const ready = { ...recording, state: 'ready' as const, audio_url: '/new.wav' };
+    const recording = micTestStatus({ id: 'new', elapsed_ms: 400, level_dbfs: -30 });
+    const ready = { ...recording, state: 'ready' as const };
     const lost = problem('network', 'Could not reach the Insight server.');
     expect(micTestAfterFailedStart(yeti.id, lost, recording, null)).toBe(recording);
     // A retry refused by its own recording.
@@ -191,7 +190,7 @@ describe('mic-test-state', () => {
       ready,
     );
     // The recording shown before Test is not new.
-    expect(micTestAfterFailedStart(yeti.id, lost, { ...ready, token: 'old' }, 'old')).toBeNull();
+    expect(micTestAfterFailedStart(yeti.id, lost, { ...ready, id: 'old' }, 'old')).toBeNull();
     // Another microphone is recording.
     expect(
       micTestAfterFailedStart(onboardMic.id, problem('test_running'), recording, null),
@@ -211,8 +210,7 @@ describe('mic-test-state', () => {
   });
 
   it('microphone test: the scan never disables Test; the start request checks the board', () => {
-    // #170 also read MicrophoneDetail.jsx's source for `disabled={button.disabled}`: the button's
-    // markup is the microphone panel's (Task 16). Here: the button reads only the test's own
+    // The button's markup is the microphone panel's. Here: the button reads only the test's own
     // state, and only a stop in flight disables it; Test itself is never disabled.
     expect(micTestAction('idle', false).disabled).toBe(false);
     for (const status of ['idle', 'done', 'error'] as const) {
@@ -232,7 +230,7 @@ describe('mic-test-state', () => {
     expect(micTestErrorAction(problem('command_failed', 'Failed.', 'See detail.'))).toBe(
       'See detail.',
     );
-    // Ruling F8: the caption's clock is the app's one clock, `clock()` from `sources/fps.ts`.
+    // The caption's clock is the app's one clock, `clock()` from `sources/fps.ts`.
     for (const [seconds, text] of [
       [0, '0:00'],
       [4.9, '0:04'],
@@ -277,12 +275,16 @@ describe('mic-test-state', () => {
     }
   });
 
-  // api.test.js: the status read never contacts the board, so a failed read is retried.
+  it("a finished test's recording is its board's route, naming the microphone and the test", () => {
+    expect(micTestAudioUrl(readyTest({ id: 't 2' }))).toBe(testAudioUrl('t%202'));
+  });
+
+  // The status read never contacts the board, so a failed read is retried.
 
   /** A request that answers or throws each of `answers` in turn, counting its calls. */
-  function requests(...answers: (MicTestResponse | Error)[]) {
+  function requests(...answers: (MicTestStatus | null | Error)[]) {
     const calls: number[] = [];
-    const request = async (): Promise<MicTestResponse> => {
+    const request = async (): Promise<MicTestStatus | null> => {
       calls.push(calls.length);
       const answer = answers.shift();
       if (answer === undefined) throw new Error('No answer left');
@@ -294,7 +296,7 @@ describe('mic-test-state', () => {
   const noWait = async () => undefined;
 
   it('a transient status failure is retried instead of ending the recording', async () => {
-    const status = { test: micTestStatus() };
+    const status = micTestStatus();
     const { request, calls } = requests(
       problem('network'),
       problem('peripheral_unavailable'),
@@ -305,8 +307,8 @@ describe('mic-test-state', () => {
   });
 
   it('a status error that means the test is gone ends it at once', async () => {
-    for (const code of ['not_found', 'stale_snapshot']) {
-      const { request, calls } = requests(problem(code), { test: null });
+    for (const code of ['not_found', 'board_changed']) {
+      const { request, calls } = requests(problem(code), null);
       await expect(readMicTest({ request, wait: noWait })).rejects.toMatchObject({ code });
       expect(calls.length).toBe(1);
     }
@@ -319,7 +321,7 @@ describe('mic-test-state', () => {
     ).rejects.toMatchObject({ code: 'network' });
     expect(limited.calls.length).toBe(3);
 
-    const unmounted = requests(problem('network'), { test: null });
+    const unmounted = requests(problem('network'), null);
     await expect(
       readMicTest({ request: unmounted.request, wait: noWait, isActive: () => false }),
     ).rejects.toMatchObject({ code: 'network' });
@@ -327,7 +329,7 @@ describe('mic-test-state', () => {
 
     // A page that goes while the retry waits sends no further read.
     let active = true;
-    const leaving = requests(problem('network'), { test: null });
+    const leaving = requests(problem('network'), null);
     await expect(
       readMicTest({
         request: leaving.request,

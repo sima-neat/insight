@@ -3,8 +3,3 @@
   flex-direction: column;
   gap: var(--neat-space-2);
 }
-
-/* The command is copied as a whole; a long one wraps instead of widening the dialog. */
-.command {
-  overflow-wrap: anywhere;
-}

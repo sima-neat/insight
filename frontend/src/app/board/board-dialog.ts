@@ -3,7 +3,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
-  DOCUMENT,
   effect,
   type ElementRef,
   inject,
@@ -12,21 +11,19 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { NeatButton, NeatCode, NeatNote, NeatTooltip, type NeatButtonVariant } from '@sima/neat-ui';
+import { NeatButton, NeatCode, NeatNote } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatDialog, NeatDialogBody, type NeatDialogRef } from '@sima/neat-ui/dialog';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import { CopyCommand } from '../copy-command';
 import { boardCameraSetup } from '../peripherals/devices';
 import { PeripheralsService } from '../peripherals/peripherals.service';
-import { LatestOnly } from '../polling';
 import { formatRelativeTime } from '../relative-time';
 import { ticking } from '../clock';
-import { messageOf } from '../sources/stream-lines';
-import type { ShellInfo } from './api';
-import { problemOf, type BoardProblem } from './board-error';
+import { problemOf, recordedProblem, type BoardProblem } from './board-error';
 import { BoardService } from './board.service';
 import { type BoardAction, BoardForm } from './board-form';
 import { BoardProblemNotice } from './board-problem-notice';
@@ -40,30 +37,23 @@ export function openBoardDialog(injector: Injector): NeatDialogRef<void> {
   return injector.get(NeatDialog).open<void>(BoardDialog, { title: 'Board', size: 'medium' });
 }
 
-/** #170's reason for a disabled Open shell (Inv-PB §1.5). */
-const NO_WEBSSH = 'webssh is not installed in this Insight environment';
-/** #170's error for a started shell without an address (Inv-PB §2.1). */
-const NO_LAUNCH_URL = 'DevKit shell launch URL is unavailable.';
-
 /**
- * The board dialog (spec, "Board connection"), opened by the rail's board block from any page: the
- * board's state and when it was checked, the one action that fits it in front, why the board
- * cannot be used with the way out (`BoardProblemNotice`: the key command, the host-key trust),
- * the board's facts under a collapsed Details, and Change board (`BoardForm`). Without a board it
- * says how to get one, and Change board is open under that. Its actions run one at a time.
+ * The board dialog, opened by the rail's board block from any page: the board's state and when
+ * it was checked, Check again, the `ssh` command that opens a shell on an SSH board (with Copy),
+ * why the board cannot be used with the way out (`BoardProblemNotice`: the key command, the
+ * host-key trust), the board's facts under a collapsed Details, and Change board (`BoardForm`).
+ * Without a board it says how to get one, and Change board is open under that. Its actions run one
+ * at a time.
  *
- * **Open shell** (webssh) shows whenever the shell can sign in by itself, whatever the connection
- * state: webssh logs in with a password, so it helps exactly when Insight's key is refused. It
- * leads only when the board is connected; otherwise Check again does. The shell details are read
- * when the dialog opens, never at app start (their launch URL carries the SDK's default password),
- * and again when the board changes while it is open, so that the action describes the board now
- * selected (Inv-PB §6.17).
+ * Insight opens no shell itself: the `ssh` command is the one the boards answer carries, for a
+ * terminal of the user's own, signed in with the user's own keys.
  */
 @Component({
   selector: 'app-board-dialog',
   imports: [
     BoardForm,
     BoardProblemNotice,
+    CopyCommand,
     NeatButton,
     NeatCallout,
     NeatCode,
@@ -72,7 +62,6 @@ const NO_LAUNCH_URL = 'DevKit shell launch URL is unavailable.';
     NeatDialogBody,
     NeatNote,
     NeatStatusChip,
-    NeatTooltip,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './board-dialog.html',
@@ -82,35 +71,23 @@ export class BoardDialog {
   protected readonly board = inject(BoardService);
   private readonly peripherals = inject(PeripheralsService);
   private readonly toasts = inject(NeatToasts);
-  private readonly window = inject(DOCUMENT).defaultView;
 
-  protected readonly noWebssh = NO_WEBSSH;
-
-  /** The browser shell's details for the board selected; null until read, or when they could not be. */
-  protected readonly shell = signal<ShellInfo | null>(null);
-  /**
-   * Whether a shell read has answered. The actions wait for it: shown before, a connected board's
-   * row would be Check again alone, and Open shell would then be put before it under the pointer.
-   */
-  private readonly shellKnown = signal(false);
-  private readonly shellReads = new LatestOnly();
-
-  /** The action running; every action waits for it (#170 ran one at a time). */
+  /** The action running; every action waits for it. */
   protected readonly busy = signal<BoardAction | null>(null);
 
   /**
-   * Why the last action failed, for the problem notice (F21): set by a failed Check again or
-   * trust, cleared by the next action that succeeds and when the board changes. A refused
-   * selection stays under the form instead, where it was typed.
+   * Why the last action failed, for the problem notice: set by a failed Check again or trust,
+   * cleared by the next action that succeeds and when the board changes. A refused selection
+   * stays under the form instead, where it was typed.
    */
   protected readonly actionError = signal<BoardProblem | null>(null);
   /**
-   * The connection error the board state repeats, for the notice while a board is in use and no
-   * action of this dialog failed (an action's own problem wins over it).
+   * The connection error the board's status records, for the notice while a board is in use and
+   * no action of this dialog failed (an action's own problem wins over it).
    */
   protected readonly recordedProblem = computed(() => {
-    const recorded = this.board.state()?.status.error;
-    return recorded ? problemOf(recorded) : null;
+    const selected = this.board.selected();
+    return selected ? recordedProblem(selected.status) : null;
   });
 
   private readonly injector = inject(Injector);
@@ -128,34 +105,14 @@ export class BoardDialog {
   });
   /** "5 s ago", ticking; '' until the board was checked. */
   protected readonly checked = computed(() =>
-    formatRelativeTime(this.board.state()?.status.checked_at ?? null, this.now()),
+    formatRelativeTime(this.board.selected()?.status.checked_at ?? null, this.now()),
   );
-
-  /** The actions with a target, the leading one first and primary. */
-  protected readonly actions = computed<{ action: BoardAction; variant: NeatButtonVariant }[]>(
-    () => {
-      const state = this.board.state();
-      if (!state?.target || !this.shellKnown()) return [];
-      const shell = this.shell()?.launch_supported === true;
-      if (shell && state.status.state === 'connected') {
-        return [
-          { action: 'shell', variant: 'primary' },
-          { action: 'check', variant: 'outlined' },
-        ];
-      }
-      return [
-        { action: 'check', variant: 'primary' },
-        ...(shell ? [{ action: 'shell' as const, variant: 'outlined' as const }] : []),
-      ];
-    },
-  );
-  protected readonly shellAvailable = computed(() => this.shell()?.available === true);
 
   /** The facts the board reported, and the camera setup of its last scan. */
   protected readonly facts = computed(() => {
     const state = this.board.state();
-    if (!state?.target) return [];
-    return boardFacts(state, boardCameraSetup(state, this.peripherals.snapshot()));
+    if (!state?.selected) return [];
+    return boardFacts(state, boardCameraSetup(this.board.id(), this.peripherals.snapshot()));
   });
   /** The collapsed Details' hint: the terms it holds. */
   protected readonly factTerms = computed(() =>
@@ -169,11 +126,8 @@ export class BoardDialog {
     // it Details simply lists less.
     this.peripherals.load().catch(() => undefined);
     effect(() => {
-      this.board.generation();
-      untracked(() => {
-        this.actionError.set(null);
-        void this.readShell();
-      });
+      this.board.id();
+      untracked(() => this.actionError.set(null));
     });
   }
 
@@ -181,34 +135,13 @@ export class BoardDialog {
     if (this.busy()) return;
     this.busy.set('check');
     try {
-      const state = await this.board.test();
+      const state = await this.board.check();
       this.actionError.set(null);
-      const name = state.board?.hostname || state.target?.label || 'the board';
+      const name = state.selected?.identity?.hostname || state.selected?.label || 'the board';
       this.toasts.status(`Connected to ${name}.`);
     } catch (failure) {
       // The service reloaded the state, which recorded the failure.
       this.actionError.set(problemOf(failure));
-    } finally {
-      this.busy.set(null);
-    }
-  }
-
-  /**
-   * Inv-PB §1.5: the window opens inside the click, blank, so that popup blockers allow it; it is
-   * sent to the shell once webssh runs, and closed again if it does not start.
-   */
-  protected async openShell(): Promise<void> {
-    if (this.busy() || !this.shellAvailable()) return;
-    this.busy.set('shell');
-    const opened = this.window?.open('', '_blank') ?? null;
-    try {
-      const started = await this.board.startShell();
-      if (!started.launch_url) throw new Error(NO_LAUNCH_URL);
-      if (opened) opened.location.href = started.launch_url;
-      else this.window?.open(started.launch_url, '_blank');
-    } catch (failure) {
-      opened?.close();
-      this.toasts.error(messageOf(failure));
     } finally {
       this.busy.set(null);
     }
@@ -234,15 +167,5 @@ export class BoardDialog {
 
   protected retry(): void {
     void this.board.reload();
-  }
-
-  /** Only the newest read is applied: one sent for an earlier board can answer last. */
-  private async readShell(): Promise<void> {
-    const request = this.shellReads.next();
-    const info = await this.board.shellInfo();
-    if (this.shellReads.accept(request)) {
-      this.shell.set(info);
-      this.shellKnown.set(true);
-    }
   }
 }

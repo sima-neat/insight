@@ -1,96 +1,121 @@
 import { Page } from '@playwright/test';
 // Types only, erased at run time: the answers are checked against the shapes the app reads.
-import type { MediaEntry, Slot, SlotList } from '../src/app/api.generated';
-import type { BoardState } from '../src/app/board/api';
-import type { HostMetrics } from '../src/app/system-info/api';
+import type {
+  BoardList,
+  BoardTarget,
+  HostReadings,
+  MediaEntry,
+  Slot,
+  SlotList,
+  SystemInfo,
+} from '../src/app/api.generated';
+
+/** The SDK-paired DevKit every test's top bar shows. */
+const DEVKIT: BoardTarget = {
+  id: 'ssh:sima@192.168.100.200:22',
+  mode: 'ssh',
+  source: 'sdk-env',
+  host: '192.168.100.200',
+  port: 22,
+  user: 'sima',
+  label: 'sima@192.168.100.200',
+};
 
 /**
- * What `GET /api/board` answers in every test: the SDK-paired DevKit, already checked. A board
+ * What `GET /api/boards` answers in every test: the SDK-paired DevKit, already checked. A board
  * whose state is unknown is checked as the app loads (`BoardService`), so a test that wants no
- * `POST /api/board/test` starts from a checked one.
+ * `POST /api/boards/<id>/check` starts from a checked one.
  */
-export const TOP_BAR_BOARD: BoardState = {
-  target: {
-    mode: 'ssh',
-    source: 'sdk-env',
-    host: '192.168.100.200',
-    port: 22,
-    user: 'sima',
-    label: 'sima@192.168.100.200',
+export const TOP_BAR_BOARD: BoardList = {
+  boards: [DEVKIT],
+  selected: {
+    id: DEVKIT.id,
+    label: DEVKIT.label,
+    status: { state: 'connected', checked_at: '2026-10-25T10:00:00Z' },
+    identity: null,
+    ssh: 'ssh sima@192.168.100.200',
   },
-  saved: null,
-  defaults: {
-    on_board: false,
-    sdk_env: { host: '192.168.100.200', port: 22, user: 'sima' },
-  },
-  generation: 1,
-  status: { state: 'connected', checked_at: '2026-10-25T10:00:00Z', error: null },
-  board: null,
 };
+
+/** The selected board's id in `TOP_BAR_BOARD`, which every board route takes. */
+export const TOP_BAR_BOARD_ID = DEVKIT.id;
 
 /** A board whose host name is far longer than the rail can show: entered by hand. */
 export const LONG_HOST = 'devkit-lab-bench-07.vision.corp.example.com';
-export const LONG_BOARD: BoardState = {
-  ...TOP_BAR_BOARD,
-  target: {
-    mode: 'ssh',
-    source: 'manual',
-    host: LONG_HOST,
-    port: 22,
-    user: 'sima',
-    label: `sima@${LONG_HOST}`,
+const LONG_TARGET: BoardTarget = {
+  id: `ssh:sima@${LONG_HOST}:22`,
+  mode: 'ssh',
+  source: 'manual',
+  host: LONG_HOST,
+  port: 22,
+  user: 'sima',
+  label: `sima@${LONG_HOST}`,
+};
+export const LONG_BOARD: BoardList = {
+  boards: [LONG_TARGET, DEVKIT],
+  selected: {
+    ...TOP_BAR_BOARD.selected!,
+    id: LONG_TARGET.id,
+    label: LONG_TARGET.label,
+    ssh: `ssh sima@${LONG_HOST}`,
   },
-  saved: { host: LONG_HOST, port: 22, user: 'sima' },
 };
 
 /**
- * What `GET /api/sysinfo` answers without the `neat` command (`_missing_neat_sysinfo_payload`,
- * enriched from the SDK's port map), so that no test depends on the machine running it.
+ * What `GET /api/system` answers without the `neat` command, so that no test depends on the
+ * machine running it.
  */
-const SYSINFO = {
-  schema: 'sima.neat.status.v1',
-  components: {},
-  environment: {
-    label: null,
-    mode: null,
-    sdkVersion: null,
-    devkitBuildVersion: null,
-    sysroot: null,
+export const SYSTEM_INFO: SystemInfo = {
+  insight: {
+    version: '0.0.0-dev',
+    build: { go_version: 'go1.26.0', platform: 'linux/amd64' },
+    place: 'sdk',
+    data_dir: '/home/sima/.local/share/neat-insight',
+    port: 9900,
+    web_ui_url: 'https://127.0.0.1:9900',
+    network: { certificate_host: '127.0.0.1', browser_ice_address_source: 'default' },
+    ports: {
+      channels: 16,
+      channels_source: 'default',
+      webrtc_start: 9200,
+      webrtc_end: 9215,
+      rtsp: 8554,
+      whip: 8889,
+      whip_ice: 8189,
+    },
   },
-  exposedPorts: [{ name: 'mainUI', protocol: 'tcp', hostPortStart: 9900, hostPortEnd: 9900 }],
-  insight: { serviceState: null, venv: null, webUiUrl: 'https://127.0.0.1:9900' },
-  updateCheck: { offline: null, status: null },
-  missing: ['neat'],
+  neat: {
+    state: 'missing',
+    exposed_ports: [{ name: 'mainUI', protocol: 'tcp', hostPortStart: 9900, hostPortEnd: 9900 }],
+  },
 };
 
-/** What `GET /api/metrics` answers, for System Info's "This computer": a local machine, with no temperature. */
-const HOST_METRICS: HostMetrics = {
-  cpu_load: 34,
+/** What `GET /api/system/host` answers, for System Info's "This computer". */
+const HOST_READINGS: HostReadings = {
+  cpu_percent: 34,
   memory: { total: 16 * 1024 ** 3, used: 8 * 1024 ** 3, percent: 52 },
-  disk: { mount: '/home/sima', total: 200 * 1024 ** 3, used: 120 * 1024 ** 3, percent: 61 },
-  temperature_celsius_avg: null,
-  REMOTE: false,
+  disk: { path: '/home/sima', total: 200 * 1024 ** 3, used: 120 * 1024 ** 3, percent: 61 },
 };
 
 /**
- * Answers the top bar's own requests, made on every page: the board for the rail's board block, and the System
- * Info (its `neat` data and the readings of "This computer"). Whatever serves the app (the dev
- * server has no API) then cannot change what the top bar shows, nor leave a failed request in a
- * test that is about something else. Call it before the page loads; a test's own route for the
- * same URL, added later, takes precedence.
+ * Answers the top bar's own requests, made on every page: the boards for the rail's board block,
+ * and System Info (Insight's and `neat`'s facts and the readings of "This computer"). Whatever
+ * serves the app (the dev server has no API) then cannot change what the top bar shows, nor leave
+ * a failed request in a test that is about something else. Call it before the page loads; a
+ * test's own route for the same URL, added later, takes precedence.
  */
 export async function answerTopBar(page: Page): Promise<void> {
   await page.route(
-    (url) => url.pathname === '/api/board',
+    (url) => url.pathname === '/api/boards',
     (route) => route.fulfill({ json: TOP_BAR_BOARD }),
   );
   await page.route(
-    (url) => url.pathname === '/api/sysinfo',
-    (route) => route.fulfill({ json: SYSINFO }),
+    (url) => url.pathname === '/api/system',
+    (route) => route.fulfill({ json: SYSTEM_INFO }),
   );
   await page.route(
-    (url) => url.pathname === '/api/metrics',
-    (route) => route.fulfill({ json: HOST_METRICS }),
+    (url) => url.pathname === '/api/system/host',
+    (route) => route.fulfill({ json: HOST_READINGS }),
   );
 }
 

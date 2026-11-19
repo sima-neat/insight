@@ -1,114 +1,103 @@
-// Stats fixtures for specs and for Playwright: #170's captured Modalix answer typed as the API's
-// shapes, a window of history over it, and a daemon state. It imports only types and the JSON
-// fixture, with no vitest globals and no Angular, so Playwright can load it too.
-import metricsLive from '../../../../tests/fixtures/sentinel/metrics-live.json';
-import type { BoardSummary } from '../board/api';
-import type { MetricStatus, SentinelMetrics, SentinelState } from './api';
-
-const liveMetrics = metricsLive.groups.flatMap((group) => group.metrics);
+// Stats fixtures for specs and for Playwright: Sentinel's cache as a Modalix DevKit answered it,
+// typed as the API's shapes, a window of history over it, and Sentinel's health. It imports only
+// types and the JSON fixture, with no vitest globals and no Angular, so Playwright can load it too.
+import cacheLive from '../../../../tests/fixtures/sentinel/cache-live.json';
+import type { MetricDefinition, SentinelCache, SentinelHealthAnswer, SentinelSample } from './api';
 
 /**
- * What `GET /api/sentinel/metrics` returned on a Modalix DevKit (59 metrics, 2026-09-24), in the
- * API's shape. The capture has no descriptions and no `order`, so the descriptions are null and
- * the order is the groups' own; its history is empty, as an answer to `history=0` is.
+ * What `GET .../sentinel/cache` answered on a Modalix DevKit (59 metrics, 2026-09-24), reduced to
+ * its newest sample. The capture has no descriptions.
  */
-export const METRICS_LIVE: SentinelMetrics = {
-  board: metricsLive.board as BoardSummary,
-  generation: metricsLive.generation,
-  sampled_at: metricsLive.sampled_at,
-  version: metricsLive.version,
-  counts: metricsLive.counts,
-  highlights: metricsLive.highlights,
-  groups: metricsLive.groups.map((group) => ({
-    name: group.name,
-    metrics: group.metrics.map((metric) => ({
-      ...metric,
-      description: null,
-      status: metric.status as MetricStatus,
-    })),
-  })),
-  order: liveMetrics.map((metric) => metric.key),
-  history: { timestamps: [], series: {}, full: true, epoch: 1 },
-};
+export const CACHE_LIVE: SentinelCache = cacheLive;
+
+/** The capture's 59 metric definitions, in Sentinel's order. */
+export const LIVE_METRICS: readonly MetricDefinition[] = CACHE_LIVE.metrics ?? [];
+
+/** The capture's readings, by key. */
+export const LIVE_VALUES: Readonly<Record<string, number | null>> = CACHE_LIVE.samples[0].values;
+
+/** The capture's newest sample's time. */
+export const LIVE_SAMPLED_AT: string = CACHE_LIVE.samples[0].timestamp;
 
 export interface HistoryOptions {
   /** The first sample's time. */
   start?: string;
   /** Milliseconds between samples; Sentinel samples every 2 s. */
   stepMs?: number;
+  /** Whether the answer replaces what the page holds; true by default. */
   full?: boolean;
-  epoch?: number;
-  /** The reading of a metric at sample `i`, `null` for one not taken. Flat at its current value by default. */
-  values?: (key: string, i: number) => number | null;
+  /** The definitions the answer carries; the capture's by default. */
+  metrics?: readonly MetricDefinition[];
+  /**
+   * The reading of a metric at sample `i`, `null` for one not taken, `undefined` for one the
+   * sample leaves out. Flat at its captured reading by default.
+   */
+  values?: (key: string, i: number) => number | null | undefined;
 }
 
 /**
- * `metrics` with `samples` samples of history for every metric in `order`, the newest at the
- * time `sampled_at` names. `start` is the first one's time, so a window that continues another
- * starts after the other's newest.
+ * A cache answer with `samples` samples of every defined metric, from `start` on. A window that
+ * continues another starts after the other's newest.
  */
-export function withHistory(
-  metrics: SentinelMetrics,
+export function cacheWith(
   samples: number,
   {
     start = '2026-10-24T10:00:00Z',
     stepMs = 2000,
     full = true,
-    epoch = 1,
-    values = (key) => current(metrics, key),
+    metrics = LIVE_METRICS,
+    values = (key) => LIVE_VALUES[key] ?? null,
   }: HistoryOptions = {},
-): SentinelMetrics {
+): SentinelCache {
   const first = Date.parse(start);
-  const timestamps = Array.from({ length: samples }, (_, i) =>
-    new Date(first + i * stepMs).toISOString(),
-  );
-  const series: Record<string, (number | null)[]> = {};
-  for (const key of metrics.order) {
-    series[key] = Array.from({ length: samples }, (_, i) => values(key, i));
-  }
-  return {
-    ...metrics,
-    sampled_at: timestamps.at(-1) ?? metrics.sampled_at,
-    history: { timestamps, series, full, epoch },
-  };
+  const taken: SentinelSample[] = Array.from({ length: samples }, (_, i) => {
+    const readings: Record<string, number | null> = {};
+    for (const { key } of metrics) {
+      const value = values(key, i);
+      if (value !== undefined) readings[key] = value;
+    }
+    return { timestamp: new Date(first + i * stepMs).toISOString(), values: readings };
+  });
+  return { version: CACHE_LIVE.version, metrics: [...metrics], samples: taken, errors: [], full };
 }
 
-function current(metrics: SentinelMetrics, key: string): number | null {
-  for (const group of metrics.groups) {
-    const metric = group.metrics.find((candidate) => candidate.key === key);
-    if (metric) return metric.value;
-  }
-  return null;
+/** An incremental answer (`full` false): `samples` samples from `start` on. */
+export function nextSamples(
+  samples: number,
+  start: string,
+  options: HistoryOptions = {},
+): SentinelCache {
+  return cacheWith(samples, { ...options, start, full: false });
 }
 
-/** A running Sentinel on the board of `METRICS_LIVE`, unless `overrides` say otherwise. */
-export function sentinelState(overrides: Partial<SentinelState> = {}): SentinelState {
+/** A running Sentinel's health, unless `overrides` say otherwise. */
+export function sentinelHealth(
+  overrides: Partial<SentinelHealthAnswer['health']> = {},
+  startedAt: string | null = '2026-10-24T09:30:00Z',
+): SentinelHealthAnswer {
   return {
-    board: METRICS_LIVE.board,
-    generation: METRICS_LIVE.generation,
-    available: true,
-    schema: 1,
-    version: 'main:80ab7de4da31',
-    status: { state: 'ready', error: null },
-    daemon: {
-      installed: true,
-      healthy: true,
-      service: 'active',
-      socket: true,
-      socket_path: '/run/simaai-sentinel/api.sock',
-      sima_cli: '/usr/bin/sima-cli',
-      instance_id: 'f3c1a9e0b27d4c5e8a61',
-      started_at: '2026-10-24T09:30:00+00:00',
-    },
     health: {
       version: 'main:80ab7de4da31',
       cached_samples: 240,
-      metric_count: METRICS_LIVE.counts.total,
+      metric_count: LIVE_METRICS.length,
       errors: [],
-      latest_sample_at: METRICS_LIVE.sampled_at,
-      updated_at: METRICS_LIVE.sampled_at,
+      latest_sample_at: LIVE_SAMPLED_AT,
+      updated_at: LIVE_SAMPLED_AT,
       active_trace: null,
+      ...overrides,
     },
-    ...overrides,
+    started_at: startedAt,
   };
+}
+
+/**
+ * The error body of a Sentinel failure as the server answers it: `sentinel_missing` with the
+ * command that installs it in the hint, by default.
+ */
+export function sentinelError(
+  code = 'sentinel_missing',
+  message = 'Sentinel is not installed on sima@192.168.1.20.',
+  hint = 'Install it on the board with `sima-cli neat install sentinel`, then retry.',
+): { error: { code: string; message: string; hint: string } } {
+  return { error: { code, message, hint } };
 }

@@ -15,10 +15,6 @@
               @if (failure.hint) {
                 <p neatNote>{{ failure.hint }}</p>
               }
-              <!-- What the board said, such as the CLI's output, keeps its lines. -->
-              @if (failure.detail) {
-                <pre>{{ failure.detail }}</pre>
-              }
             </li>
           }
         </ul>

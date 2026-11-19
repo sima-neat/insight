@@ -1,92 +1,85 @@
 /**
- * Response shapes of Flask's `/api/sentinel*` endpoints that the Stats page reads: the daemon
- * state, the install and the metrics (Inv-S §7.1 to §7.3; `neat_insight/sentinel/api.py`,
- * `install.py` and `metrics.py`). Types only: `SentinelTelemetry` and `SentinelInstall` call the
- * endpoints.
+ * The bodies of the board's Sentinel routes (`/api/boards/<id>/sentinel/...`) that the Stats page
+ * reads. Insight passes Sentinel's answers through as Sentinel gives them, without its schema
+ * marker, so most of these are Sentinel's own shapes (its public API), typed here as far as the
+ * page reads them: the generated `SentinelBody` is an open object. Types only:
+ * `SentinelTelemetry`, `SentinelRuns` and the Compare view call the routes.
  *
- * A failed request answers a board error body (`BoardErrorBody` in `board/api.ts`), which
- * `failureOf` in `sentinel-failure.ts` reads. Besides the board's codes these endpoints add
- * `sentinel_missing`, `sentinel_stopped`, `sentinel_denied`, `sentinel_schema`, `sentinel_failed`,
- * `already_installed`, `invalid_request`, `request_too_large`, `response_too_large` and
- * `stale_snapshot`, and every body carries the `generation` it was answered under.
- *
- * The traces and runs endpoints (`neat_insight/sentinel/api.py`; the shapes are Sentinel's own,
- * `runs.rs` and `api.rs` in its repo) answer the board envelope with Sentinel's body, minus its
- * schema marker, under `sentinel`.
- *
- * `GET /api/metrics` (this computer, not the board) is typed beside System Info, which reads it.
+ * A failed request answers the error shape (with a board's `host_key` or `command`), which
+ * `failureOf` in `sentinel-failure.ts` reads. A missing daemon is an error too: 502
+ * `sentinel_missing` (not installed; the hint holds the command that installs it),
+ * `sentinel_stopped`, `sentinel_denied`, `sentinel_schema`, `sentinel_outdated` or
+ * `sentinel_failed`.
  */
 
-import type { BoardErrorBody, BoardSummary } from '../board/api';
+export type { RunDeleted, TraceRequest } from '../api.generated';
 
 /**
- * What the board's service manager says about Sentinel. `missing` is not installed, `stopped` is
- * installed but not running, and `error` is a daemon that is up but does not answer (or whose
- * socket is gone).
+ * Sentinel's own health (`/v1/health`). `errors` are the daemon's collector failures, as strings
+ * or as objects with an `error` or a `message`.
  */
-export type DaemonState = 'ready' | 'missing' | 'stopped' | 'error';
+export interface SentinelHealthBody {
+  version?: string | null;
+  cached_samples?: number;
+  metric_count?: number;
+  errors?: (string | { error?: string; message?: string } | null)[];
+  latest_sample_at?: string | null;
+  updated_at?: string | null;
+  /** The trace being recorded, if any; the traces route reads it in full. */
+  active_trace?: Record<string, unknown> | null;
+}
 
-/** The daemon as the board's status script reads it (`install.status`). */
-export interface SentinelDaemon {
-  installed: boolean;
-  /** Running with its API socket present. */
-  healthy: boolean;
-  /** The systemd state: `active`, `inactive`, `failed`, ... or `unknown`. */
-  service: string;
-  socket: boolean;
-  socket_path: string;
-  /** Where `sima-cli` is on the board; null when it is not there, and Insight cannot install. */
-  sima_cli: string | null;
-  /** systemd's id for the daemon's current run; null while it is not active. */
-  instance_id: string | null;
-  /** ISO time the daemon started, on Insight's clock; null while it is not active. */
+/** `GET .../sentinel/health`: Sentinel's health and when its service started, on Insight's clock. */
+export interface SentinelHealthAnswer {
+  health: SentinelHealthBody;
+  /** Null when the board's service manager does not say. */
   started_at: string | null;
 }
 
 /**
- * Sentinel's own health body, as it sends it (minus its schema marker). `errors` are the daemon's
- * collector failures, as strings or as objects with an `error` or a `message`.
+ * One of Sentinel's metric definitions (`/v1/metrics`, and the cache's `metrics`). `unit` is
+ * Sentinel's spelling (`C`, `%`, `W`, `MB`, `MB/s`, `load`); the thresholds are null where
+ * Sentinel defines none. Any field but `key` may be missing.
  */
-export interface SentinelHealth {
-  version: string | null;
-  cached_samples: number;
-  metric_count: number;
-  errors: (string | { error?: string; message?: string } | null)[];
-  latest_sample_at: string | null;
-  updated_at: string | null;
-  /** The trace being recorded, if any; the traces endpoint reads it in full. */
-  active_trace: Record<string, unknown> | null;
+export interface MetricDefinition {
+  key: string;
+  label?: string | null;
+  short?: string | null;
+  unit?: string | null;
+  description?: string | null;
+  group?: string | null;
+  warn?: number | null;
+  critical?: number | null;
 }
 
-/** `GET /api/sentinel`. */
-export interface SentinelState {
-  board: BoardSummary;
-  generation: number;
-  /** Health answered with a schema Insight understands. */
-  available: boolean;
-  /** The schema Insight understands. */
-  schema: number;
-  version: string | null;
-  status: { state: DaemonState; error: BoardErrorBody | null };
-  daemon: SentinelDaemon;
-  health: SentinelHealth | null;
+/** One of Sentinel's samples: every metric it read at `timestamp`, null for one it could not. */
+export interface SentinelSample {
+  timestamp: string;
+  values: Record<string, number | null>;
 }
 
-/** `POST /api/sentinel/install`: the daemon as it is afterwards, and the installer's output. */
-export interface SentinelInstallResult {
-  board: BoardSummary;
-  generation: number;
-  daemon: SentinelDaemon;
-  log: string;
+/**
+ * `GET .../sentinel/cache`, the Live view's one read: Sentinel's `/v1/cache` (its definitions, its
+ * recent samples oldest first, at most 240, and its collector `errors`) with `full`. Asked with
+ * `after` (the newest sample the page holds), it holds only the newer samples and `full` is false;
+ * `full` true means its samples replace what the page holds (no `after`, a daemon that restarted,
+ * a page that fell too far behind, a board clock that stepped back).
+ */
+export interface SentinelCache {
+  version?: string | null;
+  metrics?: MetricDefinition[];
+  samples: SentinelSample[];
+  errors?: unknown[];
+  full: boolean;
 }
 
 /** `unavailable` is a metric the board did not measure, which is never "ok" and never zero. */
 export type MetricStatus = 'ok' | 'warn' | 'critical' | 'unavailable';
 
 /**
- * One metric: Sentinel's definition joined with its latest value. `unit` is Sentinel's spelling
- * (`C`, `%`, `W`, `MB`, `MB/s`, `load`), absent for a plain number; the thresholds are null where
- * Sentinel defines none. `value` is null when the board did not measure it.
+ * One metric as the page shows it: Sentinel's definition, with the fallbacks a definition lacks
+ * (`metrics.ts`), joined with its newest reading and that reading's status. `value` is null when
+ * the board did not measure it.
  */
 export interface SentinelMetric {
   key: string;
@@ -102,53 +95,7 @@ export interface SentinelMetric {
 }
 
 /**
- * Sentinel's recent samples, aligned: `series[key][i]` was measured at `timestamps[i]`, `null`
- * where it was not (a `null` timestamp is a sample without a time).
- *
- * With `after` and `epoch` in the request the answer holds only the samples newer than `after`,
- * unless `full`: then it replaces the caller's window. The backend answers `full` for a request
- * without `after`, one naming another `epoch`, one whose `after` it no longer holds, and one with
- * more newer samples than its `history` limit. `epoch` names which history it is of; it changes
- * when the history restarts (another board, a daemon restart, a polling gap, a clock step) and when
- * a reseed adds samples before the ones held.
- */
-export interface MetricsHistory {
-  timestamps: (string | null)[];
-  series: Record<string, (number | null)[]>;
-  full: boolean;
-  epoch: number;
-}
-
-/** `GET /api/sentinel/metrics`. */
-export interface SentinelMetrics {
-  board: BoardSummary;
-  generation: number;
-  /** The newest sample's timestamp; null before the daemon took one. */
-  sampled_at: string | null;
-  version: string | null;
-  counts: { total: number; unavailable: number; warn: number; critical: number };
-  /** The keys the page leads with. */
-  highlights: string[];
-  /** Sorted by group name. */
-  groups: { name: string; metrics: SentinelMetric[] }[];
-  /** Every key in Sentinel's own order, which its ops view lists in. */
-  order: string[];
-  history: MetricsHistory;
-}
-
-/**
- * The query of `GET /api/sentinel/metrics`: the window to hold (at most 240 samples) and, once
- * the caller holds some, the newest timestamp and the epoch they are of, so the answer holds only
- * what is newer.
- */
-export interface MetricsQuery {
-  history: number;
-  after?: string;
-  epoch?: number;
-}
-
-/**
- * A run as the list shows it (`GET /api/sentinel/runs`, and the stop answer's `summary`). It holds
+ * A run as the list shows it (`GET .../sentinel/runs`, and the stop answer's `summary`). It holds
  * no note or tags: those are in the run's metadata. A run still being recorded has a null
  * `ended_at`, and the totals are of the samples taken so far.
  */
@@ -180,8 +127,8 @@ export interface RunMetadata {
 
 /**
  * A metric as a run recorded it: the definition, without a reading or a status. Sentinel stores
- * `unit` and `description` as plain strings and Insight passes a run through unchanged, so a
- * metric with neither has "" (the live metrics, which Insight rebuilds, use null for none).
+ * `unit` and `description` as plain strings, so a metric with neither has "" (the live metrics
+ * use null for none).
  */
 export interface RunMetricDefinition {
   key: string;
@@ -200,9 +147,9 @@ export interface RunSample {
   values: Record<string, number | null>;
 }
 
-/** `GET /api/sentinel/runs/<id>`: a run in full. */
+/** `GET .../sentinel/runs/<id>`: a run in full. */
 export interface SavedRun {
-  /** Sentinel's file format; the run endpoint drops it, a raw comparison's runs keep it. */
+  /** Sentinel's file format; the run route drops it, a raw comparison's runs keep it. */
   schema?: number;
   metadata: RunMetadata;
   metrics: RunMetricDefinition[];
@@ -228,7 +175,7 @@ export interface RunTotals {
 }
 
 /**
- * `GET /api/sentinel/compare?raw=1`, keyed by run id. `runs` are full runs (without `raw` they
+ * `GET .../sentinel/compare?raw=true`, keyed by run id. `runs` are full runs (without `raw` they
  * are the metadata only). Each run's `baseline_deltas_pct` is its mean's change against the
  * baseline's, in percent; null where either run has no mean for the metric.
  */
@@ -240,38 +187,23 @@ export interface CompareExport {
   baseline_deltas_pct: Record<string, Record<string, number | null>>;
 }
 
-/** The body of `POST /api/sentinel/traces`; the server trims the name and checks every limit. */
-export interface TraceRequest {
-  name: string;
-  note?: string;
-  tags?: string[];
+/** `GET .../sentinel/runs`, and the `runs` of a delete's answer. */
+export interface RunsBody {
+  runs: RunSummary[];
 }
-
-/** What every traces and runs answer holds besides Sentinel's own body. */
-export interface SentinelAnswer<T> {
-  board: BoardSummary;
-  generation: number;
-  sentinel: T;
-}
-
-/** `GET /api/sentinel/runs`, and the answer of a delete (see `DeleteAnswer`). */
-export type RunsAnswer = SentinelAnswer<{ runs: RunSummary[] }>;
 
 /**
- * The trace being recorded: `GET /api/sentinel/traces` (null when none is, with its summary so
- * far otherwise), the start answer (a `trace`, no summary) and the stop answer (the finished
- * trace with the summary of its run).
+ * The trace being recorded: `GET .../sentinel/traces/active` (both null when none is, with its
+ * summary so far otherwise), the start answer (a `trace`, no summary) and the stop answer (the
+ * finished trace with the summary of its run).
  */
-export type TraceAnswer = SentinelAnswer<{
+export interface TraceBody {
   trace: RunMetadata | null;
   summary?: RunSummary | null;
-}>;
+}
 
-/** `GET /api/sentinel/runs/<id>`. */
-export type RunAnswer = SentinelAnswer<SavedRun>;
-
-/** `DELETE /api/sentinel/runs/<id>`: the run that went and the runs that are left. */
-export type DeleteAnswer = RunsAnswer & { deleted: { id: string; name: string } };
-
-/** `GET /api/sentinel/compare?raw=1`. */
-export type CompareAnswer = SentinelAnswer<CompareExport>;
+/** `DELETE .../sentinel/runs/<id>`: the run that went and the runs that are left. */
+export interface DeleteAnswer {
+  deleted: { id: string; name: string };
+  runs: RunsBody;
+}

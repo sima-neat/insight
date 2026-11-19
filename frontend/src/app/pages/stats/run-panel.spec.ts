@@ -179,7 +179,7 @@ describe('RunPanel', () => {
     await render();
     expect(text(root().querySelector('p[role="status"]'))).toBe('Reading the run from the board…');
 
-    const failure = failureOf(new BoardProblem('Gone.', 'sentinel_failed', 'Restart it.', {}), 7);
+    const failure = failureOf(new BoardProblem('Gone.', 'sentinel_failed', 'Restart it.'), 'local');
     answer({ failure });
     await settle();
     const callout = root().querySelector('neat-callout')!;
@@ -195,7 +195,7 @@ describe('RunPanel', () => {
   });
 
   it('Retry waits, and says so, while the run is read again', async () => {
-    const failure = failureOf(new BoardProblem('Gone.', 'sentinel_failed', '', {}), 7);
+    const failure = failureOf(new BoardProblem('Gone.', 'sentinel_failed', ''), 'local');
     runs.readRun.mockResolvedValue({ failure });
     await render();
     const retry = () =>

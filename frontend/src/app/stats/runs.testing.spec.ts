@@ -4,11 +4,11 @@ import {
   RECORDING_RUN,
   RUNS_LIST,
   SAVED_RUN,
+  deleteAnswer,
   runsAnswer,
   savedRun,
   traceAnswer,
 } from './runs.testing';
-import { METRICS_LIVE } from './stats.testing';
 import traceStopped from '../../../../tests/fixtures/sentinel/trace-stopped.json';
 import tracesActive from '../../../../tests/fixtures/sentinel/traces-active.json';
 
@@ -41,20 +41,19 @@ describe('the runs fixtures', () => {
     expect(traceStopped.summary.duration_ms).toBeGreaterThan(RECORDING_RUN.duration_ms);
   });
 
-  it('the answers carry the board and generation of the live capture', () => {
-    expect(runsAnswer()).toEqual({
-      board: METRICS_LIVE.board,
-      generation: METRICS_LIVE.generation,
-      sentinel: { runs: RUNS_LIST },
-    });
-    expect(runsAnswer([], 9).generation).toBe(9);
-    expect(traceAnswer(null, null).sentinel).toEqual({ trace: null, summary: null });
-    expect(traceAnswer(ACTIVE_TRACE, RECORDING_RUN, 3)).toMatchObject({
-      generation: 3,
-      sentinel: { trace: ACTIVE_TRACE, summary: RECORDING_RUN },
+  it('the answers are Sentinel bodies as the routes pass them through', () => {
+    expect(runsAnswer()).toEqual({ runs: RUNS_LIST });
+    expect(traceAnswer(null, null)).toEqual({ trace: null, summary: null });
+    expect(traceAnswer(ACTIVE_TRACE, RECORDING_RUN)).toEqual({
+      trace: ACTIVE_TRACE,
+      summary: RECORDING_RUN,
     });
     // A start answer has no summary at all.
-    expect('summary' in traceAnswer(ACTIVE_TRACE).sentinel).toBe(false);
+    expect('summary' in traceAnswer(ACTIVE_TRACE)).toBe(false);
+    expect(deleteAnswer(RUNS_LIST[1], RUNS_LIST.slice(2))).toEqual({
+      deleted: { id: RUNS_LIST[1].id, name: RUNS_LIST[1].name },
+      runs: { runs: RUNS_LIST.slice(2) },
+    });
   });
 
   it('a saved run is the detail fixture, and overrides replace its parts', () => {

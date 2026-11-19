@@ -11,6 +11,8 @@ import {
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { NeatLevelMeter } from '@sima/neat-ui/level-meter';
+import { boardUrl } from '../board/api';
+import { DEVKIT, MANUAL } from '../board/board.testing';
 import type { MicrophoneItem, MicTestStatus } from './api';
 import { MicTest } from './mic-test';
 import {
@@ -20,10 +22,19 @@ import {
   micTestAction,
   micTestErrorAction,
 } from './mic-test-state';
-import { micTestStatus, onboardMic, readyTest, yeti } from './microphones.testing';
+import { micTestStatus, onboardMic, readyTest, testAudioUrl, yeti } from './microphones.testing';
 
-const TEST_URL = '/api/peripherals/microphones/test';
-const STOP_URL = '/api/peripherals/microphones/test/stop';
+const BOARD = DEVKIT.id;
+const TEST_URL = boardUrl(BOARD, 'microphones/test');
+const startUrl = (mic: MicrophoneItem = yeti) =>
+  boardUrl(BOARD, `microphones/${encodeURIComponent(mic.id)}/test`);
+/** The stop of test `id` of the Yeti, which names the test. */
+const stopUrl = (id: string) => `${startUrl()}/stop?test=${id}`;
+const isStop = (request: { url: string }) => request.url.endsWith('/test/stop');
+/** The error shape the server answers with. */
+const failure = (code: string, message: string, hint?: string) => ({
+  error: { code, message, ...(hint ? { hint } : {}) },
+});
 const IN_USE_HINT =
   'Stop the application that is recording from it, then test again. Insight never stops it for you.';
 
@@ -77,38 +88,42 @@ describe('MicTest', () => {
   /** Lets the promise chains behind a flushed request run. */
   const settle = () => vi.advanceTimersByTimeAsync(0);
 
-  /** Answers the status read sent now (a poll, a resume or a lookup) with the backend's test. */
-  async function answerRead(test: MicTestStatus | null): Promise<void> {
-    http.expectOne({ method: 'GET', url: TEST_URL }).flush({ test });
+  /** Answers the status read sent now (a poll, a resume or a lookup) with the board's test. */
+  async function answerRead(test: MicTestStatus | null, url = TEST_URL): Promise<void> {
+    http.expectOne({ method: 'GET', url }).flush({ test });
     await settle();
   }
 
-  /** Fails the status read sent now, as when SiMa Sentinel or the network blips. */
+  /** Fails the status read sent now, as when the network blips. */
   async function failRead(): Promise<void> {
     http
       .expectOne({ method: 'GET', url: TEST_URL })
-      .flush(
-        { error: 'Insight is restarting.', code: 'peripheral_unavailable' },
-        { status: 503, statusText: 'Service Unavailable' },
-      );
+      .flush(failure('unavailable', 'Insight is restarting.'), {
+        status: 503,
+        statusText: 'Service Unavailable',
+      });
     await settle();
   }
 
-  /** Answers the start sent last (202), after checking it names the Yeti and nothing else. */
+  /** Answers the start sent last (202), after checking it names the microphone and nothing else. */
   async function answerStart(test: MicTestStatus, mic: MicrophoneItem = yeti): Promise<void> {
-    const request = http.expectOne({ method: 'POST', url: TEST_URL });
-    // `seconds` is left to the backend's default of 30.
-    expect(request.request.body).toEqual({ id: mic.id });
+    const request = http.expectOne({ method: 'POST', url: startUrl(mic) });
+    // `seconds` is left to the server's default of 30.
+    expect(request.request.body).toEqual({});
     request.flush({ test }, { status: 202, statusText: 'Accepted' });
     await settle();
   }
 
+  /** Expects the stop of test `id`. */
+  const expectStop = (id: string) =>
+    http.expectOne((request) => request.method === 'POST' && request.urlWithParams === stopUrl(id));
+
   /** Lets the next poll go out. */
   const nextPoll = () => vi.advanceTimersByTimeAsync(MIC_TEST_POLL_MS);
 
-  /** The Yeti recording on board 3, started here, with its first level read. */
+  /** The Yeti recording on the DevKit, started here, with its first level read. */
   async function startRecording(): Promise<void> {
-    void micTest.start(yeti, 3);
+    void micTest.start(yeti, BOARD);
     await answerStart(micTestStatus());
     await nextPoll();
     await answerRead(micTestStatus({ elapsed_ms: 300, level_dbfs: -30 }));
@@ -116,53 +131,51 @@ describe('MicTest', () => {
 
   const status = () => micTest.state().status;
 
-  // #170's MicrophoneDetail.test.js: the test was keyed by `generation:mic.id:mic.record`.
+  // A test is keyed by its board, its microphone's id and its record.
 
   it('a microphone test belongs to one board: another board with the same microphone id starts afresh', async () => {
-    // Codex 4255505622: keyed by the id alone, board A's recording stayed on screen under board B.
-    void micTest.resume(yeti, 1);
+    void micTest.resume(yeti, BOARD);
     await answerRead(readyTest());
     expect(micTest.state()).toMatchObject({ status: 'done', micId: yeti.id });
 
-    void micTest.resume(yeti, 1);
+    void micTest.resume(yeti, BOARD);
     http.expectNone(TEST_URL);
     expect(status()).toBe('done');
 
-    void micTest.resume(yeti, 2);
+    // The other board's test is read from that board.
+    void micTest.resume(yeti, MANUAL.id);
     expect(micTest.state()).toEqual({ ...MIC_TEST_IDLE, micId: yeti.id });
-    await answerRead(null);
+    await answerRead(null, boardUrl(MANUAL.id, 'microphones/test'));
     expect(status()).toBe('idle');
   });
 
   it('a rescan that lists another device under the same microphone id starts the test afresh', async () => {
-    // Codex 4261034878: a replug in the same port kept the id, and the old device's recording stayed on screen.
-    void micTest.resume(yeti, 1);
+    void micTest.resume(yeti, BOARD);
     await answerRead(readyTest());
 
-    void micTest.resume({ ...yeti, device: { ...yeti.device } }, 1);
+    void micTest.resume({ ...yeti, device: { ...yeti.device } }, BOARD);
     http.expectNone(TEST_URL);
     expect(status()).toBe('done');
 
     void micTest.resume(
       { ...yeti, record: '77aa77aa77aa77aa', device: { ...yeti.device, card_index: 3 } },
-      1,
+      BOARD,
     );
     expect(status()).toBe('idle');
     await answerRead(null);
   });
 
   it('a rescan that changes only fields the page does not show still starts the test afresh', async () => {
-    // Codex 4264051724: the key read the shown device fields; the backend binds a test to the whole scanned record.
-    void micTest.resume(yeti, 1);
+    void micTest.resume(yeti, BOARD);
     await answerRead(readyTest());
 
-    void micTest.resume({ ...yeti, record: 'b2b2b2b2b2b2b2b2' }, 1);
+    void micTest.resume({ ...yeti, record: 'b2b2b2b2b2b2b2b2' }, BOARD);
     expect(status()).toBe('idle');
     await answerRead(null);
   });
 
   it('polls every 100 ms while recording and exposes the latest level; 50 failed reads end the test', async () => {
-    void micTest.start(yeti, 3);
+    void micTest.start(yeti, BOARD);
     expect(micTest.state()).toEqual({
       status: 'recording',
       test: null,
@@ -177,7 +190,7 @@ describe('MicTest', () => {
     await answerRead(micTestStatus({ elapsed_ms: 1500, level_dbfs: -20 }));
     expect(micTest.level()).toBe(-20);
     expect(micTest.elapsed()).toBe(1);
-    // The meter calls it on its own, unbound (ruling F13).
+    // The meter calls it on its own, unbound.
     const sample = micTest.level;
     expect(sample()).toBe(-20);
 
@@ -199,7 +212,7 @@ describe('MicTest', () => {
     expect(MIC_TEST_MAX_FAILURES).toBe(50);
     expect(status()).toBe('error');
     expect(micTest.state().error).toMatchObject({
-      code: 'peripheral_unavailable',
+      code: 'unavailable',
       message: 'Insight is restarting.',
     });
     expect(micTest.level()).toBeNull();
@@ -218,7 +231,7 @@ describe('MicTest', () => {
       action: 'stop',
       disabled: true,
     });
-    http.expectOne({ method: 'POST', url: STOP_URL }).error(new ProgressEvent('error'));
+    expectStop('t1').error(new ProgressEvent('error'));
     await stopping;
 
     // The board may still be recording: Stop can be retried, and the failure is said.
@@ -237,13 +250,11 @@ describe('MicTest', () => {
     expect(play).toHaveBeenCalledTimes(1);
   });
 
-  it('Stop names the test it stops by its token', async () => {
-    // Codex 4264387696: a Stop by board alone ended a test another tab had just started.
+  it('Stop names the test it stops by its id', async () => {
+    // A Stop for the board alone would end a test another tab had just started.
     await startRecording();
     const stopped = micTest.stop();
-    const request = http.expectOne({ method: 'POST', url: STOP_URL });
-    expect(request.request.body).toEqual({ token: 't1' });
-    request.flush({ test: micTestStatus() });
+    expectStop('t1').flush({ test: micTestStatus() });
     await stopped;
     // Stopping until the poll picks the result up.
     expect(micTest.stopping()).toBe(true);
@@ -253,33 +264,30 @@ describe('MicTest', () => {
     expect(micTest.stopping()).toBe(false);
   });
 
-  it('a Stop pressed before the start answered is sent once the test has its token', async () => {
-    // A finished recording is shown: its token is not the one to stop.
-    void micTest.resume(yeti, 3);
-    await answerRead(readyTest({ token: 't1' }));
-    void micTest.start(yeti, 3);
+  it('a Stop pressed before the start answered is sent once the test has its id', async () => {
+    // A finished recording is shown: its id is not the one to stop.
+    void micTest.resume(yeti, BOARD);
+    await answerRead(readyTest({ id: 't1' }));
+    void micTest.start(yeti, BOARD);
     void micTest.stop();
     expect(micTest.stopping()).toBe(true);
-    http.expectNone(STOP_URL);
+    http.expectNone(isStop);
 
-    await answerStart(micTestStatus({ token: 't9' }));
-    const request = http.expectOne({ method: 'POST', url: STOP_URL });
-    expect(request.request.body).toEqual({ token: 't9' });
-    request.flush({ test: micTestStatus({ token: 't9' }) });
+    await answerStart(micTestStatus({ id: 't9' }));
+    expectStop('t9').flush({ test: micTestStatus({ id: 't9' }) });
     await nextPoll();
-    await answerRead(readyTest({ token: 't9' }));
+    await answerRead(readyTest({ id: 't9' }));
     expect(status()).toBe('playing');
     audio.dispatchEvent(new Event('ended'));
 
     // Stop pressed while a start whose answer is then lost: the recording it began is taken up
     // and stopped, and reads "Stopping…" until that stop answers.
-    void micTest.start(yeti, 3);
+    void micTest.start(yeti, BOARD);
     void micTest.stop();
-    http.expectOne({ method: 'POST', url: TEST_URL }).error(new ProgressEvent('error'));
+    http.expectOne({ method: 'POST', url: startUrl() }).error(new ProgressEvent('error'));
     await settle();
-    await answerRead(micTestStatus({ token: 't10' }));
-    const takenUp = http.expectOne({ method: 'POST', url: STOP_URL });
-    expect(takenUp.request.body).toEqual({ token: 't10' });
+    await answerRead(micTestStatus({ id: 't10' }));
+    const takenUp = expectStop('t10');
     expect(micTest.stopping()).toBe(true);
     expect(micTestAction(status(), micTest.stopping())).toEqual({
       label: 'Stopping…',
@@ -288,19 +296,19 @@ describe('MicTest', () => {
     });
     // Pressed again meanwhile, it sends no second stop.
     void micTest.stop();
-    http.expectNone(STOP_URL);
+    http.expectNone(isStop);
     takenUp.error(new ProgressEvent('error'));
     await settle();
     expect(micTest.stopping()).toBe(false);
     expect(micTest.state()).toMatchObject({ status: 'recording', error: { code: 'network' } });
     await nextPoll();
-    await answerRead(readyTest({ token: 't10' }));
+    await answerRead(readyTest({ id: 't10' }));
     expect(status()).toBe('playing');
   });
 
   it('resume takes up a recording or a ready test for this microphone only', async () => {
     // Opened mid-recording: the recording is taken up, with its level and clock, and read on.
-    void micTest.resume(yeti, 3);
+    void micTest.resume(yeti, BOARD);
     await answerRead(micTestStatus({ elapsed_ms: 12_400, level_dbfs: -18 }));
     expect(micTest.state()).toMatchObject({ status: 'recording', micId: yeti.id });
     expect(micTest.level()).toBe(-18);
@@ -310,7 +318,7 @@ describe('MicTest', () => {
     expect(micTest.level()).toBe(-16);
 
     // Another microphone's panel: the Yeti's recording goes on on the board, but is not shown.
-    void micTest.resume(onboardMic, 3);
+    void micTest.resume(onboardMic, BOARD);
     expect(micTest.state()).toEqual({ ...MIC_TEST_IDLE, micId: onboardMic.id });
     expect(micTest.level()).toBeNull();
     await answerRead(micTestStatus({ elapsed_ms: 12_600, level_dbfs: -16 }));
@@ -320,37 +328,35 @@ describe('MicTest', () => {
     http.expectNone(TEST_URL);
 
     // Back on the Yeti, its finished recording is offered for Replay, not played by itself.
-    void micTest.resume(yeti, 3);
+    void micTest.resume(yeti, BOARD);
     await answerRead(readyTest());
     expect(micTest.state()).toMatchObject({ status: 'done', micId: yeti.id, test: readyTest() });
     expect(play).not.toHaveBeenCalled();
 
     // A failed test is not taken up.
-    void micTest.resume(onboardMic, 3);
-    await answerRead(micTestStatus({ id: onboardMic.id, state: 'failed' }));
+    void micTest.resume(onboardMic, BOARD);
+    await answerRead(micTestStatus({ microphone: onboardMic.id, state: 'failed' }));
     expect(status()).toBe('idle');
 
     // A failed read is retried; one that says the test is gone leaves the panel idle.
-    void micTest.resume(yeti, 3);
+    void micTest.resume(yeti, BOARD);
     await failRead();
     await nextPoll();
     await answerRead(micTestStatus({ elapsed_ms: 20_000 }));
     expect(status()).toBe('recording');
-    void micTest.resume(onboardMic, 3);
-    http
-      .expectOne(TEST_URL)
-      .flush(
-        { error: 'The board changed.', code: 'stale_snapshot' },
-        { status: 409, statusText: 'Conflict' },
-      );
+    void micTest.resume(onboardMic, BOARD);
+    http.expectOne(TEST_URL).flush(failure('not_found', `${BOARD} is not the selected board.`), {
+      status: 404,
+      statusText: 'Not Found',
+    });
     await settle();
     expect(micTest.state()).toEqual({ ...MIC_TEST_IDLE, micId: onboardMic.id });
   });
 
   it('a resume that answers after Test was pressed does not replace the test started here', async () => {
-    void micTest.resume(yeti, 3);
-    void micTest.start(yeti, 3);
-    await answerRead(readyTest({ token: 'old' }));
+    void micTest.resume(yeti, BOARD);
+    void micTest.start(yeti, BOARD);
+    await answerRead(readyTest({ id: 'old' }));
     expect(micTest.state()).toMatchObject({ status: 'recording', test: null });
     await answerStart(micTestStatus());
     await nextPoll();
@@ -363,7 +369,7 @@ describe('MicTest', () => {
     await nextPoll();
     await answerRead(readyTest());
     expect(micTest.state()).toMatchObject({ status: 'playing', test: readyTest() });
-    expect(new URL(audio.src).pathname).toBe('/api/peripherals/microphones/test/t1.wav');
+    expect(audio.src).toBe(new URL(testAudioUrl('t1'), document.baseURI).href);
     expect(play).toHaveBeenCalledTimes(1);
     // While it plays, the meter follows the playback level, not the recording's.
     expect(micTest.level()).toBeNull();
@@ -378,16 +384,16 @@ describe('MicTest', () => {
     micTest.replay();
     expect(status()).toBe('playing');
     expect(audio.currentTime).toBe(0);
-    expect(new URL(audio.src).pathname).toBe('/api/peripherals/microphones/test/t1.wav');
+    expect(audio.src).toBe(new URL(testAudioUrl('t1'), document.baseURI).href);
     expect(play).toHaveBeenCalledTimes(2);
 
     // Stop playing.
     await micTest.stop();
     expect(pause).toHaveBeenCalled();
     expect(status()).toBe('done');
-    http.expectNone(STOP_URL);
+    http.expectNone(isStop);
 
-    // A seek the browser refuses does not fail the Replay (#170's guard).
+    // A seek the browser refuses does not fail the Replay.
     Object.defineProperty(audio, 'currentTime', {
       configurable: true,
       get: () => 4.2,
@@ -421,34 +427,34 @@ describe('MicTest', () => {
     expect(status()).toBe('done');
 
     // A recording that finished while no panel showed it is offered for Replay.
-    void micTest.start(yeti, 3);
-    await answerStart(micTestStatus({ token: 't2' }));
+    void micTest.start(yeti, BOARD);
+    await answerStart(micTestStatus({ id: 't2' }));
     await nextPoll();
-    await answerRead(readyTest({ token: 't2' }));
+    await answerRead(readyTest({ id: 't2' }));
     expect(status()).toBe('done');
   });
 
-  it("a start that may have run adopts the backend's test; one the backend refused shows its error", async () => {
-    // The answer was lost: the backend's recording for this microphone is the one it began.
-    void micTest.start(yeti, 3);
-    http.expectOne({ method: 'POST', url: TEST_URL }).error(new ProgressEvent('error'));
+  it("a start that may have run adopts the board's test; one the board refused shows its error", async () => {
+    // The answer was lost: the board's recording for this microphone is the one it began.
+    void micTest.start(yeti, BOARD);
+    http.expectOne({ method: 'POST', url: startUrl() }).error(new ProgressEvent('error'));
     await settle();
-    await answerRead(micTestStatus({ token: 'new', elapsed_ms: 400, level_dbfs: -30 }));
+    await answerRead(micTestStatus({ id: 'new', elapsed_ms: 400, level_dbfs: -30 }));
     expect(micTest.state()).toMatchObject({ status: 'recording', error: null });
     expect(micTest.level()).toBe(-30);
     await nextPoll();
-    await answerRead(readyTest({ token: 'new' }));
+    await answerRead(readyTest({ id: 'new' }));
     expect(status()).toBe('playing');
     audio.dispatchEvent(new Event('ended'));
 
-    // A microphone in use: the backend answered, so its error stands, with the panel's hint.
-    void micTest.start(yeti, 3);
+    // A microphone in use: the server answered, so its error stands, with the panel's hint.
+    void micTest.start(yeti, BOARD);
     http
-      .expectOne({ method: 'POST', url: TEST_URL })
-      .flush(
-        { error: 'Open in arecord (pid 812).', code: 'microphone_in_use', hint: IN_USE_HINT },
-        { status: 409, statusText: 'Conflict' },
-      );
+      .expectOne({ method: 'POST', url: startUrl() })
+      .flush(failure('microphone_in_use', 'Open in arecord (pid 812).', IN_USE_HINT), {
+        status: 409,
+        statusText: 'Conflict',
+      });
     await settle();
     http.expectNone(TEST_URL);
     const { error } = micTest.state();
@@ -461,17 +467,19 @@ describe('MicTest', () => {
     expect(micTestAction(status(), micTest.stopping()).label).toBe('Test microphone');
 
     // Refused because the board records already, for another microphone: the refusal stands.
-    void micTest.start(onboardMic, 3);
-    http.expectOne({ method: 'POST', url: TEST_URL }).flush(
-      {
-        error: 'A microphone test is already recording.',
-        code: 'test_running',
-        hint: 'Wait for it to finish.',
-      },
-      { status: 409, statusText: 'Conflict' },
-    );
+    void micTest.start(onboardMic, BOARD);
+    http
+      .expectOne({ method: 'POST', url: startUrl(onboardMic) })
+      .flush(
+        failure(
+          'test_running',
+          'A microphone test is already recording.',
+          'Wait for it to finish.',
+        ),
+        { status: 409, statusText: 'Conflict' },
+      );
     await settle();
-    await answerRead(micTestStatus({ token: 'yeti' }));
+    await answerRead(micTestStatus({ id: 'yeti' }));
     expect(micTest.state()).toMatchObject({
       status: 'error',
       micId: onboardMic.id,
@@ -480,7 +488,7 @@ describe('MicTest', () => {
   });
 
   it('a test that ends early or fails on the board says so, and offers the test again', async () => {
-    // Gone from the backend (an Insight restart, a newer test from another tab).
+    // Gone from the board (an Insight restart, a newer test from another tab).
     await startRecording();
     await nextPoll();
     await answerRead(null);
@@ -492,17 +500,17 @@ describe('MicTest', () => {
 
     await startRecording();
     await nextPoll();
-    await answerRead(micTestStatus({ token: 'another' }));
+    await answerRead(micTestStatus({ id: 'another' }));
     expect(micTest.state().error?.message).toBe('The test ended before it finished.');
 
-    // Stopped before anything was recorded: the backend's failure, with its hint.
+    // Stopped before anything was recorded: the board's failure, with its hint.
     await startRecording();
     await nextPoll();
     await answerRead(
       micTestStatus({
         state: 'failed',
         error: {
-          error: 'The test was stopped before anything was recorded.',
+          message: 'The test was stopped before anything was recorded.',
           code: 'stopped_early',
           hint: 'Test again and speak.',
         },
@@ -521,16 +529,14 @@ describe('MicTest', () => {
     // A status error that means the test is gone ends it at once, with no retries.
     await startRecording();
     await nextPoll();
-    http.expectOne(TEST_URL).flush(
-      {
-        error: 'The board changed.',
-        code: 'stale_snapshot',
-        hint: 'Click Refresh, then test again.',
-      },
-      { status: 409, statusText: 'Conflict' },
-    );
+    http
+      .expectOne(TEST_URL)
+      .flush(failure('board_changed', 'The board was replaced while this request was running.'), {
+        status: 409,
+        statusText: 'Conflict',
+      });
     await settle();
-    expect(micTest.state()).toMatchObject({ status: 'error', error: { code: 'stale_snapshot' } });
+    expect(micTest.state()).toMatchObject({ status: 'error', error: { code: 'board_changed' } });
     expect(micTestErrorAction(micTest.state().error)).toBe('Refresh, then test again.');
   });
 
@@ -549,10 +555,10 @@ describe('MicTest', () => {
     leave(first);
     await vi.advanceTimersByTimeAsync(MIC_TEST_POLL_MS * 10);
     http.expectNone(TEST_URL);
-    http.expectNone(STOP_URL); // the board's recording is not stopped
+    http.expectNone(isStop); // the board's recording is not stopped
 
     const next = visit().micTest;
-    void next.resume(yeti, 3);
+    void next.resume(yeti, BOARD);
     await answerRead(micTestStatus({ elapsed_ms: 9_000, level_dbfs: -21 }));
     expect(next.state()).toMatchObject({ status: 'recording', micId: yeti.id });
     expect(next.elapsed()).toBe(9);
@@ -585,7 +591,7 @@ class FakeAnimationFrames {
   }
 }
 
-/** The microphone panel's meter as Task 16 binds it, on a page that provides the test. */
+/** The microphone panel's meter as the panel binds it, on a page that provides the test. */
 @Component({
   imports: [NeatLevelMeter],
   providers: [MicTest],
@@ -611,7 +617,7 @@ describe('MicTest with the kit level meter', () => {
     vi.unstubAllGlobals();
   });
 
-  it('the meter samples the recording level every frame without a change detection (ruling Q3)', async () => {
+  it('the meter samples the recording level every frame without a change detection', async () => {
     // Fake timeouts keep the test's own 100 ms poll from going out mid-count; Angular's scheduler
     // races a timeout against a frame, so a pass it schedules runs on `drain` or `frames.run`.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -623,7 +629,7 @@ describe('MicTest with the kit level meter', () => {
     const http = TestBed.inject(HttpTestingController);
     const fixture = TestBed.createComponent(MeterHost);
     const { micTest } = fixture.componentInstance;
-    void micTest.resume(yeti, 3);
+    void micTest.resume(yeti, BOARD);
     http.expectOne(TEST_URL).flush({ test: micTestStatus({ level_dbfs: -5 }) });
     await drain();
 

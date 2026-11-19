@@ -37,15 +37,14 @@ import { createPlaybackLevel, type PlaybackLevel } from '../../peripherals/playb
 import { DeviceDetails } from './device-details';
 import { DeviceErrors } from './device-errors';
 
-/** The microphone and board a test is shown for; another of either starts afresh (ruling F12). */
+/** The microphone and board a test is shown for; another of either starts afresh. */
 interface ShownTest {
   microphone: MicrophoneItem;
-  generation: number;
+  board: string;
 }
 
 /**
- * The selected microphone in Peripherals' side panel (spec, "Microphone panel"; #170's
- * `MicrophoneDetail`, copy per Inv-PB §2.4), top to bottom: its name and chip, "Part of …" when
+ * The selected microphone in Peripherals' side panel, top to bottom: its name and chip, "Part of …" when
  * the same USB device is a camera too, the capture formats, the microphone test, then the
  * collapsed Details.
  *
@@ -56,7 +55,7 @@ interface ShownTest {
  * recording to finish, for the next opening to take up.
  *
  * Neat Core has no audio input node, so there is no mode to pick and nothing to export: the panel
- * shows what the board reports and a recording to listen to (as #170).
+ * shows what the board reports and a recording to listen to.
  */
 @Component({
   selector: 'app-microphone-panel',
@@ -79,7 +78,7 @@ interface ShownTest {
 })
 export class MicrophonePanel {
   readonly microphone = input.required<MicrophoneItem>();
-  /** The microphone's row chip in the device list, which the title repeats (ruling F23). */
+  /** The microphone's row chip in the device list, which the title repeats. */
   readonly chip = input.required<DeviceChip>();
 
   private readonly board = inject(BoardService);
@@ -88,7 +87,7 @@ export class MicrophonePanel {
 
   /**
    * The playback's level for the meter, made on the first click that leads to a playback and
-   * kept for every playback in this panel's `<audio>` (ruling F11); null before.
+   * kept for every playback in this panel's `<audio>`; null before.
    */
   private playback: PlaybackLevel | null = null;
   /** Reads the playback's level for the meter, which calls it unbound once per frame. */
@@ -105,27 +104,27 @@ export class MicrophonePanel {
   );
 
   /**
-   * Which test this panel shows: compared by the microphone's id and `record` and the board's
-   * generation, so that a Refresh listing the same device does not start the test afresh (and
-   * clear an error it shows), while another device under this id, or another board, does.
+   * Which test this panel shows: compared by the microphone's id and `record` and the board's id,
+   * so that a Refresh listing the same device does not start the test afresh (and clear an error
+   * it shows), while another device under this id, or another board, does.
    */
   private readonly shown = computed<ShownTest | null>(
     () => {
-      const generation = this.board.state()?.generation;
-      return generation === undefined ? null : { microphone: this.microphone(), generation };
+      const board = this.board.id();
+      return board === null ? null : { microphone: this.microphone(), board };
     },
     {
       equal: (a, b) =>
         a?.microphone.id === b?.microphone.id &&
         a?.microphone.record === b?.microphone.record &&
-        a?.generation === b?.generation,
+        a?.board === b?.board,
     },
   );
 
   /**
    * The page's test, which is this microphone's: the panel's `resume` (below) runs before the
    * panel first renders, and starts the test afresh when it was another microphone's. The page
-   * shows device panels only once the board is read, so a generation is there to resume on.
+   * shows device panels only once a board is selected, so there is a board to resume on.
    */
   protected readonly view = this.micTest.state;
   protected readonly action = computed(() =>
@@ -148,7 +147,7 @@ export class MicrophonePanel {
         return null;
     }
   });
-  /** #170's status lines for screen readers; the caption ticks, so it is not a live region. */
+  /** The status lines for screen readers; the caption ticks, so it is not a live region. */
   protected readonly announcement = computed(() => {
     switch (this.view().status) {
       case 'recording':
@@ -159,7 +158,7 @@ export class MicrophonePanel {
         return '';
     }
   });
-  /** Said once the playback is over, as #170 did. */
+  /** Said once the playback is over. */
   protected readonly silenceNotice = computed(() => {
     const view = this.view();
     return view.status === 'done' ? micLevelNotice(view.test?.level) : '';
@@ -172,11 +171,11 @@ export class MicrophonePanel {
   protected readonly errorAction = computed(() => micTestErrorAction(this.error()));
 
   constructor() {
-    // On open, and for another device under this id or another board (Task 13's carry);
+    // On open, and for another device under this id or another board;
     // `resume` keeps a test already shown for exactly this microphone.
     effect(() => {
       const shown = this.shown();
-      if (shown) untracked(() => void this.micTest.resume(shown.microphone, shown.generation));
+      if (shown) untracked(() => void this.micTest.resume(shown.microphone, shown.board));
     });
     // After the render that builds this panel: the panel it replaces lets go of its own element
     // when it goes, in that same render, so the order of the two never matters.
@@ -205,7 +204,7 @@ export class MicrophonePanel {
     const shown = this.shown();
     if (!shown) return;
     this.preparePlayback();
-    void this.micTest.start(this.microphone(), shown.generation);
+    void this.micTest.start(this.microphone(), shown.board);
   }
 
   protected replay(): void {
@@ -216,7 +215,7 @@ export class MicrophonePanel {
 
   /**
    * Makes the playback level once, inside a click (`createPlaybackLevel`): a media element takes
-   * one Web Audio source in its lifetime, so one level serves every playback (ruling F11).
+   * one Web Audio source in its lifetime, so one level serves every playback.
    */
   private preparePlayback(): void {
     this.playback ??= createPlaybackLevel(this.audio().nativeElement);

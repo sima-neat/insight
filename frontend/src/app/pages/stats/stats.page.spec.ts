@@ -16,10 +16,16 @@ import { AppDialogs } from '../../app-dialogs';
 import type { BoardTarget } from '../../board/api';
 import { problemOf } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
-import { boardState, DEVKIT, FakeBoard, FakePeripherals } from '../../board/board.testing';
+import {
+  boardList,
+  boardWith,
+  DEVKIT,
+  FakeBoard,
+  FakePeripherals,
+} from '../../board/board.testing';
 import { FakeLocalStorage } from '../../fake-storage.testing';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
-import type { SentinelMetric, SentinelMetrics, SentinelState } from '../../stats/api';
+import type { MetricDefinition, SentinelCache, SentinelHealthAnswer } from '../../stats/api';
 import {
   ACTIVE_TRACE,
   COMPARE_RAW,
@@ -30,106 +36,75 @@ import {
 } from '../../stats/runs.testing';
 import { SentinelTelemetry } from '../../stats/sentinel-telemetry';
 import { StatsSession } from '../../stats/stats-session';
-import { METRICS_LIVE, sentinelState, withHistory } from '../../stats/stats.testing';
+import {
+  cacheWith,
+  LIVE_METRICS,
+  LIVE_VALUES,
+  sentinelError,
+  sentinelHealth,
+} from '../../stats/stats.testing';
 import {
   boardPowerChart,
+  cacheAfter,
   mergeTelemetry,
   metricChart,
-  metricsQuery,
   sessionCsv,
   sessionCsvFilename,
   thermalMaxChart,
 } from '../../stats/telemetry';
 import { StatsPage } from './stats.page';
 
-const STATE_URL = '/api/sentinel';
-const METRICS_URL = '/api/sentinel/metrics';
-const INSTALL_URL = '/api/sentinel/install';
-const TRACES_URL = '/api/sentinel/traces';
-const RUNS_URL = '/api/sentinel/runs';
+/** A route of a board's Sentinel; the tests start on the DevKit. */
+const sentinelUrl = (path: string, target: BoardTarget = DEVKIT) =>
+  `/api/boards/${encodeURIComponent(target.id)}/sentinel/${path}`;
+const CACHE_URL = sentinelUrl('cache');
+const TRACE_URL = sentinelUrl('traces/active');
+const RUNS_URL = sentinelUrl('runs');
 const badGateway = { status: 502, statusText: 'Bad Gateway' };
-const GENERATION = METRICS_LIVE.generation;
-const OTHER_BOARD: BoardTarget = { ...DEVKIT, host: '192.168.1.30', label: 'sima@192.168.1.30' };
+const OTHER_BOARD: BoardTarget = {
+  ...DEVKIT,
+  id: 'ssh:sima@192.168.1.30:22',
+  host: '192.168.1.30',
+  label: 'sima@192.168.1.30',
+};
 
-/** The live board's answer with `samples` samples of history, each metric flat at its reading. */
-const live = (metrics: SentinelMetrics = METRICS_LIVE, samples = 20): SentinelMetrics =>
-  withHistory(metrics, samples);
+/**
+ * The live board's cache with `samples` samples of history, each metric flat at its reading:
+ * `metrics` are the definitions it carries, and `values` the reading of each.
+ */
+const live = (
+  samples = 20,
+  {
+    metrics = LIVE_METRICS,
+    values = (key: string) => LIVE_VALUES[key] ?? null,
+  }: { metrics?: readonly MetricDefinition[]; values?: (key: string) => number | null } = {},
+): SentinelCache => cacheWith(samples, { metrics, values });
 
-/** `metrics` without the metrics `drop` names, as a board that does not report them. */
-function dropping(metrics: SentinelMetrics, drop: (key: string) => boolean): SentinelMetrics {
-  return {
-    ...metrics,
-    groups: metrics.groups
-      .map((group) => ({ ...group, metrics: group.metrics.filter((m) => !drop(m.key)) }))
-      .filter((group) => group.metrics.length),
-    order: metrics.order.filter((key) => !drop(key)),
-  };
-}
+/** The live definitions without the metrics `drop` names, as a board that does not report them. */
+const dropping = (drop: (key: string) => boolean): MetricDefinition[] =>
+  LIVE_METRICS.filter((metric) => !drop(metric.key));
 
-/** `metrics` with each metric `change` returns something for replaced by that. */
-function changing(
-  metrics: SentinelMetrics,
-  change: (metric: SentinelMetric) => Partial<SentinelMetric> | undefined,
-): SentinelMetrics {
-  return {
-    ...metrics,
-    groups: metrics.groups.map((group) => ({
-      ...group,
-      metrics: group.metrics.map((metric) => ({ ...metric, ...change(metric) })),
-    })),
-  };
-}
+/** The sample after a visit's 20, as an incremental answer. */
+const nextSample = (): SentinelCache =>
+  cacheWith(1, { start: '2026-10-24T10:00:40Z', full: false });
 
-/** Sentinel not installed on board `generation`, as `GET /api/sentinel` says it. */
-function missingState(generation = GENERATION, simaCli: string | null = '/usr/bin/sima-cli') {
-  const running = sentinelState();
-  return sentinelState({
-    generation,
-    available: false,
-    version: null,
-    status: {
-      state: 'missing',
-      error: {
-        error: 'Sentinel is not installed on this board.',
-        code: 'sentinel_missing',
-        hint: 'Install it from this page, or run `sima-cli neat install sentinel` on the board.',
-      },
-    },
-    daemon: {
-      ...running.daemon,
-      installed: false,
-      healthy: false,
-      service: 'inactive',
-      socket: false,
-      sima_cli: simaCli,
-      instance_id: null,
-      started_at: null,
-    },
-    health: null,
-  });
-}
+/** Sentinel not installed on the board, as its health read fails. */
+const MISSING = sentinelError(
+  'sentinel_missing',
+  'Sentinel is not installed on sima@192.168.1.20.',
+  'Install it on the board with `sima-cli neat install sentinel`, then retry.',
+);
 
-/** Sentinel installed but stopped, as `GET /api/sentinel` says it. */
-function stoppedState(): SentinelState {
-  const missing = missingState();
-  return {
-    ...missing,
-    status: {
-      state: 'stopped',
-      error: {
-        error: 'The simaai-sentinel service is installed but inactive.',
-        code: 'sentinel_stopped',
-        hint: 'Start it on the board with `sudo systemctl start simaai-sentinel`.',
-      },
-    },
-    daemon: { ...missing.daemon, installed: true },
-  };
-}
+/** Sentinel installed but stopped, as its health read fails. */
+const STOPPED = sentinelError(
+  'sentinel_stopped',
+  'Sentinel is installed on sima@192.168.1.20 but not running (inactive).',
+  'Start it on the board with `sudo systemctl start simaai-sentinel`, then retry.',
+);
 
-/** A failure body as the backend answers it. */
-function failed(code: string, extra: Record<string, unknown> = {}) {
-  return { error: `Failed with ${code}.`, code, hint: '', generation: GENERATION, ...extra };
-}
+/** A failure body as the server answers it. */
+const failed = (code: string, message = `Failed with ${code}.`, hint = '') =>
+  sentinelError(code, message, hint);
 
 /** The app frame, so the page's toolbar has a top bar to render into. */
 @Component({
@@ -176,7 +151,7 @@ describe('StatsPage', () => {
       },
     );
     board = new FakeBoard();
-    board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
+    board.state.set(boardWith(DEVKIT));
     toasts = { status: vi.fn(), error: vi.fn() };
     dialogs = { openBoard: vi.fn(async () => undefined) };
     TestBed.configureTestingModule({
@@ -210,7 +185,7 @@ describe('StatsPage', () => {
       fixture.destroy();
       // The trace is read on every visit to a board; the specs about recording answer it, the
       // rest leave it unanswered, which shows Record.
-      http.match((request) => request.url === TRACES_URL);
+      http.match((request) => request.url.endsWith('/sentinel/traces/active'));
       // Every other request a test caused was answered and checked: a stray poll fails it.
       http.verify();
     } finally {
@@ -240,17 +215,23 @@ describe('StatsPage', () => {
     await settle();
   };
 
-  const stateRead = (): TestRequest => http.expectOne((request) => request.url === STATE_URL);
-  const metricsPoll = (): TestRequest => http.expectOne((request) => request.url === METRICS_URL);
-  const noPoll = () => http.expectNone((request) => request.url === METRICS_URL);
+  const stateRead = (target?: BoardTarget): TestRequest =>
+    http.expectOne((request) => request.url === sentinelUrl('health', target));
+  const metricsPoll = (target?: BoardTarget): TestRequest =>
+    http.expectOne((request) => request.url === sentinelUrl('cache', target));
+  const noPoll = () => http.expectNone((request) => request.url.endsWith('/sentinel/cache'));
 
   async function flush(request: TestRequest, body: object, failure = false): Promise<void> {
     request.flush(body, failure ? badGateway : undefined);
     await settle();
   }
 
-  const answerState = (state: SentinelState = sentinelState()) => flush(stateRead(), state);
-  const answerMetrics = (answer: SentinelMetrics = live()) => flush(metricsPoll(), answer);
+  const answerState = (health: SentinelHealthAnswer = sentinelHealth()) =>
+    flush(stateRead(), health);
+  /** The health read fails with `body`: Sentinel is missing, by default. */
+  const failState = (body: object = MISSING, target?: BoardTarget) =>
+    flush(stateRead(target), body, true);
+  const answerMetrics = (answer: SentinelCache = live()) => flush(metricsPoll(), answer);
 
   async function go(url: string): Promise<void> {
     await TestBed.inject(Router).navigateByUrl(url);
@@ -258,7 +239,7 @@ describe('StatsPage', () => {
   }
 
   /** Opens Stats on a running Sentinel and answers its first poll with `answer`. */
-  async function visit(answer: SentinelMetrics = live()): Promise<void> {
+  async function visit(answer: SentinelCache = live()): Promise<void> {
     await go('/stats');
     await answerState();
     await answerMetrics(answer);
@@ -374,7 +355,7 @@ describe('StatsPage', () => {
     expect(text(cardNamed('Board power').querySelector('.unit'))).toBe('W');
 
     // Each card draws its chart headless and medium, built as the side panel builds it.
-    const window = mergeTelemetry(null, live());
+    const window = mergeTelemetry(null, live(), DEVKIT.id);
     for (const card of cards()) {
       const chart = chartOf(card)!;
       expect(chart.label()).toBe(cardText(card).heading);
@@ -407,11 +388,8 @@ describe('StatsPage', () => {
   });
 
   it('a card whose metric is not reported says Not reported and still opens its area; a card whose area has no metrics is hidden', async () => {
-    const answer = dropping(
-      METRICS_LIVE,
-      (key) => key === 'mla_mem_allocated_mb' || key.startsWith('power_'),
-    );
-    await visit(live(answer));
+    const metrics = dropping((key) => key === 'mla_mem_allocated_mb' || key.startsWith('power_'));
+    await visit(live(20, { metrics }));
 
     // Without any power metric there is no Power area to open, so no Board power card.
     expect(cards().map((card) => cardText(card).heading)).toEqual([
@@ -431,25 +409,24 @@ describe('StatsPage', () => {
   });
 
   it('cards past a threshold carry Warning or Critical; Thermal max counts its alerts and names the hottest sensor', async () => {
-    const answer = changing(METRICS_LIVE, (metric) => {
-      switch (metric.key) {
-        case 'cpu_usage_pct':
-          return { status: 'warn' };
-        case 'linux_mem_used_pct':
-          return { status: 'critical' };
-        case 'net_rx_mbps':
-          return { status: 'critical' };
-        case 'net_tx_mbps':
-          return { status: 'warn' };
-        case 'rtsn_0':
-          return { value: 74, status: 'warn' };
-        case 'rtsn_1':
-          return { value: 78, status: 'warn' };
-        default:
-          return undefined;
-      }
-    });
-    await visit(live(answer));
+    // The statuses come from the readings against each definition's thresholds: the network's
+    // definitions get thresholds here, which the board defines none of.
+    const readings: Record<string, number> = {
+      cpu_usage_pct: 85,
+      linux_mem_used_pct: 92,
+      rtsn_0: 74,
+      rtsn_1: 78,
+    };
+    const thresholds: Record<string, Partial<MetricDefinition>> = {
+      net_rx_mbps: { critical: 1 },
+      net_tx_mbps: { warn: 1 },
+    };
+    await visit(
+      live(20, {
+        metrics: LIVE_METRICS.map((metric) => ({ ...metric, ...thresholds[metric.key] })),
+        values: (key) => readings[key] ?? LIVE_VALUES[key] ?? null,
+      }),
+    );
 
     const chips = cards().map((card) => [cardText(card).heading, cardText(card).chip]);
     expect(chips).toEqual([
@@ -517,7 +494,7 @@ describe('StatsPage', () => {
   });
 
   it('without a board, Choose a board opens the board dialog', async () => {
-    board.state.set(boardState({ target: null, generation: 2 }));
+    board.state.set(boardList());
     await go('/stats');
 
     expect(calloutHeadings()).toEqual(['Select a board to see its telemetry']);
@@ -527,7 +504,7 @@ describe('StatsPage', () => {
     await click(buttonNamed('Choose a board')!);
     expect(dialogs.openBoard).toHaveBeenCalledOnce();
     // Nothing is asked of a board that is not there, and the top bar has no update state.
-    http.expectNone((request) => request.url.startsWith(STATE_URL));
+    http.expectNone((request) => request.url.endsWith('/sentinel/health'));
     expect(toolbar().querySelector('neat-status-chip')).toBeNull();
     expect(toolbarButton('Pause')).toBeUndefined();
     expect(toolbarButton('More actions')).toBeDefined();
@@ -536,15 +513,13 @@ describe('StatsPage', () => {
 
   it('a board that cannot be read says why, with Open board settings', async () => {
     board.state.set(null);
-    board.error.set(
-      problemOf({ error: 'Could not reach the Insight server.', code: 'network', hint: '' }),
-    );
+    board.error.set(problemOf({ message: 'Could not reach the Insight server.', code: 'network' }));
     await go('/stats');
 
     const notice = root().querySelector('app-board-problem-notice');
     expect(text(notice)).toContain('Could not reach the Insight server.');
     expect(notice?.querySelector('app-board-settings-action')).not.toBeNull();
-    http.expectNone((request) => request.url.startsWith(STATE_URL));
+    http.expectNone((request) => request.url.endsWith('/sentinel/health'));
   });
 
   it('says it is checking Sentinel until the first state read answers, with no update state', async () => {
@@ -568,17 +543,24 @@ describe('StatsPage', () => {
     expect(cards()).toHaveLength(6);
   });
 
-  it('Sentinel missing with sima-cli offers Install Sentinel; without it, Check again with the reason', async () => {
+  it('Sentinel missing shows the command that installs it, with Copy, and Check again', async () => {
     await go('/stats');
-    await answerState(missingState());
+    await failState(MISSING);
 
     const empty = callout('Sentinel is not installed on sima@192.168.1.20')!;
     expect(empty).toBeDefined();
     expect(text(empty)).toContain(
-      'Install it from this page, or run `sima-cli neat install sentinel` on the board.',
+      'Install it on the board with `sima-cli neat install sentinel`, then retry.',
     );
-    expect(buttonNamed('Install Sentinel')).toBeDefined();
-    expect(buttonNamed('Check again')).toBeUndefined();
+    // The heading says what the server's message says: it is not repeated.
+    expect(text(empty)).not.toContain('Sentinel is not installed on sima@192.168.1.20.');
+    // Insight installs nothing: the command is the user's to run on the board.
+    const command = empty.querySelector('app-copy-command')!;
+    expect(text(command.querySelector('code'))).toBe('sima-cli neat install sentinel');
+    expect(command.querySelector('button')?.getAttribute('aria-label')).toBe(
+      'Copy the command for the board',
+    );
+    expect(buttonNamed('Install Sentinel')).toBeUndefined();
     // Not ready: no update state, no cards, no side panel and no toggle for it.
     expect(toolbar().querySelector('neat-status-chip')).toBeNull();
     expect(toolbarButton('Pause')).toBeUndefined();
@@ -587,85 +569,47 @@ describe('StatsPage', () => {
     expect(sidePanelToggle()).toBeNull();
     noPoll();
 
-    await go('/elsewhere');
-    await go('/stats');
-    await answerState(missingState(GENERATION, null));
-    const blocked = callout('Sentinel is not installed on sima@192.168.1.20')!;
-    expect(text(blocked)).toContain(
-      'sima-cli was not found on the board, so Insight cannot install Sentinel from here.',
-    );
-    expect(text(blocked)).not.toContain('Install it from this page');
-    expect(buttonNamed('Install Sentinel')).toBeUndefined();
-
-    // Check again asks the board's service manager again, and says so while it does.
+    // Check again asks Sentinel's health again, and says so while it does.
     await click(buttonNamed('Check again')!);
     const recheck = stateRead();
-    expect(recheck.request.params.get('refresh')).toBe('1');
+    expect(recheck.request.params.keys()).toEqual([]);
     expect(buttonNamed('Checking…')?.getAttribute('aria-disabled')).toBe('true');
-    await flush(recheck, missingState(GENERATION, null));
-    expect(buttonNamed('Check again')).toBeDefined();
+    expect(root().querySelector('neat-page .empty')?.getAttribute('aria-busy')).toBe('true');
+    // The user installed it meanwhile: the telemetry follows.
+    await flush(recheck, sentinelHealth());
+    await answerMetrics();
+    expect(cards()).toHaveLength(6);
   });
 
-  it('a stopped daemon gets its own heading and hint, and Check again rather than Install', async () => {
+  it('a stopped daemon gets its own heading, hint and command, and Check again', async () => {
     await go('/stats');
-    await answerState(stoppedState());
+    await failState(STOPPED);
 
     const empty = callout('Sentinel is installed but stopped')!;
     expect(text(empty)).toContain(
-      'Start it on the board with `sudo systemctl start simaai-sentinel`.',
+      'Start it on the board with `sudo systemctl start simaai-sentinel`, then retry.',
+    );
+    expect(text(empty.querySelector('app-copy-command code'))).toBe(
+      'sudo systemctl start simaai-sentinel',
     );
     expect(buttonNamed('Check again')).toBeDefined();
-    expect(buttonNamed('Install Sentinel')).toBeUndefined();
   });
 
-  it('installing shows Installing… and #170’s line, and still does after leaving and coming back', async () => {
-    const line =
-      'Running `sima-cli neat install sentinel` on the board. This downloads and unpacks an artifact and can take several minutes.';
+  it('a daemon that does not answer is titled by its failure, with its message and no command', async () => {
     await go('/stats');
-    await answerState(missingState());
-
-    await click(buttonNamed('Install Sentinel')!);
-    const post = http.expectOne((request) => request.url === INSTALL_URL);
-    expect(post.request.method).toBe('POST');
-    expect(post.request.params.get('generation')).toBe(String(GENERATION));
-    const installing = () => buttonNamed('Installing…');
-    expect(installing()?.getAttribute('aria-disabled')).toBe('true');
-    expect(text(root().querySelector('neat-page'))).toContain(line);
-    // A second press while it runs sends nothing.
-    await click(installing()!);
-    http.expectNone((request) => request.url === INSTALL_URL);
-
-    await go('/elsewhere');
-    await go('/stats');
-    await answerState(missingState());
-    expect(installing()?.getAttribute('aria-disabled')).toBe('true');
-    expect(text(root().querySelector('neat-page'))).toContain(line);
-
-    // It ends: the toast says so, and the page reads the daemon again and polls.
-    await flush(post, {
-      board: METRICS_LIVE.board,
-      generation: GENERATION,
-      daemon: sentinelState().daemon,
-      log: 'Sentinel installed.',
-    });
-    expect(toasts.status).toHaveBeenCalledWith('Sentinel installed on sima@192.168.1.20.');
-    const recheck = stateRead();
-    expect(recheck.request.params.get('refresh')).toBe('1');
-    // Until that read answers, the state held is the one from before the install: Install is not
-    // offered again, and the installer's output stays.
-    expect(buttonNamed('Install Sentinel')).toBeUndefined();
-    const checking = buttonNamed('Checking…')!;
-    expect(checking.getAttribute('aria-disabled')).toBe('true');
-    expect(root().querySelector('neat-page .empty')?.getAttribute('aria-busy')).toBe('true');
-    const output = [...root().querySelectorAll('neat-collapsible')].find((section) =>
-      text(section).startsWith('Installer output'),
+    await failState(
+      failed(
+        'sentinel_schema',
+        'Sentinel on the board speaks API schema 2 and Insight understands schema 1.',
+        'Update Insight and Sentinel to matching versions: `sima-cli neat install sentinel` on the board.',
+      ),
     );
-    expect(output?.querySelector('pre')?.textContent).toBe('Sentinel installed.');
-    await click(checking);
-    http.expectNone((request) => request.url === INSTALL_URL);
-    await flush(recheck, sentinelState());
-    await answerMetrics();
-    expect(cards()).toHaveLength(6);
+
+    const empty = callout('Sentinel and Insight speak different API versions')!;
+    expect(text(empty)).toContain('speaks API schema 2');
+    expect(text(empty)).toContain('Update Insight and Sentinel to matching versions');
+    expect(empty.querySelector('app-copy-command')).toBeNull();
+    expect(buttonNamed('Check again')).toBeDefined();
   });
 
   it('a board that stops answering keeps its cards under the failure, never says Sentinel is not installed, and the top bar says Not updating with Retry', async () => {
@@ -674,15 +618,11 @@ describe('StatsPage', () => {
     await advance(2000);
     await flush(
       metricsPoll(),
-      failed('unreachable', { error: 'Could not connect to sima@192.168.1.20.' }),
+      failed('unreachable', 'Could not connect to sima@192.168.1.20.'),
       true,
     );
     // The poll's failure halts polling and re-reads the state, which fails the same way.
-    await flush(
-      stateRead(),
-      failed('unreachable', { error: 'Could not connect to sima@192.168.1.20.' }),
-      true,
-    );
+    await failState(failed('unreachable', 'Could not connect to sima@192.168.1.20.'));
 
     expect(cards()).toHaveLength(6);
     expect(cardText(cardNamed('CPU usage')).value).toBe('37.5 %');
@@ -700,9 +640,7 @@ describe('StatsPage', () => {
     expect(announcement()).toBe('Metric updates are stopped.');
 
     await click(toolbarButton('Retry')!);
-    await answerMetrics(
-      withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
-    );
+    await answerMetrics(nextSample());
     expect(chip()).toBe('Live');
     expect(toolbarButton('Pause')).toBeDefined();
     expect(root().querySelector('app-board-problem-notice')).toBeNull();
@@ -722,18 +660,16 @@ describe('StatsPage', () => {
 
     // Retry polls at once rather than after the backoff.
     await click(failure.querySelector<HTMLButtonElement>('button')!);
-    await answerMetrics(
-      withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
-    );
+    await answerMetrics(nextSample());
     expect(callout('Sentinel could not answer')).toBeUndefined();
   });
 
-  it('the top bar offers no button where neither pausing nor asking again helps (Inv-S §13.22)', async () => {
+  it('the top bar offers no button where neither pausing nor asking again helps', async () => {
     await visit();
     await advance(2000);
     // A refused key: only the board's settings fix it, and its state read fails the same way.
     await flush(metricsPoll(), failed('auth_failed'), true);
-    await flush(stateRead(), failed('auth_failed'), true);
+    await failState(failed('auth_failed'));
 
     expect(chip()).toBe('Not updating');
     expect(cards()).toHaveLength(6);
@@ -746,14 +682,14 @@ describe('StatsPage', () => {
     await visit();
     // The window regains focus and the state says the daemon stopped, before any poll failed.
     window.dispatchEvent(new Event('focus'));
-    await answerState(stoppedState());
+    await failState(STOPPED);
 
     expect(chip()).toBe('Not updating');
     expect(cards()).toHaveLength(6);
     const stopped = callout('The Sentinel service is stopped')!;
-    expect(text(stopped)).toContain('The simaai-sentinel service is installed but inactive.');
+    expect(text(stopped)).toContain('but not running (inactive).');
     expect(text(stopped)).toContain(
-      'Start it on the board with `sudo systemctl start simaai-sentinel`.',
+      'Start it on the board with `sudo systemctl start simaai-sentinel`, then retry.',
     );
     expect(
       stopped.compareDocumentPosition(cards()[0]) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -764,12 +700,8 @@ describe('StatsPage', () => {
     noPoll();
 
     await click(stopped.querySelector<HTMLButtonElement>('button')!);
-    const read = stateRead();
-    expect(read.request.params.get('refresh')).toBe('1');
-    await flush(read, sentinelState());
-    await answerMetrics(
-      withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
-    );
+    await flush(stateRead(), sentinelHealth());
+    await answerMetrics(nextSample());
     expect(chip()).toBe('Live');
     expect(callout('The Sentinel service is stopped')).toBeUndefined();
   });
@@ -779,64 +711,39 @@ describe('StatsPage', () => {
     await click(cardNamed('Board power').querySelector<HTMLButtonElement>('button.activator')!);
     expect(asideTitle()).toBe('Power');
 
-    board.state.set(boardState({ target: OTHER_BOARD, generation: GENERATION + 1 }));
+    board.state.set(boardWith(OTHER_BOARD));
     await settle();
-    await answerState(sentinelState({ generation: GENERATION + 1 }));
-    const unpowered = dropping(METRICS_LIVE, (key) => key.startsWith('power_'));
-    await answerMetrics({ ...live(unpowered), generation: GENERATION + 1 });
+    await flush(stateRead(OTHER_BOARD), sentinelHealth());
+    const unpowered = dropping((key) => key.startsWith('power_'));
+    await flush(metricsPoll(OTHER_BOARD), live(20, { metrics: unpowered }));
 
     expect(cards().map((card) => cardText(card).heading)).not.toContain('Board power');
     expect(asideTitle()).toBe('Thermal');
   });
 
-  it('an install outcome for another board is not shown', async () => {
+  it('one board’s missing Sentinel says nothing about the next board', async () => {
     await go('/stats');
-    await answerState(missingState());
-    await click(buttonNamed('Install Sentinel')!);
-    const post = http.expectOne((request) => request.url === INSTALL_URL);
+    await failState(MISSING);
+    expect(callout('Sentinel is not installed on sima@192.168.1.20')).toBeDefined();
 
-    // Another board is selected while the install runs on the first.
-    board.state.set(boardState({ target: OTHER_BOARD, generation: GENERATION + 1 }));
+    board.state.set(boardWith(OTHER_BOARD));
     await settle();
-    await answerState(missingState(GENERATION + 1));
-    expect(callout('Sentinel is not installed on sima@192.168.1.30')).toBeDefined();
-    const install = buttonNamed('Install Sentinel')!;
-    expect(install.getAttribute('aria-disabled')).toBe('true');
-    expect(text(root().querySelector('neat-page'))).not.toContain('Running `sima-cli');
-    expect(await tooltip(install)).toBe('Sentinel is being installed on sima@192.168.1.20.');
-    await click(install);
-    http.expectNone((request) => request.url === INSTALL_URL);
-
-    // The first board's install fails: its output is that board's, not this one's.
-    await flush(
-      post,
-      failed('sentinel_failed', { error: 'The installer failed.', detail: 'E: no artifact' }),
-      true,
+    expect(text(root().querySelector('neat-page p[role="status"]'))).toBe(
+      'Checking Sentinel on the board…',
     );
-    expect(toasts.error).toHaveBeenCalledWith('The installer failed.');
-    expect(text(root().querySelector('neat-page'))).not.toContain('Installer output');
-    expect(buttonNamed('Install Sentinel')?.getAttribute('aria-disabled')).toBeNull();
-
-    // Back on the first board, its outcome shows.
-    board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
-    await settle();
-    await answerState(missingState());
-    const output = [...root().querySelectorAll('neat-collapsible')].find((section) =>
-      text(section).startsWith('Installer output'),
-    );
-    expect(output?.querySelector('pre')?.textContent).toBe('E: no artifact');
+    await flush(stateRead(OTHER_BOARD), sentinelHealth());
+    await flush(metricsPoll(OTHER_BOARD), live());
+    expect(calloutHeadings()).toEqual([]);
+    expect(cards()).toHaveLength(6);
   });
 
   it('collector errors show as a callout above the cards', async () => {
     await go('/stats');
-    const state = sentinelState();
-    await answerState({
-      ...state,
-      health: {
-        ...state.health!,
+    await answerState(
+      sentinelHealth({
         errors: ['power: INA231 not found', { error: 'thermal: read failed' }, null],
-      },
-    });
+      }),
+    );
     await answerMetrics();
 
     const errors = callout('Sentinel reported collector errors')!;
@@ -864,9 +771,7 @@ describe('StatsPage', () => {
     noPoll();
 
     await click(toolbarButton('Resume')!);
-    await answerMetrics(
-      withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
-    );
+    await answerMetrics(nextSample());
     expect(chip()).toBe('Live');
     expect(announcement()).toBe('Metrics are updating live.');
     expect(toolbarButton('Pause')).toBeDefined();
@@ -884,15 +789,13 @@ describe('StatsPage', () => {
     setVisibility('visible');
     await settle();
     await answerState();
-    await answerMetrics(
-      withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
-    );
+    await answerMetrics(nextSample());
     expect(announcement()).toBe('Metrics are updating live.');
   });
 
   it('the ⋯ menu names the Sentinel version and session start, and Export CSV downloads the session', async () => {
     // The first answer holds no samples yet.
-    await visit(live(METRICS_LIVE, 0));
+    await visit(live(0));
     await click(toolbarButton('More actions')!);
     const panel = () => morePanel() as HTMLElement;
     const notes = () => [...panel().querySelectorAll('[neatNote]')].map(text);
@@ -948,7 +851,7 @@ describe('StatsPage', () => {
     expect(blobs[0].type).toBe('text/csv');
     // jsdom reads a Blob on a timer.
     vi.useRealTimers();
-    expect(await blobs[0].text()).toBe(sessionCsv(mergeTelemetry(null, answer)));
+    expect(await blobs[0].text()).toBe(sessionCsv(mergeTelemetry(null, answer, DEVKIT.id)));
   });
 
   it('All metrics is closed and, opened, lists every metric in Sentinel order', async () => {
@@ -966,10 +869,7 @@ describe('StatsPage', () => {
     const table = section.querySelector('app-metrics-table table')!;
     expect(table.getAttribute('aria-label')).toBe('All metrics');
     const names = [...table.querySelectorAll('tbody th')].map(text);
-    const shorts = new Map(
-      METRICS_LIVE.groups.flatMap((group) => group.metrics).map((m) => [m.key, m.short]),
-    );
-    expect(names).toEqual(METRICS_LIVE.order.map((key) => shorts.get(key)));
+    expect(names).toEqual(LIVE_METRICS.map((metric) => metric.short));
   });
 
   describe('views', () => {
@@ -982,7 +882,8 @@ describe('StatsPage', () => {
       ].filter((view): view is string => view !== null);
     const telemetryOf = (): SentinelTelemetry =>
       fixture.debugElement.query(By.directive(StatsPage)).injector.get(SentinelTelemetry);
-    const runsRead = (): TestRequest => http.expectOne((request) => request.url === RUNS_URL);
+    const runsRead = (target?: BoardTarget): TestRequest =>
+      http.expectOne((request) => request.url === sentinelUrl('runs', target));
 
     it('the view follows the address: /stats is Live, /stats/runs Runs, /stats/runs/compare Compare', async () => {
       await visit();
@@ -1022,13 +923,10 @@ describe('StatsPage', () => {
       await go('/stats');
       // The window held is asked after: only the samples since come back.
       const poll = metricsPoll();
-      const held = metricsQuery(telemetry.window(), GENERATION);
-      expect(held.after).toBeDefined();
-      expect(poll.request.params.get('after')).toBe(held.after);
-      await flush(
-        poll,
-        withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
-      );
+      const after = cacheAfter(telemetry.window(), DEVKIT.id);
+      expect(after).not.toBeNull();
+      expect(poll.request.params.get('after')).toBe(after);
+      await flush(poll, nextSample());
       expect(chip()).toBe('Live');
       expect(announcement()).toBe('Metrics are updating live.');
       expect(cards()).toHaveLength(6);
@@ -1040,13 +938,9 @@ describe('StatsPage', () => {
       await go(`/stats/runs/compare?runs=${baseline},${other}&baseline=${baseline}`);
       // The run list first: it says whether the runs are still on the board and finished.
       await flush(runsRead(), runsAnswer());
-      const request = http.expectOne((request) => request.url === '/api/sentinel/compare');
+      const request = http.expectOne((request) => request.url === sentinelUrl('compare'));
       expect(request.request.params.get('runs')).toBe(`${baseline},${other}`);
-      await flush(request, {
-        board: METRICS_LIVE.board,
-        generation: GENERATION,
-        sentinel: COMPARE_RAW,
-      });
+      await flush(request, COMPARE_RAW);
 
       const chips = [...root().querySelectorAll('neat-page ul[aria-label="Compared runs"] .name')];
       expect(chips.map(text)).toEqual(['tes3', 'insight-hw-1790177227']);
@@ -1061,13 +955,11 @@ describe('StatsPage', () => {
       await flush(runsRead(), runsAnswer());
 
       await go('/stats');
-      await answerMetrics(
-        withHistory(METRICS_LIVE, 1, { start: '2026-10-24T10:00:40Z', full: false }),
-      );
+      await answerMetrics(nextSample());
       await advance(30_000);
       await answerState();
       http.expectNone((request) => request.url === RUNS_URL);
-      http.match((request) => request.url === METRICS_URL);
+      http.match((request) => request.url === CACHE_URL);
     });
 
     it('Runs lists the runs, opens the selected one in the side panel and says when it is gone', async () => {
@@ -1089,11 +981,7 @@ describe('StatsPage', () => {
       row.click();
       await vi.advanceTimersByTimeAsync(0);
       TestBed.tick();
-      await flush(runRead(), {
-        board: METRICS_LIVE.board,
-        generation: GENERATION,
-        sentinel: SAVED_RUN,
-      });
+      await flush(runRead(), SAVED_RUN);
       expect(asideTitle()).toBe(saved.name);
       expect(aside()?.querySelector('table')).not.toBeNull();
 
@@ -1125,7 +1013,7 @@ describe('StatsPage', () => {
       TestBed.tick();
       await flush(
         http.expectOne((request) => request.url === `${RUNS_URL}/${encodeURIComponent(saved.id)}`),
-        { board: METRICS_LIVE.board, generation: GENERATION, sentinel: SAVED_RUN },
+        SAVED_RUN,
       );
       expect(asideTitle()).toBe(saved.name);
     });
@@ -1141,19 +1029,19 @@ describe('StatsPage', () => {
       await settle();
 
       // Re-read, the same board keeps them.
-      board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
+      board.state.set(boardWith(DEVKIT));
       await settle();
       expect(session.run()).toBe(RUNS_LIST[0].id);
       expect(session.checkedRuns()).toEqual([RUNS_LIST[1].id, RUNS_LIST[2].id]);
 
       // Away from Stats when the board changes: the next visit finds none.
       await go('/elsewhere');
-      board.state.set(boardState({ target: OTHER_BOARD, generation: GENERATION + 1 }));
+      board.state.set(boardWith(OTHER_BOARD));
       await go('/stats/runs');
       expect(session.run()).toBeNull();
       expect(session.checkedRuns()).toEqual([]);
-      await answerState(sentinelState({ generation: GENERATION + 1 }));
-      await flush(runsRead(), runsAnswer(RUNS_LIST, GENERATION + 1));
+      await flush(stateRead(OTHER_BOARD), sentinelHealth());
+      await flush(runsRead(OTHER_BOARD), runsAnswer(RUNS_LIST));
       expect(text(aside()?.querySelector('section'))).toBe('Select a run to see its detail.');
     });
 
@@ -1198,7 +1086,7 @@ describe('StatsPage', () => {
       await go('/stats/runs');
       await answerState();
       await flush(
-        http.expectOne((request) => request.url === TRACES_URL),
+        http.expectOne((request) => request.url === TRACE_URL),
         traceAnswer(ACTIVE_TRACE, null),
       );
       await flush(runsRead(), runsAnswer());
@@ -1211,33 +1099,33 @@ describe('StatsPage', () => {
     });
 
     it('Runs and Compare show the same empty states as Live, and no Record', async () => {
-      board.state.set(boardState({ target: null, generation: GENERATION }));
+      board.state.set(boardList());
       await go('/stats/runs');
       expect(calloutHeadings()).toEqual(['Select a board to see its telemetry']);
       expect(toolbarButton('Record')).toBeUndefined();
 
-      board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
+      board.state.set(boardWith(DEVKIT));
       await go('/stats/runs/compare?runs=a,b');
       expect(text(root().querySelector('neat-page p[role="status"]'))).toBe(
         'Checking Sentinel on the board…',
       );
-      await answerState(missingState());
+      await failState(MISSING);
       expect(calloutHeadings()).toEqual(['Sentinel is not installed on sima@192.168.1.20']);
       expect(toolbarButton('Record')).toBeUndefined();
     });
 
     it('reads no trace and no runs while Sentinel is not ready, and reads them once it is', async () => {
-      const traceReads = () => http.match((request) => request.url === TRACES_URL);
+      const traceReads = () => http.match((request) => request.url === TRACE_URL);
       await go('/stats/runs');
       // Before the state answers, and with a stopped daemon, nothing is asked of it.
       expect(traceReads()).toHaveLength(0);
-      await answerState(stoppedState());
+      await failState(STOPPED);
       await advance(30_000);
       expect(traceReads()).toHaveLength(0);
       http.expectNone((request) => request.url === RUNS_URL);
 
       // Started on the board: the next state check finds it ready, and both are read at once.
-      await flush(stateRead(), sentinelState());
+      await flush(stateRead(), sentinelHealth());
       expect(traceReads()).toHaveLength(1);
       await flush(runsRead(), runsAnswer());
     });

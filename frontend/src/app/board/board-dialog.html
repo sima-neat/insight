@@ -15,43 +15,31 @@
         }
       </div>
 
-      @if (actions().length) {
+      @if (state.selected; as selected) {
         <div class="actions">
-          @for (item of actions(); track item.action) {
-            @if (item.action === 'shell') {
-              <button
-                neatButton
-                type="button"
-                size="small"
-                [variant]="item.variant"
-                [attr.aria-disabled]="busy() || !shellAvailable() ? true : null"
-                [neatTooltip]="noWebssh"
-                [neatTooltipDisabled]="shellAvailable()"
-                (click)="openShell()"
-              >
-                {{ busy() === 'shell' ? 'Opening shell…' : 'Open shell' }}
-              </button>
-            } @else {
-              <button
-                #checkButton
-                neatButton
-                type="button"
-                size="small"
-                [variant]="item.variant"
-                [attr.aria-disabled]="busy() ? true : null"
-                (click)="check()"
-              >
-                {{ busy() === 'check' ? 'Checking…' : 'Check again' }}
-              </button>
-            }
-          }
+          <button
+            #checkButton
+            neatButton
+            type="button"
+            size="small"
+            [attr.aria-disabled]="busy() ? true : null"
+            (click)="check()"
+          >
+            {{ busy() === 'check' ? 'Checking…' : 'Check again' }}
+          </button>
         </div>
+        @if (selected.ssh) {
+          <div class="shell">
+            <p neatNote>Open a shell on the board from a terminal:</p>
+            <app-copy-command [command]="selected.ssh" label="ssh command" />
+          </div>
+        }
       }
     } @else if (!board.error()) {
       <p neatNote role="status">Loading board…</p>
     }
 
-    @if (board.state()?.target) {
+    @if (board.selected()) {
       <!-- Two branches, so that an action's own problem is a new notice that is said as it
            appears, while one already recorded when the dialog opens is not. -->
       @if (actionError(); as own) {
@@ -96,7 +84,7 @@
       </neat-collapsible>
     }
 
-    @if (board.state()?.target === null) {
+    @if (board.state() && !board.selected()) {
       <neat-callout tone="info" heading="No board selected">
         <p>Insight needs a board to discover peripherals. Any of these gives it one:</p>
         <ol class="steps">

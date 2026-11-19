@@ -96,13 +96,15 @@ describe('PreviewFrame', () => {
   it('shows a live stream as an image named by its alt, in place of the file, and reports a stream it cannot load', async () => {
     await show(filePreview('stills/b.png', false));
     fixture.componentInstance.stream.set({
-      src: '/api/peripherals/cameras/preview/8f1c/stream',
+      src: '/api/boards/local/cameras/camera%3Aimx477%205-001a/preview.mjpg?preview=8f1c',
       alt: 'Live preview of imx477',
     });
     await fixture.whenStable();
     const images = root().querySelectorAll('img');
     expect(images).toHaveLength(1);
-    expect(images[0].getAttribute('src')).toBe('/api/peripherals/cameras/preview/8f1c/stream');
+    expect(images[0].getAttribute('src')).toBe(
+      '/api/boards/local/cameras/camera%3Aimx477%205-001a/preview.mjpg?preview=8f1c',
+    );
     expect(images[0].alt).toBe('Live preview of imx477');
 
     images[0].dispatchEvent(new Event('error'));

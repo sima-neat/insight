@@ -61,7 +61,7 @@ import { DeviceDetails } from './device-details';
 import { MicrophonePanel } from './microphone-panel';
 import { PeripheralsBanners } from './peripherals-banners';
 
-/** What stands in the page's main column: the device list, or why there is none (Inv-PB §1.1). */
+/** What stands in the page's main column: the device list, or why there is none. */
 type Body = 'loading' | 'read-failed' | 'no-target' | 'list';
 
 /**
@@ -76,8 +76,7 @@ interface ShownDevice {
 
 /**
  * Peripherals: the selected board's devices in one list grouped by kind, with the selected device
- * in the side panel (spec, "Peripherals page"; #170's `PeripheralsView`, Inv-PB §1.1 and §3.1).
- * The scan is `PeripheralsService`'s, which outlives the page; the camera preview and the
+ * in the side panel. The scan is `PeripheralsService`'s, which outlives the page; the camera preview and the
  * microphone test are this page's (`CameraPreview` and `MicTest`, provided here), so leaving the
  * page ends what they run.
  *
@@ -95,7 +94,7 @@ interface ShownDevice {
  *
  * **The board changing** under the page (another tab, the board dialog, a re-read on focus) shows
  * the board-changed banner over a snapshot of the old board; the preview controller lets go of the
- * old board's preview, which the backend stopped (Review Focus 1). The page does not scan the new
+ * old board's preview, which the server stopped. The page does not scan the new
  * board by itself then: Refresh now does.
  */
 @Component({
@@ -142,9 +141,8 @@ export class PeripheralsPage {
   /** This visit's read of the snapshot has answered, or failed. */
   private readonly loaded = signal(false);
   /**
-   * Why this visit's read of the snapshot failed (ruling Q9); null while it did not. A snapshot
-   * applied after it (a scan that answered) says the peripherals were read after all, so it
-   * clears the failure, as #170's Refresh did.
+   * Why this visit's read of the snapshot failed; null while it did not. A snapshot applied after
+   * it (a scan that answered) says the peripherals were read after all, so it clears the failure.
    */
   protected readonly loadError = linkedSignal<PeripheralSnapshot | null, BoardProblem | null>({
     source: this.peripherals.snapshot,
@@ -161,14 +159,14 @@ export class PeripheralsPage {
   /** For "Scanned … ago", which moves in steps of 10 s and more. */
   private readonly scannedNow = ticking(10_000);
 
-  protected readonly target = computed(() => this.board.state()?.target ?? null);
+  protected readonly target = this.board.target;
   protected readonly scanned = computed(() => isScanned(this.peripherals.snapshot()));
   protected readonly stale = computed(() =>
-    isSnapshotStale(this.board.state(), this.peripherals.snapshot()),
+    isSnapshotStale(this.board.id(), this.peripherals.snapshot()),
   );
 
   /**
-   * In priority order (ruling F35): loading while the board's first read or this visit's first
+   * In priority order: loading while the board's first read or this visit's first
    * snapshot read is out (a snapshot read before, on an earlier visit, shows at once); the board
    * could not be read with no state known; no board is selected. A read failure with a last good
    * state keeps the list: the board block says the read failed.
@@ -178,13 +176,13 @@ export class PeripheralsPage {
     if (state === null && this.board.error() === null) return 'loading';
     if (this.peripherals.snapshot() === null && !this.loaded()) return 'loading';
     if (state === null) return 'read-failed';
-    if (state.target === null) return 'no-target';
+    if (state.selected === null) return 'no-target';
     return 'list';
   });
 
   /**
-   * Which camera this page previews and which microphone it tests, for the rows' chips (ruling
-   * F23). Compared by value, so that a preview's rate arriving or a test's progress does not
+   * Which camera this page previews and which microphone it tests, for the rows' chips. Compared
+   * by value, so that a preview's rate arriving or a test's progress does not
    * rebuild the rows.
    */
   private readonly activity = computed<DeviceActivity>(
@@ -194,7 +192,7 @@ export class PeripheralsPage {
       return {
         previewing:
           preview.status === 'live' || preview.status === 'elsewhere'
-            ? (preview.session?.camera_id ?? null)
+            ? (preview.session?.camera ?? null)
             : null,
         testing: test.status === 'recording' || test.status === 'playing' ? test.micId : null,
       };
@@ -255,14 +253,14 @@ export class PeripheralsPage {
     if (since === null) return 'Refresh';
     return `Scanning… ${elapsedSeconds(since, this.now())} s`;
   });
-  /** #170's status line for screen readers (ruling F28): a scan running, or a stale snapshot. */
+  /** The status line for screen readers: a scan running, or a stale snapshot. */
   protected readonly scanStatus = computed(() => {
-    if (this.scanning()) return `Scanning ${this.target()?.label || 'the board'}`;
+    if (this.scanning()) return `Scanning ${this.board.selected()?.label || 'the board'}`;
     return this.stale() ? 'The board changed. Refresh before starting a preview.' : '';
   });
   /** Where the empty-kind guidance says it looked: the scanned board, else the selected one. */
   protected readonly scannedLabel = computed(
-    () => this.peripherals.snapshot()?.board.label || this.target()?.label || '',
+    () => this.peripherals.snapshot()?.board.label || this.board.selected()?.label || '',
   );
   protected readonly hasIssues = computed(
     () => (this.peripherals.snapshot()?.issues.length ?? 0) > 0,
@@ -285,7 +283,7 @@ export class PeripheralsPage {
       this.session.leaving = Promise.all([earlier, this.preview.release()]).then(() => undefined);
     });
     // The preview shows in its camera's panel: when that panel goes (another device selected, the
-    // side panel closed), the page leaves the preview, as #170 did when the camera changed. It
+    // side panel closed), the page leaves the preview. It
     // runs on what is shown and whose preview it is, not on the preview's state, so that a stop
     // that fails, keeping the preview and its camera, is not sent again by itself. One case sends
     // it once more: a start left while still starting has no camera until its answer comes and
@@ -343,8 +341,10 @@ export class PeripheralsPage {
     const shownBefore = this.peripherals.snapshot();
     this.pendingResume = this.session.resume;
     this.session.resume = null;
-    // The board is read too, as #170 did: the scan and the resume are decided on the board as it
-    // is now, which may have changed (or Insight restarted) while the page was away.
+    // The boards are read first: the scan, the preview and the resume are the board's as it is
+    // now, which may have changed (or Insight restarted) while the page was away, and every read
+    // of them names the board.
+    await this.board.reload();
     const [loadError, running] = await Promise.all([
       this.peripherals.load().then(
         () => null,
@@ -352,26 +352,23 @@ export class PeripheralsPage {
       ),
       // The last visit's preview may still be stopping, or starting, on the board.
       leaving.then(() => this.preview.current()).catch(() => null),
-      this.board.reload(),
     ]);
     this.loaded.set(true);
     // A snapshot applied meanwhile (a scan of an earlier visit that answered) supersedes the failure.
     if (this.peripherals.snapshot() === shownBefore) this.loadError.set(loadError);
     if (this.destroyed) return;
-    const board = this.board.state();
-    const adopted = running && running.state !== 'stopped';
-    if (adopted) {
+    // The server stops a running preview for a scan, so a visit never scans over one: Refresh
+    // does, and stops it first.
+    if (running) {
       this.pendingResume = null;
       this.preview.adopt(running);
+      return;
     }
-    // The backend stops a running preview for a scan, so a visit never scans over one: Refresh
-    // does, and stops it first.
-    if (adopted) return;
     // The preview of the last visit starts once this visit's scan ended, on the snapshot it made.
     // Until then the resume stays with the page, for the next visit if this one is left first
     // (`pendingResume`); a preview the user started meanwhile is theirs to keep, and a failed scan
     // leaves no snapshot to start on.
-    if (board) await this.peripherals.scanOnVisit(board);
+    await this.peripherals.scanOnVisit();
     const resume = this.pendingResume;
     this.pendingResume = null;
     if (!resume || this.destroyed || this.peripherals.scanError()) return;
@@ -380,19 +377,19 @@ export class PeripheralsPage {
 
   /**
    * Shows a preview the page takes up (`CameraPreview.onAdopt`), one running as the page opens or
-   * one a refused Start found (#170's `adoptPreview`): its camera selected, its mode remembered so
+   * one a refused Start found: its camera selected, its mode remembered so
    * that the pickers match the video, and the side panel open, since the preview shows there (with
    * the panel closed it would be stopped). A camera the list does not show has no panel to show it
    * in, nor has any camera while a body state stands in the list's place: answers false then.
    */
   private showAdopted(session: PreviewSession): boolean {
     const listed = this.list().rows.some(
-      (row) => row.item.id === session.camera_id && isCamera(row.item),
+      (row) => row.item.id === session.camera && isCamera(row.item),
     );
     if (this.body() !== 'list' || !listed) return false;
-    this.selectedId.set(session.camera_id);
+    this.selectedId.set(session.camera);
     this.asides.setOpen('peripherals', true);
-    this.session.setMode(session.camera_id, session.mode);
+    this.session.setMode(session.camera, session.mode);
     return true;
   }
 
@@ -402,10 +399,8 @@ export class PeripheralsPage {
    * kept from an earlier scan.
    */
   private resume(resume: PreviewResume): void {
-    const board = this.board.state();
     const snapshot = this.peripherals.snapshot();
-    if (!board || board.generation !== resume.generation) return;
-    if (snapshot?.generation !== resume.generation) return;
+    if (this.board.id() !== resume.board || snapshot?.board.id !== resume.board) return;
     const camera = snapshot.items.find(
       (item: PeripheralItem): item is CameraItem => item.id === resume.cameraId && isCamera(item),
     );
@@ -414,10 +409,10 @@ export class PeripheralsPage {
       camera,
       selection: resume.mode,
       stale: this.stale(),
-      target: board.target,
+      target: this.board.target(),
     });
     if (block.blocked) return;
     this.selectedId.set(camera.id);
-    void this.preview.start(camera, resume.mode, resume.generation);
+    void this.preview.start(camera, resume.mode, resume.board);
   }
 }

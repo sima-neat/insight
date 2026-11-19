@@ -1,267 +1,179 @@
 import { Page, Request } from '@playwright/test';
-// Types only, erased at run time: the mocks are checked against the shapes the app reads.
-import type { BoardState, ShellInfo } from '../src/app/board/api';
-import type {
-  CameraItem,
-  CameraModeChoice,
-  DeviceAvailability,
-  MicrophoneItem,
-  MicTestStatus,
-  PeripheralSnapshot,
-  PreviewSession,
-} from '../src/app/peripherals/api';
-import { TOP_BAR_BOARD } from './top-bar';
+import type { BoardList, BoardTarget, MicTest, Peripherals } from '../src/app/api.generated';
+import { boardUrl } from '../src/app/board/api';
+import type { CameraItem, MicrophoneItem, PreviewMode } from '../src/app/peripherals/api';
+import { snapshotOf } from '../src/app/peripherals/catalog';
+import { sentinelScan, type SentinelDevice } from '../src/app/peripherals/catalog.testing';
+import { TOP_BAR_BOARD, TOP_BAR_BOARD_ID } from './top-bar';
 
-// The answers of the board, peripherals, preview and microphone-test endpoints for the
-// Peripherals and board e2e, in the shapes of Inv-PB §4 (the items are a real DevKit scan's, as
-// in the unit tests' fixtures).
+// The answers of the boards, peripherals, preview and microphone-test routes for the Peripherals
+// and board e2e: the server's shapes, with SiMa Sentinel's catalog as a DevKit scan reports it.
+
+const DEVKIT: BoardTarget = TOP_BAR_BOARD.boards[0];
+
+/** The path of a route of the DevKit's, as the page asks for it. */
+export const devkitPath = (path: string): string => boardUrl(TOP_BAR_BOARD_ID, path);
 
 /** The SDK-paired DevKit of every test (`TOP_BAR_BOARD`), checked and connected. */
-export const CONNECTED_BOARD: BoardState = {
+export const CONNECTED_BOARD: BoardList = {
   ...TOP_BAR_BOARD,
-  status: { state: 'connected', checked_at: '2026-10-25T10:00:00Z', error: null },
-  board: {
-    hostname: 'modalix',
-    machine: 'aarch64',
-    build_version: '2.0.0',
-    fingerprint: '3f9a0c2b7d1e4f68',
+  selected: {
+    ...TOP_BAR_BOARD.selected!,
+    status: { state: 'connected', checked_at: '2026-10-25T10:00:00Z' },
+    identity: {
+      hostname: 'modalix',
+      machine: 'modalix',
+      build: '2.0.0',
+      host_key: 'SHA256:Gv7dpXcI1r0pVQ3nJmB4o1x0aT9WcL2yKfHq8sRzE6M',
+    },
   },
 };
 
 /** The DevKit after it was reflashed: its new host key is refused until it is trusted. */
-export const HOST_KEY_CHANGED_BOARD: BoardState = {
-  ...CONNECTED_BOARD,
-  status: {
-    state: 'error',
-    checked_at: '2026-10-25T10:00:00Z',
-    error: {
-      error: '192.168.100.200 presented a different SSH host key than the one Insight trusted.',
-      code: 'host_key_changed',
-      hint:
-        'This is expected after the board is reflashed. If you reflashed it, trust the new key; ' +
-        'otherwise check that the address still points to your board.',
-      host: '192.168.100.200',
-      expected_fingerprint: 'SHA256:Gv7dpXcI1r0pVQ3nJmB4o1x0aT9WcL2yKfHq8sRzE6M',
-      presented_fingerprint: 'SHA256:b2Q9nTz4XcLw7Vh1Ry0uJ5kP8eMfA3sGdK6oIqWtYxU',
+export const HOST_KEY_CHANGED_BOARD: BoardList = {
+  ...TOP_BAR_BOARD,
+  selected: {
+    ...TOP_BAR_BOARD.selected!,
+    status: {
+      state: 'error',
+      checked_at: '2026-10-25T10:00:00Z',
+      error: {
+        code: 'host_key_changed',
+        message: '192.168.100.200 presented a different SSH host key than the one Insight trusts.',
+        hint:
+          'This is expected after the board is reflashed. If you reflashed it, trust the new key; ' +
+          'otherwise check that the address still points to your board.',
+      },
+      host_key: {
+        host: '192.168.100.200',
+        expected: 'SHA256:Gv7dpXcI1r0pVQ3nJmB4o1x0aT9WcL2yKfHq8sRzE6M',
+        presented: 'SHA256:b2Q9nTz4XcLw7Vh1Ry0uJ5kP8eMfA3sGdK6oIqWtYxU',
+      },
     },
+    identity: null,
   },
-  board: null,
 };
 
 /** The DevKit before anything checked it: what Insight starts from on a fresh selection. */
-export const UNCHECKED_BOARD: BoardState = {
+export const UNCHECKED_BOARD: BoardList = {
   ...TOP_BAR_BOARD,
-  status: { state: 'unknown', checked_at: null, error: null },
-  board: null,
+  selected: { ...TOP_BAR_BOARD.selected!, status: { state: 'unknown' }, identity: null },
 };
 
-/** A scan's refusal when the board does not answer (502 `unreachable`, Inv-PB §4.1). */
+/** A refusal when the board does not answer (502 `unreachable`). */
 export const BOARD_UNREACHABLE = {
   status: 502,
   body: {
-    error: 'Could not connect to 192.168.100.200:22: [Errno 113] No route to host',
-    code: 'unreachable',
-    hint:
-      'Check that the board is powered on and on the network, and that ' +
-      '`ssh -p 22 sima@192.168.100.200` works from this machine.',
-  },
-};
-
-const LABEL = TOP_BAR_BOARD.target!.label;
-const available: DeviceAvailability = { state: 'available', users: [], reason: null };
-// SiMa Sentinel never opens a camera, so a camera's availability is always unknown.
-const unknown: DeviceAvailability = { state: 'unknown', users: [], reason: null };
-
-export const IMX477: CameraItem = {
-  id: 'mipi:/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
-  kind: 'camera',
-  connection: 'mipi',
-  name: '/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
-  model: 'imx477',
-  device: {
-    camera_name: '/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
-    camera_name_source: 'libcamera',
-    media_device: '/dev/media0',
-    bus_info: 'platform:csi2video@1',
-    csi: 'csidev-40c3000.csi',
-    video_node: '/dev/video3',
-  },
-  availability: unknown,
-  support: { tier: 'available', reason: '' },
-  modes_source: 'live',
-  formats: [
-    {
-      format: 'NV12',
-      label: 'NV12 (YUV 4:2:0)',
-      exportable: true,
-      support: { tier: 'available', reason: '' },
-      range: null,
-      sizes: [
-        {
-          width: 1920,
-          height: 1080,
-          fps: [{ value: 30, framerate_num: 30, framerate_den: 1, tier: 'available' }],
-        },
-        {
-          width: 1280,
-          height: 720,
-          fps: [{ value: 60, framerate_num: 60, framerate_den: 1, tier: 'available' }],
-        },
-      ],
+    error: {
+      code: 'unreachable',
+      message: 'Could not connect to sima@192.168.100.200: no route to host.',
+      hint:
+        'Check that the board is powered on and on the network, and that ' +
+        '`ssh sima@192.168.100.200` works from this machine.',
     },
-  ],
-  default_selection: { format: 'NV12', width: 1920, height: 1080, fps: 30 },
-  notes: [],
-  errors: [],
+  },
 };
+
+/** Discrete frame intervals of one size, one per rate. */
+const intervals = (width: number, height: number, fps: number) => [
+  { width, height, intervals: [{ type: 'discrete', numerator: 1, denominator: fps }] },
+];
 
 const USB_REASON = 'USB cameras have no camera overlay on this board.';
 
-export const C270: CameraItem = {
-  id: 'usb:046d:0825:1-1.2',
-  kind: 'camera',
-  connection: 'usb',
-  name: 'HD Webcam C270',
-  model: 'HD Webcam C270',
-  device: {
-    video_node: '/dev/video0',
-    by_id: '/dev/v4l/by-id/usb-046d_0825_2F6D4A10-video-index0',
-    usb: {
-      vendor_id: '046d',
-      product_id: '0825',
-      manufacturer: 'Logitech',
-      product: 'HD Webcam C270',
-      bus_path: '1-1.2',
-      speed_mbps: 480,
-    },
-  },
-  availability: unknown,
-  support: { tier: 'unsupported', reason: USB_REASON },
-  modes_source: 'live',
-  formats: [
+/** The DevKit's IMX477, as Sentinel lists it: NV12 1920×1080 at 30 fps and 1280×720 at 60. */
+const SENTINEL_IMX477: SentinelDevice = {
+  id: 'camera:imx477 5-001a',
+  type: 'camera',
+  backend: 'mipi',
+  camera_name: 'imx477 5-001a',
+  model: 'imx477',
+  media_device: '/dev/media0',
+  max_fps: 66.18,
+  // SiMa Sentinel never opens a camera, so a camera's availability is always unknown.
+  availability: { state: 'unknown' },
+  modes: [
     {
-      format: 'MJPG',
-      label: 'Motion-JPEG',
-      exportable: false,
-      support: { tier: 'unsupported', reason: USB_REASON },
-      range: null,
-      sizes: [
-        {
-          width: 1280,
-          height: 720,
-          fps: [
-            {
-              value: 30,
-              framerate_num: 30,
-              framerate_den: 1,
-              tier: 'unsupported',
-              reason: USB_REASON,
-            },
-          ],
-        },
-      ],
+      format: 'NV12',
+      width: 1920,
+      height: 1080,
+      available: true,
+      frame_intervals: intervals(1920, 1080, 30),
+    },
+    {
+      format: 'NV12',
+      width: 1280,
+      height: 720,
+      available: true,
+      frame_intervals: intervals(1280, 720, 60),
     },
   ],
-  default_selection: null,
-  notes: [],
-  errors: [],
 };
 
-export const YETI: MicrophoneItem = {
+/** A Logitech C270 on USB: MJPG 1280×720 at 30 fps, Unsupported by Sentinel yet previewable. */
+const SENTINEL_C270: SentinelDevice = {
+  id: 'camera:v4l2:5a1c0e2f9b7d4c31',
+  type: 'camera',
+  backend: 'v4l2',
+  model: 'HD Webcam C270',
+  device_path: '/dev/video0',
+  by_id_path: '/dev/v4l/by-id/usb-046d_0825_2F6D4A10-video-index0',
+  identity: { vendor_id: '046d', product_id: '0825', speed: '480', topology: 'usb1/1-1/1-1.2' },
+  availability: { state: 'unknown' },
+  modes: [
+    {
+      format: 'MJPG',
+      format_description: 'Motion-JPEG',
+      width: 1280,
+      height: 720,
+      available: false,
+      reason: USB_REASON,
+      frame_intervals: intervals(1280, 720, 30),
+    },
+  ],
+};
+
+/** A Blue Yeti Nano on its own USB port. */
+const SENTINEL_YETI: SentinelDevice = {
   id: 'microphone:alsa:3ff3d77bf791d455',
-  kind: 'microphone',
+  type: 'microphone',
+  backend: 'alsa',
   connection: 'usb',
   name: 'Yeti Nano',
-  device: {
+  availability: { state: 'available' },
+  capture_target: { card_id: 'Nano', device: 0, selector: 'plughw:CARD=Nano,DEV=0' },
+  identity: {
     card_index: 0,
     card_id: 'Nano',
     card_name: 'Yeti Nano',
     card_driver: 'USB-Audio',
-    pcm_device: 0,
-    pcm_node: '/dev/snd/pcmC0D0c',
-    alsa_name: 'hw:CARD=Nano,DEV=0',
-    by_id: '/dev/snd/by-id/usb-Blue_Microphones_Yeti_Nano_2127SG00CBA8_888-000441040606-00',
-    usb: {
-      vendor_id: 'b58e',
-      product_id: '0005',
-      manufacturer: 'Blue Microphones',
-      product: 'Yeti Nano',
-      serial: '2127SG00CBA8_888-000441040606',
-      bus_path: '1-3.1',
-    },
+    usb: { vendor_id: 'b58e', product_id: '0005', product: 'Yeti Nano', bus_path: '1-3.1' },
   },
-  availability: available,
-  capture: [
-    {
-      format: 'S24_3LE',
-      channels: 2,
-      bits: 24,
-      rates: [32000, 44100, 48000],
-      rate_range: null,
-      channel_map: ['FL', 'FR'],
-    },
-  ],
-  record: '1f0c6e2a9b3d4c5e',
-  notes: [],
-  errors: [],
+  modes: [{ format: 'S24_3LE', channels: 2, sample_bits: 24, rates_hz: [32000, 44100, 48000] }],
 };
 
-/** The DevKit before any scan: what `GET /api/peripherals` answers until the first refresh. */
-const UNSCANNED: PeripheralSnapshot = {
-  board: {
-    label: LABEL,
-    source: 'sdk-env',
-    hostname: null,
-    machine: null,
-    build_version: null,
-    fingerprint: null,
-  },
-  generation: TOP_BAR_BOARD.generation,
-  scan_id: null,
-  scanned_at: null,
-  items: [],
-  issues: [],
-  changes: null,
-  camera_setup: null,
-};
+const DEVICES = [SENTINEL_IMX477, SENTINEL_C270, SENTINEL_YETI];
 
-/** A scan of the DevKit, made `at` (now): two cameras (MIPI and USB), one microphone, no LiDAR. */
-function scanned(at = new Date()): PeripheralSnapshot {
-  const scannedAt = at.toISOString();
-  return {
-    ...UNSCANNED,
-    board: { ...UNSCANNED.board, ...CONNECTED_BOARD.board! },
-    scan_id: `118:${scannedAt}`,
-    scanned_at: scannedAt,
-    scan_ms: 3400,
-    items: [IMX477, C270, YETI],
-    camera_setup: {
-      model: 'SiMa.ai Modalix SoM 16Gig Board',
-      overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo'],
-    },
-  };
+/** The scanned devices, as the page builds them from the catalog. */
+export const [IMX477, C270, YETI] = snapshotOf(
+  { id: DEVKIT.id, label: DEVKIT.label },
+  sentinelScan(DEVICES),
+).items as [CameraItem, CameraItem, MicrophoneItem];
+
+/** A preview as the server answers it. */
+interface Preview {
+  id: string;
+  camera: string;
+  mode: PreviewMode;
+  started_at: string;
+  camera_fps: number | null;
 }
 
-/** A preview session as a start answers it (`GET /api/peripherals/preview` adds `viewer`). */
-function previewSession(id: string, camera: CameraItem, mode: CameraModeChoice): PreviewSession {
+/** A recording of the Yeti, `elapsedMs` in. */
+function recordingTest(id: string, elapsedMs: number): MicTest {
   return {
     id,
-    camera_id: camera.id,
-    mode,
-    stream_url: `/api/peripherals/cameras/preview/${id}/stream`,
-    generation: TOP_BAR_BOARD.generation,
-    started_at: new Date().toISOString(),
-    state: 'live',
-    // A USB camera runs at its mode's rate; a MIPI camera's arrives later from SiMa Sentinel.
-    camera_fps: camera.connection === 'usb' ? mode.fps : null,
-  };
-}
-
-/** A recording of the Yeti, `elapsedMs` in, as `mictest.py`'s `status()` reports it. */
-function recordingTest(token: string, elapsedMs: number): MicTestStatus {
-  return {
-    token,
-    id: YETI.id,
+    microphone: YETI.id,
     state: 'recording',
     device: 'plughw:CARD=Nano,DEV=0',
     format: { rate: 48000, channels: 2, bits: 16, seconds: 30 },
@@ -270,14 +182,17 @@ function recordingTest(token: string, elapsedMs: number): MicTestStatus {
   };
 }
 
-/** The same test once stopped: its levels, and the recording to play. */
-function readyTest(token: string, elapsedMs: number): MicTestStatus {
+/** The same test once stopped: its levels, and no live level. */
+function readyTest(id: string, elapsedMs: number): MicTest {
+  const { microphone, device, format } = recordingTest(id, elapsedMs);
   return {
-    ...recordingTest(token, elapsedMs),
+    id,
+    microphone,
     state: 'ready',
-    level_dbfs: null,
+    device,
+    format,
+    elapsed_ms: elapsedMs,
     level: { peak_dbfs: -9, rms_dbfs: -24.5, silent: false },
-    audio_url: `/api/peripherals/microphones/test/${token}.wav`,
   };
 }
 
@@ -305,42 +220,33 @@ const SILENT_WAV: Buffer = (() => {
   return Buffer.concat([header, data]);
 })();
 
-/** The browser shell of the SDK-paired DevKit, webssh installed: Open shell signs in by itself. */
-const SHELL: ShellInfo = {
-  configured: true,
-  devkit_ip: '192.168.100.200',
-  button_label: 'DevKit: 192.168.100.200',
-  available: true,
-  running: false,
-  webssh_port: 8022,
-  webssh_host_port: 8022,
-  default_username: 'sima',
-  credentials_prefilled: true,
-  launch_supported: true,
-  launch_url: null,
-};
-
 /** A 1×1 PNG: the preview stream's stand-in, which an `<img>` loads as it would the MJPEG. */
 const PIXEL = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
 );
 
-/** A POST the page sent: its path and JSON body. */
-interface Posted {
+/** A request the page sent that changes something: its method, path with query, and JSON body. */
+interface Sent {
+  method: string;
   path: string;
   body: unknown;
 }
 
+/** The error shape the server answers with. */
+const failure = (code: string, message: string, hint: string) => ({
+  error: { code, message, hint },
+});
+
 /**
- * Insight's backend for the board and Peripherals, held in memory: it answers as Flask would and
- * records what the page posts. A test sets the fields before (or while) the page asks.
+ * Insight's server for the boards and Peripherals, held in memory: it answers as the server would
+ * and records what the page sends. A test sets the fields before (or while) the page asks.
  */
 export class FakePeripheralsBackend {
-  /** What `GET /api/board` answers; a 500 while `boardFails` is set. */
-  board: BoardState = CONNECTED_BOARD;
+  /** What `GET /api/boards` answers; a 500 while `boardFails` is set. */
+  board: BoardList = CONNECTED_BOARD;
   boardFails = false;
-  /** The connection check (`POST /api/board/test`) fails: the board's state records the error. */
+  /** The connection check (`POST .../check`) fails: the board's status records the error. */
   checkFails = false;
   /** A refresh answers this board error (with its status) instead of a scan. */
   scanFailure: { status: number; body: object } | null = null;
@@ -349,24 +255,26 @@ export class FakePeripheralsBackend {
   /** Set while a refresh is held open (`holdScans`): the refresh answers once it resolves. */
   private held: Promise<void> | null = null;
 
-  /** Every POST, in order. */
-  private readonly posts: Posted[] = [];
-  /** What `GET /api/peripherals` answers: no scan until a refresh succeeds. */
-  private snapshot: PeripheralSnapshot = UNSCANNED;
-  private preview: PreviewSession | null = null;
+  /** Every POST and DELETE, in order. */
+  private readonly sent: Sent[] = [];
+  /** What `GET .../peripherals` answers: no scan until a refresh succeeds. */
+  private scan: Peripherals = { scan: null };
+  private preview: Preview | null = null;
   private viewer = false;
   private previews = 0;
-  private test: MicTestStatus | null = null;
+  private test: MicTest | null = null;
   private tests = 0;
 
-  /** The bodies posted to `path`. */
+  /** The bodies POSTed to `path` (with its query, if any). */
   posted(path: string): unknown[] {
-    return this.posts.filter((post) => post.path === path).map((post) => post.body);
+    return this.sent
+      .filter((request) => request.method === 'POST' && request.path === path)
+      .map((request) => request.body);
   }
 
-  /** The paths posted, in order: what the page asked the board to do. */
+  /** The paths POSTed or DELETEd, in order: what the page asked the board to do. */
   postedPaths(): string[] {
-    return this.posts.map((post) => post.path);
+    return this.sent.map((request) => request.path);
   }
 
   /** Holds every refresh open until the returned function is called. */
@@ -381,203 +289,231 @@ export class FakePeripheralsBackend {
 
   /**
    * A preview started by someone else after the page read the preview: another tab, or a client
-   * of the API (which may preview a USB camera's MJPG, as the backend allows). `viewing`: that tab
+   * of the API (which may preview a USB camera's MJPG, as the server allows). `viewing`: that tab
    * shows its stream.
    */
-  startElsewhere(camera: CameraItem, mode: CameraModeChoice, viewing: boolean): void {
-    this.preview = previewSession(`p${++this.previews}`, camera, mode);
+  startElsewhere(camera: CameraItem, mode: PreviewMode, viewing: boolean): void {
+    this.preview = this.newPreview(camera, mode);
     this.viewer = viewing;
   }
 
   /**
-   * Answers every endpoint of the board, the scan, the preview and the microphone test, and the
+   * Answers every route of the boards, the scan, the preview and the microphone test, and the
    * Streaming page's slots (empty), where the flows leave Peripherals to.
    */
   async install(page: Page): Promise<void> {
     const record = (request: Request) => {
       const url = new URL(request.url());
-      this.posts.push({ path: url.pathname, body: request.postDataJSON() });
+      this.sent.push({
+        method: request.method(),
+        path: url.pathname + url.search,
+        body: request.postDataJSON(),
+      });
     };
+    const selectedId = () => this.board.selected?.id ?? '';
+    /** The board id a board route names; null for another route. */
+    const boardOf = (url: URL): string | null => {
+      const match = /^\/api\/boards\/([^/]+)(\/.*)?$/.exec(url.pathname);
+      return match ? decodeURIComponent(match[1]) : null;
+    };
+    /** The route's path after `/api/boards/<id>`, when it names the selected board. */
+    const routeOf = (url: URL): string | null =>
+      boardOf(url) === selectedId()
+        ? url.pathname.slice(`/api/boards/${encodeURIComponent(selectedId())}`.length)
+        : null;
 
     await page.route(
-      (url) => url.pathname === '/api/board',
-      (route) =>
-        this.boardFails
-          ? route.fulfill({ status: 500, contentType: 'text/html', body: 'Internal Server Error' })
-          : route.fulfill({ json: this.board }),
-    );
-    // A board change starts a new generation with the connection not checked (Inv-PB §4.1).
-    const changed = (next: Partial<BoardState>): BoardState => ({
-      ...this.board,
-      generation: this.board.generation + 1,
-      status: { state: 'unknown', checked_at: null, error: null },
-      board: null,
-      ...next,
-    });
-    await page.route(
-      (url) => url.pathname === '/api/board/select',
+      (url) => url.pathname === '/api/boards',
       (route) => {
-        record(route.request());
-        const { host, port, user } = route.request().postDataJSON();
-        this.board = changed({
-          target: {
+        const request = route.request();
+        if (request.method() === 'POST') {
+          record(request);
+          const { host, port, user } = request.postDataJSON();
+          const target: BoardTarget = {
+            id: `ssh:${user}@${host}:${port}`,
             mode: 'ssh',
             source: 'manual',
             host,
             port,
             user,
             label: `${user}@${host}${port === 22 ? '' : `:${port}`}`,
-          },
-          saved: { host, port, user },
-        });
-        return route.fulfill({ json: this.board });
+          };
+          this.board = this.select(target, [target, DEVKIT]);
+          return route.fulfill({ json: this.board });
+        }
+        return this.boardFails
+          ? route.fulfill({ status: 500, contentType: 'text/html', body: 'Internal Server Error' })
+          : route.fulfill({ json: this.board });
       },
     );
+    // A board route naming another board than the selected one is 404, as the server answers it.
     await page.route(
-      (url) => url.pathname === '/api/board/test',
+      (url) => boardOf(url) !== null && routeOf(url) === null,
       (route) => {
-        record(route.request());
-        if (this.checkFails) {
-          // The backend records the failure, so the next read says it.
-          this.board = {
-            ...this.board,
-            status: { state: 'error', checked_at: new Date().toISOString(), error: null },
-          };
-          return route.fulfill({ status: BOARD_UNREACHABLE.status, json: BOARD_UNREACHABLE.body });
+        if (route.request().method() === 'DELETE') {
+          record(route.request());
+          this.board = this.select(DEVKIT, [DEVKIT]);
+          return route.fulfill({ json: this.board });
         }
+        return route.fulfill({
+          status: 404,
+          json: failure('not_found', 'This is not the selected board.', 'Read the boards again.'),
+        });
+      },
+    );
+    const on = (path: string | RegExp) => (url: URL) => {
+      const rest = routeOf(url);
+      return rest !== null && (typeof path === 'string' ? rest === path : path.test(rest));
+    };
+
+    await page.route(on(''), (route) => {
+      // Only an entered board can be forgotten; the DevKit is selected again.
+      record(route.request());
+      this.board = this.select(DEVKIT, [DEVKIT]);
+      return route.fulfill({ json: this.board });
+    });
+    await page.route(on('/check'), (route) => {
+      record(route.request());
+      const selected = this.board.selected!;
+      if (this.checkFails) {
+        // The server records the failure, so the next read says it.
         this.board = {
           ...this.board,
-          status: CONNECTED_BOARD.status,
-          board: CONNECTED_BOARD.board,
+          selected: {
+            ...selected,
+            status: {
+              state: 'error',
+              checked_at: new Date().toISOString(),
+              error: BOARD_UNREACHABLE.body.error,
+            },
+          },
         };
-        return route.fulfill({ json: this.board });
-      },
+        return route.fulfill({ status: BOARD_UNREACHABLE.status, json: BOARD_UNREACHABLE.body });
+      }
+      this.board = {
+        ...this.board,
+        selected: {
+          ...selected,
+          status: CONNECTED_BOARD.selected!.status,
+          identity: CONNECTED_BOARD.selected!.identity,
+        },
+      };
+      return route.fulfill({ json: this.board });
+    });
+    await page.route(on('/trust-host-key'), (route) => {
+      record(route.request());
+      // The board is replaced, its key trusted: check it again.
+      this.board = {
+        ...this.board,
+        selected: { ...this.board.selected!, status: { state: 'unknown' }, identity: null },
+      };
+      return route.fulfill({ json: this.board });
+    });
+    await page.route(on('/peripherals'), (route) => route.fulfill({ json: this.scan }));
+    await page.route(on('/peripherals/refresh'), async (route) => {
+      record(route.request());
+      await this.held;
+      if (this.scanFailure) {
+        return route.fulfill({ status: this.scanFailure.status, json: this.scanFailure.body });
+      }
+      this.scan = sentinelScan(DEVICES, { scannedAt: new Date().toISOString() });
+      return route.fulfill({ json: this.scan });
+    });
+    await page.route(on('/cameras/preview'), (route) =>
+      route.fulfill({
+        json: { preview: this.preview && { ...this.preview, viewer: this.viewer } },
+      }),
     );
-    await page.route(
-      (url) => url.pathname === '/api/board/trust-host-key',
-      (route) => {
-        record(route.request());
-        this.board = changed({});
-        return route.fulfill({ json: this.board });
-      },
-    );
-    await page.route(
-      (url) => url.pathname === '/api/devkit-shell',
-      (route) => route.fulfill({ json: SHELL }),
-    );
-    await page.route(
-      (url) => url.pathname === '/api/peripherals',
-      (route) => route.fulfill({ json: this.snapshot }),
-    );
-    await page.route(
-      (url) => url.pathname === '/api/peripherals/refresh',
-      async (route) => {
-        record(route.request());
-        await this.held;
-        if (this.scanFailure) {
-          return route.fulfill({ status: this.scanFailure.status, json: this.scanFailure.body });
-        }
-        this.snapshot = scanned();
-        return route.fulfill({ json: this.snapshot });
-      },
-    );
-    await page.route(
-      (url) => url.pathname === '/api/peripherals/preview',
-      (route) =>
-        route.fulfill({
-          json: { session: this.preview && { ...this.preview, viewer: this.viewer } },
-        }),
-    );
-    await page.route(
-      (url) => url.pathname === '/api/peripherals/cameras/preview',
-      (route) => {
-        record(route.request());
-        // One preview per Insight: a start while one runs is refused (`PreviewManager.start`).
-        if (this.preview) {
-          const running = this.preview.camera_id;
-          return route.fulfill({
-            status: 409,
-            json: {
-              error: `A preview of ${running} is already starting or running.`,
-              code: 'preview_active',
-              hint: 'Stop that preview before starting another one.',
-              camera_id: running,
-            },
-          });
-        }
-        const { id, format, width, height, fps } = route.request().postDataJSON();
-        const camera = [IMX477, C270].find((item) => item.id === id)!;
-        this.preview = previewSession(`p${++this.previews}`, camera, {
-          format,
-          width,
-          height,
-          fps,
+    await page.route(on(/^\/cameras\/[^/]+\/preview$/), (route) => {
+      record(route.request());
+      // One preview per board: a start while one runs is refused.
+      if (this.preview) {
+        return route.fulfill({
+          status: 409,
+          json: failure(
+            'preview_active',
+            `A preview of ${this.preview.camera} is already running.`,
+            'Stop that preview before starting another.',
+          ),
         });
-        this.viewer = false;
-        return route.fulfill({ json: { session: this.preview } });
-      },
-    );
-    await page.route(
-      (url) => /^\/api\/peripherals\/cameras\/preview\/[^/]+\/stream$/.test(url.pathname),
-      (route) => {
-        if (this.streamTaken) {
-          this.viewer = true;
-          return route.fulfill({
-            status: 409,
-            json: {
-              error: 'This preview is already shown in another tab or window.',
-              code: 'preview_active',
-              hint: 'Close the other view, or stop the preview and start it again here.',
-              camera_id: this.preview?.camera_id,
-            },
-          });
-        }
+      }
+      const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-2)!);
+      const camera = [IMX477, C270].find((item) => item.id === id)!;
+      this.preview = this.newPreview(camera, route.request().postDataJSON());
+      this.viewer = false;
+      return route.fulfill({ json: { preview: { ...this.preview, viewer: false } } });
+    });
+    await page.route(on(/^\/cameras\/[^/]+\/preview\.mjpg$/), (route) => {
+      if (this.streamTaken) {
         this.viewer = true;
-        return route.fulfill({ contentType: 'image/png', body: PIXEL });
-      },
-    );
-    await page.route(
-      (url) => /^\/api\/peripherals\/cameras\/preview\/[^/]+\/stop$/.test(url.pathname),
-      (route) => {
-        record(route.request());
-        const stopped = this.preview && { ...this.preview, state: 'stopped' };
-        this.preview = null;
-        this.viewer = false;
-        return route.fulfill({ json: { session: stopped } });
-      },
-    );
-    await page.route(
-      (url) => url.pathname === '/api/peripherals/microphones/test',
-      (route) => {
-        if (route.request().method() === 'POST') {
-          record(route.request());
-          this.test = recordingTest(`t${++this.tests}`, 0);
-          return route.fulfill({ status: 202, json: { test: this.test } });
-        }
-        // Each read finds the recording a little further on, as arecord's would be.
-        if (this.test?.state === 'recording') {
-          this.test = recordingTest(this.test.token, this.test.elapsed_ms + 300);
-        }
-        return route.fulfill({ json: { test: this.test } });
-      },
-    );
-    await page.route(
-      (url) => url.pathname === '/api/peripherals/microphones/test/stop',
-      (route) => {
-        record(route.request());
-        if (this.test?.state === 'recording') {
-          this.test = readyTest(this.test.token, this.test.elapsed_ms);
-        }
-        return route.fulfill({ json: { test: this.test } });
-      },
-    );
-    await page.route(
-      (url) => /^\/api\/peripherals\/microphones\/test\/[^/]+\.wav$/.test(url.pathname),
-      (route) => route.fulfill({ contentType: 'audio/wav', body: SILENT_WAV }),
+        return route.fulfill({
+          status: 409,
+          json: failure(
+            'preview_active',
+            'This preview is shown in another tab or window.',
+            'Close the other view, or stop the preview and start it again here.',
+          ),
+        });
+      }
+      this.viewer = true;
+      return route.fulfill({ contentType: 'image/png', body: PIXEL });
+    });
+    await page.route(on(/^\/cameras\/[^/]+\/preview\/stop$/), (route) => {
+      record(route.request());
+      this.preview = null;
+      this.viewer = false;
+      return route.fulfill({ json: { preview: null } });
+    });
+    await page.route(on('/microphones/test'), (route) => {
+      // Each read finds the recording a little further on, as arecord's would be.
+      if (this.test?.state === 'recording') {
+        this.test = recordingTest(this.test.id, this.test.elapsed_ms + 300);
+      }
+      return route.fulfill({ json: { test: this.test } });
+    });
+    await page.route(on(/^\/microphones\/[^/]+\/test$/), (route) => {
+      record(route.request());
+      this.test = recordingTest(`t${++this.tests}`, 0);
+      return route.fulfill({ status: 202, json: { test: this.test } });
+    });
+    await page.route(on(/^\/microphones\/[^/]+\/test\/stop$/), (route) => {
+      record(route.request());
+      if (this.test?.state === 'recording') {
+        this.test = readyTest(this.test.id, this.test.elapsed_ms);
+      }
+      return route.fulfill({ json: { test: this.test } });
+    });
+    await page.route(on(/^\/microphones\/[^/]+\/test\.wav$/), (route) =>
+      route.fulfill({ contentType: 'audio/wav', body: SILENT_WAV }),
     );
     await page.route(
       (url) => url.pathname === '/api/slots',
       (route) => route.fulfill({ json: { count: 48, slots: [] } }),
     );
+  }
+
+  /** `target` selected among `boards`, not checked yet, as a new selection is. */
+  private select(target: BoardTarget, boards: BoardTarget[]): BoardList {
+    return {
+      boards,
+      selected: {
+        id: target.id,
+        label: target.label,
+        status: { state: 'unknown' },
+        identity: null,
+        ssh: `ssh ${target.port === 22 ? '' : `-p ${target.port} `}${target.user}@${target.host}`,
+      },
+    };
+  }
+
+  private newPreview(camera: CameraItem, mode: PreviewMode): Preview {
+    return {
+      id: `p${++this.previews}`,
+      camera: camera.id,
+      mode,
+      started_at: new Date().toISOString(),
+      // A USB camera runs at its mode's rate; a MIPI camera's arrives later from SiMa Sentinel.
+      camera_fps: camera.connection === 'usb' ? mode.fps : null,
+    };
   }
 }

@@ -1,11 +1,12 @@
-import type { SentinelMetric, SentinelMetrics } from './api';
-import { METRICS_LIVE, withHistory } from './stats.testing';
+import type { SentinelCache, SentinelMetric } from './api';
+import { cacheWith, LIVE_METRICS, LIVE_VALUES } from './stats.testing';
 import {
   AREA_LABELS,
   HISTORY_SAMPLES,
   OVERVIEW_CARDS,
   areaMetrics,
   boardPowerChart,
+  cacheAfter,
   cardReported,
   cardShown,
   coreSummary,
@@ -16,7 +17,6 @@ import {
   metricByKey,
   metricChart,
   metricsMatching,
-  metricsQuery,
   networkChart,
   pairChart,
   powerRailsChart,
@@ -32,24 +32,31 @@ import {
 const START = Date.parse('2026-10-24T10:00:00Z');
 const AREAS = Object.keys(AREA_LABELS) as StatsArea[];
 
-/** The live board's answer with `samples` samples whose reading is its own index plus `offset`. */
-function answer(
-  samples: number,
-  options: { after?: number; full?: boolean; epoch?: number; generation?: number } = {},
-): SentinelMetrics {
-  const { after = 0, full = true, epoch = 1, generation = METRICS_LIVE.generation } = options;
-  return {
-    ...withHistory(METRICS_LIVE, samples, {
-      start: new Date(START + after * 2000).toISOString(),
-      full,
-      epoch,
-      values: (_key, i) => after + i,
-    }),
-    generation,
-  };
+const BOARD = 'local';
+
+/** The live board's cache answer with `samples` samples whose reading is its own index plus `after`. */
+function answer(samples: number, options: { after?: number; full?: boolean } = {}): SentinelCache {
+  const { after = 0, full = true } = options;
+  return cacheWith(samples, {
+    start: new Date(START + after * 2000).toISOString(),
+    full,
+    values: (_key, i) => after + i,
+  });
 }
 
-const live = (samples = 20) => mergeTelemetry(null, answer(samples));
+/**
+ * The live board's window of `samples` samples: each reads its own index, but for the newest,
+ * which holds the capture's readings, so every metric's value is the captured one.
+ */
+const live = (samples = 20) =>
+  mergeTelemetry(
+    null,
+    cacheWith(samples, {
+      start: new Date(START).toISOString(),
+      values: (key, i) => (i === samples - 1 ? (LIVE_VALUES[key] ?? null) : i),
+    }),
+    BOARD,
+  );
 
 const metric = (extra: Partial<SentinelMetric>): SentinelMetric => ({
   key: 'rtsn_0',
@@ -65,7 +72,7 @@ const metric = (extra: Partial<SentinelMetric>): SentinelMetric => ({
   ...extra,
 });
 
-/** A window written by hand, aligned as a merge leaves it. */
+/** A window written by hand, aligned as a merge leaves it; a null timestamp cannot be read. */
 function windowOf(
   metrics: readonly SentinelMetric[],
   series: Record<string, (number | null)[]>,
@@ -74,10 +81,10 @@ function windowOf(
   ),
 ): TelemetryWindow {
   return {
-    generation: 1,
-    epoch: 1,
+    board: BOARD,
     metrics,
-    timestamps,
+    sampled: [],
+    timestamps: timestamps.map((stamp) => stamp ?? 'not a time'),
     times: timestamps.map((stamp) => (stamp === null ? null : Date.parse(stamp))),
     series,
   };
@@ -97,113 +104,122 @@ function without(window: TelemetryWindow, drop: (m: SentinelMetric) => boolean):
   };
 }
 
-describe('metricsQuery', () => {
-  it('metricsQuery asks for the full window first, then for samples after the newest held one with its epoch', () => {
-    expect(metricsQuery(null, 3)).toEqual({ history: 240 });
-
-    const held = mergeTelemetry(null, answer(10, { epoch: 7 }));
-    expect(metricsQuery(held, METRICS_LIVE.generation)).toEqual({
-      history: HISTORY_SAMPLES,
-      after: held.timestamps[9],
-      epoch: 7,
-    });
+describe('cacheAfter', () => {
+  it('asks for the whole cache first, then for the samples after the newest held one', () => {
+    expect(cacheAfter(null, BOARD)).toBeNull();
+    const held = live(10);
+    expect(cacheAfter(held, BOARD)).toBe(held.timestamps[9]);
   });
 
-  it('asks for the full window again for another generation or when the newest sample has no time', () => {
+  it('asks for the whole cache again for another board, or with nothing held', () => {
     const held = live(10);
-    expect(metricsQuery(held, METRICS_LIVE.generation + 1)).toEqual({ history: 240 });
-    const untimed = { ...held, timestamps: [...held.timestamps.slice(0, -1), null] };
-    expect(metricsQuery(untimed, METRICS_LIVE.generation)).toEqual({ history: 240 });
-    expect(metricsQuery({ ...held, timestamps: [] }, METRICS_LIVE.generation)).toEqual({
-      history: 240,
-    });
+    expect(cacheAfter(held, 'ssh:sima@192.168.1.20:22')).toBeNull();
+    expect(cacheAfter({ ...held, timestamps: [] }, BOARD)).toBeNull();
   });
 });
 
 describe('mergeTelemetry', () => {
   it('a full answer replaces the window; an incremental one appends and trims to 240', () => {
-    const first = mergeTelemetry(null, answer(200));
+    const first = mergeTelemetry(null, answer(200), BOARD);
     expect(first.timestamps).toHaveLength(200);
-    expect(first.epoch).toBe(1);
+    expect(first.board).toBe(BOARD);
 
     // 60 newer samples after the 200 held: 260 in all, of which the newest 240 stay.
-    const merged = mergeTelemetry(first, answer(60, { after: 200, full: false }));
+    const merged = mergeTelemetry(first, answer(60, { after: 200, full: false }), BOARD);
     expect(merged.timestamps).toHaveLength(240);
     expect(merged.timestamps[0]).toBe(new Date(START + 20 * 2000).toISOString());
     expect(merged.timestamps.at(-1)).toBe(new Date(START + 259 * 2000).toISOString());
     expect(merged.series['cpu_usage_pct'].slice(0, 2)).toEqual([20, 21]);
     expect(merged.series['cpu_usage_pct'].at(-1)).toBe(259);
 
-    const replaced = mergeTelemetry(merged, answer(5, { after: 300, full: true, epoch: 2 }));
+    const replaced = mergeTelemetry(merged, answer(5, { after: 300, full: true }), BOARD);
     expect(replaced.timestamps).toHaveLength(5);
-    expect(replaced.epoch).toBe(2);
     expect(replaced.series['cpu_usage_pct']).toEqual([300, 301, 302, 303, 304]);
   });
 
+  it('a metric’s value is the newest sample’s reading, with its status against its thresholds', () => {
+    const merged = mergeTelemetry(null, answer(90), BOARD);
+    const cpu = metricByKey(merged, 'cpu_usage_pct')!;
+    // 89 is past the CPU's warn level (80) and short of its critical one (95).
+    expect([cpu.value, cpu.warn, cpu.critical, cpu.status]).toEqual([89, 80, 95, 'warn']);
+    // An incremental answer with no new sample keeps the newest held reading.
+    const quiet = mergeTelemetry(merged, answer(0, { after: 90, full: false }), BOARD);
+    expect(metricByKey(quiet, 'cpu_usage_pct')?.value).toBe(89);
+    expect(quiet.timestamps).toHaveLength(90);
+  });
+
   it('a full answer longer than the window keeps the newest 240', () => {
-    const merged = mergeTelemetry(null, answer(300));
+    const merged = mergeTelemetry(null, answer(300), BOARD);
     expect(merged.timestamps).toHaveLength(HISTORY_SAMPLES);
     expect(merged.series['cpu_usage_pct'][0]).toBe(60);
   });
 
-  it('an answer for another generation replaces the window whatever full says', () => {
+  it('what is held of another board is replaced whatever full says', () => {
     const held = live(30);
-    const other = mergeTelemetry(
-      held,
-      answer(4, { after: 30, full: false, generation: METRICS_LIVE.generation + 1 }),
-    );
-    expect(other.generation).toBe(METRICS_LIVE.generation + 1);
+    const other = mergeTelemetry(held, answer(4, { after: 30, full: false }), 'other');
+    expect(other.board).toBe('other');
     expect(other.timestamps).toHaveLength(4);
     expect(other.series['cpu_usage_pct']).toEqual([30, 31, 32, 33]);
   });
 
-  it('a metric new in an incremental answer gets nulls before it; one missing from it gets nulls; a dropped one leaves', () => {
-    const held = live(5);
-    const extra = metric({ key: 'extra_metric', group: 'Extra', unit: 'W', value: 1 });
-    const base = answer(3, { after: 5, full: false });
-    const next: SentinelMetrics = {
-      ...base,
-      // net_rx_mbps is no longer reported, cpu_usage_pct is reported without samples and
-      // extra_metric is new.
-      groups: [
-        ...base.groups.map((group) => ({
-          ...group,
-          metrics: group.metrics.filter((m) => m.key !== 'net_rx_mbps'),
-        })),
-        { name: 'Extra', metrics: [extra] },
-      ],
-      order: [...base.order.filter((key) => key !== 'net_rx_mbps'), 'extra_metric'],
-      history: {
-        ...base.history,
-        series: {
-          ...Object.fromEntries(
-            Object.entries(base.history.series).filter(([key]) => key !== 'cpu_usage_pct'),
-          ),
-          extra_metric: [1, 2, 3],
-        },
-      },
-    };
+  it('a metric new in an incremental answer gets nulls before it; one a sample leaves out gets null; a dropped one leaves', () => {
+    const held = mergeTelemetry(null, answer(5), BOARD);
+    const definitions = [
+      ...LIVE_METRICS.filter((m) => m.key !== 'net_rx_mbps'),
+      { key: 'extra_metric', group: 'Extra', unit: 'W' },
+    ];
+    // net_rx_mbps is no longer defined or sampled, cpu_usage_pct is defined but not sampled and
+    // extra_metric is new.
+    const next = cacheWith(3, {
+      start: new Date(START + 5 * 2000).toISOString(),
+      full: false,
+      metrics: definitions,
+      values: (key, i) =>
+        key === 'cpu_usage_pct' ? undefined : key === 'extra_metric' ? i + 1 : 0,
+    });
 
-    const merged = mergeTelemetry(held, next);
+    const merged = mergeTelemetry(held, next, BOARD);
     expect(merged.timestamps).toHaveLength(8);
     expect(merged.series['extra_metric']).toEqual([null, null, null, null, null, 1, 2, 3]);
     expect(merged.series['cpu_usage_pct']).toEqual([0, 1, 2, 3, 4, null, null, null]);
+    expect(metricByKey(merged, 'cpu_usage_pct')?.status).toBe('unavailable');
     expect('net_rx_mbps' in merged.series).toBe(false);
     expect(merged.metrics.some((m) => m.key === 'net_rx_mbps')).toBe(false);
-    expect(merged.metrics.at(-1)?.key).toBe('extra_metric');
+    expect(merged.metrics.at(-1)).toMatchObject({ key: 'extra_metric', value: 3, group: 'Extra' });
+  });
+
+  it('a sampled key without a definition is shown after the defined ones, under Other', () => {
+    const base = answer(2);
+    const merged = mergeTelemetry(
+      null,
+      {
+        ...base,
+        samples: base.samples.map((sample) => ({
+          ...sample,
+          values: { ...sample.values, zeta_unknown: 7, alpha_unknown: null },
+        })),
+      },
+      BOARD,
+    );
+    expect(merged.metrics).toHaveLength(61);
+    expect(merged.metrics.slice(-2)).toEqual([
+      expect.objectContaining({ key: 'alpha_unknown', label: 'Alpha unknown', group: 'Other' }),
+      expect.objectContaining({ key: 'zeta_unknown', value: 7, status: 'ok', unit: null }),
+    ]);
+    expect(merged.metrics[59].status).toBe('unavailable');
   });
 
   it('every series stays as long as the timestamps after any merge', () => {
     let held: TelemetryWindow | null = null;
-    const steps: SentinelMetrics[] = [
+    const steps: SentinelCache[] = [
       answer(100),
       answer(100, { after: 100, full: false }),
       answer(100, { after: 200, full: false }),
-      { ...answer(3, { after: 300, full: false }), history: answer(3, { after: 300 }).history },
-      answer(2, { after: 303, full: false, epoch: 5 }),
+      answer(3, { after: 300 }),
+      answer(2, { after: 303, full: false }),
     ];
     for (const step of steps) {
-      held = mergeTelemetry(held, step);
+      held = mergeTelemetry(held, step, BOARD);
       for (const key of held.metrics.map((m) => m.key)) {
         expect(held.series[key], key).toHaveLength(held.timestamps.length);
       }
@@ -212,30 +228,28 @@ describe('mergeTelemetry', () => {
     }
   });
 
-  it('lists the metrics in Sentinel order, with any the order omits after them', () => {
-    const base = answer(2);
-    const reversed = [...base.order].reverse();
-    const merged = mergeTelemetry(null, { ...base, order: reversed.slice(0, 5) });
-    expect(merged.metrics.slice(0, 5).map((m) => m.key)).toEqual(reversed.slice(0, 5));
-    expect(merged.metrics).toHaveLength(59);
-
-    const unordered = mergeTelemetry(null, { ...base, order: [] });
-    expect(unordered.metrics.map((m) => m.key)).toEqual(
-      base.groups.flatMap((group) => group.metrics.map((m) => m.key)),
-    );
+  it('lists the metrics in Sentinel’s order', () => {
+    const reversed = [...LIVE_METRICS].reverse();
+    const merged = mergeTelemetry(null, cacheWith(2, { metrics: reversed }), BOARD);
+    expect(merged.metrics.map((m) => m.key)).toEqual(reversed.map((m) => m.key));
   });
 
-  it('reads each timestamp as a time, null where it cannot be read', () => {
+  it('reads each timestamp as a time, null where it cannot be read, and leaves out a sample without one', () => {
     const base = answer(3);
-    const merged = mergeTelemetry(null, {
-      ...base,
-      history: {
-        ...base.history,
-        timestamps: [base.history.timestamps[0], 'not a time', null],
+    const merged = mergeTelemetry(
+      null,
+      {
+        ...base,
+        samples: [
+          base.samples[0],
+          { ...base.samples[1], timestamp: 'not a time' },
+          { values: {} } as never,
+        ],
       },
-    });
-    expect(merged.times).toEqual([START, null, null]);
-    expect(merged.timestamps[2]).toBeNull();
+      BOARD,
+    );
+    expect(merged.times).toEqual([START, null]);
+    expect(merged.timestamps).toEqual([base.samples[0].timestamp, 'not a time']);
   });
 });
 
@@ -490,7 +504,9 @@ describe('the chart inputs', () => {
     const window = live(5);
     const cpu = metricChart(window, 'cpu_usage_pct');
     const short = window.metrics.find((m) => m.key === 'cpu_usage_pct')?.short;
-    expect(cpu?.series).toEqual([{ key: 'cpu_usage_pct', label: short, values: [0, 1, 2, 3, 4] }]);
+    expect(cpu?.series).toEqual([
+      { key: 'cpu_usage_pct', label: short, values: [0, 1, 2, 3, LIVE_VALUES['cpu_usage_pct']] },
+    ]);
     expect(cpu?.domain).toEqual([0, 100]);
     expect(cpu?.thresholds.map((t) => t.label)).toEqual(['Warning 80%', 'Critical 95%']);
     expect(cpu?.tone).toBe('default');
@@ -521,7 +537,8 @@ describe('the chart inputs', () => {
       ['net_tx_mbps', 'Transmit'],
     ]);
     expect(network?.headline).toBe('2.82 MB/s');
-    expect(network?.domain).toEqual([0, 5]);
+    // The history reads 0 to 3 MB/s on each before the newest: the scale is a round number above.
+    expect(network?.domain).toEqual([0, 4]);
     expect(network?.thresholds).toEqual([]);
     expect(network?.tone).toBe('default');
   });
@@ -623,10 +640,10 @@ describe('the chart inputs, continued', () => {
       'SOM Platform 1.8V',
       'SOM Platform 3.3V',
     ]);
-    // The rails sum to 11.625 W now. The history reads 0 to 4 W on each of the eight rails, so its
-    // largest total is 32 W and the scale is a round number a tenth above that.
+    // The rails sum to 11.625 W now. Before that the history reads 0 to 3 W on each of the eight
+    // rails, so its largest total is 24 W and the scale is a round number a tenth above that.
     expect(rails?.headline).toBe('11.63 W across 8 rails');
-    expect(rails?.domain).toEqual([0, 40]);
+    expect(rails?.domain).toEqual([0, 30]);
   });
 
   it('powerRailsChart: the scale follows the largest total over the window, and a missing rail leaves no total now', () => {

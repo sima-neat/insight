@@ -26,7 +26,7 @@ class FakeRuns {
 
 /** A failure of `code` as `SentinelRuns` resolves it for `action`. */
 function failure(code: string, action: SentinelAction, hint = ''): SentinelFailure {
-  return failureOf(new BoardProblem(`Failed with ${code}.`, code, hint, {}), 7, action);
+  return failureOf(new BoardProblem(`Failed with ${code}.`, code, hint), 'local', action);
 }
 
 /** The control as the toolbar holds it. */

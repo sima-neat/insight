@@ -1,9 +1,8 @@
 /**
- * A comparison of saved runs (`GET /api/sentinel/compare?raw=1`) and what the comparison view
+ * A comparison of saved runs (`GET .../sentinel/compare?raw=true`) and what the comparison view
  * derives from it: the address, the overlay of one series over the runs' common window with its
  * summary, the per-metric table with its groups and filter, and the CSV. Pure functions over plain
- * data, ported from #170's `dashboard.js` (`compareOverlay`) and `model.js` (`compareTable`,
- * `compareCsv`), with its collapsing overlay fixed (Inv-S §13.28).
+ * data.
  *
  * The runs come in the order `/compare` was asked for, so the first is the baseline (`orderedIds`).
  */

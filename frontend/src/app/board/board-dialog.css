@@ -4,7 +4,8 @@
   gap: var(--neat-space-4);
 }
 
-.status {
+.status,
+.shell {
   display: flex;
   flex-direction: column;
   gap: var(--neat-space-2);

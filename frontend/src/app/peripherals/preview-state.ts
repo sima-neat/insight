@@ -1,13 +1,13 @@
 /**
- * The camera preview as a state machine driven by the backend's session, and the steps around it,
- * as pure functions with their requests injected (#170's `peripherals/model.js`, copy per
- * Inv-PB §2.3). `CameraPreview` composes them; keeping them pure lets every interleaving of the
- * user and the board's answers be tested without a page.
+ * The camera preview as a state machine driven by the board's preview, and the steps around it,
+ * as pure functions with their requests injected. `CameraPreview` composes them; keeping them
+ * pure lets every interleaving of the user and the board's answers be tested without a page.
  *
- * The backend runs at most one preview per Insight, across all tabs, and its MJPEG stream has one
- * reader: a second tab shows the preview as running elsewhere, with Stop (Inv-PB §4.3).
+ * The server runs at most one preview per board, across all tabs, and its MJPEG stream has one
+ * reader: a second tab shows the preview as running elsewhere, with Stop.
  */
 
+import { boardUrl } from '../board/api';
 import { BoardProblem } from '../board/board-error';
 import type { DeviceChip } from './devices';
 import type { CameraModeChoice, PreviewSession } from './api';
@@ -16,9 +16,9 @@ import { rateLabel, sameSelection } from './camera-modes';
 export type PreviewStatus = 'idle' | 'starting' | 'live' | 'elsewhere' | 'stopping' | 'error';
 
 /**
- * What the preview shows. `session` is the backend's, once a start answered or one was adopted;
- * a start has none until the board sent its first frame. `error` is why the last start failed or
- * the stream ended, or why a stop failed (the preview then stays live).
+ * What the preview shows. `session` is the board's preview, once a start answered or one was
+ * adopted; a start has none until the board sent its first frame. `error` is why the last start
+ * failed or the stream ended, or why a stop failed (the preview then stays live).
  */
 export interface PreviewState {
   status: PreviewStatus;
@@ -32,7 +32,7 @@ export interface PreviewState {
  */
 export type PreviewEvent =
   | { type: 'start' }
-  /** A session this page did not start: a reload, another tab, a refused start. */
+  /** A preview this page did not start: a reload, another tab, a refused start. */
   | { type: 'adopt'; session: PreviewSession | null }
   /** A start's answer. */
   | { type: 'session'; session: PreviewSession | null }
@@ -44,7 +44,7 @@ export type PreviewEvent =
   | { type: 'camera-fps'; for: string; fps: number }
   /** This page's stream was refused because another page shows it. */
   | { type: 'elsewhere'; for: string; session: PreviewSession }
-  /** The backend no longer runs the session; nothing is left to stop. */
+  /** The board no longer runs the preview; nothing is left to stop. */
   | { type: 'ended'; for: string; error: BoardProblem }
   | { type: 'failed'; for?: string; error: BoardProblem }
   | { type: 'reset' };
@@ -57,26 +57,26 @@ export interface CameraSelection extends CameraModeChoice {
   id: string;
 }
 
-/** What the page shows now: the camera, the board generation and the selected mode. */
+/** What the page shows now: the camera, the board's id and the selected mode. */
 export interface PreviewView {
   cameraId: string | null;
-  generation: number | null;
+  board: string | null;
   selection: CameraSelection | null;
 }
 
-/** A start as it was sent: for which camera, board generation and mode. */
+/** A start as it was sent: for which camera, board and mode. */
 export interface PreviewRequested {
   cameraId: string;
-  generation: number | null;
+  board: string | null;
   mode: CameraSelection;
 }
 
 /**
  * The requests and the page a start works with (`runPreviewStart`). `lookup` answers the running
- * session, null when none runs or the read failed. `stop` resolves whether the session stopped.
- * `adopt` answers whether the page took the running session up; one it cannot show is not, and
- * the refusal shows instead. `reloadBoard` re-reads the board when an answer names a generation
- * the page does not know.
+ * preview, null when none runs or the read failed. `stop` resolves whether the preview stopped.
+ * `adopt` answers whether the page took the running preview up; one it cannot show is not, and
+ * the refusal shows instead. `reloadBoard` re-reads the boards when an answer names a board the
+ * page does not know.
  */
 export interface PreviewStartDeps {
   post(mode: CameraSelection): Promise<PreviewSession>;
@@ -90,7 +90,7 @@ export interface PreviewStartDeps {
   reloadBoard(): void;
 }
 
-/** A read of the backend's running session (`CameraPreview.current()`); rejects when it failed. */
+/** A read of the board's running preview (`CameraPreview.current()`); rejects when it failed. */
 export type PreviewRead = () => Promise<PreviewSession | null>;
 
 /** What paces a watch: calls `tick` repeatedly from `start` until `stop`. */
@@ -99,20 +99,16 @@ export interface PreviewTimer {
   stop(): void;
 }
 
-/** An error the preview shows, with one recovery line and what else the panel says about it. */
+/** An error the preview shows, with one recovery line. */
 export interface PreviewErrorInfo {
   code: string;
   message: string;
-  /** The backend's own hint; the panel shows it, or `action` when there is none. */
+  /** The server's own hint; the panel shows it, or `action` when there is none. */
   hint: string;
   action: string;
-  /** For `preview_active`: the camera the running preview is on. */
-  otherCamera: string;
-  /** The board's output, for the folded "Board output". */
-  detail: string;
 }
 
-/** How often a live preview's page reads GET /api/peripherals/preview, which never contacts the board. */
+/** How often a live preview's page reads the board's preview, which never contacts the board. */
 export const PREVIEW_POLL_MS = 2500;
 
 export const PREVIEW_IDLE: PreviewState = Object.freeze({
@@ -121,7 +117,6 @@ export const PREVIEW_IDLE: PreviewState = Object.freeze({
   error: null,
 });
 
-/** #170's status labels; its tones mapped to the kit's, as `devices.ts` maps them. */
 const PREVIEW_STATUS: Record<PreviewStatus, DeviceChip> = {
   idle: { label: 'Not running', tone: 'neutral' },
   starting: { label: 'Starting…', tone: 'info' },
@@ -131,6 +126,7 @@ const PREVIEW_STATUS: Record<PreviewStatus, DeviceChip> = {
   error: { label: 'Could not start', tone: 'danger' },
 };
 
+/** The page's recovery lines for the codes whose answer may come without a hint. */
 const PREVIEW_ERROR_ACTIONS: Readonly<Record<string, string>> = {
   camera_in_use:
     'Stop that process on the board yourself, then start the preview again. Insight never stops it for you.',
@@ -138,9 +134,9 @@ const PREVIEW_ERROR_ACTIONS: Readonly<Record<string, string>> = {
   invalid_request: 'Choose a mode Insight lists as Available; this one was rejected.',
   mode_adjusted:
     'Pick the size libcamera streams at. The board lists the requested size, but its libcamera pipeline does not output it.',
-  command_failed:
-    'The preview pipeline could not start on the board. The board output below says why.',
-  stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.',
+  command_failed: 'The preview pipeline could not start on the board.',
+  no_scan: 'Refresh, then start the preview again.',
+  not_found: 'Refresh, then start the preview again.',
 };
 
 /** The events of a stop. */
@@ -154,10 +150,18 @@ export function previewStatus(state: PreviewState): DeviceChip {
   return PREVIEW_STATUS[state.status];
 }
 
-/** The session's stream, only as the same-origin API path Insight serves it on; null for anything else. */
+/** A preview's path on its board: `cameras/<camera>/preview<suffix>`, both escaped. */
+export function previewUrl(
+  session: Pick<PreviewSession, 'board' | 'camera'>,
+  suffix: '' | '.mjpg' | '/stop',
+): string {
+  return boardUrl(session.board, `cameras/${encodeURIComponent(session.camera)}/preview${suffix}`);
+}
+
+/** The preview's MJPEG stream, which names the preview so that a stream for another one fails. */
 export function previewStreamUrl(session: PreviewSession | null): string | null {
-  const url = session?.stream_url ?? '';
-  return /^\/api\/peripherals\/cameras\/preview\/[A-Za-z0-9_-]+\/stream$/.test(url) ? url : null;
+  if (!session) return null;
+  return `${previewUrl(session, '.mjpg')}?preview=${encodeURIComponent(session.id)}`;
 }
 
 export function nextPreviewState(current: PreviewState, event: PreviewEvent): PreviewState {
@@ -166,7 +170,7 @@ export function nextPreviewState(current: PreviewState, event: PreviewEvent): Pr
       return { status: 'starting', session: null, error: null };
     case 'adopt': {
       const session = event.session;
-      if (!session || session.state === 'stopped') return PREVIEW_IDLE;
+      if (!session) return PREVIEW_IDLE;
       // The stream has one viewer: when another page shows it, this one offers Stop, not a second stream.
       if (session.viewer) return { status: 'elsewhere', session, error: null };
       return { status: 'live', session, error: null };
@@ -177,7 +181,6 @@ export function nextPreviewState(current: PreviewState, event: PreviewEvent): Pr
       // A response for a session already replaced or stopped must not revive it.
       if (current.session && current.session.id !== session.id) return current;
       if (current.status === 'idle' || current.status === 'error') return current;
-      if (session.state === 'stopped') return PREVIEW_IDLE;
       if (current.status === 'stopping' || current.status === 'elsewhere') {
         return { status: current.status, session, error: null };
       }
@@ -228,7 +231,7 @@ export function nextPreviewState(current: PreviewState, event: PreviewEvent): Pr
  */
 export function startSuperseded(requested: PreviewRequested, latest: PreviewView): boolean {
   if (requested.cameraId !== latest.cameraId) return true;
-  if (otherGeneration(requested.generation, latest.generation)) return true;
+  if (otherBoard(requested.board, latest.board)) return true;
   return !sameSelection(requested.mode, latest.selection);
 }
 
@@ -237,11 +240,11 @@ export function startSuperseded(requested: PreviewRequested, latest: PreviewView
  * have changed again while the stop ran. None when the camera or the board changed meanwhile.
  */
 export function restartSelection(
-  requested: Pick<PreviewRequested, 'cameraId' | 'generation'>,
+  requested: Pick<PreviewRequested, 'cameraId' | 'board'>,
   latest: PreviewView,
 ): CameraSelection | null {
   if (requested.cameraId !== latest.cameraId) return null;
-  if (otherGeneration(requested.generation, latest.generation)) return null;
+  if (otherBoard(requested.board, latest.board)) return null;
   return latest.selection?.id === requested.cameraId ? latest.selection : null;
 }
 
@@ -263,6 +266,9 @@ export async function runPreviewStart(
     // the pane now shows.
     if (startSuperseded(requested, deps.view())) return deps.dispatch({ type: 'reset' });
     const error = deps.normalize(failure);
+    // The board was replaced while the start ran: the boards are read again, which shows the new
+    // one and lets go of this preview.
+    if (error.code === 'not_found' || error.code === 'board_changed') deps.reloadBoard();
     // Another tab started a preview after this page loaded: show that one, with its Stop.
     const running = error.code === 'preview_active' ? await deps.lookup() : null;
     if (startSuperseded(requested, deps.view())) return deps.dispatch({ type: 'reset' });
@@ -271,22 +277,16 @@ export async function runPreviewStart(
     return deps.dispatch({ type: 'failed', error });
   }
   // A session for a camera, board or mode no longer shown would label one camera's video as
-  // another's, or disagree with the menus: it is stopped instead.
+  // another's, or disagree with the menus: it is stopped instead, and the mode selected now
+  // started, unless the board changed meanwhile.
   const latest = deps.view();
-  if (sessionMatches(session, latest.cameraId, latest.generation, latest.selection)) {
+  if (sessionMatches(session, latest.cameraId, latest.board, latest.selection)) {
     return deps.dispatch({ type: 'session', session });
   }
-  // A session of another board generation than the one shown is never restarted: while the page
-  // still shows the generation the start was sent for, the board moved without the page knowing
-  // (Insight restarted, or a client changed the board while this window kept the focus), and a
-  // restart would get the same answer again, starting and killing the camera each time. The
-  // board is re-read instead, so the page learns of the change.
-  const otherBoard = otherGeneration(session.generation, latest.generation);
-  if (otherBoard && !otherGeneration(requested.generation, latest.generation)) deps.reloadBoard();
   if (!(await deps.stop(session))) return;
-  // The mode may have changed again while the stop ran: start the one selected now, or nothing
-  // when the camera or board changed.
-  const next = otherBoard ? null : restartSelection(requested, deps.view());
+  const next = otherBoard(session.board, deps.view().board)
+    ? null
+    : restartSelection(requested, deps.view());
   if (next) await deps.start(next);
   else deps.dispatch({ type: 'reset' });
 }
@@ -304,12 +304,12 @@ export function previewNeedsRestart(
   const session = state.session;
   if (!next || !session) return false;
   if (state.status !== 'starting' && state.status !== 'live') return false;
-  if (session.camera_id !== cameraId) return false;
+  if (session.camera !== cameraId) return false;
   return !sameSelection(session.mode, next);
 }
 
 /**
- * The event for a stream that ended: the backend stops a preview whose stream ends, so the
+ * The event for a stream that ended: the server stops a preview whose stream ends, so the
  * preview is over, with the reason shown.
  */
 export function streamEndedEvent(sessionId: string): PreviewEventOf<'ended'> {
@@ -320,15 +320,14 @@ export function streamEndedEvent(sessionId: string): PreviewEventOf<'ended'> {
       'The preview stream stopped.',
       'stream_ended',
       'Start the preview again. If it keeps stopping, check the camera connection on the board.',
-      {},
     ),
   };
 }
 
 /**
- * The event for an `<img>` that could not load the stream. The backend gives a stream one viewer
+ * The event for an `<img>` that could not load the stream. The server gives a stream one viewer
  * and refuses the next: two pages that both found the preview unclaimed both try, and the one
- * refused shows it as running in another tab while the backend still runs it with a viewer.
+ * refused shows it as running in another tab while the board still runs it with a viewer.
  * Otherwise the stream is over.
  */
 export async function streamErrorEvent(
@@ -336,16 +335,16 @@ export async function streamErrorEvent(
   sessionId: string,
 ): Promise<PreviewEventOf<'elsewhere' | 'ended'>> {
   const current = await read().catch(() => null);
-  if (current?.id === sessionId && current.state !== 'stopped' && current.viewer) {
+  if (current?.id === sessionId && current.viewer) {
     return { type: 'elsewhere', for: sessionId, session: current };
   }
   return streamEndedEvent(sessionId);
 }
 
 /**
- * One read of the backend's preview for a live session: the ended event when the backend no
- * longer runs it; while it does, the camera's rate once the backend knows it (a MIPI sensor's
- * arrives after the first frame), else null. A failed read proves nothing, so it ends nothing.
+ * One read of the board's preview for a live session: the ended event when the board no longer
+ * runs it; while it does, the camera's rate once the server knows it (a MIPI sensor's arrives
+ * after the first frame), else null. A failed read proves nothing, so it ends nothing.
  */
 export async function previewStatusEvent(
   read: PreviewRead,
@@ -357,14 +356,14 @@ export async function previewStatusEvent(
   } catch {
     return null;
   }
-  if (current?.id !== sessionId || current.state === 'stopped') return streamEndedEvent(sessionId);
+  if (current?.id !== sessionId) return streamEndedEvent(sessionId);
   return current.camera_fps !== null && rateLabel(current.camera_fps)
     ? { type: 'camera-fps', for: sessionId, fps: current.camera_fps }
     : null;
 }
 
 /**
- * Reads a live preview on every tick of `timer` until the backend no longer runs it; then
+ * Reads a live preview on every tick of `timer` until the board no longer runs it; then
  * `onEvent` gets the ended event and the timer stops. An `<img>` fires no event when a multipart
  * stream ends cleanly (end of the board stream, the stall timeout, a refresh or board change from
  * elsewhere), so this is how the page learns of it. A read that finds the camera's rate passes it
@@ -400,9 +399,9 @@ export function watchPreview(
  * mode it streams, so they agree with the video. Null when the session names no camera.
  */
 export function adoptedSelection(session: PreviewSession): CameraSelection | null {
-  if (!session.camera_id) return null;
+  if (!session.camera) return null;
   const { format, width, height, fps } = session.mode;
-  return { id: session.camera_id, format, width, height, fps };
+  return { id: session.camera, format, width, height, fps };
 }
 
 /**
@@ -413,38 +412,32 @@ export function sessionToAdopt(
   error: Pick<BoardProblem, 'code'>,
   session: PreviewSession | null,
 ): PreviewSession | null {
-  if (error.code !== 'preview_active' || !session || session.state === 'stopped') return null;
-  return session;
+  return error.code === 'preview_active' ? session : null;
 }
 
 /**
- * Whether a session is the one the page shows: its camera, its board generation (when both are
- * known) and, when given, its mode.
+ * Whether a session is the one the page shows: its camera, its board (when both are known) and,
+ * when given, its mode.
  */
 export function sessionMatches(
   session: PreviewSession | null,
   cameraId: string | null,
-  generation?: number | null,
+  board?: string | null,
   selection: CameraModeChoice | null = null,
 ): boolean {
   if (!session || !cameraId) return false;
-  if (session.camera_id !== cameraId) return false;
-  if (otherGeneration(session.generation, generation ?? null)) return false;
+  if (session.camera !== cameraId) return false;
+  if (otherBoard(session.board, board ?? null)) return false;
   return !selection || sameSelection(session.mode, selection);
 }
 
 export function previewErrorInfo(error: BoardProblem | null): PreviewErrorInfo | null {
   if (!error) return null;
-  const details = error.details;
-  const other = record(details['session']) ?? record(details['preview']) ?? {};
   return {
     code: error.code,
     message: error.message,
     hint: error.hint,
     action: PREVIEW_ERROR_ACTIONS[error.code] ?? '',
-    otherCamera:
-      error.code === 'preview_active' ? text(other['camera_id']) || text(details['camera_id']) : '',
-    detail: text(details['detail']),
   };
 }
 
@@ -464,15 +457,7 @@ function outOfDate(state: PreviewState, event: PreviewEvent & { for?: string }):
   return state.session.id !== event.for;
 }
 
-/** Two board generations that are both known and differ; an unknown one matches any. */
-function otherGeneration(a: number | null, b: number | null): boolean {
+/** Two boards that are both known and differ; an unknown one matches any. */
+function otherBoard(a: string | null, b: string | null): boolean {
   return a !== null && b !== null && a !== b;
-}
-
-function record(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
-}
-
-function text(value: unknown): string {
-  return typeof value === 'string' ? value : '';
 }

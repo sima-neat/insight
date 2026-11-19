@@ -18,7 +18,8 @@ import {
   unitAfter,
   unitSuffix,
 } from './format';
-import { METRICS_LIVE } from './stats.testing';
+import { joinMetric } from './metrics';
+import { LIVE_METRICS } from './stats.testing';
 
 const metric = (extra: Partial<SentinelMetric>): SentinelMetric => ({
   key: 'rtsn_0',
@@ -72,9 +73,7 @@ describe('what a metric is', () => {
   });
 
   it('every live metric lands in exactly one section, and the board has all three', () => {
-    const sections = new Set(
-      METRICS_LIVE.groups.flatMap((group) => group.metrics.map((m) => metricSection(m))),
-    );
+    const sections = new Set(LIVE_METRICS.map((metric) => metricSection(joinMetric(metric, null))));
     expect([...sections].sort()).toEqual(['power', 'system', 'thermal']);
   });
 

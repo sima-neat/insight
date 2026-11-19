@@ -5,7 +5,7 @@ import { SentinelFailureCallout } from './sentinel-failure-callout';
 
 /** A read failure of `code` as `failureOf` words it. */
 function failure(code: string, hint = ''): SentinelFailure {
-  return failureOf(new BoardProblem(`Failed with ${code}.`, code, hint, {}), 7);
+  return failureOf(new BoardProblem(`Failed with ${code}.`, code, hint), 'local');
 }
 
 describe('SentinelFailureCallout', () => {

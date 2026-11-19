@@ -30,6 +30,18 @@ const DAEMON_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The codes that say Sentinel cannot be used on the board as it is: its daemon is not there to
+ * answer, or it speaks an API Insight does not (`sentinel_schema`, `sentinel_outdated`). A health
+ * read failing with one of them means Sentinel is not ready; any other failure (a lost
+ * connection, a timeout) says nothing about whether it is.
+ */
+const UNUSABLE_CODES: ReadonlySet<string> = new Set([
+  ...DAEMON_CODES,
+  'sentinel_schema',
+  'sentinel_outdated',
+]);
+
+/**
  * Whether a failure with this code says the board or the daemon cannot answer: the next poll would
  * fail the same way, so polling stops until the state is read again.
  */
@@ -37,10 +49,15 @@ export function haltsPolling(code: string): boolean {
   return BOARD_CODES.has(code) || DAEMON_CODES.has(code);
 }
 
+/** Whether a failure with this code says Sentinel cannot be used on the board (`UNUSABLE_CODES`). */
+export function sentinelUnusable(code: string): boolean {
+  return UNUSABLE_CODES.has(code);
+}
+
 /**
  * The codes whose fix lies elsewhere than in asking again: the board's settings (`no_target`,
  * `auth_failed`, `host_key_changed`), Sentinel's installation (`sentinel_missing`,
- * `sentinel_denied`) or its version (`sentinel_schema`).
+ * `sentinel_denied`) or its version (`sentinel_schema`, `sentinel_outdated`).
  */
 const NOT_RETRYABLE: ReadonlySet<string> = new Set([
   'no_target',
@@ -49,6 +66,7 @@ const NOT_RETRYABLE: ReadonlySet<string> = new Set([
   'sentinel_missing',
   'sentinel_denied',
   'sentinel_schema',
+  'sentinel_outdated',
 ]);
 
 // Titles say what failed; the backend's own message and hint carry the detail.
@@ -61,13 +79,14 @@ const TITLES: Record<string, string> = {
   permission_denied: 'The board refused the command',
   tool_missing: 'A tool is missing on the board',
   command_failed: 'A command failed on the board',
-  sentinel_missing: 'Sentinel is not running on this board',
+  sentinel_missing: 'Sentinel is not installed on this board',
   sentinel_stopped: 'The Sentinel service is stopped',
   sentinel_denied: 'Sentinel refused this user',
   sentinel_schema: 'Sentinel and Insight speak different API versions',
+  sentinel_outdated: 'Sentinel on the board is older than Insight',
   sentinel_failed: 'Sentinel could not answer',
-  already_installed: 'Sentinel is already installed',
-  stale_snapshot: 'The board changed while Insight was working',
+  sentinel_busy: 'Sentinel is busy',
+  board_changed: 'The board changed while Insight was working',
   trace_conflict: 'That trace cannot start',
   not_found: 'That run is not on this board',
   invalid_request: 'The request was rejected',
@@ -78,19 +97,16 @@ const TITLES: Record<string, string> = {
 };
 const FALLBACK_TITLE = 'Something went wrong';
 
-/**
- * What the backend's own hint is missing. The board's settings are the board pill in the top bar,
- * where #170 pointed at a "Board panel above".
- */
+/** What the backend's own hint is missing. The board's settings are the rail's board item. */
 const FALLBACK_HINTS: Record<string, string> = {
-  no_target: 'Choose a board with the board pill in the top bar.',
-  unreachable: 'Fix the connection from the board pill in the top bar, then retry.',
-  auth_failed: 'Fix the connection from the board pill in the top bar, then retry.',
+  no_target: 'Choose a board with the board item in the rail.',
+  unreachable: 'Fix the connection from the board item in the rail, then retry.',
+  auth_failed: 'Fix the connection from the board item in the rail, then retry.',
   host_key_changed:
-    'Confirm the fingerprint in the board dialog, from the board pill in the top bar, before trusting the new key.',
+    'Confirm the fingerprint in the board dialog, from the board item in the rail, before trusting the new key.',
   timeout: 'Check the board is awake and on the network, then retry.',
-  stale_snapshot: 'Nothing was changed. Insight has read the board again.',
-  sentinel_missing: 'Install Sentinel from this page, or start it on the board.',
+  board_changed: 'Insight has read the board again.',
+  sentinel_missing: 'Install it on the board with `sima-cli neat install sentinel`.',
   sentinel_stopped: 'Start it on the board with `sudo systemctl start simaai-sentinel`.',
   sentinel_failed: 'Check `systemctl status simaai-sentinel` on the board.',
 };
@@ -99,26 +115,7 @@ const FALLBACK_HINTS: Record<string, string> = {
  * What a Sentinel request was for. A read is the default; the rest change something on the board,
  * and the same codes mean something else for them.
  */
-export type SentinelAction = 'read' | 'install' | 'start' | 'stop' | 'delete';
-
-/**
- * The same codes mean something else when they come back from POST /api/sentinel/install. Nothing
- * was being read there, so "Sentinel could not answer" is not what failed and not where the fix
- * is: `sentinel_failed` is how the backend reports a missing `sima-cli`, an installer that exited
- * non-zero, and an installer that finished with the service still down; `sentinel_denied` is how
- * it reports that the board's user has no passwordless sudo; and a `timeout` is the 15-minute
- * installer budget, not an unresponsive board.
- */
-const INSTALL_TITLES: Record<string, string> = {
-  sentinel_failed: 'Sentinel could not be installed',
-  sentinel_denied: 'Installing Sentinel needs sudo on the board',
-  timeout: 'The installer did not finish in time',
-};
-
-const INSTALL_HINTS: Record<string, string> = {
-  timeout: 'Run the install in a shell on the board, where it can take as long as it needs.',
-  sentinel_failed: 'Check the installer output below, or run the install in a shell on the board.',
-};
+export type SentinelAction = 'read' | 'start' | 'stop' | 'delete';
 
 /**
  * `trace_conflict` is the one code three requests answer for different reasons: starting while a
@@ -136,33 +133,25 @@ const DELETE_TITLES: Record<string, string> = {
 };
 
 const ACTION_TITLES: Partial<Record<SentinelAction, Record<string, string>>> = {
-  install: INSTALL_TITLES,
   stop: STOP_TITLES,
   delete: DELETE_TITLES,
 };
 
-const ACTION_HINTS: Partial<Record<SentinelAction, Record<string, string>>> = {
-  install: INSTALL_HINTS,
-};
-
 /** What a Sentinel request failed with: what the page says about it, and where the fix is. */
 export interface SentinelFailure {
-  /** The failure as the board's UI reads it, with the whole error body in `details`. */
+  /** The failure as the board's UI reads it. */
   problem: BoardProblem;
   code: string;
   /**
-   * The board generation the failure belongs to: the one the backend answered under when it names
-   * one, else the one the request was sent to. Null when neither is known. A failure that lands
-   * after a board switch is told apart by it.
+   * The id of the board the request was sent to; null when none was selected. A failure that
+   * lands after a board switch is told apart by it.
    */
-  generation: number | null;
-  /** What the failure came out of, so the page can label the output attached to it. */
+  boardId: string | null;
+  /** What the failure came out of. */
   action: SentinelAction;
   title: string;
   /** The backend's hint, else the page's own for the code; '' when there is none. */
   hint: string;
-  /** The installer's output tail, or whatever else the backend attached; '' when none. */
-  detail: string;
   /** The board's own failure: its settings are the place to fix it. */
   board: boolean;
   /** The daemon is not there to answer. */
@@ -173,27 +162,24 @@ export interface SentinelFailure {
 
 /**
  * One readable failure: a title, the backend's sentence (in `problem`), its hint, and where the fix
- * is. `generation` is the board generation the request was issued under, so a failure that lands
- * after a board switch can be told from the new board's. `action` says what was being asked, since
- * the same codes mean something else for an install, a stop or a delete.
+ * is. `board` is the id of the board the request was sent to, so a failure that lands after a
+ * board switch can be told from the new board's. `action` says what was being asked, since the
+ * same codes mean something else for a stop or a delete.
  */
 export function failureOf(
   failure: unknown,
-  generation: number | null,
+  board: string | null,
   action: SentinelAction = 'read',
 ): SentinelFailure {
   const problem = problemOf(failure);
   const code = problem.code;
-  const answered = problem.details['generation'];
-  const detail = problem.details['detail'];
   return {
     problem,
     code,
-    generation: Number.isInteger(answered) ? (answered as number) : generation,
+    boardId: board,
     action,
     title: ACTION_TITLES[action]?.[code] || TITLES[code] || FALLBACK_TITLE,
-    hint: problem.hint || ACTION_HINTS[action]?.[code] || FALLBACK_HINTS[code] || '',
-    detail: typeof detail === 'string' ? detail : '',
+    hint: problem.hint || FALLBACK_HINTS[code] || '',
     board: BOARD_CODES.has(code),
     daemon: DAEMON_CODES.has(code),
     retryable: !NOT_RETRYABLE.has(code),
@@ -207,8 +193,17 @@ export function failureOf(
  */
 export function unexpectedAnswer(
   message: string,
-  generation: number | null,
+  board: string | null,
   action: SentinelAction = 'read',
 ): SentinelFailure {
-  return failureOf(new BoardProblem(message, 'bad_response', '', {}), generation, action);
+  return failureOf(new BoardProblem(message, 'bad_response', ''), board, action);
+}
+
+/**
+ * The command a hint names in backticks, for the user to copy and run on the board ("Install it
+ * on the board with `sima-cli neat install sentinel`, then retry."): the first such span; '' when
+ * the hint names none.
+ */
+export function hintCommand(hint: string): string {
+  return /`([^`]+)`/.exec(hint)?.[1].trim() ?? '';
 }

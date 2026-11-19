@@ -53,7 +53,8 @@
         <ul class="blocked">
           @for (option of blockedFormats(); track option.value) {
             <li>
-              <strong>{{ option.value }}</strong>: {{ option.reason }}
+              <strong>{{ option.value }}</strong
+              >: {{ option.reason }}
             </li>
           }
         </ul>
@@ -93,17 +94,6 @@
     <!-- One recovery line: the board's own hint when it sent one, Insight's otherwise. -->
     @if (error.hint || error.action) {
       <p>{{ error.hint || error.action }}</p>
-    }
-    @if (error.otherCamera) {
-      <p>
-        The running preview is on <code neatCode>{{ error.otherCamera }}</code>.
-      </p>
-    }
-    <!-- Folded, so a failed start stays one row; the video is the panel's only large part. -->
-    @if (error.detail) {
-      <neat-collapsible label="Board output">
-        <pre class="output" tabindex="0" aria-label="Board output"><code>{{ error.detail }}</code></pre>
-      </neat-collapsible>
     }
     @if (errorOpensBoard()) {
       <app-board-settings-action neatCalloutActions />

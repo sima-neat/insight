@@ -1,35 +1,53 @@
 /**
- * Request and response shapes of Flask's `/api/peripherals*` endpoints (Inv-PB §4.2 and §4.3;
- * `neat_insight/peripherals/cameras.py`, `microphones.py`, `mictest.py` and
- * `neat_insight/preview/manager.py`). Types only: `PeripheralsService` and the pages' preview and
- * microphone-test units call the endpoints.
+ * Peripherals' routes (`/api/boards/<id>/peripherals...`, `/cameras/...`, `/microphones/...`),
+ * typed from `server/api/openapi.yaml` (`api.generated.ts`), and the device model the page shows,
+ * which the browser builds from SiMa Sentinel's catalog (`catalog.ts`). Types only:
+ * `PeripheralsService` and the page's preview and microphone-test units call the routes.
  *
- * A failed request answers a board error body (`BoardErrorBody` in `board/api.ts`), which
- * `problemOf` reads. Besides the board's codes, these endpoints add `stale_snapshot`, `not_found`,
- * `preview_active`, `camera_in_use`, `mode_adjusted`, `tool_missing`, `command_failed`,
- * `test_running`, `microphone_in_use` and the `peripheral_*` codes of SiMa Sentinel.
+ * A failed request answers the error shape (`problemOf` in `board-error.ts` reads it). Besides
+ * the board's codes, these routes add `not_found`, `no_scan`, `preview_active`, `camera_in_use`,
+ * `mode_adjusted`, `tool_missing`, `command_failed`, `test_running`, `microphone_in_use` and
+ * `stopped_early`.
  */
 
-import type { BoardErrorBody, BoardSummary, CameraSetup } from '../board/api';
+import type { CameraPreview, MicTest } from '../api.generated';
+import type { CameraSetup } from '../board/api';
+
+export type {
+  CameraPreview,
+  MicLevel,
+  MicTest,
+  MicTestAnswer,
+  MicTestRequest,
+  PeripheralChanges,
+  PeripheralScan,
+  Peripherals,
+  PreviewAnswer,
+  PreviewMode,
+} from '../api.generated';
 
 // ---------------------------------------------------------------------------------------------
-// The scan (`GET /api/peripherals`, `POST /api/peripherals/refresh`)
+// The scan, as the page shows it
 // ---------------------------------------------------------------------------------------------
+
+/** The board a snapshot is of: the id it was read with, and its label then. */
+export interface SnapshotBoard {
+  id: string;
+  label: string;
+}
 
 /**
- * The last scan of the selected board, or an empty one before any. It counts as scanned when
- * `scan_id` is not null (`isScanned` in `devices.ts`); `scan_id`, `scanned_at` and `scan_ms` are
- * set together by a scan.
+ * The last scan of a board, or an empty one before any. It counts as scanned when `scan_id` is
+ * not null (`isScanned` in `devices.ts`); `scan_id`, `scanned_at` and `scan_ms` are set together
+ * by a scan.
  */
 export interface PeripheralSnapshot {
-  board: BoardSummary;
-  /** The board generation the scan was made for (`BoardState.generation`). */
-  generation: number;
+  board: SnapshotBoard;
   /** `<Sentinel revision>:<observed at>`; null before a scan. */
   scan_id: string | null;
   /** ISO time of the scan; null before a scan. */
   scanned_at: string | null;
-  /** How long SiMa Sentinel's refresh took; absent before a scan. */
+  /** How long SiMa Sentinel's scan took; absent before a scan. */
   scan_ms?: number;
   items: PeripheralItem[];
   issues: PeripheralIssue[];
@@ -40,20 +58,20 @@ export interface PeripheralSnapshot {
 }
 
 /**
- * One device. `kind` is `camera` or `microphone` today; a kind the backend adds later arrives as
- * an `OtherItem`, which Insight lists but has no view for. Narrow with `isCamera` and
- * `isMicrophone` (`devices.ts`): `OtherItem.kind` is any string, so `kind` alone cannot.
+ * One device. `kind` is `camera` or `microphone` today; a kind Sentinel adds later arrives as an
+ * `OtherItem`, which Insight lists but has no view for. Narrow with `isCamera` and `isMicrophone`
+ * (`devices.ts`): `OtherItem.kind` is any string, so `kind` alone cannot.
  */
 export type PeripheralItem = CameraItem | MicrophoneItem | OtherItem;
 
 /** Fields every item carries. */
 interface ItemBase {
-  /** Stable across scans of one board; selections and changes name items by it. */
+  /** Sentinel's id, stable across scans of one board; selections and changes name items by it. */
   id: string;
   kind: string;
   /**
    * How the device is attached: `mipi` or `usb` for cameras, `usb` or `onboard` for microphones,
-   * otherwise the backend's own name for it.
+   * otherwise Sentinel's own name for it.
    */
   connection: string;
   name: string;
@@ -68,7 +86,6 @@ interface ItemBase {
  */
 export interface DeviceAvailability {
   state: 'available' | 'in_use' | 'unknown';
-  users: { pid: number; command: string }[];
   reason: string | null;
 }
 
@@ -80,12 +97,10 @@ export interface DeviceError {
 }
 
 /**
- * Whether a camera, format or mode can be previewed and exported: Available (the board's camera
- * overlays support the sensor, the ISP outputs the size and the format is NV12), Unverified (a
- * Platform 3.0 sensor size SiMa Sentinel cannot confirm; it can be previewed to check) or
- * Unsupported. USB cameras are always Unsupported, yet previewable.
+ * SiMa Sentinel's verdict on a camera, format or mode: Available when Neat's CameraInput can use
+ * it, Unsupported otherwise. USB cameras are Unsupported, yet previewable.
  */
-export type SupportTier = 'available' | 'unverified' | 'unsupported';
+export type SupportTier = 'available' | 'unsupported';
 
 export interface DeviceSupport {
   tier: SupportTier;
@@ -115,7 +130,6 @@ export interface UsbFacts {
 export interface CameraDevice {
   /** libcamera's name for the camera; the stable way to name a MIPI camera. */
   camera_name?: string | null;
-  camera_name_source?: string;
   media_device?: string;
   bus_info?: string;
   /** The CSI receiver the sensor is attached to. */
@@ -148,8 +162,6 @@ export interface CameraFormat {
   /** The V4L2 or libcamera fourcc, such as `NV12` or `MJPG`. */
   format: string;
   label: string;
-  /** Some mode of this format is Available. */
-  exportable: boolean;
   support: DeviceSupport;
   /** The bounds of a stepwise or continuous size range; null for discrete sizes. */
   range: CameraFormatRange | null;
@@ -173,16 +185,17 @@ export interface CameraSize {
 }
 
 /**
- * One mode: a frame rate of its size and format, with that mode's tier. `value` is the rate for
- * display and requests; the fraction is the exact rate.
+ * One mode: a frame rate of its size and format, with Sentinel's verdict on that mode, and
+ * whether Insight's preview takes it (the server's rule: for MIPI, NV12 that Sentinel does not
+ * refuse; for USB, MJPG or a raw format, at a rate the camera advertises). `value` is the rate for
+ * display and requests, to a thousandth.
  */
 export interface CameraMode {
   value: number;
-  framerate_num: number;
-  framerate_den: number;
   tier: SupportTier;
   /** Why the mode is not Available; absent when it is. */
   reason?: string;
+  previewable: boolean;
 }
 
 /** A mode as a selection and a preview request name it. */
@@ -199,7 +212,7 @@ export interface MicrophoneDevice {
   card_id: string | null;
   card_name: string | null;
   card_driver: string | null;
-  pcm_device: number;
+  pcm_device: number | null;
   pcm_node: string | null;
   /** `hw:CARD=<id>,DEV=<n>`; absent without a card id. */
   alsa_name?: string;
@@ -227,8 +240,9 @@ export interface MicrophoneItem extends ItemBase {
   /** Null when the formats cannot be read without opening the device. */
   capture: MicrophoneCapture[] | null;
   /**
-   * A short fingerprint of SiMa Sentinel's record a test binds to: a microphone listed again
-   * under the same id with another `record` is another device, and a test of the old one is over.
+   * What identifies the device behind the id (Sentinel's capture target and identity): a
+   * microphone listed again under the same id with another `record` is another device, and a test
+   * of the old one is over.
    */
   record: string;
 }
@@ -253,100 +267,19 @@ export interface DeviceRef {
 }
 
 export interface DeviceChanges {
-  added: DeviceRef[];
-  removed: DeviceRef[];
+  added: readonly DeviceRef[];
+  removed: readonly DeviceRef[];
 }
 
 // ---------------------------------------------------------------------------------------------
-// The camera preview (`/api/peripherals/preview`, `/api/peripherals/cameras/preview*`)
+// The camera preview and the microphone test
 // ---------------------------------------------------------------------------------------------
 
 /**
- * `POST /api/peripherals/cameras/preview`: a scanned camera, in a mode of its last scan; without
- * a mode the camera's `default_selection`.
+ * The board's camera preview (one per board) as the page holds it: the server's answer and the
+ * id of the board it was read from, which its stream and stop paths name.
  */
-export interface PreviewStartRequest {
-  id: string;
-  format?: string;
-  width?: number;
-  height?: number;
-  fps?: number;
-}
+export type PreviewSession = CameraPreview & { board: string };
 
-/**
- * The one camera preview Insight runs. Its MJPEG stream (`stream_url`) has a single reader and
- * stops when that reader goes.
- */
-export interface PreviewSession {
-  id: string;
-  camera_id: string;
-  mode: CameraModeChoice;
-  /** `/api/peripherals/cameras/preview/<id>/stream`. */
-  stream_url: string;
-  generation: number;
-  started_at: string;
-  /** `stopped` only in the answer of a stop. */
-  state: 'live' | 'stopped';
-  /** The rate the camera runs at: the mode's for USB; for MIPI null until SiMa Sentinel read it. */
-  camera_fps: number | null;
-  /** `GET /api/peripherals/preview` only: whether a stream reader has claimed it. */
-  viewer?: boolean;
-}
-
-/**
- * `GET /api/peripherals/preview`, the answer of a start and of
- * `POST /api/peripherals/cameras/preview/<id>/stop`; null when no preview runs (or a stop found
- * it ended already).
- */
-export interface PreviewResponse {
-  session: PreviewSession | null;
-}
-
-// ---------------------------------------------------------------------------------------------
-// The microphone test (`/api/peripherals/microphones/test*`)
-// ---------------------------------------------------------------------------------------------
-
-/** `POST /api/peripherals/microphones/test`: record from a scanned microphone. */
-export interface MicTestRequest {
-  id: string;
-  /** 1 to 30, default 30. */
-  seconds?: number;
-}
-
-/** `POST /api/peripherals/microphones/test/stop`: a test is stopped by its token only. */
-export interface MicTestStopRequest {
-  token: string;
-}
-
-/** The levels of a finished recording; null dBFS for a recording with no samples. */
-export interface MicTestLevel {
-  peak_dbfs: number | null;
-  rms_dbfs: number | null;
-  /** The median slice peak is below −60 dBFS. */
-  silent: boolean;
-}
-
-/** The test Insight runs or ran last (one per Insight process). */
-export interface MicTestStatus {
-  token: string;
-  /** The microphone's item id. */
-  id: string;
-  state: 'recording' | 'ready' | 'failed';
-  /** The ALSA selector it records from, `plughw:CARD=<id>,DEV=<n>`. */
-  device: string;
-  format: { rate: number; channels: number; bits: 16; seconds: number };
-  elapsed_ms: number;
-  /** The live level while recording; null otherwise. */
-  level_dbfs: number | null;
-  /** Once `ready`. */
-  level?: MicTestLevel;
-  /** Once `ready`: `/api/peripherals/microphones/test/<token>.wav`. */
-  audio_url?: string;
-  /** Once `failed`, such as `stopped_early`, `tool_missing` or `microphone_in_use`. */
-  error?: BoardErrorBody;
-}
-
-/** The answer of a start (202), a stop and `GET /api/peripherals/microphones/test`. */
-export interface MicTestResponse {
-  test: MicTestStatus | null;
-}
+/** The board's microphone test (one per board), and the board it was read from. */
+export type MicTestStatus = MicTest & { board: string };

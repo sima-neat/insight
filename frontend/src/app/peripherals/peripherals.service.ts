@@ -2,28 +2,28 @@ import { HttpClient } from '@angular/common/http';
 import { effect, inject, Injectable, signal } from '@angular/core';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { firstValueFrom } from 'rxjs';
-import type { BoardState } from '../board/api';
-import { problemOf, type BoardProblem } from '../board/board-error';
+import { boardUrl } from '../board/api';
+import { BOARD_GONE_CODES, problemOf, type BoardProblem } from '../board/board-error';
 import { BoardService } from '../board/board.service';
 import { LatestOnly } from '../polling';
 import { withRequestErrors } from '../sources/stream-lines';
-import type { PeripheralSnapshot } from './api';
+import type { Peripherals, PeripheralSnapshot, SnapshotBoard } from './api';
+import { snapshotOf } from './catalog';
 import { countLabel } from './devices';
-
-const SNAPSHOT_URL = '/api/peripherals';
-const REFRESH_URL = '/api/peripherals/refresh';
 
 /**
  * The selected board's peripheral scan, for the whole app: Peripherals lists it, and the board
  * dialog reads the camera setup from it. Root-provided, so the scan outlives a visit to the page.
+ * The server answers SiMa Sentinel's catalog as it wrote it; the device model the page shows is
+ * built from it here (`snapshotOf`).
  *
- * **Reads.** `GET /api/peripherals` never contacts the board: it answers the backend's cached
- * scan of the current board generation, or an empty snapshot before any. Only the newest answer
- * is applied, and none sent before a scan answered.
+ * **Reads.** `GET .../peripherals` never contacts the board: it answers the server's last scan of
+ * the board, or none before the first. Only the newest answer is applied, none sent before a scan
+ * answered, and none for a board that is no longer selected.
  *
- * **Scans.** `POST /api/peripherals/refresh` runs SiMa Sentinel's rescan on the board, which can
- * take seconds; the backend stops a running camera preview first. A scan also connects to the
- * board, which updates the board's status and identity, so the board is reloaded after every scan.
+ * **Scans.** `POST .../peripherals/refresh` runs SiMa Sentinel's rescan on the board, which can
+ * take seconds; the server stops a running camera preview first. A scan also connects to the
+ * board, which updates the board's status, so the boards are reloaded after every scan.
  */
 @Injectable({ providedIn: 'root' })
 export class PeripheralsService {
@@ -46,95 +46,102 @@ export class PeripheralsService {
 
   private readonly scanErrorValue = signal<BoardProblem | null>(null);
   /**
-   * Why the last scan of the current board failed; cleared when the next scan starts and when the
-   * board moves to another generation, or a snapshot of one is applied (the service outlives the
-   * page, and an old board's failure says nothing about the new one: it must not stand beside
-   * "Board changed — refresh", offering the old board's settings).
+   * Why the last scan of the selected board failed; cleared when the next scan starts and when
+   * another board is selected, or a snapshot of one is applied (the service outlives the page, and
+   * an old board's failure says nothing about the new one: it must not stand beside "Board changed
+   * — refresh", offering the old board's settings).
    */
   readonly scanError = this.scanErrorValue.asReadonly();
-  /** The board generation `scanError` was a scan of. */
-  private scanErrorGeneration: number | null = null;
+  /** The board `scanError` was a scan of. */
+  private scanErrorBoard: string | null = null;
 
   private readonly latest = new LatestOnly();
-  /** The scan running or queued last, and the board generation it was started for. */
-  private running: { generation: number | null; done: Promise<void> } | null = null;
+  /** The scan running or queued last, and the board it was started for. */
+  private running: { board: string; done: Promise<void> } | null = null;
 
   constructor() {
     // Watched for as long as the app runs, so that a board change drops the old board's failure
-    // while the page is not shown too (the board is re-read on focus).
-    effect(() => this.noteGeneration(this.board.generation()));
+    // while the page is not shown too (the boards are re-read on focus).
+    effect(() => this.noteBoard(this.board.id()));
   }
 
   /**
-   * Reads the current snapshot. Resolves once the answer is applied or dropped. No board selected
-   * (`no_target`) is not a failure here: the board state already says so. Any other failure
-   * rejects with its `BoardProblem` while no newer read was sent, since that one would answer for
-   * it.
+   * Reads the selected board's last scan. Resolves once the answer is applied or dropped, and at
+   * once without a board (the boards already say so). A board replaced meanwhile (`not_found`)
+   * reloads the boards rather than failing. Any other failure rejects with its `BoardProblem`
+   * while no newer read was sent, since that one would answer for it.
    */
   async load(): Promise<void> {
+    const board = this.selectedBoard();
+    if (!board) return;
     const request = this.latest.next();
     try {
-      const snapshot = await firstValueFrom(
-        this.http.get<PeripheralSnapshot>(SNAPSHOT_URL).pipe(withRequestErrors()),
+      const answer = await firstValueFrom(
+        this.http.get<Peripherals>(boardUrl(board.id, 'peripherals')).pipe(withRequestErrors()),
       );
-      if (this.latest.accept(request)) this.apply(snapshot);
+      if (this.latest.accept(request)) this.apply(snapshotOf(board, answer));
     } catch (failure) {
       // A failure answers for the reads sent before it as well, as a success would.
       if (!this.latest.isNewest(request) || !this.latest.accept(request)) return;
       const problem = problemOf(failure);
-      if (problem.code !== 'no_target') throw problem;
+      if (!BOARD_GONE_CODES.has(problem.code)) throw problem;
+      await this.board.reload();
     }
   }
 
   /**
-   * Scans the selected board. Resolves when the scan ended and the board was reloaded; never
+   * Scans the selected board. Resolves when the scan ended and the boards were reloaded; never
    * rejects, since a failure is reported in `scanError`. A call while a scan of the same board
-   * runs joins it: the backend would coalesce a second request into the running scan anyway.
+   * runs joins it: the server would coalesce a second request into the running scan anyway.
    */
   refresh(): Promise<void> {
-    return this.scanFor(this.board.generation(), true);
+    return this.scanFor(this.selectedBoard(), true);
   }
 
   /**
-   * The scan of a visit to Peripherals: whenever the page is entered with a board target and the
-   * loaded snapshot is the selected board's. Scanned or not, failed before or not: the devices
-   * change under the page, and a scan is the only way to see it. Never on a timer, since a scan
-   * takes seconds and stops a running camera preview. Call it after `load()`; a call while a scan
-   * of the board runs joins it (`scanFor`). Resolves when the scan ended (at once when none was
-   * due), never rejecting, so that the page can start a preview only after the scan stopped any.
-   * A visit's scan is silent when it succeeds: a toast on every navigation would be noise, and
-   * the list changing says it. A failure shows in `scanError` as for Refresh.
+   * The scan of a visit to Peripherals: whenever the page is entered with a board selected and the
+   * loaded snapshot is that board's. Scanned or not, failed before or not: the devices change
+   * under the page, and a scan is the only way to see it. Never on a timer, since a scan takes
+   * seconds and stops a running camera preview. Call it after `load()`; a call while a scan of the
+   * board runs joins it (`scanFor`). Resolves when the scan ended (at once when none was due),
+   * never rejecting, so that the page can start a preview only after the scan stopped any. A
+   * visit's scan is silent when it succeeds: a toast on every navigation would be noise, and the
+   * list changing says it. A failure shows in `scanError` as for Refresh.
    */
-  scanOnVisit(board: BoardState): Promise<void> {
-    this.noteGeneration(board.generation);
+  scanOnVisit(): Promise<void> {
+    const board = this.selectedBoard();
+    this.noteBoard(board?.id ?? null);
     const snapshot = this.snapshotValue();
-    if (!board.target || snapshot === null) return Promise.resolve();
-    if (snapshot.generation !== board.generation) return Promise.resolve();
-    return this.scanFor(board.generation, false);
+    if (!board || snapshot?.board.id !== board.id) return Promise.resolve();
+    return this.scanFor(board, false);
+  }
+
+  /** The selected board as a snapshot names it; null while none is selected. */
+  private selectedBoard(): SnapshotBoard | null {
+    const selected = this.board.selected();
+    return selected ? { id: selected.id, label: selected.label } : null;
   }
 
   /**
-   * Joins the running scan when it is one of `generation` (whatever it announces); otherwise
-   * queues a scan after it, which toasts its result when `announce`. A
-   * scan started for an earlier board answers for that board only, and the backend runs one scan
-   * at a time, so joining it would leave the new board unscanned.
+   * Joins the running scan when it is one of `board` (whatever it announces); otherwise queues a
+   * scan after it, which toasts its result when `announce`. A scan started for an earlier board
+   * answers for that board only, and the server runs one scan at a time, so joining it would
+   * leave the new board unscanned.
    */
-  private scanFor(generation: number | null, announce: boolean): Promise<void> {
+  private scanFor(board: SnapshotBoard | null, announce: boolean): Promise<void> {
+    if (!board) return Promise.resolve();
     const running = this.running;
-    if (running && running.generation === generation) return running.done;
+    if (running && running.board === board.id) return running.done;
     // With nothing running, the request goes out now, so `scanning` is set when this returns. A
     // queued scan whose board was left again while it waited is skipped: the scan queued after it
-    // is for the board now selected.
-    // A queued scan counts from now: the running one is another board's, whose time says
-    // nothing about this one.
+    // is for the board now selected. A queued scan counts from now: the running one is another
+    // board's, whose time says nothing about this one.
     if (running) this.scanningValue.set(Date.now());
     const started = running
-      ? running.done.then(() =>
-          this.isPast(generation) ? undefined : this.scan(generation, announce),
-        )
-      : this.scan(generation, announce);
-    const entry: { generation: number | null; done: Promise<void> } = {
-      generation,
+      ? running.done.then(() => (this.isPast(board.id) ? undefined : this.scan(board, announce)))
+      : this.scan(board, announce);
+    const entry = {
+      board: board.id,
       done: started.finally(() => {
         if (this.running !== entry) return;
         this.running = null;
@@ -145,61 +152,56 @@ export class PeripheralsService {
     return entry.done;
   }
 
-  private async scan(generation: number | null, announce: boolean): Promise<void> {
+  private async scan(board: SnapshotBoard, announce: boolean): Promise<void> {
     this.scanningValue.set(Date.now());
     this.scanErrorValue.set(null);
     try {
-      const snapshot = await firstValueFrom(
-        this.http.post<PeripheralSnapshot>(REFRESH_URL, {}).pipe(withRequestErrors()),
+      const answer = await firstValueFrom(
+        this.http
+          .post<Peripherals>(boardUrl(board.id, 'peripherals/refresh'), {})
+          .pipe(withRequestErrors()),
       );
-      if (!this.isPast(snapshot.generation)) {
-        // Reads still out were answered from the cache before this scan and would undo it.
+      if (!this.isPast(board.id)) {
+        // Reads still out were answered from the server's last scan before this one.
         this.latest.discard();
+        const snapshot = snapshotOf(board, answer);
         this.apply(snapshot);
         if (announce) this.toasts.status(scanCompleteMessage(snapshot));
       }
     } catch (failure) {
       // A scan of a board the user has left failed for that board, typically because it changed.
-      if (!this.isPast(generation)) {
+      if (!this.isPast(board.id)) {
         this.scanErrorValue.set(problemOf(failure));
-        this.scanErrorGeneration = generation;
+        this.scanErrorBoard = board.id;
       }
     }
     // `scanning` is cleared once no scan is queued after this one (`scanFor`).
     await this.board.reload();
   }
 
-  /**
-   * An answer for this generation describes a board the user has left (Review Focus 1, never
-   * apply a previous generation): it is older than the selected board's. Only the board's
-   * generation decides, never the shown snapshot's: the counter starts over when Insight
-   * restarts, and the board's re-read is what moves it, so a snapshot from before a restart must
-   * not block every answer after it. A generation newer than the board's is applied: the board
-   * service has not read the change yet (the scan reloads it right after). Unknown either way
-   * (`null`) is not past.
-   */
-  private isPast(generation: number | null): boolean {
-    const selected = this.board.generation();
-    return generation !== null && selected !== null && generation < selected;
+  /** An answer for this board describes one the user has left: another one is selected now. */
+  private isPast(board: string): boolean {
+    const selected = this.board.id();
+    return selected !== null && board !== selected;
   }
 
   /**
-   * Notes the board's generation: a scan failure of another generation is dropped (`scanError`),
-   * since an old board's failure says nothing about the new one.
+   * Notes the selected board: a scan failure of another board is dropped (`scanError`), since an
+   * old board's failure says nothing about the new one.
    */
-  private noteGeneration(generation: number | null): void {
-    if (generation === null) return;
-    if (this.scanErrorGeneration !== generation) this.scanErrorValue.set(null);
+  private noteBoard(board: string | null): void {
+    if (board === null) return;
+    if (this.scanErrorBoard !== board) this.scanErrorValue.set(null);
   }
 
   private apply(snapshot: PeripheralSnapshot): void {
-    if (this.isPast(snapshot.generation)) return;
+    if (this.isPast(snapshot.board.id)) return;
     this.snapshotValue.set(snapshot);
-    if (this.scanErrorGeneration !== snapshot.generation) this.scanErrorValue.set(null);
+    if (this.scanErrorBoard !== snapshot.board.id) this.scanErrorValue.set(null);
   }
 }
 
-/** #170's toast (Inv-PB §2.2): "Scan complete: 2 cameras, 1 microphone on sima@192.168.2.2.". */
+/** The toast of a Refresh: "Scan complete: 2 cameras, 1 microphone on sima@192.168.2.2.". */
 function scanCompleteMessage(snapshot: PeripheralSnapshot): string {
   const count = (kind: string) => snapshot.items.filter((item) => item.kind === kind).length;
   const found = `${countLabel(count('camera'), 'camera')}, ${countLabel(count('microphone'), 'microphone')}`;

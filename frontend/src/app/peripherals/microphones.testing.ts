@@ -1,11 +1,11 @@
+import { DEVKIT } from '../board/board.testing';
 import type { MicrophoneItem, MicTestStatus } from './api';
 import { available } from './cameras.testing';
 
-// #170's microphone fixtures (model.test.js), typed: the microphones a real DevKit scan returned,
-// for the device list and the microphone test.
+// Microphone items as `snapshotOf` builds them from a real DevKit scan, for the device list and
+// the microphone test.
 
-// The Blue Yeti Nano item as the real DevKit scan returned it; the backend sends no USB speed for
-// a microphone (ruling F18), so #170's `speed_mbps: 12` is left out.
+/** The Blue Yeti Nano; Sentinel reports no USB speed for a microphone. */
 export const yeti: MicrophoneItem = {
   id: 'microphone:alsa:3ff3d77bf791d455',
   kind: 'microphone',
@@ -68,32 +68,33 @@ export const onboardMic: MicrophoneItem = {
 };
 
 /**
- * A test of the Yeti as `GET /api/peripherals/microphones/test` answers it (`mictest.py`'s
- * `status()`): recording by default. A `ready` one carries `level` and `audio_url`, a `failed`
- * one `error`; pass them with the state.
+ * A test of the Yeti on the DevKit as `GET .../microphones/test` answers it: recording by
+ * default. A `ready` one carries `level`, a `failed` one `error`; pass them with the state.
  */
 export function micTestStatus(overrides: Partial<MicTestStatus> = {}): MicTestStatus {
   return {
-    token: 't1',
-    id: yeti.id,
+    id: 't1',
+    microphone: yeti.id,
+    board: DEVKIT.id,
     state: 'recording',
     device: 'plughw:CARD=Nano,DEV=0',
     format: { rate: 48000, channels: 2, bits: 16, seconds: 30 },
     elapsed_ms: 0,
-    level_dbfs: null,
     ...overrides,
   };
 }
 
 /** The Yeti's test once it recorded something: ready to play, not silent. */
 export function readyTest(overrides: Partial<MicTestStatus> = {}): MicTestStatus {
-  const token = overrides.token ?? 't1';
   return micTestStatus({
-    token,
     state: 'ready',
     elapsed_ms: 4200,
     level: { peak_dbfs: -9, rms_dbfs: -24.5, silent: false },
-    audio_url: `/api/peripherals/microphones/test/${token}.wav`,
     ...overrides,
   });
+}
+
+/** A test's recording as the panel's `<audio>` loads it. */
+export function testAudioUrl(id = 't1'): string {
+  return `/api/boards/${encodeURIComponent(DEVKIT.id)}/microphones/${encodeURIComponent(yeti.id)}/test.wav?test=${id}`;
 }

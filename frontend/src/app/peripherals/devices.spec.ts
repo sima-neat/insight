@@ -1,4 +1,5 @@
 import type { CameraSetup } from '../board/api';
+import { DEVKIT, MANUAL } from '../board/board.testing';
 import type {
   CameraItem,
   MicrophoneItem,
@@ -25,8 +26,7 @@ import {
 import { onboardMic, yeti } from './microphones.testing';
 import { peripheralSnapshot } from './snapshots.testing';
 
-// #170's fixtures (model.test.js), typed: the cameras come from `cameras.testing.ts`, the
-// microphones from `microphones.testing.ts`.
+// The cameras come from `cameras.testing.ts`, the microphones from `microphones.testing.ts`.
 
 const idle: DeviceActivity = { previewing: null, testing: null };
 
@@ -85,7 +85,7 @@ function idsByGroup(snap: PeripheralSnapshot): Record<string, string[]> {
 }
 
 describe('the device model', () => {
-  // #170's grouping tests, on one list: a connection now orders rows within their kind's group.
+  // On one list, a connection orders rows within their kind's group.
   // On one list, a kind's group is the run of its items: the microphone follows the cameras.
   it('cameras are grouped MIPI first, then USB, ahead of the other kinds', () => {
     const ids = deviceGroups(snapshot).items.map((item) => item.id);
@@ -123,7 +123,7 @@ describe('the device model', () => {
       'Other · 1',
       'Radars · 2',
     ]);
-    // Insight has no view for them: muted though they have devices (ruling F27).
+    // Insight has no view for them: muted though they have devices.
     expect(groups.slice(3).every((group) => group.muted)).toBe(true);
     expect(items.map((item) => item.id)).toEqual([imx477.id, 'g1', 'x1', 'r1', 'r2']);
     expect(deviceRow(items[3], idle).icon).toBe('device');
@@ -151,7 +151,7 @@ describe('the device model', () => {
         items: [],
       });
     }
-    // A LiDAR Insight cannot show yet is counted and muted, its rows saying so (ruling F27).
+    // A LiDAR Insight cannot show yet is counted and muted, its rows saying so.
     const lidar = other('lidar', 'l1', 'usb');
     const scanned = deviceGroups(peripheralSnapshot([lidar, other('lidar', 'l2', 'usb')]));
     expect(scanned.groups[2]).toEqual({ key: 'lidar', label: 'LiDAR · 2', muted: true });
@@ -189,7 +189,7 @@ describe('the device model', () => {
       connection: 'On-board ALSA',
     });
     // The USB generation follows the link speed; without one (every USB microphone) it is just
-    // USB, not USB 1.1 (ruling F18).
+    // USB, not USB 1.1.
     const speed = (speed_mbps?: number): CameraItem => ({
       ...usb,
       device: { ...usb.device, usb: { ...usb.device.usb, speed_mbps } },
@@ -210,7 +210,7 @@ describe('the device model', () => {
     expect(subtitle({ ...imx477, name: 'cam', model: 'imx477', device: {} })).toBe('imx477');
   });
 
-  // #170's `cameraDeviceId`, seen where it shows: the device id under a MIPI camera's name.
+  // The device id under a MIPI camera's name.
   it('a camera id prefers the stable name', () => {
     const named = { ...imx477, name: 'Front camera', model: null };
     expect(deviceRow(named, idle).subtitle).toBe(imx477.device.camera_name);
@@ -220,7 +220,10 @@ describe('the device model', () => {
       device: { ...named.device, camera_name: null, by_id: '/dev/v4l/by-id/platform-imx477-video' },
     };
     expect(deviceRow(linked, idle).subtitle).toBe('/dev/v4l/by-id/platform-imx477-video');
-    const unnamed = { ...named, device: { ...named.device, camera_name: null } };
+    const unnamed = {
+      ...named,
+      device: { ...named.device, camera_name: null, video_node: '/dev/video3' },
+    };
     expect(deviceRow(unnamed, idle).subtitle).toBe('/dev/video3');
   });
 
@@ -252,9 +255,9 @@ describe('the device model', () => {
     expect(chip(imx477, { previewing: usb.id, testing: yeti.id }).label).toBe('Available');
     // A camera kept from an earlier scan may be gone: that wins over its tier.
     expect(chip(inUse)).toEqual({ label: 'Last scan', tone: 'neutral' });
-    expect(chip({ ...imx568, support: support('unverified') })).toEqual({
-      label: 'Unverified',
-      tone: 'warning',
+    expect(chip({ ...imx568, support: support('available') })).toEqual({
+      label: 'Available',
+      tone: 'success',
     });
     // USB cameras preview fine, so Unsupported is not red.
     expect(chip(usb)).toEqual({ label: 'Unsupported', tone: 'neutral' });
@@ -263,7 +266,7 @@ describe('the device model', () => {
     expect(chip(other('radar', 'r1'))).toEqual({ label: 'Not supported yet', tone: 'neutral' });
   });
 
-  // Ruling F4: a camera panel's title names the device's own state; the preview has its own chip.
+  // A camera panel's title names the device's own state; the preview has its own chip.
   it("a device's own chip is its row's without the page's preview or test", () => {
     for (const item of [imx477, inUse, usb, imx568, yeti, onboardMic, other('radar', 'r1')]) {
       expect(deviceChip(item)).toEqual(deviceRow(item, idle).chip);
@@ -272,12 +275,10 @@ describe('the device model', () => {
     expect(deviceChip(inUse)).toEqual({ label: 'Last scan', tone: 'neutral' });
   });
 
-  // The tier half of #170's "labels for tiers, sources, and defaults" (ruling Q5; Task 7 did the rest).
   it('labels for tiers', () => {
     expect(tierInfo('available')).toEqual({ label: 'Available', tone: 'success' });
-    expect(tierInfo('unverified')).toEqual({ label: 'Unverified', tone: 'warning' });
     expect(tierInfo('unsupported')).toEqual({ label: 'Unsupported', tone: 'neutral' });
-    // Every mode is one of the three states.
+    // Every mode is one of the two states.
     expect(tierInfo('bogus' as SupportTier)).toEqual(tierInfo('unsupported'));
   });
 
@@ -331,7 +332,7 @@ describe('the device model', () => {
   });
 
   it('the selected device id survives refreshes and removals', () => {
-    // #170's camera test, on one list: the first device listed is a MIPI camera.
+    // On one list, the first device listed is a MIPI camera.
     expect(resolveDeviceId(snapshot, null)).toBe(imx477.id);
     expect(resolveDeviceId(snapshot, usb.id)).toBe(usb.id);
     // Removed devices stay selected so the panel can explain.
@@ -376,12 +377,12 @@ describe('the device model', () => {
     ]);
   });
 
-  it('a snapshot is stale only when it was scanned for another board generation', () => {
-    expect(isSnapshotStale({ generation: 3 }, snapshot)).toBe(false);
-    expect(isSnapshotStale({ generation: 4 }, snapshot)).toBe(true);
-    expect(isSnapshotStale({ generation: 4 }, { ...snapshot, scan_id: null })).toBe(false);
+  it('a snapshot is stale only when it was scanned for another board', () => {
+    expect(isSnapshotStale(DEVKIT.id, snapshot)).toBe(false);
+    expect(isSnapshotStale(MANUAL.id, snapshot)).toBe(true);
+    expect(isSnapshotStale(MANUAL.id, { ...snapshot, scan_id: null })).toBe(false);
     expect(isSnapshotStale(null, snapshot)).toBe(false);
-    expect(isSnapshotStale({ generation: 4 }, null)).toBe(false);
+    expect(isSnapshotStale(MANUAL.id, null)).toBe(false);
   });
 
   it('the camera setup belongs to the board that was scanned', () => {
@@ -390,14 +391,14 @@ describe('the device model', () => {
       overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo'],
     };
     const scanned = peripheralSnapshot([], { camera_setup: cameraSetup });
-    expect(boardCameraSetup({ generation: 3 }, scanned)).toBe(cameraSetup);
+    expect(boardCameraSetup(DEVKIT.id, scanned)).toBe(cameraSetup);
     // The selected board changed since the scan.
-    expect(boardCameraSetup({ generation: 4 }, scanned)).toBeNull();
+    expect(boardCameraSetup(MANUAL.id, scanned)).toBeNull();
     // Not scanned yet.
-    expect(boardCameraSetup({ generation: 3 }, { ...scanned, scan_id: null })).toBeNull();
+    expect(boardCameraSetup(DEVKIT.id, { ...scanned, scan_id: null })).toBeNull();
     // An older Sentinel.
-    expect(boardCameraSetup({ generation: 3 }, { ...scanned, camera_setup: null })).toBeNull();
+    expect(boardCameraSetup(DEVKIT.id, { ...scanned, camera_setup: null })).toBeNull();
     expect(boardCameraSetup(null, scanned)).toBeNull();
-    expect(boardCameraSetup({ generation: 3 }, null)).toBeNull();
+    expect(boardCameraSetup(DEVKIT.id, null)).toBeNull();
   });
 });

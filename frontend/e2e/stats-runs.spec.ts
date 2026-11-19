@@ -9,7 +9,6 @@ import {
   topBarSpill,
   VIEWPORTS,
 } from './layout';
-import { STATS_BOARD } from './stats-mocks';
 import {
   advance,
   openStats,
@@ -24,7 +23,6 @@ import {
 // Stats' Record, Runs and Compare against a fake board and Sentinel (`FakeStatsBackend`, whose
 // runs are `runs.testing.ts`' fixtures) at a laptop's size, and their layout at every viewport.
 
-const GENERATION = String(STATS_BOARD.generation);
 /** The runs of the compare fixture: `tes3`, then the run of the detail fixture. */
 const TES3 = '20260924T175231.958Z-tes3';
 const HW = '20260923T152712.952Z-insight-hw-1790177227';
@@ -52,7 +50,7 @@ function compareParams(page: Page): { runs: string | null; baseline: string | nu
   return { runs: params.get('runs'), baseline: params.get('baseline') };
 }
 
-test('Record starts a trace with the generation, the toolbar says Recording, and Stop ends the trace it shows', async ({
+test('Record starts a trace, the toolbar says Recording, and Stop ends the trace it shows', async ({
   page,
 }) => {
   const backend = await openStats(page, LAPTOP, undefined, '/stats/runs');
@@ -71,10 +69,7 @@ test('Record starts a trace with the generation, the toolbar says Recording, and
   await expect(tools(page)).toContainText(`Recording · ${name}`);
   await expect(form).toBeHidden();
   expect(backend.starts).toEqual([
-    {
-      generation: GENERATION,
-      request: { name, note: 'Compiler v3 on the YOLO pipeline', tags: ['yolo', 'compiler-v3'] },
-    },
+    { name, note: 'Compiler v3 on the YOLO pipeline', tags: ['yolo', 'compiler-v3'] },
   ]);
   const traceId = backend.trace!.metadata.id;
   // The list is read again and leads with the recording run, which has no box to tick.
@@ -85,7 +80,7 @@ test('Record starts a trace with the generation, the toolbar says Recording, and
   await toolButton(page, 'Stop').click();
   await expect(toolButton(page, 'Record')).toBeVisible();
   await expect(tools(page)).not.toContainText('Recording');
-  expect(backend.stops).toEqual([{ generation: GENERATION, traceId }]);
+  expect(backend.stops).toEqual([traceId]);
   // The trace is now a run, which can be ticked.
   await expect(checkBox(runRow(page, name))).toHaveCount(1);
 });
@@ -121,9 +116,7 @@ test('Runs lists the board’s runs, the recording one without a box, and a run 
   await expect(runPanel(page)).toContainText('Insight hardware validation');
 });
 
-test('Delete asks, deletes the ticked runs with the generation and says how many went', async ({
-  page,
-}) => {
+test('Delete asks, deletes the ticked runs by id and says how many went', async ({ page }) => {
   const backend = await openStats(page, LAPTOP, undefined, '/stats/runs');
   await expect(runRows(page)).toHaveCount(4);
 
@@ -137,8 +130,8 @@ test('Delete asks, deletes the ticked runs with the generation and says how many
 
   await expect(toast(page, 'Deleted 2 runs from the board.')).toBeVisible();
   expect(backend.deletes).toEqual([
-    { id: '20260923T152624.613Z-insight-hw-1790177178', generation: GENERATION },
-    { id: '20260922T101530.004Z-baseline-idle', generation: GENERATION },
+    '20260923T152624.613Z-insight-hw-1790177178',
+    '20260922T101530.004Z-baseline-idle',
   ]);
   await expect(runRows(page).locator('.name')).toHaveText(['tes3', 'insight-hw-1790177227']);
   await expect(selectionBar(page)).toBeHidden();

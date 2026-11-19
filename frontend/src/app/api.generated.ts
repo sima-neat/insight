@@ -566,6 +566,640 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/boards": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The boards Insight knows and the selected one
+         * @description The board entered by hand (saved in the data folder), the board Insight runs on, and the DevKit the SDK is paired with (`DEVKIT_SYNC_DEVKIT_*`), in the order the selection prefers them; the selected one is the first, with its last connection result, its identity once read, and the `ssh` command that opens a shell on it. Never connects. Peripherals and Stats use the selected board, named by its `id` in their paths; any other id is 404 `not_found`.
+         */
+        readonly get: operations["listBoards"];
+        readonly put?: never;
+        /**
+         * Enter a board and select it
+         * @description Saves `{host, port?, user?}` (port 22 and user `sima` by default) as the board entered by hand, which is then selected. Insight signs in with the SSH keys of the account it runs as; it never takes a password. A different board than the selected one replaces it: its preview and microphone test stop.
+         */
+        readonly post: operations["selectBoard"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /**
+         * Forget the board entered by hand
+         * @description The selection falls back to the board Insight runs on, else the SDK's DevKit. Only the entered board can be forgotten: another known board is 409 `not_entered`, an id Insight does not know 404 `not_found`.
+         */
+        readonly delete: operations["forgetBoard"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/check": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Connect to the selected board and read its identity
+         * @description Reads its host name, machine and build. A failure is also kept in the board's status: 502 `unreachable` or `auth_failed` (with the `command` that authorizes Insight's key), 409 `host_key_changed` (with both fingerprints in `host_key`), 504 `timeout`.
+         */
+        readonly post: operations["checkBoard"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/trust-host-key": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Trust the new host key of a reflashed board
+         * @description `{fingerprint}` must be the key the board presented when it was refused (`host_key.presented` of `host_key_changed`), which the user confirmed. Insight keeps its own known_hosts, not the user's. The board is replaced (the trusted key may be another board's), so check it again.
+         */
+        readonly post: operations["trustBoardHostKey"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/peripherals": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * The board's last peripheral scan
+         * @description From memory; `scan` is null before the first Refresh. Never contacts the board.
+         */
+        readonly get: operations["getPeripherals"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/peripherals/refresh": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Scan the board's cameras and microphones
+         * @description SiMa Sentinel rescans the board's MIPI and USB cameras and ALSA microphones and answers with its catalog, which is kept as the board's last scan, with what changed since the one before. Each camera mode carries Sentinel's own verdict (`available`, `reason`). A running preview stops first. A refresh that waited for another gets that one's scan.
+         */
+        readonly post: operations["refreshPeripherals"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/cameras/preview": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * The camera preview running on the board
+         * @description From memory; null when none runs. One preview runs on a board at a time.
+         */
+        readonly get: operations["getCameraPreview"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/cameras/{camera}/preview": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The camera's id in the scan's catalog, URL-escaped. */
+                readonly camera: components["parameters"]["CameraID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Start a camera's live preview
+         * @description Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode must be one the last scan lists: for MIPI an NV12 mode Sentinel does not mark unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format, at a rate it advertises. 409 `preview_active` while one runs, `camera_in_use` when another process holds the camera (Insight never stops it), `no_scan` before a scan; 422 `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing` without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
+         */
+        readonly post: operations["startCameraPreview"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/cameras/{camera}/preview.mjpg": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The preview's `id`; with it, a request meant for an earlier preview does nothing. */
+                readonly preview?: components["parameters"]["PreviewID"];
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The camera's id in the scan's catalog, URL-escaped. */
+                readonly camera: components["parameters"]["CameraID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * The running preview's pictures as MJPEG
+         * @description One viewer per preview (409 `preview_active` for a second): the preview stops when this answer ends, and after 10 s (two frame periods of a slower mode, at most 60 s) without a picture.
+         */
+        readonly get: operations["streamCameraPreview"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/cameras/{camera}/preview/stop": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The preview's `id`; with it, a request meant for an earlier preview does nothing. */
+                readonly preview?: components["parameters"]["PreviewID"];
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The camera's id in the scan's catalog, URL-escaped. */
+                readonly camera: components["parameters"]["CameraID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Stop a camera's preview
+         * @description Kills the pipeline on the board, which releases the camera. A preview of another camera, or another than `preview` names, goes on. Stopping a preview that ended already is no error.
+         */
+        readonly post: operations["stopCameraPreview"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/microphones/test": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * The board's microphone test
+         * @description From memory, so poll it while it records (its `level_dbfs` and `elapsed_ms`); then its `level`, or `error`. Null before the first test.
+         */
+        readonly get: operations["getMicrophoneTest"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/microphones/{microphone}/test": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The microphone's id in the scan's catalog, URL-escaped. */
+                readonly microphone: components["parameters"]["MicrophoneID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Record from a microphone
+         * @description Records with `arecord` on the board from the ALSA device the last scan names, in 16 bits at 48 kHz (or the nearest rate below that the device has) and at most 2 channels, until stopped or for `seconds` (1 to 30; 30 without a body). Answers at once; read the test for its level and result. One test records on a board at a time (409 `test_running`). A test whose device is busy ends `failed` with `microphone_in_use`.
+         */
+        readonly post: operations["startMicrophoneTest"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/microphones/{microphone}/test/stop": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The test's `id`; with it, a request meant for an earlier test does nothing. */
+                readonly test?: components["parameters"]["MicTestID"];
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The microphone's id in the scan's catalog, URL-escaped. */
+                readonly microphone: components["parameters"]["MicrophoneID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * End a microphone test now
+         * @description What was recorded so far is the result, which the answer carries (a test stopped before 0.1 s of audio fails with `stopped_early`). With `test`, a stop meant for an earlier test stops nothing.
+         */
+        readonly post: operations["stopMicrophoneTest"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/microphones/{microphone}/test.wav": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The test's `id`; with it, a request meant for an earlier test does nothing. */
+                readonly test?: components["parameters"]["MicTestID"];
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The microphone's id in the scan's catalog, URL-escaped. */
+                readonly microphone: components["parameters"]["MicrophoneID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * A finished test's recording as WAV
+         * @description With range requests, which an audio element sends. 404 once another test replaced it.
+         */
+        readonly get: operations["getMicrophoneTestAudio"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/health": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * Whether Sentinel runs on the board
+         * @description Sentinel's `/v1/health` (its version, cached samples, collector errors, active trace), and when its service started. Without Sentinel: 502 `sentinel_missing` (not installed: the hint has the command that installs it), `sentinel_stopped` (installed, not running), `sentinel_denied`, `sentinel_schema` (another API schema), `sentinel_outdated`, `sentinel_failed`.
+         */
+        readonly get: operations["getSentinelHealth"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/metrics": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * Sentinel's metric definitions
+         * @description `/v1/metrics` as Sentinel answers it: each metric's key, label, short label, unit, group, description and warn and critical thresholds.
+         */
+        readonly get: operations["getSentinelMetrics"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/samples/latest": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * Sentinel's newest sample
+         * @description `/v1/samples/latest`: `{version, updated_at, sample: {timestamp, values}}`; an unmeasured metric is null.
+         */
+        readonly get: operations["getSentinelLatestSample"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/cache": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The timestamp of the newest sample the caller holds. */
+                readonly after?: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * Sentinel's cache, the Live view's source
+         * @description `/v1/cache`: the metric definitions, the newest sample and Sentinel's recent samples (240, about 8 minutes), oldest first. With `after` the caller holds the samples up to that one: the answer holds only the newer ones, with `full` false. It holds them all, with `full` true, to replace the caller's, when there is no `after`, when the cache no longer holds it (a daemon restarted, or the caller fell too far behind), and when the board's clock stepped back (the history starts again there).
+         */
+        readonly get: operations["getSentinelCache"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/traces/active": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * The trace being recorded
+         * @description `/v1/traces/active`: `{trace, summary}`, both null when nothing records.
+         */
+        readonly get: operations["getSentinelActiveTrace"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/traces": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Start recording a named trace
+         * @description `{name, note?, tags?}`: a name of at most 80 bytes of UTF-8, without control characters or a comma (runs are compared by a comma-separated list), a note of at most 512 characters, at most 16 tags of 1 to 80. 409 `trace_conflict` when a trace records or the name is taken. Sentinel answers `{trace}`.
+         */
+        readonly post: operations["startSentinelTrace"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/traces/stop": {
+        readonly parameters: {
+            readonly query?: {
+                /** @description Stop only this trace, by its id; another one active is 409 `trace_conflict`. */
+                readonly trace?: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Stop and save the active trace
+         * @description Sentinel answers the finished trace and its run's summary, `{trace, summary}`.
+         */
+        readonly post: operations["stopSentinelTrace"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/runs": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * The runs Sentinel holds
+         * @description `/v1/runs`: `{runs}`, each `{id, name, started_at, ended_at, duration_ms, samples, energy_joules}`; a run still recording has a null `ended_at`. Runs are files on the board; Insight keeps none.
+         */
+        readonly get: operations["listSentinelRuns"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/runs/{run}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description A run's id or name (the delete takes its id). */
+                readonly run: string;
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * One run in full
+         * @description `/v1/runs/{run}`: `{metadata, metrics, samples}`; 404 `not_found` for a run Sentinel does not hold.
+         */
+        readonly get: operations["getSentinelRun"];
+        readonly put?: never;
+        readonly post?: never;
+        /**
+         * Delete a finished run
+         * @description By its id, which must have the form of Sentinel's ids (`20260924T175231.958Z-baseline`) and be one Sentinel lists: Sentinel's API cannot delete, so Insight runs `simaai-sentinel runs delete <id>` on the board as the board's user, then reads the runs again to confirm. 400 for another id, 404 `not_found`, 409 `trace_conflict` for a run still recording, 502 `tool_missing` without Sentinel's CLI, `sentinel_denied`.
+         */
+        readonly delete: operations["deleteSentinelRun"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/boards/{id}/sentinel/compare": {
+        readonly parameters: {
+            readonly query: {
+                /** @description 2 to 8 runs' ids or names, comma-separated; the first is the baseline. */
+                readonly runs: string;
+                /** @description Add every run's samples. */
+                readonly raw?: boolean;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * Compare runs against a baseline
+         * @description `/v1/compare`: `{baseline_id, generated_at, runs, summaries, baseline_deltas_pct}`, the runs in full with `raw`.
+         */
+        readonly get: operations["compareSentinelRuns"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/system": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * System Info
+         * @description Insight's version and build, where it runs, and the ports and addresses it resolved at start; and what `neat --json` says about this machine (environment, components with their versions and updates, the Insight service, the update check, the ports the SDK publishes), allowlisted: never its code UI section or passwords. neat runs once at start and again with `refresh` (up to 15 s, as it checks online for updates); a plain read answers from memory, with `neat.state` `reading` until the first run ends.
+         */
+        readonly get: operations["getSystem"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/system/host": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * This computer's CPU, memory and disk
+         * @description The machine Insight runs on, not the board: CPU use since the reading before (a read within 0.5 s repeats it), memory used of total, and the disk of Insight's data folder. Read from /proc without blocking.
+         */
+        readonly get: operations["getSystemHost"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -999,8 +1633,341 @@ export interface components {
             readonly phase: string;
             readonly detail: string;
         };
+        /** @description The error shape, with what a board's failure adds. */
+        readonly BoardError: {
+            readonly error: components["schemas"]["ErrorDetail"];
+            readonly host_key?: components["schemas"]["HostKeyChange"];
+            /** @description With auth_failed, the shell command that authorizes Insight's key on the board. */
+            readonly command?: string;
+        };
+        /** @description With host_key_changed, the key Insight trusts and the one the board presented. */
+        readonly HostKeyChange: {
+            /** @description The board's name in known_hosts, "host" or "[host]:port". */
+            readonly host: string;
+            /** @description The trusted key's SHA256 fingerprint. */
+            readonly expected: string;
+            /** @description The presented key's, which trust-host-key takes. */
+            readonly presented: string;
+        };
+        readonly BoardList: {
+            /** @description Every known board, the selected one first. */
+            readonly boards: readonly components["schemas"]["BoardTarget"][];
+            /** @description The selected board; null when none is entered, found or paired. */
+            readonly selected: components["schemas"]["SelectedBoard"] | null;
+        };
+        readonly BoardTarget: {
+            readonly id: string;
+            /**
+             * @description ssh reaches the board over SSH; local is the board Insight runs on.
+             * @enum {string}
+             */
+            readonly mode: "ssh" | "local";
+            /**
+             * @description Entered by hand, the board Insight runs on, or the DevKit the SDK is paired with.
+             * @enum {string}
+             */
+            readonly source: "manual" | "on-board" | "sdk-env";
+            readonly host?: string;
+            readonly port?: number;
+            readonly user?: string;
+            /** @description "This board", or user@host with :port off port 22. */
+            readonly label: string;
+        };
+        readonly SelectedBoard: {
+            readonly id: string;
+            readonly label: string;
+            readonly status: components["schemas"]["BoardStatus"];
+            /** @description What the last successful check read; null before one. */
+            readonly identity: components["schemas"]["BoardIdentity"] | null;
+            /** @description The command that opens a shell on the board, for an SSH board ("ssh -p 2222 sima@192.168.1.20"). */
+            readonly ssh?: string;
+        };
+        readonly BoardStatus: {
+            /**
+             * @description unknown until a check or a failure; error while the last contact failed.
+             * @enum {string}
+             */
+            readonly state: "unknown" | "connected" | "error";
+            /** Format: date-time */
+            readonly checked_at?: string;
+            readonly error?: components["schemas"]["ErrorDetail"];
+            readonly host_key?: components["schemas"]["HostKeyChange"];
+            /** @description With auth_failed, the command that authorizes Insight's key. */
+            readonly command?: string;
+        };
+        readonly BoardIdentity: {
+            readonly hostname: string;
+            /** @description /etc/build's MACHINE, "modalix". */
+            readonly machine: string;
+            /** @description /etc/build's SIMA_BUILD_VERSION. */
+            readonly build: string;
+            /** @description The SHA256 fingerprint of the board's SSH host key; "" for the local board. */
+            readonly host_key: string;
+        };
+        readonly BoardSelection: {
+            /** @description An IP address or a host name. */
+            readonly host: string;
+            /** @description 1 to 65535; 22 when absent. */
+            readonly port?: number;
+            /** @description sima when absent. */
+            readonly user?: string;
+        };
+        readonly TrustHostKeyRequest: {
+            readonly fingerprint: string;
+        };
+        /** @description One of Sentinel's answers as it gave it, without its schema marker; its fields are Sentinel's (its API is the one its public clients use). */
+        readonly SentinelBody: {
+            readonly [key: string]: unknown;
+        };
+        readonly SentinelHealth: {
+            readonly health: components["schemas"]["SentinelBody"];
+            /**
+             * Format: date-time
+             * @description When Sentinel's service started, on Insight's clock; null when systemd does not say.
+             */
+            readonly started_at: string | null;
+        };
+        /** @description Sentinel's `/v1/cache`: `version`, `metrics` (the definitions), `latest` (the newest sample), `samples` (oldest first, each `{timestamp, values}`) and `errors`, with `full`. */
+        readonly SentinelCache: {
+            readonly samples: readonly {
+                readonly [key: string]: unknown;
+            }[];
+            /** @description The samples replace what the caller holds; false, they follow its `after`. */
+            readonly full: boolean;
+        } & {
+            readonly [key: string]: unknown;
+        };
+        readonly TraceRequest: {
+            readonly name: string;
+            readonly note?: string;
+            readonly tags?: readonly string[];
+        };
+        readonly RunDeleted: {
+            readonly deleted: {
+                readonly id: string;
+                readonly name: string;
+            };
+            readonly runs: components["schemas"]["SentinelBody"];
+        };
+        readonly Peripherals: {
+            /** @description The last scan; null before the first. */
+            readonly scan: components["schemas"]["PeripheralScan"] | null;
+        };
+        readonly PeripheralScan: {
+            /** Format: date-time */
+            readonly scanned_at: string;
+            /** @description How long Sentinel's scan took. */
+            readonly scan_ms: number;
+            /** @description Sentinel's peripheral catalog as it wrote it: `revision`, `observed_at`, `devices` (cameras with their `modes`, each with Sentinel's `available` and `reason`; microphones with their `capture_target`), `errors` (a failed provider's devices are its last successful scan's) and `board` (the board's model and camera setup). */
+            readonly catalog: components["schemas"]["SentinelBody"];
+            /** @description What this scan found or missed against the one before; null for the first. */
+            readonly changes: components["schemas"]["PeripheralChanges"] | null;
+        };
+        readonly PeripheralChanges: {
+            readonly added: readonly components["schemas"]["DeviceRef"][];
+            readonly removed: readonly components["schemas"]["DeviceRef"][];
+        };
+        readonly DeviceRef: {
+            readonly id: string;
+            readonly name: string;
+        };
+        readonly PreviewMode: {
+            /** @description A V4L2 format the scan lists for the camera (NV12, MJPG, YUYV, ...). */
+            readonly format: string;
+            readonly width: number;
+            readonly height: number;
+            /**
+             * Format: double
+             * @description A rate the camera advertises for the size (the inverse of a frame interval), to a thousandth.
+             */
+            readonly fps: number;
+        };
+        readonly PreviewAnswer: {
+            /** @description The running preview; null when none runs. */
+            readonly preview: components["schemas"]["CameraPreview"] | null;
+        };
+        readonly CameraPreview: {
+            readonly id: string;
+            readonly camera: string;
+            readonly mode: components["schemas"]["PreviewMode"];
+            /** Format: date-time */
+            readonly started_at: string;
+            /**
+             * Format: double
+             * @description The rate the camera runs at; for MIPI null until Sentinel read it, a few seconds in.
+             */
+            readonly camera_fps: number | null;
+            /** @description A browser shows the preview; its stream has one viewer. */
+            readonly viewer: boolean;
+        };
+        readonly MicTestRequest: {
+            /** @description 1 to 30; 30 when absent. */
+            readonly seconds?: number;
+        };
+        readonly MicTestAnswer: {
+            /** @description The board's latest test; null before the first. */
+            readonly test: components["schemas"]["MicTest"] | null;
+        };
+        readonly MicTest: {
+            readonly id: string;
+            readonly microphone: string;
+            /** @enum {string} */
+            readonly state: "recording" | "ready" | "failed";
+            /** @description The ALSA device arecord records from. */
+            readonly device: string;
+            readonly format: {
+                readonly rate: number;
+                readonly channels: number;
+                readonly bits: number;
+                readonly seconds: number;
+            };
+            /** @description How much was recorded. */
+            readonly elapsed_ms: number;
+            /**
+             * Format: double
+             * @description While recording, the newest 50 ms's peak; absent for digital silence.
+             */
+            readonly level_dbfs?: number;
+            readonly level?: components["schemas"]["MicLevel"];
+            readonly error?: components["schemas"]["ErrorDetail"];
+        };
+        /** @description What a finished recording picked up. */
+        readonly MicLevel: {
+            /** Format: double */
+            readonly peak_dbfs: number | null;
+            /** Format: double */
+            readonly rms_dbfs: number | null;
+            /** @description Its typical level is below -60 dBFS (one click does not count). */
+            readonly silent: boolean;
+        };
+        readonly SystemInfo: {
+            readonly insight: components["schemas"]["SystemInsight"];
+            readonly neat: components["schemas"]["SystemNeat"];
+        };
+        readonly SystemInsight: {
+            readonly version: string;
+            readonly build: {
+                readonly go_version: string;
+                readonly platform: string;
+                readonly revision?: string;
+                readonly time?: string;
+                readonly modified?: boolean;
+            };
+            /** @enum {string} */
+            readonly place: "board" | "sdk" | "host";
+            readonly data_dir: string;
+            readonly port: number;
+            /** @description The public origin when a proxy serves Insight, else the address the request came to. */
+            readonly web_ui_url: string;
+            readonly network: {
+                readonly certificate_host: string;
+                readonly browser_ice_address?: string;
+                readonly browser_ice_address_source: string;
+                readonly public_origin?: string;
+                readonly url_routing?: string;
+            };
+            readonly ports: {
+                readonly channels: number;
+                readonly channels_source: string;
+                readonly webrtc_start: number;
+                readonly webrtc_end: number;
+                /** @description The host port the SDK publishes RTSP on; 0 where none is named. */
+                readonly rtsp: number;
+                readonly whip: number;
+                readonly whip_ice: number;
+            };
+        };
+        readonly SystemNeat: {
+            /** @enum {string} */
+            readonly state: "reading" | "ready" | "missing" | "failed";
+            /** Format: date-time */
+            readonly read_at?: string;
+            readonly error?: components["schemas"]["ErrorDetail"];
+            readonly environment?: {
+                /** @description elxr-sdk or modalix-board. */
+                readonly mode?: string | null;
+                readonly label?: string | null;
+                readonly sdkVersion?: string | null;
+                readonly devkitBuildVersion?: string | null;
+                readonly sysroot?: string | null;
+            };
+            /** @description By component id (core, pyneat, runtime, insight, modelCompiler, ...). */
+            readonly components?: {
+                readonly [key: string]: components["schemas"]["NeatComponent"];
+            };
+            readonly insight?: {
+                readonly serviceState?: string | null;
+                readonly venv?: string | null;
+                readonly webUiUrl?: string | null;
+            };
+            readonly update_check?: {
+                readonly offline?: boolean | null;
+                readonly status?: string | null;
+                readonly errors?: readonly string[];
+            };
+            /** @description The ports the SDK container publishes, neat's, else the port map's. */
+            readonly exposed_ports: readonly {
+                readonly name: string;
+                readonly protocol?: string;
+                readonly hostPortStart: number | null;
+                readonly hostPortEnd: number | null;
+            }[];
+        };
+        readonly NeatComponent: {
+            readonly name: string | null;
+            readonly version: string | null;
+            readonly detail?: string | null;
+            readonly channel?: string | null;
+            readonly tag?: string | null;
+            readonly channelAssumed?: boolean | null;
+            readonly latestTag?: string | null;
+            readonly latestVersion?: string | null;
+            readonly metadataUrl?: string | null;
+            readonly updateAvailable?: boolean | null;
+            readonly installed?: boolean | null;
+            readonly serviceState?: string | null;
+            readonly venv?: string | null;
+        };
+        readonly HostReadings: {
+            /** Format: double */
+            readonly cpu_percent: number | null;
+            readonly memory: components["schemas"]["Usage"] | null;
+            /** @description The disk of Insight's data folder. */
+            readonly disk: components["schemas"]["Usage"] | null;
+        };
+        readonly Usage: {
+            /**
+             * Format: int64
+             * @description Bytes.
+             */
+            readonly total: number;
+            /** Format: int64 */
+            readonly used: number;
+            /** Format: double */
+            readonly percent: number;
+            /** @description A disk's folder. */
+            readonly path?: string;
+        };
     };
     responses: {
+        /** @description Refused or failed; the body says why, with what a board's failure adds. */
+        readonly BoardError: {
+            headers: {
+                readonly [name: string]: unknown;
+            };
+            content: {
+                readonly "application/json": components["schemas"]["BoardError"];
+            };
+        };
+        /** @description Sentinel's answer as it gave it, without its schema marker. */
+        readonly SentinelBody: {
+            headers: {
+                readonly [name: string]: unknown;
+            };
+            content: {
+                readonly "application/json": components["schemas"]["SentinelBody"];
+            };
+        };
         /** @description Refused; the body says why. */
         readonly Error: {
             headers: {
@@ -1021,6 +1988,16 @@ export interface components {
         };
     };
     parameters: {
+        /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+        readonly BoardID: string;
+        /** @description The camera's id in the scan's catalog, URL-escaped. */
+        readonly CameraID: string;
+        /** @description The microphone's id in the scan's catalog, URL-escaped. */
+        readonly MicrophoneID: string;
+        /** @description The preview's `id`; with it, a request meant for an earlier preview does nothing. */
+        readonly PreviewID: string;
+        /** @description The test's `id`; with it, a request meant for an earlier test does nothing. */
+        readonly MicTestID: string;
         /** @description The slot's number, 1 to 48 (srcN). */
         readonly SlotNumber: number;
         readonly JobID: string;
@@ -1071,8 +2048,46 @@ export type CatalogImportRequest = components['schemas']['CatalogImportRequest']
 export type JobList = components['schemas']['JobList'];
 export type Job = components['schemas']['Job'];
 export type JobProgress = components['schemas']['JobProgress'];
+export type BoardError = components['schemas']['BoardError'];
+export type HostKeyChange = components['schemas']['HostKeyChange'];
+export type BoardList = components['schemas']['BoardList'];
+export type BoardTarget = components['schemas']['BoardTarget'];
+export type SelectedBoard = components['schemas']['SelectedBoard'];
+export type BoardStatus = components['schemas']['BoardStatus'];
+export type BoardIdentity = components['schemas']['BoardIdentity'];
+export type BoardSelection = components['schemas']['BoardSelection'];
+export type TrustHostKeyRequest = components['schemas']['TrustHostKeyRequest'];
+export type SentinelBody = components['schemas']['SentinelBody'];
+export type SentinelHealth = components['schemas']['SentinelHealth'];
+export type SentinelCache = components['schemas']['SentinelCache'];
+export type TraceRequest = components['schemas']['TraceRequest'];
+export type RunDeleted = components['schemas']['RunDeleted'];
+export type Peripherals = components['schemas']['Peripherals'];
+export type PeripheralScan = components['schemas']['PeripheralScan'];
+export type PeripheralChanges = components['schemas']['PeripheralChanges'];
+export type DeviceRef = components['schemas']['DeviceRef'];
+export type PreviewMode = components['schemas']['PreviewMode'];
+export type PreviewAnswer = components['schemas']['PreviewAnswer'];
+export type CameraPreview = components['schemas']['CameraPreview'];
+export type MicTestRequest = components['schemas']['MicTestRequest'];
+export type MicTestAnswer = components['schemas']['MicTestAnswer'];
+export type MicTest = components['schemas']['MicTest'];
+export type MicLevel = components['schemas']['MicLevel'];
+export type SystemInfo = components['schemas']['SystemInfo'];
+export type SystemInsight = components['schemas']['SystemInsight'];
+export type SystemNeat = components['schemas']['SystemNeat'];
+export type NeatComponent = components['schemas']['NeatComponent'];
+export type HostReadings = components['schemas']['HostReadings'];
+export type Usage = components['schemas']['Usage'];
+export type ResponseBoardError = components['responses']['BoardError'];
+export type ResponseSentinelBody = components['responses']['SentinelBody'];
 export type ResponseError = components['responses']['Error'];
 export type ResponseLibraryError = components['responses']['LibraryError'];
+export type ParameterBoardId = components['parameters']['BoardID'];
+export type ParameterCameraId = components['parameters']['CameraID'];
+export type ParameterMicrophoneId = components['parameters']['MicrophoneID'];
+export type ParameterPreviewId = components['parameters']['PreviewID'];
+export type ParameterMicTestId = components['parameters']['MicTestID'];
 export type ParameterSlotNumber = components['parameters']['SlotNumber'];
 export type ParameterJobId = components['parameters']['JobID'];
 export type ParameterMediaPath = components['parameters']['MediaPath'];
@@ -1838,6 +2853,745 @@ export interface operations {
                 };
             };
             readonly 404: components["responses"]["Error"];
+        };
+    };
+    readonly listBoards: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The boards. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["BoardList"];
+                };
+            };
+        };
+    };
+    readonly selectBoard: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["BoardSelection"];
+            };
+        };
+        readonly responses: {
+            /** @description The boards after the selection. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["BoardList"];
+                };
+            };
+            readonly 400: components["responses"]["Error"];
+            readonly 415: components["responses"]["Error"];
+            readonly 500: components["responses"]["Error"];
+        };
+    };
+    readonly forgetBoard: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The boards afterwards. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["BoardList"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["Error"];
+            readonly 500: components["responses"]["Error"];
+        };
+    };
+    readonly checkBoard: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The boards, the selected one connected. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["BoardList"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly trustBoardHostKey: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["TrustHostKeyRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description The boards afterwards. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["BoardList"];
+                };
+            };
+            readonly 400: components["responses"]["Error"];
+            readonly 404: components["responses"]["Error"];
+            readonly 415: components["responses"]["Error"];
+            readonly 500: components["responses"]["Error"];
+        };
+    };
+    readonly getPeripherals: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The last scan. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["Peripherals"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 503: components["responses"]["Error"];
+        };
+    };
+    readonly refreshPeripherals: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The new scan. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["Peripherals"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 429: components["responses"]["Error"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 503: components["responses"]["Error"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly getCameraPreview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The preview. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PreviewAnswer"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 503: components["responses"]["Error"];
+        };
+    };
+    readonly startCameraPreview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The camera's id in the scan's catalog, URL-escaped. */
+                readonly camera: components["parameters"]["CameraID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["PreviewMode"];
+            };
+        };
+        readonly responses: {
+            /** @description The running preview; open its stream within 15 s. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PreviewAnswer"];
+                };
+            };
+            readonly 400: components["responses"]["Error"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 415: components["responses"]["Error"];
+            readonly 422: components["responses"]["Error"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 503: components["responses"]["Error"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly streamCameraPreview: {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The preview's `id`; with it, a request meant for an earlier preview does nothing. */
+                readonly preview?: components["parameters"]["PreviewID"];
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The camera's id in the scan's catalog, URL-escaped. */
+                readonly camera: components["parameters"]["CameraID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The stream, one JPEG per part. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "multipart/x-mixed-replace": string;
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["Error"];
+            readonly 503: components["responses"]["Error"];
+        };
+    };
+    readonly stopCameraPreview: {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The preview's `id`; with it, a request meant for an earlier preview does nothing. */
+                readonly preview?: components["parameters"]["PreviewID"];
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The camera's id in the scan's catalog, URL-escaped. */
+                readonly camera: components["parameters"]["CameraID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The board's preview afterwards. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PreviewAnswer"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 503: components["responses"]["Error"];
+        };
+    };
+    readonly getMicrophoneTest: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The test. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MicTestAnswer"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 503: components["responses"]["Error"];
+        };
+    };
+    readonly startMicrophoneTest: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The microphone's id in the scan's catalog, URL-escaped. */
+                readonly microphone: components["parameters"]["MicrophoneID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["MicTestRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description The test, recording. */
+            readonly 202: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MicTestAnswer"];
+                };
+            };
+            readonly 400: components["responses"]["Error"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 415: components["responses"]["Error"];
+            readonly 422: components["responses"]["Error"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 503: components["responses"]["Error"];
+        };
+    };
+    readonly stopMicrophoneTest: {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The test's `id`; with it, a request meant for an earlier test does nothing. */
+                readonly test?: components["parameters"]["MicTestID"];
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The microphone's id in the scan's catalog, URL-escaped. */
+                readonly microphone: components["parameters"]["MicrophoneID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The test, finished. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MicTestAnswer"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 503: components["responses"]["Error"];
+        };
+    };
+    readonly getMicrophoneTestAudio: {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The test's `id`; with it, a request meant for an earlier test does nothing. */
+                readonly test?: components["parameters"]["MicTestID"];
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description The microphone's id in the scan's catalog, URL-escaped. */
+                readonly microphone: components["parameters"]["MicrophoneID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The recording. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "audio/wav": string;
+                };
+            };
+            /** @description Part of the recording. */
+            readonly 206: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "audio/wav": string;
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 416: components["responses"]["Error"];
+            readonly 503: components["responses"]["Error"];
+        };
+    };
+    readonly getSentinelHealth: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Sentinel's health. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["SentinelHealth"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly getSentinelMetrics: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: components["responses"]["SentinelBody"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly getSentinelLatestSample: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: components["responses"]["SentinelBody"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly getSentinelCache: {
+        readonly parameters: {
+            readonly query?: {
+                /** @description The timestamp of the newest sample the caller holds. */
+                readonly after?: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The cache. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["SentinelCache"];
+                };
+            };
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly getSentinelActiveTrace: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: components["responses"]["SentinelBody"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly startSentinelTrace: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["TraceRequest"];
+            };
+        };
+        readonly responses: {
+            readonly 200: components["responses"]["SentinelBody"];
+            readonly 400: components["responses"]["Error"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 413: components["responses"]["Error"];
+            readonly 415: components["responses"]["Error"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly stopSentinelTrace: {
+        readonly parameters: {
+            readonly query?: {
+                /** @description Stop only this trace, by its id; another one active is 409 `trace_conflict`. */
+                readonly trace?: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: components["responses"]["SentinelBody"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly listSentinelRuns: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: components["responses"]["SentinelBody"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly getSentinelRun: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description A run's id or name (the delete takes its id). */
+                readonly run: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: components["responses"]["SentinelBody"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly deleteSentinelRun: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+                /** @description A run's id or name (the delete takes its id). */
+                readonly run: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The run that went and Sentinel's runs afterwards. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RunDeleted"];
+                };
+            };
+            readonly 400: components["responses"]["Error"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly compareSentinelRuns: {
+        readonly parameters: {
+            readonly query: {
+                /** @description 2 to 8 runs' ids or names, comma-separated; the first is the baseline. */
+                readonly runs: string;
+                /** @description Add every run's samples. */
+                readonly raw?: boolean;
+            };
+            readonly header?: never;
+            readonly path: {
+                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
+                readonly id: components["parameters"]["BoardID"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: components["responses"]["SentinelBody"];
+            readonly 400: components["responses"]["Error"];
+            readonly 404: components["responses"]["Error"];
+            readonly 409: components["responses"]["BoardError"];
+            readonly 502: components["responses"]["BoardError"];
+            readonly 504: components["responses"]["BoardError"];
+        };
+    };
+    readonly getSystem: {
+        readonly parameters: {
+            readonly query?: {
+                /** @description Run neat again first (or wait for the run in progress). */
+                readonly refresh?: boolean;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description System Info. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["SystemInfo"];
+                };
+            };
+        };
+    };
+    readonly getSystemHost: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The readings. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HostReadings"];
+                };
+            };
         };
     };
 }

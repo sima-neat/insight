@@ -41,11 +41,11 @@ import { BoardProblemNotice } from '../../board/board-problem-notice';
 import { BoardSettingsAction } from '../../board/board-settings-action';
 import { BoardService } from '../../board/board.service';
 import { ticking } from '../../clock';
+import { CopyCommand } from '../../copy-command';
 import { formatRelativeTime } from '../../relative-time';
 import { downloadCsv } from '../../stats/csv-download';
 import { daemonView, healthProblems, type DaemonView } from '../../stats/daemon-view';
-import { failureOf, type SentinelFailure } from '../../stats/sentinel-failure';
-import { SentinelInstall } from '../../stats/sentinel-install';
+import type { SentinelFailure } from '../../stats/sentinel-failure';
 import { SentinelRuns } from '../../stats/sentinel-runs';
 import { SentinelTelemetry, type TelemetryUpdate } from '../../stats/sentinel-telemetry';
 import { StatsSession } from '../../stats/stats-session';
@@ -83,56 +83,52 @@ const UPDATE_CHIPS: Record<TelemetryUpdate, { label: string; tone: NeatTone }> =
   stopped: { label: 'Not updating', tone: 'warning' },
 };
 
-/** #170's status line for screen readers (Inv-S §2.4). */
+/** The status line for screen readers. */
 const UPDATE_ANNOUNCEMENTS: Record<TelemetryUpdate, string> = {
   live: 'Metrics are updating live.',
   paused: 'Metric updates are paused.',
   stopped: 'Metric updates are stopped.',
 };
 
-/** #170's line while the installer runs (Inv-S §2.3). */
-const INSTALLING =
-  'Running `sima-cli neat install sentinel` on the board. This downloads and unpacks an artifact and can take several minutes.';
-
 /** Whether a failure is the board's own, which its settings fix; `no_target` is a page state of its own. */
 const boardCoded = (failure: SentinelFailure | null): failure is SentinelFailure =>
   failure !== null && failure.board && failure.code !== 'no_target';
 
 /**
- * Why Sentinel is not ready, as the empty state's heading and tone. A failed state read says what
- * failed; otherwise the daemon's state does. Missing is an invitation to install, stopped needs a
- * hand on the board, and a daemon that does not answer (or answers nothing Insight reads) is a
- * fault.
+ * Why Sentinel is not ready, as the empty state's heading and tone. Missing asks the user to
+ * install it on the board, stopped needs a hand on the board, and anything else (a daemon that
+ * does not answer, or answers nothing Insight reads) is the failure's own title, a fault.
  */
 function notReadyHeading(
   failure: SentinelFailure | null,
   daemon: DaemonView,
   label: string,
 ): { heading: string; tone: NeatTone } {
-  if (failure) return { heading: failure.title, tone: 'danger' };
   if (daemon.state === 'missing') {
     return { heading: `Sentinel is not installed on ${label}`, tone: 'info' };
   }
   if (daemon.state === 'stopped') {
     return { heading: 'Sentinel is installed but stopped', tone: 'warning' };
   }
-  return { heading: 'Sentinel is not answering', tone: 'danger' };
+  return { heading: failure?.title ?? 'Sentinel is not answering', tone: 'danger' };
 }
 
 /**
- * Stats, in three views at their own addresses (spec, "Stats, runs"): Live (`/stats`), the selected
- * board's live Sentinel telemetry as overview cards, the chosen card's area in the side panel and
- * every metric under All metrics (spec, "Stats, live telemetry"); Runs (`/stats/runs`), the runs
- * saved on the board; and Compare (`/stats/runs/compare`). The views are child routes without
- * components, so the page stays one instance across them. `SentinelTelemetry` and `SentinelRuns`
- * are provided here, so leaving the page stops every request to the board; while Live is not shown
- * the metrics are not polled, and the run list is read only while Runs or Compare is. The install
- * belongs to `SentinelInstall`, which outlives the page, and where the user left the page to
+ * Stats, in three views at their own addresses: Live (`/stats`), the selected board's live
+ * Sentinel telemetry as overview cards, the chosen card's area in the side panel and every metric
+ * under All metrics; Runs (`/stats/runs`), the runs saved on the board; and Compare
+ * (`/stats/runs/compare`). The views are child routes without components, so the page stays one
+ * instance across them. `SentinelTelemetry` and `SentinelRuns` are provided here, so leaving the
+ * page stops every request to the board; while Live is not shown the metrics are not polled, and
+ * the run list is read only while Runs or Compare is. Where the user left the page belongs to
  * `StatsSession`. A trace can be recorded and stopped from the toolbar on every view.
  *
- * Telemetry once read stays on the page under whatever failure follows (#170): a board that stops
+ * Insight installs and starts nothing on the board: where Sentinel is missing or stopped, the
+ * page shows the command the server's hint names, with Copy, and Check again asks once more.
+ *
+ * Telemetry once read stays on the page under whatever failure follows: a board that stops
  * answering keeps its last values. The top bar's update state and its Pause, Resume or Retry are
- * about those values, so they show only with them (ruling F15).
+ * about those values, so they show only with them.
  */
 @Component({
   selector: 'app-stats-page',
@@ -141,6 +137,7 @@ function notReadyHeading(
     BoardProblemNotice,
     BoardSettingsAction,
     CompareView,
+    CopyCommand,
     MetricsTable,
     NeatAsidePanel,
     NeatAsideToggle,
@@ -176,7 +173,6 @@ export class StatsPage {
   protected readonly telemetry = inject(SentinelTelemetry);
   private readonly runs = inject(SentinelRuns);
   private readonly router = inject(Router);
-  protected readonly install = inject(SentinelInstall);
   private readonly session = inject(StatsSession);
   private readonly dialogs = inject(AppDialogs);
   private readonly document = inject(DOCUMENT);
@@ -199,40 +195,31 @@ export class StatsPage {
   /** All metrics starts closed on every visit; its table is built only while it is open. */
   protected readonly allMetricsOpen = signal(false);
 
-  private readonly target = computed(() => this.board.state()?.target ?? null);
-  private readonly daemon = computed(() => daemonView(this.telemetry.state()));
+  private readonly daemon = computed(() =>
+    daemonView(this.telemetry.state(), this.telemetry.stateFailure()),
+  );
 
   /**
-   * Telemetry is shown while Sentinel is available, or once a window of this board was read: a
-   * daemon that stops answering then leaves its last values on screen under the failure.
+   * Telemetry is shown while Sentinel answers, or once a window of this board was read: a daemon
+   * that stops answering then leaves its last values on screen under the failure.
    */
   private readonly telemetryShown = computed(
-    () =>
-      this.telemetry.state()?.available === true ||
-      this.telemetry.window()?.generation === this.board.generation(),
+    () => this.telemetry.ready() || this.telemetry.window()?.board === this.board.id(),
   );
 
   protected readonly body = computed<Body>(() => {
     const board = this.board.state();
     // Until the board is first read, Insight is still finding out what there is to check.
     if (board === null) return this.board.error() ? 'read-failed' : 'checking';
-    if (board.target === null) return 'no-target';
+    if (board.selected === null) return 'no-target';
     if (this.telemetryShown()) return 'ready';
     // Before the first state read has answered (a hidden tab sends it when it shows), it checks.
     const read = this.telemetry.state() !== null || this.telemetry.stateFailure() !== null;
     return this.telemetry.checking() || !read ? 'checking' : 'not-ready';
   });
 
-  /**
-   * What the state says is wrong: why the newest read failed, else why the daemon cannot be used
-   * (its `status.error`, with the backend's hint or `failureOf`'s fallback for the code).
-   */
-  private readonly stateProblem = computed(() => {
-    const failure = this.telemetry.stateFailure();
-    if (failure) return failure;
-    const state = this.telemetry.state();
-    return state?.status.error ? failureOf(state.status.error, state.generation) : null;
-  });
+  /** What the state says is wrong: why the newest health read failed. */
+  private readonly stateProblem = computed(() => this.telemetry.stateFailure());
 
   /**
    * The board's own failure over the telemetry, the state's or the metrics'. The state's counts
@@ -247,12 +234,12 @@ export class StatsPage {
    * The callout over the telemetry when the board's notice does not stand there: why the last poll
    * failed, else why the state says Sentinel cannot be used. A state read can stop the polling with
    * no poll failing (after Resume, on focus, or on the 30 s check), and the values on screen must
-   * not stop changing without a reason. An unavailable state always carries its `status.error`.
+   * not stop changing without a reason.
    */
   protected readonly telemetryProblem = computed(() => {
     const failure = this.telemetry.failure();
     if (failure) return failure;
-    return this.telemetry.state()?.available === false ? this.stateProblem() : null;
+    return this.telemetry.ready() ? null : this.stateProblem();
   });
 
   protected readonly collectorErrors = computed(() =>
@@ -309,7 +296,7 @@ export class StatsPage {
   /**
    * The top bar's button: Pause while live, Resume while paused, Retry where the values stopped on
    * a failure that asking again can help, and none where neither helps: Pause beside Not updating
-   * would pause nothing (Inv-S §13.22). The chip and the callout say why.
+   * would pause nothing. The chip and the callout say why.
    */
   protected readonly updateAction = computed<'pause' | 'resume' | 'retry' | null>(() => {
     const update = this.telemetry.update();
@@ -346,57 +333,27 @@ export class StatsPage {
     () => `Every metric at each of the ${this.sampleCount()} samples Insight read from Sentinel`,
   );
 
-  /** The install running, and whether it runs on this board: the backend runs one at a time. */
-  protected readonly installing = computed(() => {
-    const running = this.install.running();
-    if (!running) return null;
-    return { here: running.generation === this.board.generation(), label: running.label };
-  });
-
-  /**
-   * Install waits: an install runs, or the state is read again (after an install, or Check again),
-   * so the state held may already be out of date.
-   */
-  protected readonly installWaits = computed(
-    () => this.installing() !== null || this.telemetry.rechecking(),
-  );
-
-  /** Another board's install: a press would do nothing, so the button says why (ruling F18). */
-  protected readonly installTooltip = computed(() => {
-    const installing = this.installing();
-    return installing && !installing.here
-      ? `Sentinel is being installed on ${installing.label}.`
-      : null;
-  });
-
-  /** Install is offered for a missing daemon on a board with `sima-cli` (`DaemonView.canInstall`). */
-  protected readonly canInstall = computed(() => this.daemon().canInstall);
-
   /** A board-coded state problem while Sentinel is not ready: the board's notice says it. */
   protected readonly notReadyBoardFailure = computed(() => {
     const problem = this.stateProblem();
     return boardCoded(problem) ? problem : null;
   });
 
+  /**
+   * The empty state while Sentinel is not ready: its heading and tone, the server's message where
+   * the heading does not already say it (a missing or stopped daemon's heading does), its hint, and
+   * the command the hint names (installing Sentinel, starting its service), which the user copies
+   * and runs on the board; '' when there is none.
+   */
   protected readonly notReady = computed(() => {
     const daemon = this.daemon();
-    // Missing and not installable from here: the reason, where the hint would offer the install.
-    const blocked = daemon.state === 'missing' && !daemon.canInstall ? daemon.installBlocked : '';
+    const failure = this.stateProblem();
     return {
-      ...notReadyHeading(
-        this.telemetry.stateFailure(),
-        daemon,
-        this.target()?.label ?? 'this board',
-      ),
-      body: this.installing()?.here ? INSTALLING : blocked || this.stateProblem()?.hint || '',
+      ...notReadyHeading(failure, daemon, this.board.selected()?.label ?? 'this board'),
+      message: daemon.state === 'error' ? (failure?.problem.message ?? '') : '',
+      hint: failure?.hint ?? '',
+      command: daemon.command,
     };
-  });
-
-  /** The output of this board's last install: the installer's log, or what its failure attached. */
-  protected readonly installerOutput = computed(() => {
-    const outcome = this.install.outcome();
-    if (!outcome || outcome.generation !== this.board.generation()) return '';
-    return outcome.ok ? outcome.log : outcome.failure.detail;
   });
 
   constructor() {
@@ -409,11 +366,11 @@ export class StatsPage {
     });
     // The trace and the runs are read only while the state says Sentinel answers: a missing or
     // stopped daemon would answer each with the failure the page shows already.
-    effect(() => this.runs.setSentinelReady(this.telemetry.state()?.available === true));
+    effect(() => this.runs.setSentinelReady(this.telemetry.ready()));
     // The runs selected and ticked are the board's they were chosen on.
     effect(() => {
-      const generation = this.board.generation();
-      if (generation !== null) untracked(() => this.session.followBoard(generation));
+      const id = this.board.id();
+      if (id !== null) untracked(() => this.session.followBoard(id));
     });
   }
 
@@ -424,13 +381,6 @@ export class StatsPage {
   protected openCard(id: OverviewCardId): void {
     this.session.card.set(id);
     this.asides.setOpen('stats', true);
-  }
-
-  protected installSentinel(): void {
-    const generation = this.board.generation();
-    const label = this.target()?.label;
-    if (this.installWaits() || generation === null || !label) return;
-    void this.install.install(generation, label);
   }
 
   protected recheck(): void {

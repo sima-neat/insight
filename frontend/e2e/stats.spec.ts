@@ -10,21 +10,12 @@ import {
   VIEWPORTS,
 } from './layout';
 import { NO_BOARD, SENTINEL_FAILED, STATS_BOARD } from './stats-mocks';
-import {
-  advance,
-  openStats,
-  POLL_MS,
-  rail,
-  SETTLE_MS,
-  toast,
-  toolButton,
-  tools,
-} from './stats-page';
+import { advance, openStats, POLL_MS, rail, SETTLE_MS, toolButton, tools } from './stats-page';
 
 // Stats' Live view against a fake board and Sentinel (`FakeStatsBackend`), at every viewport,
 // on the page's held clock (`stats-page.ts`).
 
-const BOARD_LABEL = STATS_BOARD.target!.label;
+const BOARD_LABEL = STATS_BOARD.selected!.label;
 
 const panel = (page: Page) => page.getByRole('region', { name: 'Stats area' });
 /** The side panel's own scroll container: the panel sits inside it, beside the page's body. */
@@ -86,7 +77,7 @@ for (const { name, size } of VIEWPORTS) {
     await expect(cardButton(page, 'Board power')).not.toHaveAttribute('aria-current', 'true');
   });
 
-  test(`the polls ask for the full window, then only what is new, stop while Stats is away and start over on return at ${name}`, async ({
+  test(`the polls ask for the whole cache, then only what is new, stop while Stats is away and start over on return at ${name}`, async ({
     page,
   }) => {
     const backend = await openStats(page, size);
@@ -94,11 +85,11 @@ for (const { name, size } of VIEWPORTS) {
     await cardButton(page, 'Board power').click();
     await expect(panelTitle(page)).toHaveText('Power');
 
-    expect(backend.queries).toEqual([{ history: 240 }]);
+    expect(backend.queries).toEqual([null]);
     await advance(page, POLL_MS);
     await expect.poll(() => backend.polls).toBe(2);
-    // The second poll holds the first answer's newest sample and the history it is of.
-    expect(backend.queries[1]).toEqual({ history: 240, after: backend.answered[0], epoch: 1 });
+    // The second poll asks for what came after the first answer's newest sample.
+    expect(backend.queries[1]).toBe(backend.answered[0]);
 
     // Leaving Stats stops every request to the board, however long the page is away.
     await rail(page, 'Streaming').click();
@@ -110,10 +101,10 @@ for (const { name, size } of VIEWPORTS) {
     await advance(page, 180_000, 6);
     expect(backend.sentinelRequests).toHaveLength(sent);
 
-    // Coming back reads the window again, in full, and finds the panel as it was left.
+    // Coming back reads the whole cache again, and finds the panel as it was left.
     await rail(page, 'Stats').click();
     await expect(cards(page)).toHaveCount(6);
-    expect(backend.queries.at(-1)).toEqual({ history: 240 });
+    expect(backend.queries.at(-1)).toBeNull();
     await expect(panelTitle(page)).toHaveText('Power');
     await expect(cardButton(page, 'Board power')).toHaveAttribute('aria-current', 'true');
   });
@@ -176,7 +167,7 @@ for (const { name, size } of VIEWPORTS) {
     await expect(toolButton(page, 'Pause')).toBeVisible();
   });
 
-  test(`without Sentinel, Install Sentinel posts with the generation, goes on across a visit to Streaming and says when it is done at ${name}`, async ({
+  test(`without Sentinel, the page shows the command that installs it with Copy, and Check again finds it once installed at ${name}`, async ({
     page,
   }) => {
     const backend = await openStats(page, size, (fake) => (fake.sentinel = 'missing'));
@@ -185,28 +176,23 @@ for (const { name, size } of VIEWPORTS) {
     ).toBeVisible();
     // Nothing is polled while there is no Sentinel to ask.
     expect(backend.polls).toBe(0);
-    // Nor are the toolbar's update controls shown.
+    // Nor are the toolbar's update controls shown, nor an install Insight would run itself.
     await expect(toolButton(page, 'Pause')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Install Sentinel' })).toHaveCount(0);
 
-    const release = backend.holdInstall();
-    await page.getByRole('button', { name: 'Install Sentinel' }).click();
-    const installing = page.getByRole('button', { name: 'Installing…' });
-    await expect(installing).toBeVisible();
-    expect(backend.installs).toEqual([String(STATS_BOARD.generation)]);
+    // The command is the user's to run on the board.
+    await expect(page.locator('main app-copy-command code')).toHaveText(
+      'sima-cli neat install sentinel',
+    );
+    await expect(
+      page.getByRole('button', { name: 'Copy the command for the board' }),
+    ).toBeVisible();
 
-    // The install belongs to no page: leaving Stats and coming back still finds it running.
-    await rail(page, 'Streaming').click();
-    await expect(page).toHaveURL(/\/streaming$/);
-    await rail(page, 'Stats').click();
-    await expect(installing).toBeVisible();
-    expect(backend.installs).toHaveLength(1);
-
-    release();
-    await expect(toast(page, `Sentinel installed on ${BOARD_LABEL}.`)).toBeVisible();
-    // The page now shows the board's telemetry, and the installer's log was not asked for twice.
+    // Installed on the board: Check again finds it, and the page shows the board's telemetry.
+    backend.sentinel = 'running';
+    await page.getByRole('button', { name: 'Check again' }).click();
     await expect(cards(page)).toHaveCount(6);
     await expect(tools(page)).toContainText('Live');
-    expect(backend.installs).toHaveLength(1);
   });
 
   test(`with no board selected, Choose a board opens the board dialog at ${name}`, async ({

@@ -1,7 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { VIEWPORTS } from './layout';
 import {
-  CONNECTED_BOARD,
+  devkitPath,
   FakePeripheralsBackend,
   HOST_KEY_CHANGED_BOARD,
   UNCHECKED_BOARD,
@@ -33,13 +33,16 @@ for (const { name, size } of VIEWPORTS) {
     await page.goto('/streaming');
     await expect(board(page)).toHaveAccessibleName('DevKit — 192.168.100.200 — Connected');
     // Already checked: the app does not connect to the board by itself.
-    expect(backend.posted('/api/board/test')).toEqual([]);
+    expect(backend.posted(devkitPath('check'))).toEqual([]);
 
     await board(page).click();
     const dialog = boardDialog(page);
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('Connected');
-    await expect(dialog.getByRole('button', { name: 'Open shell' })).toBeVisible();
+    // Insight opens no shell: the dialog gives the ssh command, with Copy.
+    await expect(dialog.getByText('ssh sima@192.168.100.200', { exact: true })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Copy the ssh command' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Open shell' })).toHaveCount(0);
 
     await dialog.getByRole('button', { name: /^Change board/ }).click();
     await dialog.getByRole('textbox', { name: 'Host or IP address' }).fill('192.168.2.2');
@@ -49,7 +52,7 @@ for (const { name, size } of VIEWPORTS) {
     await expect(
       toast(page, 'Board set to sima@192.168.2.2. Check again to test the connection.'),
     ).toBeVisible();
-    expect(backend.posted('/api/board/select')).toEqual([
+    expect(backend.posted('/api/boards')).toEqual([
       { host: '192.168.2.2', port: 22, user: 'sima' },
     ]);
     await expect(dialog.getByRole('button', { name: 'Check again' })).toBeVisible();
@@ -76,11 +79,11 @@ for (const { name, size } of VIEWPORTS) {
     const dialog = boardDialog(page);
     await expect(dialog).toContainText('Connection failed');
     await expect(dialog).toContainText(
-      '192.168.100.200 presented a different SSH host key than the one Insight trusted.',
+      '192.168.100.200 presented a different SSH host key than the one Insight trusts.',
     );
-    const error = HOST_KEY_CHANGED_BOARD.status.error!;
-    await expect(dialog).toContainText(`Expected${error['expected_fingerprint']}`);
-    await expect(dialog).toContainText(`Presented${error['presented_fingerprint']}`);
+    const hostKey = HOST_KEY_CHANGED_BOARD.selected!.status.host_key!;
+    await expect(dialog).toContainText(`Expected${hostKey.expected}`);
+    await expect(dialog).toContainText(`Presented${hostKey.presented}`);
 
     // The question first: cancelling it trusts nothing.
     const trust = dialog.getByRole('button', { name: 'Trust new key…' });
@@ -91,13 +94,13 @@ for (const { name, size } of VIEWPORTS) {
     );
     await confirmDialog(page).getByRole('button', { name: 'Cancel' }).click();
     await expect(confirmDialog(page)).toHaveCount(0);
-    expect(backend.posted('/api/board/trust-host-key')).toEqual([]);
+    expect(backend.posted(devkitPath('trust-host-key'))).toEqual([]);
 
     await trust.click();
     await confirmDialog(page).getByRole('button', { name: 'Trust new key', exact: true }).click();
     await expect(toast(page, 'Host key updated. Check again to connect.')).toBeVisible();
-    expect(backend.posted('/api/board/trust-host-key')).toEqual([
-      { fingerprint: error['presented_fingerprint'] },
+    expect(backend.posted(devkitPath('trust-host-key'))).toEqual([
+      { fingerprint: hostKey.presented },
     ]);
     await expect(dialog.getByText('Expected')).toHaveCount(0);
     await page.keyboard.press('Escape');
@@ -139,13 +142,17 @@ for (const { name, size } of VIEWPORTS) {
     await expect(dialog.getByText('The neat command is not installed here')).toBeVisible();
     await expect(dialog.getByText('https://127.0.0.1:9900', { exact: true })).toBeVisible();
 
-    // The next answer fails, as `neat` can (Inv-PB §4.5): the dialog says so above what it showed.
+    // The next answer fails: the dialog says so above what it showed.
     await page.route(
-      (url) => url.pathname === '/api/sysinfo',
-      (route) => route.fulfill({ status: 502, json: { error: 'neat exited with status 1' } }),
+      (url) => url.pathname === '/api/system',
+      (route) =>
+        route.fulfill({
+          status: 500,
+          json: { error: { code: 'internal', message: 'Insight failed.' } },
+        }),
     );
     await dialog.getByRole('button', { name: 'Refresh' }).click();
-    await expect(dialog.getByText('Could not refresh: neat exited with status 1')).toBeVisible();
+    await expect(dialog.getByText('Could not refresh: Insight failed.')).toBeVisible();
     await expect(dialog.getByText('The neat command is not installed here')).toBeVisible();
     await expect(dialog.getByText('https://127.0.0.1:9900', { exact: true })).toBeVisible();
 
@@ -155,8 +162,8 @@ for (const { name, size } of VIEWPORTS) {
   });
 }
 
-// The block's last good state stays named while a later read fails (ruling Q4): on focus, the
-// board is read again.
+// The block's last good state stays named while a later read fails: on focus, the board is read
+// again.
 test('a read that fails after a good one keeps the board named, with Error and the board in the tooltip', async ({
   page,
 }) => {
@@ -171,7 +178,7 @@ test('a read that fails after a good one keeps the board named, with Error and t
   await expect(board(page)).toContainText('Error');
   await board(page).hover();
   await expect(page.getByRole('tooltip')).toHaveText(
-    new RegExp(`^DevKit — ${CONNECTED_BOARD.target!.host} — Could not read the board: `),
+    /^DevKit — 192\.168\.100\.200 — Could not read the board: /,
   );
 });
 
@@ -186,7 +193,7 @@ test('a board that was never checked is checked once as the app loads, Checking�
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   await page.route(
-    (url) => url.pathname === '/api/board/test',
+    (url) => url.pathname === devkitPath('check'),
     async (route) => {
       await held;
       await route.fallback();
@@ -196,7 +203,7 @@ test('a board that was never checked is checked once as the app loads, Checking�
   await expect(board(page)).toContainText('Checking…');
   release();
   await expect(board(page)).toHaveAccessibleName(/Connected$/);
-  expect(backend.posted('/api/board/test')).toEqual([{}]);
+  expect(backend.posted(devkitPath('check'))).toEqual([{}]);
 });
 
 test('a failed check on load shows Error in the board block, with no toast', async ({ page }) => {
@@ -206,6 +213,6 @@ test('a failed check on load shows Error in the board block, with no toast', asy
   await backend.install(page);
   await page.goto('/streaming');
   await expect(board(page)).toContainText('Error');
-  expect(backend.posted('/api/board/test')).toHaveLength(1);
+  expect(backend.posted(devkitPath('check'))).toHaveLength(1);
   await expect(page.locator('[data-slot="toast"]')).toHaveCount(0);
 });

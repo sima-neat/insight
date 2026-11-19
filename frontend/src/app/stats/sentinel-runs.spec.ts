@@ -8,8 +8,8 @@ import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { BoardTarget } from '../board/api';
 import { BoardService } from '../board/board.service';
-import { boardState, DEVKIT, FakeBoard } from '../board/board.testing';
-import type { DeleteAnswer, RunAnswer, RunSummary, SavedRun } from './api';
+import { boardList, boardWith, DEVKIT, FakeBoard, LOCAL } from '../board/board.testing';
+import type { DeleteAnswer, RunSummary, SavedRun } from './api';
 import {
   ACTIVE_TRACE,
   RECORDING_RUN,
@@ -20,31 +20,30 @@ import {
   traceAnswer,
 } from './runs.testing';
 import { SentinelRuns } from './sentinel-runs';
-import { METRICS_LIVE } from './stats.testing';
+import { sentinelError } from './stats.testing';
 
-const TRACES_URL = '/api/sentinel/traces';
-const STOP_URL = '/api/sentinel/traces/stop';
-const RUNS_URL = '/api/sentinel/runs';
-/** The board generation the fixtures answer under, which the tests select. */
-const GENERATION = METRICS_LIVE.generation;
+/** A route of the selected board's Sentinel; the tests start on the DevKit. */
+const sentinelUrl = (path: string, target: BoardTarget = DEVKIT) =>
+  `/api/boards/${encodeURIComponent(target.id)}/sentinel/${path}`;
+const TRACES_URL = sentinelUrl('traces');
+const STOP_URL = sentinelUrl('traces/stop');
+const RUNS_URL = sentinelUrl('runs');
 const FINISHED = RUNS_LIST.filter((run) => run.ended_at !== null);
 
-/** A failure body as the backend answers it, under board `generation`. */
-function failed(code: string, generation = GENERATION) {
-  return { error: `Failed with ${code}.`, code, generation };
-}
+/** A failure body as the server answers it. */
+const failed = (code: string) => sentinelError(code, `Failed with ${code}.`, '');
 
 const STATUS: Record<string, { status: number; statusText: string }> = {
   not_found: { status: 404, statusText: 'Not Found' },
   trace_conflict: { status: 409, statusText: 'Conflict' },
-  stale_snapshot: { status: 409, statusText: 'Conflict' },
+  board_changed: { status: 409, statusText: 'Conflict' },
 };
 const badGateway = { status: 502, statusText: 'Bad Gateway' };
 
-/** The answer of deleting `id` from `RUNS_LIST`: the runs left. */
-function deleteAnswer(id: string, left: RunSummary[], generation = GENERATION): DeleteAnswer {
+/** The answer of deleting `id` from `RUNS_LIST`: the run that went and the runs left. */
+function deleteAnswer(id: string, left: RunSummary[]): DeleteAnswer {
   const run = RUNS_LIST.find((each) => each.id === id);
-  return { ...runsAnswer(left, generation), deleted: { id, name: run?.name ?? id } };
+  return { deleted: { id, name: run?.name ?? id }, runs: runsAnswer(left) };
 }
 
 describe('SentinelRuns', () => {
@@ -59,7 +58,7 @@ describe('SentinelRuns', () => {
     visibility = 'visible';
     vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
     board = new FakeBoard();
-    board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
+    board.state.set(boardWith(DEVKIT));
     page = null;
     TestBed.configureTestingModule({
       providers: [
@@ -100,12 +99,12 @@ describe('SentinelRuns', () => {
   const advance = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 
   // Matched by path and method: a URL string would be compared with the query parameters included.
-  const traceRead = () =>
-    http.expectOne((request) => request.url === TRACES_URL && request.method === 'GET');
-  const noTraceRead = () =>
-    http.expectNone((request) => request.url === TRACES_URL && request.method === 'GET');
-  const runsRead = () => http.expectOne((request) => request.url === RUNS_URL);
-  const noRunsRead = () => http.expectNone((request) => request.url === RUNS_URL);
+  const traceRead = (target?: BoardTarget) =>
+    http.expectOne((request) => request.url === sentinelUrl('traces/active', target));
+  const noTraceRead = () => http.expectNone((request) => request.url.endsWith('/traces/active'));
+  const runsRead = (target?: BoardTarget) =>
+    http.expectOne((request) => request.url === sentinelUrl('runs', target));
+  const noRunsRead = () => http.expectNone((request) => request.url.endsWith('/sentinel/runs'));
   const startRequest = () =>
     http.expectOne((request) => request.url === TRACES_URL && request.method === 'POST');
   const stopRequest = () => http.expectOne((request) => request.url === STOP_URL);
@@ -125,8 +124,8 @@ describe('SentinelRuns', () => {
     await settle();
   }
 
-  async function fail(request: TestRequest, code: string, generation = GENERATION) {
-    request.flush(failed(code, generation), STATUS[code] ?? badGateway);
+  async function fail(request: TestRequest, code: string) {
+    request.flush(failed(code), STATUS[code] ?? badGateway);
     await settle();
   }
 
@@ -143,8 +142,8 @@ describe('SentinelRuns', () => {
     document.dispatchEvent(new Event('visibilitychange'));
   }
 
-  function switchBoard(generation: number, target: BoardTarget | null = DEVKIT): void {
-    board.state.set(boardState({ target, generation }));
+  function switchBoard(target: BoardTarget | null = LOCAL): void {
+    board.state.set(target ? boardWith(target) : boardList());
     TestBed.tick();
   }
 
@@ -203,9 +202,9 @@ describe('SentinelRuns', () => {
     expect(runs.traceSummary()).toBeNull();
     expect(runs.traceReadAt()).toBe(Date.now());
 
-    switchBoard(GENERATION + 1);
+    switchBoard();
     expect(runs.traceReadAt()).toBeNull();
-    http.match((request) => request.url === TRACES_URL);
+    http.match((request) => request.url.endsWith('/traces/active'));
   });
 
   it('a periodic trace read is skipped while one is out', async () => {
@@ -330,7 +329,7 @@ describe('SentinelRuns', () => {
     noRunsRead();
   });
 
-  it('start sends the generation and the trimmed request; success sets the trace and re-reads runs', async () => {
+  it('start sends the trimmed request to the board; success sets the trace and re-reads runs', async () => {
     await openWithRuns(FINISHED);
     const started = runs.startTrace({
       name: '  compiler-v2-bench ',
@@ -339,7 +338,7 @@ describe('SentinelRuns', () => {
     });
     expect(runs.traceBusy()).toBe('start');
     const request = startRequest();
-    expect(request.request.params.get('generation')).toBe(String(GENERATION));
+    expect(request.request.params.keys()).toEqual([]);
     expect(request.request.body).toEqual({
       name: 'compiler-v2-bench',
       note: 'Compiler v2 on the YOLO pipeline',
@@ -375,7 +374,7 @@ describe('SentinelRuns', () => {
     await flush(runsRead(), runsAnswer());
   });
 
-  it('stop sends the generation and the shown trace id', async () => {
+  it('stop names the shown trace', async () => {
     open();
     await flush(traceRead(), traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
     runs.setRunsShown(true);
@@ -385,8 +384,8 @@ describe('SentinelRuns', () => {
     expect(runs.traceBusy()).toBe('stop');
     const request = stopRequest();
     expect(request.request.method).toBe('POST');
-    expect(request.request.params.get('generation')).toBe(String(GENERATION));
-    expect(request.request.params.get('trace_id')).toBe(ACTIVE_TRACE.id);
+    expect(request.request.params.keys()).toEqual(['trace']);
+    expect(request.request.params.get('trace')).toBe(ACTIVE_TRACE.id);
     const ended = '2026-09-25T09:15:40.120Z';
     await flush(
       request,
@@ -439,25 +438,19 @@ describe('SentinelRuns', () => {
     expect(runs.trace()).toEqual(ACTIVE_TRACE);
   });
 
-  describe('an answer for another generation is dropped and the board reloaded', () => {
+  describe('a failure saying the board was replaced reloads the boards', () => {
     it('for the trace read', async () => {
       open();
-      await flush(traceRead(), traceAnswer(ACTIVE_TRACE, RECORDING_RUN, GENERATION + 1));
-      expect(runs.trace()).toBeNull();
+      await fail(traceRead(), 'not_found');
+      expect(runs.traceFailure()?.code).toBe('not_found');
       expect(board.reload).toHaveBeenCalledTimes(1);
-
-      // A failure naming another board is dropped the same way.
-      await advance(30_000);
-      await fail(traceRead(), 'timeout', GENERATION + 1);
-      expect(runs.traceFailure()).toBeNull();
-      expect(board.reload).toHaveBeenCalledTimes(2);
     });
 
     it('for the runs read', async () => {
       open();
       await flush(traceRead(), traceAnswer(null, null));
       runs.setRunsShown(true);
-      await flush(runsRead(), runsAnswer(RUNS_LIST, GENERATION + 1));
+      await fail(runsRead(), 'board_changed');
       expect(runs.runs()).toBeNull();
       expect(board.reload).toHaveBeenCalledTimes(1);
     });
@@ -465,40 +458,27 @@ describe('SentinelRuns', () => {
     it('for a start', async () => {
       await openWithRuns();
       const started = runs.startTrace({ name: 'compiler-v2-bench' });
-      await flush(startRequest(), traceAnswer(ACTIVE_TRACE, undefined, GENERATION + 1));
-      expect((await started)?.code).toBe('stale_snapshot');
+      await fail(startRequest(), 'board_changed');
+      const failure = await started;
+      expect([failure?.code, failure?.title]).toEqual([
+        'board_changed',
+        'The board changed while Insight was working',
+      ]);
       expect(runs.trace()).toBeNull();
       expect(runs.traceBusy()).toBeNull();
       expect(board.reload).toHaveBeenCalledTimes(1);
       noRunsRead();
-
-      // The backend's own stale_snapshot names the board selected now: that reloads too.
-      const again = runs.startTrace({ name: 'compiler-v2-bench' });
-      await fail(startRequest(), 'stale_snapshot', GENERATION + 1);
-      const failure = await again;
-      expect([failure?.code, failure?.title]).toEqual([
-        'stale_snapshot',
-        'The board changed while Insight was working',
-      ]);
-      expect(board.reload).toHaveBeenCalledTimes(2);
     });
 
     it('for a delete, which stops the batch', async () => {
       await openWithRuns();
       const [first, second] = FINISHED;
       const deleting = runs.deleteRuns([first.id, second.id]);
-      await flush(
-        deleteRequest(first.id),
-        deleteAnswer(
-          first.id,
-          RUNS_LIST.filter((run) => run !== first),
-          GENERATION + 1,
-        ),
-      );
+      await fail(deleteRequest(first.id), 'board_changed');
       const outcome = await deleting;
       expect(outcome.deleted).toEqual([]);
       expect(outcome.failed.map(({ id, failure }) => [id, failure.code])).toEqual([
-        [first.id, 'stale_snapshot'],
+        [first.id, 'board_changed'],
       ]);
       expect(outcome.notTried).toEqual([second.id]);
       expect(runs.runs()).toEqual(RUNS_LIST);
@@ -513,7 +493,8 @@ describe('SentinelRuns', () => {
     const deleting = runs.deleteRuns([first.id, second.id, third.id]);
 
     const one = deleteRequest(first.id);
-    expect(one.request.params.get('generation')).toBe(String(GENERATION));
+    // By its id alone.
+    expect(one.request.params.keys()).toEqual([]);
     // The next is sent only once this one answered.
     http.expectNone((request) => request.method === 'DELETE' && request.url !== one.request.url);
     const afterFirst = RUNS_LIST.filter((run) => run !== first);
@@ -545,18 +526,18 @@ describe('SentinelRuns', () => {
     await flush(runsRead(), runsAnswer(left));
   });
 
-  it('delete stops at stale_snapshot and reports the rest as not tried', async () => {
+  it('delete stops at board_changed and reports the rest as not tried', async () => {
     await openWithRuns();
     const [first, second, third] = FINISHED;
     const deleting = runs.deleteRuns([first.id, second.id, third.id]);
     const afterFirst = RUNS_LIST.filter((run) => run !== first);
     await flush(deleteRequest(first.id), deleteAnswer(first.id, afterFirst));
-    await fail(deleteRequest(second.id), 'stale_snapshot');
+    await fail(deleteRequest(second.id), 'board_changed');
 
     const outcome = await deleting;
     expect(outcome.deleted).toEqual([first.id]);
     expect(outcome.failed.map(({ id, failure }) => [id, failure.code])).toEqual([
-      [second.id, 'stale_snapshot'],
+      [second.id, 'board_changed'],
     ]);
     expect(outcome.notTried).toEqual([third.id]);
     expect(runs.runs()).toEqual(afterFirst);
@@ -584,21 +565,21 @@ describe('SentinelRuns', () => {
     const [first, second] = FINISHED;
     const deleting = runs.deleteRuns([first.id, second.id]);
     const one = deleteRequest(first.id);
-    switchBoard(GENERATION + 1);
+    switchBoard();
     // The new board's trace and runs are read at once.
-    const newTrace = traceRead();
-    const newRuns = runsRead();
+    const newTrace = traceRead(LOCAL);
+    const newRuns = runsRead(LOCAL);
     await flush(one, deleteAnswer(first.id, FINISHED));
 
     const outcome = await deleting;
     expect(outcome.deleted).toEqual([]);
     expect(outcome.failed.map(({ id, failure }) => [id, failure.code])).toEqual([
-      [first.id, 'stale_snapshot'],
+      [first.id, 'board_changed'],
     ]);
     expect(outcome.notTried).toEqual([second.id]);
     expect(runs.runs()).toBeNull();
-    await flush(newTrace, traceAnswer(null, null, GENERATION + 1));
-    await flush(newRuns, runsAnswer(RUNS_LIST, GENERATION + 1));
+    await flush(newTrace, traceAnswer(null, null));
+    await flush(newRuns, runsAnswer(RUNS_LIST));
     expect(runs.runs()).toEqual(RUNS_LIST);
   });
 
@@ -620,7 +601,7 @@ describe('SentinelRuns', () => {
     const traceOut = traceRead();
     const runsOut = runsRead();
 
-    switchBoard(GENERATION + 1);
+    switchBoard();
     expect(runs.trace()).toBeNull();
     expect(runs.traceSummary()).toBeNull();
     expect(runs.traceFailure()).toBeNull();
@@ -629,20 +610,20 @@ describe('SentinelRuns', () => {
 
     // The new board is read at once, though the previous board's reads are still out; theirs
     // land on nothing.
-    const newTrace = traceRead();
-    const newRuns = runsRead();
+    const newTrace = traceRead(LOCAL);
+    const newRuns = runsRead(LOCAL);
     await flush(traceOut, traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
     await flush(runsOut, runsAnswer());
     expect(runs.trace()).toBeNull();
     expect(runs.runs()).toBeNull();
     expect(board.reload).not.toHaveBeenCalled();
 
-    await flush(newTrace, traceAnswer(null, null, GENERATION + 1));
-    await flush(newRuns, runsAnswer(FINISHED, GENERATION + 1));
+    await flush(newTrace, traceAnswer(null, null));
+    await flush(newRuns, runsAnswer(FINISHED));
     expect(runs.runs()).toEqual(FINISHED);
 
     // Without a board nothing is read.
-    switchBoard(GENERATION + 2, null);
+    switchBoard(null);
     await advance(60_000);
     noTraceRead();
     noRunsRead();
@@ -654,14 +635,14 @@ describe('SentinelRuns', () => {
     await flush(traceRead(), traceAnswer(null, null));
     const started = runs.startTrace({ name: 'compiler-v2-bench' });
     const request = startRequest();
-    switchBoard(GENERATION + 1);
+    switchBoard();
     expect(runs.traceBusy()).toBeNull();
-    const newTrace = traceRead();
+    const newTrace = traceRead(LOCAL);
 
     await flush(request, traceAnswer(ACTIVE_TRACE));
     const failure = await started;
     expect([failure?.code, failure?.action, failure?.problem.message]).toEqual([
-      'stale_snapshot',
+      'board_changed',
       'start',
       'The selected board changed before the answer arrived; ' +
         'the change may have been made on the board selected before.',
@@ -670,7 +651,7 @@ describe('SentinelRuns', () => {
     expect(runs.trace()).toBeNull();
     expect(runs.traceBusy()).toBeNull();
     expect(board.reload).not.toHaveBeenCalled();
-    await flush(newTrace, traceAnswer(null, null, GENERATION + 1));
+    await flush(newTrace, traceAnswer(null, null));
     expect(runs.trace()).toBeNull();
   });
 
@@ -679,32 +660,40 @@ describe('SentinelRuns', () => {
     await flush(traceRead(), traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
     const stopped = runs.stopTrace();
     const request = stopRequest();
-    switchBoard(GENERATION + 1);
+    switchBoard();
     expect(runs.traceBusy()).toBeNull();
     const other = { ...ACTIVE_TRACE, id: 'other', name: 'other' };
-    await flush(traceRead(), traceAnswer(other, null, GENERATION + 1));
+    await flush(traceRead(LOCAL), traceAnswer(other, null));
 
     await fail(request, 'trace_conflict');
     const failure = await stopped;
-    expect([failure?.code, failure?.action]).toEqual(['stale_snapshot', 'stop']);
+    expect([failure?.code, failure?.action]).toEqual(['board_changed', 'stop']);
     // The new board's trace stays shown, and the old board's conflict reads nothing.
     expect(runs.trace()).toEqual(other);
     expect(runs.traceBusy()).toBeNull();
     noTraceRead();
   });
 
-  it('a delete failure naming another generation stops the batch', async () => {
+  it('a delete answered not_found reloads the boards, and the batch stops once they changed', async () => {
     await openWithRuns();
     const [first, second] = FINISHED;
+    // The board was replaced: reloading the boards selects the new one before the next delete.
+    board.reload.mockImplementation(async () => {
+      board.state.set(boardWith(LOCAL));
+      return undefined;
+    });
     const deleting = runs.deleteRuns([first.id, second.id]);
-    await fail(deleteRequest(first.id), 'not_found', GENERATION + 1);
+    await fail(deleteRequest(first.id), 'not_found');
     const outcome = await deleting;
+    // The refusal is the previous board's, so it is reported as the board having changed.
     expect(outcome.failed.map(({ id, failure }) => [id, failure.code])).toEqual([
-      [first.id, 'not_found'],
+      [first.id, 'board_changed'],
     ]);
     expect(outcome.notTried).toEqual([second.id]);
     expect(board.reload).toHaveBeenCalledTimes(1);
-    await flush(runsRead(), runsAnswer());
+    TestBed.tick();
+    await flush(traceRead(LOCAL), traceAnswer(null, null));
+    await flush(runsRead(LOCAL), runsAnswer());
   });
 
   it('before the board is known nothing is sent', async () => {
@@ -716,7 +705,7 @@ describe('SentinelRuns', () => {
     expect([refused?.code, refused?.title, refused?.problem.message]).toEqual([
       'no_target',
       'No board is selected',
-      'Choose a board in the top bar first.',
+      'Choose a board in the rail first.',
     ]);
     const read = await runs.readRun(FINISHED[0].id);
     expect('failure' in read && read.failure.code).toBe('no_target');
@@ -769,20 +758,14 @@ describe('SentinelRuns', () => {
       'read',
     ]);
 
-    // An answer for another board, or one landing after a board switch, is stale.
-    const elsewhere = runs.readRun(first.id);
-    await flush(runRead(first.id), runAnswer(savedRun(), GENERATION + 1));
-    expect(await elsewhere).toEqual({ stale: true });
-    expect(board.reload).toHaveBeenCalledTimes(1);
-
+    // An answer landing after a board switch is stale.
     const switched = runs.readRun(first.id);
     const out = runRead(first.id);
-    switchBoard(GENERATION + 1);
+    switchBoard();
     await flush(out, runAnswer(savedRun()));
     expect(await switched).toEqual({ stale: true });
-    await flush(traceRead(), traceAnswer(null, null, GENERATION + 1));
-    await flush(runsRead(), runsAnswer(RUNS_LIST, GENERATION + 1));
-    expect(board.reload).toHaveBeenCalledTimes(1);
+    await flush(traceRead(LOCAL), traceAnswer(null, null));
+    await flush(runsRead(LOCAL), runsAnswer(RUNS_LIST));
   });
 
   it('readRun: an answer of a shape Insight does not know is an unexpected answer', async () => {
@@ -791,11 +774,7 @@ describe('SentinelRuns', () => {
       const read = runs.readRun(FINISHED[0].id);
       const body: Partial<SavedRun> = { ...SAVED_RUN };
       delete body[missing];
-      await flush(runRead(FINISHED[0].id), {
-        board: METRICS_LIVE.board,
-        generation: GENERATION,
-        sentinel: body,
-      });
+      await flush(runRead(FINISHED[0].id), body);
       const result = await read;
       expect('failure' in result && [result.failure.code, result.failure.title]).toEqual([
         'bad_response',
@@ -816,9 +795,9 @@ describe('SentinelRuns', () => {
     close();
     expect(vi.getTimerCount()).toBe(0);
 
-    await flush(traceOut, traceAnswer(ACTIVE_TRACE, RECORDING_RUN, GENERATION + 1));
+    await flush(traceOut, traceAnswer(ACTIVE_TRACE, RECORDING_RUN));
     await flush(runsOut, runsAnswer(FINISHED));
-    await flush(removal, deleteAnswer(FINISHED[0].id, RUNS_LIST, GENERATION + 1));
+    await flush(removal, deleteAnswer(FINISHED[0].id, RUNS_LIST));
     await flush(runOut, runAnswer(savedRun()));
     expect((await deleting).notTried).toEqual([FINISHED[1].id]);
     expect(await reading).toEqual({ stale: true });
@@ -834,7 +813,7 @@ describe('SentinelRuns', () => {
   });
 });
 
-/** The answer of `GET /api/sentinel/runs/<id>` for `run`. */
-function runAnswer(run = SAVED_RUN, generation = GENERATION): RunAnswer {
-  return { board: METRICS_LIVE.board, generation, sentinel: run };
+/** The answer of `GET .../sentinel/runs/<id>` for `run`: the run as Sentinel gives it. */
+function runAnswer(run = SAVED_RUN): SavedRun {
+  return run;
 }

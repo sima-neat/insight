@@ -1,14 +1,25 @@
 import { expect, Page, test } from '@playwright/test';
 import { pageOverflow, TABLET, sidePanelToggle, topBarSpill, VIEWPORTS } from './layout';
-import { BOARD_UNREACHABLE, C270, FakePeripheralsBackend, IMX477, YETI } from './peripherals-mocks';
+import {
+  BOARD_UNREACHABLE,
+  C270,
+  devkitPath,
+  FakePeripheralsBackend,
+  IMX477,
+  YETI,
+} from './peripherals-mocks';
 import { answerTopBar, LONG_BOARD } from './top-bar';
 
 // The rail's board block reads the board on every page; the backend below answers it for these tests.
 test.beforeEach(({ page }) => answerTopBar(page));
 
-const PREVIEW_URL = '/api/peripherals/cameras/preview';
-const REFRESH_URL = '/api/peripherals/refresh';
-const MIC_TEST_URL = '/api/peripherals/microphones/test';
+/** The paths the page posts to on the DevKit: a camera's preview start, a scan, a mic test. */
+const previewPath = (camera: string) => devkitPath(`cameras/${encodeURIComponent(camera)}/preview`);
+const PREVIEW_URL = previewPath(IMX477.id);
+/** The stop of preview `id` of `camera`, which names the preview. */
+const stopPath = (id: string, camera = IMX477.id) => `${previewPath(camera)}/stop?preview=${id}`;
+const REFRESH_URL = devkitPath('peripherals/refresh');
+const MIC_TEST_URL = devkitPath(`microphones/${encodeURIComponent(YETI.id)}/test`);
 
 const devices = (page: Page) => page.getByRole('listbox', { name: 'Devices' });
 const device = (page: Page, name: string) =>
@@ -94,7 +105,7 @@ for (const { name, size } of VIEWPORTS) {
     await expect(
       devices(page).getByRole('group', { name: 'Cameras · 2' }).getByRole('option'),
     ).toHaveText([
-      new RegExp(`imx477@1a\\s*${connection('MIPI CSI')}Available$`),
+      new RegExp(`^imx477 5-001a\\s*${connection('MIPI CSI')}Available$`),
       new RegExp(`^HD Webcam C270\\s*${connection('USB 2\\.0')}Unsupported$`),
     ]);
     await expect(device(page, YETI.name)).toContainText('Available');
@@ -110,15 +121,14 @@ for (const { name, size } of VIEWPORTS) {
     await expect(panel(page)).toContainText('Live preview · 1920×1080 · NV12');
     await expect(device(page, IMX477.name)).toContainText('Previewing');
     expect(backend.posted(PREVIEW_URL)).toEqual([
-      { id: IMX477.id, format: 'NV12', width: 1920, height: 1080, fps: 30 },
+      { format: 'NV12', width: 1920, height: 1080, fps: 30 },
     ]);
 
     // Another resolution restarts the preview on it: a stop, then a start.
     await choose(page, 'Resolution', '1280×720');
     await expect(panel(page)).toContainText('Live preview · 1280×720 · NV12');
-    expect(backend.postedPaths().slice(-2)).toEqual([`${PREVIEW_URL}/p1/stop`, PREVIEW_URL]);
+    expect(backend.postedPaths().slice(-2)).toEqual([stopPath('p1'), PREVIEW_URL]);
     expect(backend.posted(PREVIEW_URL).at(-1)).toEqual({
-      id: IMX477.id,
       format: 'NV12',
       width: 1280,
       height: 720,
@@ -128,29 +138,24 @@ for (const { name, size } of VIEWPORTS) {
     // Leaving the page stops the preview…
     await rail(page, 'Streaming').click();
     await expect(page).toHaveTitle('Neat Insight · Streaming');
-    await expect.poll(() => backend.postedPaths().at(-1)).toBe(`${PREVIEW_URL}/p2/stop`);
+    await expect.poll(() => backend.postedPaths().at(-1)).toBe(stopPath('p2'));
 
     // …and coming back scans the board again, then starts the preview again, in the mode it had.
     const leftAt = backend.postedPaths().length;
     await rail(page, 'Peripherals').click();
     await expect(panel(page)).toContainText('Live preview · 1280×720 · NV12');
     expect(backend.posted(PREVIEW_URL).at(-1)).toEqual({
-      id: IMX477.id,
       format: 'NV12',
       width: 1280,
       height: 720,
       fps: 60,
     });
 
-    // Exactly once (Review Focus 2): leaving again ends the visit with its stop, and between the
-    // two stops the page asked for one scan, which came before the one start, and nothing else.
+    // Exactly once: leaving again ends the visit with its stop, and between the two stops the
+    // page asked for one scan, which came before the one start, and nothing else.
     await rail(page, 'Streaming').click();
-    await expect.poll(() => backend.postedPaths().at(-1)).toBe(`${PREVIEW_URL}/p3/stop`);
-    expect(backend.postedPaths().slice(leftAt)).toEqual([
-      REFRESH_URL,
-      PREVIEW_URL,
-      `${PREVIEW_URL}/p3/stop`,
-    ]);
+    await expect.poll(() => backend.postedPaths().at(-1)).toBe(stopPath('p3'));
+    expect(backend.postedPaths().slice(leftAt)).toEqual([REFRESH_URL, PREVIEW_URL, stopPath('p3')]);
     expect(backend.posted(REFRESH_URL)).toHaveLength(2);
   });
 
@@ -166,7 +171,7 @@ for (const { name, size } of VIEWPORTS) {
     await expect(panelTitle(page)).toHaveText(C270.name);
 
     await panel(page).getByRole('button', { name: 'Start preview' }).click();
-    // Spec, "Camera panel": "In another tab", with the sentence and Stop.
+    // "In another tab", with the sentence and Stop.
     await expect(panel(page).locator('.status neat-status-chip')).toHaveText('In another tab');
     await expect(panel(page)).toContainText('This preview is showing in another tab or window.');
     await expect(panel(page).getByRole('img')).toHaveCount(0);
@@ -174,7 +179,7 @@ for (const { name, size } of VIEWPORTS) {
     // Stop is this tab's too: it stops the preview the other tab shows.
     await panel(page).getByRole('button', { name: 'Stop preview' }).click();
     await expect(panel(page).getByRole('button', { name: 'Start preview' })).toBeVisible();
-    expect(backend.postedPaths().at(-1)).toBe(`${PREVIEW_URL}/p1/stop`);
+    expect(backend.postedPaths().at(-1)).toBe(stopPath('p1', C270.id));
   });
 
   test(`every visit scans the board: a failed scan is repeated on the next visit at ${name}`, async ({
@@ -185,7 +190,7 @@ for (const { name, size } of VIEWPORTS) {
     await backend.install(page);
     await page.setViewportSize(size);
     await page.goto('/peripherals');
-    await expect(page.getByText('Could not connect to 192.168.100.200:22')).toBeVisible();
+    await expect(page.getByText('Could not connect to sima@192.168.100.200')).toBeVisible();
     expect(backend.posted(REFRESH_URL)).toHaveLength(1);
 
     await rail(page, 'Streaming').click();
@@ -193,7 +198,7 @@ for (const { name, size } of VIEWPORTS) {
     await rail(page, 'Peripherals').click();
     // Coming back scans again, though the first scan failed and nothing was scanned.
     await expect.poll(() => backend.posted(REFRESH_URL).length).toBe(2);
-    await expect(page.getByText('Could not connect to 192.168.100.200:22')).toBeVisible();
+    await expect(page.getByText('Could not connect to sima@192.168.100.200')).toBeVisible();
     await expect(
       devices(page).getByRole('group', { name: 'Cameras · not scanned yet' }),
     ).toBeVisible();
@@ -225,10 +230,12 @@ for (const { name, size } of VIEWPORTS) {
     await expect(panel(page)).toContainText(/Recording · 0:0\d/);
     await expect(device(page, YETI.name)).toContainText('Testing');
     // The button and caption change as the start is sent, before it reaches the board.
-    await expect.poll(() => backend.posted(MIC_TEST_URL)).toEqual([{ id: YETI.id }]);
+    // `seconds` is left to the server's default of 30.
+    await expect.poll(() => backend.posted(MIC_TEST_URL)).toEqual([{}]);
 
     await button.click();
-    await expect.poll(() => backend.posted(`${MIC_TEST_URL}/stop`)).toEqual([{ token: 't1' }]);
+    // The stop names the test it stops.
+    await expect.poll(() => backend.posted(`${MIC_TEST_URL}/stop?test=t1`)).toEqual([{}]);
     // The recording plays once by itself; then Replay offers it again.
     const replay = panel(page).getByRole('button', { name: 'Replay' });
     await expect(replay).toBeVisible();
@@ -288,8 +295,8 @@ test('a visit does not scan while a preview is running, and shows it', async ({ 
   expect(backend.posted(REFRESH_URL)).toHaveLength(1);
 });
 
-// Final review I-1 (Review Focus 3): a Start refused because another camera's preview runs takes
-// that preview up, its camera selected, rather than stopping it or ending idle.
+// A Start refused because another camera's preview runs takes that preview up, its camera
+// selected, rather than stopping it or ending idle.
 test("a Start refused for another camera's preview selects that camera and shows its preview, stopping nothing", async ({
   page,
 }) => {
@@ -342,8 +349,7 @@ test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side pane
     await page.setViewportSize(size);
     for (const sidePanel of [true, false]) {
       await expect(panel(page)).toHaveCount(sidePanel ? 1 : 0);
-      // Final review I-2: the MIPI camera's long device path wraps, so its chip stays in the panel,
-      // on the title's first line.
+      // A long camera name wraps, so its chip stays in the panel, on the title's first line.
       if (sidePanel) expect(await titleChipFit(page)).toEqual({ inside: true, firstLine: true });
       await expect
         .poll(() => pageOverflow(page))
@@ -351,7 +357,7 @@ test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side pane
           { horizontal: 0, vertical: 0 },
           { horizontal: 0, vertical: 0 },
         ]);
-      // R14: the page tools fit beside the title on a laptop and a desktop; a tablet scrolls them.
+      // The page tools fit beside the title on a laptop and a desktop; a tablet scrolls them.
       await expect
         .poll(() => topBarSpill(page, size === TABLET))
         .toEqual({ spilled: [], toolsOverflow: 0 });
@@ -360,8 +366,8 @@ test('Peripherals fits at 1366×768, 1920×1080 and 768×1024 with the side pane
   }
 });
 
-// Final review M-7: the widest top bar Peripherals shows: a scan running for a while, with a board
-// whose long name the rail cuts (the top bar no longer carries the board).
+// The widest top bar Peripherals shows: a scan running for a while, with a board whose long name
+// the rail cuts (the top bar no longer carries the board).
 test('Peripherals fits with its widest top bar: an old scan and Scanning… N s, on a long-named board', async ({
   page,
 }) => {

@@ -50,7 +50,6 @@ interface DeleteReport {
     title: string;
     message: string;
     hint: string;
-    detail: string;
   }[];
   /** The runs after the failure that stopped the batch: still selected. */
   readonly notTried: readonly string[];
@@ -90,7 +89,6 @@ function deleteReport(
       title: failure.title,
       message: failure.problem.message,
       hint: failure.hint,
-      detail: failure.detail,
     })),
     notTried: outcome.notTried.map(nameOf),
     deleted: outcome.deleted.map(nameOf),

@@ -1,0 +1,11 @@
+:host {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+/* The command is copied as a whole; a long one wraps instead of widening its container. */
+.command {
+  overflow-wrap: anywhere;
+}

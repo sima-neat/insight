@@ -5,14 +5,14 @@ import type { CameraModeChoice } from './api';
 export interface PreviewResume {
   cameraId: string;
   mode: CameraModeChoice;
-  /** The board generation it ran on; another board's camera is not started. */
-  generation: number;
+  /** The id of the board it ran on; another board's camera is not started. */
+  board: string;
 }
 
 /**
  * Where the user left Peripherals, so that coming back from another page finds it as it was.
  * Provided in root because the page is created afresh on every visit; kept in memory only, so a
- * reload starts over, as #170 did (Inv-PB §3.1). Like `SourcesSession` for Streaming and Media.
+ * reload starts over. Like `SourcesSession` for Streaming and Media.
  */
 @Injectable({ providedIn: 'root' })
 export class PeripheralsSession {
@@ -25,7 +25,7 @@ export class PeripheralsSession {
    * may already show.
    */
   readonly modes = this.modesValue.asReadonly();
-  /** Leaving Peripherals stops its preview and coming back starts it again (spec). */
+  /** Leaving Peripherals stops its preview and coming back starts it again. */
   resume: PreviewResume | null = null;
   /**
    * Settles once the previews of the visits left so far are stopped, starts still in flight

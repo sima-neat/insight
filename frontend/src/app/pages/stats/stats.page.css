@@ -34,11 +34,3 @@
   max-inline-size: 40rem;
   margin-inline: auto;
 }
-
-/* The installer's output keeps its lines; a long one wraps rather than widening the page. */
-pre {
-  margin: 0;
-  font-size: var(--neat-text-xs);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}

@@ -1,8 +1,8 @@
 /**
  * A camera's modes as the camera panel offers them, and whether its preview can start: pure
- * functions of the scanned camera (#170's `peripherals/model.js`, copy per Inv-PB §2.3).
+ * functions of the scanned camera.
  *
- * A mode is a format, a size and a frame rate, each with the tier the board reported for it
+ * A mode is a format, a size and a frame rate, each with SiMa Sentinel's verdict on it
  * (`SupportTier`). The menus name the format and the size; the rate is chosen for the user (the
  * best one of the size) and carried in the selection, since a MIPI mode's real rate is not known
  * until the camera runs in it.
@@ -20,6 +20,7 @@ import type {
   PreviewSession,
   SupportTier,
 } from './api';
+import { USB_PREVIEW_FORMATS } from './catalog';
 import { countLabel, tierInfo } from './devices';
 
 /** An entry of a mode menu, with the tier its label names when the menu mixes tiers. */
@@ -46,26 +47,7 @@ export interface PreviewBlock {
   reason: string;
 }
 
-/**
- * The USB formats the backend previews: MJPG, and the raw FourCCs of
- * `neat_insight/preview/gst.py`'s `RAW_FORMATS`, which it converts. `tests/test_preview.py` keeps
- * the two lists equal.
- */
-export const USB_PREVIEW_FORMATS: readonly string[] = Object.freeze([
-  'MJPG',
-  'YUYV',
-  'UYVY',
-  'YVYU',
-  'NV12',
-  'NV21',
-  'YU12',
-  'YV12',
-  'GREY',
-  'RGB3',
-  'BGR3',
-]);
-
-const TIER_RANK: Record<SupportTier, number> = { available: 0, unverified: 1, unsupported: 2 };
+const TIER_RANK: Record<SupportTier, number> = { available: 0, unsupported: 1 };
 
 /** A Resolution entry's value. */
 export function sizeKey(width: number, height: number): string {
@@ -164,14 +146,19 @@ export function blockedFormatSummary(
   return `${countLabel(blocked.length, 'format')} cannot be used (${blocked.map((option) => option.value).join(', ')})`;
 }
 
-/** The tier the board reported for the selected mode; '' when the camera does not list it. */
+/** The tier Sentinel gave the selected mode; '' when the camera does not list it. */
 export function selectionTier(
   camera: CameraItem,
   selection: CameraModeChoice | null,
 ): SupportTier | '' {
-  if (!selection) return '';
+  return selectedMode(camera, selection)?.tier ?? '';
+}
+
+/** The selected mode as the camera lists it; null when it does not. */
+function selectedMode(camera: CameraItem, selection: CameraModeChoice | null): CameraMode | null {
+  if (!selection) return null;
   const size = findSize(findFormat(camera, selection.format), selection.width, selection.height);
-  return findFps(size, selection.fps)?.tier ?? '';
+  return findFps(size, selection.fps);
 }
 
 /**
@@ -212,9 +199,10 @@ export function sameSelection(a: CameraModeChoice | null, b: CameraModeChoice | 
 }
 
 /**
- * Why Start preview cannot start, the first that applies (Inv-PB §2.3, verbatim). A USB camera
- * previews any mode it lists in a format the preview reads; a MIPI camera only its Available and
- * Unverified modes. The scan's availability never blocks: a busy camera is reported by the start.
+ * Why Start preview cannot start, the first that applies. A mode starts when the preview takes it
+ * (`CameraMode.previewable`, the server's rule): a USB camera's in a format the preview reads, a
+ * MIPI camera's in NV12 that Sentinel does not refuse. The scan's availability never blocks: a
+ * busy camera is reported by the start.
  */
 export function previewBlock({
   camera,
@@ -225,7 +213,7 @@ export function previewBlock({
 }: {
   camera: CameraItem | null;
   selection: CameraModeChoice | null;
-  /** The snapshot was scanned for another board generation. */
+  /** The snapshot was scanned for another board. */
   stale?: boolean;
   /** The preview this page holds, of any camera. */
   session?: PreviewSession | null;
@@ -241,28 +229,23 @@ export function previewBlock({
       'This camera is listed from the last successful scan. Refresh before starting a preview.',
     );
   }
-  const mipi = camera.connection !== 'usb';
-  if (mipi && camera.support.tier === 'unsupported') {
-    return blocked(
-      camera.support.reason ||
-        'Preview uses the board libcamera capture path, which this camera is not supported by.',
-    );
-  }
   if (!selection) return blocked('This camera reports no mode Insight can start.');
-  if (!mipi && !USB_PREVIEW_FORMATS.includes(selection.format)) {
+  const mode = selectedMode(camera, selection);
+  if (!mode?.previewable) {
+    if (camera.connection === 'usb' && !USB_PREVIEW_FORMATS.includes(selection.format)) {
+      return blocked(
+        `Preview decodes MJPG and converts raw formats such as YUYV, not ${selection.format}. Choose another format.`,
+      );
+    }
     return blocked(
-      `Preview decodes MJPG and converts raw formats such as YUYV, not ${selection.format}. Choose another format.`,
+      mode?.reason
+        ? `${modeLabel(selection)} cannot be previewed: ${mode.reason} Choose an Available mode.`
+        : `${modeLabel(selection)} cannot be previewed. Choose an Available mode.`,
     );
   }
-  const tier = selectionTier(camera, selection);
-  if (mipi && tier !== 'available' && tier !== 'unverified') {
+  if (session && session.camera !== camera.id) {
     return blocked(
-      `${modeLabel(selection)} is Unsupported on this board. Choose an Available mode.`,
-    );
-  }
-  if (session && session.camera_id !== camera.id) {
-    return blocked(
-      `A preview is already running on ${session.camera_id}. Stop it before starting this one.`,
+      `A preview is already running on ${session.camera}. Stop it before starting this one.`,
     );
   }
   return { blocked: false, reason: '' };
@@ -274,9 +257,9 @@ function fpsLabel(value: number): string {
 }
 
 /**
- * A menu's entries in tier order (Available, Unverified, Unsupported; the board's order within
- * each), as #170's option groups listed them. `neat-select` has no option groups, so when the menu
- * mixes tiers, each entry that is not Available names its tier: "1332×990 · Unverified".
+ * A menu's entries in tier order (Available, then Unsupported; the board's order within each).
+ * `neat-select` has no option groups, so when the menu mixes tiers, each entry that is not
+ * Available names its tier: "1332×990 · Unsupported".
  */
 function withTiers<T extends ModeOption>(options: T[]): T[] {
   const mixed = new Set(options.map((option) => option.tier)).size > 1;
@@ -290,7 +273,7 @@ function withTiers<T extends ModeOption>(options: T[]): T[] {
     );
 }
 
-/** A tier's rank; anything but the three tiers ranks as Unsupported. */
+/** A tier's rank; anything but the two tiers ranks as Unsupported. */
 function rank(tier: SupportTier | ''): number {
   return TIER_RANK[tier as SupportTier] ?? TIER_RANK.unsupported;
 }

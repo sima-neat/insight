@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { App } from './app';
 import { appConfig } from './app.config';
-import { boardState, DEVKIT, railItem, shellInfo } from './board/board.testing';
+import { boardList, boardWith, DEVKIT, railItem } from './board/board.testing';
 
 /**
  * A routed page that does nothing of its own. The shell is what this spec is about; a real page
@@ -15,10 +15,10 @@ class StandInPage {}
 
 /** The SDK-paired DevKit, already checked: an unknown state would make the app check it at start. */
 const checkedDevkit = () =>
-  boardState({
-    target: DEVKIT,
-    status: { state: 'connected', checked_at: '2026-10-26T10:00:00Z', error: null },
-  });
+  boardWith(DEVKIT, { status: { state: 'connected', checked_at: '2026-10-26T10:00:00Z' } });
+
+/** The board routes of the DevKit. */
+const devkitUrl = (path: string) => `/api/boards/${encodeURIComponent(DEVKIT.id)}/${path}`;
 
 describe('App', () => {
   let http: HttpTestingController;
@@ -52,7 +52,7 @@ describe('App', () => {
 
   it('frames the routed page in the kit shell with the app name and the Insight rail', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(boardState());
+    http.expectOne('/api/boards').flush(boardList());
     const router = TestBed.inject(Router);
     router.resetConfig([{ path: 'page', component: StandInPage }]);
     await router.navigateByUrl('/page');
@@ -71,7 +71,7 @@ describe('App', () => {
 
   it('renders the toast host beside the shell, so any page can raise toasts', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(boardState());
+    http.expectOne('/api/boards').flush(boardList());
     await fixture.whenStable();
     const root: HTMLElement = fixture.nativeElement;
 
@@ -83,12 +83,7 @@ describe('App', () => {
 
   it('puts the board at the end of the rail, naming the board it read, and none in the top bar', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(
-      boardState({
-        target: DEVKIT,
-        status: { state: 'connected', checked_at: null, error: null },
-      }),
-    );
+    http.expectOne('/api/boards').flush(boardWith(DEVKIT, { status: { state: 'connected' } }));
     await settle(fixture);
     const root: HTMLElement = fixture.nativeElement;
 
@@ -105,11 +100,11 @@ describe('App', () => {
 
   it('checks the connection once at start when the selected board was never checked', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(boardState({ target: DEVKIT }));
+    http.expectOne('/api/boards').flush(boardWith(DEVKIT));
     await settle(fixture);
     http
-      .expectOne({ method: 'POST', url: '/api/board/test' })
-      .flush({ ...checkedDevkit(), status: { state: 'error', checked_at: null, error: null } });
+      .expectOne({ method: 'POST', url: devkitUrl('check') })
+      .flush(boardWith(DEVKIT, { status: { state: 'error' } }));
     await settle(fixture);
 
     const board = boardButton(fixture.nativeElement);
@@ -118,47 +113,33 @@ describe('App', () => {
     expect(railItem(board).tone()).toBe('danger');
   });
 
-  it('reads the shell info when the dialog opens, never at app start', async () => {
+  it('reads the last scan when the board dialog opens, never at app start, and shows the ssh command', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(checkedDevkit());
+    http.expectOne('/api/boards').flush(checkedDevkit());
     await settle(fixture);
-    // The shell details carry the launch URL with the SDK's default password (spec, "Shell URL").
-    http.expectNone('/api/devkit-shell');
-    http.expectNone('/api/peripherals');
+    http.expectNone(devkitUrl('peripherals'));
 
     boardButton(fixture.nativeElement).click();
     // The dialog's module loads on this first open.
     await vi.waitFor(() => expect(document.querySelector('app-board-dialog')).not.toBeNull());
-    http.expectOne('/api/devkit-shell').flush(shellInfo());
     // The camera setup comes from the last scan, which never contacts the board.
-    http.expectOne('/api/peripherals').flush(
-      { error: 'No board', code: 'no_target' },
-      {
-        status: 409,
-        statusText: 'Conflict',
-      },
-    );
+    http.expectOne(devkitUrl('peripherals')).flush({ scan: null });
     await settle(fixture);
-    expect(document.querySelector('app-board-dialog')?.textContent).toContain('Open shell');
+    expect(document.querySelector('app-board-dialog')?.textContent).toContain(
+      'ssh sima@192.168.1.20',
+    );
   });
 
   it('closing the board dialog gives the focus back to the board block', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(checkedDevkit());
+    http.expectOne('/api/boards').flush(checkedDevkit());
     await settle(fixture);
     const pill = boardButton(fixture.nativeElement);
 
     pill.focus();
     pill.click();
     await vi.waitFor(() => expect(document.querySelector('app-board-dialog')).not.toBeNull());
-    http.expectOne('/api/devkit-shell').flush(shellInfo());
-    http.expectOne('/api/peripherals').flush(
-      { error: 'No board', code: 'no_target' },
-      {
-        status: 409,
-        statusText: 'Conflict',
-      },
-    );
+    http.expectOne(devkitUrl('peripherals')).flush({ scan: null });
     await settle(fixture);
     // The focus moved into the dialog, which opens after an asynchronous import.
     expect(document.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true);
@@ -172,10 +153,10 @@ describe('App', () => {
 
   it('puts System information in the rail after the board and its divider, and loads it only when it is opened', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(checkedDevkit());
+    http.expectOne('/api/boards').flush(checkedDevkit());
     await settle(fixture);
-    // The command behind it runs for up to 15 s: never at app start.
-    http.expectNone('/api/sysinfo');
+    // Its Refresh runs neat for up to 15 s: nothing of it at app start.
+    http.expectNone('/api/system');
 
     const root: HTMLElement = fixture.nativeElement;
     const board = root.querySelector('app-board-rail')!;
@@ -192,7 +173,7 @@ describe('App', () => {
 
   it('System information opens from the rail; Escape closes it and focus returns to the item', async () => {
     const fixture = TestBed.createComponent(App);
-    http.expectOne('/api/board').flush(checkedDevkit());
+    http.expectOne('/api/boards').flush(checkedDevkit());
     await settle(fixture);
     const info = railButton(fixture.nativeElement, 'System information');
 
@@ -200,8 +181,28 @@ describe('App', () => {
     info.click();
     // The dialog's module loads on this first open.
     await vi.waitFor(() => expect(document.querySelector('app-system-info-dialog')).not.toBeNull());
-    http.expectOne('/api/sysinfo').flush({ insight: { webUiUrl: 'https://127.0.0.1:9900' } });
-    http.expectOne('/api/metrics').flush({ cpu_load: 3, memory: {}, disk: null, REMOTE: false });
+    http.expectOne('/api/system/host').flush({ cpu_percent: 3, memory: null, disk: null });
+    http.expectOne('/api/system').flush({
+      insight: {
+        version: '0.0.0',
+        build: { go_version: 'go1.26.0', platform: 'linux/amd64' },
+        place: 'host',
+        data_dir: '/tmp/insight',
+        port: 9900,
+        web_ui_url: 'https://127.0.0.1:9900',
+        network: { certificate_host: '127.0.0.1', browser_ice_address_source: 'default' },
+        ports: {
+          channels: 16,
+          channels_source: 'default',
+          webrtc_start: 9200,
+          webrtc_end: 9215,
+          rtsp: 0,
+          whip: 8889,
+          whip_ice: 8189,
+        },
+      },
+      neat: { state: 'missing', exposed_ports: [] },
+    });
     await settle(fixture);
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toContain(
       'System information',

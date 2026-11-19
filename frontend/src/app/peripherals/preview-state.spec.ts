@@ -2,7 +2,7 @@ import { BoardProblem, problemOf } from '../board/board-error';
 import { ApiRequestError } from '../sources/stream-lines';
 import type { PreviewSession } from './api';
 import { resolveSelection } from './camera-modes';
-import { imx477, imx568, previewSession, sel, usb } from './cameras.testing';
+import { imx477, imx568, previewSession, sel } from './cameras.testing';
 import {
   adoptedSelection,
   type CameraSelection,
@@ -26,15 +26,16 @@ import {
   watchPreview,
 } from './preview-state';
 
-// #170's preview tests (model.test.js), ported with their values. The reads that took a URL take
-// `CameraPreview.current()` now, the one reader of GET /api/peripherals/preview (ruling F36), so
-// they answer the session itself; the watch is paced by a timer the test fires (ruling F6).
+// The reads take `CameraPreview.current()`, the one reader of the board's preview, so they answer
+// the session itself; the watch is paced by a timer the test fires.
 
 const liveSession = previewSession();
+/** The board of `liveSession`, and another one. */
+const BOARD = liveSession.board;
+const OTHER_BOARD = 'ssh:sima@10.0.0.9:22';
 
 /** A failure as the preview shows it. */
-const problem = (message: string, code = ''): BoardProblem =>
-  new BoardProblem(message, code, '', {});
+const problem = (message: string, code = ''): BoardProblem => new BoardProblem(message, code, '');
 
 /** Lets the promise chains behind an answer run. */
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve));
@@ -85,10 +86,8 @@ describe('preview state', () => {
     expect(stopping.session?.id).toBe('8f1c');
     expect(nextPreviewState(stopping, { type: 'stopped', for: '8f1c' })).toEqual(PREVIEW_IDLE);
 
-    // A session reported as "stopped" ends the preview too.
-    expect(
-      nextPreviewState(live, { type: 'session', session: { ...liveSession, state: 'stopped' } }),
-    ).toEqual(PREVIEW_IDLE);
+    // No session in a start's answer ends the preview too.
+    expect(nextPreviewState(live, { type: 'session', session: null })).toEqual(PREVIEW_IDLE);
   });
 
   it('preview transitions: a start that was never adopted still releases the page', () => {
@@ -142,7 +141,7 @@ describe('preview state', () => {
     expect(previewErrorInfo(ended.error)?.hint).toBeTruthy();
   });
 
-  it("a live preview's status read ends it once the backend no longer runs this session", async () => {
+  it("a live preview's status read ends it once the board no longer runs this session", async () => {
     const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), {
       type: 'session',
       session: liveSession,
@@ -153,16 +152,12 @@ describe('preview state', () => {
       return session;
     };
 
-    // Still the backend's current session: nothing changes.
+    // Still the board's current session: nothing changes.
     expect(await previewStatusEvent(reply(liveSession), '8f1c')).toBeNull();
     expect(reads).toBe(1);
 
-    // No session, another session, or this one stopped: the stream is over.
-    for (const session of [
-      null,
-      { ...liveSession, id: 'other' },
-      { ...liveSession, state: 'stopped' as const },
-    ]) {
+    // No session, or another session: the stream is over.
+    for (const session of [null, { ...liveSession, id: 'other' }]) {
       const event = await previewStatusEvent(reply(session), '8f1c');
       expect(event, JSON.stringify(session)).toEqual(streamEndedEvent('8f1c'));
       const ended = nextPreviewState(live, event!);
@@ -181,24 +176,24 @@ describe('preview state', () => {
   it('a restart starts the mode selected once its stop finished, not the one selected before it', () => {
     const b: CameraSelection = { id: 'camera:a', format: 'MJPG', width: 640, height: 480, fps: 30 };
     const c: CameraSelection = { ...b, width: 1280, height: 720 };
-    const requested = { cameraId: 'camera:a', generation: 3 };
+    const requested = { cameraId: 'camera:a', board: BOARD };
     // Mode C was picked while the stop for the switch to B ran.
     expect(
-      restartSelection(requested, { cameraId: 'camera:a', generation: 3, selection: c }),
+      restartSelection(requested, { cameraId: 'camera:a', board: BOARD, selection: c }),
     ).toEqual(c);
     // Another camera or board meanwhile: nothing is started.
     expect(
       restartSelection(requested, {
         cameraId: 'camera:b',
-        generation: 3,
+        board: BOARD,
         selection: { ...c, id: 'camera:b' },
       }),
     ).toBeNull();
     expect(
-      restartSelection(requested, { cameraId: 'camera:a', generation: 4, selection: c }),
+      restartSelection(requested, { cameraId: 'camera:a', board: OTHER_BOARD, selection: c }),
     ).toBeNull();
     expect(
-      restartSelection(requested, { cameraId: 'camera:a', generation: 3, selection: null }),
+      restartSelection(requested, { cameraId: 'camera:a', board: BOARD, selection: null }),
     ).toBeNull();
   });
 
@@ -209,15 +204,14 @@ describe('preview state', () => {
     const sessionFor = (mode: CameraSelection): PreviewSession =>
       previewSession({
         id: 's1',
-        camera_id: 'camera:a',
-        generation: 3,
-        state: 'live',
+        camera: 'camera:a',
+        board: BOARD,
         mode: { format: mode.format, width: mode.width, height: mode.height, fps: mode.fps },
       });
     // A page whose selection the test changes while a request is in flight.
     function page(selection: CameraSelection) {
       const log: [string, string | number][] = [];
-      const current = { cameraId: 'camera:a', generation: 3, selection };
+      const current = { cameraId: 'camera:a', board: BOARD, selection };
       const deps: Omit<PreviewStartDeps, 'post' | 'lookup'> = {
         dispatch: (event) => log.push(['dispatch', event.type]),
         adopt: (session) => {
@@ -235,7 +229,7 @@ describe('preview state', () => {
       };
       return { log, current, deps };
     }
-    const requested = { cameraId: 'camera:a', generation: 3, mode: a };
+    const requested = { cameraId: 'camera:a', board: BOARD, mode: a };
     const refused = async (): Promise<PreviewSession> => {
       throw { code: 'preview_active', message: 'busy' };
     };
@@ -332,16 +326,17 @@ describe('preview state', () => {
     ]);
   });
 
-  it('a start whose session names a board generation the page does not know is stopped, not restarted, and the board re-read', async () => {
-    // Insight restarted (its counter starts over) or a client changed the board while this window
-    // kept the focus: the page still shows generation 3, the backend answers for 4. Restarting
-    // would get the same answer again, starting and killing the camera on the board each time.
+  it('a start answered after the board changed is stopped, not restarted on the new board', async () => {
     const mode: CameraSelection = { id: imx477.id, ...sel('NV12', 1920, 1080, 30) };
     const log: [string, string | number][] = [];
+    let board = BOARD;
     await runPreviewStart(
-      { cameraId: imx477.id, generation: 3, mode },
+      { cameraId: imx477.id, board: BOARD, mode },
       {
-        post: async () => previewSession({ id: 's4', generation: 4 }),
+        post: async () => {
+          board = OTHER_BOARD;
+          return previewSession({ id: 's4' });
+        },
         lookup: async () => null,
         stop: async (session) => {
           log.push(['stop', session.id]);
@@ -353,7 +348,33 @@ describe('preview state', () => {
           return true;
         },
         dispatch: (event) => log.push(['dispatch', event.type]),
-        view: () => ({ cameraId: imx477.id, generation: 3, selection: mode }),
+        view: () => ({ cameraId: imx477.id, board, selection: mode }),
+        normalize: problemOf,
+        reloadBoard: () => log.push(['reload', 'board']),
+      },
+    );
+    expect(log).toEqual([
+      ['dispatch', 'start'],
+      ['stop', 's4'],
+      ['dispatch', 'reset'],
+    ]);
+  });
+
+  it('a start refused because its board is no longer selected reads the boards again', async () => {
+    const mode: CameraSelection = { id: imx477.id, ...sel('NV12', 1920, 1080, 30) };
+    const log: [string, string | number][] = [];
+    await runPreviewStart(
+      { cameraId: imx477.id, board: BOARD, mode },
+      {
+        post: async () => {
+          throw problem('Not the selected board.', 'not_found');
+        },
+        lookup: async () => null,
+        stop: async () => true,
+        start: () => undefined,
+        adopt: () => true,
+        dispatch: (event) => log.push(['dispatch', event.type]),
+        view: () => ({ cameraId: imx477.id, board: BOARD, selection: mode }),
         normalize: problemOf,
         reloadBoard: () => log.push(['reload', 'board']),
       },
@@ -361,8 +382,7 @@ describe('preview state', () => {
     expect(log).toEqual([
       ['dispatch', 'start'],
       ['reload', 'board'],
-      ['stop', 's4'],
-      ['dispatch', 'reset'],
+      ['dispatch', 'failed'],
     ]);
   });
 
@@ -385,17 +405,17 @@ describe('preview state', () => {
 
   it('a start is superseded once the camera, board, or mode it was sent for is no longer the one shown', () => {
     const mode = { format: 'MJPG', width: 640, height: 480, fps: 30 };
-    const requested = { cameraId: 'camera:a', generation: 3, mode: { id: 'camera:a', ...mode } };
-    const latest = { cameraId: 'camera:a', generation: 3, selection: { id: 'camera:a', ...mode } };
+    const requested = { cameraId: 'camera:a', board: BOARD, mode: { id: 'camera:a', ...mode } };
+    const latest = { cameraId: 'camera:a', board: BOARD, selection: { id: 'camera:a', ...mode } };
     expect(startSuperseded(requested, latest)).toBe(false);
     expect(startSuperseded(requested, { ...latest, cameraId: 'camera:b' })).toBe(true);
-    expect(startSuperseded(requested, { ...latest, generation: 4 })).toBe(true);
+    expect(startSuperseded(requested, { ...latest, board: OTHER_BOARD })).toBe(true);
     expect(
       startSuperseded(requested, { ...latest, selection: { ...latest.selection, fps: 15 } }),
     ).toBe(true);
     expect(startSuperseded(requested, { ...latest, selection: null })).toBe(true);
-    // A board without a generation (none reported yet) compares on camera and mode alone.
-    expect(startSuperseded({ ...requested, generation: null }, latest)).toBe(false);
+    // An unknown board compares on camera and mode alone.
+    expect(startSuperseded({ ...requested, board: null }, latest)).toBe(false);
   });
 
   it('a stream refused because another tab claimed it first shows the preview there, not as ended', async () => {
@@ -419,7 +439,6 @@ describe('preview state', () => {
       reply({ ...liveSession, viewer: false }),
       reply(null),
       reply({ ...claimed, id: 'other' }),
-      reply({ ...claimed, state: 'stopped' }),
       async (): Promise<PreviewSession | null> => {
         throw new Error('network');
       },
@@ -510,7 +529,7 @@ describe('preview state', () => {
     const known = nextPreviewState(live, event);
     expect(known.status).toBe('live');
     expect(known.session?.camera_fps).toBe(66.18);
-    expect(known.session?.stream_url).toBe(liveSession.stream_url);
+    expect(known.session?.id).toBe(liveSession.id);
     // An unchanged rate keeps the state.
     expect(nextPreviewState(known, event)).toBe(known);
     // Another session's rate is ignored.
@@ -549,13 +568,7 @@ describe('preview state', () => {
 
     const adopted = nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: liveSession });
     expect(adopted.status).toBe('live');
-    expect(adopted.session?.stream_url).toBe(liveSession.stream_url);
-    expect(
-      nextPreviewState(PREVIEW_IDLE, {
-        type: 'adopt',
-        session: { ...liveSession, state: 'stopped' },
-      }),
-    ).toEqual(PREVIEW_IDLE);
+    expect(adopted.session).toBe(liveSession);
     expect(nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: null })).toEqual(PREVIEW_IDLE);
 
     // A session another page already shows (its one viewer) is not opened here: the pane offers Stop.
@@ -598,87 +611,73 @@ describe('preview state', () => {
     expect(previewStatus(PREVIEW_IDLE)).toEqual({ label: 'Not running', tone: 'neutral' });
   });
 
-  it('a session belongs to the camera and board generation it was started for', () => {
-    expect(sessionMatches(liveSession, imx477.id, 3)).toBe(true);
-    expect(sessionMatches(liveSession, imx477.id, 3, liveSession.mode)).toBe(true);
-    expect(sessionMatches(liveSession, imx477.id, 3, { ...liveSession.mode, fps: 60 })).toBe(false);
-    expect(sessionMatches(liveSession, imx477.id, 4)).toBe(false);
-    expect(sessionMatches(liveSession, imx568.id, 3)).toBe(false);
+  it('a session belongs to the camera and board it was started for', () => {
+    expect(sessionMatches(liveSession, imx477.id, BOARD)).toBe(true);
+    expect(sessionMatches(liveSession, imx477.id, BOARD, liveSession.mode)).toBe(true);
+    expect(sessionMatches(liveSession, imx477.id, BOARD, { ...liveSession.mode, fps: 60 })).toBe(
+      false,
+    );
+    expect(sessionMatches(liveSession, imx477.id, OTHER_BOARD)).toBe(false);
+    expect(sessionMatches(liveSession, imx568.id, BOARD)).toBe(false);
     expect(sessionMatches(liveSession, imx477.id)).toBe(true);
-    expect(sessionMatches(null, imx477.id, 3)).toBe(false);
+    expect(sessionMatches(null, imx477.id, BOARD)).toBe(false);
   });
 
   it('every preview failure carries a recovery action and nothing destructive', () => {
-    const info = (body: Record<string, unknown>, status: number) =>
-      previewErrorInfo(problemOf(new ApiRequestError(status, String(body['error']), body)));
+    const info = (error: Record<string, unknown>, status: number) =>
+      previewErrorInfo(problemOf(new ApiRequestError(status, String(error['message']), { error })));
     expect(previewErrorInfo(null)).toBeNull();
 
     const busy = info(
       {
-        error: 'The camera is already open.',
+        message: 'The camera is already open.',
         code: 'camera_in_use',
-        hint: 'gst-launch-1.0 (pid 812) has /dev/video3 open.',
+        hint: 'Stop the application using the camera, then start the preview.',
       },
       409,
     );
-    expect(busy?.hint).toBe('gst-launch-1.0 (pid 812) has /dev/video3 open.');
+    expect(busy?.hint).toBe('Stop the application using the camera, then start the preview.');
     expect(busy?.action).toMatch(/Insight never stops it for you/);
 
-    const other = info(
-      {
-        error: 'A preview is already running.',
-        code: 'preview_active',
-        session: { camera_id: imx568.id },
-      },
-      409,
-    );
-    expect(other?.otherCamera).toBe(imx568.id);
+    const other = info({ message: 'A preview is already running.', code: 'preview_active' }, 409);
     expect(other?.action).toMatch(/Stop the preview that is already running/);
 
-    // The backend puts camera_id at the top level of the 409 body.
-    expect(info({ error: 'x', code: 'preview_active', camera_id: usb.id }, 409)?.otherCamera).toBe(
-      usb.id,
-    );
-
-    expect(info({ error: 'x', code: 'invalid_request' }, 400)?.action).toMatch(
+    expect(info({ message: 'x', code: 'invalid_request' }, 400)?.action).toMatch(
       /^Choose a mode Insight lists as Available; /,
     );
-    expect(
-      info({ error: 'x', code: 'command_failed', detail: 'gst: no element' }, 502)?.detail,
-    ).toBe('gst: no element');
-    expect(info({ error: 'x', code: 'unreachable' }, 502)?.action).toBe('');
+    expect(info({ message: 'x', code: 'no_scan' }, 409)?.action).toBe(
+      'Refresh, then start the preview again.',
+    );
+    expect(info({ message: 'x', code: 'unreachable' }, 502)?.action).toBe('');
   });
 
-  it('the preview stream is only loaded from its same-origin API path', () => {
-    expect(previewStreamUrl(liveSession)).toBe(liveSession.stream_url);
-    for (const url of [
-      'https://evil.example/api/peripherals/cameras/preview/8f1c/stream',
-      'javascript:alert(1)',
-      '/api/peripherals/cameras/preview/../stop/stream',
-      '//evil.example/api/peripherals/cameras/preview/8f1c/stream',
-      '',
-    ]) {
-      expect(previewStreamUrl({ ...liveSession, stream_url: url }), url).toBeNull();
-    }
+  it("the preview stream is the board's preview route, naming the camera and the preview", () => {
+    expect(previewStreamUrl(liveSession)).toBe(
+      `/api/boards/${encodeURIComponent(BOARD)}/cameras/${encodeURIComponent(imx477.id)}/preview.mjpg?preview=8f1c`,
+    );
+    // An id or a camera that is not a plain word stays inside its path segment or parameter.
+    expect(previewStreamUrl({ ...liveSession, camera: '../stop', id: 'a&b' })).toBe(
+      `/api/boards/${encodeURIComponent(BOARD)}/cameras/..%2Fstop/preview.mjpg?preview=a%26b`,
+    );
     expect(previewStreamUrl(null)).toBeNull();
   });
 
   it('an adopted preview selects the camera and the mode it streams, not the defaults', () => {
     const session = previewSession({
       id: 's1',
-      camera_id: imx477.id,
+      camera: imx477.id,
       mode: sel('NV12', 1920, 1080, 60),
     });
     const wanted = adoptedSelection(session);
     expect(wanted).toEqual({ id: imx477.id, format: 'NV12', width: 1920, height: 1080, fps: 60 });
     expect(resolveSelection(imx477, wanted)).toEqual(session.mode);
-    expect(adoptedSelection({ ...session, camera_id: '' })).toBeNull();
+    expect(adoptedSelection({ ...session, camera: '' })).toBeNull();
   });
 
   it('a start refused because another tab started a preview adopts that preview', () => {
     const session = previewSession({
       id: 's1',
-      camera_id: imx477.id,
+      camera: imx477.id,
       mode: sel('NV12', 1920, 1080, 60),
     });
     const active = problem('A preview is already running.', 'preview_active');
@@ -691,13 +690,12 @@ describe('preview state', () => {
     expect(adopted).toEqual({ status: 'live', session, error: null });
     // Nothing to adopt: the other preview already stopped, or the start failed for another reason.
     expect(sessionToAdopt(active, null)).toBeNull();
-    expect(sessionToAdopt(active, { ...session, state: 'stopped' })).toBeNull();
     expect(sessionToAdopt(problem('busy', 'camera_in_use'), session)).toBeNull();
   });
 
   it('changing the mode restarts a preview, but only the one it belongs to', () => {
     const mode = sel('NV12', 1920, 1080, 30);
-    const session = previewSession({ id: 's1', camera_id: 'cam-a', mode });
+    const session = previewSession({ id: 's1', camera: 'cam-a', mode });
     const live = { status: 'live' as const, session, error: null };
     // A different rate needs a restart.
     expect(previewNeedsRestart(live, 'cam-a', { ...mode, fps: 60 })).toBe(true);

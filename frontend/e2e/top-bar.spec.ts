@@ -1,8 +1,8 @@
 import { expect, Locator, Page, test } from '@playwright/test';
 // Types only, erased at run time.
-import type { BoardState } from '../src/app/board/api';
+import type { BoardList } from '../src/app/api.generated';
 import { LAPTOP, PHONE, sidePanelToggle, topBarSpill } from './layout';
-import { answerSlots, answerTopBar, LONG_BOARD, LONG_HOST } from './top-bar';
+import { answerSlots, answerTopBar, LONG_BOARD, LONG_HOST, SYSTEM_INFO } from './top-bar';
 
 /** The rail's System information item, below the board block. */
 const systemInfo = (page: Page) => page.getByRole('button', { name: 'System information' });
@@ -18,14 +18,17 @@ const showLabels = (page: Page) => page.getByRole('button', { name: 'Show labels
 const answerEmptyStreaming = (page: Page) => answerSlots(page, 0);
 
 /** The board a test sees unreachable: the long-named one, whose connection check failed. */
-const UNREACHABLE_BOARD: BoardState = {
+const UNREACHABLE_BOARD: BoardList = {
   ...LONG_BOARD,
-  status: { state: 'error', checked_at: '2026-10-26T10:00:00Z', error: null },
+  selected: {
+    ...LONG_BOARD.selected!,
+    status: { state: 'error', checked_at: '2026-10-26T10:00:00Z' },
+  },
 };
 
-const answerBoard = (page: Page, state: BoardState) =>
+const answerBoard = (page: Page, state: BoardList) =>
   page.route(
-    (url) => url.pathname === '/api/board' || url.pathname === '/api/board/test',
+    (url) => url.pathname === '/api/boards' || /^\/api\/boards\/[^/]+\/check$/.test(url.pathname),
     (route) => route.fulfill({ json: state }),
   );
 
@@ -242,27 +245,31 @@ test('System information opens from the rail, tells what it can without neat, an
 test('every list in System information starts its values in the same column', async ({ page }) => {
   await answerTopBar(page);
   await page.route(
-    (url) => url.pathname === '/api/sysinfo',
+    (url) => url.pathname === '/api/system',
     (route) =>
       route.fulfill({
         json: {
-          environment: {
-            label: 'SDK on a DevKit',
-            sdkVersion: '2.1.0',
-            devkitBuildVersion: '2.1.0-b12',
-          },
-          insight: { serviceState: 'Running', webUiUrl: 'https://10.1.1.5:9900' },
-          components: {
-            neatCore: { name: 'Neat core', version: '1.4.0', updateAvailable: false },
-            neatInsight: {
-              name: 'A component with a very long name that has to wrap',
-              version: '0.9.1',
+          ...SYSTEM_INFO,
+          neat: {
+            state: 'ready',
+            environment: {
+              label: 'SDK on a DevKit',
+              sdkVersion: '2.1.0',
+              devkitBuildVersion: '2.1.0-b12',
             },
+            insight: { serviceState: 'Running' },
+            components: {
+              neatCore: { name: 'Neat core', version: '1.4.0', updateAvailable: false },
+              neatInsight: {
+                name: 'A component with a very long name that has to wrap',
+                version: '0.9.1',
+              },
+            },
+            exposed_ports: [
+              { name: 'rtp.udp', protocol: 'udp', hostPortStart: 9000, hostPortEnd: 9079 },
+            ],
+            update_check: { offline: false, status: 'Current' },
           },
-          exposedPorts: [
-            { name: 'rtp.udp', protocol: 'udp', hostPortStart: 9000, hostPortEnd: 9079 },
-          ],
-          updateCheck: { offline: false, status: 'Current' },
         },
       }),
   );

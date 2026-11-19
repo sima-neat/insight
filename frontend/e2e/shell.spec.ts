@@ -8,9 +8,9 @@ import {
   topBarSpill,
   VIEWPORTS,
 } from './layout';
-import type { BoardState } from '../src/app/board/api';
+import type { BoardList } from '../src/app/api.generated';
 import { FakePeripheralsBackend, HOST_KEY_CHANGED_BOARD } from './peripherals-mocks';
-import { FakeStatsBackend, STATS_BOARD } from './stats-mocks';
+import { FakeStatsBackend } from './stats-mocks';
 import { answerEmptyLibrary, answerSlots, answerTopBar, answerViewer, LONG_BOARD } from './top-bar';
 
 // The rail's board block reads the board on every page.
@@ -279,13 +279,11 @@ test.describe('phone width', () => {
 
   /**
    * The widest board block: a connection that failed, on a host name far past what the rail
-   * shows. Its generation is the Stats fixtures', which the telemetry answers carry.
+   * shows.
    */
-  const ERROR_BOARD: BoardState = {
-    ...HOST_KEY_CHANGED_BOARD,
-    target: LONG_BOARD.target,
-    saved: LONG_BOARD.saved,
-    generation: STATS_BOARD.generation,
+  const ERROR_BOARD: BoardList = {
+    ...LONG_BOARD,
+    selected: { ...LONG_BOARD.selected!, status: HOST_KEY_CHANGED_BOARD.selected!.status },
   };
 
   interface PhonePage {
@@ -293,16 +291,16 @@ test.describe('phone width', () => {
     /** The page's title, which the top bar's heading says. */
     readonly title: string;
     /** Answers what the page asks for, with `board` where the test chooses it. */
-    answer(page: Page, board: BoardState | null): Promise<void>;
+    answer(page: Page, board: BoardList | null): Promise<void>;
     /** Resolves once the page shows its content, with the board healthy. */
     shown(page: Page): Promise<void>;
   }
 
-  /** `GET /api/board`, when a test picks the board; each page's own mock answers it otherwise. */
-  const answerBoard = (page: Page, board: BoardState | null) =>
+  /** `GET /api/boards`, when a test picks the board; each page's own mock answers it otherwise. */
+  const answerBoard = (page: Page, board: BoardList | null) =>
     board &&
     page.route(
-      (url) => url.pathname === '/api/board',
+      (url) => url.pathname === '/api/boards',
       (route) => route.fulfill({ json: board }),
     );
 

@@ -27,9 +27,8 @@ class FakeRuns {
 }
 
 /** A delete failure of `code` as `SentinelRuns` resolves it. */
-function failure(code: string, hint = '', detail?: string): SentinelFailure {
-  const details = detail === undefined ? {} : { detail };
-  return failureOf(new BoardProblem(`Failed with ${code}.`, code, hint, details), 7, 'delete');
+function failure(code: string, hint = '', message = `Failed with ${code}.`): SentinelFailure {
+  return failureOf(new BoardProblem(message, code, hint), 'local', 'delete');
 }
 
 /** `count` finished runs, newest first. */
@@ -445,7 +444,7 @@ describe('RunsView', () => {
   it('one run not deleted is named in the heading, with what the board said', async () => {
     runs.deleteRuns.mockResolvedValue({
       deleted: [],
-      failed: [{ id: TES3.id, failure: failure('sentinel_failed', '', 'rm: permission denied') }],
+      failed: [{ id: TES3.id, failure: failure('sentinel_denied', '', 'rm: permission denied') }],
       notTried: [],
     });
     await renderChecked(TES3.id);
@@ -453,7 +452,7 @@ describe('RunsView', () => {
     await click(barButton('Delete'));
 
     expect(text(callout()!.querySelector('[role="heading"]'))).toBe('Run tes3 was not deleted');
-    expect(text(callout()!.querySelector('pre'))).toBe('rm: permission denied');
+    expect(text(callout())).toContain('rm: permission denied');
     expect(session.checkedRuns()).toEqual([TES3.id]);
   });
 
@@ -485,7 +484,7 @@ describe('RunsView', () => {
 
   it('a failed read shows its title and hint with Retry, over the runs read before', async () => {
     runs.runsFailure.set(
-      failureOf(new BoardProblem('Sentinel failed.', 'sentinel_failed', 'Restart it.', {}), 7),
+      failureOf(new BoardProblem('Sentinel failed.', 'sentinel_failed', 'Restart it.'), 'local'),
     );
     await render();
 
