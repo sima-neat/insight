@@ -2502,26 +2502,49 @@ def _pull_payload(record, path) -> dict:
 def _run_pull_probe(record) -> None:
     try:
         result = probe_rtsp(record.url)
-        if not pull_registry.apply_probe(record, result, time.monotonic()):
-            return
-        if result.status == "auth_failed":
-            # Stop mediamtx retrying with rejected credentials; the row stays "Auth failed" until Stop.
-            with _sources_lock:
-                # A Stop and a new Pull may have replaced this record since apply_probe, and a
-                # Stop or the setup may be talking to MediaMTX for it right now.
-                if pull_registry.get(record.index) is not record or record.changing:
-                    return
-                record.changing = True
-            logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
-            try:
-                mediamtx_client.clear_pull_source(f"src{record.index}")
-            except MediamtxError as exc:
-                logging.warning("src%s: could not pause the pull: %s", record.index, exc)
-            finally:
-                with _sources_lock:
-                    record.changing = False
+        rejected = pull_registry.apply_probe(record, result, time.monotonic()) and result.status == "auth_failed"
     finally:
         record.probing = False  # never leave the record marked in flight, even if the probe raised
+    if rejected:
+        _pause_pull(record)
+
+
+# How long a pause the MediaMTX API failed waits before it is tried again.
+PULL_PAUSE_RETRY_SECONDS = pull_sources.PROBE_INTERVAL_SECONDS
+_pull_pause_wait = time.sleep  # tests replace it to step through retries
+
+
+def _pause_pull(record) -> None:
+    """Stop mediamtx retrying with rejected credentials; the row stays "Auth failed" until Stop.
+
+    Runs on the probe's background thread and keeps retrying a clear the MediaMTX API failed,
+    until it succeeds or the pull is stopped or replaced. Nothing else would retry it: an
+    auth_failed pull is never probed again, and pages stop polling the sources when hidden."""
+    while not _try_pause_pull(record):
+        _pull_pause_wait(PULL_PAUSE_RETRY_SECONDS)
+
+
+def _try_pause_pull(record) -> bool:
+    """One attempt; True when nothing is left to do (paused, or the pull was stopped or replaced)."""
+    with _sources_lock:
+        # A Stop and a new Pull may have replaced this record since apply_probe.
+        if pull_registry.get(record.index) is not record:
+            return True
+        # A Stop or the setup is talking to MediaMTX for it right now: look again later.
+        if record.changing:
+            return False
+        record.changing = True
+    try:
+        mediamtx_client.clear_pull_source(f"src{record.index}")
+    except MediamtxError as exc:
+        logging.warning("src%s: camera at %s rejected the credentials; could not pause the pull, retrying in %g s: %s",
+                        record.index, record.host, PULL_PAUSE_RETRY_SECONDS, exc)
+        return False
+    finally:
+        with _sources_lock:
+            record.changing = False
+    logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
+    return True
 
 
 def _schedule_pull_probes(snapshot) -> None:

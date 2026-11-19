@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 import os
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock as mock
 from concurrent.futures import ThreadPoolExecutor
@@ -2880,6 +2882,92 @@ class PullSourceTests(_SourceFixture):
         self.probe_results.pop(CAM)
         record.probed_at = 0.0
         self.assertEqual(self._slot(3)["pull"]["status"], "auth_failed")  # not re-probed
+
+    def _auth_fail_while_mediamtx_is_down(self, during_wait, clear_patch=None):
+        """Issue #216: one source-list request finds rejected credentials while the MediaMTX API is down.
+
+        The pause is then retried on the probe's thread, not by later requests. Each retry wait
+        calls during_wait(n, record), n counting from 1, to recover the API, Stop, and so on."""
+        self._pull()
+        record = app_module.pull_registry.get(3)
+        self.probe_results[CAM] = app_module.pull_sources.ProbeResult("auth_failed", "The camera rejected the username or password")
+        self.mtx.fail_clear = True
+        record.probed_at = 0.0
+        waits, probes = [], []
+        probe = app_module.probe_rtsp
+
+        def wait(seconds):
+            waits.append(seconds)
+            if len(waits) > 10:
+                raise AssertionError("the pause is still retrying")
+            during_wait(len(waits), record)
+
+        with mock.patch.object(app_module, "_pull_pause_wait", wait), \
+                mock.patch.object(app_module, "probe_rtsp", lambda url, timeout=2.0: probes.append(url) or probe(url, timeout)), \
+                (clear_patch or contextlib.nullcontext()), self.assertLogs(level="WARNING") as logs:
+            self._slot(3)
+        return record, waits, probes, logs.output
+
+    def test_failed_pause_is_retried_until_mediamtx_recovers_without_reprobing(self):
+        def recover_on_second_wait(n, record):
+            self.assertIn("src3", self.mtx.pull_sources)  # mediamtx still holds the rejected URL
+            if n == 2:
+                self.mtx.fail_clear = False
+
+        record, waits, probes, logs = self._auth_fail_while_mediamtx_is_down(recover_on_second_wait)
+        self.assertEqual(waits, [app_module.PULL_PAUSE_RETRY_SECONDS] * 2)
+        self.assertEqual(app_module.PULL_PAUSE_RETRY_SECONDS, app_module.pull_sources.PROBE_INTERVAL_SECONDS)
+        self.assertEqual(probes, [CAM])  # the rejected credentials went to the camera once
+        self.assertEqual(self.mtx.cleared, ["src3"])
+        self.assertNotIn("src3", self.mtx.pull_sources)
+        # "pull paused" only once the clear succeeded, after the two failed attempts.
+        self.assertEqual(["pull paused" in line for line in logs if "src3" in line], [False, False, True])
+        self.assertEqual(record.status, "auth_failed")
+        self.assertEqual(self._slot(3)["pull"]["status"], "auth_failed")
+        self.assertEqual(self.mtx.cleared, ["src3"])  # done: not cleared again
+
+    def test_failed_pause_stops_retrying_after_stop(self):
+        def stop_during_first_wait(n, record):
+            self.mtx.fail_clear = False
+            self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 3}).status_code, 200)
+
+        _record, waits, _probes, _logs = self._auth_fail_while_mediamtx_is_down(stop_during_first_wait)
+        self.assertEqual(len(waits), 1)
+        self.assertEqual(self.mtx.cleared, ["src3"])  # by the Stop only
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_failed_pause_retry_never_clears_a_newer_pull(self):
+        newer = app_module.pull_sources.PullRecord(index=3, url="rtsp://10.0.0.9:554/b", scheme="rtsp",
+                                                   host="10.0.0.9:554", path="/b", started_at=0.0,
+                                                   probed_at=time.monotonic())
+
+        def replace_during_first_wait(n, record):
+            app_module.pull_registry.put(newer)  # a Stop and a new Pull landed meanwhile
+            self.mtx.fail_clear = False
+
+        _record, waits, _probes, _logs = self._auth_fail_while_mediamtx_is_down(replace_during_first_wait)
+        self.assertEqual(len(waits), 1)
+        self.assertEqual(self.mtx.cleared, [])
+        self.assertIs(app_module.pull_registry.get(3), newer)
+
+    def test_failed_pause_retry_waits_while_a_stop_is_talking_to_mediamtx(self):
+        def stop_in_flight_during_first_retry(n, record):
+            self.mtx.fail_clear = False
+            record.changing = n == 1
+
+        _record, waits, _probes, _logs = self._auth_fail_while_mediamtx_is_down(stop_in_flight_during_first_retry)
+        self.assertEqual(len(waits), 2)
+        self.assertEqual(self.mtx.cleared, ["src3"])
+
+    def test_failed_pause_retry_clears_outside_the_source_lock(self):
+        clear_patch, held = self.spy_lock("clear_pull_source")
+
+        def recover(n, record):
+            self.mtx.fail_clear = False
+
+        self._auth_fail_while_mediamtx_is_down(recover, clear_patch=clear_patch)
+        self.assertEqual(held, [False, False])
+        self.assertEqual(self.mtx.cleared, ["src3"])
 
     def test_stop_then_pull_replaces_record(self):
         self._pull()
