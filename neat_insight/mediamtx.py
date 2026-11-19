@@ -276,6 +276,8 @@ class MediamtxClient:
                 generation = self._generation
             try:
                 paths = self._get_items("paths/list")
+                # Publishers come from paths/list: this is when this answer saw them.
+                observed = self._clock()
                 sessions = {endpoint: self._get_items(f"{endpoint}/list", missing_ok=True) for endpoint, _ in SESSION_KINDS.values()}
                 built = build_snapshot(paths, sessions)
             except Exception as exc:  # any unusable answer means "API unavailable", never a 500
@@ -288,13 +290,13 @@ class MediamtxClient:
                 self._ever_succeeded = True
                 self._failing_since = None
                 self._unavailable_until = 0.0
-                # Concurrent fetches can finish out of order; never replace newer data.
-                if self._snapshot_at is None or now >= self._snapshot_at:
-                    self._snapshot, self._snapshot_at = built, now
-                    self._update_rates(now)
-                # A fresh check judges what it saw itself: the shared snapshot can come from a
-                # refresh that started later but read the API before this one did.
-                return built if fresh else self._snapshot
+                # Concurrent fetches can finish out of order. The snapshot whose paths were
+                # read last is the newest, whichever call started first, and every caller,
+                # a fresh check too, gets it: no later sighting of a publisher is dropped.
+                if self._snapshot_at is None or observed >= self._snapshot_at:
+                    self._snapshot, self._snapshot_at = built, observed
+                    self._update_rates(observed)
+                return self._snapshot
         return built
 
     def _fetch_failed(self, now: float, exc: Exception) -> Optional[dict]:

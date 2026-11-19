@@ -222,7 +222,30 @@ class ClientTests(unittest.TestCase):
 
         client = mediamtx.MediamtxClient(request=request, clock=clock)
         self.assertTrue(client.snapshot(fresh=True)["src5"].ready)
-        self.assertFalse(client.snapshot()["src5"].ready)  # the newer-started poll keeps the cache
+        self.assertTrue(client.snapshot()["src5"].ready)  # polls get the later reading too
+
+    def test_fresh_snapshot_keeps_a_publisher_that_a_later_poll_saw(self):
+        # The fresh check reads paths/list while src5 is free, then waits on a session list. A
+        # poll that starts meanwhile sees a publisher that just connected. That later reading
+        # must win, or a pull could replace the publisher.
+        clock = FakeClock()
+        current = {"paths": [dict(PATHS[4])]}  # src5, no publisher
+        polled = []
+        client = None
+
+        def request(method, url):
+            endpoint = url.split("/v3/", 1)[1].split("?", 1)[0]
+            if endpoint == "paths/list":
+                return 200, json.dumps({"items": current["paths"]}).encode()
+            if not polled:  # the fresh check's first session list
+                polled.append(True)
+                current["paths"] = [dict(PATHS[1], name="src5", confName="src5")]
+                clock.now += 2.0
+                self.assertTrue(client.snapshot()["src5"].ready)  # the later poll sees it
+            return 200, json.dumps({"items": []}).encode()
+
+        client = mediamtx.MediamtxClient(request=request, clock=clock)
+        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)
 
     def test_fresh_snapshot_asks_during_the_backoff_and_never_returns_stale_data(self):
         client, calls, clock, state = self._flaky_client()
