@@ -1,4 +1,4 @@
-import { ApiRequestError, messageOf } from '../sources/stream-lines';
+import { ApiRequestError, messageOf } from '../sources/api-errors';
 import {
   BOARD_GONE_CODES,
   BoardProblem,

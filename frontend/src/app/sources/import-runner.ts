@@ -2,9 +2,9 @@ import { computed, inject, Injectable, signal } from '@angular/core';
 import { NeatToasts, type NeatProgressToast } from '@sima/neat-ui/toast';
 import { type Observable, Subscription } from 'rxjs';
 import type { Job, MediaSaved } from '../api.generated';
-import type { YoutubeImportRequest } from './api';
+import { messageOf } from './api-errors';
 import { type CatalogAsset, catalogAssetLabel } from './catalog';
-import { jobProgress } from './jobs';
+import { jobProgress, type Progress } from './jobs';
 import {
   type LibraryEvent,
   MediaLibraryService,
@@ -19,19 +19,10 @@ import {
   type UploadConflict,
   uploadConflict,
 } from './name-clash';
-import {
-  failureText,
-  isProgressFailure,
-  type Progress,
-  type ProgressFailure,
-  savedPath,
-  youtubeProgress,
-} from './progress-lines';
 import { SlotsService } from './slots.service';
-import { messageOf } from './stream-lines';
 
 /** The import dialog's tabs, and the kind of work each starts. */
-export type ImportKind = 'local' | 'catalog' | 'youtube';
+export type ImportKind = 'local' | 'catalog';
 
 /** How a piece of work ended, for the dialog that started it. */
 export interface ImportOutcome {
@@ -45,7 +36,6 @@ export interface ImportOutcome {
 const TOAST_TITLES: Record<ImportKind, string> = {
   local: 'Uploading media',
   catalog: 'Importing catalog asset',
-  youtube: 'Importing YouTube video',
 };
 
 /** "Preparing media 2/3": a position in work of several items; none for a single one. */
@@ -53,8 +43,8 @@ const scoped = (title: string, position: number, total: number): string =>
   total > 1 ? `${title} ${position}/${total}` : title;
 
 /**
- * Progress about one item: the item ("clip.mp4", an asset's label, a YouTube target), then what
- * the server adds ("clip.mp4 - 0:12 / 0:40"), as #170 showed it.
+ * Progress about one item: the item ("clip.mp4", an asset's label), then what the server adds
+ * ("clip.mp4 - 0:12 / 0:40"), as #170 showed it.
  */
 const about = (subject: string, detail: string): string =>
   detail && detail !== subject ? `${subject} - ${detail}` : subject;
@@ -67,9 +57,9 @@ type FileOutcome =
   /** `unasked` is the outcome's note for a clash no one was there to answer; null for a Skip. */
   | { readonly kind: 'skipped'; readonly unasked: string | null };
 
-/** How work ended: a status message on success (or cancel), a failure to report otherwise. */
+/** How work ended: a status message on success, a failure to report otherwise. */
 type Ending =
-  | { readonly ok: boolean; readonly path: string | null; readonly message: string }
+  | { readonly ok: true; readonly path: string | null; readonly message: string }
   | { readonly ok: false; readonly path: string | null; readonly failure: string };
 
 /** What a request that saves into the library said it saved; it must have said so. */
@@ -79,8 +69,8 @@ function savedOf(saved: MediaSaved | null): MediaSaved {
 }
 
 /**
- * Runs the import dialog's work, outside the dialog so that it outlives it: local uploads, catalog
- * imports and YouTube imports, one piece of work at a time (spec, Media import; Review Focus 3).
+ * Runs the import dialog's work, outside the dialog so that it outlives it: local uploads and
+ * catalog imports, one piece of work at a time (spec, Media import; Review Focus 3).
  *
  * While a dialog holds the runner (`hold`), the dialog shows the progress, the name-clash question
  * and the failure, and the outcome is a toast as #170's was. When the last dialog lets go while
@@ -90,8 +80,7 @@ function savedOf(saved: MediaSaved | null): MediaSaved {
  * back from the toast: the progress, the clashes and the outcome are the dialog's again.
  *
  * An upload shows its bytes, then the job that re-encodes it when the server needs one; a catalog
- * import shows its download's job. A YouTube import is read from the old backend's lines as
- * `progress-lines.ts` tells a caller to. The library refreshes itself after each request;
+ * import shows its download's job. The library refreshes itself after each request;
  * `MediaLibraryService` does that, whatever the outcome.
  */
 @Injectable({ providedIn: 'root' })
@@ -121,7 +110,6 @@ export class ImportRunner {
   /** The toast the work reports to once no dialog shows it. */
   private toast: NeatProgressToast | null = null;
   private answerClash: ((choice: ClashChoice) => void) | null = null;
-  private abortRequest: (() => void) | null = null;
   private current: Promise<ImportOutcome> | null = null;
 
   /**
@@ -149,11 +137,6 @@ export class ImportRunner {
   /** Answers the name clash waiting for one. */
   answer(choice: ClashChoice): void {
     this.answerClash?.(choice);
-  }
-
-  /** Aborts a YouTube import; the server stops yt-dlp and FFmpeg when the request goes. */
-  cancel(): void {
-    if (this.job() === 'youtube') this.abortRequest?.();
   }
 
   /**
@@ -222,23 +205,6 @@ export class ImportRunner {
     });
   }
 
-  /** Imports a YouTube clip; `cancel` aborts it. */
-  importYoutube(request: YoutubeImportRequest): Promise<ImportOutcome> {
-    return this.run('youtube', async () => {
-      this.show({ title: 'Importing YouTube video', detail: request.target, percent: null });
-      const lines: string[] = [];
-      const finished = await this.read(this.library.importYoutube(request), (event) => {
-        if (event.kind !== 'line') return;
-        lines.push(event.text);
-        this.showLine(youtubeProgress(event.text), request.target);
-      });
-      if (!finished) return { ok: false, path: null, message: 'YouTube import canceled.' };
-      const failure = failureText(lines);
-      if (failure) return { ok: false, path: null, failure };
-      return { ok: true, path: lastSaved(lines), message: 'Imported YouTube video.' };
-    });
-  }
-
   /**
    * Runs one piece of work from start to outcome. Whatever happens in it, a failure included that
    * no request reported, the outcome is reported and the runner is free again.
@@ -270,7 +236,6 @@ export class ImportRunner {
       this.toasts.status(ending.message);
     }
     this.toast = null;
-    this.abortRequest = null;
     this.current = null;
     this.progressState.set(null);
     this.jobState.set(null);
@@ -309,12 +274,6 @@ export class ImportRunner {
   private showJob(job: Job, title: string, subject: string): void {
     const progress = jobProgress(job, title);
     this.show({ ...progress, detail: about(subject, progress.detail) });
-  }
-
-  /** Shows a parsed line about one item; a failure line shows nothing, `failureText` reports it. */
-  private showLine(parsed: Progress | ProgressFailure | null, subject: string): void {
-    if (parsed === null || isProgressFailure(parsed)) return;
-    this.show({ ...parsed, detail: about(subject, parsed.detail) });
   }
 
   /**
@@ -388,11 +347,8 @@ export class ImportRunner {
     return savedOf(saved);
   }
 
-  /**
-   * Reads a request to its end and resolves true, or false when `abortRequest` aborted it;
-   * rejects when the request failed or a handler threw.
-   */
-  private read<E>(stream: Observable<E>, onEvent: (event: E) => void): Promise<boolean> {
+  /** Reads a request to its end; rejects when the request failed or a handler threw. */
+  private read<E>(stream: Observable<E>, onEvent: (event: E) => void): Promise<void> {
     return new Promise((resolve, reject) => {
       // Made first and the request added to it: a source that emits while `subscribe` runs can
       // fail a handler before `subscribe` returns, and the request added to a subscription that is
@@ -411,13 +367,9 @@ export class ImportRunner {
             }
           },
           error: reject,
-          complete: () => resolve(true),
+          complete: () => resolve(),
         }),
       );
-      this.abortRequest = () => {
-        subscription.unsubscribe();
-        resolve(false);
-      };
     });
   }
 
@@ -443,14 +395,4 @@ export class ImportRunner {
       this.clashState.set(null);
     }
   }
-}
-
-/** The last path a request's lines say was saved. */
-function lastSaved(lines: readonly string[]): string | null {
-  return (
-    lines
-      .map(savedPath)
-      .filter((path) => path !== null)
-      .pop() ?? null
-  );
 }

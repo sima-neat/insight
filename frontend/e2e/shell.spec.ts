@@ -182,8 +182,8 @@ test('the kit font loads', async ({ page }) => {
   await page.goto('/');
 
   // `document.fonts.check` is true for a family that was never declared, so it cannot catch a
-  // font file that failed to load, such as one shadowed by Flask's `/media/<path>` route. The
-  // declared faces' status can.
+  // font file that failed to load, such as one shadowed by a server route. The declared faces'
+  // status can.
   const faces = await page.evaluate(async () => {
     await document.fonts.ready;
     return [...document.fonts]

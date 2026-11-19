@@ -132,7 +132,7 @@ describe('ViewerPage', () => {
   }
 
   interface Visit {
-    /** The channel limit Flask answers, or null for a failed request. */
+    /** The channel limit the server answers, or null for a failed request. */
     readonly limit?: number | null;
     /** The grid's size, or null to leave it unmeasured. */
     readonly area?: readonly [number, number] | null;

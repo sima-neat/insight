@@ -3,8 +3,8 @@ import { NeatButton, NeatNote } from '@sima/neat-ui';
 
 /**
  * A heading with notes under it and, projected, the actions at its end: the foot of the import
- * dialog's Catalog and YouTube panels ("1 asset(s) selected", the filter, Import), and the words
- * beside a preview (`ImportPreview`). A note may be a path or a link, so it breaks anywhere.
+ * dialog's Catalog panels ("1 asset(s) selected", the filter, Import), and the words beside a
+ * preview (`ImportPreview`). A note may be a path or a link, so it breaks anywhere.
  * The actions' box exists only while buttons are projected: an empty one would still take its
  * place in the wrapping row, and a line of its own under long notes.
  */

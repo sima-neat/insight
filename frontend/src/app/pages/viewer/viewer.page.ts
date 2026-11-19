@@ -168,7 +168,7 @@ export class ViewerPage {
     inject(ActivatedRoute).queryParamMap.pipe(map(readViewerParams)),
     { requireSync: true },
   );
-  /** Flask's channel limit (`/api/viewer-url`), for a link without `max_channels`. */
+  /** The server's channel limit (`/api/viewer-url`), for a link without `max_channels`. */
   private readonly serverLimit = signal<number | null>(null);
   private serverLimitRequested = false;
   private readonly limit = computed(() => this.params().maxChannels ?? this.serverLimit());

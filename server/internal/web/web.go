@@ -1,5 +1,4 @@
-// Package web is the server's HTTP side: the routes it implements, the web UI, and the old
-// backend behind them for the routes not moved yet.
+// Package web is the server's HTTP side: the API's routes and the web UI.
 package web
 
 import (
@@ -7,7 +6,6 @@ import (
 	"errors"
 	"mime"
 	"net/http"
-	"slices"
 	"time"
 
 	"insight/api"
@@ -24,8 +22,6 @@ import (
 // Deps is what the handlers need.
 type Deps struct {
 	Config config.Config
-	// Ready says whether every service Insight runs is up.
-	Ready func() bool
 	// Channels are the Viewer's channels.
 	Channels ChannelSet
 	// Slots are the sources src1 to src48, Library the media library and Jobs the long work
@@ -40,10 +36,7 @@ type Deps struct {
 	// System is System Info, Host this computer's readings.
 	System *system.Reader
 	Host   *system.HostReader
-	// Legacy serves the paths in LegacyPrefixes; nil answers them 404.
-	Legacy         http.Handler
-	LegacyPrefixes []string
-	// UI serves every other path.
+	// UI serves every path outside the API and the streams.
 	UI http.Handler
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
@@ -69,16 +62,9 @@ func NewHandler(deps Deps) http.Handler {
 	mux.Handle("/stream/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, http.StatusNotFound, "not_found", "There is no such stream.", "")
 	}))
-	if deps.Legacy != nil {
-		for _, prefix := range deps.LegacyPrefixes {
-			mux.Handle(prefix, deps.Legacy)
-		}
-	}
-	if deps.Legacy == nil || !slices.Contains(deps.LegacyPrefixes, "/api/") {
-		mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			apierr.Write(w, http.StatusNotFound, "not_found", "There is no such API route.", "")
-		}))
-	}
+	mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apierr.Write(w, http.StatusNotFound, "not_found", "There is no such API route.", "")
+	}))
 	mux.Handle("/", deps.UI)
 	return mux
 }
@@ -95,8 +81,8 @@ type handlers struct{ deps Deps }
 
 func (h *handlers) GetHealth(w http.ResponseWriter, r *http.Request) {
 	network := h.deps.Config.Network
-	body := api.Health{
-		Status:  api.HealthStatusOk,
+	writeJSON(w, http.StatusOK, api.Health{
+		Status:  "ok",
 		Service: "neat-insight",
 		Time:    h.deps.Now().UTC().Format("2006-01-02T15:04:05.000000Z"),
 		Network: api.HealthNetwork{
@@ -104,12 +90,13 @@ func (h *handlers) GetHealth(w http.ResponseWriter, r *http.Request) {
 			BrowserIceAddressSource: api.HealthNetworkBrowserIceAddressSource(network.BrowserICEAddressSource),
 			PublicOrigin:            optional(network.PublicOrigin),
 		},
-	}
-	status := http.StatusOK
-	if h.deps.Ready != nil && !h.deps.Ready() {
-		body.Status, status = api.HealthStatusStarting, http.StatusServiceUnavailable
-	}
-	writeJSON(w, status, body)
+	})
+}
+
+// GetOpenAPIDocument serves the API's own description, embedded when the server was built.
+func (h *handlers) GetOpenAPIDocument(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/yaml")
+	_, _ = w.Write(api.Document)
 }
 
 func optional(value string) *string {

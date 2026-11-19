@@ -2,7 +2,6 @@ import { HttpEventType, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import type { MediaEntry, MediaSaved } from '../api.generated';
-import type { YoutubePreview } from './api';
 import type { CatalogIndex } from './catalog';
 import { JobFailedError } from './jobs';
 import { FakeEventSources } from './jobs.testing';
@@ -10,7 +9,6 @@ import { type LibraryEvent, MediaLibraryService, toFileNodes } from './media-lib
 import { mediaFile as file, mediaFolder as folder, mediaRoot, videoInfo } from './media.testing';
 import { SlotsService } from './slots.service';
 import { fileSlot, job, slotList } from './slots.testing';
-import type { StreamEvent } from './stream-lines';
 
 const TREE_URL = '/api/media';
 const INFO_URL = '/api/media/info';
@@ -312,7 +310,7 @@ describe('MediaLibraryService', () => {
     });
   });
 
-  describe('catalog and YouTube validation', () => {
+  describe('catalog', () => {
     it("catalog fetches the index, and rejects with the server's message", async () => {
       const index: CatalogIndex = {
         schema: '1',
@@ -336,30 +334,6 @@ describe('MediaLibraryService', () => {
         status: 502,
         message: 'The media catalog could not be fetched: timed out.',
       });
-    });
-
-    it('validateYoutube posts the link and gives the preview, or the refusal', async () => {
-      const preview: YoutubePreview = {
-        video_id: 'abc',
-        normalized_url: 'https://www.youtube.com/watch?v=abc',
-        embed_url: 'https://www.youtube.com/embed/abc',
-        thumbnail_url: '',
-        title: 'Street',
-        duration: 120,
-        is_live: false,
-        live_status: 'not_live',
-      };
-      const validated = library.validateYoutube('https://youtu.be/abc');
-      const request = http.expectOne('/api/import/youtube/validate');
-      expect(request.request.body).toEqual({ url: 'https://youtu.be/abc' });
-      request.flush(preview);
-      await expect(validated).resolves.toEqual(preview);
-
-      const refused = library.validateYoutube('https://example.com');
-      http
-        .expectOne('/api/import/youtube/validate')
-        .flush({ error: 'Not a YouTube URL.' }, { status: 400, statusText: 'Bad Request' });
-      await expect(refused).rejects.toMatchObject({ message: 'Not a YouTube URL.' });
     });
   });
 
@@ -486,26 +460,6 @@ describe('MediaLibraryService', () => {
       expect(seen.events).toEqual([
         { kind: 'job', job: download },
         { kind: 'saved', saved: { path: 'catalog/street/day_720p30.mp4' } },
-      ]);
-    });
-
-    it('importYoutube posts its request, streams the lines and refreshes the tree', () => {
-      const events: StreamEvent[] = [];
-      const youtube = {
-        url: 'https://youtu.be/abc',
-        target: '720p30' as const,
-        clip_start: 0,
-        clip_duration: 60,
-      };
-      library.importYoutube(youtube).subscribe((event) => events.push(event));
-      const request = http.expectOne('/api/import/youtube');
-      expect(request.request.body).toEqual(youtube);
-      request.flush('YouTube import complete.\n');
-      http.expectOne(TREE_URL).flush(mediaRoot([]));
-
-      expect(events).toEqual([
-        { kind: 'line', text: 'YouTube import complete.' },
-        { kind: 'done' },
       ]);
     });
   });

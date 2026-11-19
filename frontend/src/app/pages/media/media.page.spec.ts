@@ -8,10 +8,10 @@ import type { MediaEntry, MediaFileInfo, Slot } from '../../api.generated';
 import { ImportDialogs } from '../../sources/import-dialog';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { mediaFile, mediaFolder } from '../../sources/media.testing';
-import type { Progress } from '../../sources/progress-lines';
+import type { Progress } from '../../sources/jobs';
 import { SlotsService } from '../../sources/slots.service';
 import { fileSlot } from '../../sources/slots.testing';
-import { ApiRequestError } from '../../sources/stream-lines';
+import { ApiRequestError } from '../../sources/api-errors';
 import { FakeLocalStorage } from '../../fake-storage.testing';
 import { MediaPage } from './media.page';
 

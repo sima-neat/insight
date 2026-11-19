@@ -15,7 +15,7 @@ import { boardUrl } from '../board/api';
 import { BOARD_GONE_CODES, BoardProblem } from '../board/board-error';
 import { BoardService } from '../board/board.service';
 import { LatestOnly, visiblePoller } from '../polling';
-import { withRequestErrors } from '../sources/stream-lines';
+import { withRequestErrors } from '../sources/api-errors';
 import type {
   DeleteAnswer,
   RunMetadata,

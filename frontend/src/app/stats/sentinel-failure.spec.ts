@@ -1,5 +1,5 @@
 import { BoardProblem } from '../board/board-error';
-import { ApiRequestError } from '../sources/stream-lines';
+import { ApiRequestError } from '../sources/api-errors';
 import {
   MAX_POLL_MS,
   POLL_MS,

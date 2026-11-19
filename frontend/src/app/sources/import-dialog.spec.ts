@@ -1,24 +1,18 @@
 import { Location } from '@angular/common';
 import { provideLocationMocks } from '@angular/common/testing';
-import { Component, getDebugNode, inject, type Type } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
-import { NeatButton } from '@sima/neat-ui';
-import { NeatInput } from '@sima/neat-ui/input';
-import { NeatSelect } from '@sima/neat-ui/select';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { YoutubePreview } from './api';
 import type { CatalogAsset, CatalogIndex } from './catalog';
 import { ImportDialogs } from './import-dialog';
 import type { ImportKind } from './import-runner';
 import {
-  done,
   FakeLibrary,
   FakeSlots,
   FakeToasts,
   fileSlot,
   jobFailed,
-  lines,
   preparing,
   refuse,
   saved,
@@ -83,18 +77,6 @@ const CATALOG: CatalogIndex = {
     }),
     asset({ path: 'street/1080_hevc.mp4', profile: '1080p30', codec: 'hevc', target_height: 1080 }),
   ],
-};
-
-const PREVIEW: YoutubePreview = {
-  video_id: 'abc',
-  normalized_url: 'https://www.youtube.com/watch?v=abc',
-  embed_url: 'https://www.youtube.com/embed/abc?start=30',
-  thumbnail_url: '',
-  clip_start: 30,
-  title: 'Street walk',
-  duration: 600,
-  is_live: false,
-  live_status: 'not_live',
 };
 
 describe('ImportDialog', () => {
@@ -166,10 +148,6 @@ describe('ImportDialog', () => {
     [...dialog()!.querySelectorAll<HTMLElement>('[role="tab"]')].find(
       (one) => one.textContent?.trim() === name,
     )!;
-  const field = (label: string): HTMLInputElement =>
-    [...dialog()!.querySelectorAll('label')]
-      .find((one) => one.querySelector('span')?.textContent?.trim() === label)!
-      .querySelector('input')!;
   const list = (label: string) =>
     dialog()!.querySelector<HTMLElement>(`[role="listbox"][aria-label="${label}"]`)!;
   const options = (label: string) => [
@@ -196,12 +174,6 @@ describe('ImportDialog', () => {
 
   async function click(element: HTMLElement | undefined): Promise<void> {
     element!.click();
-    await settle();
-  }
-
-  async function type(input: HTMLInputElement, value: string): Promise<void> {
-    input.value = value;
-    input.dispatchEvent(new Event('input'));
     await settle();
   }
 
@@ -477,6 +449,11 @@ describe('ImportDialog', () => {
       rows: [['720p30', 'H.265', '1280x720', '1.0 MB']],
     });
     expect(text()).toContain('A narrow alley');
+    // The summary beside the preview has no actions, so no box for them; the footer's has.
+    expect(dialog()!.querySelector('app-import-preview .actions')).toBeNull();
+    expect(
+      dialog()!.querySelector('app-import-preview ~ app-import-summary .actions'),
+    ).not.toBeNull();
 
     await click(tab('Catalog by asset type'));
     await click(options('Catalog assets')[1]);
@@ -601,124 +578,6 @@ describe('ImportDialog', () => {
     expect(dialog()).toBeNull();
     expect(opener.result).toBe('catalog/street/1080_hevc.mp4');
     expect(toasts.status).toHaveBeenCalledWith('Imported 2 catalog asset(s).');
-  });
-
-  it('YouTube import needs a validated link and Cancel Import aborts it', async () => {
-    library.validateYoutube.mockResolvedValue(PREVIEW);
-    await open('youtube');
-    expect(button('Import')!.disabled).toBe(true);
-    expect(text()).toContain('Validate a YouTube link to show the preview before import.');
-
-    await type(field('YouTube URL'), 'https://youtu.be/abc?t=30');
-    await click(button('Validate'));
-    expect(library.validateYoutube).toHaveBeenCalledWith('https://youtu.be/abc?t=30');
-    expect(field('YouTube URL').value).toBe('https://www.youtube.com/watch?v=abc');
-    expect(field('Start Time').value).toBe('30');
-    expect(dialog()!.querySelector('iframe')!.getAttribute('src')).toBe(PREVIEW.embed_url);
-    expect(text()).toContain(
-      'Insight will import up to 5 minute(s) from 30 as 1080p30 H.264 with B-frames disabled.',
-    );
-    expect(text()).toContain('Ready to import YouTube video');
-
-    // A different link needs validating again.
-    await type(field('YouTube URL'), 'https://youtu.be/other');
-    expect(button('Import')!.disabled).toBe(true);
-    await type(field('YouTube URL'), 'https://youtu.be/abc?t=30');
-    await click(button('Validate'));
-
-    await click(button('Import'));
-    expect(library.last.body).toEqual({
-      url: 'https://www.youtube.com/watch?v=abc',
-      target: '1080p30',
-      clip_start: '30',
-      clip_duration: 300,
-    });
-    expect(button('Importing...')!.disabled).toBe(true);
-    await click(button('Cancel Import'));
-
-    expect(library.last.unsubscribed).toBe(true);
-    expect(toasts.status).toHaveBeenCalledWith('YouTube import canceled.');
-    expect(dialog()).not.toBeNull();
-    expect(button('Cancel Import')).toBeUndefined();
-  });
-
-  it('lines up the YouTube row: kit fields, and every control in it of the small size', async () => {
-    await open('youtube');
-    const row = dialog()!.querySelector('app-import-youtube .form')!;
-    const sizeOf = <T extends { size: () => string }>(element: Element, type: Type<T>) =>
-      getDebugNode(element)!.injector.get(type).size();
-
-    expect([...row.querySelectorAll('neat-field label > span')].map(text)).toEqual([
-      'YouTube URL',
-      'Start Time',
-    ]);
-    expect(
-      [...row.querySelectorAll('neat-field input')].map((input) => sizeOf(input, NeatInput)),
-    ).toEqual(['small', 'small']);
-    expect(
-      [...row.querySelectorAll('neat-select')].map((select) => sizeOf(select, NeatSelect)),
-    ).toEqual(['small', 'small']);
-    expect(sizeOf(row.querySelector(':scope > button')!, NeatButton)).toBe('small');
-  });
-
-  it('a live link says the clip length caps the import, as #170 did', async () => {
-    library.validateYoutube.mockResolvedValue({ ...PREVIEW, is_live: true });
-    await open('youtube');
-    await type(field('YouTube URL'), 'https://youtu.be/abc');
-    await click(button('Validate'));
-    const notes = [...dialog()!.querySelectorAll('app-import-preview p')].map(text);
-    expect(notes).toEqual([
-      'https://www.youtube.com/watch?v=abc',
-      'Live stream import is clipped to the selected duration.',
-      'Insight will import up to 5 minute(s) from 30 as 1080p30 H.264 with B-frames disabled.',
-    ]);
-    // The summary beside the preview has no actions, so no box for them; the footer has.
-    expect(dialog()!.querySelector('app-import-preview .actions')).toBeNull();
-    expect(
-      dialog()!.querySelector('app-import-preview ~ app-import-summary .actions'),
-    ).not.toBeNull();
-  });
-
-  it('a validation that fails without a message says it could not validate the link', async () => {
-    library.validateYoutube.mockRejectedValue(undefined);
-    await open('youtube');
-    await type(field('YouTube URL'), 'https://youtu.be/abc');
-    await click(button('Validate'));
-    expect(alert()).toBe('Could not validate YouTube URL.');
-  });
-
-  it('a failed YouTube import keeps the dialog open and shows the whole failure', async () => {
-    library.validateYoutube.mockResolvedValue(PREVIEW);
-    await open('youtube');
-    await type(field('YouTube URL'), 'https://youtu.be/abc');
-    await click(button('Validate'));
-    await click(button('Import'));
-    lines(
-      library.last,
-      'Downloading YouTube video: 12%',
-      'YouTube import failed: ERROR: unable to download video data',
-      'HTTP Error 403: Forbidden',
-    );
-    done(library.last);
-    await settle();
-
-    const failure =
-      'YouTube import failed: ERROR: unable to download video data\nHTTP Error 403: Forbidden';
-    expect(dialog()).not.toBeNull();
-    expect(alert()).toBe(failure.replace('\n', ' '));
-    expect(toasts.error).toHaveBeenCalledWith(failure);
-    expect(button('Import')!.disabled).toBe(false);
-  });
-
-  it('the preview frames YouTube’s embed page only', async () => {
-    library.validateYoutube.mockResolvedValue({
-      ...PREVIEW,
-      embed_url: 'https://example.com/embed/abc',
-    });
-    await open('youtube');
-    await type(field('YouTube URL'), 'https://youtu.be/abc');
-    await click(button('Validate'));
-    expect(dialog()!.querySelector('iframe')!.src).toBe('about:blank');
   });
 
   it('a drop holding files Insight cannot import uploads the rest and names those', async () => {

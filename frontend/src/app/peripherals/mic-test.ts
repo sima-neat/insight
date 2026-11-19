@@ -3,7 +3,7 @@ import { DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { boardUrl } from '../board/api';
 import { problemOf } from '../board/board-error';
-import { withRequestErrors } from '../sources/stream-lines';
+import { withRequestErrors } from '../sources/api-errors';
 import type { MicrophoneItem, MicTestAnswer, MicTestRequest, MicTestStatus } from './api';
 import {
   MIC_TEST_IDLE,

@@ -1,5 +1,5 @@
 import { BoardProblem, problemOf } from '../board/board-error';
-import { ApiRequestError } from '../sources/stream-lines';
+import { ApiRequestError } from '../sources/api-errors';
 import type { PreviewSession } from './api';
 import { resolveSelection } from './camera-modes';
 import { imx477, imx568, previewSession, sel } from './cameras.testing';

@@ -13,9 +13,29 @@ export interface paths {
         };
         /**
          * Whether Insight is up
-         * @description Frozen: the SDK's network test and other tools check `status == "ok"`. While Insight is still starting its services, it answers 503 with `status: "starting"`.
+         * @description Frozen: the SDK's network test and other tools check `status == "ok"`. Insight answers once its services have started, so an answer is always `ok`.
          */
         readonly get: operations["getHealth"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/openapi.yaml": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * This document
+         * @description The API's description as the server was built with it, OpenAPI 3.0 in YAML: every route, its parameters, bodies, answers and errors. Read it to call the API or generate a client.
+         */
+        readonly get: operations["getOpenAPIDocument"];
         readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
@@ -1326,8 +1346,8 @@ export interface components {
             readonly sdk_channel_limited: boolean;
         };
         readonly Health: {
-            /** @enum {string} */
-            readonly status: "ok" | "starting";
+            /** @description Always `ok`. */
+            readonly status: string;
             /** @description Always `neat-insight`. */
             readonly service: string;
             /** @description The server's time in UTC, ISO 8601 with a `Z`. */
@@ -2111,13 +2131,24 @@ export interface operations {
                     readonly "application/json": components["schemas"]["Health"];
                 };
             };
-            /** @description Insight is still starting. */
-            readonly 503: {
+        };
+    };
+    readonly getOpenAPIDocument: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The document. */
+            readonly 200: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["Health"];
+                    readonly "application/yaml": string;
                 };
             };
         };

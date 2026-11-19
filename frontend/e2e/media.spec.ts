@@ -466,17 +466,6 @@ const CATALOG = {
   ],
 };
 
-const YOUTUBE_PREVIEW = {
-  video_id: 'abc',
-  normalized_url: 'https://www.youtube.com/watch?v=abc',
-  embed_url: 'https://www.youtube.com/embed/abc',
-  thumbnail_url: '',
-  title: 'Street walk',
-  duration: 600,
-  is_live: false,
-  live_status: 'not_live',
-};
-
 const importDialog = (page: Page) => page.getByRole('dialog', { name: 'Import media' });
 const dialogButton = (page: Page, name: string) =>
   importDialog(page).getByRole('button', { name, exact: true });
@@ -491,15 +480,10 @@ const choose = (page: Page, ...names: string[]) =>
 
 test.describe('Import with mocked APIs', () => {
   test.beforeEach(async ({ page }) => {
-    // Nothing leaves the machine: the catalog's previews and YouTube's player are stubbed.
+    // Nothing leaves the machine: the catalog's previews are stubbed.
     await page.route(
       (url) => url.hostname === 'artifacts.neat.sima.ai',
       (route) => route.abort(),
-    );
-    await page.route(
-      (url) => url.hostname.endsWith('youtube.com'),
-      (route) =>
-        route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Player</title>' }),
     );
   });
 
@@ -733,87 +717,6 @@ test.describe('Import with mocked APIs', () => {
         importDialog(page).getByRole('listbox', { name: 'Catalog variants' }),
       ).toBeVisible();
       expect(await height()).toBe(local);
-      await tab('YouTube').click();
-      await expect(importDialog(page).getByLabel('YouTube URL')).toBeVisible();
-      expect(await height()).toBe(local);
     }
-  });
-
-  test('the YouTube row lines up: names on one baseline, controls level with Validate', async ({
-    page,
-  }) => {
-    await withMockedMedia(page);
-    await page.setViewportSize(LAPTOP);
-    await page.goto('/media');
-    await tool(page, 'Import…').click();
-    await importDialog(page).getByRole('tab', { name: 'YouTube', exact: true }).click();
-    const row = importDialog(page).locator('app-import-youtube .form');
-    await expect(row.getByRole('button', { name: 'Validate' })).toBeVisible();
-
-    // Under the URL, which spans the row: target, start, length and Validate side by side.
-    const edges = await row.evaluate((form) => {
-      const box = (element: Element) => element.getBoundingClientRect();
-      const named = (text: string) =>
-        [...form.querySelectorAll('label, span')].find(
-          (element) => element.textContent?.trim() === text && element.children.length === 0,
-        )!;
-      const combos = [...form.querySelectorAll('[role="combobox"]')];
-      const controls = [
-        combos[0],
-        form.querySelectorAll('neat-field input')[1],
-        combos[1],
-        form.querySelector(':scope > button')!,
-      ].map(box);
-      const names = ['Target Resolution & FPS', 'Start Time', 'Clip Length'].map(
-        (text) => box(named(text)).bottom,
-      );
-      return {
-        tops: controls.map((control) => Math.round(control.top)),
-        bottoms: controls.map((control) => Math.round(control.bottom)),
-        names: names.map(Math.round),
-      };
-    });
-    expect(new Set(edges.tops).size, `control tops ${edges.tops}`).toBe(1);
-    expect(new Set(edges.bottoms).size, `control bottoms ${edges.bottoms}`).toBe(1);
-    expect(new Set(edges.names).size, `name baselines ${edges.names}`).toBe(1);
-  });
-
-  test('a YouTube link is validated before import, and Cancel Import aborts the import', async ({
-    page,
-  }) => {
-    await withMockedMedia(page);
-    await page.route(
-      (url) => url.pathname === '/api/import/youtube/validate',
-      (route) => route.fulfill({ json: YOUTUBE_PREVIEW }),
-    );
-    // The import never answers: it runs until cancelled.
-    await page.route(
-      (url) => url.pathname === '/api/import/youtube',
-      () => undefined,
-    );
-    await page.goto('/media');
-    await tool(page, 'Import…').click();
-    await importDialog(page).getByRole('tab', { name: 'YouTube' }).click();
-    await expect(dialogButton(page, 'Import')).toBeDisabled();
-
-    await importDialog(page).getByLabel('YouTube URL').fill('https://youtu.be/abc');
-    await dialogButton(page, 'Validate').click();
-    await expect(importDialog(page).getByLabel('YouTube URL')).toHaveValue(
-      'https://www.youtube.com/watch?v=abc',
-    );
-    await expect(importDialog(page)).toContainText('Ready to import YouTube video');
-
-    const aborted = page.waitForEvent(
-      'requestfailed',
-      (request) => new URL(request.url()).pathname === '/api/import/youtube',
-    );
-    await dialogButton(page, 'Import').click();
-    await expect(importDialog(page)).toContainText('Importing YouTube video');
-    await dialogButton(page, 'Cancel Import').click();
-
-    await aborted;
-    await expect(toast(page, 'YouTube import canceled.')).toBeVisible();
-    await expect(importDialog(page)).toBeVisible();
-    await expect(dialogButton(page, 'Cancel Import')).toHaveCount(0);
   });
 });

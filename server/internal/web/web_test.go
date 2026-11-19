@@ -1,14 +1,15 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"insight/api"
 	"insight/internal/config"
-	"insight/internal/legacy"
 )
 
 func serve(t *testing.T, h http.Handler, method, target string) *httptest.ResponseRecorder {
@@ -25,19 +26,12 @@ func marker(name string) http.Handler {
 var fixed = func() time.Time { return time.Date(2026, 11, 18, 21, 0, 0, 123456000, time.UTC) }
 
 func TestHealth(t *testing.T) {
-	ready := false
 	h := NewHandler(Deps{
 		Config: config.Config{Network: config.Network{BrowserICEAddress: "10.0.0.5", BrowserICEAddressSource: "CONTAINER_HOST_IP"}},
-		Ready:  func() bool { return ready },
 		UI:     marker("ui"),
 		Now:    fixed,
 	})
 	w := serve(t, h, http.MethodGet, "/api/health")
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status %d while starting", w.Code)
-	}
-	ready = true
-	w = serve(t, h, http.MethodGet, "/api/health")
 	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("status %d, cache %q", w.Code, w.Header().Get("Cache-Control"))
 	}
@@ -64,20 +58,13 @@ func TestHealth(t *testing.T) {
 }
 
 func TestRouting(t *testing.T) {
-	h := NewHandler(Deps{
-		Legacy:         marker("legacy"),
-		LegacyPrefixes: legacy.Prefixes,
-		UI:             marker("ui"),
-		Now:            fixed,
-	})
+	h := NewHandler(Deps{UI: marker("ui"), Now: fixed})
 	cases := []struct {
 		target, want string // "" is the new server's own answer, with status
 		status       int
 	}{
 		{"/", "ui", http.StatusOK},
 		{"/viewer", "ui", http.StatusOK},
-		{"/api/import/youtube/validate", "legacy", http.StatusOK},
-		{"/swagger-ui-assets/swagger-ui.css", "legacy", http.StatusOK},
 		{"/media", "ui", http.StatusOK}, // the Media page; files are /api/media/file
 		{"/media/clip.mp4", "ui", http.StatusOK},
 		{"/mediafile", "ui", http.StatusOK},
@@ -96,12 +83,24 @@ func TestRouting(t *testing.T) {
 	}
 }
 
-func TestAnUnknownAPIRouteWithoutTheOldBackend(t *testing.T) {
+func TestAnUnknownAPIRoute(t *testing.T) {
 	h := NewHandler(Deps{UI: marker("ui"), Now: fixed})
-	w := serve(t, h, http.MethodGet, "/api/nothing")
-	var body struct{ Error struct{ Code string } }
-	json.Unmarshal(w.Body.Bytes(), &body)
-	if w.Code != http.StatusNotFound || body.Error.Code != "not_found" {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
+	// The old backend's routes among them: nothing behind the server answers them any more.
+	for _, target := range []string{"/api/nothing", "/api/docs", "/api/openapi.json", "/api/import/youtube"} {
+		w := serve(t, h, http.MethodGet, target)
+		var body struct{ Error struct{ Code string } }
+		json.Unmarshal(w.Body.Bytes(), &body)
+		if w.Code != http.StatusNotFound || body.Error.Code != "not_found" || w.Header().Get("Content-Type") != "application/json" {
+			t.Errorf("%s: %d %s %s", target, w.Code, w.Header().Get("Content-Type"), w.Body.String())
+		}
+	}
+}
+
+func TestTheAPIDocument(t *testing.T) {
+	h := NewHandler(Deps{UI: marker("ui"), Now: fixed})
+	w := serve(t, h, http.MethodGet, "/api/openapi.yaml")
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/yaml" ||
+		!bytes.Equal(w.Body.Bytes(), api.Document) || !bytes.HasPrefix(api.Document, []byte("openapi: 3.")) {
+		t.Fatalf("%d %s, %d bytes", w.Code, w.Header().Get("Content-Type"), w.Body.Len())
 	}
 }

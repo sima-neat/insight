@@ -43,8 +43,9 @@ import (
 // must be answered at least once, so a route and its description cannot drift apart.
 
 func init() {
-	// The streams' and files' types, read as the binary strings the document says they are.
-	for _, contentType := range []string{"multipart/x-mixed-replace", "image/jpeg", "video/mp4", "audio/wav"} {
+	// The streams', files' and the document's own types, read as the binary strings the document
+	// says they are.
+	for _, contentType := range []string{"multipart/x-mixed-replace", "image/jpeg", "video/mp4", "audio/wav", "application/yaml"} {
 		openapi3filter.RegisterBodyDecoder(contentType, openapi3filter.FileBodyDecoder)
 	}
 	openapi3filter.RegisterBodyDecoder("text/event-stream", openapi3filter.PlainBodyDecoder)
@@ -53,8 +54,11 @@ func init() {
 func TestTheAPIAnswersAsItsDocumentSays(t *testing.T) {
 	c := newContract(t)
 
-	// The Viewer's routes.
+	// The service's own routes.
 	c.ok(c.get("/api/health"))
+	c.ok(c.get("/api/openapi.yaml"))
+
+	// The Viewer's routes.
 	c.ok(c.get("/api/channels"))
 	c.ok(c.send(http.MethodPost, "/api/channels/0/offer", `{"type":"offer","sdp":"v=0"}`))
 	c.ok(c.get("/api/ingest/stats?all=1&verbose=1"))

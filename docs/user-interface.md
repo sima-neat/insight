@@ -50,13 +50,12 @@ Workspace is especially useful when an application produces several build output
 
 ## Media Sources
 
-Media Sources is where you add and manage media files used for application tests. Select **Import Media** to open the import dialog, then choose one of three sources:
+Media Sources is where you add and manage media files used for application tests. Select **Import Media** to open the import dialog, then choose one of two sources:
 
 - **Local files**: Choose or drag and drop one or more files from your computer. H.264 MP4 uploads are normalized for low-latency playback with B-frames disabled while preserving the source frame rate.
 - **Catalog**: Import from SiMa's curated video catalog for repeatable tests with known assets. Browse by asset type or name, search the catalog, filter by resolution, frame rate, and codec, preview a video, then import one variant or select and import several matching assets.
-- **YouTube**: Paste a regular YouTube video URL, validate it to display a preview, and choose a start time, clip length, and output profile. Insight supports 1-, 3-, or 5-minute clips at `1080p30`, `720p30`, or `480p30`. The imported clip is converted to WebRTC-friendly H.264 with B-frames disabled. Active live streams are not supported; use a regular video or an archived live stream.
 
-Catalog and YouTube imports require network access. Insight displays progress while it downloads and prepares the media, then saves the result in the local media library.
+Catalog imports require network access. Insight displays progress while it downloads and prepares the media, then saves the result in the local media library.
 
 Supported video formats include common container formats such as `mp4`, `mov`, `avi`, `mkv`, and `webm`. Insight also recognizes MJPEG assets and HEVC/H.265 media for codec-aware streaming. MJPEG and HEVC media are preserved so they can be streamed with their original codec behavior.
 
@@ -72,7 +71,7 @@ cannot be ticked and untick nothing. Dragging over rows does not tick them.
 
 ![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
 
-Media Sources combines importing, file selection, preview, metadata inspection, and delete actions in one view. Imported catalog assets are stored under `catalog/`, and YouTube clips are stored under `youtube/`, so you can identify how files entered the library.
+Media Sources combines importing, file selection, preview, metadata inspection, and delete actions in one view. Imported catalog assets are stored under `catalog/`, so you can identify how files entered the library.
 
 ## Streaming Sources
 

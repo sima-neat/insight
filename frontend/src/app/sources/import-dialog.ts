@@ -19,7 +19,6 @@ import { CatalogTabState, ImportCatalog } from './import-catalog';
 import { ImportLocal } from './import-local';
 import { type ImportKind, ImportRunner } from './import-runner';
 import { ImportSession } from './import-session';
-import { ImportYoutube, YoutubeTabState } from './import-youtube';
 
 /**
  * Opens the import dialog, from Media's Import… and from the picker's Import… in Streaming.
@@ -42,8 +41,8 @@ export class ImportDialogs {
 }
 
 /**
- * The import dialog (spec, Media import; Inv-SM §1.1): Local files, Catalog and YouTube, each a
- * tab of its own, and under them the work `ImportRunner` runs: its progress, a name clash waiting
+ * The import dialog (spec, Media import; Inv-SM §1.1): Local files and Catalog, each a tab of
+ * its own, and under them the work `ImportRunner` runs: its progress, a name clash waiting
  * for an answer (Replace / Keep both / Skip), and why it failed. The dialog holds the runner while
  * it is open, so the work reports here; when the dialog goes while work runs (leaving the page),
  * the runner moves it into a toast. It closes itself once its work went through, and cannot be
@@ -54,7 +53,6 @@ export class ImportDialogs {
   imports: [
     ImportCatalog,
     ImportLocal,
-    ImportYoutube,
     NeatButton,
     NeatDialogBody,
     NeatErrorNote,
@@ -63,7 +61,7 @@ export class ImportDialogs {
     NeatTab,
     NeatTabs,
   ],
-  providers: [ImportSession, CatalogTabState, YoutubeTabState],
+  providers: [ImportSession, CatalogTabState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './import-dialog.html',
   styleUrl: './import-dialog.css',
@@ -87,9 +85,9 @@ export class ImportDialog {
     if (running) void inject(ImportSession).run(() => running);
 
     // Focus follows the work. A clash puts it on Keep both, the answer that loses nothing. When
-    // the control that had it goes (an answered clash, Cancel Import) or is disabled (the drop
-    // zone, an Import button), it moves to the work's status: the dialog's focus trap does not
-    // take back focus that has fallen to the page.
+    // the control that had it goes (an answered clash) or is disabled (the drop zone, an Import
+    // button), it moves to the work's status: the dialog's focus trap does not take back focus
+    // that has fallen to the page.
     let wasBusy = false;
     let hadClash = false;
     afterRenderEffect(() => {

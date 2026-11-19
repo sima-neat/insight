@@ -1,9 +1,7 @@
 // Command neat-insight is the Neat Insight server: the web UI and its API over HTTPS, and the
 // services behind them, run as supervised children.
 //
-// The `neat-insight` command of the Python package runs this binary with the same arguments and
-// names its interpreter in NEAT_INSIGHT_PYTHON, which runs the old backend until the rewrite
-// has moved everything here.
+// The `neat-insight` command of the Python package runs this binary with the same arguments.
 package main
 
 import (
@@ -27,7 +25,6 @@ import (
 	"insight/internal/certs"
 	"insight/internal/channels"
 	"insight/internal/config"
-	"insight/internal/legacy"
 	"insight/internal/peripherals"
 	"insight/internal/spa"
 	"insight/internal/supervisor"
@@ -77,11 +74,6 @@ func run() error {
 		return err
 	}
 	slog.Info("starting", "version", version, "place", cfg.Place, "data", cfg.DataDir, "certificate", pair.Source)
-
-	python := os.Getenv("NEAT_INSIGHT_PYTHON")
-	if python == "" {
-		return errors.New("NEAT_INSIGHT_PYTHON is not set: start Insight with the neat-insight command")
-	}
 
 	bin, err := binaryFolder()
 	if err != nil {
@@ -140,27 +132,19 @@ func run() error {
 		slog.Info("board", "selected", selected.Target().Label(), "source", selected.Target().Source)
 	}
 
-	backend, err := legacy.Start(ctx, sup, legacy.Options{Python: python, Output: os.Stdout})
-	if err != nil {
-		return err
-	}
-
 	server := &http.Server{
 		Addr: ":" + strconv.Itoa(cfg.Port),
 		Handler: web.NewHandler(web.Deps{
-			Config:         cfg,
-			Ready:          backend.Ready,
-			Channels:       viewer,
-			Slots:          srcs.slots,
-			Library:        srcs.library,
-			Jobs:           srcs.jobs,
-			Boards:         boards,
-			Peripherals:    devices,
-			System:         system.New(system.Options{Version: version, Config: cfg}),
-			Host:           system.NewHostReader("/proc", cfg.DataDir),
-			Legacy:         backend.Handler(),
-			LegacyPrefixes: legacy.Prefixes,
-			UI:             spa.Handler(spa.Files()),
+			Config:      cfg,
+			Channels:    viewer,
+			Slots:       srcs.slots,
+			Library:     srcs.library,
+			Jobs:        srcs.jobs,
+			Boards:      boards,
+			Peripherals: devices,
+			System:      system.New(system.Options{Version: version, Config: cfg}),
+			Host:        system.NewHostReader("/proc", cfg.DataDir),
+			UI:          spa.Handler(spa.Files()),
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
@@ -174,8 +158,6 @@ func run() error {
 	case <-ctx.Done():
 		slog.Info("stopping")
 	case serveErr = <-served:
-	case <-backend.Process().Done():
-		serveErr = errors.New("the backend stopped and will not restart")
 	}
 
 	// Streams (MJPEG) never finish on their own: give requests a moment, then close them all.
@@ -185,8 +167,7 @@ func run() error {
 		server.Close()
 	}
 	// Then what the requests used: the board's preview and microphone test and its connection,
-	// the slots' publishers and encodes, the relays, the jobs; then the children, MediaMTX and
-	// the old backend.
+	// the slots' publishers and encodes, the relays, the jobs; then the children, MediaMTX.
 	devices.Close()
 	boards.Close()
 	closeSources()

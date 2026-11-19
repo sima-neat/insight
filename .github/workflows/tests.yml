@@ -28,12 +28,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Install Insight
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-
+      # The scripts' tests (the media assets, the test feed) need nothing beyond the standard library.
       - name: Python tests
         env:
           # ffmpeg is installed above; a missing one must fail the test-feed metadata tests, not skip them.

@@ -4,7 +4,7 @@ import type { Slot } from '../../api.generated';
 import { CamerasService } from '../../sources/cameras.service';
 import { allCommitsSucceeded, type CommitResult } from '../../sources/fps';
 import { SlotsService } from '../../sources/slots.service';
-import { messageOf } from '../../sources/stream-lines';
+import { messageOf } from '../../sources/api-errors';
 
 /** How a start ended: started (the slot is on its way), or skipped because its rate commit failed. */
 export type StartOutcome = 'started' | 'skipped';

@@ -1,6 +1,6 @@
 ---
 title: REST API Reference
-description: Automate Neat Insight with its OpenAPI document, Swagger UI, and HTTP endpoints.
+description: Automate Neat Insight with its OpenAPI document and HTTP endpoints.
 sidebar_position: 6
 ---
 
@@ -8,22 +8,13 @@ sidebar_position: 6
 
 Insight exposes its browser control plane as an HTTP API. You can use it to automate health checks, media imports, streaming-source setup, viewer discovery, workspace inspection, and runtime diagnostics.
 
-The running service publishes two API documentation endpoints:
-
-- `GET /api/docs` opens the interactive Swagger UI.
-- `GET /api/openapi.json` returns the OpenAPI 3.1 document for client generation and other tooling.
-
-For a default local installation, open:
-
-```text
-https://127.0.0.1:9900/api/docs
-```
+The running service describes its API at `GET /api/openapi.yaml`: the OpenAPI 3.0 document, in YAML, for client generation and other tooling.
 
 Insight normally uses a locally generated development certificate. Command-line clients may need to trust that certificate or use `-k` for local diagnostics:
 
 ```bash
 curl -k https://127.0.0.1:9900/api/health
-curl -k https://127.0.0.1:9900/api/openapi.json -o neat-insight-openapi.json
+curl -k https://127.0.0.1:9900/api/openapi.yaml -o neat-insight-openapi.yaml
 ```
 
 ## Common automation flow
@@ -63,19 +54,18 @@ A slot published to by something other than Insight reports `state: "external"` 
 
 - Most endpoints return JSON. Errors generally use `{"error": "message"}` with an HTTP error status.
 - Uploads and imports return `text/plain` streaming progress rather than a single JSON object.
-- `/api/neat-metrics` is a server-sent event stream.
 - MJPEG preview and source endpoints return multipart image streams.
 - Media and workspace raw-file endpoints return the requested binary content.
 
-The Swagger UI uses the same host as Insight, so its **Try it out** requests target the current installation. Operations such as delete, reset, start, and stop change service state immediately.
+Operations such as delete, reset, start, and stop change service state immediately.
 
 ## API groups
 
 The OpenAPI document groups operations by purpose:
 
 - **Service and system** — health, environment, build details, metrics, logs, and optional tools.
-- **Diagnostics** — RTP ingest, WebRTC egress, and server-sent metrics.
-- **Media library and imports** — catalog, YouTube, upload, delete, inspect, preview, and download.
+- **Diagnostics** — RTP ingest and WebRTC egress.
+- **Media library and imports** — catalog, upload, delete, inspect, preview, and download.
 - **Media sources** — assignment and RTSP/HTTP playback control.
 - **Viewer** — browser-reachable viewer URL and configured channel capacity.
 - **Workspace** — browse, search, inspect, and preview workspace files and MPK archive members.
@@ -84,4 +74,4 @@ The OpenAPI document groups operations by purpose:
 - **Peripherals** — list the MIPI and USB cameras and ALSA microphones that SiMa Sentinel reports on the selected board, start, inspect, stream, or stop a temporary camera preview, and test a microphone through the API.
 - **Sentinel** — check for and install SiMa Sentinel on the selected board, read the board's telemetry, start and stop traces, and list, inspect, delete, and compare saved runs.
 
-The raw OpenAPI file is also maintained in the Insight repository at `neat_insight/openapi.json`. Tests compare its operations with Flask's registered `/api` routes so new endpoints cannot be added silently without updating the reference.
+The OpenAPI document is maintained in the Insight repository at `server/api/openapi.yaml`, the source the server's routes are generated from. A contract test checks the server's answers against it, so a route cannot change without its description.

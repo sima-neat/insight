@@ -4,7 +4,7 @@ import { type FilePreview, PreviewFrame } from './preview-frame';
 
 /**
  * What an import would bring in, shown before it: the preview box, with what the caller projects
- * over it (a player, or why there is no preview), and its summary beside it once there is one.
+ * over it (why there is no preview), and its summary beside it once there is one.
  */
 @Component({
   selector: 'app-import-preview',

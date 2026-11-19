@@ -4,8 +4,8 @@
 > used to rebuild the Insight frontend in Angular on a new UI kit. It started from upstream commit `829ec7c`
 > with fresh history (see [`UPSTREAM.md`](UPSTREAM.md)), and the React frontend and the org-level release
 > workflows were removed. On this branch the backend is being rewritten from scratch as one Go server
-> (`server/`), which runs the old Python backend behind it until it has replaced it; what apps rely
-> on is in [`docs/contracts.md`](docs/contracts.md).
+> (`server/`), which has replaced the old Python backend; what apps rely on is in
+> [`docs/contracts.md`](docs/contracts.md).
 > The rest of this README describes upstream Insight, and `docs/` still describes the upstream UI until the
 > Angular frontend reaches parity.
 

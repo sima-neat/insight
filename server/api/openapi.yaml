@@ -14,8 +14,8 @@ paths:
       operationId: getHealth
       summary: Whether Insight is up
       description: >-
-        Frozen: the SDK's network test and other tools check `status == "ok"`. While Insight is
-        still starting its services, it answers 503 with `status: "starting"`.
+        Frozen: the SDK's network test and other tools check `status == "ok"`. Insight answers
+        once its services have started, so an answer is always `ok`.
       responses:
         "200":
           description: Insight is up.
@@ -23,12 +23,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
-        "503":
-          description: Insight is still starting.
+  /api/openapi.yaml:
+    get:
+      operationId: getOpenAPIDocument
+      summary: This document
+      description: >-
+        The API's description as the server was built with it, OpenAPI 3.0 in YAML: every route,
+        its parameters, bodies, answers and errors. Read it to call the API or generate a client.
+      responses:
+        "200":
+          description: The document.
           content:
-            application/json:
+            application/yaml:
               schema:
-                $ref: "#/components/schemas/Health"
+                type: string
+                format: binary
   /api/channels:
     get:
       operationId: listChannels
@@ -1542,7 +1551,7 @@ components:
       properties:
         status:
           type: string
-          enum: [ok, starting]
+          description: Always `ok`.
         service:
           type: string
           description: Always `neat-insight`.

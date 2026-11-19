@@ -13,11 +13,10 @@ import type {
   MediaUpload,
 } from '../api.generated';
 import { LatestOnly } from '../polling';
-import type { YoutubeImportRequest, YoutubePreview, YoutubeValidateRequest } from './api';
+import { withRequestErrors } from './api-errors';
 import type { CatalogIndex } from './catalog';
 import { isFinal, JobEvents, JobFailedError } from './jobs';
 import { SlotsService } from './slots.service';
-import { postStreamedText, withRequestErrors, type StreamEvent } from './stream-lines';
 
 const TREE_URL = '/api/media';
 
@@ -211,26 +210,6 @@ export class MediaLibraryService {
         finalize(() => void this.refresh().catch(() => undefined)),
       );
     });
-  }
-
-  /** What a YouTube link would import; rejects with the server's reason when it cannot. */
-  validateYoutube(url: string): Promise<YoutubePreview> {
-    const body: YoutubeValidateRequest = { url };
-    return firstValueFrom(
-      this.http
-        .post<YoutubePreview>('/api/import/youtube/validate', body)
-        .pipe(withRequestErrors()),
-    );
-  }
-
-  /**
-   * Imports a YouTube clip through the old backend, which reports in streamed lines (read them
-   * with `youtubeProgress`); unsubscribing aborts it. The tree is fetched again however it ends.
-   */
-  importYoutube(request: YoutubeImportRequest): Observable<StreamEvent> {
-    return postStreamedText(this.http, '/api/import/youtube', request).pipe(
-      finalize(() => void this.refresh().catch(() => undefined)),
-    );
   }
 
   /**

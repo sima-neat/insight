@@ -62,7 +62,7 @@ import {
   type SlotRow,
   slotOutput,
 } from '../../sources/slot-row';
-import { messageOf } from '../../sources/stream-lines';
+import { messageOf } from '../../sources/api-errors';
 import { type EmptySourceForm, SourcesSession } from '../sources-session';
 
 /** Which form the source switch shows. */

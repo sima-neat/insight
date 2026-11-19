@@ -39,8 +39,5 @@ COPY neat_insight/bin /app/neat_insight/bin
 # Expose required ports
 EXPOSE 9900 9000-9079 9100-9179 8081 8554 8889 8189/udp
 
-# Set environment variables for Flask (used by neat_insight.app:main)
-ENV FLASK_APP=neat_insight.app
-
 # Run the neat-insight application
 CMD ["neat-insight"]

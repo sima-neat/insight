@@ -5,7 +5,7 @@ import type { Slot } from '../../api.generated';
 import { CamerasService } from '../../sources/cameras.service';
 import { SlotsService } from '../../sources/slots.service';
 import { fileSlot, webcamSlot } from '../../sources/slots.testing';
-import { ApiRequestError } from '../../sources/stream-lines';
+import { ApiRequestError } from '../../sources/api-errors';
 import { SlotControl } from './slot-control';
 
 /** Resolves or rejects when the test says. */

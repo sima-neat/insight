@@ -27,7 +27,7 @@ import { MediaLibraryService } from '../../sources/media-library.service';
 import { filePreview, PreviewFrame } from '../../sources/preview-frame';
 import { SlotsService } from '../../sources/slots.service';
 import { slotName, SLOTS_NOT_CHECKED } from '../../sources/slot-row';
-import { messageOf } from '../../sources/stream-lines';
+import { messageOf } from '../../sources/api-errors';
 import { mediaInfoRows } from './media-info';
 
 /**

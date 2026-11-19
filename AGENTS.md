@@ -11,12 +11,11 @@ UI kit, `@sima/neat-ui` (repo `justin-guth-sima/neat-ui`). Its design notes are 
 repo.
 
 - `frontend/`: the Angular app. The server embeds its build (`frontend/dist`).
-- `server/`: the new backend, one Go binary, which is being rewritten from scratch on
-  `feat/backend-rewrite` (see "The server" below). It listens on `--port`, serves the web UI and
-  the routes it implements, and runs the old backend behind it for the rest.
-- `neat_insight/`: the old Flask backend, which keeps the few routes the server does not have yet
-  (see "The old backend" below), run by the server on a loopback port until the rewrite has
-  replaced it, and the `neat-insight` command (`launcher.py`), which runs the server binary.
+- `server/`: the backend, one Go binary, which is being rewritten from scratch on
+  `feat/backend-rewrite` (see "The server" below). It listens on `--port` and serves the web UI
+  and the API.
+- `neat_insight/`: the Python package that ships the server: the `neat-insight` command
+  (`launcher.py`), which runs the server binary, and the metadata test tools (`tools/`).
 - `webrtc/mediamtx.yml`: MediaMTX's configuration, all that is left of vf's folder (the server's
   channels replaced vf). The build copies it beside the server's binary, which renders it for
   MediaMTX at start (see "MediaMTX" below).
@@ -324,7 +323,7 @@ merging.
 
 `server/` is a Go module (its `go.mod` names the Go version). `neat-insight --port 9900` (the
 Python package's command, `neat_insight/launcher.py`) execs `neat_insight/bin/neat-insight` with
-the same arguments and names its interpreter in `NEAT_INSIGHT_PYTHON`.
+the same arguments.
 
 - **The API is described first.** `server/api/openapi.yaml` is the source; `go generate ./...` in
   `server/` writes the Go types and routing (`api/api.gen.go`, oapi-codegen, a `tool` in `go.mod`),
@@ -333,13 +332,16 @@ the same arguments and names its interpreter in `NEAT_INSIGHT_PYTHON`.
   Handlers may answer with a package's own types where they match the schema:
   `internal/web/contract_test.go` sends requests to the real handlers and checks every request and
   answer against the YAML (statuses documented, no field the schema does not name), and fails
-  while any operation of the YAML goes unanswered. A new route needs a call there.
-- **Errors have one shape**, `{"error": {"code", "message", "hint"?}}` (`internal/apierr`).
+  while any operation of the YAML goes unanswered. A new route needs a call there. The server
+  serves the YAML itself at `GET /api/openapi.yaml` (embedded at build time, `api.Document`), so
+  agents and tools read the API from the running server.
+- **Errors have one shape**, `{"error": {"code", "message", "hint"?}}` (`internal/apierr`). A
+  path under `/api/` that names no route answers it with 404 `not_found`.
 - **Startup** (`cmd/neat-insight`): the configuration is resolved once (`internal/config`: where
   Insight runs, its data folder, the hosted-mode files sima-cli writes, the SDK's port map), then
   the certificate (`internal/certs`: the SDK's, a valid earlier one, or a new one from mkcert,
-  which Insight never installs), then the channels, MediaMTX, the sources, the board registry and
-  the old backend.
+  which Insight never installs), then the channels, MediaMTX, the sources and the board
+  registry; the server listens once they have started, so `/api/health` always answers `ok`.
   The programs Insight ships (`mediamtx`, its `mediamtx.yml`, `ffmpeg_nodelay.so`) are found beside
   the server's binary (`neat_insight/bin/`); ffmpeg and ffprobe on `PATH`. Shutdown runs the other
   way: the HTTP server, then the board's preview and microphone test and its connection, the
@@ -348,14 +350,9 @@ the same arguments and names its interpreter in `NEAT_INSIGHT_PYTHON`.
   restarted with back-off when it is a service, its PID in `<data>/run/` so the next start stops
   what a crashed run left behind (and only that: the PID must still run the same program and lead
   its own group).
-- **The old backend** (`internal/legacy`) is a child: Flask with `--behind-proxy` on a free
-  loopback port, plain HTTP. Every `/api/` and `/swagger-ui-assets/` request the server does not
-  handle is passed to it, with the browser's host and `X-Forwarded-Proto: https`, streamed. Each
-  phase of the rewrite moves routes from it to the server: `/api/health` first, then the
-  channels, then the sources and the media library, then the board, Peripherals, Stats and System
-  Info. It no longer starts MediaMTX or frees its ports, and runs no webssh. What it still serves:
-  the YouTube import (`/api/import/youtube*`, saving into the same media folder) and its own
-  `/api/health`. Workspace, GenAI Studio's relay and the profiling stream were removed, not moved.
+- **Dropped, not moved:** the old Python backend's Workspace, GenAI Studio relay, profiling
+  stream, YouTube import and API docs page (`/api/docs`, `/api/openapi.json`) are not in the
+  server; `/api/openapi.yaml` replaces the document.
 - **MediaMTX** (`internal/mediamtx`) is the server's child, restarted when it exits: its
   configuration is the shipped `mediamtx.yml` rendered into `<data>/run/` with this run's API
   password and publisher tag (readable by the owner only), and its WHIP listener serves the
@@ -454,9 +451,10 @@ Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 
 The server's checks run in `server/`: `gofmt -l .`, `go vet ./...`, `go test -race ./...`, and
 `go generate ./...` after a change to `api/openapi.yaml`. The tests against a real MediaMTX run
-when `NEAT_INSIGHT_MEDIAMTX` names its program (CI downloads it), and skip otherwise. The old
-backend's tests run from the repo root with `python -m unittest discover -s tests`. Run lint, the unit tests and the build
-before opening a PR; CI (`.github/workflows/tests.yml`) runs the same.
+when `NEAT_INSIGHT_MEDIAMTX` names its program (CI downloads it), and skip otherwise. The
+scripts' tests (the media assets, the test feed) run from the repo root with
+`python -m unittest discover -s tests`. Run lint, the unit tests and the build before opening a
+PR; CI (`.github/workflows/tests.yml`) runs the same.
 
 To try a branch in the Neat SDK container on `:9900`, run `scripts/deploy-sdk-dev.sh` from this
 checkout with Node 24 and Go on `PATH` (`--no-frontend` skips the frontend build, `--restore`

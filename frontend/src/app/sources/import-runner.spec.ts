@@ -1,17 +1,15 @@
 import { TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { of } from 'rxjs';
-import type { YoutubeImportRequest } from './api';
+import { ApiRequestError } from './api-errors';
 import type { CatalogAsset } from './catalog';
 import { ImportRunner } from './import-runner';
 import {
-  done,
   FakeLibrary,
   FakeSlots,
   FakeToasts,
   fileSlot,
   jobFailed,
-  lines,
   preparing,
   refuse,
   saved,
@@ -20,7 +18,6 @@ import {
 } from './import.testing';
 import { type LibraryEvent, MediaLibraryService } from './media-library.service';
 import { SlotsService } from './slots.service';
-import { ApiRequestError } from './stream-lines';
 
 const asset = (path: string): CatalogAsset => ({
   source_id: 'street',
@@ -38,13 +35,6 @@ const asset = (path: string): CatalogAsset => ({
   height: 720,
   url: '',
 });
-
-const YOUTUBE: YoutubeImportRequest = {
-  url: 'https://youtu.be/a',
-  target: '720p30',
-  clip_start: 0,
-  clip_duration: 60,
-};
 
 describe('ImportRunner', () => {
   let library: FakeLibrary;
@@ -285,34 +275,6 @@ describe('ImportRunner', () => {
       'Uploaded and prepared 0/1 file(s). a.mp4: The server did not say what it saved.',
     );
     expect(runner.busy()).toBe(false);
-  });
-
-  it('a YouTube import reads its lines to the end and reports the first failure with its diagnostics', async () => {
-    const outcome = runner.importYoutube(YOUTUBE);
-    lines(library.last, 'Downloading YouTube video: 12%');
-    expect(runner.progress()).toEqual({
-      title: 'Downloading YouTube video',
-      detail: '720p30',
-      percent: 12,
-    });
-    lines(library.last, 'YouTube import failed: ERROR: unavailable', 'HTTP Error 403');
-    done(library.last);
-
-    await expect(outcome).resolves.toEqual({ ok: false, path: null });
-    expect(runner.failure()).toBe('YouTube import failed: ERROR: unavailable\nHTTP Error 403');
-  });
-
-  it('a YouTube import saves where its lines say, and is cancelled by aborting its request', async () => {
-    const first = runner.importYoutube(YOUTUBE);
-    lines(library.last, 'Saved YouTube media to youtube/a.mp4', 'YouTube import complete.');
-    done(library.last);
-    await expect(first).resolves.toEqual({ ok: true, path: 'youtube/a.mp4' });
-
-    const second = runner.importYoutube(YOUTUBE);
-    runner.cancel();
-    await expect(second).resolves.toEqual({ ok: false, path: null });
-    expect(library.last.unsubscribed).toBe(true);
-    expect(toasts.status).toHaveBeenCalledWith('YouTube import canceled.');
   });
 
   it('refuses to start while work runs', async () => {

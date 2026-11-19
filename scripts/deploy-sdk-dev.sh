@@ -9,8 +9,8 @@ DEV=$HOME/workspace/.insight-dev            # == /workspace/.insight-dev inside 
 C=${INSIGHT_SDK_CONTAINER:-$(docker ps --format '{{.Names}}' | grep -m1 'sima-neat-sdk' || true)}
 [[ -n "$C" ]] || { echo "SDK container not running (set INSIGHT_SDK_CONTAINER to pick one)"; exit 1; }
 
-# The server (bin/neat-insight) stops the old backend it runs, and that stops MediaMTX.
-# A dev copy deployed before the server existed ran the backend from .venv/bin/neat-insight.
+# The server (bin/neat-insight) stops MediaMTX, its child, when it stops. A dev copy deployed
+# before the server existed ran the Python backend from .venv/bin/neat-insight.
 stop_dev() {
   docker exec "$C" bash -c '
     for p in $(pgrep -f "^/workspace/.insight-dev/(neat_insight/bin/neat-insight|.venv/bin/python3 .*neat-insight) "); do kill $p; done
@@ -25,7 +25,7 @@ if [[ "${1:-}" == "--restore" ]]; then
   curl -sk https://127.0.0.1:9900/api/health; echo; exit 0
 fi
 
-[[ -f "$REPO/neat_insight/app.py" ]] || { echo "not an insight checkout: $REPO"; exit 1; }
+[[ -f "$REPO/server/go.mod" ]] || { echo "not an insight checkout: $REPO"; exit 1; }
 if [[ "${1:-}" != "--no-frontend" ]]; then
   # Standalone commands, not `... && echo`: set -e ignores a failure on the left of && - a failed
   # build used to fall through and deploy the old dist.

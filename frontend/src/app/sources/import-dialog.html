@@ -1,15 +1,12 @@
 <neat-dialog-body>
   <div class="import">
-    <p neatNote>Upload local files, import catalog assets, or bring in a YouTube video.</p>
+    <p neatNote>Upload local files or import catalog assets.</p>
     <neat-tabs label="Import source" [(value)]="tab">
       <neat-tab label="Local files" value="local">
         <ng-template><app-import-local /></ng-template>
       </neat-tab>
       <neat-tab label="Catalog" value="catalog">
         <ng-template><app-import-catalog /></ng-template>
-      </neat-tab>
-      <neat-tab label="YouTube" value="youtube">
-        <ng-template><app-import-youtube /></ng-template>
       </neat-tab>
     </neat-tabs>
 

@@ -23,7 +23,7 @@ import {
   revealIn,
 } from '../../sources/media-browser';
 import { MediaLibraryService, toFileNodes } from '../../sources/media-library.service';
-import { messageOf } from '../../sources/stream-lines';
+import { messageOf } from '../../sources/api-errors';
 
 /**
  * The content of the "Source for srcN" dialog that the side panel's Change… opens: the media

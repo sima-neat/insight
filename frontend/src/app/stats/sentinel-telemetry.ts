@@ -14,7 +14,7 @@ import { boardUrl } from '../board/api';
 import { BOARD_GONE_CODES } from '../board/board-error';
 import { BoardService } from '../board/board.service';
 import { LatestOnly, visiblePoller } from '../polling';
-import { withRequestErrors } from '../sources/stream-lines';
+import { withRequestErrors } from '../sources/api-errors';
 import type { SentinelCache, SentinelHealthAnswer } from './api';
 import type { SentinelReading } from './daemon-view';
 import {

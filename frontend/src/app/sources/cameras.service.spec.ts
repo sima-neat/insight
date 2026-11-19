@@ -7,7 +7,7 @@ import { CamerasService } from './cameras.service';
 import { FakeCameraMedia, FakeCameraStream, FakePeer } from './cameras.testing';
 import { SlotsService } from './slots.service';
 import { fileSlot, webcamSlot } from './slots.testing';
-import { ApiRequestError } from './stream-lines';
+import { ApiRequestError } from './api-errors';
 
 const DESK = { kind: 'videoinput', deviceId: 'cam-desk', label: 'Desk camera' };
 const LAPTOP = { kind: 'videoinput', deviceId: 'cam-laptop', label: 'Laptop camera' };

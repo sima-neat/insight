@@ -34,16 +34,8 @@ setup(
     packages=find_packages(exclude=["neat_insight.bin*"]),
     include_package_data=True,
     zip_safe=False,
-    install_requires=[
-        "flask",
-        "psutil",
-        "cryptography>=41.0.5,<45",
-        "yt-dlp",
-    ],
     package_data={
         "neat_insight": [
-            "openapi.json",
-            "swagger_ui/*",
             # The server, with the web UI built in, and the MediaMTX it runs.
             "bin/neat-insight",
             "bin/mediamtx",
@@ -60,7 +52,6 @@ setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
-        "Framework :: Flask",
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.10",

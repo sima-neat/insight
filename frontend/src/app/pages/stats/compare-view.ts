@@ -27,7 +27,7 @@ import { BOARD_GONE_CODES } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
 import { LatestOnly } from '../../polling';
 import { Announcement } from '../../announcement';
-import { withRequestErrors } from '../../sources/stream-lines';
+import { withRequestErrors } from '../../sources/api-errors';
 import type { CompareExport } from '../../stats/api';
 import {
   ALL_GROUPS,

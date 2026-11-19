@@ -11,6 +11,12 @@ Use the neat-insight HTTP API as the control plane for media management, streami
 
 Default local backend URL is `https://127.0.0.1:9900`. The service uses a local mkcert certificate in normal development, so local API clients may need to trust mkcert or pass an insecure TLS option for diagnostics.
 
+The server describes its whole API at `GET /api/openapi.yaml`: the OpenAPI 3.0 document it was built from, in YAML, with every route, its parameters, request bodies, answers and error codes. Read it for endpoint-level details this skill leaves out, or to generate a client:
+
+```bash
+curl -k https://127.0.0.1:9900/api/openapi.yaml -o neat-insight-openapi.yaml
+```
+
 User-facing documentation lives at `https://developer.sima.ai/software/tools/insight/`. Read that documentation when the user asks for conceptual guidance, SDK usage, UI workflows, or installation instructions rather than endpoint-level API details.
 
 Insight is bundled with the Neat Development Environment and can also be installed on a Modalix DevKit with `sima-cli neat install insight@<ref>`. In the SDK, Insight provides RTSP media-source control and WebRTC video rendering from inside the SDK container while exposing host ports that external devices, including a DevKit, can connect to.
@@ -104,6 +110,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Return service identity, status, UTC timestamp, and the startup-scoped browser ICE address/public origin applied by Insight. |
+| `GET` | `/api/openapi.yaml` | Return the API's OpenAPI document (YAML), as the server was built with it. |
 | `GET` | `/api/channels` | Return every Viewer channel with its video, metadata, viewers, and recent errors (see [Channels](#channels)). |
 | `GET` | `/api/ingest/stats` | Return the same counters in the older, frozen shape that the SDK's tests read. |
 
@@ -235,8 +242,6 @@ The media library is the folder the Media page shows and the slots stream from: 
 | `POST` | `/api/catalog/imports` | JSON `{"path": "<asset path>"}` | 202 with a job that downloads the asset into `catalog/<source>/`, checks its size and SHA-256, and saves it (a taken name as `name_2`). |
 | `GET` | `/api/renditions` | None | `{count, bytes, in_use}` of the frame-rate renditions the slots keep in the library's hidden `.renditions` folder. |
 | `DELETE` | `/api/renditions` | None | `{removed, freed_bytes, kept}`: removes every rendition but those a slot streams or is about to. |
-
-YouTube imports are still the old backend's (`/api/import/youtube/validate`, `/api/import/youtube`) and save into the same library.
 
 Examples:
 
@@ -409,7 +414,7 @@ To follow the Live history, read `cache` once, then send the newest sample's `ti
 
 ## Error Handling
 
-Most JSON API errors return `{"error": "message"}` with an HTTP error status. Routes the Go server serves (the channels, the slots, the media library, the jobs, the boards, Peripherals, Sentinel, System Info) answer `{"error": {"code", "message", "hint"}}` instead, `hint` only when there is one; branch on `code`. Common statuses are:
+Every API error answers `{"error": {"code", "message", "hint"}}` with an HTTP error status, `hint` only when there is one; branch on `code`. A path under `/api/` that names no route is 404 `not_found`. Common statuses are:
 
 - `400` for missing or invalid request fields.
 - `404` for missing media files, slots, jobs or runs, and for a board id that is not the selected board's.

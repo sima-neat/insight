@@ -31,13 +31,13 @@ import {
   revealIn,
 } from '../../sources/media-browser';
 import { MediaLibraryService, toFileNodes } from '../../sources/media-library.service';
-import type { Progress } from '../../sources/progress-lines';
+import type { Progress } from '../../sources/jobs';
 import { SlotsColumn } from '../../sources/slots-column';
 import { SlotsService } from '../../sources/slots.service';
 import { slotName, slotState } from '../../sources/slot-row';
 import { SourcesSession } from '../sources-session';
 import { MediaPanel } from './media-panel';
-import { messageOf } from '../../sources/stream-lines';
+import { messageOf } from '../../sources/api-errors';
 
 /** "src3 · Live, src9 · Idle": the slots a file is assigned to, with their state as Streaming words it. */
 function inUseText(slots: readonly Slot[], encodes: ReadonlyMap<number, Progress>): string {

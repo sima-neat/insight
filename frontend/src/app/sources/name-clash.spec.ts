@@ -1,6 +1,6 @@
+import { ApiRequestError } from './api-errors';
 import { isArchiveUpload, nameClash, skippedText, uploadConflict } from './name-clash';
 import { fileSlot } from './slots.testing';
-import { ApiRequestError } from './stream-lines';
 
 const CONFLICT = { existing: 'clip.mp4', suggested: 'clip_2.mp4' };
 

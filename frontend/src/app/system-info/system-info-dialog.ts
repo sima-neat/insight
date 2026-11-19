@@ -19,7 +19,7 @@ import { NeatDialog, NeatDialogActions, NeatDialogBody, NeatDialogRef } from '@s
 import { NeatErrorNote } from '@sima/neat-ui/field';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { Announcement } from '../announcement';
-import { messageOf, withRequestErrors } from '../sources/stream-lines';
+import { messageOf, withRequestErrors } from '../sources/api-errors';
 import type { HostReadings, SystemInfo } from './api';
 import { hostNotice, hostView } from './host-readings';
 import {

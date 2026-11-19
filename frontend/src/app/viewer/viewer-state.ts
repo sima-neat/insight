@@ -38,7 +38,7 @@ export function parseChannelIndices(
 export interface ViewerParams {
   /** The channel subset, unparsed: `parseChannelIndices` needs the limit, which may come later. */
   readonly src: string | null;
-  /** The channel limit the link carries, or null to ask Flask (`/api/viewer-url`). */
+  /** The channel limit the link carries, or null to ask the server (`/api/viewer-url`). */
   readonly maxChannels: number | null;
   /** The colour scheme for this page load, or null to keep the user's own. */
   readonly mode: NeatColorScheme | null;

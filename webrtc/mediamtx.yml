@@ -7,19 +7,19 @@ logLevel: info
 # Lets browsers publish a webcam straight into MediaMTX over WHIP; the
 # resulting stream is then available as RTSP on the same path, same as an
 # ffmpeg-pushed video file. webrtcServerCert/webrtcServerKey are supplied at
-# launch (see neat_insight/utils.py start_processes) via the MTX_WEBRTC*
+# launch (see server/internal/mediamtx/spec.go) via the MTX_WEBRTC*
 # environment overrides, so the WHIP endpoint reuses Insight's own trusted
 # mkcert/SDK certificate instead of shipping a second one here.
 #
 # webrtcEncryption stays `no` here only so MediaMTX still starts if this config
-# is ever launched without Insight. start_processes() always overrides it to
+# is ever launched without Insight. The server always overrides it to
 # `yes` together with the cert pair, and the frontend only ever posts its WHIP
 # offer to https://, so the listener is TLS in every supported deployment.
 webrtc: yes
 webrtcAddress: :8889
 webrtcEncryption: no
-# The WHIP POST is cross-origin by construction: the page is served by Flask
-# on its own port and posts to this listener on 8889. There is nothing to
+# The WHIP POST is cross-origin by construction: the page is served by
+# Insight's server on its own port and posts to this listener on 8889. There is nothing to
 # protect with a tighter origin — publishing needs no credentials and the
 # listener is only reachable where Insight itself is.
 webrtcAllowOrigin: '*'
@@ -36,12 +36,11 @@ webrtcLocalUDPAddress: :8189
 # than this, or it gives up on a camera MediaMTX would still have accepted.
 webrtcTrackGatherTimeout: 10s
 
-# Backs the "is this webcam actually publishing" status Insight polls per
-# source (see neat_insight/mediasrc.py webcam_is_publishing) and the detection
-# of external publishers (neat_insight/mediamtx.py); loopback-only, never
-# exposed outside the container/host. Not MediaMTX's default 9997: that is
-# the Neat GenAI Studio model server's control port, and Insight frees this port
-# at startup (neat_insight/utils.py), which would stop the Studio.
+# The slots' only way to MediaMTX (server/internal/mediamtx): what publishes on
+# each path, whether a webcam is publishing, external publishers to report or
+# take over; loopback-only, never exposed outside the container/host. Not
+# MediaMTX's default 9997: that is the Neat GenAI Studio model server's control
+# port.
 api: yes
 apiAddress: 127.0.0.1:9901
 apiAllowOrigin: 'http://127.0.0.1'
@@ -62,14 +61,14 @@ pathDefaults:
   overridePublisher: no
 
 # Webcam ingest + normalization. A browser WHIP-publishes its camera to
-# cam{N} (see neat_insight/mediasrc.py webcam_ingest_path_name), NOT to src{N}. A
+# cam{N} (see server/internal/slots/publish.go camName), NOT to src{N}. A
 # browser's WebRTC stream is encoded for a video call: sparse keyframes and
 # whatever H.264 profile it negotiates, which the board's hardware decoder and
 # GStreamer rtspsrc cannot consume (rtspsrc fails waiting for a keyframe; the
 # decoder rejects a non-baseline profile). runOnReady transcodes cam{N} to
 # baseline H.264 with a keyframe every second and republishes it on src{N} —
 # the same normalized shape a file source's ffmpeg already produces
-# (neat_insight/mediasrc.py _codec_args) — so a webcam is directly consumable
+# (server/internal/slots/levels.go) — so a webcam is directly consumable
 # by the viewer and by detection apps with no manual ffmpeg hop. MediaMTX owns
 # this process: it starts when the browser publishes, restarts on failure, and
 # is killed when the browser leaves. The pattern is bounded to 1..48 to match
@@ -86,7 +85,7 @@ paths:
   #
   # The ?publisher= query on the output marks src{N} as Insight's own stream, not
   # an external publisher; Insight swaps in its per-run tag at launch
-  # (neat_insight/mediamtx.py render_config).
+  # (server/internal/mediamtx/config.go RenderConfig).
   #
   # -r 30 is required, not cosmetic: a WebRTC webcam has no fixed framerate, so
   # libx264 cannot compute an H.264 level and emits the maximum (6.2), which the

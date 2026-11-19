@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { computed, DestroyRef, DOCUMENT, inject, Injectable, signal } from '@angular/core';
 import { firstValueFrom, type Observable } from 'rxjs';
 import { LatestOnly } from '../polling';
-import { withRequestErrors } from '../sources/stream-lines';
+import { withRequestErrors } from '../sources/api-errors';
 import {
   boardUrl,
   selectedTarget,

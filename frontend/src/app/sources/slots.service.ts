@@ -14,9 +14,8 @@ import type {
   SlotStopResult,
 } from '../api.generated';
 import { LatestOnly, visiblePoller } from '../polling';
-import { JobEvents, jobProgress } from './jobs';
-import type { Progress } from './progress-lines';
-import { ApiRequestError, withRequestErrors } from './stream-lines';
+import { JobEvents, jobProgress, type Progress } from './jobs';
+import { ApiRequestError, withRequestErrors } from './api-errors';
 
 const SLOTS_URL = '/api/slots';
 const RENDITIONS_URL = '/api/renditions';

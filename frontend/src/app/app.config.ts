@@ -12,7 +12,7 @@ export const appConfig: ApplicationConfig = {
     // The tab reads `Neat Insight · <route title>`, or the app name alone on untitled routes.
     provideNeatTitles(APP_NAME),
     // XHR, not the default fetch backend: only XHR reports upload progress, which the import
-    // dialog's byte progress needs (`postStreamedText`), and it gives the same streamed text.
+    // dialog's byte progress needs.
     provideHttpClient(withXhr()),
     provideNeatUi(),
   ],

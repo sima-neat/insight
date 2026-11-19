@@ -1,7 +1,6 @@
 import { inject, Injectable, InjectionToken } from '@angular/core';
 import { concat, Observable, of } from 'rxjs';
 import type { Job } from '../api.generated';
-import type { Progress } from './progress-lines';
 
 /**
  * The server's jobs (`/api/jobs`): long work with progress, such as a rendition's encode, an
@@ -42,6 +41,14 @@ export class JobFailedError extends Error {
     );
     this.name = 'JobFailedError';
   }
+}
+
+/** How far a piece of work is, as the app shows it: a job (`jobProgress`), an upload's bytes. */
+export interface Progress {
+  title: string;
+  detail: string;
+  /** 0..100, or null while the length of the work is unknown. */
+  percent: number | null;
 }
 
 /**

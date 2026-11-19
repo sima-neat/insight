@@ -1,4 +1,2 @@
 recursive-include neat_insight/bin *
 recursive-include neat_insight/tools *
-include neat_insight/openapi.json
-recursive-include neat_insight/swagger_ui *

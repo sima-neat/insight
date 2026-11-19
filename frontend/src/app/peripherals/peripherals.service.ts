@@ -6,7 +6,7 @@ import { boardUrl } from '../board/api';
 import { BOARD_GONE_CODES, problemOf, type BoardProblem } from '../board/board-error';
 import { BoardService } from '../board/board.service';
 import { LatestOnly } from '../polling';
-import { withRequestErrors } from '../sources/stream-lines';
+import { withRequestErrors } from '../sources/api-errors';
 import type { Peripherals, PeripheralSnapshot, SnapshotBoard } from './api';
 import { snapshotOf } from './catalog';
 import { countLabel } from './devices';

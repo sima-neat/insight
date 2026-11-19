@@ -21,11 +21,11 @@ import type {
 import { CamerasService } from '../../sources/cameras.service';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { mediaFile, mediaFolder } from '../../sources/media.testing';
-import type { Progress } from '../../sources/progress-lines';
+import type { Progress } from '../../sources/jobs';
 import type { SlotRow } from '../../sources/slot-row';
 import { SlotsService } from '../../sources/slots.service';
 import { fileSlot, publisher, pull, slot, webcamSlot } from '../../sources/slots.testing';
-import { ApiRequestError } from '../../sources/stream-lines';
+import { ApiRequestError } from '../../sources/api-errors';
 import type { Camera } from '../../sources/webcam-publishing';
 import { radioLabel } from '../../radio-label.testing';
 import { FakeLocalStorage } from '../../fake-storage.testing';

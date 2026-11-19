@@ -1,22 +1,21 @@
 import { computed, signal } from '@angular/core';
 import { Observable, Subject } from 'rxjs';
 import type { Job, MediaSaved, Slot } from '../api.generated';
-import type { YoutubeImportRequest, YoutubePreview } from './api';
+import { ApiRequestError } from './api-errors';
 import type { CatalogIndex } from './catalog';
 import { JobFailedError } from './jobs';
 import type { LibraryEvent, UploadOnConflict } from './media-library.service';
 import { job } from './slots.testing';
-import { ApiRequestError, type StreamEvent } from './stream-lines';
 
 export { fileSlot } from './slots.testing';
 
 /** Fakes for the import runner's and the import dialog's specs. */
 
 /** One request the fake library was asked for, answered by the test. */
-export interface Call<E = LibraryEvent | StreamEvent> {
+export interface Call {
   readonly url: string;
   readonly body: unknown;
-  readonly events: Subject<E>;
+  readonly events: Subject<LibraryEvent>;
   unsubscribed: boolean;
 }
 
@@ -25,16 +24,15 @@ export class FakeLibrary {
   readonly calls: Call[] = [];
 
   readonly catalog = vi.fn<() => Promise<CatalogIndex>>();
-  readonly validateYoutube = vi.fn<(url: string) => Promise<YoutubePreview>>();
 
   /** Like the real service: cold, and unsubscribing before the end aborts the request. */
-  private stream<E extends LibraryEvent | StreamEvent>(url: string, body: unknown): Observable<E> {
-    return new Observable<E>((subscriber) => {
+  private stream(url: string, body: unknown): Observable<LibraryEvent> {
+    return new Observable<LibraryEvent>((subscriber) => {
       const call: Call = { url, body, events: new Subject(), unsubscribed: false };
       this.calls.push(call);
       let ended = false;
       const subscription = call.events.subscribe({
-        next: (event) => subscriber.next(event as E),
+        next: (event) => subscriber.next(event),
         error: (failure: unknown) => {
           ended = true;
           subscriber.error(failure);
@@ -56,9 +54,6 @@ export class FakeLibrary {
   }
   importCatalog(path: string): Observable<LibraryEvent> {
     return this.stream('catalog', path);
-  }
-  importYoutube(request: YoutubeImportRequest): Observable<StreamEvent> {
-    return this.stream('youtube', request);
   }
 
   /** The newest request. */
@@ -124,15 +119,6 @@ export const saved = (call: Call, path: string, extra: Omit<MediaSaved, 'path'> 
 export const jobFailed = (call: Call, error: string) =>
   call.events.error(new JobFailedError(job({ state: 'failed', error })));
 
-/** Lines of the YouTube import's streamed response. */
-export const lines = (call: Call, ...texts: string[]) => {
-  for (const text of texts) call.events.next({ kind: 'line', text });
-};
-/** The end of the YouTube import's streamed response. */
-export const done = (call: Call) => {
-  call.events.next({ kind: 'done' });
-  call.events.complete();
-};
 /** The upload's name is taken: 409 `name_taken` with the clash, before anything was saved. */
 export const refuse = (call: Call, existing: string, suggested: string) =>
   call.events.error(

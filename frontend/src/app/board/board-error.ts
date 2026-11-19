@@ -1,5 +1,5 @@
 import type { BoardStatus, ErrorDetail, HostKeyChange } from '../api.generated';
-import { ApiRequestError, messageOf } from '../sources/stream-lines';
+import { ApiRequestError, messageOf } from '../sources/api-errors';
 
 /**
  * A board failure as the board's UI shows it: the message, the API's stable `code` and recovery

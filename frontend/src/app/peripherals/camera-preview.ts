@@ -5,7 +5,7 @@ import { boardUrl } from '../board/api';
 import { problemOf } from '../board/board-error';
 import { BoardService } from '../board/board.service';
 import { visiblePoller } from '../polling';
-import { withRequestErrors } from '../sources/stream-lines';
+import { withRequestErrors } from '../sources/api-errors';
 import type {
   CameraItem,
   CameraModeChoice,

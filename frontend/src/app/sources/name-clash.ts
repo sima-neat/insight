@@ -1,6 +1,6 @@
 import type { MediaConflict, Slot } from '../api.generated';
+import { ApiRequestError } from './api-errors';
 import { slotName, SLOTS_NOT_CHECKED } from './slot-row';
-import { ApiRequestError } from './stream-lines';
 
 /**
  * An upload whose name exists already (spec, "Name clashes"). The server decides: without an

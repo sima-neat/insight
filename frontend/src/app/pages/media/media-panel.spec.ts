@@ -8,7 +8,7 @@ import { MediaLibraryService } from '../../sources/media-library.service';
 import { videoInfo } from '../../sources/media.testing';
 import { SlotsService } from '../../sources/slots.service';
 import { fileSlot } from '../../sources/slots.testing';
-import { ApiRequestError } from '../../sources/stream-lines';
+import { ApiRequestError } from '../../sources/api-errors';
 import { MediaPanel } from './media-panel';
 
 const VIDEO = videoInfo('people/walk.mp4', { size: 5_452_595 });

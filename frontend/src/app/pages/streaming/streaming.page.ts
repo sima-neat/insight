@@ -46,7 +46,7 @@ import { MediaLibraryService } from '../../sources/media-library.service';
 import { isInUse, type SlotRow, slotRow } from '../../sources/slot-row';
 import { SlotsColumn } from '../../sources/slots-column';
 import { SlotsService } from '../../sources/slots.service';
-import { messageOf } from '../../sources/stream-lines';
+import { messageOf } from '../../sources/api-errors';
 import { SourcesSession } from '../sources-session';
 import {
   autoAssignedMessage,

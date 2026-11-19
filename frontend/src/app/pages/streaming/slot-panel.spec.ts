@@ -11,12 +11,12 @@ import { CamerasService, type CameraAccessState } from '../../sources/cameras.se
 import { ImportDialogs } from '../../sources/import-dialog';
 import { MediaLibraryService } from '../../sources/media-library.service';
 import { mediaFile, mediaFolder } from '../../sources/media.testing';
-import type { Progress } from '../../sources/progress-lines';
+import type { Progress } from '../../sources/jobs';
 import { slotRow } from '../../sources/slot-row';
 import type { PullRequest } from '../../sources/slots.service';
 import { SlotsService } from '../../sources/slots.service';
 import { fileSlot, publisher, pull, slot, webcamSlot } from '../../sources/slots.testing';
-import { ApiRequestError } from '../../sources/stream-lines';
+import { ApiRequestError } from '../../sources/api-errors';
 import type { Camera } from '../../sources/webcam-publishing';
 import { radioLabel } from '../../radio-label.testing';
 import { SourcesSession } from '../sources-session';

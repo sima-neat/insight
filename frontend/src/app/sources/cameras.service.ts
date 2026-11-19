@@ -4,7 +4,7 @@ import type { Slot } from '../api.generated';
 import { LatestOnly } from '../polling';
 import { CAMERA_MEDIA, type PublishPeer } from './camera-media';
 import { type PullRequest, SlotsService } from './slots.service';
-import { messageOf } from './stream-lines';
+import { messageOf } from './api-errors';
 import {
   camerasFromDevices,
   closeAllWebcamSessions,

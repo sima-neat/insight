@@ -76,24 +76,6 @@ func (e BoardTargetSource) Valid() bool {
 	}
 }
 
-// Defines values for HealthStatus.
-const (
-	HealthStatusOk       HealthStatus = "ok"
-	HealthStatusStarting HealthStatus = "starting"
-)
-
-// Valid indicates whether the value is a known member of the HealthStatus enum.
-func (e HealthStatus) Valid() bool {
-	switch e {
-	case HealthStatusOk:
-		return true
-	case HealthStatusStarting:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for HealthNetworkBrowserIceAddressSource.
 const (
 	HealthNetworkBrowserIceAddressSourceBrowserIceAddress HealthNetworkBrowserIceAddressSource = "browser-ice-address"
@@ -609,15 +591,14 @@ type Health struct {
 	Network HealthNetwork `json:"network"`
 
 	// Service Always `neat-insight`.
-	Service string       `json:"service"`
-	Status  HealthStatus `json:"status"`
+	Service string `json:"service"`
+
+	// Status Always `ok`.
+	Status string `json:"status"`
 
 	// Time The server's time in UTC, ISO 8601 with a `Z`.
 	Time string `json:"time"`
 }
-
-// HealthStatus defines model for Health.Status.
-type HealthStatus string
 
 // HealthNetwork How browsers reach Insight, as resolved at start.
 type HealthNetwork struct {
@@ -1738,6 +1719,9 @@ type ServerInterface interface {
 	// UploadMedia Upload a file or an archive into the library
 	// (POST /api/media/uploads)
 	UploadMedia(w http.ResponseWriter, r *http.Request)
+	// GetOpenAPIDocument This document
+	// (GET /api/openapi.yaml)
+	GetOpenAPIDocument(w http.ResponseWriter, r *http.Request)
 	// ClearRenditions Remove the renditions no slot streams
 	// (DELETE /api/renditions)
 	ClearRenditions(w http.ResponseWriter, r *http.Request)
@@ -3007,6 +2991,20 @@ func (siw *ServerInterfaceWrapper) UploadMedia(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// GetOpenAPIDocument operation middleware
+func (siw *ServerInterfaceWrapper) GetOpenAPIDocument(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOpenAPIDocument(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ClearRenditions operation middleware
 func (siw *ServerInterfaceWrapper) ClearRenditions(w http.ResponseWriter, r *http.Request) {
 
@@ -3475,6 +3473,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/health", wrapper.GetHealth)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/openapi.yaml", wrapper.GetOpenAPIDocument)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/channels", wrapper.ListChannels)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/channels/{channel}/offer", wrapper.OfferChannel)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/ingest/stats", wrapper.GetIngestStats)

@@ -38,7 +38,7 @@ import { ImportPreview } from './import-preview';
 import { ImportSummary } from './import-summary';
 import type { FilePreview } from './preview-frame';
 import { codecLabel } from './slot-row';
-import { messageOf } from './stream-lines';
+import { messageOf } from './api-errors';
 
 /** A catalog asset as a list row shows it: a cell per column, "-" for what the index omits. */
 interface AssetRow {

@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { BoardList, BoardTarget, SelectedBoard } from './api';
-import { messageOf } from '../sources/stream-lines';
+import { messageOf } from '../sources/api-errors';
 import { BoardProblem } from './board-error';
 import { BoardService } from './board.service';
 import { boardList, boardWith, MANUAL, selectedBoard } from './board.testing';

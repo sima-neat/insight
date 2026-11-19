@@ -5,7 +5,7 @@ import type { Slot } from '../api.generated';
 import { FakeEventSources } from './jobs.testing';
 import { SlotsService } from './slots.service';
 import { fileSlot, job, pull, slot, slotList, webcamSlot } from './slots.testing';
-import { ApiRequestError } from './stream-lines';
+import { ApiRequestError } from './api-errors';
 
 const SLOTS_URL = '/api/slots';
 const RENDITIONS_URL = '/api/renditions';

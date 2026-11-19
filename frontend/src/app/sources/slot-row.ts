@@ -1,7 +1,7 @@
 import type { NeatTone } from '@sima/neat-ui';
 import type { Slot, SlotPublisher, SlotPull, SlotReader } from '../api.generated';
 import { customRate } from './fps';
-import type { Progress } from './progress-lines';
+import type { Progress } from './jobs';
 import type { Camera } from './webcam-publishing';
 
 /**
