@@ -41,7 +41,7 @@ export const TOP_BAR_BOARD: BoardList = {
 export const TOP_BAR_BOARD_ID = DEVKIT.id;
 
 /** A board whose host name is far longer than the rail can show: entered by hand. */
-export const LONG_HOST = 'devkit-lab-bench-07.vision.corp.example.com';
+const LONG_HOST = 'devkit-lab-bench-07.vision.corp.example.com';
 const LONG_TARGET: BoardTarget = {
   id: `ssh:sima@${LONG_HOST}:22`,
   mode: 'ssh',
@@ -120,7 +120,7 @@ export async function answerTopBar(page: Page): Promise<void> {
 }
 
 /** The Streaming and Media pages' slots (`GET /api/slots`): `count` idle slots, none in use. */
-export function slotRows(count: number): Slot[] {
+function slotRows(count: number): Slot[] {
   return Array.from({ length: count }, (_, i) => ({
     n: i + 1,
     kind: 'none',

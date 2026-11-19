@@ -1,6 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import type { ChannelList } from '../api.generated';
 import { LatestOnly, visiblePoller } from '../polling';
 
 const CHANNELS_URL = '/api/channels';
@@ -9,20 +10,10 @@ const POLL_INTERVAL_MS = 2000;
 /**
  * The channels a `/api/channels` answer says receive video. It lists every channel the server
  * serves, live or not; a channel is live while its `video.active` is true (video arrived in the
- * last 3 s). Anything malformed is skipped, since this is JSON from over the network.
+ * last 3 s).
  */
-export function liveChannels(answer: unknown): ReadonlySet<number> {
-  const channels = (answer as { channels?: unknown } | null)?.channels;
-  const live = new Set<number>();
-  if (!Array.isArray(channels)) return live;
-  for (const entry of channels as unknown[]) {
-    const { channel, video } = (entry ?? {}) as { channel?: unknown; video?: unknown };
-    const active = (video as { active?: unknown } | null | undefined)?.active;
-    if (active === true && typeof channel === 'number' && Number.isInteger(channel)) {
-      live.add(channel);
-    }
-  }
-  return live;
+export function liveChannels({ channels }: ChannelList): ReadonlySet<number> {
+  return new Set(channels.filter(({ video }) => video.active).map(({ channel }) => channel));
 }
 
 /**
@@ -64,7 +55,7 @@ export class ChannelLiveness {
   private poll(): void {
     const request = this.latest.next();
     this.http
-      .get<unknown>(CHANNELS_URL)
+      .get<ChannelList>(CHANNELS_URL)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (answer) => this.settle(request, liveChannels(answer)),

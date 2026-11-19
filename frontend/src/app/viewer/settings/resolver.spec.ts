@@ -28,7 +28,7 @@ describe('viewer settings resolver', () => {
   it('the global line width is a whole number of pixels from 1 to 10', () => {
     // One width for every overlay line, defaulting to 3 px.
     const widthOf = (lineWidth: unknown) =>
-      settingsOverrides({ version: 4, general: { lineWidth } }).general.lineWidth;
+      settingsOverrides({ version: 10, general: { lineWidth } }).general.lineWidth;
 
     expect(widthOf(5)).toBe(5);
     expect(widthOf(2.6)).toBe(3);
@@ -39,7 +39,7 @@ describe('viewer settings resolver', () => {
 
   it('viewer synchronization settings preserve configured values', () => {
     const own = settingsOverrides({
-      version: 4,
+      version: 10,
       general: { videoSyncBufferMs: 700, metadataRetentionMs: 2500 },
     });
 
@@ -51,7 +51,7 @@ describe('viewer settings resolver', () => {
     // Deliberate change: the original kept these style keys (copied by Object.assign) although
     // nothing read them.
     const own = settingsOverrides({
-      version: 6,
+      version: 10,
       types: {
         'pose-estimation': {
           poseStrokeColor: '#123456',
@@ -62,21 +62,6 @@ describe('viewer settings resolver', () => {
     });
 
     expect(own.types['pose-estimation']).toBeUndefined();
-  });
-
-  it('a stored auxiliary object is not read, so a scope holding only that holds nothing', () => {
-    const own = settingsOverrides({
-      version: 10,
-      general: { lineWidth: 5 },
-      auxiliary: { 'blazepose-3d': { yawDegrees: 30, panelMode: 'expanded' } },
-    });
-
-    expect(own).toStrictEqual({ general: { lineWidth: 5 }, types: {} });
-    expect(
-      holdsSomething(
-        settingsOverrides({ version: 10, auxiliary: { 'blazepose-3d': { enabled: false } } }),
-      ),
-    ).toBe(false);
   });
 
   it('pins the metadata type defaults', () => {
@@ -108,7 +93,7 @@ describe('viewer settings resolver', () => {
 
   it('scope overrides are read without defaults', () => {
     expect(
-      settingsOverrides({ version: 4, general: { videoSyncBufferMs: 600 }, types: {} }).general,
+      settingsOverrides({ version: 10, general: { videoSyncBufferMs: 600 }, types: {} }).general,
     ).toStrictEqual({
       videoSyncBufferMs: 600,
     });
@@ -201,47 +186,16 @@ describe('viewer settings resolver', () => {
     expect(resolved.general.lineWidth).toBe(5);
   });
 
-  it('a legacy flat scope maps its keys and gives pose and classification nothing', () => {
-    // As the original's resolution read it: only its dialog's load copied the flat object into
-    // pose and classification, so `visible` and the pose keys never reached a tile.
-    const own = settingsOverrides({
-      showRoi: false,
-      confidenceThreshold: 0.4,
-      objects: [
-        { label: 'default', color: '#00FF00' },
-        { label: 'car', color: '#ff0000', style: 'dashed', width: 3 },
-      ],
-      trackingConfidenceThreshold: 0.2,
-      showTrackHistory: false,
-      trailLength: 500,
-      lostTrackTtlMs: 4000,
-      visible: false,
-      showKeypointLabels: true,
-      poseStrokeColor: '#123456',
-    });
-
-    expect(own).toStrictEqual({
-      general: { showRoi: false },
-      types: {
-        'object-detection': {
-          confidenceThreshold: 0.4,
-          objects: [{ label: 'car', color: '#ff0000', style: 'dashed', width: 3 }],
-        },
-        tracking: {
-          confidenceThreshold: 0.2,
-          history: { enabled: false, trailLength: 120, lostTrackTtlMs: 4000 },
-        },
-      },
-    });
-  });
-
-  it('a tracking scope of a supported version still accepts the flat history keys, which win', () => {
-    const own = settingsOverrides({
-      version: 7,
-      types: { tracking: { history: { enabled: true, trailLength: 30 }, showTrackHistory: false } },
-    });
-
-    expect(own.types.tracking).toStrictEqual({ history: { enabled: false, trailLength: 30 } });
+  it('a scope stored at another version, or at none, holds nothing', () => {
+    for (const version of [9, 11, '10', undefined]) {
+      expect(
+        settingsOverrides({ version, general: { lineWidth: 5, videoSyncBufferMs: 600 } }),
+      ).toStrictEqual(EMPTY_OVERRIDES);
+    }
+    // The first viewer's flat shape, with no version.
+    expect(settingsOverrides({ showRoi: false, confidenceThreshold: 0.4 })).toStrictEqual(
+      EMPTY_OVERRIDES,
+    );
   });
 
   it('class rows normalize their fields and drop rows without a label', () => {
@@ -271,8 +225,10 @@ describe('viewer settings resolver', () => {
       'text',
       42,
       [],
+      null,
       { version: 10, general: null, types: 'x' },
       { version: 10, types: { tracking: { history: 5 } } },
+      { version: 10, general: [1, 2], types: [3] },
     ]) {
       expect(settingsOverrides(raw)).toStrictEqual({ general: {}, types: {} });
     }

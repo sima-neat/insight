@@ -1,9 +1,8 @@
 import { Routes } from '@angular/router';
 
 /**
- * One lazily loaded route per page, titled with the page's rail label. The old React app's paths
- * keep working: its aliases `/rtsp` and `/visualizer` redirect to their pages, and `/` and every
- * unknown path (old `/workspace` and `/genai` bookmarks included) land on Streaming.
+ * One lazily loaded route per page, titled with the page's rail label. `/` and every unknown path
+ * land on Streaming.
  *
  * Stats has three views, each with its own address so that it can be bookmarked or shared: Live
  * (`/stats`), Runs (`/stats/runs`) and Compare (`/stats/runs/compare?runs=…`). Live and Runs are
@@ -43,8 +42,6 @@ export const routes: Routes = [
       { path: 'runs/compare', title: 'Compare', children: [] },
     ],
   },
-  { path: 'rtsp', redirectTo: 'streaming' },
-  { path: 'visualizer', redirectTo: 'stats' },
   { path: '', pathMatch: 'full', redirectTo: 'streaming' },
   { path: '**', redirectTo: 'streaming' },
 ];

@@ -10,8 +10,6 @@ import {
   sentinelUnusable,
 } from './sentinel-failure';
 
-const BOARD_ITEM = 'from the board item in the rail';
-
 /** An error as an answer's `error` carries it: a code, a sentence and maybe a hint. */
 const detail = (code: string, message = 'x', hint?: string) => ({
   code,
@@ -75,22 +73,18 @@ describe('polling', () => {
 });
 
 describe('failureOf', () => {
-  it('every backend failure becomes a title, a sentence and a place to fix it', () => {
+  it('a failure is headed by the backend’s message, with its hint and the place to fix it', () => {
     const noBoard = failureOf(
       detail('no_target', 'No board is selected.', 'Enter the board address.'),
       null,
     );
-    expect([noBoard.title, noBoard.hint, noBoard.board, noBoard.retryable]).toEqual([
-      'No board is selected',
-      'Enter the board address.',
-      true,
-      false,
-    ]);
-    expect(noBoard.problem.message).toBe('No board is selected.');
-
-    const unreachable = failureOf(answered(502, 'unreachable', 'ssh: connect failed'), null);
-    expect(unreachable.board).toBe(true);
-    expect(unreachable.hint).toContain(BOARD_ITEM);
+    expect(noBoard).toMatchObject({
+      title: 'No board is selected.',
+      detail: '',
+      hint: 'Enter the board address.',
+      board: true,
+      retryable: false,
+    });
 
     const hostKey = { host: '192.168.1.20', expected: 'SHA256:old', presented: 'SHA256:new' };
     expect(
@@ -99,25 +93,17 @@ describe('failureOf', () => {
     ).toEqual(hostKey);
 
     const schema = failureOf(detail('sentinel_schema', 'Sentinel speaks schema 2'), null);
-    expect([schema.title, schema.board]).toEqual([
-      'Sentinel and Insight speak different API versions',
+    expect([schema.title, schema.detail, schema.board]).toEqual([
+      'Sentinel speaks schema 2',
+      '',
       false,
     ]);
     expect(failureOf(detail('sentinel_denied'), null).daemon).toBe(true);
-    expect(failureOf(detail('sentinel_outdated'), null).title).toBe(
-      'Sentinel on the board is older than Insight',
-    );
-
-    const tooLarge = failureOf(detail('response_too_large'), null);
-    expect([tooLarge.title, tooLarge.board, tooLarge.daemon]).toEqual([
-      'Sentinel answered with more than Insight reads',
-      false,
-      false,
-    ]);
-    expect(failureOf(detail('unheard_of'), null).title).toBe('Something went wrong');
+    expect(failureOf(detail('unheard_of', 'Something odd.'), null).title).toBe('Something odd.');
     expect(failureOf(new Error('plain'), null)).toMatchObject({
       code: '',
-      title: 'Something went wrong',
+      title: 'plain',
+      detail: '',
       hint: '',
     });
     // A problem the board already read is read as it is.
@@ -125,38 +111,37 @@ describe('failureOf', () => {
     expect(failureOf(problem, 'local').problem).toBe(problem);
   });
 
-  it('a request that never reached Insight is titled as that, with the hint to retry', () => {
+  it('a code whose message is technical or Sentinel’s own text gets a title, the message below it', () => {
+    const unreachable = failureOf(
+      detail(
+        'unreachable',
+        'Could not connect to 192.168.2.254:22: connection refused',
+        'Check that `ssh -p 22 sima@192.168.2.254` works from this machine.',
+      ),
+      null,
+    );
+    expect(unreachable).toMatchObject({
+      title: 'The board could not be reached',
+      detail: 'Could not connect to 192.168.2.254:22: connection refused',
+      hint: 'Check that `ssh -p 22 sima@192.168.2.254` works from this machine.',
+      board: true,
+      daemon: false,
+    });
+    expect(failureOf(detail('sentinel_outdated', 'No /v1/runs.'), null)).toMatchObject({
+      title: 'Sentinel on the board is older than Insight',
+      detail: 'No /v1/runs.',
+    });
+  });
+
+  it('a request that never reached Insight says so, with the hint to retry', () => {
     const failure = failureOf(new ApiRequestError(0, 'Failed to fetch', null), 'local');
     expect([failure.code, failure.title, failure.board, failure.retryable]).toEqual([
       'network',
-      'Insight is not answering',
+      'Could not reach the Insight server.',
       false,
       true,
     ]);
     expect(failure.hint).toBe('Check that Insight is still running, then retry.');
-  });
-
-  it('fallback hints point at the board item in the rail, or name the command', () => {
-    const hint = (code: string) => failureOf(detail(code), null).hint;
-    for (const code of ['no_target', 'unreachable', 'auth_failed', 'host_key_changed']) {
-      expect(hint(code), code).toContain('board item in the rail');
-    }
-    expect(hint('sentinel_missing')).toContain('`sima-cli neat install sentinel`');
-    expect(hint('sentinel_stopped')).toContain('`sudo systemctl start simaai-sentinel`');
-    expect(hint('unheard_of')).toBe('');
-  });
-
-  it('the backend’s own hint wins over the fallback', () => {
-    const gone = failureOf(
-      detail(
-        'unreachable',
-        'The board could not be reached.',
-        'Check that the board is powered on and on the network, and that `ssh -p 22 sima@192.168.2.254` works from this machine.',
-      ),
-      null,
-    );
-    expect([gone.board, gone.daemon]).toEqual([true, false]);
-    expect(gone.hint).toMatch(/ssh -p 22 sima@192\.168\.2\.254/);
   });
 
   it('only failures a retry can fix are retryable', () => {
@@ -194,36 +179,14 @@ describe('failureOf', () => {
     }
   });
 
-  it('a board that changed under a request says so, whatever the request was', () => {
-    for (const action of ['read', 'start', 'stop', 'delete'] as const) {
-      const failure = failureOf(detail('board_changed'), 'local', action);
-      expect([failure.title, failure.hint, failure.action], action).toEqual([
-        'The board changed while Insight was working',
-        'Insight has read the board again.',
-        action,
-      ]);
-    }
-    // The backend's own hint still wins over the page's.
-    expect(failureOf(detail('board_changed', 'x', 'Try again.'), 'local', 'start').hint).toBe(
-      'Try again.',
-    );
-  });
-
-  it('a trace conflict is titled by what was being asked', () => {
-    const title = (action: 'read' | 'start' | 'stop' | 'delete') =>
-      failureOf(detail('trace_conflict'), 'local', action).title;
-    expect(title('start')).toBe('That trace cannot start');
-    expect(title('stop')).toBe('The trace changed before it was stopped');
-    expect(title('delete')).toBe('That run is still recording');
-    // The default keeps the wording the code had before the actions existed.
-    expect(title('read')).toBe('That trace cannot start');
-  });
-
-  it('a run that is gone is titled as a deleted run only when it was being deleted', () => {
-    const gone = detail('not_found');
-    expect(failureOf(gone, 'local', 'delete').title).toBe('That run is no longer on the board');
-    expect(failureOf(gone, 'local').title).toBe('That run is not on this board');
-    expect(failureOf(gone, 'local', 'stop').title).toBe('That run is not on this board');
+  it('a trace conflict is titled by what was being asked; a delete’s message says it', () => {
+    const conflict = (action: 'read' | 'start' | 'stop' | 'delete') =>
+      failureOf(detail('trace_conflict', 'Run r1 is still recording.'), 'local', action);
+    expect(conflict('start').title).toBe('That trace cannot start');
+    expect(conflict('stop').title).toBe('The trace changed before it was stopped');
+    expect(conflict('stop').detail).toBe('Run r1 is still recording.');
+    expect(conflict('delete').title).toBe('Run r1 is still recording.');
+    expect(conflict('read').title).toBe('Run r1 is still recording.');
   });
 
   it('a failure carries the board it was asked of', () => {

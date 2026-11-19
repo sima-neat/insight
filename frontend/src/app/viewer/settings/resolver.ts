@@ -6,24 +6,19 @@ import {
   type NeatRoiPolygon,
 } from '@sima/neat-ui/video';
 import {
-  AUTO_COLORS_VERSION,
   CLASS_STYLE_TYPES,
   DEFAULTS_ROOT,
-  GENERAL_DEFAULTS,
   type GeneralSettings,
   NUMBER_RANGES,
   type NumericSettingId,
-  PREVIOUS_VIDEO_SYNC_DEFAULT_MS,
   SCALAR_SETTINGS,
   type SettingId,
   type SettingValues,
   settingPath,
   SETTINGS_VERSION,
-  SUPPORTED_SETTINGS_VERSIONS,
   type SyncSettings,
   TYPE_DEFAULTS,
   type TypeSettings,
-  VIDEO_SYNC_DEFAULT_CHANGED_VERSION,
 } from './schema';
 
 /**
@@ -107,12 +102,10 @@ function defaultValue<Id extends SettingId>(id: Id): SettingValues[Id] {
  * Normalizes one raw value the way the original's per-section normalizers did. Anything not of
  * the setting's kind falls back to its default: a boolean keeps only a boolean, a number is parsed,
  * clamped to its range and rounded where whole.
- * `sourceVersion` is the version the value was stored at, for the 350 ms migration.
  */
 export function normalizeSettingValue<Id extends SettingId>(
   id: Id,
   raw: unknown,
-  sourceVersion = SETTINGS_VERSION,
 ): SettingValues[Id] {
   const fallback: unknown = defaultValue(id);
   if (typeof fallback === 'boolean') {
@@ -121,19 +114,10 @@ export function normalizeSettingValue<Id extends SettingId>(
   // Every setting that is not a boolean is a number with a range.
   const { min, max, integer } = NUMBER_RANGES[id as NumericSettingId];
   const clamped = Math.max(min, Math.min(max, parseNumber(raw, fallback as number)));
-  const value = integer ? Math.round(clamped) : clamped;
-  const isOldDefault =
-    id === 'general.videoSyncBufferMs' &&
-    sourceVersion < VIDEO_SYNC_DEFAULT_CHANGED_VERSION &&
-    value === PREVIOUS_VIDEO_SYNC_DEFAULT_MS;
-  return (isOldDefault ? GENERAL_DEFAULTS.videoSyncBufferMs : value) as SettingValues[Id];
+  return (integer ? Math.round(clamped) : clamped) as SettingValues[Id];
 }
 
 const LINE_STYLES: readonly NeatOverlayLineStyle[] = ['solid', 'dashed', 'dotted'];
-
-// Before version 10 every class row list carried an injected `default` row in this stock green,
-// the same colour a row falls back to.
-const LEGACY_DEFAULT_COLOR = NEAT_OVERLAY_STYLE_FALLBACK_COLOR;
 
 function normalizeClassStyle(entry: unknown): NeatOverlayClassStyle | null {
   if (!isTree(entry)) return null;
@@ -148,90 +132,30 @@ function normalizeClassStyle(entry: unknown): NeatOverlayClassStyle | null {
   };
 }
 
-/**
- * Normalizes a class row list. For a scope stored before version 10 (`legacy`) the injected stock
- * default row is dropped, so the automatic colours take over; a recoloured default is a deliberate
- * user override and stays.
- */
-function normalizeClassStyles(raw: unknown, legacy: boolean): readonly NeatOverlayClassStyle[] {
+/** Normalizes a class row list; anything that is not a list holds no rows. */
+function normalizeClassStyles(raw: unknown): readonly NeatOverlayClassStyle[] {
   if (!Array.isArray(raw)) return [];
-  const rows = raw.map(normalizeClassStyle).filter((row) => row !== null);
-  if (!legacy) return rows;
-  return rows.filter(
-    (row) => !(row.label === 'default' && row.color.toLowerCase() === LEGACY_DEFAULT_COLOR),
-  );
-}
-
-/** Tracking scopes may still hold the history keys flat at type level; these win over `history`. */
-const TRACKING_FLAT_KEYS: readonly (readonly [string, SettingId])[] = [
-  ['showTrackHistory', 'types.tracking.history.enabled'],
-  ['trailLength', 'types.tracking.history.trailLength'],
-  ['lostTrackTtlMs', 'types.tracking.history.lostTrackTtlMs'],
-];
-
-/**
- * Where the unversioned flat shape kept each setting. Pose and classification get nothing from it:
- * the original's resolution never read them from a flat scope (only its dialog's load
- * copied the whole flat object into both types), so tiles keep drawing what they drew before.
- */
-const LEGACY_FLAT_KEYS: readonly (readonly [string, SettingId])[] = [
-  ['showRoi', 'general.showRoi'],
-  ['applyRoiFiltering', 'general.applyRoiFiltering'],
-  ['confidenceThreshold', 'types.object-detection.confidenceThreshold'],
-  ['trackingConfidenceThreshold', 'types.tracking.confidenceThreshold'],
-  ...TRACKING_FLAT_KEYS,
-];
-
-function withRawValue(own: Tree, id: SettingId, raw: unknown, sourceVersion: number): Tree {
-  return raw === undefined
-    ? own
-    : withValueAt(own, settingPath(id), normalizeSettingValue(id, raw, sourceVersion));
-}
-
-function versionedOverrides(raw: Tree, version: number): Tree {
-  let own = emptyTree();
-  for (const { id } of SCALAR_SETTINGS)
-    own = withRawValue(own, id, valueAt(raw, settingPath(id)), version);
-  for (const [key, id] of TRACKING_FLAT_KEYS) {
-    own = withRawValue(own, id, valueAt(raw, ['types', 'tracking', key]), version);
-  }
-  for (const type of CLASS_STYLE_TYPES) {
-    const rows = valueAt(raw, ['types', type, 'objects']);
-    if (rows === undefined) continue;
-    own = withValueAt(
-      own,
-      ['types', type, 'objects'],
-      normalizeClassStyles(rows, version < AUTO_COLORS_VERSION),
-    );
-  }
-  return own;
-}
-
-function flatOverrides(raw: Tree): Tree {
-  let own = emptyTree();
-  for (const [key, id] of LEGACY_FLAT_KEYS)
-    own = withRawValue(own, id, valueAt(raw, [key]), SETTINGS_VERSION);
-  const rows = valueAt(raw, ['objects']);
-  if (rows !== undefined) {
-    own = withValueAt(
-      own,
-      ['types', 'object-detection', 'objects'],
-      normalizeClassStyles(rows, true),
-    );
-  }
-  return own;
+  return raw.map(normalizeClassStyle).filter((row) => row !== null);
 }
 
 /**
- * A stored scope's own values, migrated from any older version and normalized. Anything that is
- * not a scope (null, text, a number, a list) holds nothing.
+ * A stored scope's own values, normalized. Anything that is not a scope stored at
+ * `SETTINGS_VERSION` (null, text, a number, a list, an earlier build's version) holds nothing, so
+ * the scope follows until its next write replaces it.
  */
 export function settingsOverrides(raw: unknown): ScopeOverrides {
-  if (!isTree(raw)) return EMPTY_OVERRIDES;
-  const version = raw['version'];
-  const own = SUPPORTED_SETTINGS_VERSIONS.has(version)
-    ? versionedOverrides(raw, version as number)
-    : flatOverrides(raw);
+  if (!isTree(raw) || raw['version'] !== SETTINGS_VERSION) return EMPTY_OVERRIDES;
+  let own = emptyTree();
+  for (const { id } of SCALAR_SETTINGS) {
+    const path = settingPath(id);
+    const value = valueAt(raw, path);
+    if (value !== undefined) own = withValueAt(own, path, normalizeSettingValue(id, value));
+  }
+  for (const type of CLASS_STYLE_TYPES) {
+    const path = ['types', type, 'objects'];
+    const rows = valueAt(raw, path);
+    if (rows !== undefined) own = withValueAt(own, path, normalizeClassStyles(rows));
+  }
   // Every leaf was written by normalizeSettingValue or normalizeClassStyles at its setting's path.
   return own as unknown as ScopeOverrides;
 }

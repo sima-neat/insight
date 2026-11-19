@@ -484,7 +484,7 @@ describe('StreamingPage', () => {
     expect(toasts.status).toHaveBeenCalledWith(
       'Started 0 source(s), 1 already running, 1 failed. Skipped external: src4.',
     );
-    expect(toasts.error).toHaveBeenCalledWith('Failed: src2');
+    expect(toasts.error).toHaveBeenCalledWith('src2: cars.mp4 is not in the media library.');
 
     // The next time it opens at the count chosen last.
     await choose('Start…');

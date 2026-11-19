@@ -48,7 +48,7 @@ interface DeleteReport {
   readonly failures: readonly {
     name: string;
     title: string;
-    message: string;
+    detail: string;
     hint: string;
   }[];
   /** The runs after the failure that stopped the batch: still selected. */
@@ -87,7 +87,7 @@ function deleteReport(
     failures: outcome.failed.map(({ id, failure }) => ({
       name: nameOf(id),
       title: failure.title,
-      message: failure.problem.message,
+      detail: failure.detail,
       hint: failure.hint,
     })),
     notTried: outcome.notTried.map(nameOf),

@@ -350,7 +350,7 @@ export class StatsPage {
     const failure = this.stateProblem();
     return {
       ...notReadyHeading(failure, daemon, this.board.selected()?.label ?? 'this board'),
-      message: daemon.state === 'error' ? (failure?.problem.message ?? '') : '',
+      message: daemon.state === 'error' ? (failure?.detail ?? '') : '',
       hint: failure?.hint ?? '',
       command: daemon.command,
     };

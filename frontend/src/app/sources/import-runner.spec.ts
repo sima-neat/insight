@@ -143,7 +143,7 @@ describe('ImportRunner', () => {
     );
   });
 
-  it('a clash still open when the dialog goes is skipped, and the toast says so', async () => {
+  it('a clash still open when the dialog goes is skipped, and the outcome toast says so', async () => {
     const outcome = runner.upload([new File(['x'], 'a.mp4'), new File(['y'], 'b.mp4')]);
     refuse(library.last, 'a.mp4', 'a_2.mp4');
     await tick();
@@ -161,12 +161,21 @@ describe('ImportRunner', () => {
     await tick();
 
     await expect(outcome).resolves.toEqual({ ok: true, path: null });
-    const [toast] = toasts.progressToasts;
-    expect(toast.title).toBe('Uploading media');
-    expect(toast.done).toHaveBeenCalledWith(
+    expect(toasts.status).toHaveBeenCalledWith(
       'Uploaded and prepared 0 file(s). Skipped a.mp4: it already exists. Skipped b.mp4: it already exists.',
     );
-    expect(toasts.status).not.toHaveBeenCalled();
+  });
+
+  it('work goes on after its dialog went, and its failure is a toast', async () => {
+    const outcome = runner.upload([new File(['x'], 'a.mov')]);
+    release();
+    preparing(library.last);
+    jobFailed(library.last, 'FFmpeg failed: moov atom not found.');
+
+    await expect(outcome).resolves.toEqual({ ok: false, path: null });
+    expect(toasts.error).toHaveBeenCalledWith(
+      'Uploaded and prepared 0/1 file(s). a.mov: FFmpeg failed: moov atom not found.',
+    );
   });
 
   it('catalog imports run one after the other, showing their download, and stop at a failure', async () => {
@@ -221,23 +230,14 @@ describe('ImportRunner', () => {
     });
   });
 
-  it('a dialog opened while the work is in a toast takes it back, and asks its clashes', async () => {
+  it('a dialog opened while earlier work runs shows its progress and asks its clashes', async () => {
     const outcome = runner.upload([new File(['x'], 'a.mp4'), new File(['y'], 'b.mp4')]);
     release();
-    const [toast] = toasts.progressToasts;
-    expect(toast.title).toBe('Uploading media');
 
     runner.hold();
-    // The toast goes without a word: the dialog shows the work again, to its outcome.
-    expect(toast.dismiss).toHaveBeenCalledOnce();
-    expect(toast.done).not.toHaveBeenCalled();
     preparing(library.last, {
       progress: { phase: 'encode', detail: '00:04 / 00:10', percent: 40 },
     });
-    expect(toast.update).not.toHaveBeenCalledWith(
-      'Preparing media 1/2 · a.mp4 - 00:04 / 00:10',
-      40,
-    );
     expect(runner.progress()?.percent).toBe(40);
     saved(library.last, 'a.mp4');
     await tick();
@@ -249,7 +249,6 @@ describe('ImportRunner', () => {
 
     await expect(outcome).resolves.toEqual({ ok: true, path: 'a.mp4' });
     expect(toasts.status).toHaveBeenCalledWith('Uploaded and prepared 1 file(s).');
-    expect(toasts.progressToasts).toHaveLength(1);
   });
 
   it('a failure of its own while reading frees the runner and is reported', async () => {

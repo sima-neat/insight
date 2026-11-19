@@ -19,26 +19,6 @@ describe('liveChannels', () => {
     expect(liveChannels(channelList(4, 0))).toEqual(new Set([0, 4]));
     expect(liveChannels(channelList())).toEqual(new Set());
   });
-
-  it('skips inactive and malformed entries, and reads a malformed answer as none live', () => {
-    expect(
-      liveChannels({
-        channels: [
-          { channel: 1, video: { active: false } },
-          { channel: '2', video: { active: true } },
-          { channel: 3.5, video: { active: true } },
-          { channel: 4, video: null },
-          { channel: 5, active: true },
-          // Metadata alone is no video.
-          { channel: 7, video: { active: false }, metadata: { active: true } },
-          null,
-          { channel: 6, video: { active: true } },
-        ],
-      }),
-    ).toEqual(new Set([6]));
-    expect(liveChannels({ channels: 'none' })).toEqual(new Set());
-    expect(liveChannels(null)).toEqual(new Set());
-  });
 });
 
 describe('ChannelLiveness', () => {

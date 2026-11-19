@@ -1,6 +1,7 @@
 import {
   autoAssignedMessage,
   clearedMessage,
+  failedMessage,
   resetMessage,
   startedMessage,
   stoppedMessage,
@@ -19,6 +20,15 @@ describe('bulk messages', () => {
     expect(
       startedMessage({ started: [], already_running: [], skipped_external: [5, 7], errors: [] }),
     ).toBe('Started 0 source(s), 0 already running, 0 failed. Skipped external: src5, src7.');
+  });
+
+  it('the slots a bulk start could not start are said in the server’s words', () => {
+    expect(
+      failedMessage([
+        { n: 2, code: 'file_not_found', error: 'cars.mp4 is not in the media library.' },
+        { n: 5, code: 'no_media', error: 'Slot 5 has no media assigned.' },
+      ]),
+    ).toBe('src2: cars.mp4 is not in the media library. src5: Slot 5 has no media assigned.');
   });
 
   it('stop all and reset name the external streams they leave running', () => {

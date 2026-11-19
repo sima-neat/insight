@@ -65,7 +65,7 @@ export function nameClash(
 
 /**
  * What the outcome says of a clash that no one was there to answer: the dialog was closed by
- * leaving the page, and the upload went on in a toast, which cannot ask.
+ * leaving the page, and the upload went on with no one to ask.
  */
 export function skippedText(conflict: UploadConflict): string {
   return `Skipped ${conflict.existing}: it already exists.`;

@@ -595,7 +595,7 @@ describe('StatsPage', () => {
     expect(buttonNamed('Check again')).toBeDefined();
   });
 
-  it('a daemon that does not answer is titled by its failure, with its message and no command', async () => {
+  it('a daemon that does not answer is headed by its message, with its hint and no command', async () => {
     await go('/stats');
     await failState(
       failed(
@@ -605,8 +605,10 @@ describe('StatsPage', () => {
       ),
     );
 
-    const empty = callout('Sentinel and Insight speak different API versions')!;
-    expect(text(empty)).toContain('speaks API schema 2');
+    const empty = callout(
+      'Sentinel on the board speaks API schema 2 and Insight understands schema 1.',
+    )!;
+    expect(text(empty).match(/speaks API schema 2/g)).toHaveLength(1);
     expect(text(empty)).toContain('Update Insight and Sentinel to matching versions');
     expect(empty.querySelector('app-copy-command')).toBeNull();
     expect(buttonNamed('Check again')).toBeDefined();
@@ -649,7 +651,15 @@ describe('StatsPage', () => {
   it('a failed poll of Sentinel itself shows its title, message and hint, with Retry', async () => {
     await visit();
     await advance(2000);
-    await flush(metricsPoll(), failed('sentinel_failed'), true);
+    await flush(
+      metricsPoll(),
+      failed(
+        'sentinel_failed',
+        'Failed with sentinel_failed.',
+        'Check `systemctl status simaai-sentinel` on the board.',
+      ),
+      true,
+    );
 
     const failure = callout('Sentinel could not answer')!;
     expect(text(failure)).toContain('Failed with sentinel_failed.');
@@ -686,8 +696,8 @@ describe('StatsPage', () => {
 
     expect(chip()).toBe('Not updating');
     expect(cards()).toHaveLength(6);
-    const stopped = callout('The Sentinel service is stopped')!;
-    expect(text(stopped)).toContain('but not running (inactive).');
+    const stoppedMessage = 'Sentinel is installed on sima@192.168.1.20 but not running (inactive).';
+    const stopped = callout(stoppedMessage)!;
     expect(text(stopped)).toContain(
       'Start it on the board with `sudo systemctl start simaai-sentinel`, then retry.',
     );
@@ -703,7 +713,7 @@ describe('StatsPage', () => {
     await flush(stateRead(), sentinelHealth());
     await answerMetrics(nextSample());
     expect(chip()).toBe('Live');
-    expect(callout('The Sentinel service is stopped')).toBeUndefined();
+    expect(callout(stoppedMessage)).toBeUndefined();
   });
 
   it('after a board switch the panel shows Thermal when the chosen card is not on the new board', async () => {

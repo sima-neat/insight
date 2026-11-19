@@ -51,6 +51,7 @@ import { SourcesSession } from '../sources-session';
 import {
   autoAssignedMessage,
   clearedMessage,
+  failedMessage,
   resetMessage,
   startedMessage,
   stoppedMessage,
@@ -280,7 +281,7 @@ export class StreamingPage {
       const result = await this.slots.startBulk(count);
       this.toasts.status(startedMessage(result));
       if (result.errors.length > 0) {
-        this.toasts.error(`Failed: ${result.errors.map(({ n }) => `src${n}`).join(', ')}`);
+        this.toasts.error(failedMessage(result.errors));
       }
       return true;
     });

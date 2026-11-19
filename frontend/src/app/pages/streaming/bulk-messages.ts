@@ -1,14 +1,16 @@
 import type {
   AutoAssignResult,
   RenditionsCleared,
+  SlotFailure,
   SlotStartResult,
   SlotStopResult,
 } from '../../api.generated';
 import { formatBytes } from '../../format-bytes';
 
 /**
- * What Streaming's bulk actions say when they are done, worded from the server's results as the
- * old backend worded them.
+ * What Streaming's bulk actions say when they are done. The server's results carry counts and
+ * slot numbers, not sentences, so these word them; a slot that failed is said in the server's
+ * own words (`failedMessage`).
  */
 
 /** " Skipped external: src3, src7." for a phrase and its slots; nothing without slots. */
@@ -21,6 +23,11 @@ export function startedMessage(result: SlotStartResult): string {
     `Started ${result.started.length} source(s), ${result.already_running.length} already ` +
     `running, ${result.errors.length} failed.${slotsSuffix('Skipped external', result.skipped_external)}`
   );
+}
+
+/** Each slot a bulk start could not start, with the server's message: "src2: … src5: …". */
+export function failedMessage(errors: readonly SlotFailure[]): string {
+  return errors.map(({ n, error }) => `src${n}: ${error}`).join(' ');
 }
 
 export function stoppedMessage(result: SlotStopResult): string {

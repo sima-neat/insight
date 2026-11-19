@@ -1022,7 +1022,7 @@ describe('ViewerPage', () => {
     expect(storage.readRaw('aside-width')).toBe('380');
 
     neatPage.asideWidth.set(null);
-    expect(storage.readRaw('aside-width')).toBeNull();
+    expect(storage.readStored('aside-width')).toBeNull();
   });
 
   it('has no tile shape control', async () => {
@@ -1031,14 +1031,6 @@ describe('ViewerPage', () => {
     const labels = [...toolbar().querySelectorAll('[aria-label]')].map(labelOf);
     expect(labels.filter((label) => /shape|aspect|16:9|1:1/i.test(label ?? ''))).toEqual([]);
     expect(toolbar().textContent).not.toMatch(/16:9|1:1/);
-  });
-
-  it('a 1:1 that an earlier build stored fits 16:9 tiles', async () => {
-    storage.seed({ layout: { aspect: '1:1' } });
-    await open('/viewer');
-
-    // The same 167 px as for any 16:9 layout of 16 tiles in 1000×400 (not the 128 px of squares).
-    expect(tileWidth()).toBe('167px');
   });
 
   it('mode=dark applies dark without persisting it', async () => {

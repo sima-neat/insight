@@ -542,7 +542,9 @@ describe('CompareView', () => {
       },
       502,
     );
-    expect(calloutHeadings()).toEqual(['Sentinel answered with more than Insight reads']);
+    expect(calloutHeadings()).toEqual([
+      'Sentinel answered with 13 MB; Insight reads at most 12 MiB.',
+    ]);
     expect(text(callout())).toContain('Compare fewer or shorter runs.');
     expect(buttonNamed('Export CSV').disabled).toBe(true);
 

@@ -69,46 +69,21 @@ const NOT_RETRYABLE: ReadonlySet<string> = new Set([
   'sentinel_outdated',
 ]);
 
-// Titles say what failed; the backend's own message and hint carry the detail.
+/**
+ * The page's own titles, for the codes whose message can be Sentinel's own text or a technical
+ * detail (a socket path, a Go error) that needs a plain heading over it. Every other failure is
+ * headed by the backend's message, which is a sentence of its own.
+ */
 const TITLES: Record<string, string> = {
-  no_target: 'No board is selected',
   unreachable: 'The board could not be reached',
-  auth_failed: 'The board refused the SSH key',
-  host_key_changed: 'The board presented a different host key',
   timeout: 'The board took too long to answer',
-  permission_denied: 'The board refused the command',
-  tool_missing: 'A tool is missing on the board',
-  command_failed: 'A command failed on the board',
   sentinel_missing: 'Sentinel is not installed on this board',
-  sentinel_stopped: 'The Sentinel service is stopped',
-  sentinel_denied: 'Sentinel refused this user',
-  sentinel_schema: 'Sentinel and Insight speak different API versions',
   sentinel_outdated: 'Sentinel on the board is older than Insight',
   sentinel_failed: 'Sentinel could not answer',
   sentinel_busy: 'Sentinel is busy',
-  board_changed: 'The board changed while Insight was working',
-  trace_conflict: 'That trace cannot start',
-  not_found: 'That run is not on this board',
   invalid_request: 'The request was rejected',
   request_too_large: 'The request was too large',
-  response_too_large: 'Sentinel answered with more than Insight reads',
-  network: 'Insight is not answering',
   bad_response: 'Insight answered something unexpected',
-};
-const FALLBACK_TITLE = 'Something went wrong';
-
-/** What the backend's own hint is missing. The board's settings are the rail's board item. */
-const FALLBACK_HINTS: Record<string, string> = {
-  no_target: 'Choose a board with the board item in the rail.',
-  unreachable: 'Fix the connection from the board item in the rail, then retry.',
-  auth_failed: 'Fix the connection from the board item in the rail, then retry.',
-  host_key_changed:
-    'Confirm the fingerprint in the board dialog, from the board item in the rail, before trusting the new key.',
-  timeout: 'Check the board is awake and on the network, then retry.',
-  board_changed: 'Insight has read the board again.',
-  sentinel_missing: 'Install it on the board with `sima-cli neat install sentinel`.',
-  sentinel_stopped: 'Start it on the board with `sudo systemctl start simaai-sentinel`.',
-  sentinel_failed: 'Check `systemctl status simaai-sentinel` on the board.',
 };
 
 /**
@@ -118,23 +93,14 @@ const FALLBACK_HINTS: Record<string, string> = {
 export type SentinelAction = 'read' | 'start' | 'stop' | 'delete';
 
 /**
- * `trace_conflict` is the one code three requests answer for different reasons: starting while a
- * trace runs or a name is taken (the default title says that, so a start needs no entry),
- * stopping a trace that is no longer the one shown, and deleting a run still being recorded.
- * Deleting a run another client already removed is a `not_found`.
+ * `trace_conflict` is the one code three requests answer for different reasons, with Sentinel's
+ * own text for a start and a stop: starting while a trace runs or a name is taken, and stopping a
+ * trace that is no longer the one shown. Deleting a run still being recorded says so in its
+ * message.
  */
-const STOP_TITLES: Record<string, string> = {
-  trace_conflict: 'The trace changed before it was stopped',
-};
-
-const DELETE_TITLES: Record<string, string> = {
-  trace_conflict: 'That run is still recording',
-  not_found: 'That run is no longer on the board',
-};
-
 const ACTION_TITLES: Partial<Record<SentinelAction, Record<string, string>>> = {
-  stop: STOP_TITLES,
-  delete: DELETE_TITLES,
+  start: { trace_conflict: 'That trace cannot start' },
+  stop: { trace_conflict: 'The trace changed before it was stopped' },
 };
 
 /** What a Sentinel request failed with: what the page says about it, and where the fix is. */
@@ -149,8 +115,11 @@ export interface SentinelFailure {
   boardId: string | null;
   /** What the failure came out of. */
   action: SentinelAction;
+  /** The failure's heading: the page's own title for the code, else the backend's message. */
   title: string;
-  /** The backend's hint, else the page's own for the code; '' when there is none. */
+  /** The backend's message when the title is the page's own; '' when the title is the message. */
+  detail: string;
+  /** The backend's hint; '' when there is none. */
   hint: string;
   /** The board's own failure: its settings are the place to fix it. */
   board: boolean;
@@ -161,10 +130,10 @@ export interface SentinelFailure {
 }
 
 /**
- * One readable failure: a title, the backend's sentence (in `problem`), its hint, and where the fix
- * is. `board` is the id of the board the request was sent to, so a failure that lands after a
- * board switch can be told from the new board's. `action` says what was being asked, since the
- * same codes mean something else for a stop or a delete.
+ * One readable failure: a title, the backend's sentence (in `problem`) where the title is not it,
+ * its hint, and where the fix is. `board` is the id of the board the request was sent to, so a
+ * failure that lands after a board switch can be told from the new board's. `action` says what
+ * was being asked, since the same codes mean something else for a start or a stop.
  */
 export function failureOf(
   failure: unknown,
@@ -173,13 +142,15 @@ export function failureOf(
 ): SentinelFailure {
   const problem = problemOf(failure);
   const code = problem.code;
+  const title = ACTION_TITLES[action]?.[code] ?? TITLES[code];
   return {
     problem,
     code,
     boardId: board,
     action,
-    title: ACTION_TITLES[action]?.[code] || TITLES[code] || FALLBACK_TITLE,
-    hint: problem.hint || FALLBACK_HINTS[code] || '',
+    title: title ?? problem.message,
+    detail: title === undefined ? '' : problem.message,
+    hint: problem.hint,
     board: BOARD_CODES.has(code),
     daemon: DAEMON_CODES.has(code),
     retryable: !NOT_RETRYABLE.has(code),
@@ -188,8 +159,8 @@ export function failureOf(
 
 /**
  * An answer Insight could not read: its body lacks what the page needs (a Sentinel build that
- * answers in another shape, or an answer cut short). `message` says what was expected; the title
- * is `bad_response`'s, and asking again may help.
+ * answers in another shape, or an answer cut short). `message` says what was expected, under
+ * `bad_response`'s title, and asking again may help.
  */
 export function unexpectedAnswer(
   message: string,

@@ -81,24 +81,10 @@ export class FakeSlots {
   }
 }
 
-export interface FakeProgressToast {
-  readonly title: string;
-  readonly update: ReturnType<typeof vi.fn>;
-  readonly done: ReturnType<typeof vi.fn>;
-  readonly fail: ReturnType<typeof vi.fn>;
-  readonly dismiss: ReturnType<typeof vi.fn>;
-}
-
 export class FakeToasts {
   readonly error = vi.fn();
   readonly warning = vi.fn();
   readonly status = vi.fn();
-  readonly progressToasts: FakeProgressToast[] = [];
-  readonly progress = vi.fn((title: string) => {
-    const toast = { title, update: vi.fn(), done: vi.fn(), fail: vi.fn(), dismiss: vi.fn() };
-    this.progressToasts.push(toast);
-    return toast;
-  });
 }
 
 /** An upload's bytes sent so far. */

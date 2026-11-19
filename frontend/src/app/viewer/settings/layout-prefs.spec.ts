@@ -79,14 +79,14 @@ describe('LayoutPrefs', () => {
       expect(fake.readStored('layout')).toMatchObject({ inspector: true, tileWidths: { 16: 240 } });
     });
 
-    it('goes back to the default by removing the stored value', () => {
+    it('goes back to the default, across a reload too', () => {
       const prefs = open();
       prefs.setInspectorWidth(432);
 
       prefs.setInspectorWidth(null);
 
       expect(prefs.inspectorWidth()).toBeNull();
-      expect(fake.readRaw('aside-width')).toBeNull();
+      expect(reload().inspectorWidth()).toBeNull();
     });
 
     it.each(['', 'wide', '0', '-20', 'Infinity'])('ignores %j in storage', (stored) => {
@@ -208,16 +208,6 @@ describe('LayoutPrefs', () => {
     expect(prefs.fitFor(0)).toBeNull();
   });
 
-  it("two viewer tabs keep each other's fits", () => {
-    const first = open();
-    const second = open();
-
-    first.rememberFit(16, 9);
-    second.rememberFit(48, 25);
-
-    expect((fake.readStored('layout') as { fits: object }).fits).toStrictEqual({ 16: 9, 48: 25 });
-  });
-
   it('remembering the fit already chosen writes nothing', () => {
     const prefs = open();
     prefs.rememberFit(16, 9);
@@ -270,10 +260,8 @@ describe('LayoutPrefs', () => {
     expect(prefs.tileWidthFor(8)).toBeNull();
   });
 
-  it('a layout stored with aspect "1:1" keeps its other choices, and the next write stores no aspect', () => {
-    // An earlier build stored the tile shape; tiles are 16:9 now, so the choice is dropped on the
-    // next write.
-    fake.seed({ layout: { aspect: '1:1', bars: false, tileWidths: { 4: 300 } } });
+  it('a stored layout keeps the choices it holds, and the next write stores no key it does not know', () => {
+    fake.seed({ layout: { unknown: '1:1', bars: false, tileWidths: { 4: 300 } } });
     const prefs = open();
 
     expect(prefs.bars()).toBe(false);
@@ -291,24 +279,6 @@ describe('LayoutPrefs', () => {
     });
   });
 
-  it("two viewer tabs keep each other's choices: bars in one does not wipe widths from the other", () => {
-    const first = open();
-    const second = open();
-
-    first.rememberTileWidth(16, 240);
-    second.setBars(false);
-    second.rememberTileWidth(4, 500);
-
-    expect(fake.readStored('layout')).toStrictEqual({
-      bars: false,
-      hideEmpty: false,
-      inspector: false,
-      tileWidths: { 4: 500, 16: 240 },
-      fits: {},
-    });
-    expect(second.tileWidthFor(16)).toBe(240);
-  });
-
   it('choosing what is already chosen writes nothing', () => {
     const prefs = open();
     prefs.setBars(true);
@@ -321,17 +291,19 @@ describe('LayoutPrefs', () => {
     expect(fake.writes).toHaveLength(1);
   });
 
-  it('runs on defaults and keeps changes for the session when storage throws or holds garbage', () => {
-    fake.seed({ layout: '{"bars":' });
+  it('runs on defaults and keeps changes for the visit when storage throws or holds garbage', () => {
+    fake.seed({ layout: '{"bars":', 'aside-width': '{' });
     expect(open().bars()).toBe(true);
+    expect(open().inspectorWidth()).toBeNull();
 
     fake.unavailable = true;
     const prefs = reload();
     expect(prefs.bars()).toBe(true);
     expect(() => prefs.setBars(false)).not.toThrow();
     expect(() => prefs.rememberTileWidth(16, 240)).not.toThrow();
+    expect(() => prefs.setInspectorWidth(400)).not.toThrow();
     expect(prefs.bars()).toBe(false);
-    expect(open().bars()).toBe(false);
-    expect(open().tileWidthFor(16)).toBe(240);
+    expect(prefs.tileWidthFor(16)).toBe(240);
+    expect(prefs.inspectorWidth()).toBe(400);
   });
 });

@@ -462,7 +462,7 @@ describe('SentinelRuns', () => {
       const failure = await started;
       expect([failure?.code, failure?.title]).toEqual([
         'board_changed',
-        'The board changed while Insight was working',
+        'Failed with board_changed.',
       ]);
       expect(runs.trace()).toBeNull();
       expect(runs.traceBusy()).toBeNull();
@@ -506,7 +506,7 @@ describe('SentinelRuns', () => {
     const outcome = await deleting;
     expect(outcome.deleted).toEqual([first.id, third.id]);
     expect(outcome.failed.map(({ id, failure }) => [id, failure.code, failure.title])).toEqual([
-      [second.id, 'not_found', 'That run is no longer on the board'],
+      [second.id, 'not_found', 'Failed with not_found.'],
     ]);
     expect(outcome.notTried).toEqual([]);
     // The last answer's runs apply at once; then the list is read again.
@@ -521,7 +521,7 @@ describe('SentinelRuns', () => {
     const left = RUNS_LIST.filter((run) => run !== FINISHED[0]);
     await flush(deleteRequest(FINISHED[0].id), deleteAnswer(FINISHED[0].id, left));
     const outcome = await deleting;
-    expect(outcome.failed[0].failure.title).toBe('That run is still recording');
+    expect(outcome.failed[0].failure.title).toBe('Failed with trace_conflict.');
     expect(outcome.deleted).toEqual([FINISHED[0].id]);
     await flush(runsRead(), runsAnswer(left));
   });
@@ -702,9 +702,9 @@ describe('SentinelRuns', () => {
     runs.setRunsShown(true);
     await advance(60_000);
     const refused = await runs.startTrace({ name: 'bench' });
-    expect([refused?.code, refused?.title, refused?.problem.message]).toEqual([
+    expect([refused?.code, refused?.title, refused?.hint]).toEqual([
       'no_target',
-      'No board is selected',
+      'No board is selected.',
       'Choose a board in the rail first.',
     ]);
     const read = await runs.readRun(FINISHED[0].id);

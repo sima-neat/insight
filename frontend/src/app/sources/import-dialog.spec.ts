@@ -319,7 +319,7 @@ describe('ImportDialog', () => {
     expect(opener.result).toBeNull();
   });
 
-  it('leaving the page mid-upload continues it in a progress toast', async () => {
+  it('leaving the page mid-upload lets it go on, and a toast says how it ended', async () => {
     await open();
     await drop('a.mp4');
     sent(library.last, 1, 2);
@@ -330,34 +330,26 @@ describe('ImportDialog', () => {
     await settle();
     expect(dialog()).toBeNull();
     expect(opener.result).toBeNull();
-    const [toast] = toasts.progressToasts;
-    expect(toast.title).toBe('Uploading media');
-    expect(toast.update).toHaveBeenLastCalledWith('Uploading media · a.mp4', 50);
 
     preparing(library.last, {
       progress: { phase: 'encode', detail: '00:04 / 00:10', percent: 40 },
     });
-    expect(toast.update).toHaveBeenLastCalledWith('Preparing media · a.mp4 - 00:04 / 00:10', 40);
     saved(library.last, 'a.mp4');
     await settle();
 
     expect(library.last.unsubscribed).toBe(false);
-    expect(toast.done).toHaveBeenCalledWith('Uploaded and prepared 1 file(s).');
-    expect(toasts.status).not.toHaveBeenCalled();
+    expect(toasts.status).toHaveBeenCalledWith('Uploaded and prepared 1 file(s).');
   });
 
-  it('opened again while the work is in a toast, the dialog takes it back to the end', async () => {
+  it('opened again while earlier work runs, the dialog sees it to the end', async () => {
     await open();
     await drop('a.mp4', 'b.mp4');
     TestBed.inject(Location).back();
     await settle();
-    const [toast] = toasts.progressToasts;
 
     await TestBed.inject(Router).navigateByUrl('/media');
     await settle();
     await open();
-    expect(toast.dismiss).toHaveBeenCalledOnce();
-    expect(toast.done).not.toHaveBeenCalled();
     expect(progress()!.title).toBe('Uploading media 1/2');
     // It is this dialog's work now: not dismissed by Escape, and it closes when the work is done.
     await escape();

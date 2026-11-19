@@ -1,24 +1,34 @@
-import { computed, inject, Injectable, signal } from '@angular/core';
+import { computed, Injectable } from '@angular/core';
+import { neatStoredSignal } from '@sima/neat-ui';
 import { NEAT_MIN_TILE_WIDTH } from '@sima/neat-ui/video';
-import { storedAsideWidth, storeAsideWidth } from '../../aside-width';
-import { ViewerStorage } from './storage';
 
-const LAYOUT = 'layout';
-/** The inspector's width apart from the layout, which every layout write stores whole. */
-const INSPECTOR_WIDTH = 'aside-width';
+const LAYOUT_KEY = 'neat-insight:viewer:layout';
+/** The inspector's width is kept apart from the layout. */
+const INSPECTOR_WIDTH_KEY = 'neat-insight:viewer:aside-width';
+
+/** A size per displayed channel count, keyed by the count as JSON keeps it: as text. */
+type SizeByCount = Readonly<Record<string, number>>;
 
 interface Layout {
   readonly bars: boolean;
   readonly hideEmpty: boolean;
   readonly inspector: boolean;
   /** The tile width chosen with the size slider, per displayed channel count. */
-  readonly tileWidths: ReadonlyMap<number, number>;
+  readonly tileWidths: SizeByCount;
   /**
    * The tiles per page chosen with "Fit", per displayed channel count. A count has a width or a
    * fit, never both: choosing one forgets the other.
    */
-  readonly fits: ReadonlyMap<number, number>;
+  readonly fits: SizeByCount;
 }
+
+const DEFAULT_LAYOUT: Layout = {
+  bars: true,
+  hideEmpty: false,
+  inspector: false,
+  tileWidths: {},
+  fits: {},
+};
 
 function isTileWidth(width: unknown): width is number {
   return typeof width === 'number' && Number.isFinite(width) && width >= NEAT_MIN_TILE_WIDTH;
@@ -29,58 +39,65 @@ function isCount(count: unknown): count is number {
   return Number.isInteger(count) && (count as number) > 0;
 }
 
-/** The stored layout, with anything malformed or out of range replaced by its default. */
-function parseLayout(raw: string | null): Layout {
-  let stored: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = raw === null ? null : JSON.parse(raw);
-    if (typeof parsed === 'object' && parsed !== null) stored = parsed as Record<string, unknown>;
-  } catch {
-    // Not JSON: every choice starts from its default.
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** The entries of `stored` keyed by a channel count whose size `valid` accepts. */
+function sizesIn(stored: unknown, valid: (size: unknown) => size is number): SizeByCount {
+  if (!isRecord(stored)) return {};
+  const sizes: Record<string, number> = {};
+  for (const [count, size] of Object.entries(stored)) {
+    if (isCount(Number(count)) && valid(size)) sizes[Number(count)] = size;
   }
+  return sizes;
+}
+
+function without(sizes: SizeByCount, count: number): SizeByCount {
+  return Object.fromEntries(Object.entries(sizes).filter(([key]) => key !== String(count)));
+}
+
+/** The stored layout, with anything malformed or out of range replaced by its default. */
+function parseLayout(stored: unknown): Layout | undefined {
+  if (!isRecord(stored)) return undefined;
   const flag = (value: unknown, fallback: boolean) =>
     typeof value === 'boolean' ? value : fallback;
-  const tileWidths = new Map<number, number>();
-  const widths = stored['tileWidths'];
-  if (typeof widths === 'object' && widths !== null) {
-    for (const [count, width] of Object.entries(widths)) {
-      if (isCount(Number(count)) && isTileWidth(width)) tileWidths.set(Number(count), width);
-    }
-  }
+  const tileWidths = sizesIn(stored['tileWidths'], isTileWidth);
   // A count stored with both (only by hand) keeps its width, the more specific choice.
-  const fits = new Map<number, number>();
-  const storedFits = stored['fits'];
-  if (typeof storedFits === 'object' && storedFits !== null) {
-    for (const [count, tiles] of Object.entries(storedFits)) {
-      const key = Number(count);
-      if (isCount(key) && isCount(tiles) && !tileWidths.has(key)) {
-        fits.set(key, tiles);
-      }
-    }
-  }
+  const fits = Object.fromEntries(
+    Object.entries(sizesIn(stored['fits'], isCount)).filter(
+      ([count]) => !Object.hasOwn(tileWidths, count),
+    ),
+  );
   return {
-    bars: flag(stored['bars'], true),
-    hideEmpty: flag(stored['hideEmpty'], false),
-    inspector: flag(stored['inspector'], false),
+    bars: flag(stored['bars'], DEFAULT_LAYOUT.bars),
+    hideEmpty: flag(stored['hideEmpty'], DEFAULT_LAYOUT.hideEmpty),
+    inspector: flag(stored['inspector'], DEFAULT_LAYOUT.inspector),
     tileWidths,
     fits,
   };
 }
 
 /**
+ * A stored inspector width: a positive number of pixels. Anything else is the kit's default; the
+ * kit clamps any width it is given, so only what cannot be a width is refused here.
+ */
+function parseWidth(stored: unknown): number | undefined {
+  return typeof stored === 'number' && Number.isFinite(stored) && stored > 0 ? stored : undefined;
+}
+
+/**
  * The Viewer's layout choices, stored under one key as they change: tile bars, "Hide empty", the
  * inspector, and the tile size per displayed channel count, either a width from the slider or a
- * tiles-per-page fit from "Fit". Provided by the Viewer page like the settings store; the choices
- * outlive the page through storage. Tiles are always 16:9, so an `aspect` that an earlier build
- * stored is not read and the next write leaves it out.
+ * tiles-per-page fit from "Fit". The width the inspector was dragged to is stored under a key of
+ * its own. Provided by the Viewer page like the settings store, and read from storage on each
+ * visit, so a choice made in another Viewer tab shows on the next visit (the tab that writes last
+ * keeps its layout). A choice storage refuses to keep lasts for the visit.
  */
 @Injectable()
 export class LayoutPrefs {
-  private readonly storage = inject(ViewerStorage);
-  private readonly layout = signal(parseLayout(this.storage.get(LAYOUT)));
-  private readonly tileWidths = computed(() => this.layout().tileWidths);
-  private readonly fits = computed(() => this.layout().fits);
-  private readonly width = signal(storedAsideWidth(this.storage, INSPECTOR_WIDTH));
+  private readonly layout = neatStoredSignal(LAYOUT_KEY, DEFAULT_LAYOUT, parseLayout);
+  private readonly width = neatStoredSignal<number | null>(INSPECTOR_WIDTH_KEY, null, parseWidth);
 
   readonly bars = computed(() => this.layout().bars);
   readonly hideEmpty = computed(() => this.layout().hideEmpty);
@@ -103,14 +120,12 @@ export class LayoutPrefs {
 
   /** Remembers the inspector's width; null, the default, forgets it. */
   setInspectorWidth(width: number | null): void {
-    if (this.width() === width) return;
-    this.width.set(width);
-    storeAsideWidth(this.storage, INSPECTOR_WIDTH, width);
+    if (this.width() !== width) this.width.set(width);
   }
 
   /** The width remembered for `count` displayed channels, or null when the user never chose one. */
   tileWidthFor(count: number): number | null {
-    return this.tileWidths().get(count) ?? null;
+    return this.layout().tileWidths[count] ?? null;
   }
 
   /**
@@ -118,18 +133,17 @@ export class LayoutPrefs {
    * use is ignored.
    */
   rememberTileWidth(count: number, width: number): void {
-    if (!isCount(count) || !isTileWidth(width)) return;
-    if (this.tileWidths().get(count) === width) return;
-    this.update((latest) => {
-      const fits = new Map(latest.fits);
-      fits.delete(count);
-      return { ...latest, tileWidths: new Map(latest.tileWidths).set(count, width), fits };
-    });
+    if (!isCount(count) || !isTileWidth(width) || this.tileWidthFor(count) === width) return;
+    this.layout.update((layout) => ({
+      ...layout,
+      tileWidths: { ...layout.tileWidths, [count]: width },
+      fits: without(layout.fits, count),
+    }));
   }
 
   /** The tiles per page remembered for `count` displayed channels, or null when none was chosen. */
   fitFor(count: number): number | null {
-    return this.fits().get(count) ?? null;
+    return this.layout().fits[count] ?? null;
   }
 
   /**
@@ -137,13 +151,12 @@ export class LayoutPrefs {
    * count of tiles that is not a positive whole number is ignored.
    */
   rememberFit(count: number, tiles: number): void {
-    if (!isCount(count) || !isCount(tiles)) return;
-    if (this.fits().get(count) === tiles) return;
-    this.update((latest) => {
-      const tileWidths = new Map(latest.tileWidths);
-      tileWidths.delete(count);
-      return { ...latest, tileWidths, fits: new Map(latest.fits).set(count, tiles) };
-    });
+    if (!isCount(count) || !isCount(tiles) || this.fitFor(count) === tiles) return;
+    this.layout.update((layout) => ({
+      ...layout,
+      tileWidths: without(layout.tileWidths, count),
+      fits: { ...layout.fits, [count]: tiles },
+    }));
   }
 
   /**
@@ -151,38 +164,16 @@ export class LayoutPrefs {
    * again ("Fit all"). Forgetting a size that is not stored writes nothing.
    */
   forgetSize(count: number): void {
-    if (!this.tileWidths().has(count) && !this.fits().has(count)) return;
-    this.update((latest) => {
-      const tileWidths = new Map(latest.tileWidths);
-      const fits = new Map(latest.fits);
-      tileWidths.delete(count);
-      fits.delete(count);
-      return { ...latest, tileWidths, fits };
-    });
+    if (this.tileWidthFor(count) === null && this.fitFor(count) === null) return;
+    this.layout.update((layout) => ({
+      ...layout,
+      tileWidths: without(layout.tileWidths, count),
+      fits: without(layout.fits, count),
+    }));
   }
 
   /** Stores one choice; choosing what is already chosen writes nothing. */
   private choose<K extends 'bars' | 'hideEmpty' | 'inspector'>(key: K, value: Layout[K]): void {
-    if (this.layout()[key] === value) return;
-    this.update((latest) => ({ ...latest, [key]: value }));
-  }
-
-  /**
-   * Applies `edit` to the layout as stored now rather than as read at open: another Viewer tab may
-   * have stored other choices since, and toggling bars here must not wipe its tile widths.
-   */
-  private update(edit: (latest: Layout) => Layout): void {
-    const next = edit(parseLayout(this.storage.get(LAYOUT)));
-    this.layout.set(next);
-    this.storage.set(
-      LAYOUT,
-      JSON.stringify({
-        bars: next.bars,
-        hideEmpty: next.hideEmpty,
-        inspector: next.inspector,
-        tileWidths: Object.fromEntries(next.tileWidths),
-        fits: Object.fromEntries(next.fits),
-      }),
-    );
+    if (this.layout()[key] !== value) this.layout.update((layout) => ({ ...layout, [key]: value }));
   }
 }

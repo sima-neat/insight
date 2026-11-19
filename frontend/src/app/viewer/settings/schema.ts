@@ -3,35 +3,11 @@ import { NEAT_OVERLAY_DEFAULTS, type NeatOverlaySettings } from '@sima/neat-ui/v
 /**
  * The viewer settings model, ported from viewer-settings-resolver.js (sima-neat/insight@829ec7c):
  * every setting a scope can own, with its default and the range its value is held to. A stored
- * scope is `{ version, general, types }`, and a setting's id is its path in that object. An earlier
- * build also stored an `auxiliary` object (a BlazePose 3D panel's settings); Insight has no such
- * panel, so scopes still holding one are read without it and the next write leaves it out.
+ * scope is `{ version, general, types }`, and a setting's id is its path in that object.
  */
 
+/** The version every scope is stored at; a scope stored at any other version is not read. */
 export const SETTINGS_VERSION = 10;
-
-/**
- * Versions stored in the `{ version, general, types }` shape. An entry with any other
- * version (or none) is read as the flat shape the first viewer stored.
- */
-export const SUPPORTED_SETTINGS_VERSIONS: ReadonlySet<unknown> = new Set([
-  2,
-  3,
-  4,
-  5,
-  6,
-  7,
-  8,
-  9,
-  SETTINGS_VERSION,
-]);
-
-/** Up to version 8 the video sync buffer defaulted to 350 ms; a stored 350 meant "the default". */
-export const VIDEO_SYNC_DEFAULT_CHANGED_VERSION = 9;
-export const PREVIOUS_VIDEO_SYNC_DEFAULT_MS = 350;
-
-/** From version 10 unlisted classes are coloured automatically, not by a stored default row. */
-export const AUTO_COLORS_VERSION = 10;
 
 export type MetadataType = keyof NeatOverlaySettings['types'];
 

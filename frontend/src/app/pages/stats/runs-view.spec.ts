@@ -418,7 +418,7 @@ describe('RunsView', () => {
   it('a failure that stops the batch lists the failure, the runs not tried (still ticked) and the deleted ones', async () => {
     runs.deleteRuns.mockResolvedValue({
       deleted: [TES3.id],
-      failed: [{ id: HW_SHORT.id, failure: failure('stale_snapshot', 'Check the board.') }],
+      failed: [{ id: HW_SHORT.id, failure: failure('sentinel_failed', 'Check the board.') }],
       notTried: [HW_LONG.id],
     });
     await renderChecked(TES3.id, HW_SHORT.id, HW_LONG.id);
@@ -427,10 +427,10 @@ describe('RunsView', () => {
 
     const report = callout()!;
     expect(text(report.querySelector('[role="heading"]'))).toBe('2 of 3 runs were not deleted');
-    // Each failure's title, then what the backend said, then its hint.
+    // Each failure's title, then what the backend said where the title is not it, then its hint.
     expect([...report.querySelectorAll('.failures p')].map(text)).toEqual([
-      `insight-hw-1790177227: ${failure('stale_snapshot').title}`,
-      'Failed with stale_snapshot.',
+      'insight-hw-1790177227: Sentinel could not answer',
+      'Failed with sentinel_failed.',
       'Check the board.',
     ]);
     expect(text(report)).toContain('Not tried, so still selected: insight-hw-1790177178');

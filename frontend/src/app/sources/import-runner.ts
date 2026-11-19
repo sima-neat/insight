@@ -1,5 +1,5 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { NeatToasts, type NeatProgressToast } from '@sima/neat-ui/toast';
+import { NeatToasts } from '@sima/neat-ui/toast';
 import { type Observable, Subscription } from 'rxjs';
 import type { Job, MediaSaved } from '../api.generated';
 import { messageOf } from './api-errors';
@@ -31,12 +31,6 @@ export interface ImportOutcome {
   /** The library path saved last (an archive's folder), to reveal; null when nothing was. */
   readonly path: string | null;
 }
-
-/** What a progress toast is titled by, once the work has left the dialog. */
-const TOAST_TITLES: Record<ImportKind, string> = {
-  local: 'Uploading media',
-  catalog: 'Importing catalog asset',
-};
 
 /** "Preparing media 2/3": a position in work of several items; none for a single one. */
 const scoped = (title: string, position: number, total: number): string =>
@@ -72,12 +66,10 @@ function savedOf(saved: MediaSaved | null): MediaSaved {
  * Runs the import dialog's work, outside the dialog so that it outlives it: local uploads and
  * catalog imports, one piece of work at a time.
  *
- * While a dialog holds the runner (`hold`), the dialog shows the progress, the name-clash question
- * and the failure, and the outcome is a toast. When the last dialog lets go while
- * work runs (navigation closes a dialog even while it is busy), the progress moves into a progress
- * toast that reports to the end; a clash that can no longer be asked is skipped and the toast says
- * so, since a 409 saved nothing. A dialog opened again while the work runs takes it
- * back from the toast: the progress, the clashes and the outcome are the dialog's again.
+ * A dialog shows the progress, the name-clash question and the failure while it is open, and the
+ * outcome is a toast, so the user learns how the work ended also after its dialog went
+ * (navigation closes a dialog even while it is busy). While no dialog holds the runner (`hold`),
+ * a clash cannot be asked: it is skipped, and the outcome says so, since a 409 saved nothing.
  *
  * An upload shows its bytes, then the job that re-encodes it when the server needs one; a catalog
  * import shows its download's job. The library refreshes itself after each request;
@@ -107,25 +99,22 @@ export class ImportRunner {
   readonly failure = this.failureState.asReadonly();
 
   private holders = 0;
-  /** The toast the work reports to once no dialog shows it. */
-  private toast: NeatProgressToast | null = null;
   private answerClash: ((choice: ClashChoice) => void) | null = null;
   private current: Promise<ImportOutcome> | null = null;
 
   /**
-   * Shows the work in the caller (the dialog) until the returned function is called. Letting go
-   * while work runs moves its progress into a toast for the rest of it; holding again takes it
-   * back from the toast.
+   * Shows the work in the caller (the dialog) until the returned function is called. Once the last
+   * holder lets go, a clash waiting for an answer is skipped: no one is left to answer it.
    */
   hold(): () => void {
     this.holders++;
     this.failureState.set(null);
-    this.takeFromToast();
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      if (--this.holders === 0 && this.busy()) this.moveToToast();
+      // `upload` records the clash as skipped without asking.
+      if (--this.holders === 0) this.answerClash?.('skip');
     };
   }
 
@@ -189,7 +178,7 @@ export class ImportRunner {
         const position = index + 1;
         const title = scoped('Importing catalog asset', position, assets.length);
         const label = catalogAssetLabel(asset);
-        this.show({ title, detail: label, percent: null });
+        this.progressState.set({ title, detail: label, percent: null });
         let saved: MediaSaved | null = null;
         try {
           await this.read(this.library.importCatalog(asset.path), (event) => {
@@ -213,7 +202,6 @@ export class ImportRunner {
     if (this.busy()) return Promise.reject(new Error('An import is running already.'));
     this.jobState.set(kind);
     this.failureState.set(null);
-    if (this.holders === 0) this.moveToToast();
     const outcome = work()
       .catch((failure: unknown): Ending => ({ ok: false, path: null, failure: messageOf(failure) }))
       .then((ending) => this.finish(ending));
@@ -221,59 +209,24 @@ export class ImportRunner {
     return outcome;
   }
 
-  /** Reports the outcome where the work is shown, and frees the runner for the next. */
+  /** Reports the outcome in a toast, and to a dialog, and frees the runner for the next. */
   private finish(ending: Ending): ImportOutcome {
-    const toast = this.toast;
     if ('failure' in ending) {
-      if (toast) toast.fail(ending.failure);
-      else {
-        this.failureState.set(ending.failure);
-        this.toasts.error(ending.failure);
-      }
-    } else if (toast) {
-      toast.done(ending.message);
+      this.failureState.set(ending.failure);
+      this.toasts.error(ending.failure);
     } else {
       this.toasts.status(ending.message);
     }
-    this.toast = null;
     this.current = null;
     this.progressState.set(null);
     this.jobState.set(null);
     return { ok: ending.ok, path: ending.path };
   }
 
-  private moveToToast(): void {
-    const job = this.job();
-    if (!job || this.toast) return;
-    this.toast = this.toasts.progress(TOAST_TITLES[job]);
-    const progress = this.progress();
-    if (progress) this.show(progress);
-    // No one is left to answer; `upload` records it as skipped.
-    this.answerClash?.('skip');
-  }
-
-  /**
-   * Shows the work in a dialog again. The toast goes without an outcome: the dialog that took the
-   * work back shows it, and reports how it ended.
-   */
-  private takeFromToast(): void {
-    if (!this.toast) return;
-    this.toast.dismiss();
-    this.toast = null;
-  }
-
-  private show(progress: Progress): void {
-    this.progressState.set(progress);
-    this.toast?.update(
-      [progress.title, progress.detail].filter(Boolean).join(' · '),
-      progress.percent,
-    );
-  }
-
   /** Shows a job's progress about one item, under `title`. */
   private showJob(job: Job, title: string, subject: string): void {
     const progress = jobProgress(job, title);
-    this.show({ ...progress, detail: about(subject, progress.detail) });
+    this.progressState.set({ ...progress, detail: about(subject, progress.detail) });
   }
 
   /**
@@ -297,7 +250,7 @@ export class ImportRunner {
    */
   private async uploadFile(file: File, position: number, total: number): Promise<FileOutcome> {
     const title = scoped('Uploading media', position, total);
-    this.show({ title, detail: file.name, percent: null });
+    this.progressState.set({ title, detail: file.name, percent: null });
     let onConflict: UploadOnConflict | undefined;
     for (;;) {
       let saved: MediaSaved;
@@ -313,7 +266,7 @@ export class ImportRunner {
         if (!conflict) return { kind: 'failed', message: `${file.name}: ${messageOf(refusal)}` };
         const choice = await this.ask(conflict, isArchiveUpload(file.name));
         if (choice === 'skip') {
-          return { kind: 'skipped', unasked: this.toast ? skippedText(conflict) : null };
+          return { kind: 'skipped', unasked: this.holders === 0 ? skippedText(conflict) : null };
         }
         onConflict = choice;
         continue;
@@ -337,7 +290,7 @@ export class ImportRunner {
     await this.read(this.library.upload(file, onConflict), (event: LibraryEvent) => {
       if (event.kind === 'upload') {
         const percent = event.total ? Math.round((event.loaded / event.total) * 100) : null;
-        this.show({ title: uploading, detail: file.name, percent });
+        this.progressState.set({ title: uploading, detail: file.name, percent });
       } else if (event.kind === 'job') {
         this.showJob(event.job, preparing, file.name);
       } else {
@@ -379,9 +332,9 @@ export class ImportRunner {
    * fetch fails. Skipped without asking once no dialog shows the work.
    */
   private async ask(conflict: UploadConflict, archive: boolean): Promise<ClashChoice> {
-    if (this.toast) return 'skip';
+    if (this.holders === 0) return 'skip';
     const checked = await this.slots.recheck();
-    if (this.toast) return 'skip';
+    if (this.holders === 0) return 'skip';
     const using = archive
       ? this.slots.assignedUnder(conflict.existing)
       : this.slots.assignedTo(conflict.existing);

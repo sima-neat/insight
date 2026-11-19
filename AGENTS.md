@@ -79,8 +79,7 @@ imported from the wrong entry point.
 
 - **Pages are routes.** `app.routes.ts` loads each page lazily and titles it with its rail label;
   `navigation.ts` lists the rail items. A new page needs both, and `navigation.spec.ts` checks that
-  they agree. The old app's paths keep working: `/rtsp` and `/visualizer` redirect to their pages,
-  and `/` and unknown paths (old `/workspace` and `/genai` bookmarks) land on Streaming.
+  they agree. `/` and unknown paths land on Streaming.
 - **State lives as long as it should.** What a page runs is provided by the page, so it stops when
   the page is left: the Viewer's connections, Peripherals' `CameraPreview` and `MicTest`, Stats'
   `SentinelTelemetry` and `SentinelRuns` (leaving Stats stops every request to the board). Where

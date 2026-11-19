@@ -491,7 +491,11 @@ function stopsBatch({ code }: SentinelFailure): boolean {
 
 /** A change asked for while no board is known; the page offers none then. */
 function noBoard(action: SentinelAction): SentinelFailure {
-  const problem = new BoardProblem('Choose a board in the rail first.', 'no_target', '');
+  const problem = new BoardProblem(
+    'No board is selected.',
+    'no_target',
+    'Choose a board in the rail first.',
+  );
   return failureOf(problem, null, action);
 }
 

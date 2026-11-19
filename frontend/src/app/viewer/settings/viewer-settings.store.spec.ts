@@ -1,10 +1,6 @@
 import { computed } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import {
-  NEAT_OVERLAY_DEFAULTS,
-  NEAT_OVERLAY_STYLE_FALLBACK_COLOR,
-  type NeatRoiPolygon,
-} from '@sima/neat-ui/video';
+import { NEAT_OVERLAY_DEFAULTS, type NeatRoiPolygon } from '@sima/neat-ui/video';
 import { FakeLocalStorage } from '../../fake-storage.testing';
 import type { ScopeOverrides } from './resolver';
 import { SCALAR_SETTINGS, TYPE_DEFAULTS, type SettingId } from './schema';
@@ -81,64 +77,37 @@ afterEach(() => {
 // writeScopeOwnSettings → set, clearScope* → resetOverride, listChannel*Overrides → overridesOf,
 // applyGlobalGeneral → raiseGlobal).
 describe('ViewerSettingsStore (ported resolver tests)', () => {
-  it('the previous 350 ms default migrates to the measured 300 ms floor', () => {
+  it('a scope stored by an earlier build is not read: its channel follows the defaults until the next write replaces it', () => {
     const store = load({
-      'settings:global': JSON.stringify({ version: 8, general: { videoSyncBufferMs: 350 } }),
-    });
-
-    expect(store.general(0)().videoSyncBufferMs).toBe(300);
-    expect(store.value('global', 'general.videoSyncBufferMs')).toBe(300);
-  });
-
-  it('legacy settings migrate on read, in the global scope and in channel scopes alike', () => {
-    const store = load({
-      'settings:global': JSON.stringify({
-        version: 9,
-        general: { metadataRetentionMs: 2500 },
-        types: { 'pose-estimation': { visible: false } },
-      }),
-      'settings:channel:0': JSON.stringify({ version: 3, general: { videoSyncBufferMs: 350 } }),
-      'settings:channel:1': JSON.stringify({ version: 3, general: { videoSyncBufferMs: 350 } }),
-    });
-
-    for (const channel of [0, 1]) {
-      expect(store.general(channel)().videoSyncBufferMs).toBe(300);
-      expect(store.general(channel)().metadataRetentionMs).toBe(2500);
-      expect(store.resolved(channel)().types['pose-estimation'].visible).toBe(false);
-    }
-  });
-
-  it('version two settings migrate without retaining overlay delay', () => {
-    const store = load({
-      'settings:global': JSON.stringify({
-        version: 2,
-        general: { metadataDelay: 900, showRoi: false },
-        types: { 'object-detection': { confidenceThreshold: 0.5 } },
-      }),
+      'settings:global': JSON.stringify({ version: 9, general: { videoSyncBufferMs: 700 } }),
+      'settings:channel:1': JSON.stringify({ version: 3, general: { showRoi: false } }),
+      'settings:channel:2': JSON.stringify({ showRoi: false, confidenceThreshold: 0.4 }),
     });
 
     expect(store.value('global', 'general.videoSyncBufferMs')).toBe(300);
-    expect(store.value('global', 'general.metadataRetentionMs')).toBe(0);
-    expect(store.value('global', 'general.showRoi')).toBe(false);
-    expect(store.value('global', 'types.object-detection.confidenceThreshold')).toBe(0.5);
-    // The next write stores the migrated scope.
-    store.set('global', 'general.lineWidth', 3);
-    const settings = stored('settings:global');
-    expect(settings?.version).toBe(10);
-    expect(settings !== null && 'metadataDelay' in settings.general).toBe(false);
+    expect(store.resolved(1)().general.showRoi).toBe(true);
+    expect(store.resolved(2)().types['object-detection'].confidenceThreshold).toBe(0);
+    expect(store.channelOverrides()).toStrictEqual({ settings: 0, channels: 0 });
+
+    store.set(1, 'general.lineWidth', 5);
+    expect(stored('settings:channel:1')).toStrictEqual({
+      version: 10,
+      general: { lineWidth: 5 },
+      types: {},
+    });
   });
 
   it('viewer settings resolve independent channel overrides', () => {
     const store = load({
       'settings:global': JSON.stringify({
-        version: 9,
+        version: 10,
         types: {
           'object-detection': { visible: false, confidenceThreshold: 0.8 },
           'pose-estimation': { showKeypoints: false, showKeypointLabels: true },
         },
       }),
       'settings:channel:2': JSON.stringify({
-        version: 9,
+        version: 10,
         types: {
           'object-detection': { visible: true },
           'pose-estimation': { showKeypoints: true, showKeypointLabels: false },
@@ -169,75 +138,6 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
     expect(store.resolved(0)().types.segmentation.objects).toStrictEqual([]);
   });
 
-  it('migrating from version 9 drops a stock green default entry', () => {
-    // The drop recognises the stock row by the kit's fallback colour; a kit change must fail here
-    // rather than silently stop the drop.
-    expect(NEAT_OVERLAY_STYLE_FALLBACK_COLOR).toBe('#00ff00');
-    const store = load({
-      'settings:global': JSON.stringify({
-        version: 9,
-        types: {
-          'object-detection': {
-            objects: [
-              { label: 'default', color: '#00ff00', style: 'solid', width: 1 },
-              { label: 'car', color: '#ff0000', style: 'dashed', width: 3 },
-            ],
-          },
-          segmentation: {
-            objects: [{ label: 'default', color: '#00ff00', style: 'solid', width: 1 }],
-          },
-        },
-      }),
-    });
-
-    expect(store.resolved(0)().types['object-detection'].objects).toStrictEqual([
-      { label: 'car', color: '#ff0000', style: 'dashed', width: 3 },
-    ]);
-    expect(store.resolved(0)().types.segmentation.objects).toStrictEqual([]);
-    // The next write stores the migrated scope.
-    store.set('global', 'general.lineWidth', 3);
-    const settings = stored('settings:global');
-    expect(settings?.version).toBe(10);
-    expect(settings?.types['object-detection']?.objects).toStrictEqual([
-      { label: 'car', color: '#ff0000', style: 'dashed', width: 3 },
-    ]);
-    expect(settings?.types.segmentation?.objects).toStrictEqual([]);
-  });
-
-  it('migrating from version 9 keeps a recolored default entry as an override', () => {
-    const store = load({
-      'settings:global': JSON.stringify({
-        version: 9,
-        types: {
-          'object-detection': {
-            objects: [{ label: 'default', color: '#ff00ff', style: 'solid', width: 1 }],
-          },
-        },
-      }),
-    });
-
-    expect(store.resolved(0)().types['object-detection'].objects).toStrictEqual([
-      { label: 'default', color: '#ff00ff', style: 'solid', width: 1 },
-    ]);
-  });
-
-  it('version 10 settings keep an explicit stock green default entry', () => {
-    const store = load({
-      'settings:global': JSON.stringify({
-        version: 10,
-        types: {
-          'object-detection': {
-            objects: [{ label: 'default', color: '#00ff00', style: 'solid', width: 1 }],
-          },
-        },
-      }),
-    });
-
-    const objects = store.resolved(0)().types['object-detection'].objects;
-    expect(objects.length).toBe(1);
-    expect(objects[0].color).toBe('#00ff00');
-  });
-
   it('channel object entries override global entries by label', () => {
     const store = load({
       'settings:global': JSON.stringify({
@@ -265,7 +165,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it("writing one general override leaves the scope's other values inherited", () => {
     const store = load({
       'settings:global': {
-        version: 4,
+        version: 10,
         general: { videoSyncBufferMs: 500, showRoi: false },
         types: {},
       },
@@ -279,7 +179,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   });
 
   it('writing one general override leaves other scopes untouched', () => {
-    const global = { version: 4, general: { videoSyncBufferMs: 500 }, types: {} };
+    const global = { version: 10, general: { videoSyncBufferMs: 500 }, types: {} };
     const store = load({ 'settings:global': global });
 
     store.set(1, 'general.videoSyncBufferMs', 600);
@@ -292,7 +192,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it("writing one general override keeps the scope's existing overrides", () => {
     const store = load({
       'settings:channel:1': {
-        version: 4,
+        version: 10,
         general: { metadataRetentionMs: 2500 },
         types: { segmentation: { maskOpacity: 0.7 } },
       },
@@ -317,7 +217,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it('clearing one own general value keeps the others and the types', () => {
     const store = load({
       'settings:channel:1': {
-        version: 4,
+        version: 10,
         general: { videoSyncBufferMs: 600, metadataRetentionMs: 2500 },
         types: { segmentation: { maskOpacity: 0.7 } },
       },
@@ -333,7 +233,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it('clearing a value the scope does not have succeeds and changes nothing else', () => {
     const store = load({
-      'settings:channel:1': { version: 4, general: { metadataRetentionMs: 2500 }, types: {} },
+      'settings:channel:1': { version: 10, general: { metadataRetentionMs: 2500 }, types: {} },
     });
 
     store.resetOverride(1, 'general.videoSyncBufferMs');
@@ -344,7 +244,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it('clearing a general value removes the entry when nothing is left', () => {
     const store = load({
-      'settings:channel:1': { version: 4, general: { videoSyncBufferMs: 600 }, types: {} },
+      'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 600 }, types: {} },
     });
 
     store.resetOverride(1, 'general.videoSyncBufferMs');
@@ -356,7 +256,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it('a clear that storage refuses still holds for the session and leaves the stored entry alone', () => {
     // The original returned null here; the store keeps its state in memory and ViewerStorage
     // keeps the refused write for the session instead.
-    const channel1 = { version: 4, general: { videoSyncBufferMs: 600 }, types: {} };
+    const channel1 = { version: 10, general: { videoSyncBufferMs: 600 }, types: {} };
     const store = load(
       { 'settings:channel:1': channel1 },
       { failWritesFor: ['settings:channel:1'] },
@@ -371,10 +271,10 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it('listing finds channels with their own value, sorted by channel number', () => {
     const store = load({
-      'settings:channel:10': { version: 4, general: { videoSyncBufferMs: 900 }, types: {} },
-      'settings:channel:2': { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
-      'settings:channel:7': { version: 4, general: { videoSyncBufferMs: 700 }, types: {} },
-      'settings:channel:3': { version: 4, general: { metadataRetentionMs: 2500 }, types: {} },
+      'settings:channel:10': { version: 10, general: { videoSyncBufferMs: 900 }, types: {} },
+      'settings:channel:2': { version: 10, general: { videoSyncBufferMs: 500 }, types: {} },
+      'settings:channel:7': { version: 10, general: { videoSyncBufferMs: 700 }, types: {} },
+      'settings:channel:3': { version: 10, general: { metadataRetentionMs: 2500 }, types: {} },
     });
 
     expect(listOverrides(store, 'general.videoSyncBufferMs')).toStrictEqual([
@@ -386,14 +286,14 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it('listing ignores the global scope, malformed entries and foreign keys', () => {
     const store = load({
-      'settings:global': { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
-      'settings:channel:abc': { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
+      'settings:global': { version: 10, general: { videoSyncBufferMs: 500 }, types: {} },
+      'settings:channel:abc': { version: 10, general: { videoSyncBufferMs: 500 }, types: {} },
       'settings:channel:4': 'not json',
       layout: 3,
     });
     fake.values.set(
       'viewerSettings_channel_5',
-      JSON.stringify({ version: 4, general: { videoSyncBufferMs: 500 } }),
+      JSON.stringify({ version: 10, general: { videoSyncBufferMs: 500 } }),
     );
 
     expect(listOverrides(store, 'general.videoSyncBufferMs')).toStrictEqual([]);
@@ -401,8 +301,8 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it('listing reports a channel whose own value equals the global value', () => {
     const store = load({
-      'settings:global': { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
-      'settings:channel:1': { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
+      'settings:global': { version: 10, general: { videoSyncBufferMs: 500 }, types: {} },
+      'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 500 }, types: {} },
     });
 
     expect(listOverrides(store, 'general.videoSyncBufferMs')).toStrictEqual([
@@ -413,18 +313,18 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it("the followed value is the global scope's own value, else the default", () => {
     const withGlobal = load({
       'settings:global': {
-        version: 4,
+        version: 10,
         general: { videoSyncBufferMs: 1000, metadataRetentionMs: 0 },
         types: {},
       },
-      'settings:channel:1': { version: 4, general: { videoSyncBufferMs: 350 }, types: {} },
+      'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 350 }, types: {} },
     });
     expect(withGlobal.value('global', 'general.videoSyncBufferMs')).toBe(1000);
     expect(withGlobal.value('global', 'general.metadataRetentionMs')).toBe(0);
     expect(withGlobal.value('global', 'general.showRoi')).toBe(true);
 
     const withoutGlobal = load({
-      'settings:channel:1': { version: 4, general: { videoSyncBufferMs: 600 }, types: {} },
+      'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 600 }, types: {} },
     });
     expect(withoutGlobal.value('global', 'general.videoSyncBufferMs')).toBe(300);
   });
@@ -443,12 +343,12 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it("applying globally raises the global value and removes the channel's own value", () => {
     for (const seeded of [
-      { 'settings:global': { version: 4, general: { videoSyncBufferMs: 350 }, types: {} } },
+      { 'settings:global': { version: 10, general: { videoSyncBufferMs: 350 }, types: {} } },
       {},
     ]) {
       const store = load({
         ...seeded,
-        'settings:channel:1': { version: 4, general: { videoSyncBufferMs: 350 }, types: {} },
+        'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 350 }, types: {} },
       });
 
       const result = store.raiseGlobal(1, 'general.videoSyncBufferMs', 600);
@@ -465,8 +365,8 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it('applying globally never lowers the global value', () => {
     const store = load({
-      'settings:global': { version: 4, general: { videoSyncBufferMs: 1000 }, types: {} },
-      'settings:channel:1': { version: 4, general: { videoSyncBufferMs: 350 }, types: {} },
+      'settings:global': { version: 10, general: { videoSyncBufferMs: 1000 }, types: {} },
+      'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 350 }, types: {} },
     });
 
     const result = store.raiseGlobal(1, 'general.videoSyncBufferMs', 600);
@@ -481,13 +381,13 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   });
 
   it('applying globally with a global value equal to the target does not write the global scope', () => {
-    const global = { version: 4, general: { videoSyncBufferMs: 600 }, types: {} };
+    const global = { version: 10, general: { videoSyncBufferMs: 600 }, types: {} };
     // 600.4 and "600" normalize to 600, so they count as equal too. The text one is what a
     // control's raw value would be; the type says number, but normalization still parses it.
     for (const value of [600, 600.4, '600' as unknown as number]) {
       const store = load({
         'settings:global': global,
-        'settings:channel:1': { version: 4, general: { videoSyncBufferMs: 350 }, types: {} },
+        'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 350 }, types: {} },
       });
 
       const result = store.raiseGlobal(1, 'general.videoSyncBufferMs', value);
@@ -505,7 +405,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it("applying globally keeps the channel's other own values and types", () => {
     const store = load({
       'settings:channel:1': {
-        version: 4,
+        version: 10,
         general: { videoSyncBufferMs: 350, metadataRetentionMs: 2500, showRoi: false },
         types: { segmentation: { maskOpacity: 0.7 } },
       },
@@ -519,9 +419,9 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   });
 
   it("applying globally does not touch other channels' own values", () => {
-    const channel2 = { version: 4, general: { videoSyncBufferMs: 450 }, types: {} };
+    const channel2 = { version: 10, general: { videoSyncBufferMs: 450 }, types: {} };
     const store = load({
-      'settings:channel:1': { version: 4, general: { videoSyncBufferMs: 350 }, types: {} },
+      'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 350 }, types: {} },
       'settings:channel:2': channel2,
     });
 
@@ -544,7 +444,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it("the followed value is the global scope's own value, else the default, for general, type and nested ids", () => {
     const store = load({
       'settings:global': {
-        version: 4,
+        version: 10,
         general: { videoSyncBufferMs: 900 },
         types: { tracking: { history: { trailLength: 40 } } },
       },
@@ -560,7 +460,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it('own values are read by id, nested ones included, empty for an empty scope', () => {
     const store = load({
       'settings:channel:1': {
-        version: 4,
+        version: 10,
         general: { videoSyncBufferMs: 600 },
         types: { tracking: { history: { trailLength: 25 } } },
       },
@@ -576,7 +476,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it('own values of a scope stored by the old dialog are all reported', () => {
     const store = load({
       'settings:channel:1': {
-        version: 4,
+        version: 10,
         general: {
           videoSyncBufferMs: 700,
           metadataRetentionMs: 3000,
@@ -606,22 +506,6 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
       'types.tracking.history.enabled': false,
       'types.tracking.history.trailLength': 30,
       'types.tracking.history.lostTrackTtlMs': 6000,
-    });
-  });
-
-  it('own values of a legacy tracking scope with flat keys are reported under the history ids', () => {
-    const store = load({
-      'settings:channel:1': {
-        version: 4,
-        general: {},
-        types: { tracking: { showTrackHistory: false, trailLength: 20, lostTrackTtlMs: 5000 } },
-      },
-    });
-
-    expect(ownValues(store, 1)).toStrictEqual({
-      'types.tracking.history.enabled': false,
-      'types.tracking.history.trailLength': 20,
-      'types.tracking.history.lostTrackTtlMs': 5000,
     });
   });
 
@@ -670,7 +554,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it('a switched-on value equal to the followed value is still an own value', () => {
     const store = load({
-      'settings:global': { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
+      'settings:global': { version: 10, general: { videoSyncBufferMs: 500 }, types: {} },
     });
 
     store.set(1, 'general.videoSyncBufferMs', 500);
@@ -713,65 +597,10 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
     }
   });
 
-  it('a scope stored with auxiliary.blazepose-3d values loads its other settings, and the next write stores no auxiliary key', () => {
-    // An earlier build stored 3D pose settings; Insight has no such panel, so they are not read.
-    const store = load({
-      'settings:global': {
-        version: 10,
-        general: { lineWidth: 5 },
-        auxiliary: { 'blazepose-3d': { yawDegrees: -20, panelMode: 'expanded' } },
-      },
-      'settings:channel:2': {
-        version: 10,
-        types: {
-          tracking: { visible: false },
-          'object-detection': { objects: [{ label: 'car', color: '#dc2626' }] },
-        },
-        auxiliary: { 'blazepose-3d': { enabled: false } },
-      },
-    });
-
-    expect(store.value('global', 'general.lineWidth')).toBe(5);
-    expect(store.resolved(2)().types.tracking.visible).toBe(false);
-    expect(writesTo('settings:global')).toStrictEqual([]);
-
-    store.set('global', 'general.showRoi', false);
-    store.set(2, 'general.lineWidth', 7);
-
-    expect(stored('settings:global')).toStrictEqual({
-      version: 10,
-      general: { lineWidth: 5, showRoi: false },
-      types: {},
-    });
-    // The class colour row stays; only the auxiliary object goes.
-    expect(stored('settings:channel:2')).toStrictEqual({
-      version: 10,
-      general: { lineWidth: 7 },
-      types: {
-        tracking: { visible: false },
-        'object-detection': {
-          objects: [{ label: 'car', color: '#dc2626', style: 'solid', width: 1 }],
-        },
-      },
-    });
-  });
-
-  it('a channel holding only auxiliary values is not listed in channelOverrides()', () => {
-    const store = load({
-      'settings:channel:4': {
-        version: 10,
-        auxiliary: { 'blazepose-3d': { panelMode: 'collapsed' } },
-      },
-      'settings:channel:5': { version: 10, general: { lineWidth: 6 } },
-    });
-
-    expect(store.channelOverrides()).toStrictEqual({ settings: 1, channels: 1 });
-  });
-
   it('clearing one own value keeps the others and the class colour entries', () => {
     const store = load({
       'settings:channel:1': {
-        version: 4,
+        version: 10,
         general: { videoSyncBufferMs: 600, metadataRetentionMs: 2500 },
         types: {
           tracking: { history: { enabled: false, trailLength: 20, lostTrackTtlMs: 5000 } },
@@ -805,7 +634,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it("clearing a channel's last own value removes its entry", () => {
     const store = load({
-      'settings:channel:1': { version: 4, general: { videoSyncBufferMs: 600 }, types: {} },
+      'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 600 }, types: {} },
     });
 
     store.resetOverride(1, 'general.videoSyncBufferMs');
@@ -817,7 +646,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it("clearing a channel's last nested own value removes its entry", () => {
     const store = load({
       'settings:channel:1': {
-        version: 4,
+        version: 10,
         general: {},
         types: { tracking: { history: { trailLength: 30 } } },
       },
@@ -832,7 +661,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it('clearing a value keeps the entry while class colour entries remain', () => {
     const store = load({
       'settings:channel:1': {
-        version: 4,
+        version: 10,
         general: { videoSyncBufferMs: 600 },
         types: {
           'object-detection': {
@@ -854,17 +683,17 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it('listing channel overrides works for a nested id, sorted by channel, ignoring the global scope and malformed entries', () => {
     const store = load({
       'settings:global': {
-        version: 4,
+        version: 10,
         general: {},
         types: { tracking: { history: { trailLength: 99 } } },
       },
       'settings:channel:10': {
-        version: 4,
+        version: 10,
         general: {},
         types: { tracking: { history: { trailLength: 90 } } },
       },
       'settings:channel:2': {
-        version: 4,
+        version: 10,
         general: {},
         types: { tracking: { history: { trailLength: 20 } } },
       },
@@ -881,7 +710,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   it("inherited objects are the global scope's own entries for the type", () => {
     const store = load({
       'settings:global': {
-        version: 4,
+        version: 10,
         general: {},
         types: {
           'object-detection': {

@@ -18,7 +18,7 @@ export class ImportSession {
   async run(work: () => Promise<ImportOutcome>): Promise<void> {
     this.runningState.set(true);
     // Closing would not stop the work, but the user would lose sight of it and of a name clash
-    // waiting for an answer; navigation still closes it, and the work moves into a toast.
+    // waiting for an answer; navigation still closes it, and the work goes on to its toast.
     this.ref.setDismissible(false);
     try {
       const outcome = await work();

@@ -52,12 +52,8 @@ const tiles = (page: Page) => page.locator('app-viewer-tile');
 const tile = (page: Page, channel: number) =>
   page.getByRole('group', { name: `Channel ${channel}`, exact: true });
 const pageTools = (page: Page) => page.getByRole('group', { name: 'Page tools' });
-const pageField = (page: Page) => page.getByRole('textbox', { name: 'Page' });
-/** The page field's label, which ends in "of <page count>". */
-const pageLabel = (page: Page) => page.locator('label').filter({ has: pageField(page) });
 /** A toolbar popover's panel, which lives in the overlay outside the toolbar while it is open. */
 const popover = (page: Page, name: string) => page.getByRole('dialog', { name, exact: true });
-const sizeSlider = (page: Page) => page.getByRole('slider', { name: 'Tile size' });
 
 /**
  * The tiles that reach outside the grid's box or are smaller than the kit's 64 px minimum, by
@@ -93,25 +89,9 @@ function columns(page: Page): Promise<number> {
   );
 }
 
-/** The opacity an element is drawn with, its own times its ancestors' (as in shell.spec.ts). */
-const renderedOpacity = (locator: Locator) =>
-  locator.evaluate((element) => {
-    let opacity = 1;
-    for (let node: Element | null = element; node; node = node.parentElement) {
-      opacity *= Number(getComputedStyle(node).opacity);
-    }
-    return opacity;
-  });
-
-/**
- * Measures with the page clock paused: Angular renders on timers, which are paused too, so each
- * look lets a little time pass for it first.
- */
-async function settledLook<T>(page: Page, measure: () => Promise<T>): Promise<T> {
-  await page.clock.runFor(100);
-  return measure();
-}
-
+// The Viewer's layout and its one flow without video, against a mocked channel API. What the page
+// does with its toolbar, inspector and settings is held by its unit specs (`src/app/pages/viewer/`,
+// `src/app/viewer/`).
 test.describe('the Viewer without video', () => {
   test('16 slots at 1366×768, 1920×1080 and 768×1024: every tile fully inside the grid, no page scroll', async ({
     page,
@@ -141,50 +121,6 @@ test.describe('the Viewer without video', () => {
           toolsOverflow: 0,
         });
     }
-  });
-
-  test('the size slider changes tiles per page and the choice survives reload for the same count', async ({
-    page,
-  }) => {
-    await withoutVideo(page);
-    await page.setViewportSize(LAPTOP);
-    await page.goto('/viewer');
-    await expect(tiles(page)).toHaveCount(SLOTS);
-    await expect(pageLabel(page)).toContainText('of 1');
-
-    // The slider's far end is one tile filling the area.
-    await sizeSlider(page).focus();
-    await page.keyboard.press('End');
-    await expect(tiles(page)).toHaveCount(1);
-    await expect(pageLabel(page)).toContainText(`of ${SLOTS}`);
-    const chosen = await sizeSlider(page).getAttribute('aria-valuenow');
-
-    await page.reload();
-    await expect(tiles(page)).toHaveCount(1);
-    await expect(sizeSlider(page)).toHaveAttribute('aria-valuenow', chosen!);
-
-    // The choice belongs to 16 displayed channels: four still fit on one page.
-    await page.goto('/viewer?src=0,1,2,3');
-    await expect(tiles(page)).toHaveCount(4);
-    await expect(pageLabel(page)).toContainText('of 1');
-
-    await page.goto('/viewer');
-    await expect(tiles(page)).toHaveCount(1);
-  });
-
-  test('bars off: no label, status or chip in any tile', async ({ page }) => {
-    await withoutVideo(page);
-    await page.goto('/viewer');
-    // With bars, a tile names its channel and says what it waits for.
-    await expect(tile(page, 0)).toContainText('0');
-    await expect(tile(page, 0)).toContainText('Waiting for stream');
-
-    await pageTools(page).getByRole('button', { name: 'View options' }).click();
-    await popover(page, 'View options').getByRole('switch', { name: 'Bars' }).click();
-
-    await expect(tiles(page)).toHaveCount(SLOTS);
-    await expect(tiles(page)).toHaveText(Array(SLOTS).fill(''));
-    await expect(tiles(page).getByRole('button')).toHaveCount(0);
   });
 
   test('inspector open/close repacks without overflow and keeps the selected tile on screen', async ({
@@ -232,105 +168,11 @@ test.describe('the Viewer without video', () => {
     await expect.poll(() => misplacedTiles(page)).toEqual([]);
   });
 
-  test('a click into the empty space around the tiles deselects, as Escape does', async ({
-    page,
-  }) => {
+  test('kiosk: the grid repacks to the full screen, inset by one tile gap', async ({ page }) => {
     await withoutVideo(page);
     await page.setViewportSize(LAPTOP);
     await page.goto('/viewer');
-
-    await tile(page, 3).click();
-    await expect(tile(page, 3)).toHaveAttribute('aria-current', 'true');
-
-    // The grid area's inset, which no tile covers.
-    await page.locator('app-viewer-page .grid-area').click({ position: { x: 2, y: 2 } });
-    await expect(tile(page, 3)).not.toHaveAttribute('aria-current', 'true');
-
-    // The tile still selects, and a click in the inspector keeps the selection.
-    await tile(page, 3).click();
-    await sidePanelToggle(page).click();
-    await page.locator('app-viewer-inspector').click({ position: { x: 4, y: 4 } });
-    await expect(tile(page, 3)).toHaveAttribute('aria-current', 'true');
-  });
-
-  test('the inspector lists channel overrides, folded; bulk resets ask first and keep focus in the panel', async ({
-    page,
-  }) => {
-    await withoutVideo(page);
-    await page.setViewportSize(LAPTOP);
-    await page.goto('/viewer');
-    await page.evaluate(() => {
-      const scope = (settings: object) => JSON.stringify({ version: 10, general: settings });
-      localStorage.setItem('neat-insight:viewer:settings:channel:3', scope({ lineWidth: 6 }));
-      localStorage.setItem(
-        'neat-insight:viewer:settings:channel:7',
-        scope({ lineWidth: 8, videoSyncBufferMs: 900 }),
-      );
-    });
-    await page.reload();
-    await sidePanelToggle(page).click();
-    const inspector = page.locator('app-viewer-inspector');
-    await inspector.getByRole('tab', { name: 'General' }).click();
-
-    // Folded by default; a click shows the channels with their values.
-    const note = inspector.getByRole('button', { name: 'Overridden on 2 channels' });
-    await expect(note).toHaveAttribute('aria-expanded', 'false');
-    await expect(inspector.getByText('Channel 3')).toHaveCount(0);
-    await note.click();
-    await expect(note).toHaveAttribute('aria-expanded', 'true');
-    await expect(inspector.getByText('Channel 3')).toBeVisible();
-    await expect(inspector.getByText('6 px')).toBeVisible();
-
-    // The bulk reset asks, with Cancel focused; Escape changes nothing.
-    const reset = inspector.getByRole('button', { name: /^Reset on 2 channels/ });
-    await reset.click();
-    const dialog = page.getByRole('alertdialog', { name: 'Reset Line width on 2 channels?' });
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText(
-      "They go back to the global value (3 px). This can't be undone.",
-    );
-    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
-    await page.keyboard.press('Escape');
-    await expect(dialog).toHaveCount(0);
-    await expect(reset).toBeFocused();
-    await expect(note).toBeVisible();
-
-    // Resetting the one setting leaves channel 7's sync buffer, so the footer stays.
-    await reset.click();
-    await dialog.getByRole('button', { name: 'Reset', exact: true }).click();
-    await expect(dialog).toHaveCount(0);
-    await expect(note).toHaveCount(0);
-    await expect(inspector.getByRole('slider', { name: 'Line width' })).toBeFocused();
-    const footer = inspector.getByRole('button', { name: /^Reset all channels to global/ });
-    await expect(footer).toBeVisible();
-
-    await footer.click();
-    const all = page.getByRole('alertdialog', { name: 'Reset all channels to global?' });
-    await expect(all).toContainText(
-      "1 setting on 1 channel goes back to the global values. Regions of interest are kept. This can't be undone.",
-    );
-    await all.getByRole('button', { name: 'Reset', exact: true }).click();
-    await expect(footer).toHaveCount(0);
-    await expect(inspector.getByRole('heading', { name: 'All channels' })).toBeFocused();
-    expect(
-      await page.evaluate(() =>
-        Object.keys(localStorage).filter((key) => key.includes(':settings:channel:')),
-      ),
-    ).toEqual([]);
-  });
-
-  test('kiosk: grid repacks to the full screen; the toolbar shows on pointer movement', async ({
-    page,
-  }) => {
-    // The toolbar hides after 2.5 s without pointer activity. The clock is paused from before the
-    // page loads, so that timer advances only when the test runs it (as in shell.spec.ts).
-    await page.clock.install({ time: 0 });
-    await page.clock.pauseAt(1000);
-    const settled = <T>(measure: () => Promise<T>) => settledLook(page, measure);
-    await withoutVideo(page);
-    await page.setViewportSize(LAPTOP);
-    await page.goto('/viewer');
-    await expect.poll(() => settled(() => tiles(page).count())).toBe(SLOTS);
+    await expect(tiles(page)).toHaveCount(SLOTS);
     await expect(tile(page, 0)).toBeVisible();
     const tileBefore = (await tile(page, 0).boundingBox())!;
 
@@ -338,55 +180,12 @@ test.describe('the Viewer without video', () => {
 
     // The grid is inset by one tile gap, 8 px, from the screen's edges.
     await expect
-      .poll(() => settled(() => grid(page).boundingBox()))
+      .poll(() => grid(page).boundingBox())
       .toEqual({ x: 8, y: 8, width: LAPTOP.width - 16, height: LAPTOP.height - 16 });
-    await expect.poll(() => settled(() => misplacedTiles(page))).toEqual([]);
+    await expect.poll(() => misplacedTiles(page)).toEqual([]);
     const tileAfter = (await tile(page, 0).boundingBox())!;
     expect(tileAfter.width).toBeGreaterThan(tileBefore.width);
     await expect(tiles(page)).toHaveCount(SLOTS);
-
-    const tools = pageTools(page);
-    await expect.poll(() => renderedOpacity(tools)).toBe(1);
-    await page.clock.runFor(3000);
-    await expect.poll(() => renderedOpacity(tools)).toBe(0);
-    await page.mouse.move(400, 300);
-    await expect.poll(() => settled(() => renderedOpacity(tools))).toBe(1);
-  });
-
-  test('kiosk: View options opened from the floating toolbar stays open while the pointer rests on it', async ({
-    page,
-  }) => {
-    // As in the test above, the clock is paused so that the idle timer runs only when told to.
-    await page.clock.install({ time: 0 });
-    await page.clock.pauseAt(1000);
-    const settled = <T>(measure: () => Promise<T>) => settledLook(page, measure);
-    await withoutVideo(page);
-    await page.setViewportSize(LAPTOP);
-    // `?kiosk` turns kiosk mode on without asking for fullscreen, which Escape would leave.
-    await page.goto('/viewer?kiosk');
-    await expect.poll(() => settled(() => tiles(page).count())).toBe(SLOTS);
-    // The bar shows on pointer movement, whether or not it has already gone idle.
-    await page.mouse.move(400, 300);
-    const tools = pageTools(page);
-    await expect.poll(() => settled(() => renderedOpacity(tools))).toBe(1);
-
-    await tools.getByRole('button', { name: 'View options' }).click();
-    const panel = popover(page, 'View options');
-    await expect.poll(() => settled(() => panel.isVisible())).toBe(true);
-
-    // The pointer rests on the panel, outside the bar, for longer than the bar's idle time.
-    const box = (await panel.boundingBox())!;
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.clock.runFor(3000);
-    await expect.poll(() => settled(() => panel.isVisible())).toBe(true);
-    await expect.poll(() => settled(() => renderedOpacity(tools))).toBe(1);
-
-    // Closed, the bar may hide again. (By the trigger rather than Escape: a key press leaves focus
-    // visible on the trigger, which keeps the bar shown for keyboard users.)
-    await tools.getByRole('button', { name: 'View options' }).click();
-    await expect.poll(() => settled(() => panel.count())).toBe(0);
-    await page.clock.runFor(3000);
-    await expect.poll(() => settled(() => renderedOpacity(tools))).toBe(0);
   });
 
   test('tiles show "Waiting for stream" while the offer returns 503', async ({ page }) => {
