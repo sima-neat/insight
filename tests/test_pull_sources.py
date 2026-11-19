@@ -320,6 +320,116 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result.status, "ok")
         self.assertEqual(closed, [True])
 
+
+class ScriptedSocket:
+    """A connected socket whose recv() returns the scripted chunks in order, then end of stream.
+
+    A chunk may be an exception instance, which recv() raises instead. Each sendall() is recorded.
+    """
+
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+        self.sent = []
+        self.closed = False
+
+    def settimeout(self, value):
+        pass
+
+    def sendall(self, data):
+        self.sent.append(data.decode())
+
+    def recv(self, size):
+        if not self.chunks:
+            return b""
+        chunk = self.chunks.pop(0)
+        if isinstance(chunk, BaseException):
+            raise chunk
+        if len(chunk) > size:
+            self.chunks.insert(0, chunk[size:])
+            chunk = chunk[:size]
+        return chunk
+
+    def close(self):
+        self.closed = True
+
+
+BASIC_401_HEAD = b'RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\nWWW-Authenticate: Basic realm="ipcam"\r\n'
+OK_200 = b"RTSP/1.0 200 OK\r\nCSeq: 2\r\nContent-Type: application/sdp\r\nContent-Length: 0\r\n\r\n"
+REJECTED_401 = b'RTSP/1.0 401 Unauthorized\r\nCSeq: 2\r\nWWW-Authenticate: Basic realm="ipcam"\r\n\r\n'
+
+
+class ProbeResponseBodyTests(unittest.TestCase):
+    """Issue #215: a 401 body must be consumed before the authenticated DESCRIBE reuses the connection."""
+
+    def _probe(self, chunks):
+        sock = ScriptedSocket(chunks)
+        with mock.patch.object(pull_sources.socket, "create_connection", return_value=sock):
+            result = pull_sources.probe_rtsp("rtsp://cam:pw@10.0.0.5/live", timeout=2)
+        self.assertTrue(sock.closed)
+        return result, sock
+
+    def test_401_body_arriving_after_its_headers_then_accepted_credentials_is_ok(self):
+        result, sock = self._probe([BASIC_401_HEAD + b"Content-Length: 4\r\n\r\n", b"deny", OK_200])
+        self.assertEqual((result.status, result.error), ("ok", None))
+        self.assertIn("Authorization: Basic ", sock.sent[1])
+
+    def test_401_body_arriving_after_its_headers_then_rejected_credentials_is_auth_failed(self):
+        result, _ = self._probe([BASIC_401_HEAD + b"Content-Length: 4\r\n\r\n", b"deny", REJECTED_401])
+        self.assertEqual((result.status, result.error), ("auth_failed", pull_sources.AUTH_REJECTED_MESSAGE))
+
+    def test_401_body_split_over_several_reads(self):
+        body = b"<html>401 Unauthorized</html>"
+        chunks = [BASIC_401_HEAD + b"Content-Length: %d\r\n\r\n<ht" % len(body), b"ml>401 Unau", b"thorized</html>", OK_200]
+        result, _ = self._probe(chunks)
+        self.assertEqual(result.status, "ok")
+
+    def test_401_body_coalesced_with_its_headers(self):
+        result, _ = self._probe([BASIC_401_HEAD + b"Content-Length: 4\r\n\r\ndeny", REJECTED_401])
+        self.assertEqual(result.status, "auth_failed")
+
+    def test_401_without_content_length_has_no_body(self):
+        result, _ = self._probe([BASIC_401_HEAD + b"\r\n", OK_200])
+        self.assertEqual(result.status, "ok")
+
+    def test_connection_closed_inside_the_401_body_is_unreachable(self):
+        result, sock = self._probe([BASIC_401_HEAD + b"Content-Length: 10\r\n\r\n", b"den"])
+        self.assertEqual((result.status, result.error), ("unreachable", "The camera closed the connection"))
+        self.assertEqual(len(sock.sent), 1)  # no authenticated DESCRIBE after a truncated body
+
+    def test_timeout_inside_the_401_body_is_unreachable(self):
+        result, _ = self._probe([BASIC_401_HEAD + b"Content-Length: 10\r\n\r\n", b"den", socket.timeout()])
+        self.assertEqual((result.status, result.error), ("unreachable", "Timed out after 2 s"))
+
+    def test_malformed_content_length_is_an_invalid_response(self):
+        for value in (b"abc", b"-4", b"4, 5", b"+4", b""):
+            with self.subTest(value=value):
+                result, sock = self._probe([BASIC_401_HEAD + b"Content-Length: " + value + b"\r\n\r\n", b"deny", OK_200])
+                self.assertEqual((result.status, result.error), ("unreachable", pull_sources.INVALID_RESPONSE_MESSAGE))
+                self.assertEqual(len(sock.sent), 1)
+
+    def test_conflicting_content_length_headers_are_an_invalid_response(self):
+        head = BASIC_401_HEAD + b"Content-Length: 4\r\nContent-Length: 5\r\n\r\n"
+        result, _ = self._probe([head, b"deny", OK_200])
+        self.assertEqual((result.status, result.error), ("unreachable", pull_sources.INVALID_RESPONSE_MESSAGE))
+
+    def test_repeated_equal_content_length_headers_are_accepted(self):
+        head = BASIC_401_HEAD + b"Content-Length: 4\r\nContent-Length: 4\r\n\r\n"
+        result, _ = self._probe([head, b"deny", OK_200])
+        self.assertEqual(result.status, "ok")
+
+    def test_content_length_too_long_for_int_is_an_invalid_response(self):
+        head = BASIC_401_HEAD + b"Content-Length: " + b"4" * 5000 + b"\r\n\r\n"
+        result, sock = self._probe([head, b"deny", OK_200])
+        self.assertEqual((result.status, result.error), ("unreachable", pull_sources.INVALID_RESPONSE_MESSAGE))
+        self.assertEqual(len(sock.sent), 1)
+
+    def test_oversized_401_body_is_refused_without_reading_it(self):
+        length = pull_sources.MAX_RESPONSE_BODY_BYTES + 1
+        result, sock = self._probe([BASIC_401_HEAD + b"Content-Length: %d\r\n\r\n" % length, b"x" * 4096, OK_200])
+        self.assertEqual((result.status, result.error), ("unreachable", pull_sources.INVALID_RESPONSE_MESSAGE))
+        self.assertEqual(len(sock.chunks), 2)  # neither the body nor the next response was read
+
+
 class RegistryTests(unittest.TestCase):
     def _record(self, index=3, **kwargs):
         base = dict(index=index, url="rtsp://u:p@10.0.0.5:554/x", scheme="rtsp", host="10.0.0.5:554", path="/x", started_at=100.0)

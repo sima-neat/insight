@@ -84,6 +84,10 @@ def _masked_query(query: str) -> str:
 PROBE_TIMEOUT_SECONDS = 5.0
 AUTH_REJECTED_MESSAGE = "The camera rejected the username or password"
 AUTH_REQUIRED_MESSAGE = "The camera requires a username and password"
+INVALID_RESPONSE_MESSAGE = "The camera sent an invalid RTSP response"
+MAX_RESPONSE_HEAD_BYTES = 65536
+# A 401 body is a short error page; anything larger is not a camera answering DESCRIBE.
+MAX_RESPONSE_BODY_BYTES = 65536
 
 
 @dataclass(frozen=True)
@@ -92,27 +96,56 @@ class ProbeResult:
     error: Optional[str] = None
 
 
-def _read_response(sock) -> tuple[int, str, dict]:
-    """Return (status, reason, headers); header names are lower-case and every value is kept in a list."""
-    data = b""
-    while b"\r\n\r\n" not in data:
-        chunk = sock.recv(4096)
+class _InvalidResponse(Exception):
+    pass
+
+
+class _ResponseReader:
+    """Reads RTSP responses off one connection, keeping bytes received past a response's headers."""
+
+    def __init__(self, sock):
+        self.sock = sock
+        self._buffer = b""
+
+    def _receive(self) -> None:
+        chunk = self.sock.recv(4096)
         if not chunk:
             raise ConnectionError("closed")
-        data += chunk
-        if len(data) > 65536:
+        self._buffer += chunk
+
+    def read_response(self) -> tuple[int, str, dict]:
+        """Return (status, reason, headers); header names are lower-case and every value is kept in a list."""
+        while b"\r\n\r\n" not in self._buffer:
+            if len(self._buffer) > MAX_RESPONSE_HEAD_BYTES:
+                raise ConnectionError("closed")
+            self._receive()
+        head, self._buffer = self._buffer.split(b"\r\n\r\n", 1)
+        lines = head.decode("latin-1").split("\r\n")
+        parts = lines[0].split(" ", 2)
+        if len(parts) < 2 or not parts[0].startswith("RTSP/"):
             raise ConnectionError("closed")
-    head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1")
-    lines = head.split("\r\n")
-    parts = lines[0].split(" ", 2)
-    if len(parts) < 2 or not parts[0].startswith("RTSP/"):
-        raise ConnectionError("closed")
-    headers: dict = {}
-    for line in lines[1:]:
-        name, sep, value = line.partition(":")
-        if sep:
-            headers.setdefault(name.strip().lower(), []).append(value.strip())
-    return int(parts[1]), (parts[2] if len(parts) > 2 else ""), headers
+        headers: dict = {}
+        for line in lines[1:]:
+            name, sep, value = line.partition(":")
+            if sep:
+                headers.setdefault(name.strip().lower(), []).append(value.strip())
+        return int(parts[1]), (parts[2] if len(parts) > 2 else ""), headers
+
+    def skip_body(self, headers: dict) -> None:
+        """Consume the body a response declared, so the next response starts at its status line."""
+        values = set(headers.get("content-length", []))
+        if not values:
+            return  # RTSP: no Content-Length means no body
+        if len(values) != 1:
+            raise _InvalidResponse("conflicting Content-Length")
+        value = values.pop()
+        # Digits are counted before int(): a few thousand of them make int() itself raise.
+        if not re.fullmatch(r"[0-9]{1,20}", value) or int(value) > MAX_RESPONSE_BODY_BYTES:
+            raise _InvalidResponse("bad Content-Length")
+        length = int(value)
+        while len(self._buffer) < length:
+            self._receive()
+        self._buffer = self._buffer[length:]
 
 
 _CHALLENGE_PARAM = re.compile(r'([A-Za-z0-9_-]+)\s*=\s*("(?:[^"\\]|\\.)*"|[^,\s]*)')
@@ -170,12 +203,12 @@ def _authorization(challenges: list, username: str, password: str, uri: str) -> 
     return None
 
 
-def _describe(sock, uri: str, cseq: int, authorization: Optional[str]) -> tuple[int, str, dict]:
+def _describe(reader: _ResponseReader, uri: str, cseq: int, authorization: Optional[str]) -> tuple[int, str, dict]:
     lines = [f"DESCRIBE {uri} RTSP/1.0", f"CSeq: {cseq}", "Accept: application/sdp", "User-Agent: neat-insight"]
     if authorization:
         lines.append(f"Authorization: {authorization}")
-    sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
-    return _read_response(sock)
+    reader.sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+    return reader.read_response()
 
 
 def probe_rtsp(url: str, timeout: float = PROBE_TIMEOUT_SECONDS) -> ProbeResult:
@@ -212,7 +245,8 @@ def probe_rtsp(url: str, timeout: float = PROBE_TIMEOUT_SECONDS) -> ProbeResult:
                 return ProbeResult("unreachable", "Certificate is not trusted (TLS)")
             except (ssl.SSLError, OSError):
                 return ProbeResult("unreachable", "TLS handshake failed")
-        status, reason, headers = _describe(sock, uri, 1, None)
+        reader = _ResponseReader(sock)
+        status, reason, headers = _describe(reader, uri, 1, None)
         if status == 401 and "www-authenticate" in headers:
             if not username:
                 return ProbeResult("auth_failed", AUTH_REQUIRED_MESSAGE)
@@ -221,12 +255,16 @@ def probe_rtsp(url: str, timeout: float = PROBE_TIMEOUT_SECONDS) -> ProbeResult:
                 # A challenge this probe cannot compute (SHA-256, auth-int, another scheme):
                 # mediamtx may still answer it, so let the pull go ahead and mediamtx decide.
                 return ProbeResult("ok")
-            status, reason, headers = _describe(sock, uri, 2, authorization)
+            # The connection is reused: a 401 body left unread would be parsed as the next response.
+            reader.skip_body(headers)
+            status, reason, headers = _describe(reader, uri, 2, authorization)
         if 200 <= status < 300:
             return ProbeResult("ok")
         if status in (401, 403):
             return ProbeResult("auth_failed", AUTH_REJECTED_MESSAGE)
         return ProbeResult("unreachable", f"Camera answered {status} {reason}".rstrip())
+    except _InvalidResponse:
+        return ProbeResult("unreachable", INVALID_RESPONSE_MESSAGE)
     except socket.timeout:
         return ProbeResult("unreachable", f"Timed out after {timeout:g} s")
     except (ConnectionError, OSError, ValueError):
