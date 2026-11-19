@@ -30,7 +30,7 @@ setup(
     description="Sima.ai Vision ML Development Tool",
     author="Sima.ai",
     author_email="support@sima.ai",
-    license="MIT",
+    license="Apache-2.0",
     packages=find_packages(exclude=["neat_insight.bin*"]),
     include_package_data=True,
     zip_safe=False,
@@ -41,7 +41,6 @@ setup(
             "bin/mediamtx",
             "bin/mediamtx.yml",
             "bin/ffmpeg_nodelay.so",
-            "tools/*",
         ]
     },
     entry_points={

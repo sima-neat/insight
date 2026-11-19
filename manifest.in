@@ -1,2 +1,1 @@
 recursive-include neat_insight/bin *
-recursive-include neat_insight/tools *

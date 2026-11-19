@@ -1,3 +1,0 @@
-#!/bin/bash
-# Launch sima-mipi-util manually (not needed when the systemd service is running)
-exec /opt/sima-mipi-util/venv/bin/python /usr/share/sima-mipi-util/camera_api.py "$@"

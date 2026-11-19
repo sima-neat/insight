@@ -20,7 +20,6 @@ usage() {
 Usage: ./build.sh [options]
 
 Options:
-  --release        Deprecated (no Docker installer artifacts are produced)
   --install        Install built neat-insight wheel into active virtualenv
   --skip-frontend  Skip npm frontend build step
   --skip-shim      Skip the TCP_NODELAY shim; Linux wheels then run ffmpeg with Nagle enabled
@@ -33,9 +32,6 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --release)
-            echo "⚠️ --release is deprecated and has no additional effect."
-            ;;
         --install)
             INSTALL_WHEEL=1
             ;;
@@ -159,88 +155,20 @@ install_wheel_into_venv() {
 }
 
 
-resolve_go_archive() {
-    local version="$1"
-    local os_name="$2"
-    local arch_name="$3"
-
-    if [[ "$os_name" == "Linux" ]]; then
-        if [[ "$arch_name" == "x86_64" ]]; then
-            echo "go${version}.linux-amd64.tar.gz"
-            return 0
-        fi
-        if [[ "$arch_name" == "aarch64" || "$arch_name" == "arm64" ]]; then
-            echo "go${version}.linux-arm64.tar.gz"
-            return 0
-        fi
-        echo "❌ Unsupported Linux architecture: $arch_name" >&2
-        return 1
-    fi
-
-    if [[ "$os_name" == "Darwin" ]]; then
-        if [[ "$arch_name" == "arm64" ]]; then
-            echo "go${version}.darwin-arm64.tar.gz"
-            return 0
-        fi
-        echo "❌ Unsupported Darwin architecture: $arch_name" >&2
-        return 1
-    fi
-
-    echo "❌ Auto-install only supported on Linux and macOS for now. Please install Go manually." >&2
-    return 1
-}
-
-
+# Go comes from PATH. server/go.mod names the version: Go's default (GOTOOLCHAIN=auto) fetches
+# that toolchain by itself, and GOTOOLCHAIN=local refuses an older Go, so asking the go command
+# from server/ checks it without stating the version a second time.
 ensure_go() {
-    REQUIRED_VERSION="1.24.5"
-    GO_OK=0
-    if command -v go >/dev/null 2>&1; then
-        GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-        GO_MAJOR=$(echo "$GO_VERSION" | cut -d. -f1)
-        GO_MINOR=$(echo "$GO_VERSION" | cut -d. -f2)
-
-        if [[ "$GO_MAJOR" -gt 1 || ( "$GO_MAJOR" -eq 1 && "$GO_MINOR" -ge 24 ) ]]; then
-            echo "✅ Go version $GO_VERSION is installed."
-            GO_OK=1
-        else
-            echo "⚠️ Found Go $GO_VERSION, but 1.24 or newer is required."
-        fi
-    else
-        echo "⚠️ Go is not installed."
+    if ! command -v go >/dev/null 2>&1; then
+        echo "❌ Go is not on PATH. Install Go; server/go.mod names the version."
+        exit 1
     fi
-
-    if [[ $GO_OK -eq 0 ]]; then
-        read -p "👉 Do you want to install Go $REQUIRED_VERSION now? [y/N]: " INSTALL_GO
-        if [[ "$INSTALL_GO" =~ ^[Yy]$ ]]; then
-            install_go "$REQUIRED_VERSION"
-        else
-            echo "❌ Cannot proceed without Go 1.24+. Exiting."
-            exit 1
-        fi
+    local version
+    if ! version=$(cd server && go env GOVERSION); then
+        echo "❌ The Go on PATH cannot build server/ (server/go.mod names the version)."
+        exit 1
     fi
-}
-
-install_go() {
-    local version="$1"
-    local os_name
-    local arch_name
-    local go_tar
-
-    os_name=$(uname -s)
-    arch_name=$(uname -m)
-
-    go_tar=$(resolve_go_archive "$version" "$os_name" "$arch_name") || exit 1
-
-    echo "📦 Installing Go $version..."
-    curl -LO "https://go.dev/dl/${go_tar}"
-    mkdir -p ~/.local
-    tar -C ~/.local -xzf "$go_tar"
-    rm "$go_tar"
-    export PATH="$HOME/.local/go/bin:$PATH"
-
-    echo "✅ Go installed to ~/.local/go"
-    echo "👉 Please add the following to your shell profile:"
-    echo 'export PATH="$HOME/.local/go/bin:$PATH"'
+    echo "✅ Building the server with $version"
 }
 
 build_python_package() {
@@ -273,10 +201,9 @@ build_python_package() {
 }
 
 # ==== Start Build ====
-export PATH="$HOME/.local/go/bin:$PATH"
 resolve_package_version
-build_frontend
 ensure_go
+build_frontend
 
 if [[ "$TARGET_PLATFORM" == "all" && "$INSTALL_WHEEL" == "1" ]]; then
     echo "❌ --install cannot be used with --target-platform all."

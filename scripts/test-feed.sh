@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # Feeds a Viewer channel in the Neat SDK container with a test stream for the Viewer: an H.264 test
 # pattern (640x480 at 15 fps, RTP payload type 96) on UDP 9000+N and object-detection metadata
-# matched to its frames on UDP 9100+N. The work happens in the container, in
-# test_feed_metadata.py beside this script, which says how the metadata is matched.
+# matched to its frames on UDP 9100+N. The work happens in the container, in the package's
+# neat_insight/tools/metadata_test.py (the neat-insight-metadata-test command), which says how the
+# metadata is matched and which options it takes after the channel.
 #
 # Usage, from the laptop:
-#   scripts/test-feed.sh <channel> [--metadata-delay-ms <ms>]   runs until Ctrl-C
+#   scripts/test-feed.sh <channel> [<option>...]               runs until Ctrl-C
 #   scripts/test-feed.sh stop [<channel>]                       stops that channel's feed, or all
 #
 # The container is the first running sima-neat-sdk* one, as for the sima-insight-dev-deploy skill;
 # INSIGHT_SDK_CONTAINER=<name> picks another. It needs ffmpeg and python3, which the SDK image has.
 set -euo pipefail
 
-SENDER=test_feed_metadata.py
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SENDER=metadata_test.py
+SENDER_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../neat_insight/tools" && pwd)
 # The sender runs from a copy at a fixed path, so `stop` can tell it from any other process.
 REMOTE_DIR=/tmp/neat-insight-test-feed
 REMOTE_SENDER=$REMOTE_DIR/$SENDER
@@ -21,8 +22,9 @@ REMOTE_SENDER=$REMOTE_DIR/$SENDER
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  scripts/test-feed.sh <channel> [--metadata-delay-ms <ms>]   runs until Ctrl-C
+  scripts/test-feed.sh <channel> [<option>...]               runs until Ctrl-C
   scripts/test-feed.sh stop [<channel>]                       stops that channel's feed, or all
+Options: --types <type>,...  --metadata-delay-ms <ms>  (neat_insight/tools/metadata_test.py --help)
 EOF
   exit "${1:-2}"
 }
@@ -95,7 +97,7 @@ if docker exec "$CONTAINER" pgrep -f "$(feed_pattern "$channel")" >/dev/null; th
   die "a feed already runs on channel $channel (scripts/test-feed.sh stop $channel)"
 fi
 docker exec "$CONTAINER" mkdir -p "$REMOTE_DIR"
-docker cp --quiet "$SCRIPT_DIR/$SENDER" "$CONTAINER:$REMOTE_SENDER"
+docker cp --quiet "$SENDER_DIR/$SENDER" "$CONTAINER:$REMOTE_SENDER"
 # docker exec passes no signal into the container, so Ctrl-C stops the sender the way `stop` does.
 # The client runs in the background because bash runs a trap only once its foreground command has
 # ended, and with the sender gone the client ends too.

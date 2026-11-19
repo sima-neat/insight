@@ -11,8 +11,8 @@ classes, poses, masks, tracks) an app sends it. This page states the rules for b
 follows them shows up in Insight with no change to Insight. Following them is optional: an app that
 does not has no tile in Insight, and works as before.
 
-This is **version 1** of the contracts. It is the interface the Insight backend and the Viewer
-implement. Where today's build differs from it, [Open points](#open-points) says how.
+This is **version 1** of the contracts. What it marks **planned** is not drawn yet; everything else
+is what Insight does.
 
 | To | Use |
 | --- | --- |
@@ -265,8 +265,7 @@ milliseconds loses, so the rule never picks a neighboring frame.
   timestamp they put on the frame.
 - `T` is an integer. A number with a fraction, a string, or a time in another unit (seconds,
   nanoseconds, the wall clock) matches no frame.
-- Either side may arrive first. Insight waits up to 5 s for the other, then drops the message and
-  counts it. The tile says when messages match no frame.
+- Either side may arrive first. Insight waits up to 5 s for the other, then drops the message.
 - The browser holds the video back by its sync buffer (300 ms by default, a Viewer setting), so a
   message that lags its frame by less than that is still drawn on it. One that arrives after its
   frame was shown is late; the tile shows "Metadata late".
@@ -491,114 +490,5 @@ link on the address the caller reached Insight on (or on the public address a ho
 The browser receives the video over WebRTC from Insight's own UDP ports. In the SDK container they
 are published as `webRTC` in the port map; the browser must reach them.
 
-## Open points
-
-Places where the code, Core's docs and the apps disagree, or where this document chose. Each says
-what disagrees, the choice, and why.
-
-1. **Match tolerance.** The design draft said "within one frame"; vf matches within 90 ticks (1 ms)
-   and takes the closest (vf's `metadata_sync.go`, since removed). *Choice:* 90 ticks. *Why:* it is the most
-   the rounding to milliseconds loses; a frame-wide window would match a neighboring frame at high
-   frame rates. *Now:* the server's channels match this way.
-2. **Stamping on arrival.** The design's default for the new backend is to stamp each message on
-   arrival with `T × 90 + offset`. The kit draws a message only on a frame whose RTP timestamp
-   equals `_insight.rtp_timestamp` exactly (`metadata-sync.ts`), and `T × 90` is up to 89 ticks
-   below the frame's. *Choice:* the contract keeps the rule in [Matching](#matching-a-message-to-its-frame);
-   the backend must stamp the matched frame's outgoing time, so it keeps recent frames' times per
-   channel (no frame buffering), or the kit gains a tolerance. *Why:* the producer's side must not
-   change. The 5 s wait is vf's value (also capped at 256 entries, about 2.5 s at 100 messages a
-   second). *Now:* the server keeps the last 5 s of frames' times per channel and stamps a matched
-   message with its frame's outgoing time; no frames are held back.
-3. **Whole numbers written with a fraction.** vf decodes `timestamp` as an int64, so `12345.0`
-   (Python's `json.dumps` of a float) fails the whole envelope and the message is drawn by arrival.
-   JSON Schema counts `12345.0` as an integer. *Choice:* Insight accepts any whole number.
-   *Why:* one rule for the schema and the backend. *Now:* the server accepts them.
-4. **Silent loss on a wrong timestamp.** A float is drawn by arrival order, which hides the
-   mistake; an integer in the wrong unit is held 5 s and dropped, visible only in
-   `expired_metadata` of vf's verbose ingest stats. `neat_insight/tools/metadata_test.py` sends
-   `time.time()` seconds. *Choice:* integer milliseconds as stated; Insight counts unmatched
-   messages per channel and the tile says so (the design's "says so on the tile"; not built yet).
-   The test tool follows the contract when it is rewritten. *Now:* `/api/channels` counts
-   `unmatched` per channel; the tile does not say so yet.
-5. **Negative timestamps.** Core's `send_metadata` leaves `timestamp` out for a negative value;
-   the apps' `support/object_detection/detection_egress.h` writes `-1` itself; vf treats a negative
-   value as absent. *Choice:* negative means absent, and the schema allows any integer. *Why:* it
-   is what every receiver already does; the doc recommends leaving the field out.
-6. **Required envelope fields.** Core's doc requires `type` and `data`; vf requires neither; the kit
-   needs only a string `type`. *Choice:* `type` and `data` required. *Why:* Core's sender enforces
-   both, and every type reads `data`.
-7. **A producer's `_insight`.** vf overwrites `_insight` only on a matched message; an unmatched or
-   untimestamped one keeps a producer's, and the kit trusts it. *Choice:* reserved; Insight removes
-   it from every incoming message. *Why:* a producer must not be able to pick the frame by
-   Insight's internal clock. *Now:* the server removes it.
-8. **Other timing fields.** The high-density detector also sends top-level `rtp_timestamp`,
-   `pts_ns`, `stream_id` and more (`detection_egress.h`). *Choice:* ignored; `timestamp` is the one
-   key. *Why:* two ways to say one thing; `rtp_timestamp` is a third name beside `timestamp` and
-   `_insight.rtp_timestamp`.
-9. **`frame_id`.** A string from Core, an integer from `scripts/test_feed_metadata.py`; nothing uses
-   it. *Choice:* any JSON value, a string recommended, diagnostics only.
-10. **Trailing NUL bytes.** vf strips them from every message, for fixed-size padded senders; no
-    sender in the public repos pads. *Choice:* not part of the contract; the new backend drops
-    the trimming unless a producer that needs it turns up. *Now:* the server does not trim.
-11. **RTP datagram size.** vf reads RTP into a 4 KiB buffer and truncates a larger datagram without
-    a sign; Insight's older docs state "at most 4096 bytes". *Choice:* up to 65,507 bytes, about
-    1,400 recommended. *Why:* a truncation is a bug, not a limit anyone chose. *Now:* the server
-    reads datagrams of any size.
-12. **RTP/JPEG (payload type 26).** Core's `video_sender.md` says Insight's viewer shows MJPEG
-    "in releases after v0.0.8"; Core's `node.mdx` says it does not; USB-camera apps send it;
-    insight-next's vf drops it, so the tile waits forever. Upstream insight added JPEG channels
-    after insight-next's copy. *Choice:* planned, in a later phase; until then Insight's channel
-    list reports the unsupported payload type (`/api/channels`: `payload_type`,
-    `unsupported_packets`). Core's docs need an update outside Insight.
-13. **Keyframe interval.** "At least every second" is the target. Core's `SimaEncodeOptions` leaves
-    `gop_length` and `idr_interval` unset by default, which keeps the hardware encoder's own
-    default (not documented as a value; `idr_interval = 0` means three times the frame rate).
-    Insight's file sources copy the file's keyframes, however sparse. *Choice:* a recommendation
-    ("send"), not a requirement Insight checks. *Why:* nothing breaks with fewer keyframes; a new
-    viewer waits longer. Not verified on a board: which encoder setting gives an IDR every second.
-14. **H.264 profile.** vf offers H.264 as constrained baseline 3.1 (`42e01f`) whatever the stream
-    is; browsers decode main and high in practice. *Choice:* any profile the browser decodes, not
-    checked.
-15. **Channel count.** vf binds all 80 channels everywhere; Insight's docs and the SDK say
-    `9000-9079`; `sima-cli` publishes 4 channels by default, so a DevKit app on channel 4 or above
-    gets no tile. *Choice:* channels `0` to `C − 1` as Insight resolves `C` (80 on a DevKit, the
-    published count in the SDK), stated by `/api/viewer-url`. *Why:* one number everywhere, the
-    design's default. *Now:* the server binds channels `0` to `C − 1` only.
-16. **Sources from 1, channels from 0.** One apps config comment names `/src0`
-    (`single-stream-thermal-face-detector`). *Choice:* keep both numberings. *Why:* apps, docs and
-    tests use both; this page says they are separate.
-17. **HTTP MJPEG.** Today only an MJPEG file source set to the HTTP transport serves it, and every
-    reader gets its own ffmpeg playing the file from its start. *Choice:* every MJPEG source, one
-    shared live stream (the design's default). The single-frame route `/stream/http/srcN.jpg`
-    exists today with no known consumer and is left out of the contract.
-18. **Port 8554 on a board.** Neat's own RTSP server also defaults to 8554, and Insight kills
-    whatever holds its ports at start. *Choice:* the source URL keeps 8554; the new backend stops
-    killing other programs and reports the port as taken. An app running its own RTSP server
-    beside Insight picks another port.
-19. **Liveness.** "Hide empty slots" counts video only, so a channel with metadata and no video is
-    hidden. *Choice:* Insight's channel list reports video and metadata separately, so the Viewer
-    can say "metadata, no video". *Now:* `/api/channels` does; the Viewer still hides by video.
-20. **Tracking in Core's docs.** `metadata_sender.md` says Insight's tracking overlay "is tracked
-    separately in `sima-neat/insight#8`"; the Viewer draws `tracking`, and the tracking examples
-    send it. *Choice:* part of version 1. Core's doc needs an update outside Insight.
-21. **`oriented_bbox`.** The OBB detector example sends it; upstream insight draws it; the kit does
-    not, so insight-next draws `bbox`. *Choice:* an optional field of version 1 with upstream's
-    definition, marked planned until the kit draws it. *Why:* apps send it today, and `bbox` keeps
-    them correct meanwhile.
-22. **Captions with a missing label or confidence.** The kit's detection and segmentation captions
-    read `undefined (NaN%)` when either is missing; tracking leaves them out. *Choice:* both
-    optional, as tracking treats them. The kit's two captions leave out what is missing (a kit
-    change).
-23. **Pose box and confidence.** The pose examples send a pose `bbox` and `confidence`; the kit
-    ignores both and boxes the keypoints instead. A keypoint without a confidence is drawn as fully
-    confident but never counts toward the box. *Choice:* both pose fields optional and not drawn in
-    version 1; a keypoint without a confidence should count as confident for the box too (a kit
-    change).
-24. **`auxiliary-visualization`.** The BlazePose 3D example sends it; insight-next draws nothing
-    for it, while the kit's queue still keys it by `data.id`. *Choice:* not a type of version 1,
-    ignored as an unknown type. The kit's special case can go.
-25. **RLE masks.** No app sends them; only Insight's test tool does. *Choice:* kept, since the kit
-    draws them and large masks need them. Not verified end to end with a real producer.
-26. **Metadata ports' reach.** Insight binds its UDP ports on all interfaces, with no
-    authentication, as the RTSP sources have none. *Choice:* stated as is; Insight is a developer
-    tool for a trusted network (the design's decision on network access).
+When a tile stays empty or draws nothing, [Missing video or overlays](workflows.md#missing-video-or-overlays)
+says what to check.

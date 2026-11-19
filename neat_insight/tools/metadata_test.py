@@ -1,261 +1,286 @@
+#!/usr/bin/env python3
+"""A test feed for one Viewer channel: an H.264 test pattern and metadata matched to its frames.
+
+    neat-insight-metadata-test <channel> [--host <host>] [--types <type>,...] [--metadata-delay-ms <ms>]
+
+ffmpeg encodes `testsrc2` (640x480 at 15 fps) with a white square sweeping across it and sends it
+as RTP (payload type 96) to a loopback socket of this program, which forwards every packet to
+Insight's video port 9000+N. For each frame (its RTP marker packet) it sends one message of each
+type asked for (`--types`, object-detection by default) to Insight's metadata port 9100+N, each
+drawn on the square: a box, a track, a pose on its corners, an elliptic RLE mask, and two classes.
+
+Every message follows Insight's metadata contract (docs/contracts.md): its `timestamp` is the
+frame's RTP timestamp in whole milliseconds, and Insight matches a timestamp of T ms to the frame
+whose RTP timestamp is within 90 ticks of T*90. ffmpeg starts its RTP timestamps at a random value
+and has no option to choose it, so reading them off the relayed packets is the one way to know
+them. The overlays follow the square in the video, so one that leaves its square on screen shows a
+frame-matching problem.
+
+`--metadata-delay-ms` holds each message back, as a slow model would, to provoke the Viewer's
+"Metadata late" notice. The feed runs until SIGINT or SIGTERM. It needs only ffmpeg (with libx264)
+and Python 3, so `scripts/test-feed.sh` copies this file into the Neat SDK container and runs it
+there.
+"""
+
 import argparse
 import json
-import random
+import signal
 import socket
+import subprocess
+import sys
 import threading
 import time
+from collections import deque
+from typing import NamedTuple, Optional
 
-_last_shape_update = 0.0
-_cached_segments = []
-_track_positions = {}
+VIDEO_BASE_PORT = 9000
+METADATA_BASE_PORT = 9100
+CHANNELS = 80  # the most channels Insight serves
 
-DEFAULT_FPS = 30.0
-FRAME_WIDTH = 1280
-FRAME_HEIGHT = 720
+WIDTH, HEIGHT, FPS = 640, 480, 15
+SQUARE = 96
+BOX_MARGIN = 4
+RTP_CLOCK_RATE = 90_000
+PAYLOAD_TYPE = 96
 
+# The metadata types the feed can send, as the contract names them.
+TYPES = ("object-detection", "classification", "tracking", "pose-estimation", "segmentation")
 
-def generate_object_detection():
-    detections = [
-        ("obj_1", "car", [100, 100, 100, 80], (0.7, 0.99)),
-        ("obj_2", "person", [1020, 100, 60, 120], (0.85, 0.99)),
-        ("obj_3", "bicycle", [100, 540, 90, 70], (0.6, 0.95)),
-        ("obj_4", "dog", [1020, 540, 70, 60], (0.6, 0.95)),
-    ]
-    return {
-        "type": "object-detection",
-        "timestamp": time.time(),
-        "data": {
-            "objects": [
-                {
-                    "id": object_id,
-                    "label": label,
-                    "confidence": round(random.uniform(*confidence_range), 2),
-                    "bbox": [bbox[0] + random.randint(-6, 6), bbox[1] + random.randint(-6, 6), bbox[2], bbox[3]],
-                }
-                for object_id, label, bbox, confidence_range in detections
-            ]
-        },
-    }
+# The square's position as ffmpeg's overlay filter computes it per frame, t in seconds: a sweep
+# from the right edge to the left and back every 4 s. `square_x` below is the same formula; they
+# must change together.
+_SQUARE_X_EXPR = "(W-w)*abs(mod(t/2,2)-1)"
+_SQUARE_Y_EXPR = "(H-h)/2"
 
 
-def generate_classification():
-    classes = ["urban", "nature", "indoor", "beach", "mountain"]
-    return {
-        "type": "classification",
-        "timestamp": time.time(),
-        "data": {
-            "top_classes": [
-                {"label": label, "confidence": round(random.uniform(0.3, 1.0), 2)}
-                for label in random.sample(classes, 3)
-            ]
-        },
-    }
+class RtpPacket(NamedTuple):
+    timestamp: int
+    marker: bool
+    payload_type: int
 
 
-POSE_TEMPLATE = {
-    "nose": (0, 0),
-    "left_eye": (-10, -10),
-    "right_eye": (10, -10),
-    "left_shoulder": (-20, 50),
-    "right_shoulder": (20, 50),
-    "left_hip": (-15, 130),
-    "right_hip": (15, 130),
-}
-
-POSE_ORIGINS = [("pose_1", 240, 180), ("pose_2", 640, 200), ("pose_3", 1040, 180)]
+def parse_rtp(datagram: bytes) -> Optional[RtpPacket]:
+    """The header fields of an RTP packet (RFC 3550), or None for anything else."""
+    if len(datagram) < 12 or datagram[0] >> 6 != 2:
+        return None
+    return RtpPacket(
+        timestamp=int.from_bytes(datagram[4:8], "big"),
+        marker=bool(datagram[1] & 0x80),
+        payload_type=datagram[1] & 0x7F,
+    )
 
 
-def generate_pose_estimation():
-    poses = []
-    for pose_id, origin_x, origin_y in POSE_ORIGINS:
-        jitter_x = random.randint(-6, 6)
-        jitter_y = random.randint(-6, 6)
-        poses.append(
-            {
-                "id": pose_id,
-                "label": "person",
-                "keypoints": [
-                    {
-                        "name": name,
-                        "x": origin_x + dx + jitter_x,
-                        "y": origin_y + dy + jitter_y,
-                        "confidence": round(random.uniform(0.85, 1.0), 2),
-                    }
-                    for name, (dx, dy) in POSE_TEMPLATE.items()
-                ],
-            }
-        )
-    return {"type": "pose-estimation", "timestamp": time.time(), "data": {"poses": poses}}
+def frame_end(datagram: bytes) -> Optional[int]:
+    """The RTP timestamp of the video frame this packet ends (its marker packet), or None."""
+    packet = parse_rtp(datagram)
+    if packet is None or packet.payload_type != PAYLOAD_TYPE or not packet.marker:
+        return None
+    return packet.timestamp
 
 
-def _ellipse_rle(mask_h, mask_w):
-    """Encode an ellipse filling a bbox-local mask as alternating run lengths.
+def square_x(seconds: float) -> float:
+    return (WIDTH - SQUARE) * abs((seconds / 2) % 2 - 1)
 
-    Runs walk the mask column-major and the first run is background, which is the
-    encoding the viewer decodes. The mask is bbox-local, so one mask at mask-head
-    resolution is valid for every bounding box.
-    """
-    counts = []
-    previous = 0
-    run = 0
-    for x in range(mask_w):
-        for y in range(mask_h):
-            nx = (x + 0.5) / mask_w * 2 - 1
-            ny = (y + 0.5) / mask_h * 2 - 1
+
+def _ellipse_rle(height: int, width: int) -> dict:
+    """An ellipse filling a mask of this size, as the contract's uncompressed RLE: runs over the
+    mask column by column, the first one background. A mask covers its segment's bbox, so one mask
+    serves every position of the square."""
+    counts, previous, run = [], 0, 0
+    for x in range(width):
+        for y in range(height):
+            nx = (x + 0.5) / width * 2 - 1
+            ny = (y + 0.5) / height * 2 - 1
             value = 1 if nx * nx + ny * ny <= 1.0 else 0
             if value == previous:
                 run += 1
             else:
                 counts.append(run)
-                previous = value
-                run = 1
+                previous, run = value, 1
     counts.append(run)
-    return {"size": [mask_h, mask_w], "counts": counts}
+    return {"size": [height, width], "counts": counts}
 
 
-RLE_MASK = _ellipse_rle(mask_h=60, mask_w=40)
+_ELLIPSE = _ellipse_rle(32, 32)
 
 
-def _generate_segments():
-    segments = []
-    labels = ["person", "car", "truck"]
-    for index in range(random.randint(3, 4)):
-        w = random.randint(120, 320)
-        h = random.randint(120, 320)
-        x = random.randint(0, FRAME_WIDTH - w)
-        y = random.randint(0, FRAME_HEIGHT - h)
-        segment = {
-            "id": f"seg_{index + 1}",
-            "label": random.choice(labels),
-            "confidence": round(random.uniform(0.55, 0.98), 2),
-            "bbox": [x, y, w, h],
+def overlay_data(kind: str, box: list) -> dict:
+    """The `data` of a message of this type, drawn on the square inside `box` ([x, y, w, h])."""
+    left, top, width, height = box
+    right, bottom = left + width, top + height
+    if kind == "object-detection":
+        return {"objects": [{"label": "square", "confidence": 0.99, "bbox": box}]}
+    if kind == "tracking":
+        return {"tracks": [{"id": "1", "label": "square", "confidence": 0.99, "bbox": box}]}
+    if kind == "pose-estimation":
+        # COCO names, so the Viewer links the four corners into the square's outline.
+        corners = {
+            "left_shoulder": (left, top),
+            "right_shoulder": (right, top),
+            "left_hip": (left, bottom),
+            "right_hip": (right, bottom),
         }
-        if index % 2 == 0:
-            segment["mask_format"] = "polygon"
-            segment["mask"] = [[x + w // 2, y], [x + w, y + h], [x, y + h]]
-        else:
-            segment["mask_format"] = "rle"
-            segment["mask"] = RLE_MASK
-        segments.append(segment)
-    return segments
+        keypoints = [{"name": name, "x": x, "y": y, "confidence": 0.99} for name, (x, y) in corners.items()]
+        return {"poses": [{"id": "1", "label": "square", "keypoints": keypoints}]}
+    if kind == "segmentation":
+        segment = {"label": "square", "confidence": 0.99, "bbox": box, "mask_format": "rle", "mask": _ELLIPSE}
+        return {"segments": [segment]}
+    if kind == "classification":
+        return {"top_classes": [{"label": "test pattern", "confidence": 0.9}, {"label": "square", "confidence": 0.08}]}
+    raise ValueError(f"unknown metadata type: {kind}")
 
 
-def generate_segmentation():
-    global _last_shape_update, _cached_segments
-    now = time.time()
-    if now - _last_shape_update > 2.0:
-        _cached_segments = _generate_segments()
-        _last_shape_update = now
-    return {"type": "segmentation", "timestamp": now, "data": {"segments": _cached_segments}}
+def frame_messages(rtp_timestamp: int, first_timestamp: int, types=("object-detection",)) -> list:
+    """The messages for the frame with this RTP timestamp, one per type in `types`.
+
+    `first_timestamp` is the stream's first RTP timestamp, the frame at t = 0, from which the
+    frame's time in the video follows.
+    """
+    # Modulo 2^32 ticks, so the time survives the RTP timestamp's wrap. After 2^32 ticks of feed
+    # (about 13 h 15 min) it restarts at 0 while ffmpeg's t runs on: the overlays then sweep out of
+    # phase with the square and frame_id starts again from 0, until the feed is restarted. The
+    # `timestamp`, and so Insight's matching, does not depend on it.
+    seconds = ((rtp_timestamp - first_timestamp) & 0xFFFFFFFF) / RTP_CLOCK_RATE
+    # The overlay filter places the square at whole (even) pixels; the margin covers the rounding.
+    x = round(square_x(seconds))
+    y = (HEIGHT - SQUARE) // 2
+    left, top = max(0, x - BOX_MARGIN), max(0, y - BOX_MARGIN)
+    right, bottom = min(WIDTH, x + SQUARE + BOX_MARGIN), min(HEIGHT, y + SQUARE + BOX_MARGIN)
+    box = [left, top, right - left, bottom - top]
+    return [
+        {
+            "type": kind,
+            # Whole ms rounded down: T*90 lands at most 89 ticks below the frame's RTP timestamp.
+            "timestamp": rtp_timestamp // (RTP_CLOCK_RATE // 1000),
+            "frame_id": round(seconds * FPS),
+            "data": overlay_data(kind, box),
+        }
+        for kind in types
+    ]
 
 
-def generate_tracking():
-    now = time.time()
-    tracks = []
-    for track_id, label, start_x, start_y in [
-        ("1", "person", 180, 140),
-        ("2", "person", 760, 420),
-        ("3", "forklift", 980, 180),
-    ]:
-        x, y = _track_positions.get(track_id, (start_x, start_y))
-        dx = random.randint(-18, 18)
-        dy = random.randint(-12, 12)
-        x = min(max(20, x + dx), FRAME_WIDTH - 100)
-        y = min(max(20, y + dy), FRAME_HEIGHT - 140)
-        _track_positions[track_id] = (x, y)
-        tracks.append(
-            {
-                "id": track_id,
-                "label": label,
-                "confidence": round(random.uniform(0.82, 0.99), 2),
-                "bbox": [x, y, 80, 130],
-            }
-        )
-    return {"type": "tracking", "timestamp": now, "data": {"tracks": tracks}}
+def encode_message(message: dict) -> bytes:
+    return json.dumps(message, separators=(",", ":")).encode("utf-8")
 
 
-GENERATOR_MAP = {
-    "object-detection": generate_object_detection,
-    "classification": generate_classification,
-    "pose-estimation": generate_pose_estimation,
-    "segmentation": generate_segmentation,
-    "tracking": generate_tracking,
-}
+def ffmpeg_command(relay_port: int) -> list:
+    graph = (
+        f"testsrc2=size={WIDTH}x{HEIGHT}:rate={FPS}[pattern];"
+        f"color=c=white:size={SQUARE}x{SQUARE}:rate={FPS}[square];"
+        f"[pattern][square]overlay=x='{_SQUARE_X_EXPR}':y='{_SQUARE_Y_EXPR}':shortest=1"
+    )
+    return [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-re", "-f", "lavfi", "-i", graph,
+        # Constrained baseline without B-frames is what Insight offers browsers; a
+        # keyframe with its SPS/PPS every second lets a viewer join at any time.
+        "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+        "-profile:v", "baseline", "-pix_fmt", "yuv420p", "-bf", "0",
+        "-g", str(FPS), "-keyint_min", str(FPS), "-sc_threshold", "0",
+        "-x264-params", "repeat-headers=1",
+        # Plain UDP and no RTCP: the relay socket expects RTP packets only. A connected socket
+        # makes ffmpeg fail and exit once the relay is gone, so a killed feed leaves no encoder.
+        "-f", "rtp", "-payload_type", str(PAYLOAD_TYPE), "-rtpflags", "skip_rtcp",
+        f"udp://127.0.0.1:{relay_port}?pkt_size=1200&connect=1",
+    ]
 
 
-def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Send random simulated metadata to vf metadata UDP ports.")
-    parser.add_argument("--host", default="127.0.0.1", help="Destination host (default: 127.0.0.1)")
-    parser.add_argument("--start-port", type=int, default=9100, help="Starting UDP port (default: 9100)")
-    parser.add_argument("--count", type=int, default=1, help="Number of parallel channels (default: 1)")
+def run_feed(
+    video_address, metadata_address, metadata_delay_s: float, stop: threading.Event, types=("object-detection",)
+) -> int:
+    """Feeds the two addresses until `stop` is set (returns 0) or ffmpeg ends, which is a failure
+    since the pattern never ends (returns ffmpeg's exit code, or 1 if that is 0)."""
+    relay = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    relay.bind(("127.0.0.1", 0))
+    # The muxer prints an SDP description on stdout, which nobody here reads.
+    ffmpeg = subprocess.Popen(ffmpeg_command(relay.getsockname()[1]), stdout=subprocess.DEVNULL)
+    first_timestamp = None
+    held = deque()  # (send at, encoded message), in send order: the delay is the same for all
+    try:
+        while not stop.is_set():
+            if ffmpeg.poll() is not None:
+                return ffmpeg.returncode or 1
+            now = time.monotonic()
+            while held and held[0][0] <= now:
+                sender.sendto(held.popleft()[1], metadata_address)
+            # Short enough to notice `stop` and a dead ffmpeg promptly, and wake for held messages.
+            relay.settimeout(min(0.2, held[0][0] - now) if held else 0.2)
+            try:
+                datagram = relay.recv(65536)
+            except socket.timeout:
+                continue
+            sender.sendto(datagram, video_address)
+            timestamp = frame_end(datagram)
+            if timestamp is None:
+                continue
+            if first_timestamp is None:
+                first_timestamp = timestamp
+            send_at = time.monotonic() + metadata_delay_s
+            for message in frame_messages(timestamp, first_timestamp, types):
+                held.append((send_at, encode_message(message)))
+        return 0
+    finally:
+        ffmpeg.terminate()
+        try:
+            ffmpeg.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            ffmpeg.kill()
+            ffmpeg.wait()
+        relay.close()
+        sender.close()
+
+
+def parse_types(value: str) -> tuple:
+    """`--types`: comma-separated names from `TYPES`, at least one."""
+    names = tuple(name.strip() for name in value.split(",") if name.strip())
+    if not names or any(name not in TYPES for name in names):
+        raise argparse.ArgumentTypeError(f"give one or more of {','.join(TYPES)}")
+    return names
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("channel", type=int, choices=range(CHANNELS), metavar="channel", help="Viewer channel, 0-79")
+    parser.add_argument("--host", default="127.0.0.1", help="the machine Insight runs on (default 127.0.0.1)")
     parser.add_argument(
         "--types",
-        default="object-detection",
-        help="Comma-separated metadata types: object-detection, classification, pose-estimation, segmentation, tracking",
+        type=parse_types,
+        default=("object-detection",),
+        help=f"comma-separated metadata types sent for every frame, of {','.join(TYPES)} (default object-detection)",
     )
-    parser.add_argument("--fps", type=float, default=DEFAULT_FPS, help="Messages per second per channel (default: 30)")
-    parser.add_argument("--seed", type=int, default=None, help="Optional RNG seed for repeatable output")
-    parser.add_argument("--verbose", action="store_true", help="Print each emitted payload")
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--metadata-delay-ms",
+        type=int,
+        default=0,
+        help="hold each metadata message back this long after its frame (default 0)",
+    )
+    args = parser.parse_args(argv)
+    if args.metadata_delay_ms < 0:
+        parser.error("--metadata-delay-ms must not be negative")
+    return args
 
 
-def resolve_enabled_types(types_value):
-    return [name.strip() for name in types_value.split(",") if name.strip() in GENERATOR_MAP]
-
-
-def metadata_sender(host, port, channel_id, enabled_types, frame_interval_sec, verbose):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        while True:
-            start_time = time.perf_counter()
-            type_choice = random.choice(enabled_types)
-            payload = GENERATOR_MAP[type_choice]()
-            message = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-            sock.sendto(message, (host, port))
-            if verbose:
-                print(f"channel={channel_id} type={type_choice} dst={host}:{port} payload={message.decode('utf-8')}")
-            elapsed = time.perf_counter() - start_time
-            time.sleep(max(0.0, frame_interval_sec - elapsed))
-    finally:
-        sock.close()
-
-
-def main(argv=None):
-    args = parse_args(argv)
-    if args.count < 1:
-        raise SystemExit("--count must be >= 1")
-    if args.fps <= 0:
-        raise SystemExit("--fps must be > 0")
-
-    if args.seed is not None:
-        random.seed(args.seed)
-
-    enabled_types = resolve_enabled_types(args.types)
-    if not enabled_types:
-        raise SystemExit("No valid metadata types specified")
-
-    end_port = args.start_port + args.count - 1
-    print(f"Starting {args.count} metadata sender threads to {args.host}:{args.start_port}-{end_port} at {args.fps:g} FPS")
-    print(f"Enabled metadata types: {', '.join(enabled_types)}")
-
-    frame_interval_sec = 1.0 / args.fps
-    threads = []
-    try:
-        for channel_id in range(args.count):
-            port = args.start_port + channel_id
-            thread = threading.Thread(
-                target=metadata_sender,
-                args=(args.host, port, channel_id, enabled_types, frame_interval_sec, args.verbose),
-                daemon=True,
-            )
-            thread.start()
-            threads.append(thread)
-
-        while True:
-            time.sleep(10)
-    except KeyboardInterrupt:
-        print("Stopped metadata sender.")
+def main(argv=None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    stop = threading.Event()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(signum, lambda *_: stop.set())
+    video_port = VIDEO_BASE_PORT + args.channel
+    metadata_port = METADATA_BASE_PORT + args.channel
+    print(
+        f"channel {args.channel}: H.264 {WIDTH}x{HEIGHT} at {FPS} fps to {args.host}:{video_port}, "
+        f"{', '.join(args.types)} to {args.host}:{metadata_port}"
+        + (f" {args.metadata_delay_ms} ms after each frame" if args.metadata_delay_ms else ""),
+        flush=True,
+    )
+    code = run_feed(
+        (args.host, video_port), (args.host, metadata_port), args.metadata_delay_ms / 1000, stop, args.types
+    )
+    if code != 0:
+        print(f"channel {args.channel}: ffmpeg exited with code {code}", file=sys.stderr)
+    return code
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

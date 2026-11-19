@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import select
@@ -9,9 +11,10 @@ import time
 import unittest
 from pathlib import Path
 
-# The feed is a standalone script copied into the SDK container, not part of the package.
-_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "test_feed_metadata.py"
-_spec = importlib.util.spec_from_file_location("test_feed_metadata", _SCRIPT)
+# The feed is the neat-insight-metadata-test command; scripts/test-feed.sh copies the file into the
+# SDK container, so it must stay a standalone script that imports nothing of the package.
+_SCRIPT = Path(__file__).resolve().parent.parent / "neat_insight" / "tools" / "metadata_test.py"
+_spec = importlib.util.spec_from_file_location("metadata_test", _SCRIPT)
 feed = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(feed)
 
@@ -57,11 +60,16 @@ class FrameEndTests(unittest.TestCase):
         self.assertIsNone(feed.frame_end(b""))
 
 
+def detection_message(rtp_timestamp, first_timestamp):
+    [message] = feed.frame_messages(rtp_timestamp, first_timestamp)
+    return message
+
+
 class DetectionMessageTests(unittest.TestCase):
-    def test_timestamp_is_whole_ms_that_vf_matches_to_the_frame(self):
+    def test_timestamp_is_whole_ms_that_insight_matches_to_the_frame(self):
         for rtp_timestamp in (0, 89, 90, 6000, 1_234_567_891, 0xFFFFFFFF - 89, 0xFFFFFFFF):
             with self.subTest(rtp_timestamp=rtp_timestamp):
-                message = feed.detection_message(rtp_timestamp, first_timestamp=0)
+                message = detection_message(rtp_timestamp, first_timestamp=0)
                 self.assertIsInstance(message["timestamp"], int)
                 self.assertGreaterEqual(message["timestamp"], 0)
                 # The server: source = uint32(timestamp * 90), matched within ±90 ticks.
@@ -70,13 +78,13 @@ class DetectionMessageTests(unittest.TestCase):
 
     def test_names_the_frame_by_its_index_across_a_timestamp_wrap(self):
         first = 0xFFFFFFFF - 5999
-        self.assertEqual(feed.detection_message(first, first)["frame_id"], 0)
-        self.assertEqual(feed.detection_message((first + 6000 * 31) & 0xFFFFFFFF, first)["frame_id"], 31)
+        self.assertEqual(detection_message(first, first)["frame_id"], 0)
+        self.assertEqual(detection_message((first + 6000 * 31) & 0xFFFFFFFF, first)["frame_id"], 31)
 
     def test_one_box_around_the_square_the_video_shows_at_that_time(self):
         for seconds, square_x in ((0, 544), (1, 272), (2, 0), (3, 272), (4, 544)):
             with self.subTest(seconds=seconds):
-                message = feed.detection_message(seconds * 90_000, first_timestamp=0)
+                message = detection_message(seconds * 90_000, first_timestamp=0)
                 self.assertEqual(message["type"], "object-detection")
                 [box] = message["data"]["objects"]
                 x, y, width, height = box["bbox"]
@@ -89,17 +97,63 @@ class DetectionMessageTests(unittest.TestCase):
 
     def test_fits_one_legacy_metadata_datagram(self):
         # The server takes a datagram that does not start with the chunk magic as a whole JSON message.
-        encoded = feed.encode_message(feed.detection_message(0xFFFFFFFF, 0))
+        encoded = feed.encode_message(detection_message(0xFFFFFFFF, 0))
         self.assertLess(len(encoded), 1200)
         self.assertNotEqual(encoded[0], 0x4E)
-        self.assertEqual(json.loads(encoded), feed.detection_message(0xFFFFFFFF, 0))
+        self.assertEqual(json.loads(encoded), detection_message(0xFFFFFFFF, 0))
+
+
+class FrameMessagesTests(unittest.TestCase):
+    """`--types`: one message per type for each frame, every one drawn on the square."""
+
+    def test_one_message_per_type_with_the_frame_timestamp(self):
+        messages = feed.frame_messages(90_000, 0, feed.TYPES)
+        self.assertEqual([m["type"] for m in messages], list(feed.TYPES))
+        self.assertEqual({m["timestamp"] for m in messages}, {1000})
+        self.assertEqual({m["frame_id"] for m in messages}, {15})
+
+    def test_every_type_is_drawn_inside_the_square_s_box(self):
+        by_type = {m["type"]: m["data"] for m in feed.frame_messages(0, 0, feed.TYPES)}
+        [box] = [o["bbox"] for o in by_type["object-detection"]["objects"]]
+        left, top, width, height = box
+        self.assertEqual(by_type["tracking"]["tracks"][0]["bbox"], box)
+        self.assertEqual(by_type["segmentation"]["segments"][0]["bbox"], box)
+        for point in by_type["pose-estimation"]["poses"][0]["keypoints"]:
+            self.assertIn(point["x"], (left, left + width))
+            self.assertIn(point["y"], (top, top + height))
+        self.assertGreater(len(by_type["classification"]["top_classes"]), 0)
+
+    def test_the_rle_mask_covers_its_size_column_by_column(self):
+        [segment] = feed.frame_messages(0, 0, ["segmentation"])[0]["data"]["segments"]
+        height, width = segment["mask"]["size"]
+        counts = segment["mask"]["counts"]
+        self.assertEqual(sum(counts), height * width)
+        self.assertGreater(counts[0], 0)  # the first run is background: a corner of the ellipse's box
+
+    def test_every_message_fits_one_datagram(self):
+        for message in feed.frame_messages(0xFFFFFFFF, 0, feed.TYPES):
+            with self.subTest(type=message["type"]):
+                self.assertLess(len(feed.encode_message(message)), 1200)
+
+
+class ParseArgsTests(unittest.TestCase):
+    def test_types_default_to_object_detection(self):
+        self.assertEqual(feed.parse_args(["0"]).types, ("object-detection",))
+
+    def test_types_take_a_comma_separated_list(self):
+        self.assertEqual(feed.parse_args(["3", "--types", "tracking, segmentation"]).types, ("tracking", "segmentation"))
+
+    def test_rejects_an_unknown_type_and_a_channel_out_of_range(self):
+        for argv in (["0", "--types", "boxes"], ["0", "--types", ","], ["80"]):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                feed.parse_args(argv)
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg is not installed")
 class FeedTests(unittest.TestCase):
     """The feed end to end: ffmpeg's RTP relayed to one socket, its metadata sent to another."""
 
-    def run_feed(self, seconds, metadata_delay_s=0.0):
+    def run_feed(self, seconds, metadata_delay_s=0.0, types=("object-detection",)):
         video = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         metadata = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         for sock in (video, metadata):
@@ -111,7 +165,7 @@ class FeedTests(unittest.TestCase):
         thread = threading.Thread(
             target=lambda: result.setdefault(
                 "code",
-                feed.run_feed(video.getsockname(), metadata.getsockname(), metadata_delay_s, stop),
+                feed.run_feed(video.getsockname(), metadata.getsockname(), metadata_delay_s, stop, types),
             )
         )
         thread.start()
@@ -156,6 +210,18 @@ class FeedTests(unittest.TestCase):
             self.assertIsNotNone(self.matching_frame(frames, message), message)
         frame_ids = [message["frame_id"] for _, message in messages]
         self.assertEqual(frame_ids, list(range(frame_ids[0], frame_ids[0] + len(frame_ids))))
+
+    def test_every_type_asked_for_comes_for_every_frame(self):
+        frames, messages = self.run_feed(seconds=1.5, types=feed.TYPES)
+
+        per_frame = {}
+        for _, message in messages:
+            self.assertIsNotNone(self.matching_frame(frames, message), message)
+            per_frame.setdefault(message["timestamp"], []).append(message["type"])
+        self.assertGreaterEqual(len(per_frame), 5)
+        # The run may end between the datagrams of its last frame.
+        for kinds in list(per_frame.values())[:-1]:
+            self.assertEqual(sorted(kinds), sorted(feed.TYPES))
 
     def test_a_metadata_delay_holds_each_message_back_from_its_frame(self):
         frames, messages = self.run_feed(seconds=2.5, metadata_delay_s=0.4)
