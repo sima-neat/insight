@@ -7,7 +7,10 @@ import type { NeatLateNoticeBlocker, NeatLateNoticeDetails } from '@sima/neat-ui
 /** Which of the notice's actions was taken: this channel's own buffer, or the global one. */
 export type RaiseTarget = 'channel' | 'global';
 
-/** Why nothing can be offered, word for word as in 829ec7c's `MetadataLateNotice.jsx`. */
+/**
+ * Why nothing can be offered, word for word as in `MetadataLateNotice.jsx`
+ * (sima-neat/insight@829ec7c).
+ */
 const BLOCKED_TEXT: Readonly<Record<NeatLateNoticeBlocker, string>> = {
   maximum:
     'The buffer needed exceeds the 4000 ms maximum. The application must send metadata sooner.',
@@ -17,12 +20,12 @@ const BLOCKED_TEXT: Readonly<Record<NeatLateNoticeBlocker, string>> = {
 };
 
 /**
- * The "raise the buffer" notice (Inv §4g), ported from 829ec7c's `MetadataLateNotice.jsx`: what
- * was measured, and either why nothing can be done or the two ways to raise the video sync
- * buffer. The original opened from the tile's chip as a popover; here it sits in the inspector's
- * General tab, so it has no open state of its own and the inspector decides when it shows. It is
- * a kit warning callout, a region named by its heading. The original's two-line action buttons are
- * kit buttons here, each described by the line below it.
+ * The "raise the buffer" notice, ported from `MetadataLateNotice.jsx`
+ * (sima-neat/insight@829ec7c): what was measured, and either why nothing can be done or the two
+ * ways to raise the video sync buffer. The original opened from the tile's chip as a popover;
+ * here it sits in the inspector's General tab, so it has no open state of its own and the
+ * inspector decides when it shows. It is a kit warning callout, a region named by its heading. The
+ * original's two-line action buttons are kit buttons here, each described by the line below it.
  *
  * Both actions carry the suggestion as the original's did: what the global one writes (a raise, or
  * only following a global value that already covers it) is the settings store's decision.

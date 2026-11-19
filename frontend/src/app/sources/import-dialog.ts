@@ -19,13 +19,12 @@ import { CatalogTabState, ImportCatalog } from './import-catalog';
 import { ImportLocal } from './import-local';
 import { type ImportKind, ImportRunner } from './import-runner';
 import { ImportSession } from './import-session';
-import { ImportYoutube, YoutubeTabState } from './import-youtube';
 
 /**
  * Opens the import dialog, from Media's Import… and from the picker's Import… in Streaming.
  * Resolves with the library path saved last (an archive's folder), for the caller to reveal, or
  * null when nothing was imported or the dialog was closed meanwhile (also by leaving the page,
- * when the work goes on in a toast).
+ * when the work goes on and a toast says how it ended).
  */
 @Injectable({ providedIn: 'root' })
 export class ImportDialogs {
@@ -42,19 +41,18 @@ export class ImportDialogs {
 }
 
 /**
- * The import dialog (spec, Media import; Inv-SM §1.1): Local files, Catalog and YouTube, each a
- * tab of its own, and under them the work `ImportRunner` runs: its progress, a name clash waiting
+ * The import dialog: Local files and Catalog, each a tab of
+ * its own, and under them the work `ImportRunner` runs: its progress, a name clash waiting
  * for an answer (Replace / Keep both / Skip), and why it failed. The dialog holds the runner while
- * it is open, so the work reports here; when the dialog goes while work runs (leaving the page),
- * the runner moves it into a toast. It closes itself once its work went through, and cannot be
- * dismissed while that work runs.
+ * it is open, so the work can ask it about a clash; when the dialog goes while work runs (leaving
+ * the page), the work goes on and its toast says how it ended. It closes itself once its work went
+ * through, and cannot be dismissed while that work runs.
  */
 @Component({
   selector: 'app-import-dialog',
   imports: [
     ImportCatalog,
     ImportLocal,
-    ImportYoutube,
     NeatButton,
     NeatDialogBody,
     NeatErrorNote,
@@ -63,7 +61,7 @@ export class ImportDialogs {
     NeatTab,
     NeatTabs,
   ],
-  providers: [ImportSession, CatalogTabState, YoutubeTabState],
+  providers: [ImportSession, CatalogTabState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './import-dialog.html',
   styleUrl: './import-dialog.css',
@@ -81,15 +79,15 @@ export class ImportDialog {
 
   constructor() {
     inject(DestroyRef).onDestroy(this.runner.hold());
-    // Opened while earlier work runs (it went on in a toast when its dialog went): holding the
-    // runner took it back, and this dialog sees it to the end as if it had started it.
+    // Opened while earlier work runs (it went on when its dialog went): this dialog sees it to the
+    // end as if it had started it.
     const running = this.runner.running();
     if (running) void inject(ImportSession).run(() => running);
 
     // Focus follows the work. A clash puts it on Keep both, the answer that loses nothing. When
-    // the control that had it goes (an answered clash, Cancel Import) or is disabled (the drop
-    // zone, an Import button), it moves to the work's status: the dialog's focus trap does not
-    // take back focus that has fallen to the page.
+    // the control that had it goes (an answered clash) or is disabled (the drop zone, an Import
+    // button), it moves to the work's status: the dialog's focus trap does not take back focus
+    // that has fallen to the page.
     let wasBusy = false;
     let hadClash = false;
     afterRenderEffect(() => {

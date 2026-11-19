@@ -3,7 +3,7 @@ import type { NeatLatenessSnapshot } from '@sima/neat-ui/video';
 
 /** What a channel's grid tile last measured of how late its metadata arrives. */
 export interface LatenessReading {
-  /** Whether the tile's "Metadata late" warning is on (Inv §4g): judged late, and playing. */
+  /** Whether the tile's "Metadata late" warning is on: judged late, and playing. */
   readonly active: boolean;
   /** The tile's lateness window at its last stats tick; null before the first one. */
   readonly snapshot: NeatLatenessSnapshot | null;

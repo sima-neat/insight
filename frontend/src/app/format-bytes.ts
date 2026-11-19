@@ -5,7 +5,7 @@ const TB = GB * 1024;
 const PB = TB * 1024;
 
 /**
- * A byte count as #170's media library shows it: whole bytes below 1 KB, KB and MB to one decimal,
+ * A byte count for display: whole bytes below 1 KB, KB and MB to one decimal,
  * GB, TB and PB to two ("1.20 GB"), binary units (1 KB = 1024 B), and "-" for a count that is not
  * a number. One formatter for every size in the app (stored renditions, media files, the memory and
  * disk of the machine Insight runs on), so the same quantity reads the same everywhere. There is

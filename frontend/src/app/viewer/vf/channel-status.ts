@@ -2,8 +2,8 @@
 export interface VfStatus {
   /**
    * `connecting` until the first stats sample of a connected session, `connected` from then on,
-   * `waiting` while vf has no stream to give (it retries), `failed` once vf rejected the offer for
-   * good.
+   * `waiting` while the server has no stream to give (it retries), `failed` once the server
+   * rejected the offer for good.
    */
   phase: 'connecting' | 'waiting' | 'failed' | 'connected';
   /** The negotiated codec, such as `H.264`; null until the browser reports it. */
@@ -41,8 +41,9 @@ export function resolveCodecLabel(
 }
 
 /**
- * The status line's text for an offer vf rejected for good. vf answers 415 when the browser's offer
- * lacks the channel's codec, which a raw "HTTP 415" would not tell anyone.
+ * The status line's text for an offer Insight's server rejected for good. It answers 415
+ * (`codec_unsupported`) when the browser's offer lacks the channel's codec, which a raw "HTTP 415"
+ * would not tell anyone.
  */
 export function offerFailureText(httpStatus: number): string {
   return httpStatus === 415

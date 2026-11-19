@@ -18,9 +18,9 @@ import {
 import { NeatFileBrowser } from '@sima/neat-ui/file-browser';
 import { NeatColumn } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import type { MediaEntry, Slot } from '../../api.generated';
 import { AsidePrefs } from '../../aside-prefs';
 import { CellText } from '../../cell-text';
-import type { MediaNode, Slot } from '../../sources/api';
 import { ImportDialogs } from '../../sources/import-dialog';
 import {
   hasFile,
@@ -31,28 +31,27 @@ import {
   revealIn,
 } from '../../sources/media-browser';
 import { MediaLibraryService, toFileNodes } from '../../sources/media-library.service';
-import type { Progress } from '../../sources/progress-lines';
+import type { Progress } from '../../sources/jobs';
 import { SlotsColumn } from '../../sources/slots-column';
 import { SlotsService } from '../../sources/slots.service';
 import { slotName, slotState } from '../../sources/slot-row';
 import { SourcesSession } from '../sources-session';
 import { MediaPanel } from './media-panel';
-import { messageOf } from '../../sources/stream-lines';
+import { messageOf } from '../../sources/api-errors';
 
 /** "src3 · Live, src9 · Idle": the slots a file is assigned to, with their state as Streaming words it. */
 function inUseText(slots: readonly Slot[], encodes: ReadonlyMap<number, Progress>): string {
   return slots
-    .map((slot) => `${slotName(slot)} · ${slotState(slot, encodes.get(slot.index)).label}`)
+    .map((slot) => `${slotName(slot)} · ${slotState(slot, encodes.get(slot.n)).label}`)
     .join(', ');
 }
 
 /**
  * Media: the library in a `neat-file-browser` (manage mode: every file, ticked for deletion,
  * those Insight cannot stream greyed and tagged), with the selected or ticked files in the page's
- * side panel (Inv-SM §1.1). A file's "In use" column names the slots assigned to it, whatever
- * their state (spec, "In use"); the slots come from `SlotsService`, which polls them while the page
- * is shown. The library is fetched as the page opens, since it may have changed meanwhile.
- * Folders cannot be deleted from here, as in #170.
+ * side panel. A file's "In use" column names the slots assigned to it, whatever their state; the
+ * slots come from `SlotsService`, which polls them while the page is shown. The library is fetched
+ * as the page opens, since it may have changed meanwhile. Folders cannot be deleted from here.
  */
 @Component({
   selector: 'app-media-page',
@@ -90,7 +89,7 @@ export class MediaPage {
    * delete that failed because the file had gone), so the panel does not describe a file that is
    * not there. The browser itself drops such files from `checked`.
    */
-  protected readonly selected = linkedSignal<readonly MediaNode[] | null, string | null>({
+  protected readonly selected = linkedSignal<readonly MediaEntry[] | null, string | null>({
     source: this.library.tree,
     computation: (tree, previous) => {
       const path = previous ? previous.value : this.session.media.selected;

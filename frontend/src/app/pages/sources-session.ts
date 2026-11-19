@@ -21,14 +21,13 @@ export type EmptySourceForm = 'file' | 'url';
 
 /**
  * Where the user left Streaming and Media, so that coming back from another page finds them as
- * they were: #170 kept the selected slot, the media folder and the selection across its tabs, all
- * its state living in one component (Inv-SM §1.0). Provided in root because the pages are created
- * afresh on every visit; kept in memory only, so a reload starts over, on src1 and at the media
- * root, as #170 did. The Viewer keeps its own (`ViewerSession`).
+ * they were: the selected slot, the media folder and the selection. Provided in root because the
+ * pages are created afresh on every visit; kept in memory only, so a reload starts over, on src1
+ * and at the media root. The Viewer keeps its own (`ViewerSession`).
  */
 @Injectable({ providedIn: 'root' })
 export class SourcesSession {
-  /** Streaming as the last visit left it; before any, src1 selected, as in #170. */
+  /** Streaming as the last visit left it; before any, src1 selected. */
   streaming: StreamingVisit = { slot: 1 };
   /** Media as the last visit left it; before any, the root with nothing selected. */
   media: MediaVisit = { folder: '', selected: null, checked: [] };

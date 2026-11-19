@@ -27,12 +27,13 @@ import type { VfConnection } from './vf/vf-connection';
 import { VfConnections } from './vf/vf-connections';
 
 /**
- * One channel of the Viewer grid: the kit's video tile fed by the channel's vf connection and its
+ * One channel of the Viewer grid: the kit's video tile fed by the channel's connection and its
  * resolved settings. It holds the connection for as long as it exists, so a tile paged away
- * releases it, and it is where the connection meets the tile: the sync buffer and retention are
- * applied when they change, the tile's frame stats go back to the connection for vf's egress
- * report, and each stats tick decides the "Metadata late" chip, which it also publishes for the
- * inspector (`ChannelLateness`), as it does whether its video plays (`ChannelPlayback`).
+ * releases it, and it is where the connection meets the tile: the sync buffer is applied to the
+ * connection and the retention to the tile when they change, the tile's frame stats go back to the
+ * connection for its status line, and each stats tick decides the "Metadata late" chip, which it
+ * also publishes for the inspector (`ChannelLateness`), as it does whether its video plays
+ * (`ChannelPlayback`).
  *
  * The page owns selection; the tile only shows it.
  */
@@ -100,7 +101,7 @@ export class ViewerTile {
   private readonly lateChip = new LateChip();
   private readonly playing = signal(false);
   private readonly lateActive = signal(false);
-  /** Late metadata matters only while there is video for it to be late for (Inv §4g). */
+  /** Late metadata matters only while there is video for it to be late for. */
   protected readonly lateShown = computed(() => this.playing() && this.lateActive());
   /** The lateness window at the last stats tick of the current stream. */
   private readonly latenessSnapshot = signal<NeatLatenessSnapshot | null>(null);
@@ -114,7 +115,7 @@ export class ViewerTile {
 
     followSyncSettings(this.connection, this.sync);
 
-    // A new buffer makes the lateness measured with the old one meaningless (Inv §4g).
+    // A new buffer makes the lateness measured with the old one meaningless.
     let previousBufferMs: number | null = null;
     effect(() => {
       const bufferMs = this.syncBufferMs();
@@ -153,7 +154,7 @@ export class ViewerTile {
     }
   }
 
-  /** The tile's once-a-second stats: vf's egress report gets them, and the late chip is judged. */
+  /** The tile's once-a-second stats: the status line gets them, and the late chip is judged. */
   protected onFrameStats(stats: NeatFrameStats): void {
     this.connection()?.reportFrameStats(stats);
     this.lateActive.set(this.lateChip.tick(this.tile(), performance.now()));

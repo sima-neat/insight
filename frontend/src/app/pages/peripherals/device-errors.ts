@@ -4,7 +4,7 @@ import type { DeviceError } from '../../peripherals/api';
 
 /**
  * The problems the backend reports with a device (its `errors`), each a danger callout with the
- * hint as its body, as #170's device panels showed them. The camera and microphone panels show
+ * hint as its body. The camera and microphone panels show
  * them under their title.
  */
 @Component({
@@ -14,9 +14,7 @@ import type { DeviceError } from '../../peripherals/api';
   template: `
     @for (problem of errors(); track $index) {
       <neat-callout tone="danger" [heading]="problem.message">
-        @if (problem.hint) {
-          <p>{{ problem.hint }}</p>
-        }
+        <p>{{ problem.hint }}</p>
       </neat-callout>
     }
   `,

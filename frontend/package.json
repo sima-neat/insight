@@ -12,7 +12,9 @@
     "build": "ng build",
     "check:bundle": "node scripts/check-bundle-split.mjs",
     "test": "ng test",
-    "lint": "ng lint && stylelint \"src/**/*.css\" --allow-empty-input && tsc -p e2e/tsconfig.json",
+    "lint": "npm run check:api && ng lint && stylelint \"src/**/*.css\" --allow-empty-input && tsc -p e2e/tsconfig.json",
+    "api:types": "openapi-typescript ../server/api/openapi.yaml --immutable --root-types --root-types-no-schema-prefix -o src/app/api.generated.ts",
+    "check:api": "npm run api:types -- --check",
     "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
@@ -37,10 +39,16 @@
     "angular-eslint": "22.6.0",
     "eslint": "^10.12.0",
     "jsdom": "^30.0.0",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.8.1",
     "stylelint": "^17.16.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "8.71.0",
     "vitest": "^5.0.0"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   }
 }

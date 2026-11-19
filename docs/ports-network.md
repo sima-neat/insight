@@ -1,138 +1,77 @@
 ---
 title: Ports and Network Behavior
-description: Understand Insight port usage, channel mapping, and SDK port remapping.
+description: The ports Insight uses, how the SDK remaps them, and how an app or browser outside the SDK reaches Insight.
 sidebar_position: 5
 ---
 
 # Ports and Network Behavior
 
-Insight uses several ports during normal operation. The default ports are the ports used inside the SDK container or on a directly installed DevKit. In the Neat Development Environment, the SDK publishes those services onto host ports. If a default host port is already in use, `sima-cli` can allocate another available host port.
+The ports below are the ones inside the SDK container, or on a DevKit Insight is installed on. The
+SDK publishes them on its host, under the names in the first column, on other ports when these are
+taken.
 
-![Insight port and network paths between the browser client, Modalix DevKit, SDK host machine, and SDK container.](images/insight-ports-network.jpg)
-
-| Port-map name | Default port or range | Protocol | Purpose |
+| Port-map name | Port | Protocol | Use |
 | --- | --- | --- | --- |
-| `mainUI` | `9900` | HTTPS/TCP | Main Insight web UI, HTTP API, and HTTP MJPEG streaming sources. |
-| `videoUI` | `8081` | HTTPS/TCP | WebRTC Video Viewer UI. |
-| `rtsp.tcp` | `8554` | RTSP/TCP | RTSP streaming sources created from uploaded media. |
-| `videoUDP` | `9000-9079` | UDP | Video RTP ingest for viewer channels `0-79`. |
-| `metadataUDP` | `9100-9179` | UDP | Metadata JSON ingest for viewer channels `0-79`. |
-| `webRTC` | `40000-40199` | UDP | WebRTC media and metadata DataChannel egress from vf to the browser. |
-| `webrtcWhip` | `8889` | HTTPS/TCP | Browser webcam publishing into MediaMTX over WHIP, republished as an RTSP source. |
-| `webrtcWhipIce` | `8189` | UDP | ICE media for browser webcam publishing. Signalling uses `webrtcWhip`; the video itself arrives here, so both must be reachable. |
-| `webSSH` | `8022` | HTTPS/TCP | Browser shell to a paired DevKit when available. |
+| `mainUI` | 9900 | HTTPS (TCP) | The web UI, the Viewer, the API, and HTTP MJPEG sources. |
+| `rtsp.tcp` | 8554 | RTSP (TCP) | The sources `src1` to `src48`, which apps read and other programs may publish into. |
+| `videoUDP` | 9000 + N | UDP | Channel `N`'s video (RTP). |
+| `metadataUDP` | 9100 + N | UDP | Channel `N`'s metadata (JSON). |
+| `webRTC` | a range, 40000–40200 outside the SDK | UDP | The Viewer's video, from Insight to the browser. |
+| `webrtcWhip` | 8889 | HTTPS (TCP) | A browser publishing its webcam as a source. |
+| `webrtcWhipIce` | 8189 | UDP | That webcam's video. |
 
-Insight also runs the mediamtx control API on `127.0.0.1:9901` (TCP). It is loopback-only, password-protected with a password generated on every start, and used only by Insight itself, to confirm webcam sources, to detect external publishers and to set up pulled streams, so it needs no port mapping. Like the other mediamtx ports, it is freed at startup if another process holds it.
+Channels run from 0 to one below the channel count: 80 on a DevKit, in the SDK the number it
+publishes (`insightVideoChannels`, 4 by default). Insight also runs MediaMTX's control API on
+`127.0.0.1:9901`, reachable from the same machine only.
 
-## Find the actual SDK port map
+Insight is a developer tool for a trusted network: its sources, channels and API take no
+credentials.
 
-In the SDK, do not assume default host ports are available. Run:
+## The SDK's port map
 
-```bash
-neat --json
-```
-
-The output includes `insight.webUiUrl` and an `exposedPorts` array:
-
-```json
-{
-  "exposedPorts": [
-    {"hostPortEnd": null, "hostPortStart": 9900, "name": "mainUI", "protocol": "tcp"},
-    {"hostPortEnd": 9179, "hostPortStart": 9100, "name": "metadataUDP", "protocol": "udp"},
-    {"hostPortEnd": null, "hostPortStart": 8554, "name": "rtsp.tcp", "protocol": "tcp"},
-    {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
-    {"hostPortEnd": null, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
-    {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
-    {"hostPortEnd": null, "hostPortStart": 8889, "name": "webrtcWhip", "protocol": "tcp"},
-    {"hostPortEnd": null, "hostPortStart": 8189, "name": "webrtcWhipIce", "protocol": "udp"},
-    {"hostPortEnd": null, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"}
-  ],
-  "insight": {
-    "serviceState": "Running",
-    "venv": "/opt/neat-insight/venv",
-    "webUiUrl": "https://10.0.0.210:9900"
-  }
-}
-```
-
-If a host port was remapped, the `hostPortStart` value is the port that external clients should use. `hostPortEnd` is present for port ranges such as video, metadata, and WebRTC.
-
-## Channel mapping
-
-The Video Viewer uses paired video and metadata ports. For channel `N`:
-
-```text
-video:    UDP 9000 + N
-metadata: UDP 9100 + N
-```
-
-For example:
-
-| Viewer channel | Video port | Metadata port |
-| --- | --- | --- |
-| `0` | `9000` | `9100` |
-| `1` | `9001` | `9101` |
-| `2` | `9002` | `9102` |
-
-Keep the channel number consistent between video and metadata. If your application sends video to channel `3`, send corresponding metadata to the metadata port for channel `3`.
-
-## SDK port mapping
-
-In the Neat Development Environment, ports may be remapped by the SDK container. Insight reads the SDK port-map configuration when available so UI links point to the browser-reachable host port.
-
-This matters most for the Video Viewer. The internal default viewer port is `8081`, but the browser-facing port can be different when the SDK maps `videoUI` to another host port.
-
-Use System Information in the Insight UI to check the actual exposed ports before assuming a URL is wrong.
-
-## Optional browser-facing configuration
-
-Hosted environments can separate the address used by a paired DevKit from the address advertised to an external browser. Insight reads two optional, startup-scoped files:
-
-| File | Purpose |
-| --- | --- |
-| `/home/docker/.insight-config/browser-ice-address` | One browser-reachable IPv4 address advertised by both the vf viewer and MediaMTX WHIP endpoint. |
-| `/home/docker/.insight-config/launch-url` | One trusted absolute HTTP or HTTPS launch URL. Insight derives its origin for generated viewer, WHIP, and HTTP MJPEG URLs. |
-
-When `browser-ice-address` is absent, Insight keeps the existing `CONTAINER_HOST_IP` behavior. When `launch-url` is absent, generated browser URLs continue to use the request host and SDK port map. The files therefore opt into hosted-environment behavior independently and do not change ordinary local or DevKit installations.
-
-`browser-ice-address` is validated before vf or MediaMTX starts. An empty or malformed browser address prevents Insight from becoming ready instead of silently advertising an unreachable address. `launch-url` is advisory: Insight accepts a full URL with an ASCII hostname, including a path, query, or fragment, and uses only its HTTP(S) origin. An invalid launch URL logs a warning and preserves legacy request-host/port-map URL generation. Replace files atomically, run `insight-admin restart`, and inspect `/api/health` to confirm the address and public origin applied by the new process.
-
-The browser ICE address is not required to be assigned to a local network interface. Public cloud IPv4 addresses commonly reach the host through 1:1 NAT. The WebRTC and `webrtcWhipIce` UDP ports must still be published and allowed by the surrounding network policy.
-
-## Configure applications with the port map
-
-Use the application location to decide whether to use default container ports or SDK host-exposed ports.
-
-| Application location | RTSP input from Insight | Video/metadata output to Insight |
-| --- | --- | --- |
-| Inside the SDK container | `rtsp://127.0.0.1:8554/srcN` | `127.0.0.1:9000 + channel` and `127.0.0.1:9100 + channel` |
-| On a DevKit or another external machine | `rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/srcN` | `<sdk-host-ip>:<videoUDP hostPortStart + channel>` and `<sdk-host-ip>:<metadataUDP hostPortStart + channel>` |
-
-HTTP MJPEG sources use the main Insight UI/API port. In the SDK, use the `mainUI` host port from `neat --json` for those URLs.
-
-For example, if `neat --json` reports:
+`neat --json` in the SDK lists the published ports in `exposedPorts`, and Insight's address as
+`insight.webUiUrl`:
 
 ```json
 {"name": "rtsp.tcp", "hostPortStart": 18554, "protocol": "tcp"}
-{"name": "videoUDP", "hostPortStart": 19000, "hostPortEnd": 19079, "protocol": "udp"}
-{"name": "metadataUDP", "hostPortStart": 19100, "hostPortEnd": 19179, "protocol": "udp"}
+{"name": "videoUDP", "hostPortStart": 19000, "hostPortEnd": 19003, "protocol": "udp"}
+{"name": "metadataUDP", "hostPortStart": 19100, "hostPortEnd": 19103, "protocol": "udp"}
 ```
 
-Then an application on a DevKit should use:
+`hostPortStart` is the port to use from outside the container, the start of the range for a range.
+**System information** in Insight shows the same ports.
+
+## An app on a DevKit
+
+An app in the SDK container uses the ports in the table at `127.0.0.1`. An app on a DevKit that
+works with Insight in the SDK uses the SDK host's address and the published ports. With the map
+above:
 
 ```text
-RTSP source src1:   rtsp://<sdk-host-ip>:18554/src1
-video channel 0:    <sdk-host-ip>:19000
-metadata channel 0: <sdk-host-ip>:19100
-video channel 3:    <sdk-host-ip>:19003
-metadata channel 3: <sdk-host-ip>:19103
+source src1:        rtsp://<sdk-host-ip>:18554/src1
+channel 0 video:    <sdk-host-ip>:19000      channel 0 metadata: <sdk-host-ip>:19100
+channel 3 video:    <sdk-host-ip>:19003      channel 3 metadata: <sdk-host-ip>:19103
 ```
 
-If the application and Insight run in the same SDK container, use the default local ports instead.
+The [contracts](contracts.md#port-remapping-in-the-sdk-container) say which options of Neat's
+senders take these ports.
 
-## Related tools
+## A browser on another machine
 
-- **Neat Development Environment** provides the containerized build and run environment where Insight is bundled.
-- **Neat Library** provides the application APIs used to build and run vision workloads.
-- **sima-cli** installs and upgrades Insight packages and other Neat artifacts.
-- **Model Compiler and LLiMa** produce model artifacts that you can inspect through Workspace and validate through applications running beside Insight.
+The browser needs `mainUI`, and the `webRTC` range for the Viewer's video; to publish a webcam,
+`webrtcWhip` and `webrtcWhipIce` as well. When a firewall or a NAT lies between the browser and
+Insight, these UDP ports must be open to it.
+
+## Hosted environments
+
+Where Insight runs behind a proxy or a NAT, the hosting setup writes optional files into
+`/home/docker/.insight-config/`, each holding one line, read when Insight starts
+(`insight-admin restart` after a change):
+
+| File | Purpose |
+| --- | --- |
+| `browser-ice-address` | The IPv4 address browsers reach Insight's WebRTC ports at, for the Viewer and webcam publishing. Without it, Insight offers `CONTAINER_HOST_IP` when that is set. A value that is not such an address stops Insight from starting. |
+| `launch-url` | The URL browsers open Insight at. The links Insight makes (the Viewer, webcam publishing, HTTP MJPEG) use its origin. A value Insight cannot use is logged and ignored. |
+| `url-routing` | `proxy` (the default) to make links through the launch URL, `direct` to make them on Insight's own ports. |
+
+**System information** shows the browser address and public origin Insight applied.

@@ -4,20 +4,13 @@ import { NeatCallout } from '@sima/neat-ui/callout';
 import { CONNECTION_CODES, type BoardProblem } from '../../board/board-error';
 import { BoardSettingsAction } from '../../board/board-settings-action';
 import { BoardService } from '../../board/board.service';
-import type { PeripheralIssue } from '../../peripherals/api';
-import {
-  changeSummary,
-  isSnapshotStale,
-  severityInfo,
-  sortIssues,
-} from '../../peripherals/devices';
+import { changeSummary, isSnapshotStale } from '../../peripherals/devices';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 
 /**
- * What Peripherals says above its device list (#170's banners, copy per Inv-PB §2.2), in this
- * order: the board changed since the scan shown (with Refresh now), the peripherals could not be
- * read (ruling Q9), the last scan failed (with the board settings for a connection failure), what
- * changed since the scan before, and SiMa Sentinel's issues, errors first. Each is a callout under
+ * What Peripherals says above its device list, in this order: the board changed since the scan
+ * shown (with Refresh now), the peripherals could not be read, the last scan failed (with the board settings for a connection failure), what
+ * changed since the scan before, and SiMa Sentinel's warnings. Each is a callout under
  * the page's title, so its heading is a level 2.
  *
  * It reads the board and the scan from their services; the read failure is the page's, since the
@@ -91,11 +84,9 @@ import { PeripheralsService } from '../../peripherals/peripherals.service';
     }
 
     @for (issue of issues(); track $index) {
-      <neat-callout [tone]="issue.tone" [heading]="issue.label" [headingLevel]="2">
+      <neat-callout tone="warning" heading="Warning" [headingLevel]="2">
         <p>{{ issue.message }}</p>
-        @if (issue.hint) {
-          <p neatNote>{{ issue.hint }}</p>
-        }
+        <p neatNote>{{ issue.hint }}</p>
       </neat-callout>
     }
   `,
@@ -111,10 +102,10 @@ export class PeripheralsBanners {
   protected readonly peripherals = inject(PeripheralsService);
 
   protected readonly stale = computed(() =>
-    isSnapshotStale(this.board.state(), this.peripherals.snapshot()),
+    isSnapshotStale(this.board.id(), this.peripherals.snapshot()),
   );
   protected readonly scannedLabel = computed(() => this.peripherals.snapshot()?.board.label ?? '');
-  protected readonly targetLabel = computed(() => this.board.state()?.target?.label ?? '');
+  protected readonly targetLabel = computed(() => this.board.selected()?.label ?? '');
   protected readonly scanning = computed(() => this.peripherals.scanning() !== null);
   /** A failure of the SSH connection itself, which the board's settings are the place to fix. */
   protected readonly connectionFailed = computed(() =>
@@ -123,12 +114,6 @@ export class PeripheralsBanners {
   protected readonly changes = computed(() =>
     changeSummary(this.peripherals.snapshot()?.changes ?? null),
   );
-  /** The issues as #170 listed them: errors first, each with its severity's word and tone. */
-  protected readonly issues = computed(() =>
-    sortIssues(this.peripherals.snapshot()?.issues ?? []).map((issue: PeripheralIssue) => ({
-      ...severityInfo(issue.severity),
-      message: issue.message,
-      hint: issue.hint,
-    })),
-  );
+  /** SiMa Sentinel's warnings about the scan, in its order. */
+  protected readonly issues = computed(() => this.peripherals.snapshot()?.issues ?? []);
 }

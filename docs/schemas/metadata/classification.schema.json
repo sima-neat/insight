@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "classification message",
+  "description": "The frame's top classes, listed in its top-left corner. Version 1 of the contract in docs/contracts.md.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "classification" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "required": ["top_classes"],
+      "properties": {
+        "top_classes": {
+          "description": "The classes, best first. The viewer shows the first three, with no threshold.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/class" }
+        }
+      }
+    },
+    "class": {
+      "type": "object",
+      "required": ["label"],
+      "properties": {
+        "label": { "$ref": "envelope.schema.json#/$defs/label" },
+        "confidence": { "$ref": "envelope.schema.json#/$defs/confidence" }
+      }
+    }
+  }
+}

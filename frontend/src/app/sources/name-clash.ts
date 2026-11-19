@@ -1,17 +1,18 @@
-import type { Slot, UploadConflictBody } from './api';
+import type { MediaConflict, Slot } from '../api.generated';
+import { ApiRequestError } from './api-errors';
 import { slotName, SLOTS_NOT_CHECKED } from './slot-row';
-import { ApiRequestError } from './stream-lines';
 
 /**
- * An upload whose name exists already (spec, "Name clashes"). The server decides: without an
- * `on_conflict` it answers 409 with the name it has and the one `keep_both` would save under,
- * having saved nothing; the import dialog asks per file and sends the file again with the answer.
+ * An upload whose name exists already. The server decides: without an
+ * `on_conflict` it answers 409 `name_taken` with the name it has and the one `keep_both` would
+ * save under, having saved nothing; the import dialog asks per file and sends the file again with
+ * the answer.
  */
 
 /** What the user answers: the `on_conflict` to send again with, or to leave the file out. */
 export type ClashChoice = 'replace' | 'keep_both' | 'skip';
 
-export type UploadConflict = UploadConflictBody['conflict'];
+export type UploadConflict = MediaConflict;
 
 /** The question the dialog asks about one clash. */
 export interface NameClash {
@@ -26,7 +27,7 @@ export interface NameClash {
 
 /** The clash a refused upload names, or null for any other failure. */
 export function uploadConflict(failure: unknown): UploadConflict | null {
-  if (!(failure instanceof ApiRequestError) || failure.status !== 409) return null;
+  if (!(failure instanceof ApiRequestError) || failure.code !== 'name_taken') return null;
   const conflict = failure.body?.['conflict'];
   if (typeof conflict !== 'object' || conflict === null) return null;
   const { existing, suggested } = conflict as Record<string, unknown>;
@@ -36,13 +37,13 @@ export function uploadConflict(failure: unknown): UploadConflict | null {
 }
 
 /**
- * Whether the server extracts the upload into a folder named after it (app.py's
- * `_is_archive_upload`): such an upload clashes on that folder, and replacing it swaps the
- * folder's content, so the slots streaming any file in it are the ones a Replace touches.
+ * Whether the server unpacks the upload into a folder named after it (a ZIP, a tar or a gzipped
+ * tar, by its name): such an upload clashes on that folder, and replacing it swaps the folder's
+ * content, so the slots streaming any file in it are the ones a Replace touches.
  */
 export function isArchiveUpload(fileName: string): boolean {
   const name = fileName.toLowerCase();
-  return /\.(?:zip|tar|gz)$/.test(name);
+  return /\.(?:zip|tar|gz|tgz)$/.test(name);
 }
 
 /**
@@ -64,7 +65,7 @@ export function nameClash(
 
 /**
  * What the outcome says of a clash that no one was there to answer: the dialog was closed by
- * leaving the page, and the upload went on in a toast, which cannot ask (ruling Q17).
+ * leaving the page, and the upload went on with no one to ask.
  */
 export function skippedText(conflict: UploadConflict): string {
   return `Skipped ${conflict.existing}: it already exists.`;

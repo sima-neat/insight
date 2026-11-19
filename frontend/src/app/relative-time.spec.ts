@@ -1,7 +1,6 @@
 import { elapsedSeconds, formatRelativeTime } from './relative-time';
 
 describe('formatRelativeTime', () => {
-  // #170's "relative times and durations", the time half (durations are not ported).
   it('relative times', () => {
     const now = Date.parse('2026-09-21T10:00:00Z');
     for (const [at, label] of [

@@ -28,8 +28,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # The MediaMTX integration tests run against the release build.sh bundles.
+      # The scripts' tests (the media assets, the test feed) need nothing beyond the standard library.
+      - name: Python tests
+        env:
+          # ffmpeg is installed above; a missing one must fail the test-feed metadata tests, not skip them.
+          NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS: "1"
+        run: python -m unittest discover -s tests -v
+
+  server:
+    name: Server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      # The media, relay and MediaMTX tests run the real tools; without them they skip.
+      - name: Install FFmpeg
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
       - name: Download MediaMTX
+        working-directory: .
         run: |
           set -euo pipefail
           version=$(sed -n 's/^MTX_VERSION="\(.*\)"$/\1/p' build.sh)
@@ -38,17 +68,17 @@ jobs:
             | tar -xz -C "$RUNNER_TEMP/mediamtx" mediamtx
           echo "NEAT_INSIGHT_MEDIAMTX=$RUNNER_TEMP/mediamtx/mediamtx" >> "$GITHUB_ENV"
 
-      - name: Install Insight
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e .
+      - name: Formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
 
-      - name: Python tests
-        env:
-          # ffmpeg is installed above; a missing one must fail the FPS rendition tests, not skip them.
-          NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS: "1"
-        run: python -m unittest discover -s tests -v
+      - name: Generated code matches openapi.yaml
+        run: go generate ./... && git diff --exit-code
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Tests
+        run: go test -race ./...
 
   frontend:
     name: Frontend

@@ -2,11 +2,9 @@ import { signal, untracked } from '@angular/core';
 import type { NeatFrameStats, NeatTileSource } from '@sima/neat-ui/video';
 import { resolveCodecLabel, offerFailureText, type VfStatus } from './channel-status';
 import { INITIAL_DECODER_HEALTH, updateDecoderHealth, type DecoderHealth } from './decoder-health';
-import { buildEgressReport, type InboundVideoReport, type VfSyncBuffer } from './egress-report';
 import { isRetryable, OfferRejectedError, requestAnswer } from './signaling';
 
-const STUN_SERVER = 'stun:stun.l.google.com:19302';
-/** Fixed and unlimited, without backoff, as vf's own viewer retries (Inv §4d). */
+/** Fixed and unlimited, without backoff, as vf's own viewer retries. */
 const RECONNECT_DELAY_MS = 2000;
 /**
  * Deliberately longer than the retry delay: a decoder can legitimately produce nothing for a moment
@@ -15,11 +13,11 @@ const RECONNECT_DELAY_MS = 2000;
 const DECODER_STALL_MS = 5000;
 /**
  * ICE often recovers from a brief `disconnected` on its own. One that lasts this long gets a
- * reconnect instead of a frozen frame until ICE gives up with `failed` (Inv §6.8).
+ * reconnect instead of a frozen frame until ICE gives up with `failed`.
  */
 const ICE_DISCONNECTED_MS = 5000;
 const STATS_INTERVAL_MS = 1000;
-/** The viewer's default video sync buffer (Inv §5b), until the page sets the channel's own. */
+/** The viewer's default video sync buffer, until the page sets the channel's own. */
 const DEFAULT_SYNC_BUFFER_MS = 300;
 
 type MetadataListener = (text: string, receivedAt: number) => void;
@@ -27,8 +25,30 @@ type DebugLog = (event: string, details?: unknown) => void;
 
 const NO_LOG: DebugLog = () => undefined;
 
+/** The inbound-rtp video fields the tick reads, for the status line, the stall check and the log. */
+type InboundVideoReport = Pick<
+  RTCInboundRtpStreamStats,
+  | 'bytesReceived'
+  | 'packetsReceived'
+  | 'packetsLost'
+  | 'framesReceived'
+  | 'framesDecoded'
+  | 'framesDropped'
+  | 'framesPerSecond'
+  | 'frameWidth'
+  | 'frameHeight'
+>;
+
 /** A stats report as the tick reads it: any type, with the inbound-rtp fields when it is one. */
 type InboundRtpReport = RTCStats & InboundVideoReport & { kind?: string; codecId?: string };
+
+/** Whether the receiver took the video sync buffer as its jitter buffer target. */
+export interface VfSyncBuffer {
+  supported: boolean;
+  applied: boolean;
+  /** The target the receiver reports, in ms; 0 unless applied. */
+  targetMs: number;
+}
 
 /** One peer connection and everything that belongs to it; replaced on every reconnect. */
 interface Session {
@@ -56,10 +76,10 @@ const CONNECTING: VfStatus = {
 };
 
 /**
- * Receives one vf channel over WebRTC: its video as `stream` and its metadata data channel through
- * `onMetadata`, for a `neat-video-tile`. It signals through Insight's `/api/vf/offer` proxy,
- * reconnects as vf's viewer always has (Inv §4d), and sends vf the `browser_egress_stats` report
- * every second (Inv §2c).
+ * Receives one channel over WebRTC: its video as `stream` and its metadata data channel through
+ * `onMetadata`, for a `neat-video-tile`. It signals to Insight's server
+ * (`/api/channels/<n>/offer`) and reconnects as vf's viewer did. The data channel only receives:
+ * the server reads nothing the browser sends on it.
  *
  * All of it runs outside Angular change detection on WebRTC callbacks and timers. Metadata goes to
  * the listeners without touching a signal; `status` changes on connection events and at most once
@@ -84,7 +104,6 @@ export class VfConnection implements NeatTileSource {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private syncBufferMs = DEFAULT_SYNC_BUFFER_MS;
-  private metadataRetentionMs = 0;
   /** The tile's latest frame stats for the current stream; null until it reports. */
   private frameStats: NeatFrameStats | null = null;
   private log: DebugLog = NO_LOG;
@@ -122,12 +141,7 @@ export class VfConnection implements NeatTileSource {
     if (this.session) this.applySyncBuffer(this.session.receiver);
   }
 
-  /** The channel's metadata retention; only reported to vf, since the tile applies it. */
-  setMetadataRetention(ms: number): void {
-    this.metadataRetentionMs = ms;
-  }
-
-  /** Takes the tile's `frameStats` output for the next egress report and status line. */
+  /** Takes the tile's `frameStats` output, whose message rate the status line shows. */
   reportFrameStats(stats: NeatFrameStats): void {
     this.frameStats = stats;
   }
@@ -142,12 +156,14 @@ export class VfConnection implements NeatTileSource {
 
   private connect(): void {
     this.endSession();
-    // A retry while vf has nothing to send keeps saying so instead of flickering to "connecting".
+    // A retry while the server has nothing to send keeps saying so instead of flickering to
+    // "connecting".
     if (this.statusState().phase !== 'waiting') this.statusState.set(CONNECTING);
     this.frameStats = null;
     this.log('connect start', { videoSyncBufferMs: this.syncBufferMs });
 
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: STUN_SERVER }] });
+    // No ICE servers: the server and the browser reach each other without them (signaling.ts).
+    const pc = new RTCPeerConnection();
     const { receiver } = pc.addTransceiver('video', { direction: 'recvonly' });
     const channel = pc.createDataChannel('metadata', { ordered: true, maxRetransmits: 0 });
     const session: Session = {
@@ -168,7 +184,7 @@ export class VfConnection implements NeatTileSource {
     channel.onopen = () => this.log('data channel open');
     channel.onclose = () => this.log('data channel closed');
     channel.onmessage = (event: MessageEvent) => {
-      // vf sends text frames only; the tile parses and validates them.
+      // The server sends text frames only; the tile parses and validates them.
       if (typeof event.data !== 'string') return;
       const receivedAt = performance.now();
       for (const listener of this.listeners) listener(event.data, receivedAt);
@@ -202,13 +218,14 @@ export class VfConnection implements NeatTileSource {
       if (this.session === session) this.log('iceGatheringState', pc.iceGatheringState);
     };
 
-    requestAnswer(pc, `/api/vf/offer?channel=${this.channel}`)
+    requestAnswer(pc, `/api/channels/${this.channel}/offer`)
       .then(async (answer) => {
         if (this.session !== session) return;
         await pc.setRemoteDescription(answer);
         if (this.session !== session) return;
         this.log('offer answered');
-        // A retry that got through is no longer waiting for vf, though no stats show it yet.
+        // A retry that got through is no longer waiting for the server, though no stats show it
+        // yet.
         if (this.statusState().phase === 'waiting') this.statusState.set(CONNECTING);
       })
       .catch((error: unknown) => {
@@ -265,8 +282,8 @@ export class VfConnection implements NeatTileSource {
   }
 
   /**
-   * The 1 s stats tick: status line, decoder stall check and egress report, from the inbound-rtp
-   * video report. Only a connected session has stats worth showing.
+   * The 1 s stats tick: status line and decoder stall check, from the inbound-rtp video report.
+   * Only a connected session has stats worth showing.
    */
   private async sample(session: Session): Promise<void> {
     const { pc } = session;
@@ -309,22 +326,6 @@ export class VfConnection implements NeatTileSource {
           : 0;
       session.lastBytes = bytes;
       session.lastTimestamp = report.timestamp;
-
-      if (session.channel.readyState === 'open') {
-        const egress = buildEgressReport({
-          channel: this.channel,
-          time: new Date(now),
-          peer: pc,
-          inbound: report,
-          bitrateBps,
-          dataChannelState: session.channel.readyState,
-          frameStats: this.frameStats,
-          videoSyncBufferMs: this.syncBufferMs,
-          metadataRetentionMs: this.metadataRetentionMs,
-          syncBuffer: this.syncBufferState(),
-        });
-        session.channel.send(JSON.stringify(egress));
-      }
 
       status = {
         phase: 'connected',

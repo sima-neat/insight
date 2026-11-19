@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "segmentation message",
+  "description": "Instance masks, filled at the viewer's mask opacity, each with a caption in its class color. Version 1 of the contract in docs/contracts.md.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "segmentation" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "required": ["segments"],
+      "properties": {
+        "segments": {
+          "description": "Every instance of the frame.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/segment" }
+        }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "required": ["mask_format", "mask"],
+      "properties": {
+        "mask_format": { "enum": ["polygon", "rle"] },
+        "mask": { "description": "A polygon or an RLE mask, as mask_format says." },
+        "bbox": {
+          "$ref": "envelope.schema.json#/$defs/bbox",
+          "description": "Places the caption and drives the region-of-interest filter. Optional for a polygon, whose extent is used when absent; required for an RLE mask, which is stretched over it."
+        },
+        "label": { "$ref": "envelope.schema.json#/$defs/label" },
+        "confidence": {
+          "$ref": "envelope.schema.json#/$defs/confidence",
+          "description": "Compared with the viewer's confidence threshold; a segment without one always passes."
+        },
+        "id": {
+          "$ref": "envelope.schema.json#/$defs/id",
+          "description": "Names the segment in the browser console's warnings; not drawn."
+        },
+        "show_rectangle": {
+          "description": "true also draws bbox's outline. Only the boolean true does.",
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mask_format": { "const": "polygon" } } },
+          "then": { "properties": { "mask": { "$ref": "#/$defs/polygon" } } }
+        },
+        {
+          "if": { "properties": { "mask_format": { "const": "rle" } } },
+          "then": {
+            "required": ["bbox"],
+            "properties": { "mask": { "$ref": "#/$defs/rle" } }
+          }
+        }
+      ]
+    },
+    "polygon": {
+      "description": "The outline as [[x, y], ...] in video pixels, at least three points; it is closed by itself.",
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "array",
+        "prefixItems": [{ "type": "number" }, { "type": "number" }],
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "rle": {
+      "description": "An uncompressed run-length mask covering the bbox rectangle, not the frame. The runs go over the mask column by column (column-major), the first run is background, and runs then alternate. At most 2048 × 2048 cells.",
+      "type": "object",
+      "required": ["size", "counts"],
+      "properties": {
+        "size": {
+          "description": "[height, width] of the mask in cells.",
+          "type": "array",
+          "prefixItems": [
+            { "type": "integer", "minimum": 1, "maximum": 4194304 },
+            { "type": "integer", "minimum": 1, "maximum": 4194304 }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "counts": {
+          "description": "The run lengths, a JSON array of integers; not the compressed string pycocotools' mask.encode returns.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

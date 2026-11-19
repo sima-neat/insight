@@ -1,0 +1,604 @@
+{
+  "version": "main:80ab7de4da31",
+  "metrics": [
+    {
+      "key": "rtsn_4",
+      "label": "APU RTSN-4",
+      "short": "APU-4",
+      "unit": "C",
+      "group": "APU",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_11",
+      "label": "APU RTSN-11",
+      "short": "APU-11",
+      "unit": "C",
+      "group": "APU",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "lm96163_temp1",
+      "label": "LM96163 temp1",
+      "short": "LM96-1",
+      "unit": "C",
+      "group": "Board",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "lm96163_temp2",
+      "label": "LM96163 temp2",
+      "short": "LM96-2",
+      "unit": "C",
+      "group": "Board",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "eth_mdio_temp1",
+      "label": "ETH/MDIO temp1",
+      "short": "ETH-1",
+      "unit": "C",
+      "group": "Board",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "cpu_usage_pct",
+      "label": "CPU usage",
+      "short": "CPU%",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_load_1",
+      "label": "CPU load 1m",
+      "short": "Load1",
+      "unit": "load",
+      "group": "CPU",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "cpu_load_1_pct",
+      "label": "CPU load 1m percentage",
+      "short": "Load%",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_0_usage_pct",
+      "label": "CPU core 0 usage",
+      "short": "c0",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_1_usage_pct",
+      "label": "CPU core 1 usage",
+      "short": "c1",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_2_usage_pct",
+      "label": "CPU core 2 usage",
+      "short": "c2",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_3_usage_pct",
+      "label": "CPU core 3 usage",
+      "short": "c3",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_4_usage_pct",
+      "label": "CPU core 4 usage",
+      "short": "c4",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_5_usage_pct",
+      "label": "CPU core 5 usage",
+      "short": "c5",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_6_usage_pct",
+      "label": "CPU core 6 usage",
+      "short": "c6",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_7_usage_pct",
+      "label": "CPU core 7 usage",
+      "short": "c7",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_8_usage_pct",
+      "label": "CPU core 8 usage",
+      "short": "c8",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_9_usage_pct",
+      "label": "CPU core 9 usage",
+      "short": "c9",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_10_usage_pct",
+      "label": "CPU core 10 usage",
+      "short": "c10",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_11_usage_pct",
+      "label": "CPU core 11 usage",
+      "short": "c11",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_12_usage_pct",
+      "label": "CPU core 12 usage",
+      "short": "c12",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_13_usage_pct",
+      "label": "CPU core 13 usage",
+      "short": "c13",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_14_usage_pct",
+      "label": "CPU core 14 usage",
+      "short": "c14",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "cpu_core_15_usage_pct",
+      "label": "CPU core 15 usage",
+      "short": "c15",
+      "unit": "%",
+      "group": "CPU",
+      "warn": 80.0,
+      "critical": 95.0
+    },
+    {
+      "key": "rtsn_5",
+      "label": "CVU RTSN-5",
+      "short": "CVU-5",
+      "unit": "C",
+      "group": "CVU",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_12",
+      "label": "CVU RTSN-12",
+      "short": "CVU-12",
+      "unit": "C",
+      "group": "CVU",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "disk_emmc_used_pct",
+      "label": "eMMC disk used",
+      "short": "eMMC%",
+      "unit": "%",
+      "group": "Disk",
+      "warn": 80.0,
+      "critical": 90.0
+    },
+    {
+      "key": "disk_emmc_used_mb",
+      "label": "eMMC disk used MB",
+      "short": "eMMCMB",
+      "unit": "MB",
+      "group": "Disk",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "disk_emmc_read_mbps",
+      "label": "eMMC read",
+      "short": "eMMCR",
+      "unit": "MB/s",
+      "group": "DiskIO",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "disk_emmc_write_mbps",
+      "label": "eMMC write",
+      "short": "eMMCW",
+      "unit": "MB/s",
+      "group": "DiskIO",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "ev74_cma_total_mb",
+      "label": "EV74 CMA reserved",
+      "short": "CMATotal",
+      "unit": "MB",
+      "group": "EV74",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "ev74_cma_free_mb",
+      "label": "EV74 CMA free",
+      "short": "CMAFree",
+      "unit": "MB",
+      "group": "EV74",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "ev74_cma_used_mb",
+      "label": "EV74 CMA used",
+      "short": "CMAUsed",
+      "unit": "MB",
+      "group": "EV74",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "rtsn_0",
+      "label": "MLA RTSN-0",
+      "short": "MLA-0",
+      "unit": "C",
+      "group": "MLA",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_1",
+      "label": "MLA RTSN-1",
+      "short": "MLA-1",
+      "unit": "C",
+      "group": "MLA",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_2",
+      "label": "MLA RTSN-2",
+      "short": "MLA-2",
+      "unit": "C",
+      "group": "MLA",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_3",
+      "label": "MLA RTSN-3",
+      "short": "MLA-3",
+      "unit": "C",
+      "group": "MLA",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_7",
+      "label": "MLA RTSN-7",
+      "short": "MLA-7",
+      "unit": "C",
+      "group": "MLA",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_8",
+      "label": "MLA RTSN-8",
+      "short": "MLA-8",
+      "unit": "C",
+      "group": "MLA",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_9",
+      "label": "MLA RTSN-9",
+      "short": "MLA-9",
+      "unit": "C",
+      "group": "MLA",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_10",
+      "label": "MLA RTSN-10",
+      "short": "MLA-10",
+      "unit": "C",
+      "group": "MLA",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "mla_mem_allocated_mb",
+      "label": "MLA memory allocated",
+      "short": "MLAMB",
+      "unit": "MB",
+      "group": "MLA",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "linux_mem_used_pct",
+      "label": "Linux memory used",
+      "short": "Mem%",
+      "unit": "%",
+      "group": "Memory",
+      "warn": 80.0,
+      "critical": 90.0
+    },
+    {
+      "key": "linux_mem_used_mb",
+      "label": "Linux memory used MB",
+      "short": "MemMB",
+      "unit": "MB",
+      "group": "Memory",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "net_rx_mbps",
+      "label": "Network RX",
+      "short": "NetRX",
+      "unit": "MB/s",
+      "group": "Network",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "net_tx_mbps",
+      "label": "Network TX",
+      "short": "NetTX",
+      "unit": "MB/s",
+      "group": "Network",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_current_watts",
+      "label": "Current board power",
+      "short": "Current",
+      "unit": "W",
+      "group": "Power",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_average_watts",
+      "label": "Average board power",
+      "short": "Average",
+      "unit": "W",
+      "group": "Power",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_peak_watts",
+      "label": "Peak board power",
+      "short": "Peak",
+      "unit": "W",
+      "group": "Power",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_rail_soc_ddr_vdd_watts",
+      "label": "SoC and DDR VDD",
+      "short": "SoC and DDR VDD",
+      "unit": "W",
+      "group": "PowerRail",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_rail_hdmi_watts",
+      "label": "HDMI 1.2V",
+      "short": "HDMI 1.2V",
+      "unit": "W",
+      "group": "PowerRail",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_rail_soc_ddr_vddq_watts",
+      "label": "SoC and DDR VDDQ",
+      "short": "SoC and DDR VDDQ",
+      "unit": "W",
+      "group": "PowerRail",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_rail_soc_ddr_vdd2h_watts",
+      "label": "SoC and DDR VDD2H",
+      "short": "SoC and DDR VDD2H",
+      "unit": "W",
+      "group": "PowerRail",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_rail_mla_watts",
+      "label": "MLA 0.68V",
+      "short": "MLA 0.68V",
+      "unit": "W",
+      "group": "PowerRail",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_rail_pcie_eth_watts",
+      "label": "PCIe and ETH VP",
+      "short": "PCIe and ETH VP",
+      "unit": "W",
+      "group": "PowerRail",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_rail_platform_1v8_watts",
+      "label": "SOM Platform 1.8V",
+      "short": "SOM Platform 1.8V",
+      "unit": "W",
+      "group": "PowerRail",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "power_rail_platform_3v3_watts",
+      "label": "SOM Platform 3.3V",
+      "short": "SOM Platform 3.3V",
+      "unit": "W",
+      "group": "PowerRail",
+      "warn": null,
+      "critical": null
+    },
+    {
+      "key": "rtsn_6",
+      "label": "TOP RTSN-6",
+      "short": "TOP-6",
+      "unit": "C",
+      "group": "TOP",
+      "warn": 70.0,
+      "critical": 85.0
+    },
+    {
+      "key": "rtsn_13",
+      "label": "TOP RTSN-13",
+      "short": "TOP-13",
+      "unit": "C",
+      "group": "TOP",
+      "warn": 70.0,
+      "critical": 85.0
+    }
+  ],
+  "samples": [
+    {
+      "timestamp": "2026-09-24T18:57:50.098080504Z",
+      "values": {
+        "rtsn_4": 65.25559082031248,
+        "rtsn_11": 64.57307128906251,
+        "lm96163_temp1": 63.0,
+        "lm96163_temp2": 66.25,
+        "eth_mdio_temp1": 64.0,
+        "cpu_usage_pct": 37.48816661407383,
+        "cpu_load_1": 6.0,
+        "cpu_load_1_pct": 37.5,
+        "cpu_core_0_usage_pct": 33.333333333333336,
+        "cpu_core_1_usage_pct": 23.469387755102044,
+        "cpu_core_2_usage_pct": 60.0,
+        "cpu_core_3_usage_pct": 17.17171717171717,
+        "cpu_core_4_usage_pct": 48.94736842105263,
+        "cpu_core_5_usage_pct": 22.27722772277227,
+        "cpu_core_6_usage_pct": 43.58974358974359,
+        "cpu_core_7_usage_pct": 17.647058823529417,
+        "cpu_core_8_usage_pct": 50.5,
+        "cpu_core_9_usage_pct": 25.125628140703515,
+        "cpu_core_10_usage_pct": 47.76119402985075,
+        "cpu_core_11_usage_pct": 57.2139303482587,
+        "cpu_core_12_usage_pct": 37.878787878787875,
+        "cpu_core_13_usage_pct": 15.57788944723618,
+        "cpu_core_14_usage_pct": 47.02970297029702,
+        "cpu_core_15_usage_pct": 55.05050505050505,
+        "rtsn_5": 63.71992187500001,
+        "rtsn_12": 63.89055175781249,
+        "disk_emmc_used_pct": 72.3531464967201,
+        "disk_emmc_used_mb": 21182.3671875,
+        "disk_emmc_read_mbps": 0.0,
+        "disk_emmc_write_mbps": 0.013671016439661066,
+        "ev74_cma_total_mb": 1788.0,
+        "ev74_cma_free_mb": 1267.3046875,
+        "ev74_cma_used_mb": 520.6953125,
+        "rtsn_0": 65.25559082031248,
+        "rtsn_1": 64.06118164062497,
+        "rtsn_2": 63.71992187500001,
+        "rtsn_3": 64.40244140624998,
+        "rtsn_7": 64.91433105468747,
+        "rtsn_8": 65.0849609375,
+        "rtsn_9": 64.40244140624998,
+        "rtsn_10": 64.74370117187499,
+        "mla_mem_allocated_mb": 742.3338813781738,
+        "linux_mem_used_pct": 21.291911183755214,
+        "linux_mem_used_mb": 1255.84765625,
+        "net_rx_mbps": 1.141349162777595,
+        "net_tx_mbps": 1.6793846215431942,
+        "power_current_watts": 11.625,
+        "power_average_watts": 11.154253915959291,
+        "power_peak_watts": 16.09375,
+        "power_rail_soc_ddr_vdd_watts": 4.75,
+        "power_rail_hdmi_watts": 0.59375,
+        "power_rail_soc_ddr_vddq_watts": 0.09375,
+        "power_rail_soc_ddr_vdd2h_watts": 0.96875,
+        "power_rail_mla_watts": 1.5,
+        "power_rail_pcie_eth_watts": 0.65625,
+        "power_rail_platform_1v8_watts": 1.28125,
+        "power_rail_platform_3v3_watts": 1.78125,
+        "rtsn_6": 64.74370117187499,
+        "rtsn_13": 65.25559082031248
+      }
+    }
+  ],
+  "errors": [],
+  "full": true
+}

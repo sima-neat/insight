@@ -6,8 +6,8 @@ import { NeatCallout } from '@sima/neat-ui/callout';
 import { AppDialogs } from '../../app-dialogs';
 import { BoardProblem } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
-import { boardState, DEVKIT, FakeBoard } from '../../board/board.testing';
-import type { PeripheralSnapshot } from '../../peripherals/api';
+import { boardList, boardWith, DEVKIT, FakeBoard } from '../../board/board.testing';
+import type { PeripheralIssue, PeripheralSnapshot } from '../../peripherals/api';
 import { imx477, usb } from '../../peripherals/cameras.testing';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import { peripheralSnapshot } from '../../peripherals/snapshots.testing';
@@ -32,12 +32,19 @@ class Host {
   refreshes = 0;
 }
 
-const unreachable = new BoardProblem(
-  'Could not connect to sima@192.168.1.20.',
-  'unreachable',
-  '',
-  {},
-);
+const unreachable = new BoardProblem('Could not connect to sima@192.168.1.20.', 'unreachable', '');
+
+const STATUS_HINT = 'Check `systemctl status simaai-sentinel` on the board, then Refresh.';
+
+/** The server's warning about a Sentinel provider that failed. */
+const failedProvider = (provider: string): PeripheralIssue => ({
+  code: 'provider.failed',
+  message: `SiMa Sentinel's ${provider} provider failed: timed out`,
+  hint: STATUS_HINT,
+});
+
+/** Another board than the DevKit the snapshot is of. */
+const OTHER = { ...DEVKIT, id: 'ssh:sima@10.0.0.9:22', host: '10.0.0.9', label: 'sima@10.0.0.9' };
 
 describe('PeripheralsBanners', () => {
   let board: FakeBoard;
@@ -47,7 +54,7 @@ describe('PeripheralsBanners', () => {
 
   beforeEach(async () => {
     board = new FakeBoard();
-    board.state.set(boardState({ target: DEVKIT, generation: 3 }));
+    board.state.set(boardWith(DEVKIT));
     peripherals = new FakePeripherals();
     dialogs = { openBoard: vi.fn(async () => undefined) };
     TestBed.configureTestingModule({
@@ -91,12 +98,7 @@ describe('PeripheralsBanners', () => {
 
   it('board changed: a warning naming both boards, with Refresh now while a board is selected', async () => {
     peripherals.snapshot.set(peripheralSnapshot([imx477]));
-    board.state.set(
-      boardState({
-        target: { ...DEVKIT, host: '10.0.0.9', label: 'sima@10.0.0.9' },
-        generation: 4,
-      }),
-    );
+    board.state.set(boardWith(OTHER));
     await settle();
     expect(shown()).toEqual([
       {
@@ -116,12 +118,10 @@ describe('PeripheralsBanners', () => {
     await settle();
     expect(button('Refresh now')!.getAttribute('aria-disabled')).toBe('true');
 
-    board.state.set(boardState({ target: null, generation: 5 }));
+    // With no board selected, the page says so in place of the list: no banner repeats it.
+    board.state.set(boardList());
     await settle();
-    expect(shown()[0].body).toEqual([
-      'These results are from sima@192.168.1.20; the selected board is now not set. Preview is disabled until you refresh.',
-    ]);
-    expect(button('Refresh now')).toBeUndefined();
+    expect(shown()).toEqual([]);
   });
 
   it('a scan failure is an alert; a connection failure adds the fallback hint and Open board settings', async () => {
@@ -138,22 +138,22 @@ describe('PeripheralsBanners', () => {
     button('Open board settings')!.click();
     expect(dialogs.openBoard).toHaveBeenCalledTimes(1);
 
-    // The backend's own hint wins over the fallback.
+    // The server's own hint wins over the fallback.
     peripherals.scanError.set(
-      new BoardProblem('Host key changed.', 'host_key_changed', 'Trust the new key.', {}),
+      new BoardProblem('Host key changed.', 'host_key_changed', 'Trust the new key.'),
     );
     await settle();
     expect(shown()[0].body).toEqual(['Trust the new key.']);
 
     // Any other failure has its hint and no board settings: they would not help.
     peripherals.scanError.set(
-      new BoardProblem('SiMa Sentinel is not installed.', 'peripheral_tool_missing', '', {}),
+      new BoardProblem('Sentinel is not installed on the board.', 'sentinel_missing', ''),
     );
     await settle();
     expect(shown()).toEqual([
       {
         tone: 'danger',
-        heading: 'Scan failed: SiMa Sentinel is not installed.',
+        heading: 'Scan failed: Sentinel is not installed on the board.',
         body: [],
         role: 'alert',
       },
@@ -161,10 +161,9 @@ describe('PeripheralsBanners', () => {
     expect(button('Open board settings')).toBeUndefined();
   });
 
-  // Ruling Q9: Peripherals says what failed (Review Focus 4).
   it('a failed read of the peripherals says what failed, with its hint', async () => {
     fixture.componentInstance.loadError.set(
-      new BoardProblem('Internal Server Error', '', 'Check the Insight log.', {}),
+      new BoardProblem('Internal Server Error', '', 'Check the Insight log.'),
     );
     await settle();
     expect(shown()).toEqual([
@@ -177,23 +176,14 @@ describe('PeripheralsBanners', () => {
     ]);
   });
 
-  it('the change summary is one status line per change; each issue is a callout, errors first, toned by severity', async () => {
+  it("the change summary is one status line per change; each of Sentinel's issues is a warning callout", async () => {
     peripherals.snapshot.set(
       peripheralSnapshot([imx477], {
         changes: {
           added: [{ id: imx477.id, name: 'imx477' }],
           removed: [{ id: usb.id, name: usb.name }],
         },
-        issues: [
-          { severity: 'info', code: 'a', message: 'USB hub reports low power.', hint: null },
-          {
-            severity: 'error',
-            code: 'b',
-            message: 'v4l2-ctl is missing.',
-            hint: 'Install v4l-utils.',
-          },
-          { severity: 'warning', code: 'c', message: 'Camera overlays unknown.', hint: null },
-        ],
+        issues: [failedProvider('camera.v4l2'), failedProvider('microphone.alsa')],
       }),
     );
     await settle();
@@ -205,13 +195,17 @@ describe('PeripheralsBanners', () => {
         role: 'status',
       },
       {
-        tone: 'danger',
-        heading: 'Error',
-        body: ['v4l2-ctl is missing.', 'Install v4l-utils.'],
+        tone: 'warning',
+        heading: 'Warning',
+        body: ["SiMa Sentinel's camera.v4l2 provider failed: timed out", STATUS_HINT],
         role: null,
       },
-      { tone: 'warning', heading: 'Warning', body: ['Camera overlays unknown.'], role: null },
-      { tone: 'info', heading: 'Info', body: ['USB hub reports low power.'], role: null },
+      {
+        tone: 'warning',
+        heading: 'Warning',
+        body: ["SiMa Sentinel's microphone.alsa provider failed: timed out", STATUS_HINT],
+        role: null,
+      },
     ]);
   });
 
@@ -219,14 +213,12 @@ describe('PeripheralsBanners', () => {
     peripherals.snapshot.set(
       peripheralSnapshot([imx477], {
         changes: { added: [{ id: imx477.id, name: 'imx477' }], removed: [] },
-        issues: [
-          { severity: 'warning', code: 'c', message: 'Camera overlays unknown.', hint: null },
-        ],
+        issues: [failedProvider('camera.v4l2')],
       }),
     );
-    board.state.set(boardState({ target: DEVKIT, generation: 4 }));
+    board.state.set(boardWith(OTHER));
     peripherals.scanError.set(unreachable);
-    fixture.componentInstance.loadError.set(new BoardProblem('Bad Gateway', '', '', {}));
+    fixture.componentInstance.loadError.set(new BoardProblem('Bad Gateway', '', ''));
     await settle();
     expect(shown().map((callout) => callout.heading)).toEqual([
       'Board changed — refresh',

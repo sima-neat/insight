@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * A deployed build (Flask serving `frontend/dist`, e.g. in the SDK container) is tested when
+ * A deployed build (the server with the app built in, e.g. in the SDK container) is tested when
  * `INSIGHT_BASE_URL` is set; otherwise the tests start the dev server and run against it.
  */
 const deployedUrl = process.env['INSIGHT_BASE_URL'];
@@ -27,7 +27,7 @@ export default defineConfig({
   reporter: process.env['CI'] ? 'github' : 'list',
   use: {
     baseURL: deployedUrl ?? devServerUrl,
-    // Flask serves its self-signed HTTPS certificate on the SDK container.
+    // A deployed build serves a certificate the test browser may not trust.
     ignoreHTTPSErrors: true,
     // A deployed build is someone's running Insight, and capturing its UI needs the owner's
     // explicit permission: record nothing there. Against the throwaway dev server a trace of a

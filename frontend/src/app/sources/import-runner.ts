@@ -1,9 +1,15 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { NeatToasts, type NeatProgressToast } from '@sima/neat-ui/toast';
+import { NeatToasts } from '@sima/neat-ui/toast';
 import { type Observable, Subscription } from 'rxjs';
-import type { CatalogAsset, UploadOnConflict, YoutubeImportRequest } from './api';
-import { catalogAssetLabel } from './catalog';
-import { MediaLibraryService } from './media-library.service';
+import type { Job, MediaSaved } from '../api.generated';
+import { messageOf } from './api-errors';
+import { type CatalogAsset, catalogAssetLabel } from './catalog';
+import { jobProgress, type Progress } from './jobs';
+import {
+  type LibraryEvent,
+  MediaLibraryService,
+  type UploadOnConflict,
+} from './media-library.service';
 import {
   type ClashChoice,
   isArchiveUpload,
@@ -13,22 +19,10 @@ import {
   type UploadConflict,
   uploadConflict,
 } from './name-clash';
-import {
-  catalogProgress,
-  failureText,
-  isProgressFailure,
-  type Progress,
-  type ProgressFailure,
-  restartWarning,
-  savedPath,
-  uploadProgress,
-  youtubeProgress,
-} from './progress-lines';
 import { SlotsService } from './slots.service';
-import { messageOf, type StreamEvent } from './stream-lines';
 
 /** The import dialog's tabs, and the kind of work each starts. */
-export type ImportKind = 'local' | 'catalog' | 'youtube';
+export type ImportKind = 'local' | 'catalog';
 
 /** How a piece of work ended, for the dialog that started it. */
 export interface ImportOutcome {
@@ -38,51 +32,48 @@ export interface ImportOutcome {
   readonly path: string | null;
 }
 
-/** What a progress toast is titled by, once the work has left the dialog. */
-const TOAST_TITLES: Record<ImportKind, string> = {
-  local: 'Uploading media',
-  catalog: 'Importing catalog asset',
-  youtube: 'Importing YouTube video',
-};
-
 /** "Preparing media 2/3": a position in work of several items; none for a single one. */
 const scoped = (title: string, position: number, total: number): string =>
   total > 1 ? `${title} ${position}/${total}` : title;
 
 /**
- * A server line's progress about one item: the item ("clip.mp4", an asset's label, a YouTube
- * target), then what the line adds ("clip.mp4 - 0:12 / 0:40"), as #170 showed it.
+ * Progress about one item: the item ("clip.mp4", an asset's label), then what the server adds
+ * ("clip.mp4 - 0:12 / 0:40").
  */
 const about = (subject: string, detail: string): string =>
   detail && detail !== subject ? `${subject} - ${detail}` : subject;
 
 /** How one file of an upload ended. */
 type FileOutcome =
-  | { readonly kind: 'uploaded'; readonly path: string | null }
-  /** The message names the file; a failed file may still have been saved (`path`). */
-  | { readonly kind: 'failed'; readonly message: string; readonly path: string | null }
+  | { readonly kind: 'uploaded'; readonly path: string }
+  /** The message names the file. */
+  | { readonly kind: 'failed'; readonly message: string }
   /** `unasked` is the outcome's note for a clash no one was there to answer; null for a Skip. */
   | { readonly kind: 'skipped'; readonly unasked: string | null };
 
-/** How work ended: a status message on success (or cancel), a failure to report otherwise. */
+/** How work ended: a status message on success, a failure to report otherwise. */
 type Ending =
-  | { readonly ok: boolean; readonly path: string | null; readonly message: string }
+  | { readonly ok: true; readonly path: string | null; readonly message: string }
   | { readonly ok: false; readonly path: string | null; readonly failure: string };
 
+/** What a request that saves into the library said it saved; it must have said so. */
+function savedOf(saved: MediaSaved | null): MediaSaved {
+  if (!saved) throw new Error('The server did not say what it saved.');
+  return saved;
+}
+
 /**
- * Runs the import dialog's work, outside the dialog so that it outlives it: local uploads, catalog
- * imports and YouTube imports, one piece of work at a time (spec, Media import; Review Focus 3).
+ * Runs the import dialog's work, outside the dialog so that it outlives it: local uploads and
+ * catalog imports, one piece of work at a time.
  *
- * While a dialog holds the runner (`hold`), the dialog shows the progress, the name-clash question
- * and the failure, and the outcome is a toast as #170's was. When the last dialog lets go while
- * work runs (navigation closes a dialog even while it is busy), the progress moves into a progress
- * toast that reports to the end; a clash that can no longer be asked is skipped and the toast says
- * so (ruling Q17), since a 409 saved nothing. A dialog opened again while the work runs takes it
- * back from the toast: the progress, the clashes and the outcome are the dialog's again.
+ * A dialog shows the progress, the name-clash question and the failure while it is open, and the
+ * outcome is a toast, so the user learns how the work ended also after its dialog went
+ * (navigation closes a dialog even while it is busy). While no dialog holds the runner (`hold`),
+ * a clash cannot be asked: it is skipped, and the outcome says so, since a 409 saved nothing.
  *
- * The streamed lines are read as `progress-lines.ts` tells a caller to: to the end, never
- * unsubscribing on a failure line, with the failure taken from all of the request's lines. The
- * library refreshes itself after each request; `MediaLibraryService` does that, whatever the outcome.
+ * An upload shows its bytes, then the job that re-encodes it when the server needs one; a catalog
+ * import shows its download's job. The library refreshes itself after each request;
+ * `MediaLibraryService` does that, whatever the outcome.
  */
 @Injectable({ providedIn: 'root' })
 export class ImportRunner {
@@ -108,26 +99,22 @@ export class ImportRunner {
   readonly failure = this.failureState.asReadonly();
 
   private holders = 0;
-  /** The toast the work reports to once no dialog shows it. */
-  private toast: NeatProgressToast | null = null;
   private answerClash: ((choice: ClashChoice) => void) | null = null;
-  private abortRequest: (() => void) | null = null;
   private current: Promise<ImportOutcome> | null = null;
 
   /**
-   * Shows the work in the caller (the dialog) until the returned function is called. Letting go
-   * while work runs moves its progress into a toast for the rest of it; holding again takes it
-   * back from the toast.
+   * Shows the work in the caller (the dialog) until the returned function is called. Once the last
+   * holder lets go, a clash waiting for an answer is skipped: no one is left to answer it.
    */
   hold(): () => void {
     this.holders++;
     this.failureState.set(null);
-    this.takeFromToast();
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      if (--this.holders === 0 && this.busy()) this.moveToToast();
+      // `upload` records the clash as skipped without asking.
+      if (--this.holders === 0) this.answerClash?.('skip');
     };
   }
 
@@ -141,16 +128,11 @@ export class ImportRunner {
     this.answerClash?.(choice);
   }
 
-  /** Aborts a YouTube import; the server stops yt-dlp and FFmpeg when the request goes. */
-  cancel(): void {
-    if (this.job() === 'youtube') this.abortRequest?.();
-  }
-
   /**
-   * Uploads files one after the other, each with byte progress and then the server's processing
-   * lines. A name that exists is asked about per file and sent again with the answer. A failure
-   * fails its file and the next one still uploads; the outcome is ok when every file was
-   * uploaded or skipped.
+   * Uploads files one after the other, each with byte progress and then the progress of its
+   * re-encode, when the server needs one. A name that exists is asked about per file and sent
+   * again with the answer. A failure fails its file and the next one still uploads; the outcome
+   * is ok when every file was uploaded or skipped.
    */
   upload(files: readonly File[]): Promise<ImportOutcome> {
     return this.run('local', async () => {
@@ -167,9 +149,12 @@ export class ImportRunner {
           else skippedByChoice++;
           continue;
         }
-        if (outcome.kind === 'failed') failures.push(outcome.message);
-        else uploaded++;
-        path = outcome.path ?? path;
+        if (outcome.kind === 'failed') {
+          failures.push(outcome.message);
+          continue;
+        }
+        uploaded++;
+        path = outcome.path;
       }
 
       const attempted = files.length - skippedByChoice - unasked.length;
@@ -185,42 +170,27 @@ export class ImportRunner {
     });
   }
 
-  /** Imports catalog assets one after the other, stopping at the first that fails, as #170 did. */
+  /** Imports catalog assets one after the other, stopping at the first that fails. */
   importCatalog(assets: readonly CatalogAsset[]): Promise<ImportOutcome> {
     return this.run('catalog', async () => {
       let path: string | null = null;
       for (const [index, asset] of assets.entries()) {
         const position = index + 1;
+        const title = scoped('Importing catalog asset', position, assets.length);
         const label = catalogAssetLabel(asset);
-        this.show({
-          title: scoped('Importing catalog asset', position, assets.length),
-          detail: label,
-          percent: null,
-        });
-        // Only a YouTube import is ever aborted, so the lines are always there.
-        const lines =
-          (await this.read(this.library.importCatalog(asset.path), (line) =>
-            this.showLine(catalogProgress(line), position, assets.length, label),
-          )) ?? [];
-        const failure = failureText(lines);
-        if (failure) return { ok: false, path, failure };
-        path = lastSaved(lines) ?? path;
+        this.progressState.set({ title, detail: label, percent: null });
+        let saved: MediaSaved | null = null;
+        try {
+          await this.read(this.library.importCatalog(asset.path), (event) => {
+            if (event.kind === 'job') this.showJob(event.job, title, label);
+            else if (event.kind === 'saved') saved = this.reportSaved(event.saved);
+          });
+        } catch (failure) {
+          return { ok: false, path, failure: messageOf(failure) };
+        }
+        path = savedOf(saved).path;
       }
       return { ok: true, path, message: `Imported ${assets.length} catalog asset(s).` };
-    });
-  }
-
-  /** Imports a YouTube clip; `cancel` aborts it. */
-  importYoutube(request: YoutubeImportRequest): Promise<ImportOutcome> {
-    return this.run('youtube', async () => {
-      this.show({ title: 'Importing YouTube video', detail: request.target, percent: null });
-      const lines = await this.read(this.library.importYoutube(request), (line) =>
-        this.showLine(youtubeProgress(line), 1, 1, request.target),
-      );
-      if (lines === null) return { ok: false, path: null, message: 'YouTube import canceled.' };
-      const failure = failureText(lines);
-      if (failure) return { ok: false, path: null, failure };
-      return { ok: true, path: lastSaved(lines), message: 'Imported YouTube video.' };
     });
   }
 
@@ -232,7 +202,6 @@ export class ImportRunner {
     if (this.busy()) return Promise.reject(new Error('An import is running already.'));
     this.jobState.set(kind);
     this.failureState.set(null);
-    if (this.holders === 0) this.moveToToast();
     const outcome = work()
       .catch((failure: unknown): Ending => ({ ok: false, path: null, failure: messageOf(failure) }))
       .then((ending) => this.finish(ending));
@@ -240,145 +209,100 @@ export class ImportRunner {
     return outcome;
   }
 
-  /** Reports the outcome where the work is shown, and frees the runner for the next. */
+  /** Reports the outcome in a toast, and to a dialog, and frees the runner for the next. */
   private finish(ending: Ending): ImportOutcome {
-    const toast = this.toast;
     if ('failure' in ending) {
-      if (toast) toast.fail(ending.failure);
-      else {
-        this.failureState.set(ending.failure);
-        this.toasts.error(ending.failure);
-      }
-    } else if (toast) {
-      toast.done(ending.message);
+      this.failureState.set(ending.failure);
+      this.toasts.error(ending.failure);
     } else {
       this.toasts.status(ending.message);
     }
-    this.toast = null;
-    this.abortRequest = null;
     this.current = null;
     this.progressState.set(null);
     this.jobState.set(null);
     return { ok: ending.ok, path: ending.path };
   }
 
-  private moveToToast(): void {
-    const job = this.job();
-    if (!job || this.toast) return;
-    this.toast = this.toasts.progress(TOAST_TITLES[job]);
-    const progress = this.progress();
-    if (progress) this.show(progress);
-    // No one is left to answer; `upload` records it as skipped.
-    this.answerClash?.('skip');
+  /** Shows a job's progress about one item, under `title`. */
+  private showJob(job: Job, title: string, subject: string): void {
+    const progress = jobProgress(job, title);
+    this.progressState.set({ ...progress, detail: about(subject, progress.detail) });
   }
 
   /**
-   * Shows the work in a dialog again. The toast goes without an outcome: the dialog that took the
-   * work back shows it, and reports how it ended.
+   * Says what saving changed beyond the library: a slot a Replace could not restart,
+   * and the slots a replaced folder cleared because it no longer has their file. Returns what was
+   * saved.
    */
-  private takeFromToast(): void {
-    if (!this.toast) return;
-    this.toast.dismiss();
-    this.toast = null;
-  }
-
-  private show(progress: Progress): void {
-    this.progressState.set(progress);
-    this.toast?.update(
-      [progress.title, progress.detail].filter(Boolean).join(' · '),
-      progress.percent,
-    );
-  }
-
-  /** Shows a parsed line about one item; a failure line shows nothing, `failureText` reports it. */
-  private showLine(
-    parsed: Progress | ProgressFailure | null,
-    position: number,
-    total: number,
-    subject: string,
-  ): void {
-    if (parsed === null || isProgressFailure(parsed)) return;
-    this.show({
-      title: scoped(parsed.title, position, total),
-      detail: about(subject, parsed.detail),
-      percent: parsed.percent,
-    });
+  private reportSaved(saved: MediaSaved): MediaSaved {
+    for (const warning of saved.warnings ?? []) this.toasts.warning(warning);
+    const cleared = saved.unassigned ?? [];
+    if (cleared.length > 0) {
+      const names = cleared.map((n) => `src${n}`).join(', ');
+      this.toasts.warning(`Cleared ${names}: the replaced folder no longer has their files.`);
+    }
+    return saved;
   }
 
   /**
    * Uploads one file: sent as it is, then, if its name exists, again with the answer to the
-   * clash. A failure is reported with the file's name, as #170 did.
+   * clash. A failure is reported with the file's name.
    */
   private async uploadFile(file: File, position: number, total: number): Promise<FileOutcome> {
-    this.show({
-      title: scoped('Uploading media', position, total),
-      detail: file.name,
-      percent: null,
-    });
+    const title = scoped('Uploading media', position, total);
+    this.progressState.set({ title, detail: file.name, percent: null });
     let onConflict: UploadOnConflict | undefined;
     for (;;) {
-      let lines: string[];
+      let saved: MediaSaved;
       try {
-        lines = await this.sendUpload(file, onConflict, position, total);
+        saved = await this.sendUpload(
+          file,
+          onConflict,
+          title,
+          scoped('Preparing media', position, total),
+        );
       } catch (refusal) {
         const conflict = uploadConflict(refusal);
-        if (!conflict) {
-          return { kind: 'failed', message: `${file.name}: ${messageOf(refusal)}`, path: null };
-        }
+        if (!conflict) return { kind: 'failed', message: `${file.name}: ${messageOf(refusal)}` };
         const choice = await this.ask(conflict, isArchiveUpload(file.name));
         if (choice === 'skip') {
-          return { kind: 'skipped', unasked: this.toast ? skippedText(conflict) : null };
+          return { kind: 'skipped', unasked: this.holders === 0 ? skippedText(conflict) : null };
         }
         onConflict = choice;
         continue;
       }
-      const failure = failureText(lines);
-      return failure
-        ? { kind: 'failed', message: `${file.name}: ${failure}`, path: lastSaved(lines) }
-        : { kind: 'uploaded', path: lastSaved(lines) };
+      return { kind: 'uploaded', path: saved.path };
     }
   }
 
   /**
-   * Sends one upload and resolves with its lines once the server has finished; rejects with the
-   * refusal (a 409 names a clash). The bytes show as the upload's percent until the server's
-   * lines take over; a slot a Replace could not restart is reported as it comes (ruling Q6).
+   * Sends one upload and resolves with what was saved; rejects with the refusal (a 409 names a
+   * clash) or the failure of its re-encode. The bytes show as the upload's percent until the
+   * server's re-encode, if any, takes over; what saving changed is reported as it arrives.
    */
   private async sendUpload(
     file: File,
     onConflict: UploadOnConflict | undefined,
-    position: number,
-    total: number,
-  ): Promise<string[]> {
-    const lines = await this.read(
-      this.library.upload(file, onConflict),
-      (line) => {
-        const warning = restartWarning(line);
-        if (warning) this.toasts.warning(warning);
-        this.showLine(uploadProgress(line), position, total, file.name);
-      },
-      (loaded, size) =>
-        this.show({
-          title: scoped('Uploading media', position, total),
-          detail: file.name,
-          percent: size ? Math.round((loaded / size) * 100) : null,
-        }),
-    );
-    // Only a YouTube import is ever aborted, so the lines are always there.
-    return lines ?? [];
+    uploading: string,
+    preparing: string,
+  ): Promise<MediaSaved> {
+    let saved: MediaSaved | null = null;
+    await this.read(this.library.upload(file, onConflict), (event: LibraryEvent) => {
+      if (event.kind === 'upload') {
+        const percent = event.total ? Math.round((event.loaded / event.total) * 100) : null;
+        this.progressState.set({ title: uploading, detail: file.name, percent });
+      } else if (event.kind === 'job') {
+        this.showJob(event.job, preparing, file.name);
+      } else {
+        saved = this.reportSaved(event.saved);
+      }
+    });
+    return savedOf(saved);
   }
 
-  /**
-   * Reads a streamed request to its end and resolves with its lines, or with null when
-   * `abortRequest` aborted it; rejects when the request failed or a handler threw.
-   */
-  private read(
-    stream: Observable<StreamEvent>,
-    onLine: (line: string) => void,
-    onUpload?: (loaded: number, total: number | null) => void,
-  ): Promise<string[] | null> {
+  /** Reads a request to its end; rejects when the request failed or a handler threw. */
+  private read<E>(stream: Observable<E>, onEvent: (event: E) => void): Promise<void> {
     return new Promise((resolve, reject) => {
-      const lines: string[] = [];
       // Made first and the request added to it: a source that emits while `subscribe` runs can
       // fail a handler before `subscribe` returns, and the request added to a subscription that is
       // already closed is ended at once.
@@ -387,11 +311,7 @@ export class ImportRunner {
         stream.subscribe({
           next: (event) => {
             try {
-              if (event.kind === 'upload') onUpload?.(event.loaded, event.total);
-              else if (event.kind === 'line') {
-                lines.push(event.text);
-                onLine(event.text);
-              } else resolve(lines);
+              onEvent(event);
             } catch (failure) {
               // A failure of ours, not the server's: RxJS would only log it, and the request would
               // read on with nothing to show it. It fails the request instead.
@@ -400,24 +320,21 @@ export class ImportRunner {
             }
           },
           error: reject,
+          complete: () => resolve(),
         }),
       );
-      this.abortRequest = () => {
-        subscription.unsubscribe();
-        resolve(null);
-      };
     });
   }
 
   /**
    * Asks what to do about a clash, naming the slots a Replace would restart: fetched again first,
-   * as before any replace (spec, "In use"), or the last known ones, said to be so, when that
-   * fetch fails (Q16). Skipped without asking once no dialog shows the work.
+   * as before any replace, or the last known ones, said to be so, when that
+   * fetch fails. Skipped without asking once no dialog shows the work.
    */
   private async ask(conflict: UploadConflict, archive: boolean): Promise<ClashChoice> {
-    if (this.toast) return 'skip';
+    if (this.holders === 0) return 'skip';
     const checked = await this.slots.recheck();
-    if (this.toast) return 'skip';
+    if (this.holders === 0) return 'skip';
     const using = archive
       ? this.slots.assignedUnder(conflict.existing)
       : this.slots.assignedTo(conflict.existing);
@@ -431,14 +348,4 @@ export class ImportRunner {
       this.clashState.set(null);
     }
   }
-}
-
-/** The last path a request's lines say was saved. */
-function lastSaved(lines: readonly string[]): string | null {
-  return (
-    lines
-      .map(savedPath)
-      .filter((path) => path !== null)
-      .pop() ?? null
-  );
 }

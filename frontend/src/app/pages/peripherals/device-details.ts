@@ -6,11 +6,10 @@ import type { PeripheralItem } from '../../peripherals/api';
 import { deviceFacts } from '../../peripherals/devices';
 
 /**
- * A device panel's last part: the facts and notes the backend reports for the device and #170
- * never showed (spec, "Details, collapsed by default"), in a section closed until opened. The
- * facts are `deviceFacts`, a key/value list; the notes follow under their own heading. A device
- * with neither shows nothing. The camera and microphone panels end with it, and so does the panel
- * of a kind Insight has no view for.
+ * A device panel's last part: the facts and notes the backend reports for the device, in a
+ * section closed until opened. The facts are `deviceFacts`, a key/value list; the notes follow
+ * under their own heading. A device with neither shows nothing. The camera and microphone panels
+ * end with it, and so does the panel of a kind Insight has no view for.
  */
 @Component({
   selector: 'app-device-details',

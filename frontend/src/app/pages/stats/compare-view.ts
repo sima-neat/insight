@@ -22,11 +22,13 @@ import { NeatSwitch } from '@sima/neat-ui/switch';
 import { NeatNumeric, NeatTable } from '@sima/neat-ui/table';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import { firstValueFrom, map } from 'rxjs';
+import { boardUrl } from '../../board/api';
+import { BOARD_GONE_CODES } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
 import { LatestOnly } from '../../polling';
 import { Announcement } from '../../announcement';
-import { withRequestErrors } from '../../sources/stream-lines';
-import type { CompareAnswer, CompareExport } from '../../stats/api';
+import { withRequestErrors } from '../../sources/api-errors';
+import type { CompareExport } from '../../stats/api';
 import {
   ALL_GROUPS,
   availableSeries,
@@ -52,9 +54,7 @@ import { StatsSession } from '../../stats/stats-session';
 import { SentinelFailureCallout } from './sentinel-failure-callout';
 import { StatsChart, type StatsChartInputs } from './stats-chart';
 
-const COMPARE_URL = '/api/sentinel/compare';
-
-/** #170's words for a comparison body without a comparison's parts (Inv-S §2.10). */
+/** What a comparison body without a comparison's parts is said to be. */
 const UNKNOWN_COMPARISON = 'This Sentinel build returned a comparison Insight cannot lay out.';
 
 /**
@@ -74,8 +74,8 @@ type Gate =
 type Comparison = { answer: CompareExport } | { failure: SentinelFailure } | null;
 
 /**
- * Stats' Compare view (`/stats/runs/compare?runs=<a>,<b>[,…]&baseline=<a>`, spec "Compare"): the runs
- * of the address, each in its series colour with the baseline marked, one series of theirs drawn
+ * Stats' Compare view (`/stats/runs/compare?runs=<a>,<b>[,…]&baseline=<a>`): the runs
+ * of the address, each in its series color with the baseline marked, one series of theirs drawn
  * over the common window with its summary per run, and Sentinel's per-metric comparison folded
  * below. The baseline is chosen in the header, which opens the same runs with it.
  *
@@ -83,8 +83,8 @@ type Comparison = { answer: CompareExport } | { failure: SentinelFailure } | nul
  * before Sentinel is asked: only it tells a run that is gone from the board, or still recording,
  * and both are said rather than sent. Once the list allows them, the runs are asked for once per
  * address and board; a list read again every 30 s with the same runs asks nothing. Only the
- * newest request's answer is shown, and one naming another board generation reloads the board
- * instead, whose new list asks again.
+ * newest request's answer is shown, and only while the page is on the board it was asked of; a
+ * failure saying the board was replaced reloads the board, whose new list asks again.
  *
  * Changes are plain text everywhere: whether lower is better depends on the metric.
  */
@@ -316,8 +316,8 @@ export class CompareView {
   constructor() {
     effect(() => {
       const runs = this.requested();
-      const generation = this.board.generation();
-      untracked(() => void this.load(runs, generation));
+      const id = this.board.id();
+      untracked(() => void this.load(runs, id));
     });
     inject(DestroyRef).onDestroy(() => (this.destroyed = true));
   }
@@ -337,7 +337,7 @@ export class CompareView {
   }
 
   protected retry(): void {
-    void this.load(this.requested(), this.board.generation());
+    void this.load(this.requested(), this.board.id());
   }
 
   /** Downloads every row of the comparison, whatever the table shows. */
@@ -349,40 +349,32 @@ export class CompareView {
   }
 
   /**
-   * Asks Sentinel to compare `runs` on the board of `generation`, dropping whatever was shown;
-   * null asks nothing. An answer is shown only while it is the newest request's and the page is
-   * on that board; one without a comparison's parts (`isCompareExport`) is shown as a failure.
+   * Asks Sentinel to compare `runs` on the board of `id`, dropping whatever was shown; null asks
+   * nothing. An answer is shown only while it is the newest request's and the page is on that
+   * board; one without a comparison's parts (`isCompareExport`) is shown as a failure.
    */
-  private async load(runs: string | null, generation: number | null): Promise<void> {
+  private async load(runs: string | null, id: string | null): Promise<void> {
     const request = this.reads.next();
     this.comparison.set(null);
-    if (runs === null || generation === null) return;
-    const current = () => !this.destroyed && this.reads.isNewest(request);
+    if (runs === null || id === null) return;
+    const current = () => !this.destroyed && this.reads.isNewest(request) && this.board.id() === id;
     try {
       const answer = await firstValueFrom(
         this.http
-          .get<CompareAnswer>(COMPARE_URL, { params: { runs, raw: 1 } })
+          .get<unknown>(boardUrl(id, 'sentinel/compare'), { params: { runs } })
           .pipe(withRequestErrors()),
       );
       if (!current()) return;
-      if (answer.generation !== generation) {
-        void this.board.reload();
-        return;
-      }
-      if (this.board.generation() !== generation) return;
       this.comparison.set(
-        isCompareExport(answer.sentinel)
-          ? { answer: answer.sentinel }
-          : { failure: unexpectedAnswer(UNKNOWN_COMPARISON, generation) },
+        isCompareExport(answer)
+          ? { answer }
+          : { failure: unexpectedAnswer(UNKNOWN_COMPARISON, id) },
       );
     } catch (error) {
       if (!current()) return;
-      const failure = failureOf(error, generation);
-      if (failure.generation !== generation) {
-        void this.board.reload();
-        return;
-      }
-      if (this.board.generation() === generation) this.comparison.set({ failure });
+      const failure = failureOf(error, id);
+      if (BOARD_GONE_CODES.has(failure.code)) void this.board.reload();
+      this.comparison.set({ failure });
     }
   }
 }

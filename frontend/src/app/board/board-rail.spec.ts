@@ -8,7 +8,7 @@ import { FakeLocalStorage } from '../fake-storage.testing';
 import { BoardProblem } from './board-error';
 import { BoardRail } from './board-rail';
 import { BoardService } from './board.service';
-import { boardState, DEVKIT, FakeBoard, railItem } from './board.testing';
+import { boardList, boardWith, DEVKIT, FakeBoard, railItem } from './board.testing';
 
 /** The app frame: a rail item belongs in the shell's rail end, which gives it the rail's state. */
 @Component({
@@ -19,7 +19,7 @@ import { boardState, DEVKIT, FakeBoard, railItem } from './board.testing';
 })
 class Shell {}
 
-const CONNECTED = { state: 'connected', checked_at: null, error: null } as const;
+const CONNECTED = { state: 'connected' } as const;
 
 describe('BoardRail', () => {
   let board: FakeBoard;
@@ -73,7 +73,7 @@ describe('BoardRail', () => {
   }
 
   it('a connected board is quiet: name and address, a success tone, the state in its label', async () => {
-    board.state.set(boardState({ target: DEVKIT, status: CONNECTED }));
+    board.state.set(boardWith(DEVKIT, { status: CONNECTED }));
     const button = await render();
 
     // The state is in the label (the item's name and tooltip), not only in the tone's colour.
@@ -88,9 +88,7 @@ describe('BoardRail', () => {
   });
 
   it('a board that is not connected says its state in words, in the state’s tone', async () => {
-    board.state.set(
-      boardState({ target: DEVKIT, status: { state: 'error', checked_at: null, error: null } }),
-    );
+    board.state.set(boardWith(DEVKIT, { status: { state: 'error' } }));
     const button = await render();
 
     expect(mapped(button)).toEqual({
@@ -100,7 +98,7 @@ describe('BoardRail', () => {
       label: 'DevKit — 192.168.1.20 — Connection failed',
     });
 
-    board.state.set(boardState({ target: DEVKIT }));
+    board.state.set(boardWith(DEVKIT));
     await fixture.whenStable();
     expect(mapped(button)).toMatchObject({
       text: 'DevKit',
@@ -108,7 +106,7 @@ describe('BoardRail', () => {
       tone: 'neutral',
     });
 
-    board.state.set(boardState({ target: null }));
+    board.state.set(boardList());
     await fixture.whenStable();
     expect(mapped(button)).toMatchObject({
       text: 'No board',
@@ -118,7 +116,7 @@ describe('BoardRail', () => {
   });
 
   it('says Checking… in the warning tone while the connection check is out, then its result', async () => {
-    board.state.set(boardState({ target: DEVKIT }));
+    board.state.set(boardWith(DEVKIT));
     board.checking.set(true);
     const button = await render();
 
@@ -129,15 +127,15 @@ describe('BoardRail', () => {
       label: 'DevKit — 192.168.1.20 — Checking the connection',
     });
 
-    board.state.set(boardState({ target: DEVKIT, status: CONNECTED }));
+    board.state.set(boardWith(DEVKIT, { status: CONNECTED }));
     board.checking.set(false);
     await fixture.whenStable();
     expect(mapped(button)).toMatchObject({ detail: '192.168.1.20', tone: 'success' });
   });
 
   it('keeps naming the last known board when the board read fails, and says so', async () => {
-    board.state.set(boardState({ target: DEVKIT, status: CONNECTED }));
-    board.error.set(new BoardProblem('Could not reach the Insight server.', 'network', '', {}));
+    board.state.set(boardWith(DEVKIT, { status: CONNECTED }));
+    board.error.set(new BoardProblem('Could not reach the Insight server.', 'network', ''));
     const button = await render();
 
     expect(mapped(button)).toEqual({
@@ -150,14 +148,14 @@ describe('BoardRail', () => {
   });
 
   it('the tooltip of the collapsed rail says it all', async () => {
-    board.state.set(boardState({ target: DEVKIT, status: CONNECTED }));
+    board.state.set(boardWith(DEVKIT, { status: CONNECTED }));
     const button = await render();
 
     expect(await tooltip(button)).toBe('DevKit — 192.168.1.20 — Connected');
   });
 
   it('a click opens the board dialog', async () => {
-    board.state.set(boardState({ target: DEVKIT, status: CONNECTED }));
+    board.state.set(boardWith(DEVKIT, { status: CONNECTED }));
     const button = await render();
 
     button.click();

@@ -1,49 +1,46 @@
-import { Component, getDebugNode, Injector } from '@angular/core';
+import { Component, Injector } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import { NeatButton } from '@sima/neat-ui';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { PeripheralsService } from '../peripherals/peripherals.service';
 import { peripheralSnapshot } from '../peripherals/snapshots.testing';
-import type { BoardState, ShellInfo } from './api';
+import type { BoardList, SelectedBoard } from './api';
 import { openBoardDialog } from './board-dialog';
 import { BoardProblem } from './board-error';
 import { BoardService } from './board.service';
 import {
-  boardState,
+  boardList,
+  boardWith,
   deferred,
   DEVKIT,
   FakeBoard,
   FakePeripherals,
-  shellInfo,
+  LOCAL,
 } from './board.testing';
 
 /** Something to render, so that change detection runs for the dialog in the overlay. */
 @Component({ template: '' })
 class Host {}
 
-const connected = (overrides: Partial<BoardState> = {}) =>
-  boardState({
-    target: DEVKIT,
-    status: { state: 'connected', checked_at: null, error: null },
-    ...overrides,
-  });
+const connected = (overrides: Partial<SelectedBoard> = {}) =>
+  boardWith(DEVKIT, { status: { state: 'connected' }, ...overrides });
 
-const failed = (overrides: Partial<BoardState> = {}) =>
-  boardState({
-    target: DEVKIT,
+const failed = (overrides: Partial<SelectedBoard> = {}) =>
+  boardWith(DEVKIT, {
     status: {
       state: 'error',
       checked_at: '2026-10-25T10:00:00Z',
-      error: { error: 'SSH key authentication failed.', code: 'auth_failed', hint: null },
+      error: { code: 'auth_failed', message: 'SSH key authentication failed.' },
     },
     ...overrides,
   });
 
-/** A scan of board `generation` that read the board's camera setup, as the dialog's Details show it. */
-const scanOf = (generation: number) =>
+const IDENTITY = { hostname: 'devkit', machine: '', build: '2.0.0', host_key: '' };
+
+/** A scan of the board `boardId` that read the board's camera setup, as Details show it. */
+const scanOf = (boardId: string) =>
   peripheralSnapshot([], {
-    generation,
+    board: { id: boardId },
     camera_setup: {
       model: 'SiMa.ai Modalix SoM 16Gig Board',
       overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo'],
@@ -116,8 +113,7 @@ describe('BoardDialog', () => {
       text(one.querySelector('button')).startsWith(label),
     ) ?? null;
   const notice = () => dialog().querySelector('app-board-problem-notice');
-  const variant = (element: HTMLElement) =>
-    getDebugNode(element)!.injector.get(NeatButton).variant();
+  const shell = () => dialog().querySelector('.shell');
 
   it('opens titled Board', async () => {
     board.state.set(connected());
@@ -125,195 +121,86 @@ describe('BoardDialog', () => {
     expect(text(dialog().querySelector('h2'))).toBe('Board');
   });
 
-  it('the dialog leads with Open shell when connected and supported, otherwise with Check again; Open shell hides without launch_supported', async () => {
+  it('offers Check again for a selected board, whatever its state', async () => {
     board.state.set(connected());
-    board.shellInfo.mockResolvedValue(shellInfo());
     await open();
-    expect(actions()).toEqual(['Open shell', 'Check again']);
-    expect(variant(button('Open shell'))).toBe('primary');
-    expect(variant(button('Check again'))).toBe('outlined');
+    expect(actions()).toEqual(['Check again']);
 
-    // Not connected: Check again leads; Open shell stays, since webssh signs in with a password and
-    // helps exactly when Insight's key is refused.
     board.state.set(failed());
     await settle();
-    expect(actions()).toEqual(['Check again', 'Open shell']);
-    expect(variant(button('Check again'))).toBe('primary');
-    expect(variant(button('Open shell'))).toBe('outlined');
-
-    // A shell that cannot sign in by itself is not offered (the next board's read says so).
-    board.shellInfo.mockResolvedValue(shellInfo({ launch_supported: false }));
-    board.state.set(connected({ generation: 2 }));
-    await settle();
-    expect(actions()).toEqual(['Check again']);
-    expect(variant(button('Check again'))).toBe('primary');
-  });
-
-  it('Open shell without webssh is dimmed with #170’s reason and does nothing', async () => {
-    board.state.set(connected());
-    board.shellInfo.mockResolvedValue(shellInfo({ available: false }));
-    const opened = vi.spyOn(window, 'open');
-    await open();
-    const shell = button('Open shell');
-    expect(shell.getAttribute('aria-disabled')).toBe('true');
-
-    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1366);
-    vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(768);
-    shell.getBoundingClientRect = () => new DOMRect(400, 300, 120, 32);
-    shell.dispatchEvent(new FocusEvent('focus'));
-    await settle();
-    expect(text(document.querySelector('[role="tooltip"]'))).toBe(
-      'webssh is not installed in this Insight environment',
-    );
-
-    shell.click();
-    await settle();
-    expect(opened).not.toHaveBeenCalled();
-    expect(board.startShell).not.toHaveBeenCalled();
-  });
-
-  it('Open shell opens the window synchronously, then starts webssh and navigates it; a failure closes it and toasts', async () => {
-    board.state.set(connected());
-    board.shellInfo.mockResolvedValue(shellInfo());
-    const blank = { location: { href: '' }, close: vi.fn() };
-    const opened = vi.spyOn(window, 'open').mockReturnValue(blank as unknown as Window);
-    const start = deferred<ShellInfo>();
-    board.startShell.mockReturnValue(start.promise);
-    await open();
-
-    button('Open shell').click();
-    // Inside the click, so that popup blockers allow it: the address follows once webssh runs.
-    expect(opened).toHaveBeenCalledWith('', '_blank');
-    expect(board.startShell).toHaveBeenCalledTimes(1);
-    await settle();
-    expect(actions()).toEqual(['Opening shell…', 'Check again']);
-    expect(button('Opening shell…').getAttribute('aria-disabled')).toBe('true');
-    // One action at a time, as #170: Check again waits too.
-    expect(button('Check again').getAttribute('aria-disabled')).toBe('true');
-
-    start.resolve(shellInfo({ running: true, launch_url: 'https://localhost:8022/?go' }));
-    await settle();
-    expect(blank.location.href).toBe('https://localhost:8022/?go');
-    expect(blank.close).not.toHaveBeenCalled();
-    expect(toasts.error).not.toHaveBeenCalled();
-    expect(actions()).toEqual(['Open shell', 'Check again']);
-
-    // A blocked popup: the shell opens in a window of its own once the address is known.
-    opened.mockReturnValue(null);
-    board.startShell.mockResolvedValue(shellInfo({ launch_url: 'https://localhost:8022/?again' }));
-    button('Open shell').click();
-    await settle();
-    expect(opened).toHaveBeenLastCalledWith('https://localhost:8022/?again', '_blank');
-
-    // A failure closes the blank window and says why.
-    opened.mockReturnValue(blank as unknown as Window);
-    board.startShell.mockRejectedValue(
-      new Error('webssh failed to start. Check bin/logs/webssh.log'),
-    );
-    button('Open shell').click();
-    await settle();
-    expect(blank.close).toHaveBeenCalledTimes(1);
-    expect(toasts.error).toHaveBeenCalledWith('webssh failed to start. Check bin/logs/webssh.log');
-
-    // Started without an address: #170's message.
-    blank.close.mockClear();
-    board.startShell.mockResolvedValue(shellInfo({ launch_url: null }));
-    button('Open shell').click();
-    await settle();
-    expect(blank.close).toHaveBeenCalledTimes(1);
-    expect(toasts.error).toHaveBeenLastCalledWith('DevKit shell launch URL is unavailable.');
-  });
-
-  it('shows the actions once the shell details are in, so that they do not reorder under the pointer', async () => {
-    board.state.set(connected());
-    const read = deferred<ShellInfo | null>();
-    board.shellInfo.mockReturnValue(read.promise);
-    await open();
-    // Check again alone first, with Open shell put before it a moment later, would take a quick
-    // click meant for the leading action.
-    expect(dialog().querySelector('.actions')).toBeNull();
-
-    read.resolve(shellInfo());
-    await settle();
-    expect(actions()).toEqual(['Open shell', 'Check again']);
-
-    // A later board's read keeps the row shown meanwhile.
-    board.shellInfo.mockReturnValue(new Promise(() => undefined));
-    board.state.set(connected({ generation: 2 }));
-    await settle();
-    expect(actions()).toEqual(['Open shell', 'Check again']);
-  });
-
-  it('shell details read for an earlier board cannot overwrite the newer board', async () => {
-    // #170's Codex finding (5878ec6), Inv-PB §6.17: the board changes while the dialog is open.
-    board.state.set(connected());
-    const reads = [deferred<ShellInfo | null>(), deferred<ShellInfo | null>()];
-    board.shellInfo.mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
-    await open();
-    expect(board.shellInfo).toHaveBeenCalledTimes(1);
-
-    board.state.set(failed({ generation: 2 }));
-    await settle();
-    expect(board.shellInfo).toHaveBeenCalledTimes(2);
-
-    reads[1].resolve(shellInfo({ launch_supported: false }));
-    await settle();
-    reads[0].resolve(shellInfo());
-    await settle();
-    // The newer board has no browser shell; the earlier answer does not bring Open shell back.
-    expect(actions()).toEqual(['Check again']);
-
-    // A failed read hides the shell.
-    board.shellInfo.mockResolvedValue(null);
-    board.state.set(connected({ generation: 3 }));
-    await settle();
     expect(actions()).toEqual(['Check again']);
   });
 
-  it('Check again tests the connection, says Checking… meanwhile and toasts the board it reached', async () => {
+  it('an SSH board shows the ssh command that opens a shell, with Copy; the local board has none', async () => {
+    const writeText = vi.fn(async () => undefined);
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    try {
+      board.state.set(connected());
+      await open();
+      expect(text(shell()!.querySelector('p'))).toBe('Open a shell on the board from a terminal:');
+      expect(text(shell()!.querySelector('code'))).toBe('ssh sima@192.168.1.20');
+      const copy = shell()!.querySelector('button')!;
+      expect(copy.getAttribute('aria-label')).toBe('Copy the ssh command');
+      copy.click();
+      await settle();
+      expect(writeText).toHaveBeenCalledWith('ssh sima@192.168.1.20');
+      expect(toasts.status).toHaveBeenCalledWith('Copied: ssh sima@192.168.1.20');
+
+      // No Open shell any more: Insight runs no shell of its own.
+      expect(button('Open shell')).toBeUndefined();
+
+      board.state.set(boardWith(LOCAL, { status: { state: 'connected' } }));
+      await settle();
+      expect(shell()).toBeNull();
+    } finally {
+      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('Check again checks the connection, says Checking… meanwhile and toasts the board it reached', async () => {
     board.state.set(failed());
-    const test = deferred<BoardState>();
-    board.test.mockReturnValue(test.promise);
+    const check = deferred<BoardList>();
+    board.check.mockReturnValue(check.promise);
     await open();
 
     button('Check again').click();
     await settle();
-    expect(board.test).toHaveBeenCalledTimes(1);
+    expect(board.check).toHaveBeenCalledTimes(1);
     expect(button('Checking…').getAttribute('aria-disabled')).toBe('true');
     // A press while it runs is ignored.
     button('Checking…').click();
-    expect(board.test).toHaveBeenCalledTimes(1);
+    expect(board.check).toHaveBeenCalledTimes(1);
 
-    const answer = connected({
-      board: { hostname: 'devkit', machine: null, build_version: null, fingerprint: 'f' },
-    });
+    const answer = connected({ identity: { ...IDENTITY, machine: 'modalix' } });
     board.state.set(answer);
-    test.resolve(answer);
+    check.resolve(answer);
     await settle();
     expect(toasts.status).toHaveBeenCalledWith('Connected to devkit.');
     expect(statusLine()).toBe('Connected devkit · sima@192.168.1.20 · SDK DevKit');
 
-    // Without a hostname the toast names the target.
-    board.test.mockResolvedValue(connected());
+    // Without a hostname the toast names the board.
+    board.check.mockResolvedValue(connected());
     button('Check again').click();
     await settle();
     expect(toasts.status).toHaveBeenLastCalledWith('Connected to sima@192.168.1.20.');
   });
 
-  it('a failed Check again shows its own problem in the notice; the next success clears it (F21)', async () => {
+  it('a failed Check again shows its own problem in the notice; the next success clears it', async () => {
     board.state.set(connected());
-    board.test.mockImplementation(async () => {
+    board.check.mockImplementation(async () => {
       // The service reloads the state before it rejects; the reload recorded an older failure.
       board.state.set(
         failed({
           status: {
             state: 'error',
             checked_at: '2026-10-25T10:00:00Z',
-            error: { error: 'The board did not answer.', code: 'unreachable', hint: null },
+            error: { code: 'unreachable', message: 'The board did not answer.' },
           },
         }),
       );
-      throw new BoardProblem('SSH key authentication failed.', 'auth_failed', '', {});
+      throw new BoardProblem('SSH key authentication failed.', 'auth_failed', '');
     });
     await open();
     expect(notice()).toBeNull();
@@ -321,15 +208,15 @@ describe('BoardDialog', () => {
     button('Check again').click();
     await settle();
     expect(statusLine()).toMatch(/^Connection failed /);
-    // The action's own problem wins over the one the state repeats.
+    // The action's own problem wins over the one the status records.
     expect(text(notice())).toBe('SSH key authentication failed.');
-    // Said as it appears, as #170's role="alert": the failure has no toast.
+    // Said as it appears: the failure has no toast.
     expect(notice()!.querySelector('neat-callout')!.getAttribute('role')).toBe('alert');
     expect(toasts.status).not.toHaveBeenCalled();
     expect(toasts.error).not.toHaveBeenCalled();
     expect(button('Check again').getAttribute('aria-disabled')).toBeNull();
 
-    board.test.mockImplementation(async () => {
+    board.check.mockImplementation(async () => {
       board.state.set(connected());
       return connected();
     });
@@ -338,14 +225,37 @@ describe('BoardDialog', () => {
     expect(notice()).toBeNull();
   });
 
-  it('shows the connection error the board state repeats, while a target exists', async () => {
-    board.state.set(failed());
+  it('shows the connection error the board’s status records, with its command, while a board is selected', async () => {
+    board.state.set(
+      failed({
+        status: {
+          state: 'error',
+          error: { code: 'auth_failed', message: 'SSH key authentication failed.' },
+          command: 'ssh-copy-id sima@192.168.1.20',
+        },
+      }),
+    );
     await open();
-    expect(text(notice())).toBe('SSH key authentication failed.');
+    expect(words(notice())).toBe(
+      'SSH key authentication failed. ssh-copy-id sima@192.168.1.20 Copy',
+    );
     // A problem already there when the dialog opens is not shouted.
     expect(notice()!.querySelector('neat-callout')!.getAttribute('role')).toBeNull();
 
-    board.state.set(boardState());
+    board.state.set(boardList());
+    await settle();
+    expect(notice()).toBeNull();
+  });
+
+  it('a board change drops the problem of an action on the board before', async () => {
+    board.state.set(connected());
+    board.check.mockRejectedValue(new BoardProblem('Timed out.', 'timeout', ''));
+    await open();
+    button('Check again').click();
+    await settle();
+    expect(text(notice())).toBe('Timed out.');
+
+    board.state.set(boardWith(LOCAL, { status: { state: 'connected' } }));
     await settle();
     expect(notice()).toBeNull();
   });
@@ -356,20 +266,17 @@ describe('BoardDialog', () => {
         state: 'error',
         checked_at: '2026-10-25T10:00:00Z',
         error: {
-          error: '192.168.1.20 presented a different SSH host key than the one Insight trusted.',
           code: 'host_key_changed',
-          hint: null,
-          host: '192.168.1.20',
-          expected_fingerprint: 'SHA256:old',
-          presented_fingerprint: 'SHA256:new',
+          message: '192.168.1.20 presented a different SSH host key than the one Insight trusted.',
         },
+        host_key: { host: '192.168.1.20', expected: 'SHA256:old', presented: 'SHA256:new' },
       },
     });
     board.state.set(changed);
     await open();
     const trust = () => button('Trust new key…');
 
-    const trusted = boardState({ target: DEVKIT, generation: 2 });
+    const trusted = boardWith(DEVKIT);
     board.trustHostKey.mockImplementation(async () => {
       board.state.set(trusted);
       return trusted;
@@ -384,20 +291,19 @@ describe('BoardDialog', () => {
 
     // The board presents a new key again, and this time the server refuses the trust: its words
     // replace the notice (its hint says to check again, which reads the key afresh).
-    board.state.set({ ...changed, generation: 3 });
+    board.state.set({ ...changed });
     await settle();
     board.trustHostKey.mockRejectedValueOnce(
       new BoardProblem(
         'That host key is not the one the board presented.',
-        'bad_fingerprint',
-        'Test the connection again and confirm the fingerprint it reports.',
-        {},
+        'invalid_request',
+        'Check the connection again and confirm the fingerprint it reports.',
       ),
     );
     trust().click();
     await settle();
     expect(words(notice())).toBe(
-      'That host key is not the one the board presented. Test the connection again and confirm the fingerprint it reports.',
+      'That host key is not the one the board presented. Check the connection again and confirm the fingerprint it reports.',
     );
     expect(notice()!.querySelector('neat-callout')!.getAttribute('role')).toBe('alert');
     // Trust new key… went with the warning; the server asks to check again, so the focus goes there.
@@ -406,11 +312,7 @@ describe('BoardDialog', () => {
   });
 
   it('Change board sits under Details; without a board it is open under the guide', async () => {
-    board.state.set(
-      connected({
-        board: { hostname: 'devkit', machine: null, build_version: null, fingerprint: 'f' },
-      }),
-    );
+    board.state.set(connected({ identity: IDENTITY }));
     await open();
     const sections = () =>
       [...dialog().querySelectorAll('neat-collapsible')].map(
@@ -421,7 +323,7 @@ describe('BoardDialog', () => {
       'false',
     );
 
-    board.state.set(boardState());
+    board.state.set(boardList());
     await settle();
     const guide = dialog().querySelector('neat-callout')!;
     const form = section('Change board')!;
@@ -429,16 +331,11 @@ describe('BoardDialog', () => {
     expect(form.querySelector('button')!.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('Checked ticks; Details lists only reported facts and the camera setup of the current generation', async () => {
+  it('Checked ticks; Details lists only reported facts and the camera setup of the selected board', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     vi.setSystemTime(new Date('2026-10-25T10:00:05Z'));
-    board.state.set(
-      failed({
-        generation: 4,
-        board: { hostname: 'devkit', machine: null, build_version: '2.0.0', fingerprint: 'f' },
-      }),
-    );
-    peripherals.snapshot.set(scanOf(4));
+    board.state.set(failed({ identity: IDENTITY }));
+    peripherals.snapshot.set(scanOf(DEVKIT.id));
     await open();
     expect(peripherals.load).toHaveBeenCalledTimes(1);
 
@@ -468,8 +365,8 @@ describe('BoardDialog', () => {
       ['Camera setup', 'modalix-som-waveshare-ARDU-IMX477-1CAM'],
     ]);
 
-    // A scan of another board generation says nothing about this one's camera setup.
-    peripherals.snapshot.set(scanOf(3));
+    // A scan of another board says nothing about this one's camera setup.
+    peripherals.snapshot.set(scanOf(LOCAL.id));
     await settle();
     expect(facts()).toEqual([
       ['Hostname', 'devkit'],
@@ -479,7 +376,7 @@ describe('BoardDialog', () => {
   });
 
   it('never checked: no Checked line and no Details', async () => {
-    board.state.set(boardState({ target: DEVKIT }));
+    board.state.set(boardWith(DEVKIT));
     await open();
     expect(statusLine()).toBe('Not checked sima@192.168.1.20 · SDK DevKit');
     expect(dialog().querySelector('.checked')).toBeNull();
@@ -488,7 +385,7 @@ describe('BoardDialog', () => {
 
   it('ignores a failed peripherals read', async () => {
     board.state.set(connected());
-    peripherals.load.mockRejectedValue(new BoardProblem('Sentinel is down.', '', '', {}));
+    peripherals.load.mockRejectedValue(new BoardProblem('Sentinel is down.', '', ''));
     await open();
     expect(statusLine()).toMatch(/^Connected /);
   });
@@ -499,7 +396,6 @@ describe('BoardDialog', () => {
         'Could not reach the Insight server.',
         'network',
         'Check that Insight is still running, then retry.',
-        {},
       ),
     );
     await open();
@@ -526,11 +422,12 @@ describe('BoardDialog', () => {
     expect(text(dialog().querySelector('[role="status"]'))).toBe('Loading board…');
   });
 
-  it('without a board, says so and gives #170’s three ways to get one', async () => {
-    board.state.set(boardState());
+  it('without a board, says so and gives the three ways to get one', async () => {
+    board.state.set(boardList());
     await open();
     expect(statusLine()).toBe('No board');
     expect(dialog().querySelector('.actions')).toBeNull();
+    expect(shell()).toBeNull();
     const callout = dialog().querySelector('neat-callout')!;
     expect(text(callout.querySelector('[role="heading"]'))).toBe('No board selected');
     expect(text(callout)).toContain(

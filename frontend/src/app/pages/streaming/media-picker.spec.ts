@@ -1,29 +1,24 @@
 import { Component, signal, viewChild } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { MediaNode } from '../../sources/api';
+import type { MediaEntry } from '../../api.generated';
 import { MediaLibraryService } from '../../sources/media-library.service';
-import { ApiRequestError } from '../../sources/stream-lines';
+import { mediaFile, mediaFolder } from '../../sources/media.testing';
+import { ApiRequestError } from '../../sources/api-errors';
 import { MediaPicker } from './media-picker';
 
-const TREE: MediaNode[] = [
-  {
-    name: '/people',
-    path: 'people',
-    type: 'folder',
-    streamable_count: 2,
-    children: [
-      { name: 'walk.mp4', path: 'people/walk.mp4', type: 'file', streamable: true },
-      { name: 'run.mp4', path: 'people/run.mp4', type: 'file', streamable: true },
-      { name: 'notes.txt', path: 'people/notes.txt', type: 'file', streamable: false },
-      { name: 'cover.png', path: 'people/cover.png', type: 'file', streamable: false },
-    ],
-  },
-  { name: 'cars.mp4', path: 'cars.mp4', type: 'file', streamable: true },
+const TREE: MediaEntry[] = [
+  mediaFolder('people', [
+    mediaFile('people/walk.mp4'),
+    mediaFile('people/run.mp4'),
+    mediaFile('people/notes.txt', false),
+    mediaFile('people/cover.png', false),
+  ]),
+  mediaFile('cars.mp4'),
 ];
 
 class FakeLibrary {
-  readonly tree = signal<readonly MediaNode[] | null>(TREE);
+  readonly tree = signal<readonly MediaEntry[] | null>(TREE);
   readonly refresh = vi.fn(async () => undefined);
 }
 
@@ -152,31 +147,20 @@ describe('MediaPicker', () => {
     expect(option('cars.mp4')).toBeDefined();
   });
 
-  it('Import… asks for the import dialog; reveal then shows the imported file in its folder once the library has it (Q1)', async () => {
+  it('Import… asks for the import dialog; reveal then shows the imported file in its folder once the library has it', async () => {
     await open('cars.mp4');
     await click(button('Import…'));
     expect(host.imports).toBe(1);
 
-    // What Task 13's import does on success: the library gains the file, and the picker reveals it.
+    // What a successful import does: the library gains the file, and the picker reveals it.
     library.refresh.mockImplementationOnce(async () => {
-      library.tree.set([
-        ...TREE,
-        {
-          name: '/youtube',
-          path: 'youtube',
-          type: 'folder',
-          streamable_count: 1,
-          children: [
-            { name: 'clip.mp4', path: 'youtube/clip.mp4', type: 'file', streamable: true },
-          ],
-        },
-      ]);
+      library.tree.set([...TREE, mediaFolder('imports', [mediaFile('imports/clip.mp4')])]);
     });
-    await host.picker().reveal('youtube/clip.mp4');
+    await host.picker().reveal('imports/clip.mp4');
     await fixture.whenStable();
-    expect(crumbs().join(' ')).toContain('youtube');
+    expect(crumbs().join(' ')).toContain('imports');
     expect(option('clip.mp4').getAttribute('aria-selected')).toBe('true');
-    expect(text()).toContain('Selected: youtube/clip.mp4');
+    expect(text()).toContain('Selected: imports/clip.mp4');
     expect(button('Assign').disabled).toBe(false);
   });
 

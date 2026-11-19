@@ -14,8 +14,10 @@ import { NeatInput } from '@sima/neat-ui/input';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import { CellText } from '../cell-text';
-import type { CatalogAsset, CatalogIndex, CatalogSource } from './api';
 import {
+  type CatalogAsset,
+  type CatalogIndex,
+  type CatalogSource,
   assetDimensions,
   assetMatchesSearch,
   assetsOfSource,
@@ -36,7 +38,7 @@ import { ImportPreview } from './import-preview';
 import { ImportSummary } from './import-summary';
 import type { FilePreview } from './preview-frame';
 import { codecLabel } from './slot-row';
-import { messageOf } from './stream-lines';
+import { messageOf } from './api-errors';
 
 /** A catalog asset as a list row shows it: a cell per column, "-" for what the index omits. */
 interface AssetRow {
@@ -68,7 +70,7 @@ const bySourceId = (row: SourceRow) => row.source.id;
 /**
  * What the Catalog tab keeps while the dialog is open: `neat-tabs` destroys a tab's panel when
  * another opens, and coming back must not refetch the catalog or forget the choices made. The
- * filter is one for both browsing modes, as in #170. Provided by the dialog.
+ * filter is one for both browsing modes. Provided by the dialog.
  */
 @Injectable()
 export class CatalogTabState {
@@ -87,7 +89,7 @@ export class CatalogTabState {
 }
 
 /**
- * The import dialog's Catalog tab (Inv-SM §1.1): the published catalog, loaded when the tab first
+ * The import dialog's Catalog tab: the published catalog, loaded when the tab first
  * opens, browsed by asset type or by asset name with one shared filter, and imported through
  * `ImportRunner.importCatalog`, one asset after the other.
  */
@@ -152,7 +154,7 @@ export class ImportCatalog {
         variants: assets.filter((asset) => asset.source_id === source.id && !asset.preview).length,
       }));
   });
-  /** As #170: the source picked even when the search hides it, else the first one shown. */
+  /** The source picked even when the search hides it, else the first one shown. */
   protected readonly selectedSource = computed(
     () =>
       this.sources().find((source) => source.id === this.state.sourceId()) ??
@@ -183,7 +185,7 @@ export class ImportCatalog {
   protected readonly variantRows = computed(() =>
     this.rows(this.sourceAssets().filter((asset) => matchesFilter(asset, this.state.filter()))),
   );
-  /** As #170: the variant picked, else the first one that passes the filter. */
+  /** The variant picked, else the first one that passes the filter. */
   protected readonly selectedVariant = computed(
     () =>
       this.variantRows().find((row) => row.asset.path === this.state.variantPath()) ??
@@ -228,7 +230,7 @@ export class ImportCatalog {
   constructor() {
     if (this.state.index() === null && !this.state.loading()) void this.load();
 
-    // As #170: a check the search or the filter hides is dropped, so nothing is checked that the
+    // A check the search or the filter hides is dropped, so nothing is checked that the
     // list does not show (the kit's checked list would keep it).
     effect(() => {
       const shown = new Set(this.typeRows().map(byAssetPath));
@@ -256,7 +258,7 @@ export class ImportCatalog {
     this.state.search.set(value);
   }
 
-  /** A different source starts from its own variants, unfiltered, as #170 did. */
+  /** A different source starts from its own variants, unfiltered. */
   protected pickSource(row: SourceRow | null): void {
     if (!row || row.source.id === this.selectedSource()?.id) return;
     this.state.sourceId.set(row.source.id);
@@ -268,7 +270,7 @@ export class ImportCatalog {
     this.state.variantPath.set(row?.asset.path ?? null);
   }
 
-  /** A click on an asset's row checks or unchecks it, as #170's checkbox labels did. */
+  /** A click on an asset's row checks or unchecks it. */
   protected toggleType(row: AssetRow): void {
     const path = row.asset.path;
     this.state.typePaths.update((paths) =>
@@ -276,7 +278,7 @@ export class ImportCatalog {
     );
   }
 
-  /** Checks exactly the assets the list shows, as #170's Select All did. */
+  /** Checks exactly the assets the list shows. */
   protected checkAllTypes(): void {
     this.state.typePaths.set(this.typeRows().map(byAssetPath));
   }

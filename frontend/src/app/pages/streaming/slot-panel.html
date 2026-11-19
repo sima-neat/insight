@@ -4,11 +4,10 @@
 
 <!--
   One element for the slot's main action, whatever it is now (Start, Stop, Cancel encoding, Take
-  over…, Stop pulling): a press changes the action, and the focus stays on the button. While the
-  slot is busy it waits with aria-disabled rather than disabled, which would drop the focus. A
-  start that waits turns its glyph and says so with aria-busy; its name stays "Start". It is the
-  panel's main control, so it is a medium button on a row of its own, not a small one among the
-  source's.
+  over…): a press changes the action, and the focus stays on the button. While the slot is busy it
+  waits with aria-disabled rather than disabled, which would drop the focus. A start that waits
+  turns its glyph and says so with aria-busy; its name stays "Start". It is the panel's main
+  control, so it is a medium button on a row of its own, not a small one among the source's.
 -->
 <div neatAsideActions>
   <button
@@ -68,8 +67,8 @@
     }
     @case ('camera') {
       <p neatNote>
-        The browser publishes the camera to <code neatCode>{{ rtspUrl() }}</code> while this tab
-        stays open.
+        The browser publishes the camera to <code neatCode>{{ slot().urls.rtsp }}</code> while this
+        tab stays open.
       </p>
       @if (cameras.state() === 'unsupported') {
         <p neatNote>This browser cannot access cameras.</p>
@@ -110,10 +109,30 @@
       </div>
     }
     @case ('url') {
+      @if (pullSource(); as source) {
+        <p class="text">
+          Camera: <code neatCode>{{ source }}</code>
+        </p>
+        @if (needsUrl()) {
+          <p neatNote>{{ slot().error }}</p>
+        }
+        <div neatAsideActions>
+          <button
+            neatButton
+            type="button"
+            variant="text"
+            size="small"
+            [disabled]="busy()"
+            (click)="clear()"
+          >
+            Clear
+          </button>
+        </div>
+      }
       <form class="pull" (submit)="$event.preventDefault(); pull()">
         <p neatNote>
           Insight pulls the stream and forwards it unchanged to
-          <code neatCode>{{ rtspUrl() }}</code
+          <code neatCode>{{ slot().urls.rtsp }}</code
           >. RTSP and RTSPS only.
         </p>
         <neat-field label="Stream URL"
@@ -150,7 +169,7 @@
         </div>
         <p neatNote>
           Most IP cameras need a username and password. Credentials typed into the URL work too and
-          are never shown again.
+          are never shown again. Insight keeps them only until it restarts.
         </p>
         @if (pullError(); as error) {
           <neat-error-note>{{ error }}</neat-error-note>
@@ -164,7 +183,7 @@
     }
   }
 
-  @if (hasFrameRate()) {
+  @if (isFile()) {
     <div class="frame-rate">
       <h3 neatAsideHeading>Output frame rate</h3>
       <div
@@ -206,17 +225,6 @@
       }
     </div>
   }
-
-  @if (transportOptions().length > 1) {
-    <neat-select
-      label="Transport"
-      showLabel
-      [options]="transportOptions()"
-      [value]="transport()"
-      [disabled]="busy()"
-      (valueChange)="setTransport($event)"
-    />
-  }
 }
 
 <h3 neatAsideHeading>Details</h3>
@@ -251,16 +259,19 @@
       }
     </dd>
   }
-  @if (streamUrl(); as url) {
-    <dt>URL</dt>
+  @if (problem(); as problem) {
+    <dt>Problem</dt>
+    <dd>{{ problem }}</dd>
+  }
+  @for (stream of streamUrls(); track stream.label) {
+    <dt>{{ stream.label }}</dt>
     <dd class="url">
-      <code neatCode>{{ url }}</code>
+      <code neatCode>{{ stream.url }}</code>
       <button
         neatInlineButton
         type="button"
-        [attr.aria-label]="'Copy stream URL for src' + index()"
-        [disabled]="!canCopy()"
-        (click)="copyUrl()"
+        [attr.aria-label]="stream.copyLabel"
+        (click)="copyUrl(stream.url)"
       >
         Copy
       </button>
@@ -272,16 +283,14 @@
     <dt>Bitrate</dt>
     <dd>{{ holder.bitrate }}</dd>
   }
-  @if (readers(); as readers) {
-    <dt>Readers</dt>
-    <dd>{{ readers }}</dd>
-  }
+  <dt>Readers</dt>
+  <dd>{{ readers() }}</dd>
 </dl>
 
 <ng-template #picker let-dialog>
   <app-media-picker
     #mediaPicker
-    [current]="slot().file"
+    [current]="slot().file ?? ''"
     [busy]="pickerBusy()"
     (assign)="assignPicked(dialog, $event)"
     (cancelled)="dialog.close()"

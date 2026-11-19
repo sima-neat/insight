@@ -2,7 +2,7 @@ import { Injectable, type OnDestroy } from '@angular/core';
 import { VfConnection } from './vf-connection';
 
 /**
- * The Viewer page's vf connections, one per channel, shared by everything that shows the channel
+ * The Viewer page's channel connections, one per channel, shared by everything that shows the channel
  * (its grid tile, the inspector's preview). Provided by the page rather than in root, so the
  * connections end with the page.
  */

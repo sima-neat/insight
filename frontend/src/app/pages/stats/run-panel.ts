@@ -65,7 +65,7 @@ function metricGroups(run: SavedRun): MetricGroup[] {
   return groups;
 }
 
-/** #170's sentence about readings a run has no definition for. */
+/** The sentence about readings a run has no definition for. */
 function undefinedSentence(keys: readonly string[]): string {
   if (keys.length === 0) return '';
   const values = keys.length === 1 ? '1 value it carries' : `${keys.length} values it carries`;
@@ -73,7 +73,7 @@ function undefinedSentence(keys: readonly string[]): string {
 }
 
 /**
- * The side panel of Stats' Runs view: one run in detail (spec, "Run detail"). A finished run is
+ * The side panel of Stats' Runs view: one run in detail. A finished run is
  * read in full (`SentinelRuns.readRun`) once per run, not on every read of the list, and shows
  * its facts, note and tags, each metric's mean, minimum and maximum over the run's samples (with
  * a Warning or Critical chip where the maximum passed a level), and its metadata folded.

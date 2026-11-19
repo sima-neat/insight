@@ -1,11 +1,11 @@
 import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { BoardState } from './api';
+import type { BoardList } from './api';
 import { BoardProblem } from './board-error';
 import { type BoardAction, BoardForm } from './board-form';
 import { BoardService } from './board.service';
-import { boardState, deferred, DEVKIT, FakeBoard } from './board.testing';
+import { boardList, boardWith, deferred, DEVKIT, FakeBoard, MANUAL } from './board.testing';
 
 /** The dialog's side of the form: the one action running, and whether a selection went through. */
 @Component({
@@ -17,15 +17,8 @@ class Host {
   selections = 0;
 }
 
-const PAIRED = { on_board: false, sdk_env: { host: '192.168.1.20', port: 22, user: 'sima' } };
-const MANUAL = {
-  mode: 'ssh',
-  source: 'manual',
-  host: '10.0.0.4',
-  port: 2222,
-  user: 'sima',
-  label: 'sima@10.0.0.4:2222',
-} as const;
+/** The board entered by hand, selected, with the paired DevKit to fall back to. */
+const ENTERED = boardList([MANUAL, DEVKIT]);
 
 describe('BoardForm', () => {
   let board: FakeBoard;
@@ -43,7 +36,7 @@ describe('BoardForm', () => {
     });
   });
 
-  async function render(state: BoardState): Promise<HTMLElement> {
+  async function render(state: BoardList): Promise<HTMLElement> {
     board.state.set(state);
     fixture = TestBed.createComponent(Host);
     await settle();
@@ -95,8 +88,8 @@ describe('BoardForm', () => {
     await settle();
   }
 
-  it('Change board is open without a target and shows the default hint', async () => {
-    await render(boardState());
+  it('Change board is open without a board and shows the default hint', async () => {
+    await render(boardList());
     // Open, so the summary is hidden.
     expect(words(trigger())).toBe('Change board');
     expect(isOpen()).toBe(true);
@@ -114,8 +107,8 @@ describe('BoardForm', () => {
     expect(button('Cancel')).toBeUndefined();
   });
 
-  it('with a target it starts closed, from the target in use, with the default it falls back to', async () => {
-    await render(boardState({ target: DEVKIT, defaults: PAIRED }));
+  it('with a board it starts closed, from the board in use, with the default it falls back to', async () => {
+    await render(boardWith(DEVKIT));
     expect(isOpen()).toBe(false);
     expect(words(trigger())).toBe('Change board Host, port, user');
 
@@ -138,8 +131,8 @@ describe('BoardForm', () => {
     expect(field('Host or IP address').value).toBe('192.168.1.20');
   });
 
-  it('Save validates with #170 messages, selects, toasts, closes and returns focus to the trigger', async () => {
-    await render(boardState({ target: DEVKIT, defaults: PAIRED }));
+  it('Save validates, selects, toasts, closes and returns focus to the trigger', async () => {
+    await render(boardWith(DEVKIT));
     trigger().click();
     await settle();
 
@@ -153,16 +146,16 @@ describe('BoardForm', () => {
       await type(name, value);
       await press('Save');
       expect(errorNote()).toBe(message);
-      if (name === 'Host or IP address') await type(name, '10.0.0.4');
+      if (name === 'Host or IP address') await type(name, '10.0.0.5');
       if (name === 'SSH port') await type(name, '2222');
     }
     expect(board.select).not.toHaveBeenCalled();
 
     await type('User', 'sima');
-    const answer = deferred<BoardState>();
+    const answer = deferred<BoardList>();
     board.select.mockReturnValue(answer.promise);
     await press('Save');
-    expect(board.select).toHaveBeenCalledWith({ host: '10.0.0.4', port: 2222, user: 'sima' });
+    expect(board.select).toHaveBeenCalledWith({ host: '10.0.0.5', port: 2222, user: 'sima' });
     expect(errorNote()).toBe('');
     // One action at a time: the dialog sees the save, and the form says it runs.
     expect(fixture.componentInstance.busy()).toBe('select');
@@ -173,12 +166,11 @@ describe('BoardForm', () => {
     await settle();
     expect(isOpen()).toBe(true);
 
-    const selected = boardState({ target: MANUAL, saved: MANUAL, defaults: PAIRED, generation: 2 });
-    board.state.set(selected);
-    answer.resolve(selected);
+    board.state.set(ENTERED);
+    answer.resolve(ENTERED);
     await settle();
     expect(toasts.status).toHaveBeenCalledWith(
-      'Board set to sima@10.0.0.4:2222. Check again to test the connection.',
+      'Board set to sima@10.0.0.5:2222. Check again to test the connection.',
     );
     expect(isOpen()).toBe(false);
     expect(document.activeElement).toBe(trigger());
@@ -187,23 +179,23 @@ describe('BoardForm', () => {
   });
 
   it('waits while another board action runs', async () => {
-    await render(boardState());
+    await render(boardList());
     fixture.componentInstance.busy.set('check');
     await settle();
     expect(button('Save')!.getAttribute('aria-disabled')).toBe('true');
-    board.select.mockResolvedValue(boardState());
+    board.select.mockResolvedValue(boardList());
     await press('Save');
     expect(board.select).not.toHaveBeenCalled();
   });
 
-  it('Use default shows only with a saved target and resets', async () => {
-    await render(boardState({ target: DEVKIT, defaults: PAIRED }));
+  it('Use default shows only with a board entered by hand, and forgets it', async () => {
+    await render(boardWith(DEVKIT));
     trigger().click();
     await settle();
     expect(button('Use default')).toBeUndefined();
 
-    // The board read again with a manual target saved: the section stays as the user left it.
-    board.state.set(boardState({ target: MANUAL, saved: MANUAL, defaults: PAIRED }));
+    // The board read again with one entered by hand: the section stays as the user left it.
+    board.state.set(ENTERED);
     await settle();
     expect(isOpen()).toBe(true);
     trigger().click();
@@ -213,43 +205,42 @@ describe('BoardForm', () => {
     trigger().click();
     await settle();
 
-    const paired = boardState({ target: DEVKIT, defaults: PAIRED, generation: 2 });
-    board.select.mockImplementation(async () => {
+    const paired = boardWith(DEVKIT);
+    board.forget.mockImplementation(async () => {
       board.state.set(paired);
       return paired;
     });
     await press('Use default');
-    expect(board.select).toHaveBeenCalledWith({ reset: true });
+    expect(board.forget).toHaveBeenCalled();
     expect(toasts.status).toHaveBeenCalledWith('Using sima@192.168.1.20.');
     expect(isOpen()).toBe(false);
     expect(fixture.componentInstance.selections).toBe(1);
 
     // Without a default to fall back to, no board is left: the form stays open to enter one.
-    board.state.set(boardState({ target: MANUAL, saved: MANUAL }));
+    board.state.set(boardList([MANUAL]));
     await settle();
     trigger().click();
     await settle();
-    const none = boardState({ generation: 3 });
-    board.select.mockImplementation(async () => {
+    const none = boardList();
+    board.forget.mockImplementation(async () => {
       board.state.set(none);
       return none;
     });
     await press('Use default');
     expect(toasts.status).toHaveBeenLastCalledWith('Manual board cleared.');
     expect(isOpen()).toBe(true);
-    // Use default and Cancel went with the saved target; the next step is to enter a board.
+    // Use default and Cancel went with the entered board; the next step is to enter a board.
     expect(document.activeElement).toBe(field('Host or IP address'));
   });
 
   it('a server refusal stays under the form', async () => {
-    await render(boardState());
+    await render(boardList());
     await type('Host or IP address', 'board_7');
     board.select.mockRejectedValue(
       new BoardProblem(
         "Enter the board's IP address or host name.",
-        'invalid_target',
+        'invalid_request',
         'For example 192.168.2.2',
-        {},
       ),
     );
     await press('Save');
@@ -261,20 +252,20 @@ describe('BoardForm', () => {
     expect(fixture.componentInstance.busy()).toBeNull();
 
     // The next attempt starts clean.
-    board.select.mockResolvedValue(boardState({ target: MANUAL, saved: MANUAL }));
+    board.select.mockResolvedValue(ENTERED);
     await press('Save');
     expect(errorNote()).toBe('');
   });
 
   it('a refusal goes when the board changes otherwise', async () => {
-    await render(boardState());
-    board.select.mockRejectedValue(new BoardProblem('Enter a valid SSH user name.', '', '', {}));
+    await render(boardList());
+    board.select.mockRejectedValue(new BoardProblem('Enter a valid SSH user name.', '', ''));
     await type('Host or IP address', '10.0.0.4');
     await press('Save');
     expect(errorNote()).toBe('Enter a valid SSH user name.');
 
     // Another tab or a terminal selected a board meanwhile; the refusal was about the old one.
-    board.state.set(boardState({ generation: 2 }));
+    board.state.set(boardWith(DEVKIT));
     await settle();
     expect(errorNote()).toBe('');
   });

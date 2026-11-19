@@ -27,11 +27,11 @@ export interface PreviewStream {
   readonly alt: string;
 }
 
-/** `/media/<path>` serves the library's files; each segment is encoded, the slashes kept. */
-const mediaUrl = (path: string) => `/media/${path.split('/').map(encodeURIComponent).join('/')}`;
+/** Where the server serves a library file, with range requests, for the browser to play or show. */
+const mediaUrl = (path: string) => `/api/media/file?path=${encodeURIComponent(path)}`;
 
 /**
- * How a library file is previewed (#170's Selected Media and Source Preview): MJPEG through the
+ * How a library file is previewed: MJPEG through the
  * server's multipart MJPEG route, since a browser plays it neither as a video nor as an image; a
  * video or an image as itself; and null for any other file. `mjpeg` says the streamer reads the
  * file as MJPEG, which an extension other than `.mjpeg`/`.mjpg` does not tell (an AVI may hold
@@ -43,7 +43,7 @@ export function filePreview(path: string, mjpeg: boolean): FilePreview | null {
   if (mjpeg || MJPEG_EXTENSIONS.has(extension)) {
     return {
       kind: 'image',
-      src: `/api/media-preview/mjpeg?path=${encodeURIComponent(path)}`,
+      src: `/api/media/preview.mjpg?path=${encodeURIComponent(path)}`,
       path,
     };
   }
@@ -55,8 +55,8 @@ export function filePreview(path: string, mjpeg: boolean): FilePreview | null {
 /**
  * Ends the load of the image it sits on when the image leaves the page. A browser keeps loading a
  * multipart MJPEG image after the element is dropped, so a preview removed from the page would go
- * on decoding, and hold one of the server's four preview sessions, until the stream ends (#170
- * cleared the source for this). Removing the source aborts it.
+ * on decoding, and hold one of the server's four preview sessions, until the stream ends.
+ * Removing the source aborts it.
  */
 @Directive({ selector: 'img[appEndsStream]' })
 export class EndsStream {

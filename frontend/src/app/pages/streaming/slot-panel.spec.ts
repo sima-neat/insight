@@ -6,126 +6,87 @@ import { By } from '@angular/platform-browser';
 import { NeatButton, NeatIcon, type NeatButtonVariant } from '@sima/neat-ui';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import { Observable, Subject } from 'rxjs';
-import type {
-  AssignRequest,
-  MediaNode,
-  PullRequest,
-  Slot,
-  StartRequest,
-  StopRequest,
-  SuccessResponse,
-  TakeoverResponse,
-} from '../../sources/api';
+import type { MediaEntry, Slot } from '../../api.generated';
 import { CamerasService, type CameraAccessState } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
 import { MediaLibraryService } from '../../sources/media-library.service';
-import type { Progress } from '../../sources/progress-lines';
+import { mediaFile, mediaFolder } from '../../sources/media.testing';
+import type { Progress } from '../../sources/jobs';
+import { slotRow } from '../../sources/slot-row';
+import type { PullRequest } from '../../sources/slots.service';
 import { SlotsService } from '../../sources/slots.service';
-import { ApiRequestError, type StreamEvent } from '../../sources/stream-lines';
+import { fileSlot, publisher, pull, slot, webcamSlot } from '../../sources/slots.testing';
+import { ApiRequestError } from '../../sources/api-errors';
 import type { Camera } from '../../sources/webcam-publishing';
 import { radioLabel } from '../../radio-label.testing';
-import { SlotControl } from './slot-control';
 import { SourcesSession } from '../sources-session';
+import { SlotControl } from './slot-control';
 import { SlotPanel } from './slot-panel';
-import { slotRow } from '../../sources/slot-row';
 
-function slot(index: number, overrides: Partial<Slot> = {}): Slot {
-  return {
-    index,
-    file: '',
-    state: 'stopped',
-    transport: '',
-    codec: '',
-    type: 'file',
-    allowed_transports: [],
-    urls: { rtsp: `rtsp://10.0.0.2:8554/src${index}` },
-    readers: [],
-    fps: null,
-    native_fps: null,
-    ...overrides,
-  };
-}
+/** A file slot ready to start: people/walk.mp4, H.264 at 30 fps. */
+const walk = (n = 2, overrides: Partial<Slot> = {}) => fileSlot(n, 'people/walk.mp4', overrides);
 
-/** A file slot ready to start: H.264 at 30 fps. */
-const fileSlot = (index = 2, overrides: Partial<Slot> = {}) =>
-  slot(index, {
-    file: 'people/walk.mp4',
+/** A slot an external publisher holds. */
+const external = (n: number, overrides: Partial<Slot> = {}) =>
+  slot(n, {
+    state: 'external',
     codec: 'h264',
-    transport: 'rtsp',
-    allowed_transports: ['rtsp'],
-    native_fps: 30,
+    publisher: publisher({ address: '192.168.1.20' }),
     ...overrides,
   });
 
-const OK: SuccessResponse = { success: true };
+/** A slot that pulls a camera and has its stream. */
+const pulled = (n: number, overrides: Partial<Slot> = {}) =>
+  slot(n, {
+    kind: 'pull',
+    run: true,
+    state: 'live',
+    codec: 'h264',
+    pull: pull(),
+    publisher: publisher({ protocol: 'rtspSource', address: undefined, width: 1920, height: 1080 }),
+    ...overrides,
+  });
+
+const ENCODING: Progress = { title: 'Encoding rendition…', detail: '', percent: null };
+
 const CAMERAS: Camera[] = [
   { deviceId: 'd1', label: 'Desk camera' },
   { deviceId: 'd2', label: 'iPhone' },
 ];
 
 class FakeSlots {
-  readonly slots = signal<readonly Slot[] | null>([fileSlot()]);
+  readonly slots = signal<readonly Slot[] | null>([walk()]);
   readonly encodes = signal<ReadonlyMap<number, Progress>>(new Map());
-  readonly prepares: { lines: Subject<StreamEvent>; cancelled: boolean }[] = [];
-  readonly assign = vi.fn<(request: AssignRequest) => Promise<SuccessResponse>>(async () => OK);
-  readonly start = vi.fn<(request: StartRequest) => Promise<SuccessResponse>>(async () => OK);
-  readonly startAfterPrepare = vi.fn<(index: number) => Promise<SuccessResponse>>(async () => OK);
-  readonly stop = vi.fn<(request: StopRequest) => Promise<SuccessResponse>>(async () => OK);
-  readonly takeOver = vi.fn<(index: number) => Promise<TakeoverResponse>>(async (index) => ({
-    success: true,
-    index,
-  }));
-  readonly pull = vi.fn<(request: PullRequest) => Promise<Slot>>();
-  /** Like the real service: the encode shows under its slot while it runs. */
-  readonly prepare = vi.fn(
-    (index: number) =>
-      new Observable<StreamEvent>((subscriber) => {
-        const run = { lines: new Subject<StreamEvent>(), cancelled: false };
-        this.prepares.push(run);
-        this.encodes.set(
-          new Map([[index, { title: 'Preparing rendition…', detail: '', percent: null }]]),
-        );
-        let ended = false;
-        const subscription = run.lines.subscribe({
-          next: (event) => subscriber.next(event),
-          complete: () => {
-            ended = true;
-            subscriber.complete();
-          },
-        });
-        return () => {
-          if (!ended) run.cancelled = true;
-          subscription.unsubscribe();
-          this.encodes.set(new Map());
-        };
-      }),
+  readonly assignFile = vi.fn<(n: number, file: string, fps?: number | null) => Promise<Slot>>(
+    async (n) => this.of(n),
   );
+  readonly start = vi.fn<(n: number) => Promise<Slot>>(async (n) => this.of(n));
+  readonly stop = vi.fn<(n: number) => Promise<Slot>>(async (n) => this.of(n));
+  readonly takeOver = vi.fn<(n: number) => Promise<Slot>>(async (n) => this.of(n));
 
-  update(index: number, overrides: Partial<Slot>): void {
+  of(n: number): Slot {
+    return this.slots()!.find((one) => one.n === n)!;
+  }
+
+  update(n: number, overrides: Partial<Slot>): void {
     this.slots.update((all) =>
-      (all ?? []).map((one) => (one.index === index ? { ...one, ...overrides } : one)),
+      (all ?? []).map((one) => (one.n === n ? { ...one, ...overrides } : one)),
     );
   }
-}
 
-/** The slots as the server leaves them after the change a camera action asks for. */
-const WEBCAM_SLOT: Partial<Slot> = {
-  type: 'webcam',
-  file: '',
-  state: 'stopped',
-  codec: 'h264',
-  transport: 'rtsp',
-};
-const EMPTY_SLOT: Partial<Slot> = {
-  type: 'file',
-  file: '',
-  state: 'stopped',
-  codec: '',
-  transport: '',
-  allowed_transports: [],
-  native_fps: null,
-};
+  /** The server answers with another slot `n` altogether: a new assignment. */
+  replace(replacement: Slot): void {
+    this.slots.update((all) =>
+      (all ?? []).map((one) => (one.n === replacement.n ? replacement : one)),
+    );
+  }
+
+  /** The server prepares the slot's rendition, as a start at another rate makes it. */
+  prepare(n: number): void {
+    this.update(n, { run: true, state: 'preparing', job: 'job-1' });
+    this.encodes.set(new Map([[n, ENCODING]]));
+  }
+}
 
 /** Like the real service, a change shows in the slots and in the cameras it remembers. */
 class FakeCameras {
@@ -136,17 +97,19 @@ class FakeCameras {
   readonly localStreams = signal<ReadonlyMap<number, MediaStream>>(new Map());
   readonly changingSlots = signal<ReadonlySet<number>>(new Set());
   readonly anyChanging = computed(() => this.changingSlots().size > 0);
-  readonly assign = vi.fn<(slot: number, deviceId: string | null) => Promise<void>>(
-    async (slot, deviceId) => {
-      this.slots.update(slot, WEBCAM_SLOT);
-      this.remember(slot, this.cameras().find((camera) => camera.deviceId === deviceId) ?? null);
+  readonly assign = vi.fn<(n: number, deviceId: string | null) => Promise<void>>(
+    async (n, deviceId) => {
+      this.slots.replace(webcamSlot(n));
+      this.remember(n, this.cameras().find((camera) => camera.deviceId === deviceId) ?? null);
     },
   );
-  readonly assignFile = vi.fn<
-    (request: Omit<AssignRequest, 'publisher_released'>) => Promise<SuccessResponse>
-  >(async () => OK);
-  readonly publish = vi.fn<(slot: number) => Promise<void>>(async () => undefined);
-  readonly release = vi.fn<(slot: number) => Promise<void>>(async () => undefined);
+  readonly assignFile = vi.fn<(n: number, file: string) => Promise<Slot>>(async (n) =>
+    this.slots.of(n),
+  );
+  readonly assignPull = vi.fn<(n: number, request: PullRequest) => Promise<Slot>>();
+  readonly clear = vi.fn<(n: number) => Promise<Slot>>(async (n) => this.slots.of(n));
+  readonly publish = vi.fn<(n: number) => Promise<void>>(async () => undefined);
+  readonly release = vi.fn<(n: number) => Promise<void>>(async () => undefined);
   readonly requestAccess = vi.fn(async () => {
     this.state.set('granted');
     this.cameras.set(CAMERAS);
@@ -159,36 +122,27 @@ class FakeCameras {
    * the specs that only count calls leave the slots alone.
    */
   followTheServer(): void {
-    this.assignFile.mockImplementation(async ({ index, file }) => {
-      if (file === '') {
-        this.slots.update(index, EMPTY_SLOT);
-        this.remember(index, null);
-      }
-      return OK;
+    this.clear.mockImplementation(async (n) => {
+      this.slots.replace(slot(n));
+      this.remember(n, null);
+      return this.slots.of(n);
     });
-    this.release.mockImplementation(async (slot) => this.slots.update(slot, { state: 'stopped' }));
+    this.release.mockImplementation(async (n) =>
+      this.slots.update(n, { state: 'idle', run: false }),
+    );
   }
 
-  private remember(slot: number, camera: Camera | null): void {
+  private remember(n: number, camera: Camera | null): void {
     const next = new Map(this.assignments());
-    if (camera) next.set(slot, camera);
-    else next.delete(slot);
+    if (camera) next.set(n, camera);
+    else next.delete(n);
     this.assignments.set(next);
   }
 }
 
 class FakeLibrary {
-  readonly tree = signal<readonly MediaNode[] | null>([
-    {
-      name: '/people',
-      path: 'people',
-      type: 'folder',
-      streamable_count: 2,
-      children: [
-        { name: 'walk.mp4', path: 'people/walk.mp4', type: 'file', streamable: true },
-        { name: 'run.mp4', path: 'people/run.mp4', type: 'file', streamable: true },
-      ],
-    },
+  readonly tree = signal<readonly MediaEntry[] | null>([
+    mediaFolder('people', [mediaFile('people/walk.mp4'), mediaFile('people/run.mp4')]),
   ]);
   readonly refresh = vi.fn(async () => undefined);
 }
@@ -202,13 +156,13 @@ class Host {
   private readonly slots = inject(SlotsService);
   private readonly cameras = inject(CamerasService);
   private readonly control = inject(SlotControl);
-  readonly index = signal(2);
+  readonly n = signal(2);
   readonly row = computed(() => {
-    const slot = this.slots.slots()!.find((one) => one.index === this.index())!;
+    const slot = this.slots.slots()!.find((one) => one.n === this.n())!;
     return slotRow(slot, {
-      camera: this.cameras.assignments().get(slot.index),
-      encode: this.slots.encodes().get(slot.index),
-      starting: this.control.starting().has(slot.index),
+      camera: this.cameras.assignments().get(slot.n),
+      encode: this.slots.encodes().get(slot.n),
+      starting: this.control.starting().has(slot.n),
     });
   });
 }
@@ -265,14 +219,13 @@ describe('SlotPanel', () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
-    delete (Element.prototype as Partial<Element>).scrollIntoView;
     if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
     else Reflect.deleteProperty(navigator, 'clipboard');
   });
 
-  async function open(index = 2): Promise<void> {
+  async function open(n = 2): Promise<void> {
     fixture = TestBed.createComponent(Host);
-    fixture.componentInstance.index.set(index);
+    fixture.componentInstance.n.set(n);
     await settle();
   }
 
@@ -335,14 +288,29 @@ describe('SlotPanel', () => {
   function sentNothing(): void {
     expect(cameras.assign).not.toHaveBeenCalled();
     expect(cameras.assignFile).not.toHaveBeenCalled();
-    expect(slots.assign).not.toHaveBeenCalled();
-    expect(slots.pull).not.toHaveBeenCalled();
+    expect(cameras.assignPull).not.toHaveBeenCalled();
+    expect(cameras.clear).not.toHaveBeenCalled();
+    expect(slots.assignFile).not.toHaveBeenCalled();
     expect(slots.start).not.toHaveBeenCalled();
     expect(slots.stop).not.toHaveBeenCalled();
   }
 
+  /** The kit button on `element`: what the panel gave it, whatever classes that makes. */
+  const kitButton = (element: HTMLElement): NeatButton =>
+    fixture.debugElement
+      .queryAll(By.directive(NeatButton))
+      .find((debug) => debug.nativeElement === element)!
+      .injector.get(NeatButton);
+  /** The name of the icon drawn in `element`, or null when it has none. */
+  const iconOf = (element: HTMLElement): ReturnType<NeatIcon['name']> | null =>
+    fixture.debugElement
+      .queryAll(By.directive(NeatIcon))
+      .find((debug) => element.contains(debug.nativeElement))
+      ?.injector.get(NeatIcon)
+      .name() ?? null;
+
   it('heads the panel with the slot and its state, and previews it', async () => {
-    slots.slots.set([fileSlot(2, { state: 'playing' })]);
+    slots.slots.set([walk(2, { run: true, state: 'live' })]);
     await open();
     expect(text(root().querySelector('h2')!)).toBe('src2');
     expect(text(root().querySelector('app-panel-title neat-status-chip')!)).toBe('Live');
@@ -352,15 +320,9 @@ describe('SlotPanel', () => {
   const row = () => fixture.componentInstance.row();
 
   describe('the source switch', () => {
-    beforeEach(() => {
-      cameras.followTheServer();
-      slots.stop.mockImplementation(async ({ index }) => {
-        slots.update(index, { state: 'stopped' });
-        return OK;
-      });
-    });
+    beforeEach(() => cameras.followTheServer());
 
-    it('applies at once on a stopped slot: Camera registers a webcam with no camera picked', async () => {
+    it('applies at once on a stopped slot: Camera makes it a webcam with no camera picked', async () => {
       await open();
       expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
       expect(text()).toContain('File: people/walk.mp4 · 30 fps');
@@ -376,22 +338,21 @@ describe('SlotPanel', () => {
         'The browser publishes the camera to rtsp://10.0.0.2:8554/src2 while this tab stays open.',
       );
       expect(text()).not.toContain('File: people/walk.mp4');
-      expect(slots.assign).not.toHaveBeenCalled();
     });
 
     it('applies at once on a stopped slot: File clears a webcam, and a file slot keeps its file', async () => {
-      slots.slots.set([slot(2, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      slots.slots.set([webcamSlot(2)]);
       await open();
       expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
 
       await click(sourceKind('File'));
-      expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
+      expect(cameras.clear).toHaveBeenCalledExactlyOnceWith(2);
       expect(row().kind).toBe('');
       expect(text()).toContain('File: Not assigned');
 
       // A file slot is on File already: choosing it again changes nothing.
-      cameras.assignFile.mockClear();
-      slots.slots.set([fileSlot()]);
+      cameras.clear.mockClear();
+      slots.slots.set([walk()]);
       await settle();
       expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
       await click(sourceKind('File'));
@@ -402,7 +363,7 @@ describe('SlotPanel', () => {
     it('applies at once on a stopped slot: Stream URL clears a webcam or a file, and leaves an empty slot alone', async () => {
       await open();
       await click(sourceKind('Stream URL'));
-      expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
+      expect(cameras.clear).toHaveBeenCalledExactlyOnceWith(2);
       expect(row().kind).toBe('');
       expect(field('Stream URL')).toBeDefined();
       expect(text()).toContain(
@@ -410,7 +371,7 @@ describe('SlotPanel', () => {
       );
 
       // Nothing left to clear on an empty slot: only the form changes.
-      cameras.assignFile.mockClear();
+      cameras.clear.mockClear();
       await click(sourceKind('File'));
       await click(sourceKind('Stream URL'));
       sentNothing();
@@ -419,25 +380,25 @@ describe('SlotPanel', () => {
       await click(sourceKind('Camera'));
       expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(2, null);
       await click(sourceKind('Stream URL'));
-      expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
+      expect(cameras.clear).toHaveBeenCalledExactlyOnceWith(2);
       expect(row().kind).toBe('');
     });
 
     it('a refused change shows the server’s message and goes back to the slot’s form', async () => {
-      cameras.assign.mockRejectedValueOnce(new Error('src2 is held by another browser'));
+      cameras.assign.mockRejectedValueOnce(new Error('src2 is in use by an external publisher.'));
       await open();
       await click(sourceKind('Camera'));
-      expect(toasts.error).toHaveBeenCalledWith('src2 is held by another browser');
+      expect(toasts.error).toHaveBeenCalledWith('src2 is in use by an external publisher.');
       expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
       expect(text()).toContain('File: people/walk.mp4');
     });
 
     it('remembers the empty slot’s form only once the change took', async () => {
       const session = TestBed.inject(SourcesSession);
-      cameras.assignFile.mockRejectedValueOnce(new Error('src2 is held by another browser'));
+      cameras.clear.mockRejectedValueOnce(new Error('There is no source 2.'));
       await open();
       await click(sourceKind('Stream URL'));
-      expect(toasts.error).toHaveBeenCalledWith('src2 is held by another browser');
+      expect(toasts.error).toHaveBeenCalledWith('There is no source 2.');
       expect(session.emptyForm(2)).toBeUndefined();
       expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
 
@@ -446,7 +407,7 @@ describe('SlotPanel', () => {
     });
 
     it('remembers the form left on an empty slot, for the session', async () => {
-      slots.slots.set([slot(3), fileSlot(2)]);
+      slots.slots.set([slot(3), walk(2)]);
       await open(3);
       await click(sourceKind('Stream URL'));
       sentNothing();
@@ -461,7 +422,6 @@ describe('SlotPanel', () => {
       expect(sourceKind('Stream URL').getAttribute('aria-checked')).toBe('true');
       expect(field('Stream URL')).toBeDefined();
 
-      // Clearing lands on File, which is then what the slot is remembered on.
       await click(sourceKind('File'));
       fixture.destroy();
       await open(3);
@@ -469,7 +429,7 @@ describe('SlotPanel', () => {
     });
 
     it('asks first on a live file slot, and Cancel changes nothing', async () => {
-      slots.slots.set([fileSlot(2, { state: 'playing' })]);
+      slots.slots.set([walk(2, { run: true, state: 'live' })]);
       await open();
       await click(sourceKind('Camera'));
 
@@ -502,48 +462,44 @@ describe('SlotPanel', () => {
     });
 
     it('changes nothing when the slot changed while the question was open', async () => {
-      slots.slots.set([fileSlot(2, { state: 'playing' })]);
+      slots.slots.set([walk(2, { run: true, state: 'live' })]);
       await open();
       await click(sourceKind('Camera'));
       expect(confirmDialog()).not.toBeNull();
 
-      // Another tab stopped it and gave it a webcam meanwhile.
-      slots.update(2, { state: 'stopped', type: 'webcam', file: '' });
+      // Another tab gave it a webcam meanwhile.
+      slots.slots.set([webcamSlot(2)]);
       await settle();
       await click(buttonIn(confirmDialog()!, 'Stop and switch'));
       sentNothing();
       expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
 
-      // Or a pull took it: the switch is hidden, and nothing was stopped or switched.
-      slots.slots.set([fileSlot(2, { state: 'playing' })]);
+      // Or a pull took it: its form shows, and nothing was switched.
+      slots.slots.set([walk(2, { run: true, state: 'live' })]);
       await settle();
       await click(sourceKind('File'));
       await click(sourceKind('Stream URL'));
-      slots.update(2, { state: 'pulled' });
+      slots.slots.set([pulled(2)]);
       await settle();
       await click(buttonIn(confirmDialog()!, 'Stop and switch'));
       sentNothing();
+      expect(sourceKind('Stream URL').getAttribute('aria-checked')).toBe('true');
     });
 
-    it('stops a live file slot, then switches, once the question is confirmed', async () => {
-      slots.slots.set([fileSlot(2, { state: 'playing' })]);
+    it('switches a live file slot once the question is confirmed: the new assignment stops it on the server', async () => {
+      slots.slots.set([walk(2, { run: true, state: 'live' })]);
       await open();
       await click(sourceKind('Camera'));
       await click(buttonIn(confirmDialog()!, 'Stop and switch'));
 
-      expect(slots.stop).toHaveBeenCalledExactlyOnceWith({ index: 2 });
       expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(2, null);
-      expect(slots.stop.mock.invocationCallOrder[0]).toBeLessThan(
-        cameras.assign.mock.invocationCallOrder[0],
-      );
+      expect(slots.stop).not.toHaveBeenCalled();
       expect(row().kind).toBe('CAM');
       expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
     });
 
-    it('stops a live webcam through the cameras service, then clears it, once confirmed', async () => {
-      slots.slots.set([
-        slot(2, { type: 'webcam', state: 'playing', codec: 'h264', transport: 'rtsp' }),
-      ]);
+    it('clears a live webcam through the cameras service, which ends its publish, once confirmed', async () => {
+      slots.slots.set([webcamSlot(2, { state: 'live' })]);
       cameras.assignments.set(new Map([[2, CAMERAS[0]]]));
       await open();
       await click(sourceKind('File'));
@@ -551,15 +507,10 @@ describe('SlotPanel', () => {
         'Switching to File stops src2 and removes its camera.',
       );
       sentNothing();
-      expect(cameras.release).not.toHaveBeenCalled();
 
       await click(buttonIn(confirmDialog()!, 'Stop and switch'));
-      expect(cameras.release).toHaveBeenCalledExactlyOnceWith(2);
+      expect(cameras.clear).toHaveBeenCalledExactlyOnceWith(2);
       expect(slots.stop).not.toHaveBeenCalled();
-      expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
-      expect(cameras.release.mock.invocationCallOrder[0]).toBeLessThan(
-        cameras.assignFile.mock.invocationCallOrder[0],
-      );
       expect(row().kind).toBe('');
     });
 
@@ -570,7 +521,7 @@ describe('SlotPanel', () => {
         () =>
           new Promise<void>((resolve) => {
             registered = () => {
-              slots.update(2, WEBCAM_SLOT);
+              slots.update(2, webcamSlot(2));
               resolve();
             };
           }),
@@ -581,8 +532,7 @@ describe('SlotPanel', () => {
       expect(sourceKind('File').hasAttribute('disabled')).toBe(false);
       await click(sourceKind('File'));
       expect(cameras.assign).toHaveBeenCalledOnce();
-      expect(slots.assign).not.toHaveBeenCalled();
-      expect(cameras.assignFile).not.toHaveBeenCalled();
+      expect(cameras.clear).not.toHaveBeenCalled();
       // The change in flight is not a start: Start waits without spinning.
       expect(iconOf(button('Start')!)).toBe('play');
       // It shows what the change in flight is changing to, not the click it ignored.
@@ -596,9 +546,9 @@ describe('SlotPanel', () => {
 
       // Another action of the panel in flight ignores a click the same way, and shows the slot's
       // form.
-      slots.slots.set([fileSlot(2)]);
+      slots.slots.set([walk()]);
       await settle();
-      let started!: (answer: SuccessResponse) => void;
+      let started!: (answer: Slot) => void;
       slots.start.mockReturnValueOnce(new Promise((resolve) => (started = resolve)));
       await click(button('Start'));
       expect(sourceKind('Camera').hasAttribute('disabled')).toBe(false);
@@ -608,22 +558,24 @@ describe('SlotPanel', () => {
       expect(sourceKind('File').getAttribute('aria-checked')).toBe('true');
       expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('false');
       expect(text()).toContain('File: people/walk.mp4');
-      started(OK);
+      started(walk());
       await settle();
     });
 
-    it('waits while the slot is encoding: that is a state, not a moment', async () => {
+    it('waits while the slot prepares its rendition: that is a state, not a moment', async () => {
+      slots.slots.set([walk(2, { fps: 15 })]);
+      slots.start.mockImplementationOnce(async (n) => {
+        slots.prepare(n);
+        return slots.of(n);
+      });
       await open();
-      // An encode in progress holds it, as it holds Change….
-      slots.slots.set([fileSlot(2, { fps: 15 })]);
-      await settle();
       await click(button('Start'));
-      expect(text(button('Cancel encoding'))).toBe('Cancel encoding');
+      expect(text(button('Cancel encoding')!)).toBe('Cancel encoding');
       expect(sourceKind('Camera').hasAttribute('disabled')).toBe(true);
     });
 
-    it('is hidden while an external publisher or a pull holds the slot, as before', async () => {
-      slots.slots.set([slot(2, { state: 'pulled', pull: undefined })]);
+    it('is hidden while an external publisher holds the slot', async () => {
+      slots.slots.set([external(2)]);
       await open();
       expect(root().querySelector('[role="radiogroup"][aria-label="Source"]')).toBeNull();
     });
@@ -635,7 +587,7 @@ describe('SlotPanel', () => {
     const options = () => [...cameraList().querySelectorAll<HTMLElement>('[role="option"]')];
 
     it('assigns a camera when it is clicked, and there is no Assign button', async () => {
-      slots.slots.set([slot(2, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      slots.slots.set([webcamSlot(2)]);
       cameras.cameras.set(CAMERAS);
       await open();
       expect(button('Assign')).toBeUndefined();
@@ -656,7 +608,7 @@ describe('SlotPanel', () => {
     });
 
     it('moves the cursor with the arrow keys and assigns only on Enter', async () => {
-      slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      slots.slots.set([webcamSlot(3)]);
       cameras.cameras.set(CAMERAS);
       cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
       await open(3);
@@ -677,7 +629,7 @@ describe('SlotPanel', () => {
     });
 
     it('puts the assigned camera back in the list when the focus leaves it', async () => {
-      slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      slots.slots.set([webcamSlot(3)]);
       cameras.cameras.set(CAMERAS);
       cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
       await open(3);
@@ -700,11 +652,14 @@ describe('SlotPanel', () => {
     });
 
     it('keeps a live webcam live on the camera activated: the publish ends, the new camera is assigned and published', async () => {
-      slots.slots.set([
-        slot(3, { type: 'webcam', state: 'playing', codec: 'h264', transport: 'rtsp' }),
-      ]);
+      slots.slots.set([webcamSlot(3, { state: 'live' })]);
       cameras.cameras.set(CAMERAS);
       cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+      cameras.assign.mockImplementation(async (n, deviceId) => {
+        cameras.assignments.set(
+          new Map([[n, CAMERAS.find((camera) => camera.deviceId === deviceId)!]]),
+        );
+      });
       await open(3);
 
       await click(options()[1]);
@@ -717,6 +672,8 @@ describe('SlotPanel', () => {
       expect(options()[1].getAttribute('aria-selected')).toBe('true');
 
       // A stopped webcam is only assigned: starting it is the user's.
+      slots.update(3, { state: 'idle' });
+      await settle();
       cameras.publish.mockClear();
       await click(options()[0]);
       expect(cameras.assign).toHaveBeenLastCalledWith(3, 'd1');
@@ -724,15 +681,15 @@ describe('SlotPanel', () => {
     });
 
     it('shows the assigned camera as selected, and a refused assignment puts the selection back', async () => {
-      slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      slots.slots.set([webcamSlot(3)]);
       cameras.cameras.set(CAMERAS);
       cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
       await open(3);
       expect(options()[0].getAttribute('aria-selected')).toBe('true');
 
-      cameras.assign.mockRejectedValueOnce(new Error('src3 is held by another browser'));
+      cameras.assign.mockRejectedValueOnce(new Error('src3 is in use by an external publisher.'));
       await click(options()[1]);
-      expect(toasts.error).toHaveBeenCalledWith('src3 is held by another browser');
+      expect(toasts.error).toHaveBeenCalledWith('src3 is in use by an external publisher.');
       expect(options()[0].getAttribute('aria-selected')).toBe('true');
       expect(options()[1].getAttribute('aria-selected')).toBe('false');
 
@@ -748,7 +705,7 @@ describe('SlotPanel', () => {
     });
 
     it('waits while the slot is changing: a click then assigns nothing, and the selection stays', async () => {
-      slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+      slots.slots.set([webcamSlot(3)]);
       cameras.cameras.set(CAMERAS);
       cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
       await open(3);
@@ -764,7 +721,7 @@ describe('SlotPanel', () => {
 
   it('opens on the form for what the slot holds, and words the camera access as Media did', async () => {
     cameras.followTheServer();
-    slots.slots.set([slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp' })]);
+    slots.slots.set([webcamSlot(3)]);
     await open(3);
     expect(sourceKind('Camera').getAttribute('aria-checked')).toBe('true');
     expect(text()).toContain(
@@ -791,83 +748,129 @@ describe('SlotPanel', () => {
     // The camera form has no Clear: switching away clears the webcam.
     expect(button('Clear')).toBeUndefined();
 
-    // The switch cleared what stood in the way of a pull, so nothing tells the user to clear it.
     await click(sourceKind('Stream URL'));
-    expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 3, file: '' });
-    expect(text()).not.toContain('Clear it on the Camera tab');
+    expect(cameras.clear).toHaveBeenCalledExactlyOnceWith(3);
     await type(field('Stream URL'), 'rtsp://10.0.0.7/stream1');
     expect(button('Pull')!.disabled).toBe(false);
   });
 
-  it('a pull sends the trimmed URL and credentials, names the source from the server’s record, and forgets the password', async () => {
-    slots.slots.set([slot(2)]);
-    await open();
-    await click(sourceKind('Stream URL'));
-    slots.pull.mockResolvedValueOnce(
-      slot(2, {
-        state: 'pulled',
-        pull: {
-          status: 'connecting',
-          scheme: 'rtsp',
-          host: '10.0.0.7:554',
-          path: '/stream1',
-          error: null,
-          since: null,
-          codec_supported: true,
-          width: null,
-          height: null,
-          fps: null,
-          bitrate_bps: null,
-        },
-      }),
-    );
-    expect(button('Pull')!.disabled).toBe(true);
-    await type(field('Stream URL'), ' rtsp://cam:pw@10.0.0.7:554/stream1 ');
-    await type(field('Username'), ' admin ');
-    await type(field('Password'), 'secret');
-    await click(button('Pull'));
-    expect(slots.pull).toHaveBeenCalledExactlyOnceWith({
-      index: 2,
-      url: 'rtsp://cam:pw@10.0.0.7:554/stream1',
-      username: 'admin',
-      password: 'secret',
+  describe('a pull', () => {
+    it('sends the trimmed URL and credentials, names the camera from the server’s record, and empties the form', async () => {
+      slots.slots.set([slot(2)]);
+      await open();
+      await click(sourceKind('Stream URL'));
+      cameras.assignPull.mockImplementationOnce(async (n) => {
+        slots.slots.set([pulled(n, { state: 'starting', pull: pull({ status: 'connecting' }) })]);
+        return slots.of(n);
+      });
+      expect(button('Pull')!.disabled).toBe(true);
+      await type(field('Stream URL'), ' rtsp://cam:pw@10.0.0.7:554/stream1 ');
+      await type(field('Username'), ' admin ');
+      await type(field('Password'), 'secret');
+      await click(button('Pull'));
+      expect(cameras.assignPull).toHaveBeenCalledExactlyOnceWith(2, {
+        url: 'rtsp://cam:pw@10.0.0.7:554/stream1',
+        username: 'admin',
+        password: 'secret',
+      });
+      // Named from the server's credential-free record, never from what was typed.
+      expect(toasts.status).toHaveBeenCalledWith(
+        'src2 is pulling from rtsp://10.0.0.7:554/stream1.',
+      );
+      expect([field('Stream URL').value, field('Username').value, field('Password').value]).toEqual(
+        ['', '', ''],
+      );
+      // The camera it pulls, and what comes next: its Stop.
+      expect(text()).toContain('Camera: rtsp://10.0.0.7:554/stream1');
+      expect(document.activeElement).toBe(button('Stop'));
     });
-    // Named from the server's credential-free record, never from what was typed.
-    expect(toasts.status).toHaveBeenCalledWith('src2 is pulling from rtsp://10.0.0.7:554/stream1.');
-    expect(field('Password').value).toBe('');
-  });
 
-  it('a refused pull shows the server message and keeps the form to try again', async () => {
-    await open();
-    await click(sourceKind('Stream URL'));
-    let refuse!: () => void;
-    slots.pull.mockReturnValueOnce(
-      new Promise((_, reject) => {
-        refuse = () =>
-          reject(
-            new ApiRequestError(400, 'The camera rejected the username or password', {
-              reason: 'auth_failed',
-            }),
-          );
-      }),
-    );
-    await type(field('Stream URL'), 'rtsp://10.0.0.7/stream1');
-    await type(field('Password'), 'wrong');
-    await click(button('Pull'));
-    expect(button('Checking…')!.disabled).toBe(true);
-    refuse();
-    await settle();
-    expect(toasts.error).toHaveBeenCalledWith('The camera rejected the username or password');
-    // Also under the form, where the credentials are typed again (Q13 d, as #170's dialog).
-    const inline = root().querySelector('form neat-error-note[role="alert"]')!;
-    expect(text(inline)).toBe('The camera rejected the username or password');
-    expect(field('Stream URL').value).toBe('rtsp://10.0.0.7/stream1');
-    expect(button('Pull')!.disabled).toBe(false);
+    it('a refused pull shows the server message and keeps the form to try again', async () => {
+      await open();
+      await click(sourceKind('Stream URL'));
+      let refuse!: () => void;
+      cameras.assignPull.mockReturnValueOnce(
+        new Promise((_, reject) => {
+          refuse = () =>
+            reject(
+              new ApiRequestError(
+                422,
+                'The camera at 10.0.0.7 rejected the username or password.',
+                {
+                  error: {
+                    code: 'pull_auth_failed',
+                    message: 'The camera at 10.0.0.7 rejected the username or password.',
+                  },
+                },
+              ),
+            );
+        }),
+      );
+      await type(field('Stream URL'), 'rtsp://10.0.0.7/stream1');
+      await type(field('Password'), 'wrong');
+      await click(button('Pull'));
+      expect(button('Checking…')!.disabled).toBe(true);
+      refuse();
+      await settle();
+      const message = 'The camera at 10.0.0.7 rejected the username or password.';
+      expect(toasts.error).toHaveBeenCalledWith(message);
+      // Also under the form, where the credentials are typed again.
+      const inline = root().querySelector('form neat-error-note[role="alert"]')!;
+      expect(text(inline)).toBe(message);
+      expect(field('Stream URL').value).toBe('rtsp://10.0.0.7/stream1');
+      expect(button('Pull')!.disabled).toBe(false);
 
-    // A new attempt clears it.
-    slots.pull.mockReturnValueOnce(new Promise(() => undefined));
-    await click(button('Pull'));
-    expect(root().querySelector('form neat-error-note[role="alert"]')).toBeNull();
+      // A new attempt clears it.
+      cameras.assignPull.mockReturnValueOnce(new Promise(() => undefined));
+      await click(button('Pull'));
+      expect(root().querySelector('form neat-error-note[role="alert"]')).toBeNull();
+    });
+
+    it('Stop keeps the camera and Start pulls again; Clear removes it', async () => {
+      slots.slots.set([pulled(5)]);
+      slots.stop.mockImplementationOnce(async (n) => {
+        slots.update(n, { run: false, state: 'idle', pull: pull({ status: 'stopped' }) });
+        return slots.of(n);
+      });
+      cameras.followTheServer();
+      await open(5);
+      expect(sourceKind('Stream URL').getAttribute('aria-checked')).toBe('true');
+      expect(text()).toContain('Camera: rtsp://10.0.0.7:554/stream1');
+      // A pull has no frame rate of its own.
+      expect(root().querySelector('app-fps-stepper')).toBeNull();
+
+      await click(button('Stop'));
+      expect(slots.stop).toHaveBeenCalledExactlyOnceWith(5);
+      expect(text()).toContain('Camera: rtsp://10.0.0.7:554/stream1');
+      expect(row().state.label).toBe('Idle');
+
+      await click(button('Start'));
+      expect(slots.start).toHaveBeenCalledExactlyOnceWith(5);
+
+      await click(button('Clear'));
+      expect(cameras.clear).toHaveBeenCalledExactlyOnceWith(5);
+      expect(text()).not.toContain('Camera: rtsp://');
+      expect(sourceKind('Stream URL').getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('a pull that lost its credentials to a restart cannot start until its URL is typed again', async () => {
+      const error =
+        'Insight keeps no camera credentials across a restart; enter the stream URL again.';
+      slots.slots.set([
+        pulled(5, {
+          run: false,
+          state: 'idle',
+          error,
+          publisher: undefined,
+          pull: pull({ status: 'needs_credentials', error }),
+        }),
+      ]);
+      await open(5);
+      expect(row().state.label).toBe('Needs URL');
+      expect(text()).toContain(error);
+      expect(button('Start')!.disabled).toBe(true);
+      expect(field('Stream URL')).toBeDefined();
+    });
   });
 
   it('Change… assigns the picked file through the cameras service, and keeps the picker open on a refusal', async () => {
@@ -877,16 +880,16 @@ describe('SlotPanel', () => {
     expect(dialog()!.textContent).toContain('Source for src2');
     expect(library.refresh).toHaveBeenCalled();
 
-    const run = [...dialog()!.querySelectorAll<HTMLElement>('[role="option"]')].find((row) =>
-      row.textContent?.includes('run.mp4'),
+    const run = [...dialog()!.querySelectorAll<HTMLElement>('[role="option"]')].find((option) =>
+      option.textContent?.includes('run.mp4'),
     )!;
     await click(run);
     cameras.assignFile.mockRejectedValueOnce(
-      new ApiRequestError(409, 'src2 is in use by an external publisher.', null),
+      new ApiRequestError(409, 'src2 is in use by an external publisher (rtsp).', null),
     );
     await click(buttonIn(dialog()!, 'Assign'));
-    expect(cameras.assignFile).toHaveBeenCalledWith({ index: 2, file: 'people/run.mp4' });
-    expect(toasts.error).toHaveBeenCalledWith('src2 is in use by an external publisher.');
+    expect(cameras.assignFile).toHaveBeenCalledWith(2, 'people/run.mp4');
+    expect(toasts.error).toHaveBeenCalledWith('src2 is in use by an external publisher (rtsp).');
     expect(dialog()).not.toBeNull();
 
     await click(buttonIn(dialog()!, 'Assign'));
@@ -894,7 +897,7 @@ describe('SlotPanel', () => {
     expect(dialog()).toBeNull();
   });
 
-  it("the picker's Import… opens the import dialog, then shows the imported file picked (Q1)", async () => {
+  it("the picker's Import… opens the import dialog, then shows the imported file picked", async () => {
     await open();
     await click(button('Change…'));
     let finish!: (path: string | null) => void;
@@ -904,77 +907,60 @@ describe('SlotPanel', () => {
 
     // The import saved a file the tree did not hold yet; the picker fetches the library again.
     library.refresh.mockImplementationOnce(async () => {
-      library.tree.update((tree) => [
-        ...(tree ?? []),
-        { name: 'clip.mp4', path: 'clip.mp4', type: 'file', streamable: true },
-      ]);
+      library.tree.update((tree) => [...(tree ?? []), mediaFile('clip.mp4')]);
     });
     finish('clip.mp4');
     await settle();
     expect(text(dialog()!)).toContain('Selected: clip.mp4');
-    const clip = [...dialog()!.querySelectorAll<HTMLElement>('[role="option"]')].find((row) =>
-      row.textContent?.includes('clip.mp4'),
+    const clip = [...dialog()!.querySelectorAll<HTMLElement>('[role="option"]')].find((option) =>
+      option.textContent?.includes('clip.mp4'),
     )!;
     expect(clip.getAttribute('aria-selected')).toBe('true');
 
     await click(buttonIn(dialog()!, 'Assign'));
-    expect(cameras.assignFile).toHaveBeenCalledWith({ index: 2, file: 'clip.mp4' });
+    expect(cameras.assignFile).toHaveBeenCalledWith(2, 'clip.mp4');
   });
 
-  it('a rate set while the native rate is unknown is custom: Details say so, and Start encodes it', async () => {
-    slots.slots.set([fileSlot(2, { fps: 15, native_fps: null })]);
+  it('a rate set while the native rate is unknown is custom: Details say so, and Start leaves the rendition to the server', async () => {
+    slots.slots.set([walk(2, { fps: 15, native_fps: undefined })]);
     await open();
     expect(details()['Output']).toBe('RTSP / H.264 · 15 fps (rendition will be created on start)');
     expect(button('Native')!.disabled).toBe(false);
 
     await click(button('Start'));
-    expect(slots.prepare).toHaveBeenCalledWith(2);
-    expect(slots.start).not.toHaveBeenCalled();
+    expect(slots.start).toHaveBeenCalledWith(2);
   });
 
-  it('a different frame rate prepares a rendition with progress before start, and Cancel encoding stops it', async () => {
+  it('a different frame rate is committed, the server prepares its rendition on start with progress, and Cancel encoding stops it', async () => {
     await open();
     expect(text()).toContain('Native 30 fps. A different rate creates a rendition on start.');
     const rate = field('Frames per second');
     await type(rate, '15');
     rate.dispatchEvent(new Event('blur'));
     await settle();
-    expect(slots.assign).toHaveBeenCalledExactlyOnceWith({
-      index: 2,
-      file: 'people/walk.mp4',
-      transport: 'rtsp',
-      fps: 15,
-    });
+    expect(slots.assignFile).toHaveBeenCalledExactlyOnceWith(2, 'people/walk.mp4', 15);
     slots.update(2, { fps: 15 });
     await fixture.whenStable();
     expect(details()['Output']).toBe('RTSP / H.264 · 15 fps (rendition will be created on start)');
 
+    slots.start.mockImplementationOnce(async (n) => {
+      slots.prepare(n);
+      return slots.of(n);
+    });
     await click(button('Start'));
-    expect(slots.prepare).toHaveBeenCalledWith(2);
-    expect(slots.start).not.toHaveBeenCalled();
-    expect(encodeTitle()).toBe('Preparing rendition…');
+    expect(slots.start).toHaveBeenCalledWith(2);
+    expect(encodeTitle()).toBe('Encoding rendition…');
     expect(text(root().querySelector('app-panel-title neat-status-chip')!)).toBe('Encoding');
     // The rate cannot change while the encode runs.
     expect(field('Frames per second').disabled).toBe(true);
 
     slots.encodes.set(
-      new Map([
-        [
-          2,
-          {
-            title: 'Encoding 15 fps rendition…',
-            detail: '0:25 / 1:00 · libx264',
-            percent: 42,
-            encoder: 'libx264',
-          },
-        ],
-      ]),
+      new Map([[2, { title: 'Encoding rendition…', detail: '00:25 / 01:00', percent: 42 }]]),
     );
     await fixture.whenStable();
-    expect(encodeTitle()).toBe('Encoding 15 fps rendition… 42%');
-    // #170's line under it (Q13 a).
+    expect(encodeTitle()).toBe('Encoding rendition… 42%');
     expect(text(encodeStatus()!.querySelector('[data-slot="progress-detail"]')!)).toBe(
-      '0:25 / 1:00 · libx264',
+      '00:25 / 01:00',
     );
     // The progress belongs to the frame rate it encodes.
     expect(encodeStatus()!.closest('[aria-label="Output frame rate"], .frame-rate')).not.toBeNull();
@@ -985,116 +971,93 @@ describe('SlotPanel', () => {
     ).toBe('42');
 
     await click(button('Cancel encoding'));
-    expect(slots.prepares[0].cancelled).toBe(true);
+    expect(slots.stop).toHaveBeenCalledExactlyOnceWith(2);
     expect(toasts.status).toHaveBeenCalledWith('Cancelled encoding for src2.');
-    expect(slots.startAfterPrepare).not.toHaveBeenCalled();
   });
 
-  it('a finished encode starts the slot, which cannot be cancelled any more; Native goes back to the source rate', async () => {
-    slots.slots.set([fileSlot(2, { fps: 15 })]);
-    let started!: () => void;
-    slots.startAfterPrepare.mockImplementationOnce(async (index) => {
-      slots.encodes.set(new Map([[index, { title: 'Starting stream…', detail: '', percent: 99 }]]));
-      await new Promise<void>((resolve) => (started = resolve));
-      slots.encodes.set(new Map());
-      return OK;
-    });
+  it('a failed encode is the slot’s problem, said in its details', async () => {
+    slots.slots.set([
+      walk(2, {
+        fps: 15,
+        run: true,
+        state: 'failed',
+        error: 'Encoding people/walk.mp4 at 15 fps failed: disk full',
+      }),
+    ]);
     await open();
-    await click(button('Start'));
-    slots.prepares[0].lines.next({ kind: 'line', text: 'Rendition ready: .renditions/a.mp4' });
-    slots.prepares[0].lines.complete();
-    await settle();
-    expect(slots.startAfterPrepare).toHaveBeenCalledWith(2);
-    // Starting stream…: still encoding to the eye, but the encode is over, so nothing to cancel.
-    expect(encodeTitle()).toBe('Starting stream… 99%');
-    expect(button('Cancel encoding')!.getAttribute('aria-disabled')).toBe('true');
-    button('Cancel encoding')!.click();
-    expect(slots.prepares[0].cancelled).toBe(false);
-    started();
-    await settle();
-
-    await click(button('Native (30 fps)'));
-    expect(slots.assign).toHaveBeenLastCalledWith({
-      index: 2,
-      file: 'people/walk.mp4',
-      transport: 'rtsp',
-      fps: null,
-    });
+    expect(row().state.label).toBe('Failed');
+    expect(details()['Problem']).toBe('Encoding people/walk.mp4 at 15 fps failed: disk full');
+    // A slot that is to run offers Stop.
+    expect(button('Stop')).toBeDefined();
   });
 
-  it('an invalid frame rate draft holds Start; MJPEG and unassigned slots have no frame rate to set', async () => {
+  it('Native goes back to the source rate', async () => {
+    slots.slots.set([walk(2, { fps: 15 })]);
+    await open();
+    await click(button('Native (30 fps)'));
+    expect(slots.assignFile).toHaveBeenLastCalledWith(2, 'people/walk.mp4', null);
+  });
+
+  it('an invalid frame rate draft holds Start; MJPEG has no frame rate to set, an unassigned slot no stepper and no Start', async () => {
     await open();
     await type(field('Frames per second'), '0');
     expect(button('Start')!.disabled).toBe(true);
     await type(field('Frames per second'), '25');
     expect(button('Start')!.disabled).toBe(false);
 
-    slots.update(2, { file: 'cam.mjpeg', codec: 'mjpeg', allowed_transports: ['rtsp', 'http'] });
+    slots.update(2, { file: 'cam.mjpeg', codec: 'mjpeg' });
     await fixture.whenStable();
     expect(field('Frames per second').disabled).toBe(true);
     expect(button('Native (30 fps)')!.disabled).toBe(true);
 
-    slots.update(2, { file: '', codec: '', allowed_transports: [] });
+    slots.slots.set([slot(2)]);
     await fixture.whenStable();
-    expect(field('Frames per second').disabled).toBe(true);
+    expect(root().querySelector('app-fps-stepper')).toBeNull();
     expect(button('Start')!.disabled).toBe(true);
   });
 
-  it('offers the transport only where the media allows more than one, and sends a change', async () => {
-    Element.prototype.scrollIntoView = vi.fn();
+  it('an MJPEG stream also goes out over HTTP, with its URL and Copy, and there is no transport to choose', async () => {
+    slots.slots.set([
+      walk(2, {
+        file: 'cam.mjpeg',
+        codec: 'mjpeg',
+        urls: {
+          rtsp: 'rtsp://10.0.0.2:8554/src2',
+          http_mjpeg: 'https://10.0.0.2:9900/stream/http/src2.mjpg',
+        },
+      }),
+    ]);
     await open();
     expect(root().querySelector('neat-select')).toBeNull();
-
-    slots.update(2, {
-      file: 'cam.mjpeg',
-      codec: 'mjpeg',
-      transport: 'rtsp',
-      allowed_transports: ['rtsp', 'http'],
+    expect(details()).toMatchObject({
+      Output: 'RTSP and HTTP / MJPEG · 30 fps',
+      URL: 'rtsp://10.0.0.2:8554/src2 Copy',
+      HTTP: 'https://10.0.0.2:9900/stream/http/src2.mjpg Copy',
     });
-    await fixture.whenStable();
-    const select = root().querySelector('neat-select')!;
-    expect(select.textContent).toContain('RTSP');
-    // The kit select's value, as a pick would set it.
-    (select.querySelector('[role="combobox"]') as HTMLElement).click();
-    await settle();
-    const http = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-      (option) => option.textContent?.trim() === 'HTTP',
-    )!;
-    await click(http);
-    // Through the cameras, as every file assign from Streaming (Q7), so bulk actions wait for it.
-    expect(cameras.assignFile).toHaveBeenCalledWith({
-      index: 2,
-      file: 'cam.mjpeg',
-      transport: 'http',
-    });
-    expect(slots.assign).not.toHaveBeenCalled();
+    await click(button('Copy HTTP URL for src2'));
+    expect(writeText).toHaveBeenCalledWith('https://10.0.0.2:9900/stream/http/src2.mjpg');
   });
 
-  it('Start and Stop: a file through the server, a webcam through the cameras, a pull with Stop pulling', async () => {
+  it('Start and Stop: a file through the server, a webcam through the cameras', async () => {
     await open();
     await click(button('Start'));
-    expect(slots.start).toHaveBeenCalledWith({ index: 2 });
+    expect(slots.start).toHaveBeenCalledWith(2);
 
-    slots.update(2, { state: 'playing' });
+    slots.update(2, { run: true, state: 'live' });
     await fixture.whenStable();
-    slots.stop.mockRejectedValueOnce(
-      new ApiRequestError(409, 'This source is now published by a different session', null),
-    );
+    slots.stop.mockRejectedValueOnce(new ApiRequestError(404, 'There is no source 2.', null));
     await click(button('Stop'));
-    expect(slots.stop).toHaveBeenCalledWith({ index: 2 });
-    expect(toasts.error).toHaveBeenCalledWith(
-      'This source is now published by a different session',
-    );
+    expect(slots.stop).toHaveBeenCalledWith(2);
+    expect(toasts.error).toHaveBeenCalledWith('There is no source 2.');
 
     fixture.destroy();
     cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
-    slots.slots.set([
-      slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp', allowed_transports: ['rtsp'] }),
-    ]);
+    slots.slots.set([webcamSlot(3)]);
     await open(3);
+    // The server keeps a webcam slot on from its assignment: until a browser publishes, it starts.
     await click(button('Start'));
     expect(cameras.publish).toHaveBeenCalledWith(3);
-    slots.update(3, { state: 'playing' });
+    slots.update(3, { state: 'live' });
     await fixture.whenStable();
     await click(button('Stop'));
     expect(cameras.release).toHaveBeenCalledWith(3);
@@ -1107,48 +1070,10 @@ describe('SlotPanel', () => {
     cameras.release.mockClear();
     button('Stop')!.click();
     expect(cameras.release).not.toHaveBeenCalled();
-
-    fixture.destroy();
-    slots.slots.set([
-      slot(5, {
-        state: 'pulled',
-        pull: {
-          status: 'live',
-          scheme: 'rtsp',
-          host: '10.0.0.7:554',
-          path: '/stream1',
-          error: null,
-          since: '2026-10-24T08:00:00Z',
-          codec_supported: true,
-          width: 1920,
-          height: 1080,
-          fps: 25,
-          bitrate_bps: 4_000_000,
-        },
-      }),
-    ]);
-    await open(5);
-    expect(button('Start')).toBeUndefined();
-    await click(button('Stop pulling'));
-    expect(slots.stop).toHaveBeenLastCalledWith({ index: 5 });
   });
 
-  /** The kit button on `element`: what the panel gave it, whatever classes that makes. */
-  const kitButton = (element: HTMLElement): NeatButton =>
-    fixture.debugElement
-      .queryAll(By.directive(NeatButton))
-      .find((debug) => debug.nativeElement === element)!
-      .injector.get(NeatButton);
-  /** The name of the icon drawn in `element`, or null when it has none. */
-  const iconOf = (element: HTMLElement): ReturnType<NeatIcon['name']> | null =>
-    fixture.debugElement
-      .queryAll(By.directive(NeatIcon))
-      .find((debug) => element.contains(debug.nativeElement))
-      ?.injector.get(NeatIcon)
-      .name() ?? null;
-
   it('Start spins while a start waits, keeping its name and saying it is busy; it is a play glyph otherwise', async () => {
-    let started!: (answer: SuccessResponse) => void;
+    let started!: (answer: Slot) => void;
     slots.start.mockReturnValueOnce(new Promise((resolve) => (started = resolve)));
     await open();
     const start = () => button('Start')!;
@@ -1163,9 +1088,8 @@ describe('SlotPanel', () => {
     expect(text(start())).toBe('Start');
     expect(start().getAttribute('aria-label')).toBeNull();
 
-    started(OK);
-    await settle();
-    slots.update(2, { state: 'playing' });
+    slots.update(2, { run: true, state: 'starting' });
+    started(slots.of(2));
     await settle();
     // Stop is not a start that waits: it keeps its own glyph.
     expect(iconOf(button('Stop')!)).toBe('stop');
@@ -1173,105 +1097,52 @@ describe('SlotPanel', () => {
   });
 
   it('the main action is a medium button on a row of its own, in the look of what it does', async () => {
-    const pulled = slot(5, {
-      state: 'pulled',
-      pull: {
-        status: 'live',
-        scheme: 'rtsp',
-        host: '10.0.0.7:554',
-        path: '/stream1',
-        error: null,
-        since: '2026-10-24T08:00:00Z',
-        codec_supported: true,
-        width: 1920,
-        height: 1080,
-        fps: 25,
-        bitrate_bps: 4_000_000,
-      },
-    });
-    const external = slot(4, {
-      state: 'external',
-      codec: 'h264',
-      external: {
-        protocol: 'rtsp',
-        address: '192.168.1.20:41234',
-        since: '2026-10-24T08:00:00Z',
-        codec_supported: true,
-        width: 1280,
-        height: 720,
-        fps: 30,
-        bitrate_bps: 2_000_000,
-      },
-    });
     slots.slots.set([
-      fileSlot(2),
-      fileSlot(3, { state: 'playing' }),
-      external,
-      pulled,
-      fileSlot(6, { fps: 15 }),
+      walk(2),
+      walk(3, { run: true, state: 'live' }),
+      external(4),
+      pulled(5),
+      walk(6, { fps: 15, run: true, state: 'preparing', job: 'job-1' }),
     ]);
-    const looks: Record<string, [string, NeatButtonVariant, ReturnType<NeatIcon['name']> | null]> =
-      {};
-    for (const index of [2, 3, 4, 5]) {
-      await open(index);
+    slots.encodes.set(new Map([[6, ENCODING]]));
+    const looks: Record<string, [NeatButtonVariant, ReturnType<NeatIcon['name']> | null]> = {};
+    for (const n of [2, 3, 4, 5, 6]) {
+      await open(n);
       const main = fixture.debugElement.query(By.css('[neatAsideActions] button')).nativeElement;
       const kit = kitButton(main);
-      expect(kit.size(), `src${index}`).toBe('medium');
+      expect(kit.size(), `src${n}`).toBe('medium');
       // The row is its own and the button fills it: the panel's one rule for it.
-      expect(getComputedStyle(main).inlineSize, `src${index}`).toBe('100%');
-      looks[text(main)] = [text(main), kit.variant(), iconOf(main)];
+      expect(getComputedStyle(main).inlineSize, `src${n}`).toBe('100%');
+      looks[`src${n} ${text(main)}`] = [kit.variant(), iconOf(main)];
       fixture.destroy();
     }
-    // Encoding: Cancel encoding, outlined, no icon.
-    slots.encodes.set(new Map([[6, { title: 'Preparing rendition…', detail: '', percent: null }]]));
-    await open(6);
-    const cancel = button('Cancel encoding')!;
-    looks['Cancel encoding'] = ['Cancel encoding', kitButton(cancel).variant(), iconOf(cancel)];
 
     expect(looks).toEqual({
-      Start: ['Start', 'success', 'play'],
-      Stop: ['Stop', 'danger', 'stop'],
-      'Take over…': ['Take over…', 'danger', null],
-      'Stop pulling': ['Stop pulling', 'danger', 'stop'],
-      'Cancel encoding': ['Cancel encoding', 'outlined', null],
+      'src2 Start': ['success', 'play'],
+      'src3 Stop': ['danger', 'stop'],
+      'src4 Take over…': ['danger', null],
+      'src5 Stop': ['danger', 'stop'],
+      'src6 Cancel encoding': ['outlined', null],
     });
   });
 
   it('a webcam slot without a camera picked in this browser cannot start', async () => {
-    slots.slots.set([
-      slot(3, { type: 'webcam', codec: 'h264', transport: 'rtsp', allowed_transports: ['rtsp'] }),
-    ]);
+    slots.slots.set([webcamSlot(3)]);
     await open(3);
     expect(button('Start')!.disabled).toBe(true);
   });
 
-  it('Take over asks first and disconnects; a 409 shows the server message', async () => {
-    slots.slots.set([
-      slot(4, {
-        state: 'external',
-        codec: 'h264',
-        readers: [{ protocol: 'rtsp', address: '10.42.0.79' }],
-        external: {
-          protocol: 'rtsp',
-          address: '192.168.1.20:41234',
-          since: '2026-10-24T08:00:00Z',
-          codec_supported: true,
-          width: 1280,
-          height: 720,
-          fps: 30,
-          bitrate_bps: 2_000_000,
-        },
-      }),
-    ]);
+  it('Take over asks first and disconnects; a refusal shows the server message', async () => {
+    slots.slots.set([external(4, { readers: [{ protocol: 'rtsp', address: '10.42.0.79' }] })]);
     await open(4);
     expect(button('Start')).toBeUndefined();
     await click(button('Take over…'));
     const question = confirmDialog()!;
     expect(text(question)).toContain('Disconnect external stream on src4?');
-    expect(text(question)).toContain('⇢ RTSP · 192.168.1.20:41234 · 1280×720 · 30 fps');
+    expect(text(question)).toContain('⇢ RTSP · 192.168.1.20 · 1280×720 · 30 fps');
     expect(text(question)).toContain('Readers: 1 · 10.42.0.79');
     expect(text(question)).toContain(
-      'The publisher and all readers will be disconnected. src4 becomes Idle and you can assign a file to it.',
+      'The publisher and all readers will be disconnected, and src4 goes back to what it is assigned.',
     );
     await click(buttonIn(question, 'Cancel'));
     expect(slots.takeOver).not.toHaveBeenCalled();
@@ -1282,41 +1153,33 @@ describe('SlotPanel', () => {
     expect(toasts.status).toHaveBeenCalledWith('Disconnected the external stream on src4.');
 
     slots.takeOver.mockRejectedValueOnce(
-      new ApiRequestError(409, 'A new external publisher took src4; try again.', null),
+      new ApiRequestError(409, 'src4 is not held by an external publisher.', null),
     );
     await click(button('Take over…'));
     await click(buttonIn(confirmDialog()!, 'Disconnect'));
-    expect(toasts.error).toHaveBeenCalledWith('A new external publisher took src4; try again.');
+    expect(toasts.error).toHaveBeenCalledWith('src4 is not held by an external publisher.');
   });
 
   it('details: output, URL, readers; and for a publisher or a pull, its source, video, live for and bitrate', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.parse('2026-10-24T08:12:04Z'));
     slots.slots.set([
-      fileSlot(2, {
-        state: 'playing',
+      walk(2, {
+        run: true,
+        state: 'live',
         fps: 15,
         active_file: '.renditions/walk_15fps.mp4',
         readers: [{ protocol: 'rtsp', address: '127.0.0.1', label: 'insight preview' }],
       }),
-      slot(5, {
-        state: 'pulled',
-        // The server's codec for a pull that is not live yet.
-        codec: 'none',
-        readers: [],
-        pull: {
-          status: 'unreachable',
-          scheme: 'rtsp',
-          host: '10.0.0.7:554',
-          path: '/stream1?token=***',
-          error: 'connection refused',
-          since: '2026-10-24T08:00:00Z',
-          codec_supported: true,
-          width: null,
-          height: null,
-          fps: null,
-          bitrate_bps: 850_000,
-        },
+      pulled(5, {
+        pull: pull({ path: '/stream1?token=***' }),
+        publisher: publisher({ protocol: 'rtspSource', address: undefined, bitrate_bps: 850_000 }),
+      }),
+      pulled(6, {
+        state: 'starting',
+        codec: undefined,
+        publisher: undefined,
+        pull: pull({ status: 'unreachable', error: 'connection refused' }),
       }),
     ]);
     await open();
@@ -1330,82 +1193,55 @@ describe('SlotPanel', () => {
     await open(5);
     expect(details()).toEqual({
       Source: 'rtsp://10.0.0.7:554/stream1?token=***',
-      Status: 'Unreachable · connection refused',
-      Video: '-',
+      Status: 'Live',
+      Video: 'H.264 · 1280×720 · 30 fps',
       URL: 'rtsp://10.0.0.2:8554/src5 Copy',
       'Live for': '12m 04s',
       Bitrate: '850 kbit/s',
       Readers: '0',
     });
+
+    fixture.destroy();
+    await open(6);
+    expect(details()).toEqual({
+      Source: 'rtsp://10.0.0.7:554/stream1',
+      Status: 'Unreachable · connection refused',
+      Video: '-',
+      URL: 'rtsp://10.0.0.2:8554/src6 Copy',
+      'Live for': '-',
+      Bitrate: '-',
+      Readers: '0',
+    });
   });
 
-  it('an external publisher’s panel offers only Take over, and a pull’s only Stop pulling', async () => {
-    slots.slots.set([
-      slot(4, {
-        state: 'external',
-        codec: 'h264',
-        file: 'under.mp4',
-        allowed_transports: ['rtsp', 'http'],
-        external: {
-          protocol: 'rtsp',
-          address: '192.168.1.20:41234',
-          since: '2026-10-24T08:00:00Z',
-          codec_supported: true,
-          width: 1280,
-          height: 720,
-          fps: 30,
-          bitrate_bps: 2_000_000,
-        },
-      }),
-      slot(5, {
-        state: 'pulled',
-        codec: 'none',
-        file: 'under.mp4',
-        pull: {
-          status: 'connecting',
-          scheme: 'rtsp',
-          host: '10.0.0.7:554',
-          path: '/stream1',
-          error: null,
-          since: null,
-          codec_supported: true,
-          width: null,
-          height: null,
-          fps: null,
-          bitrate_bps: null,
-        },
-      }),
-    ]);
-    for (const [index, action] of [
-      [4, 'Take over…'],
-      [5, 'Stop pulling'],
-    ] as const) {
-      await open(index);
-      const actions = [...root().querySelectorAll('button')].map((b) => b.textContent?.trim());
-      expect(actions).toEqual([action, 'Copy']);
-      expect(root().querySelector('neat-segmented, app-fps-stepper, neat-select')).toBeNull();
-      expect(root().querySelector('app-slot-preview')).not.toBeNull();
-      expect(root().querySelector('dl')).not.toBeNull();
-      fixture.destroy();
-    }
+  it('an external publisher’s panel offers only Take over', async () => {
+    slots.slots.set([external(4, { kind: 'file', file: 'under.mp4' })]);
+    await open(4);
+    const actions = [...root().querySelectorAll('button')].map((b) => b.textContent?.trim());
+    expect(actions).toEqual(['Take over…', 'Copy']);
+    expect(root().querySelector('neat-segmented, app-fps-stepper, neat-select')).toBeNull();
+    expect(root().querySelector('app-slot-preview')).not.toBeNull();
+    expect(root().querySelector('dl')).not.toBeNull();
   });
 
   it('holds the frame rate while the slot is busy, and an assignment waits for a commit on its way', async () => {
     await open();
     let landed!: () => void;
-    slots.assign.mockReturnValueOnce(new Promise((resolve) => (landed = () => resolve(OK))));
+    slots.assignFile.mockReturnValueOnce(
+      new Promise((resolve) => (landed = () => resolve(walk(2, { fps: 15 })))),
+    );
     const rate = field('Frames per second');
     await type(rate, '15');
     rate.dispatchEvent(new Event('blur'));
     await fixture.whenStable();
     // Clear right after: it must not race the commit, which posts the file the slot has now.
     await click(button('Clear'));
-    expect(cameras.assignFile).not.toHaveBeenCalled();
+    expect(cameras.clear).not.toHaveBeenCalled();
     expect(field('Frames per second').disabled).toBe(true);
     expect(button('Native (30 fps)')!.disabled).toBe(true);
     landed();
     await settle();
-    expect(cameras.assignFile).toHaveBeenCalledExactlyOnceWith({ index: 2, file: '' });
+    expect(cameras.clear).toHaveBeenCalledExactlyOnceWith(2);
     expect(field('Frames per second').disabled).toBe(false);
 
     // The changing slot holds the stepper too.
@@ -1415,7 +1251,17 @@ describe('SlotPanel', () => {
   });
 
   it('keeps the focus on the main action as it changes, and moves it to what comes next', async () => {
-    slots.slots.set([fileSlot(2, { fps: 15 })]);
+    cameras.followTheServer();
+    slots.slots.set([walk(2, { fps: 15 })]);
+    slots.start.mockImplementationOnce(async (n) => {
+      slots.prepare(n);
+      return slots.of(n);
+    });
+    slots.stop.mockImplementationOnce(async (n) => {
+      slots.update(n, { run: false, state: 'idle', job: undefined });
+      slots.encodes.set(new Map());
+      return slots.of(n);
+    });
     await open();
     const action = button('Start')!;
     action.focus();
@@ -1434,7 +1280,7 @@ describe('SlotPanel', () => {
   });
 
   it('says why the frame rate cannot change, in words the stepper is described by', async () => {
-    slots.slots.set([fileSlot(2, { file: 'cam.mjpeg', codec: 'mjpeg' })]);
+    slots.slots.set([walk(2, { file: 'cam.mjpeg', codec: 'mjpeg' })]);
     await open();
     const group = root().querySelector<HTMLElement>(
       '[role="group"][aria-label="Output frame rate"]',
@@ -1442,11 +1288,11 @@ describe('SlotPanel', () => {
     const reason = document.getElementById(group.getAttribute('aria-describedby')!)!;
     expect(text(reason)).toBe('FPS changes are not supported for MJPEG sources');
 
-    slots.update(2, { file: 'a.mp4', codec: 'h264', state: 'playing' });
+    slots.update(2, { file: 'a.mp4', codec: 'h264', run: true, state: 'live' });
     await fixture.whenStable();
     expect(text(reason)).toBe('Stop the source to change its frame rate');
 
-    slots.update(2, { state: 'stopped' });
+    slots.update(2, { run: false, state: 'idle' });
     await fixture.whenStable();
     expect(group.hasAttribute('aria-describedby')).toBe(false);
   });
@@ -1462,10 +1308,5 @@ describe('SlotPanel', () => {
     expect(toasts.error).toHaveBeenCalledWith(
       'Could not copy the URL: the browser refused access to the clipboard.',
     );
-
-    // Until the codec is known there is no stream to copy.
-    slots.update(2, { codec: 'unknown', allowed_transports: [] });
-    await fixture.whenStable();
-    expect(button('Copy stream URL for src2')!.disabled).toBe(true);
   });
 });

@@ -1,11 +1,11 @@
 /**
  * The telemetry window the Stats page holds and what it derives from it: merging Sentinel's
- * incremental answers, the sections of the side panel, the overview cards, the inputs of every
- * chart and the CSV export. Pure functions over plain data, ported from #170's `dashboard.js`
- * and `model.js` (`orderedMetrics`, `csvField`, `sessionCsv`).
+ * incremental cache answers, the sections of the side panel, the overview cards, the inputs of
+ * every chart and the CSV export. Pure functions over plain data.
  */
 import type { NeatChartTone, NeatReference, NeatSeries, NeatThreshold } from '@sima/neat-ui/charts';
-import type { MetricStatus, MetricsQuery, SentinelMetric, SentinelMetrics } from './api';
+import type { SentinelCache, SentinelMetric, SentinelSample } from './api';
+import { definitionsOf, joinMetrics, metricStatus } from './metrics';
 import {
   fixedValue,
   formatValue,
@@ -23,73 +23,88 @@ import { powerCeiling, scaleFor } from './scales';
 export const HISTORY_SAMPLES = 240;
 
 /**
- * What the page holds of Sentinel's history. `metrics` are in Sentinel's order with their latest
- * values, `times` are the timestamps as milliseconds (null where one cannot be read), and
- * `series[key][i]` was measured at `timestamps[i]`: every series is as long as the timestamps.
+ * What the page holds of Sentinel's history, for the board `board` (its id). `metrics` are in
+ * Sentinel's order with their newest readings (`metrics.ts`), `times` are the timestamps as
+ * milliseconds (null where one cannot be read), and `series[key][i]` was measured at
+ * `timestamps[i]`: every series is as long as the timestamps. `sampled` are the keys the newest
+ * sample held, which keep a metric without a definition listed.
  */
 export interface TelemetryWindow {
-  readonly generation: number;
-  readonly epoch: number;
+  readonly board: string;
   readonly metrics: readonly SentinelMetric[];
-  readonly timestamps: readonly (string | null)[];
+  readonly sampled: readonly string[];
+  readonly timestamps: readonly string[];
   readonly times: readonly (number | null)[];
   readonly series: Readonly<Record<string, readonly (number | null)[]>>;
 }
 
-/** What to ask Sentinel for: the whole window first, then what is newer than the newest held sample. */
-export function metricsQuery(held: TelemetryWindow | null, generation: number): MetricsQuery {
-  const after = held?.generation === generation ? held.timestamps.at(-1) : null;
-  if (!held || typeof after !== 'string') return { history: HISTORY_SAMPLES };
-  return { history: HISTORY_SAMPLES, after, epoch: held.epoch };
-}
-
-/** Every metric in Sentinel's own order, then any the order does not list (in the groups' order). */
-function orderedMetrics(
-  order: readonly string[],
-  groups: SentinelMetrics['groups'],
-): SentinelMetric[] {
-  const all = groups.flatMap((group) => group.metrics);
-  if (!order.length) return all;
-  const byKey = new Map(all.map((metric) => [metric.key, metric]));
-  const listed = order.flatMap((key) => byKey.get(key) ?? []);
-  const seen = new Set(listed.map((metric) => metric.key));
-  return [...listed, ...all.filter((metric) => !seen.has(metric.key))];
+/**
+ * The `after` of the next cache read: the newest sample held of `board`, so the answer holds only
+ * what is newer; null for the whole cache (nothing held of that board yet).
+ */
+export function cacheAfter(held: TelemetryWindow | null, board: string): string | null {
+  return held?.board === board ? (held.timestamps.at(-1) ?? null) : null;
 }
 
 const nulls = (count: number): null[] => new Array<null>(count).fill(null);
 
-function timeOf(timestamp: string | null): number | null {
-  const time = Date.parse(timestamp ?? '');
+function timeOf(timestamp: string): number | null {
+  const time = Date.parse(timestamp);
   return Number.isFinite(time) ? time : null;
 }
 
+/** A reading as the page holds it: a number, else null (Sentinel's null, or anything else). */
+const reading = (value: unknown): number | null => (isNumber(value) ? value : null);
+
+/** The samples of an answer that have a timestamp and values; anything else is left out. */
+function samplesOf(samples: unknown): SentinelSample[] {
+  if (!Array.isArray(samples)) return [];
+  return samples.filter(
+    (sample): sample is SentinelSample =>
+      typeof sample === 'object' &&
+      sample !== null &&
+      typeof (sample as { timestamp?: unknown }).timestamp === 'string' &&
+      typeof (sample as { values?: unknown }).values === 'object' &&
+      (sample as { values?: unknown }).values !== null,
+  );
+}
+
 /**
- * The window after Sentinel's `answer`. A full answer, or one for another generation (another
- * board, or a daemon that restarted), replaces what is held; an incremental one is appended to it.
- * Either way the newest 240 samples stay, and every series keeps the timestamps' length: a metric
- * that is new gets nulls for the samples before it, one the answer carries no samples for gets
- * nulls for the new ones, and one no longer reported leaves.
+ * The window of `board` after Sentinel's cache `answer`. A full answer, or what is held of another
+ * board, is replaced; an incremental one (`full` false) is appended. Either way the newest 240
+ * samples stay, every series keeps the timestamps' length (a metric that is new gets nulls for
+ * the samples before it), and a metric's value is the newest sample's reading of it. The metrics
+ * are the answer's definitions in Sentinel's order and then the keys of the newest sample that
+ * have none; one neither defines nor samples any more leaves.
  */
 export function mergeTelemetry(
   held: TelemetryWindow | null,
-  answer: SentinelMetrics,
+  answer: SentinelCache,
+  board: string,
 ): TelemetryWindow {
-  const metrics = orderedMetrics(answer.order, answer.groups);
-  const fresh = answer.history;
-  const keep = held !== null && held.generation === answer.generation && !fresh.full ? held : null;
+  const keep = held !== null && held.board === board && !answer.full ? held : null;
+  const fresh = samplesOf(answer.samples);
+  const sampled = fresh.length
+    ? Object.keys(fresh[fresh.length - 1].values)
+    : (keep?.sampled ?? []);
+  const definitions = definitionsOf(answer.metrics);
+  const keys = [...new Set([...definitions.map(({ key }) => key), ...sampled])];
   const before = keep?.timestamps.length ?? 0;
-  const timestamps = [...(keep?.timestamps ?? []), ...fresh.timestamps].slice(-HISTORY_SAMPLES);
+  const timestamps = [
+    ...(keep?.timestamps ?? []),
+    ...fresh.map((sample) => sample.timestamp),
+  ].slice(-HISTORY_SAMPLES);
   const series = Object.fromEntries(
-    metrics.map(({ key }) => {
+    keys.map((key) => {
       const old = keep ? (keep.series[key] ?? nulls(before)) : [];
-      const added = fresh.series[key] ?? nulls(fresh.timestamps.length);
+      const added = fresh.map((sample) => reading(sample.values[key]));
       return [key, [...old, ...added].slice(-HISTORY_SAMPLES)];
     }),
   );
   return {
-    generation: answer.generation,
-    epoch: fresh.epoch,
-    metrics,
+    board,
+    metrics: joinMetrics(definitions, sampled, (key) => reading(series[key]?.at(-1))),
+    sampled,
     timestamps,
     times: timestamps.map(timeOf),
     series,
@@ -200,16 +215,6 @@ function recentValues(
   return values.filter((_, i) => (times[i] as number) > since);
 }
 
-function statusOf(
-  value: number | null,
-  warn: number | null,
-  critical: number | null,
-): MetricStatus {
-  if (!isNumber(value)) return 'unavailable';
-  if (isNumber(critical) && value >= critical) return 'critical';
-  return isNumber(warn) && value >= warn ? 'warn' : 'ok';
-}
-
 /**
  * Each CPU core's one-minute average and the tone it reads in (against that core's own
  * thresholds), the average of the cores that reported, and the busiest core. A row's `values` are
@@ -234,7 +239,7 @@ export function coreSummary(window: TelemetryWindow): {
       label: core.short || core.label,
       values,
       recent,
-      tone: lineTone(statusOf(recent, core.warn, core.critical)),
+      tone: lineTone(metricStatus(recent, core.warn, core.critical)),
     };
   });
   const reporting = rows.filter((row): row is typeof row & { recent: number } =>
@@ -296,7 +301,7 @@ export interface OverviewCard {
 /** Network in and out, which the Network card and the Storage & Network area chart together. */
 const NETWORK_KEYS = ['net_rx_mbps', 'net_tx_mbps'] as const;
 
-/** The cards in #170's order (Inv-S §2.5). */
+/** The cards, in the order the page shows them. */
 export const OVERVIEW_CARDS: readonly OverviewCard[] = [
   { id: 'thermal-max', heading: 'Thermal max', area: 'thermal', keys: [] },
   { id: 'board-power', heading: 'Board power', area: 'power', keys: ['power_current_watts'] },

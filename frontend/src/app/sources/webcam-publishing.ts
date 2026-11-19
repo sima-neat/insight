@@ -1,17 +1,16 @@
 /**
- * WHIP publishing helpers for browser webcam sources (#120), ported from #170's
- * `webcamPublishing.js`. They are plain functions over narrow structural types, so the negotiation
- * and the teardown can be tested without a DOM, a real `RTCPeerConnection` or a camera;
- * `CamerasService` is what wires them to the browser and to the slots.
+ * WHIP publishing helpers for browser webcam sources (sima-neat/insight#120), ported from
+ * `webcamPublishing.js` in sima-neat/insight#170. They are plain functions over narrow structural
+ * types, so the negotiation and the teardown can be tested without a DOM, a real
+ * `RTCPeerConnection` or a camera; `CamerasService` is what wires them to the browser and to the
+ * slots.
  *
  * The HTTP here is `fetch`, not Angular's `HttpClient`: WHIP is a different origin from Insight's
  * API (MediaMTX's own TLS listener), so none of the app's HTTP configuration should apply to it;
- * it needs the raw SDP body and the `Location` and `Id` response headers; and a stop sent while
- * the page unloads needs `keepalive`, which only `fetch` has. The calls take the function as a
- * parameter, defaulting to the global one.
+ * it needs the raw SDP body and the `Location` response header; and a stop sent while the page
+ * unloads needs `keepalive`, which only `fetch` has. The calls take the function as a parameter,
+ * defaulting to the global one.
  */
-
-import type { StopRequest } from './api';
 
 /** The reason a connection was given up on, as the disconnect watcher reports it. */
 export type ConnectionLoss = 'failed' | 'closed' | 'disconnected';
@@ -64,11 +63,6 @@ export interface ClosableSession {
   stream: { getTracks(): { stop(): void }[] } | null;
   pc: { close(): void } | null;
   deleteUrl: string | null;
-}
-
-/** What a stop on page exit needs to know of a session: the WHIP session it can name, if any. */
-export interface NameableSession {
-  sessionId: string | null;
 }
 
 /** An error's `name` or `message`, when it has one: whatever was thrown is not necessarily an `Error`. */
@@ -125,21 +119,6 @@ export function camerasFromDevices(devices: readonly DeviceInfo[] | null | undef
 }
 
 /**
- * The session id is NOT the last segment of `Location`. MediaMTX names the WHIP resource with a
- * separate secret, so that knowing a session id does not let anyone delete it; the session id
- * itself, the one its status API reports as the path's source and the one a stop must name, comes
- * back in the `Id` response header, which MediaMTX exposes to cross-origin callers. Verified
- * against v1.12.1 on a DevKit: Location carried 5fdd8139-…, Id and the API both carried
- * 52304a1c-….
- */
-export function sessionIdFromResponse(
-  headers: { get(name: string): string | null } | null | undefined,
-): string | null {
-  const id = headers?.get('Id');
-  return typeof id === 'string' && id.trim() ? id.trim() : null;
-}
-
-/**
  * MediaMTX returns the session resource in `Location`; DELETE on it releases the path immediately
  * instead of waiting for the peer connection to time out. A malformed or absent value is not
  * worth failing the publish over: closing the peer connection already ends the media flow.
@@ -158,8 +137,8 @@ export function resolveDeleteUrl(
 
 /**
  * Chrome's default offer prefers VP8. The rest of Insight (codec badges, what a Core application
- * expects on the RTSP side) assumes h264/h265/mjpeg, and #120 calls for H.264, so the transceiver
- * is pinned rather than left to negotiate.
+ * expects on the RTSP side) assumes h264/h265/mjpeg, and sima-neat/insight#120 calls for H.264,
+ * so the transceiver is pinned rather than left to negotiate.
  */
 export function selectH264Codecs<C extends { mimeType: string }>(
   capabilities: { codecs?: readonly C[] } | null | undefined,
@@ -195,7 +174,7 @@ export async function publishWebcamOffer(
   peerConnection: OfferingPeer,
   whipUrl: string,
   fetchRequest: WhipFetch = globalThis.fetch,
-): Promise<{ answerSdp: string; deleteUrl: string | null; sessionId: string | null }> {
+): Promise<{ answerSdp: string; deleteUrl: string | null }> {
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
 
@@ -211,7 +190,7 @@ export async function publishWebcamOffer(
     // (the common one here) the browser rejecting the WHIP endpoint's certificate. That listener
     // is a separate https origin from the main UI (its own host:port), so it has to be trusted on
     // its own. The browser deliberately will not say which cause it was, so give one hint that
-    // covers both, per #120's ask for setup feedback the user can act on.
+    // covers both: sima-neat/insight#120 asks for setup feedback the user can act on.
     throw new WebcamPublishError(
       'Could not reach the webcam publish endpoint. Check that its certificate is trusted — ' +
         'open the publish URL once in this browser to accept it — and that the endpoint is reachable.',
@@ -232,7 +211,6 @@ export async function publishWebcamOffer(
   return {
     answerSdp: await response.text(),
     deleteUrl: resolveDeleteUrl(response.headers.get('Location'), whipUrl),
-    sessionId: sessionIdFromResponse(response.headers),
   };
 }
 
@@ -242,8 +220,8 @@ const defaultSleep = (ms: number): Promise<void> =>
 export interface ConfirmOptions {
   /**
    * Longer than MediaMTX's webrtcTrackGatherTimeout (10 s) plus the ICE handshake, AND the extra
-   * hop before the slot reports ready: start now confirms the normalized output path (src{N}),
-   * which only appears once the browser is publishing to the ingest path AND MediaMTX's runOnReady
+   * hop before the slot reports live: the slot is the normalized output path (src{N}), which only
+   * appears once the browser is publishing to the ingest path (cam{N}) AND MediaMTX's runOnReady
    * ffmpeg has spun up and produced its first frames (~1-3 s on the DevKit). A slow-starting
    * camera or normalizer is still within this window, and giving up first would tear down a
    * publish that was about to succeed.
@@ -261,7 +239,7 @@ export interface ConfirmOptions {
 }
 
 /**
- * Insight reports a webcam slot as playing only once MediaMTX says the path is ready, which lags
+ * Insight reports a webcam slot as live only once MediaMTX says the path is ready, which lags
  * the WHIP exchange by the ICE handshake. Polls to a deadline rather than sleeping a fixed amount:
  * a fixed delay is either longer than a local handshake needs or too short for a slow one, and
  * this reports the real failure when the stream genuinely never arrives.
@@ -328,10 +306,10 @@ export function closeWebcamSession(
 }
 
 /**
- * Stop All, Reset and Auto Assign each invalidate every live webcam slot at once. Insight can kill
- * a file source's ffmpeg process itself, but only this browser can end a webcam publish, so a bulk
- * action that skips this leaves cameras publishing while the UI reports everything stopped.
- * Returns the slots it closed and empties `sessions`.
+ * Stop All, Reset and Auto Assign each end every webcam slot at once. The server disconnects a
+ * webcam's publisher itself, but only this browser can let go of its camera and its peer
+ * connection, which would otherwise keep the camera's light on and try to reconnect. Returns the
+ * slots it closed and empties `sessions`.
  */
 export function closeAllWebcamSessions(
   sessions: Map<number, ClosableSession> | null | undefined,
@@ -349,39 +327,27 @@ export function closeAllWebcamSessions(
 
 /**
  * When the page is unloading (reload or close), closing the peer connection only makes MediaMTX
- * drop the path ~15-20 s later, and the reloaded page can query sources before that and keep the
- * slot marked Live with no session behind it. So this records a session-bound stop for each owned
- * webcam over a keepalive POST: a plain fetch is cancelled when the page dies, keepalive lets it
- * complete (`XMLHttpRequest`, which Angular's `HttpClient` uses here, cannot do that, so this
- * does not go through `SlotsService.stop`). Same-origin (Insight's own API), so no CORS concern.
- * Returns the indexes a stop was sent for.
+ * drop the path ~15-20 s later, and the reloaded page can list the slots before that and show one
+ * live with no camera behind it. So this stops each slot this tab publishes over a keepalive POST
+ * to its stop route, which disconnects the publisher at once: a plain fetch is cancelled when the
+ * page dies, keepalive lets it complete (`XMLHttpRequest`, which Angular's `HttpClient` uses here,
+ * cannot do that, so this does not go through `SlotsService.stop`). Same-origin (Insight's own
+ * API), so no CORS concern. Returns the slots a stop was sent for.
  */
 export function recordWebcamStopsOnExit(
-  sessions: ReadonlyMap<number, NameableSession> | null | undefined,
+  slots: Iterable<number>,
   fetchRequest: FireAndForgetFetch = globalThis.fetch,
 ): number[] {
   const stopped: number[] = [];
-  if (!sessions) return stopped;
-  for (const [index, session] of sessions) {
-    // Only a session this tab can name can be stopped without a kick; a session with no id has
-    // nothing to record and is just closed.
-    if (!session.sessionId) continue;
-    const body: StopRequest = {
-      index,
-      publisher_released: true,
-      publisher_session: session.sessionId,
-    };
+  for (const n of slots) {
     try {
-      fetchRequest('/api/mediasrc/stop', {
-        method: 'POST',
-        keepalive: true,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }).catch(() => undefined);
+      fetchRequest(`/api/slots/${n}/stop`, { method: 'POST', keepalive: true }).catch(
+        () => undefined,
+      );
     } catch {
       // The page is unloading; there is nothing more we can do.
     }
-    stopped.push(index);
+    stopped.push(n);
   }
   return stopped;
 }

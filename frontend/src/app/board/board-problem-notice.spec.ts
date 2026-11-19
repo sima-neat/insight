@@ -4,6 +4,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import type { HostKeyChange } from './api';
 import { BoardProblem } from './board-error';
 import { BoardProblemNotice } from './board-problem-notice';
 
@@ -19,7 +20,7 @@ import { BoardProblemNotice } from './board-problem-notice';
   `,
 })
 class Host {
-  readonly problem = signal<BoardProblem>(new BoardProblem('', '', '', {}));
+  readonly problem = signal<BoardProblem>(new BoardProblem('', '', ''));
   readonly busy = signal(false);
   readonly announce = signal(false);
   readonly trusted: string[] = [];
@@ -35,25 +36,27 @@ class Host {
   `,
 })
 class HostWithAction {
-  readonly problem = signal<BoardProblem>(new BoardProblem('', '', '', {}));
+  readonly problem = signal<BoardProblem>(new BoardProblem('', '', ''));
 }
 
 const COMMAND = 'ssh-copy-id -p 22 sima@192.168.1.20';
 const authFailed = new BoardProblem(
   'SSH key authentication as sima on 192.168.1.20 failed.',
   'auth_failed',
-  `Insight signs in with the SSH keys of the 'root' account on this machine. Authorize one on the board, then retry: ${COMMAND}`,
-  { command: COMMAND },
+  "Insight signs in with the SSH keys of the 'root' account on this machine. Authorize one on the board, then retry.",
+  null,
+  COMMAND,
 );
-const keyChanged = (details: Record<string, unknown>) =>
+const keyChanged = (hostKey: HostKeyChange | null) =>
   new BoardProblem(
     '192.168.1.20 presented a different SSH host key than the one Insight trusted.',
     'host_key_changed',
     'This is expected after the board is reflashed.',
-    details,
+    hostKey,
   );
 const EXPECTED = 'SHA256:oldoldoldoldoldoldoldoldoldoldoldoldoldold';
 const PRESENTED = 'SHA256:newnewnewnewnewnewnewnewnewnewnewnewnewnew';
+const HOST_KEY: HostKeyChange = { host: '192.168.1.20', expected: EXPECTED, presented: PRESENTED };
 
 describe('BoardProblemNotice', () => {
   let fixture: ComponentFixture<Host>;
@@ -104,39 +107,28 @@ describe('BoardProblemNotice', () => {
       text(term.nextElementSibling),
     ]);
 
-  it('auth_failed shows the ssh-copy-id command with Copy; a refused clipboard says so', async () => {
+  it('auth_failed shows the command that authorizes the key, with Copy', async () => {
     const callout = await show(authFailed);
     expect(tone(callout)).toBe('danger');
     expect(text(callout)).toContain('SSH key authentication as sima on 192.168.1.20 failed.');
     expect(text(callout)).toContain("Insight signs in with the SSH keys of the 'root' account");
-    expect(text(callout.querySelector('code[neatCode]'))).toBe(COMMAND);
+    expect(text(callout.querySelector('app-copy-command code[neatCode]'))).toBe(COMMAND);
 
-    button(callout, 'Copy command').click();
+    const copy = button(callout, 'Copy');
+    expect(copy.getAttribute('aria-label')).toBe('Copy the command that authorizes the key');
+    copy.click();
     await settle();
     expect(writeText).toHaveBeenCalledWith(COMMAND);
     expect(toasts.status).toHaveBeenCalledWith(`Copied: ${COMMAND}`);
 
-    writeText.mockRejectedValueOnce(new DOMException('Denied', 'NotAllowedError'));
-    button(callout, 'Copy command').click();
-    await settle();
-    expect(toasts.error).toHaveBeenCalledWith(
-      'Could not copy: the browser only allows clipboard access over HTTPS or localhost. Select the text and copy it instead.',
-    );
-
-    // Without the command (an older Insight) there is nothing to copy.
-    const plain = await show(new BoardProblem(authFailed.message, 'auth_failed', '', {}));
+    // Without the command there is nothing to copy.
+    const plain = await show(new BoardProblem(authFailed.message, 'auth_failed', ''));
     expect(plain.querySelector('code')).toBeNull();
-    expect(text(plain)).not.toContain('Copy command');
+    expect(plain.querySelector('button')).toBeNull();
   });
 
   it('host_key_changed shows both fingerprints; Trust asks first and trusts the presented key; Cancel changes nothing', async () => {
-    const callout = await show(
-      keyChanged({
-        host: '192.168.1.20',
-        expected_fingerprint: EXPECTED,
-        presented_fingerprint: PRESENTED,
-      }),
-    );
+    const callout = await show(keyChanged(HOST_KEY));
     expect(tone(callout)).toBe('warning');
     expect(text(callout)).toContain('presented a different SSH host key');
     expect(facts(callout)).toEqual([
@@ -170,8 +162,8 @@ describe('BoardProblemNotice', () => {
     expect(confirm.ask).toHaveBeenCalledTimes(2);
   });
 
-  it('host_key_changed without a presented key cannot be trusted, and says what is unknown', async () => {
-    const callout = await show(keyChanged({}));
+  it('host_key_changed without the host key cannot be trusted, and says what is unknown', async () => {
+    const callout = await show(keyChanged(null));
     expect(facts(callout)).toEqual([
       ['Expected', 'unknown'],
       ['Presented', 'unknown'],
@@ -183,7 +175,7 @@ describe('BoardProblemNotice', () => {
     expect(confirm.ask).not.toHaveBeenCalled();
 
     // The confirmation names the board as "this board" when the host is unknown.
-    await show(keyChanged({ presented_fingerprint: PRESENTED }));
+    await show(keyChanged({ ...HOST_KEY, host: '' }));
     button(fixture.nativeElement.querySelector('neat-callout'), 'Trust new key…').click();
     await settle();
     expect(confirm.ask.mock.calls[0][0].message).toMatch(
@@ -192,16 +184,14 @@ describe('BoardProblemNotice', () => {
   });
 
   it('a key that changed again while the confirmation was open is not trusted', async () => {
-    const callout = await show(
-      keyChanged({ host: '192.168.1.20', presented_fingerprint: PRESENTED }),
-    );
+    const callout = await show(keyChanged(HOST_KEY));
     const answer = deferred<boolean>();
     confirm.ask.mockReturnValue(answer.promise);
     button(callout, 'Trust new key…').click();
     await settle();
 
     // A re-read while the user compared fingerprints: the board now presents another key.
-    await show(keyChanged({ host: '192.168.1.20', presented_fingerprint: 'SHA256:other' }));
+    await show(keyChanged({ ...HOST_KEY, presented: 'SHA256:other' }));
     answer.resolve(true);
     await settle();
     expect(fixture.componentInstance.trusted).toEqual([]);
@@ -215,8 +205,7 @@ describe('BoardProblemNotice', () => {
     expect(fixture.nativeElement.querySelector('neat-callout').getAttribute('role')).toBe('alert');
   });
 
-  // Final review M-2: the caller's actions are kept with a changed host key too.
-  it("shows the caller's own actions with every problem, beside its own", async () => {
+  it("shows the caller's own actions with every problem, after its own", async () => {
     const withAction = TestBed.createComponent(HostWithAction);
     const actions = async (problem: BoardProblem) => {
       withAction.componentInstance.problem.set(problem);
@@ -225,12 +214,10 @@ describe('BoardProblemNotice', () => {
       const callout: HTMLElement = withAction.nativeElement.querySelector('neat-callout');
       return [...callout.querySelectorAll('[data-slot="callout-actions"] button')].map(text);
     };
-    expect(await actions(keyChanged({ presented_fingerprint: PRESENTED }))).toEqual([
-      'Trust new key…',
-      'Open board settings',
-    ]);
-    expect(await actions(authFailed)).toEqual(['Copy command', 'Open board settings']);
-    expect(await actions(new BoardProblem('Timed out.', 'timeout', '', {}))).toEqual([
+    expect(await actions(keyChanged(HOST_KEY))).toEqual(['Trust new key…', 'Open board settings']);
+    // The command's Copy sits beside the command, not among the actions.
+    expect(await actions(authFailed)).toEqual(['Open board settings']);
+    expect(await actions(new BoardProblem('Timed out.', 'timeout', ''))).toEqual([
       'Open board settings',
     ]);
   });
@@ -241,7 +228,6 @@ describe('BoardProblemNotice', () => {
         'Could not connect to 192.168.1.20:22: timed out',
         'unreachable',
         'Check that the board is powered on and on the network.',
-        {},
       ),
     );
     expect(tone(callout)).toBe('danger');

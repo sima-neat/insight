@@ -1,11 +1,12 @@
 // Windows for the area specs: the live Modalix board with a window of history, then changed.
+import { DEVKIT } from '../../board/board.testing';
 import type { SentinelMetric } from '../../stats/api';
-import { METRICS_LIVE, withHistory, type HistoryOptions } from '../../stats/stats.testing';
+import { cacheWith, type HistoryOptions } from '../../stats/stats.testing';
 import { mergeTelemetry, type TelemetryWindow } from '../../stats/telemetry';
 
 /** The live board's 59 metrics with `samples` samples of history, every metric flat at its reading. */
 export function liveWindow(samples = 20, options?: HistoryOptions): TelemetryWindow {
-  return mergeTelemetry(null, withHistory(METRICS_LIVE, samples, options));
+  return mergeTelemetry(null, cacheWith(samples, options), DEVKIT.id);
 }
 
 /** `window` with each metric `change` returns something for replaced by that. */

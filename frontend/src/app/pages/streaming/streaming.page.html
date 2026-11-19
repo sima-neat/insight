@@ -137,7 +137,7 @@
       >
         <app-cell-text>
           @if (row.codecWarning; as warning) {
-            <!-- As #170: the codec in warning colours, the glyph naming the problem. -->
+            <!-- The codec in warning colours, the glyph naming the problem. -->
             <neat-status-chip tone="warning">
               {{ row.codec }}
               <span role="img" [attr.aria-label]="warning" [neatTooltip]="warning">⚠</span>
@@ -156,7 +156,7 @@
         One panel per slot: choosing another slot builds the panel afresh, so nothing typed for
         one slot (a stream URL, a password, a frame rate) carries over to the next.
       -->
-      @for (row of selectedRows(); track row.slot.index) {
+      @for (row of selectedRows(); track row.slot.n) {
         <app-slot-panel [row]="row" />
       } @empty {
         <p neatNote>No slot selected.</p>

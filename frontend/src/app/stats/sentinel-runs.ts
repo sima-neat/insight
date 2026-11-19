@@ -11,18 +11,18 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { firstValueFrom, type Observable } from 'rxjs';
-import { BoardProblem } from '../board/board-error';
+import { boardUrl } from '../board/api';
+import { BOARD_GONE_CODES, BoardProblem } from '../board/board-error';
 import { BoardService } from '../board/board.service';
 import { LatestOnly, visiblePoller } from '../polling';
-import { withRequestErrors } from '../sources/stream-lines';
+import { withRequestErrors } from '../sources/api-errors';
 import type {
   DeleteAnswer,
-  RunAnswer,
   RunMetadata,
-  RunsAnswer,
+  RunsBody,
   RunSummary,
   SavedRun,
-  TraceAnswer,
+  TraceBody,
   TraceRequest,
 } from './api';
 import { isSavedRun } from './runs';
@@ -34,9 +34,6 @@ import {
   unexpectedAnswer,
 } from './sentinel-failure';
 
-const TRACES_URL = '/api/sentinel/traces';
-const STOP_URL = '/api/sentinel/traces/stop';
-const RUNS_URL = '/api/sentinel/runs';
 /** How often the trace and the shown run list are re-read, to catch changes made elsewhere. */
 const READ_MS = 30_000;
 
@@ -56,7 +53,8 @@ export interface DeleteOutcome {
 
 /** One kind of periodic read (the trace, the run list) and what it keeps. */
 interface ReadSlot<T> {
-  url: string;
+  /** The route's path under the board. */
+  path: string;
   reads: LatestOnly;
   /** The newest read still out, which answers for a periodic read due meanwhile. */
   out: number | null;
@@ -66,7 +64,7 @@ interface ReadSlot<T> {
 
 const STALE: RunRead = { stale: true };
 
-/** #170's words for a run body without a run's parts (Inv-S §2.10). */
+/** What a run body without a run's parts is said to be. */
 const UNKNOWN_RUN = 'This Sentinel build answered with a run body Insight does not know.';
 
 /**
@@ -75,27 +73,27 @@ const UNKNOWN_RUN = 'This Sentinel build answered with a run body Insight does n
  *
  * **Reads.** Nothing is read until the page says Sentinel is ready (`setSentinelReady`): a
  * missing or stopped daemon would only answer each read with the failure the page already shows.
- * From then on the active trace (`GET /api/sentinel/traces`) is read at once and when the board
- * changes, then every 30 s, so a trace started or stopped elsewhere (the Sentinel CLI, another
- * browser) shows within that. The run list (`GET /api/sentinel/runs`) is read the same way while
- * the page says it is shown (`setRunsShown`), and again after each start, stop and delete, and
- * when a trace read finds another trace than the one before (started or stopped elsewhere), so
- * the list and the toolbar agree. A hidden tab sends nothing: each read runs on the board, and
+ * From then on the active trace (`GET .../sentinel/traces/active`) is read at once and when the
+ * board changes, then every 30 s, so a trace started or stopped elsewhere (the Sentinel CLI,
+ * another browser) shows within that. The run list (`GET .../sentinel/runs`) is read the same way
+ * while the page says it is shown (`setRunsShown`), and again after each start, stop and delete,
+ * and when a trace read finds another trace than the one before (started or stopped elsewhere),
+ * so the list and the toolbar agree. A hidden tab sends nothing: each read runs on the board, and
  * showing the tab again reads at once. A periodic read due while one is out is left to that one.
  * Only the newest answer applies; a failed read keeps what was read before, beside its failure.
  *
- * **Changes.** Start, stop and delete send the board generation they were asked under
- * (`?generation=`), so the backend refuses one that outlives a board switch (`stale_snapshot`).
- * Each resolves with what the page reports and never rejects. A change makes the reads out before
- * it obsolete: their answers are dropped, so a read sent before a start cannot hide the trace it
+ * **Changes.** Start, stop and delete go to the board they were asked for, by its id, so one that
+ * outlives a board switch is refused (404 `not_found`) rather than made on the new board. Each
+ * resolves with what the page reports and never rejects. A change makes the reads out before it
+ * obsolete: their answers are dropped, so a read sent before a start cannot hide the trace it
  * started.
  *
- * **Board changes.** Everything held is the current board generation's: a board change drops it
- * and reads the new board at once, never waiting for a request still out to the previous one. An
- * answer or failure naming another generation than it was asked under means another client
- * switched the board: the board is reloaded and the answer dropped. A change whose answer or
- * failure lands after the board shown changed is reported as a `stale_snapshot` failure and
- * nothing of it applies: the previous board's refusal must not show against the new one.
+ * **Board changes.** Everything held is the selected board's: a board change drops it and reads
+ * the new board at once, never waiting for a request still out to the previous one. A failure
+ * saying the board was replaced (`BOARD_GONE_CODES`) reloads the board, whose new id then drops
+ * what is held. A change whose answer or failure lands after the board shown changed is reported
+ * as a `board_changed` failure and nothing of it applies: the previous board's refusal must not
+ * show against the new one.
  */
 @Injectable()
 export class SentinelRuns {
@@ -136,26 +134,24 @@ export class SentinelRuns {
   /** Why the newest run list read failed; cleared by the next good one. */
   readonly runsFailure = this.runsFailureValue.asReadonly();
 
-  private readonly targeted = computed(() => this.board.state()?.target != null);
-
-  private readonly traceSlot: ReadSlot<TraceAnswer> = {
-    url: TRACES_URL,
+  private readonly traceSlot: ReadSlot<TraceBody> = {
+    path: 'sentinel/traces/active',
     reads: new LatestOnly(),
     out: null,
     failure: this.traceFailureValue,
-    apply: ({ sentinel }) => {
+    apply: ({ trace, summary }) => {
       // Another trace than the last read showed was started or stopped elsewhere, which changes
       // the run list too: it is read now rather than up to 30 s later.
-      if (this.showTrace(sentinel.trace, sentinel.summary ?? null)) this.rereadRuns();
+      if (this.showTrace(trace, summary ?? null)) this.rereadRuns();
     },
   };
 
-  private readonly runsSlot: ReadSlot<RunsAnswer> = {
-    url: RUNS_URL,
+  private readonly runsSlot: ReadSlot<RunsBody> = {
+    path: 'sentinel/runs',
     reads: new LatestOnly(),
     out: null,
     failure: this.runsFailureValue,
-    apply: ({ sentinel }) => this.runsValue.set(sentinel.runs),
+    apply: ({ runs }) => this.runsValue.set(runs),
   };
 
   /** Run reads, of which only the newest one's answer is shown. */
@@ -167,18 +163,18 @@ export class SentinelRuns {
   private sentinelReady = false;
   /** The id of the trace shown (null for none); undefined before the board's first trace answer. */
   private traceSeen: string | null | undefined = undefined;
-  /** The board generation everything held is of; undefined before the first look at the board. */
-  private generation: number | null | undefined = undefined;
+  /** The id of the board everything held is of; undefined before the first look at the board. */
+  private boardId: string | null | undefined = undefined;
   private destroyed = false;
 
+  private readonly targeted = computed(() => this.board.id() !== null);
   private readonly traceReads = visiblePoller(READ_MS, () => void this.read(this.traceSlot));
   private readonly runsReads = visiblePoller(READ_MS, () => void this.read(this.runsSlot));
 
   constructor() {
     effect(() => {
-      const generation = this.board.generation();
-      const targeted = this.targeted();
-      untracked(() => this.follow(generation, targeted));
+      const id = this.board.id();
+      untracked(() => this.follow(id));
     });
     // The pollers stop themselves with the page; a request still out lands on nothing.
     inject(DestroyRef).onDestroy(() => (this.destroyed = true));
@@ -223,18 +219,18 @@ export class SentinelRuns {
    * `trace_conflict` (another trace records, or the name is taken) re-reads the trace.
    */
   async startTrace(request: TraceRequest): Promise<SentinelFailure | null> {
-    const generation = this.board.generation();
-    if (generation === null) return noBoard('start');
+    const id = this.board.id();
+    if (id === null) return noBoard('start');
     const busy = this.markBusy('start');
     const result = await this.change(
-      this.http.post<TraceAnswer>(TRACES_URL, trimmed(request), { params: { generation } }),
-      generation,
+      this.http.post<TraceBody>(boardUrl(id, 'sentinel/traces'), trimmed(request)),
+      id,
       'start',
     );
     this.clearBusy(busy);
     if ('failure' in result) return this.failedTrace(result.failure);
     this.invalidate(this.traceSlot);
-    const { trace, summary } = result.answer.sentinel;
+    const { trace, summary } = result.answer;
     this.showTrace(trace, summary ?? null);
     this.traceFailureValue.set(null);
     this.rereadRuns();
@@ -242,22 +238,22 @@ export class SentinelRuns {
   }
 
   /**
-   * Stops the trace shown, naming it (`trace_id`) so a trace started elsewhere since is not
-   * stopped in its place: the backend answers `trace_conflict` instead, which re-reads the trace.
-   * Resolves with null once the trace is no longer shown, else with why it was not stopped.
-   * Without a trace shown there is nothing to stop: it resolves with null at once.
+   * Stops the trace shown, naming it (`trace`) so a trace started elsewhere since is not stopped
+   * in its place: the backend answers `trace_conflict` instead, which re-reads the trace. Resolves
+   * with null once the trace is no longer shown, else with why it was not stopped. Without a trace
+   * shown there is nothing to stop: it resolves with null at once.
    */
   async stopTrace(): Promise<SentinelFailure | null> {
     const trace = this.traceValue();
     if (trace === null) return null;
-    const generation = this.board.generation();
-    if (generation === null) return noBoard('stop');
+    const id = this.board.id();
+    if (id === null) return noBoard('stop');
     const busy = this.markBusy('stop');
     const result = await this.change(
-      this.http.post<TraceAnswer>(STOP_URL, null, {
-        params: { generation, trace_id: trace.id },
+      this.http.post<TraceBody>(boardUrl(id, 'sentinel/traces/stop'), null, {
+        params: { trace: trace.id },
       }),
-      generation,
+      id,
       'stop',
     );
     this.clearBusy(busy);
@@ -275,69 +271,58 @@ export class SentinelRuns {
    * left, so a caller shows what it gets unless it is stale. A body without a run's parts
    * (`isSavedRun`) resolves with a `bad_response` failure rather than as a run.
    */
-  async readRun(id: string): Promise<RunRead> {
-    const generation = this.board.generation();
-    if (generation === null) return { failure: noBoard('read') };
+  async readRun(run: string): Promise<RunRead> {
+    const id = this.board.id();
+    if (id === null) return { failure: noBoard('read') };
     const request = this.runReads.next();
-    const current = () => !this.destroyed && this.runReads.isNewest(request);
+    const current = () => !this.destroyed && this.runReads.isNewest(request) && this.isShown(id);
     try {
       const answer = await firstValueFrom(
-        this.http.get<RunAnswer>(runUrl(id)).pipe(withRequestErrors()),
+        this.http.get<unknown>(runUrl(id, run)).pipe(withRequestErrors()),
       );
       if (!current()) return STALE;
-      if (answer.generation !== generation) {
-        void this.board.reload();
-        return STALE;
-      }
-      if (!this.isShown(generation)) return STALE;
-      return isSavedRun(answer.sentinel)
-        ? { run: answer.sentinel }
-        : { failure: unexpectedAnswer(UNKNOWN_RUN, generation) };
+      return isSavedRun(answer) ? { run: answer } : { failure: unexpectedAnswer(UNKNOWN_RUN, id) };
     } catch (error) {
       if (!current()) return STALE;
-      const failure = failureOf(error, generation);
-      if (failure.generation !== generation) {
-        void this.board.reload();
-        return STALE;
-      }
-      return this.isShown(generation) ? { failure } : STALE;
+      const failure = failureOf(error, id);
+      if (BOARD_GONE_CODES.has(failure.code)) void this.board.reload();
+      return { failure };
     }
   }
 
   /**
-   * Deletes runs one at a time, in the order given. A failure that says the board, the daemon or
-   * Insight cannot answer, or that the board changed (`stale_snapshot`, or a failure naming
-   * another generation), stops the batch: the next request would fail the same way, or hit
-   * another board. Any other (a run another client removed, `not_found`; a run still recording,
-   * `trace_conflict`) is recorded and the batch goes on. The runs the last successful answer
-   * leaves apply at once, then the list is read again.
+   * Deletes runs one at a time, in the order given, each by its id. A failure that says the board,
+   * the daemon or Insight cannot answer, or that the board changed, stops the batch: the next
+   * request would fail the same way, or hit another board. Any other (a run another client
+   * removed, `not_found`; a run still recording, `trace_conflict`) is recorded and the batch goes
+   * on. The runs the last successful answer leaves apply at once, then the list is read again.
    */
   async deleteRuns(ids: readonly string[]): Promise<DeleteOutcome> {
-    const generation = this.board.generation();
+    const id = this.board.id();
     const outcome: DeleteOutcome = { deleted: [], failed: [], notTried: [] };
     let left: RunSummary[] | null = null;
-    for (const [index, id] of ids.entries()) {
-      if (generation === null || !this.isShown(generation)) {
+    for (const [index, run] of ids.entries()) {
+      if (id === null || !this.isShown(id)) {
         outcome.notTried.push(...ids.slice(index));
         break;
       }
       const result = await this.change(
-        this.http.delete<DeleteAnswer>(runUrl(id), { params: { generation } }),
-        generation,
+        this.http.delete<DeleteAnswer>(runUrl(id, run)),
+        id,
         'delete',
       );
       if ('answer' in result) {
-        outcome.deleted.push(id);
-        left = result.answer.sentinel.runs;
+        outcome.deleted.push(run);
+        left = result.answer.runs.runs;
         continue;
       }
-      outcome.failed.push({ id, failure: result.failure });
-      if (stopsBatch(result.failure, generation)) {
+      outcome.failed.push({ id: run, failure: result.failure });
+      if (stopsBatch(result.failure)) {
         outcome.notTried.push(...ids.slice(index + 1));
         break;
       }
     }
-    if (generation !== null && this.isShown(generation)) {
+    if (id !== null && this.isShown(id)) {
       if (left !== null) {
         this.invalidate(this.runsSlot);
         this.runsValue.set(left);
@@ -347,15 +332,15 @@ export class SentinelRuns {
     return outcome;
   }
 
-  /** Follows the selected board: another generation drops everything held of the previous one. */
-  private follow(generation: number | null, targeted: boolean): void {
-    if (generation !== this.generation) {
-      this.generation = generation;
+  /** Follows the selected board: another id drops everything held of the previous one. */
+  private follow(id: string | null): void {
+    if (id !== this.boardId) {
+      this.boardId = id;
       this.reset();
     }
     // Restarting the pollers reads the board at once (once the tab shows, if it is hidden) and
     // counts their 30 s from now.
-    const reading = targeted && this.sentinelReady;
+    const reading = this.reading();
     this.traceReads.setActive(false);
     this.traceReads.setActive(reading);
     this.runsReads.setActive(false);
@@ -394,9 +379,9 @@ export class SentinelRuns {
     this.runsFailureValue.set(null);
   }
 
-  /** Whether the page is still open on the board of `generation`, so an answer of it applies. */
-  private isShown(generation: number): boolean {
-    return !this.destroyed && this.board.generation() === generation;
+  /** Whether the page is still open on the board of `id`, so an answer of it applies. */
+  private isShown(id: string): boolean {
+    return !this.destroyed && this.board.id() === id;
   }
 
   /** Drops the answers of the reads of this kind still out: they describe a moment now past. */
@@ -409,31 +394,25 @@ export class SentinelRuns {
    * Reads the trace or the run list unless one is out, which answers for this one, the tab is
    * hidden (the poller reads at once when it shows) or nothing is read now (`reading`).
    */
-  private async read<T extends { generation: number }>(slot: ReadSlot<T>): Promise<void> {
-    const generation = this.board.generation();
-    if (this.destroyed || !this.reading() || generation === null) return;
+  private async read<T>(slot: ReadSlot<T>): Promise<void> {
+    const id = this.board.id();
+    if (this.destroyed || !this.reading() || id === null) return;
     if (this.document.visibilityState !== 'visible' || slot.out !== null) return;
     const request = slot.reads.next();
     slot.out = request;
     try {
-      const answer = await firstValueFrom(this.http.get<T>(slot.url).pipe(withRequestErrors()));
-      if (this.destroyed || !slot.reads.accept(request)) return;
-      if (answer.generation !== generation) {
-        void this.board.reload();
-        return;
-      }
-      if (!this.isShown(generation)) return;
+      const answer = await firstValueFrom(
+        this.http.get<T>(boardUrl(id, slot.path)).pipe(withRequestErrors()),
+      );
+      if (this.destroyed || !slot.reads.accept(request) || !this.isShown(id)) return;
       slot.apply(answer);
       slot.failure.set(null);
     } catch (error) {
       // A failure answers for the reads sent before it as well, as an answer would.
       if (this.destroyed || !slot.reads.isNewest(request) || !slot.reads.accept(request)) return;
-      const failure = failureOf(error, generation);
-      if (failure.generation !== generation) {
-        void this.board.reload();
-        return;
-      }
-      if (this.isShown(generation)) slot.failure.set(failure);
+      const failure = failureOf(error, id);
+      if (BOARD_GONE_CODES.has(failure.code)) void this.board.reload();
+      if (this.isShown(id)) slot.failure.set(failure);
     } finally {
       if (slot.out === request) slot.out = null;
     }
@@ -441,7 +420,7 @@ export class SentinelRuns {
 
   /** A start or stop failed. A conflict means the trace shown is out of date: it is read again. */
   private failedTrace(failure: SentinelFailure): SentinelFailure {
-    if (failure.code === 'trace_conflict' && failure.generation === this.board.generation()) {
+    if (failure.code === 'trace_conflict' && failure.boardId === this.board.id()) {
       this.invalidate(this.traceSlot);
       void this.read(this.traceSlot);
     }
@@ -462,34 +441,31 @@ export class SentinelRuns {
   }
 
   /**
-   * Sends a change to the board of `generation` and says how it went: the answer or failure when
-   * the page still shows that board, else that it was not applied. An answer or failure naming
-   * another generation reloads the board; after the page was left nothing more happens.
+   * Sends a change to the board of `id` and says how it went: the answer or failure when the page
+   * still shows that board, else that it was not applied. A failure saying the board was replaced
+   * reloads the board; after the page was left nothing more happens.
    */
-  private async change<T extends { generation: number }>(
+  private async change<T>(
     request: Observable<T>,
-    generation: number,
+    id: string,
     action: SentinelAction,
   ): Promise<{ answer: T } | { failure: SentinelFailure }> {
-    const unapplied = { failure: notApplied(generation, action) };
+    const unapplied = { failure: notApplied(id, action) };
     try {
       const answer = await firstValueFrom(request.pipe(withRequestErrors()));
-      if (this.destroyed) return unapplied;
-      if (answer.generation !== generation) void this.board.reload();
-      return answer.generation === generation && this.isShown(generation) ? { answer } : unapplied;
+      return this.isShown(id) ? { answer } : unapplied;
     } catch (error) {
       if (this.destroyed) return unapplied;
-      const failure = failureOf(error, generation, action);
-      // The backend's own stale_snapshot names the board selected now: it is reported as it is.
-      if (failure.generation !== generation) void this.board.reload();
-      return this.isShown(generation) ? { failure } : unapplied;
+      const failure = failureOf(error, id, action);
+      if (BOARD_GONE_CODES.has(failure.code)) void this.board.reload();
+      return this.isShown(id) ? { failure } : unapplied;
     }
   }
 }
 
-/** The path of one run. Ids from the Sentinel CLI may hold slashes, which Flask's route takes. */
-function runUrl(id: string): string {
-  return `${RUNS_URL}/${encodeURIComponent(id)}`;
+/** The path of one run on the board of `id`. Ids from the Sentinel CLI may hold slashes. */
+function runUrl(id: string, run: string): string {
+  return boardUrl(id, `sentinel/runs/${encodeURIComponent(run)}`);
 }
 
 /** The request with its text trimmed and an empty note or tag left out, as the server keeps it. */
@@ -505,37 +481,34 @@ function trimmed({ name, note, tags }: TraceRequest): TraceRequest {
 
 /**
  * Whether a delete failure stops the batch: the board or the daemon cannot answer
- * (`haltsPolling`), the board changed (`stale_snapshot`, or the failure names another generation
- * than the batch was sent under), or Insight itself did not answer as it should.
+ * (`haltsPolling`), the board changed, or Insight itself did not answer as it should.
  */
-function stopsBatch({ code, generation }: SentinelFailure, sent: number): boolean {
+function stopsBatch({ code }: SentinelFailure): boolean {
   return (
-    generation !== sent ||
-    haltsPolling(code) ||
-    code === 'stale_snapshot' ||
-    code === 'network' ||
-    code === 'bad_response'
+    haltsPolling(code) || code === 'board_changed' || code === 'network' || code === 'bad_response'
   );
 }
 
 /** A change asked for while no board is known; the page offers none then. */
 function noBoard(action: SentinelAction): SentinelFailure {
-  const problem = new BoardProblem('Choose a board in the top bar first.', 'no_target', '', {});
+  const problem = new BoardProblem(
+    'No board is selected.',
+    'no_target',
+    'Choose a board in the rail first.',
+  );
   return failureOf(problem, null, action);
 }
 
 /**
  * A change whose answer is not for the board shown now: the board changed while it was out. It
- * may have been made on the previous board, so the backend's own "nothing was changed" does not
- * apply; the hint is given so that fallback is not used.
+ * may have been made on the previous board, which the hint says.
  */
-function notApplied(generation: number, action: SentinelAction): SentinelFailure {
+function notApplied(id: string, action: SentinelAction): SentinelFailure {
   const problem = new BoardProblem(
     'The selected board changed before the answer arrived; ' +
       'the change may have been made on the board selected before.',
-    'stale_snapshot',
+    'board_changed',
     'Check the board selected now.',
-    {},
   );
-  return failureOf(problem, generation, action);
+  return failureOf(problem, id, action);
 }

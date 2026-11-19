@@ -13,18 +13,16 @@ import { NeatSeriesSwatch, NeatTimeChart } from '@sima/neat-ui/charts';
 import { NeatSelect } from '@sima/neat-ui/select';
 import { BoardProblem } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
-import { boardState, DEVKIT, FakeBoard } from '../../board/board.testing';
-import type { CompareAnswer, CompareExport, RunSummary } from '../../stats/api';
+import { boardWith, DEVKIT, FakeBoard, LOCAL } from '../../board/board.testing';
+import type { CompareExport, RunSummary } from '../../stats/api';
 import { compareCsv, compareCsvFilename, compareSummary, formatChange } from '../../stats/compare';
 import { COMPARE_RAW, RECORDING_RUN, RUNS_LIST } from '../../stats/runs.testing';
 import { failureOf, type SentinelFailure } from '../../stats/sentinel-failure';
 import { SentinelRuns } from '../../stats/sentinel-runs';
 import { StatsSession } from '../../stats/stats-session';
-import { METRICS_LIVE } from '../../stats/stats.testing';
 import { CompareView } from './compare-view';
 
-const COMPARE_URL = '/api/sentinel/compare';
-const GENERATION = METRICS_LIVE.generation;
+const COMPARE_URL = `/api/boards/${encodeURIComponent(DEVKIT.id)}/sentinel/compare`;
 // The fixture's two runs: tes3, its baseline, and the hardware validation run.
 const [BASELINE, OTHER] = COMPARE_RAW.runs.map((run) => run.metadata.id);
 
@@ -45,9 +43,8 @@ const SWAPPED: CompareExport = {
   runs: [...COMPARE_RAW.runs].reverse(),
 };
 
-function answer(sentinel: CompareExport = COMPARE_RAW, generation = GENERATION): CompareAnswer {
-  return { board: METRICS_LIVE.board, generation, sentinel };
-}
+/** Sentinel's comparison as the route answers it. */
+const answer = (comparison: CompareExport = COMPARE_RAW): CompareExport => comparison;
 
 describe('CompareView', () => {
   let http: HttpTestingController;
@@ -72,7 +69,7 @@ describe('CompareView', () => {
       },
     );
     board = new FakeBoard();
-    board.state.set(boardState({ target: DEVKIT, generation: GENERATION }));
+    board.state.set(boardWith(DEVKIT));
     runs = new FakeRuns();
     TestBed.configureTestingModule({
       providers: [
@@ -179,12 +176,11 @@ describe('CompareView', () => {
   const baselineSelect = (): NeatSelect<string> =>
     harness.fixture.debugElement.query(By.directive(NeatSelect)).componentInstance;
 
-  it('asks Sentinel for the runs with the baseline first and their raw samples', async () => {
+  it('asks Sentinel for the runs with the baseline first', async () => {
     await open(`runs=${OTHER},${BASELINE}&baseline=${BASELINE}`);
     const request = compareRequest();
     expect(request.request.method).toBe('GET');
     expect(request.request.params.get('runs')).toBe(`${BASELINE},${OTHER}`);
-    expect(request.request.params.get('raw')).toBe('1');
     expect(text(root().querySelector('[role="status"]'))).toBe(
       'Reading the comparison from the board…',
     );
@@ -497,7 +493,7 @@ describe('CompareView', () => {
 
   it('a run list that cannot be read says why, with Retry', async () => {
     runs.runs.set(null);
-    runs.runsFailure.set(failureOf(new BoardProblem('Timed out.', 'timeout', '', {}), GENERATION));
+    runs.runsFailure.set(failureOf(new BoardProblem('Timed out.', 'timeout', ''), DEVKIT.id));
     await openPair();
     noRequest();
     expect(calloutHeadings()).toEqual(['The board took too long to answer']);
@@ -538,14 +534,17 @@ describe('CompareView', () => {
     await flush(
       compareRequest(),
       {
-        error: 'Sentinel answered with 9.1 MB; Insight reads at most 8 MB.',
-        code: 'response_too_large',
-        hint: 'Compare fewer or shorter runs.',
-        generation: GENERATION,
+        error: {
+          code: 'response_too_large',
+          message: 'Sentinel answered with 13 MB; Insight reads at most 12 MiB.',
+          hint: 'Compare fewer or shorter runs.',
+        },
       },
       502,
     );
-    expect(calloutHeadings()).toEqual(['Sentinel answered with more than Insight reads']);
+    expect(calloutHeadings()).toEqual([
+      'Sentinel answered with 13 MB; Insight reads at most 12 MiB.',
+    ]);
     expect(text(callout())).toContain('Compare fewer or shorter runs.');
     expect(buttonNamed('Export CSV').disabled).toBe(true);
 
@@ -605,14 +604,36 @@ describe('CompareView', () => {
     expect(rows(metricTable()).every((row) => row[2] === '—')).toBe(true);
   });
 
-  it('drops an answer for another board and reloads the board', async () => {
+  it('drops an answer that lands after the board changed, and asks the new board', async () => {
     await openPair();
-    await flush(compareRequest(), answer(COMPARE_RAW, GENERATION + 1));
-    expect(board.reload).toHaveBeenCalledOnce();
+    const first = compareRequest();
+    board.state.set(boardWith(LOCAL));
+    await settle();
+    const local = http.expectOne((request) => request.url === '/api/boards/local/sentinel/compare');
+    expect(local.request.params.get('runs')).toBe(`${BASELINE},${OTHER}`);
+    await flush(first, answer());
     expect(chips()).toHaveLength(0);
     expect(text(root().querySelector('[role="status"]'))).toBe(
       'Reading the comparison from the board…',
     );
+    await flush(local, answer());
+    expect(chips()).toHaveLength(2);
+  });
+
+  it('a board that is no longer selected reloads the boards', async () => {
+    await openPair();
+    await flush(
+      compareRequest(),
+      {
+        error: {
+          code: 'not_found',
+          message: `${DEVKIT.id} is not the selected board.`,
+          hint: 'Read the boards again and use the selected one.',
+        },
+      },
+      404,
+    );
+    expect(board.reload).toHaveBeenCalledOnce();
   });
 
   it('shows only the newest answer: one for the baseline chosen before is dropped', async () => {

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tracking message",
+  "description": "Tracked objects: a box, a caption with the track's id and a trail of its centers, in the id's color. Version 1 of the contract in docs/contracts.md.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "tracking" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "required": ["tracks"],
+      "properties": {
+        "tracks": {
+          "description": "Every track seen on the frame. An empty list clears the boxes of the frame before.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/track" }
+        }
+      }
+    },
+    "track": {
+      "type": "object",
+      "required": ["bbox"],
+      "properties": {
+        "bbox": { "$ref": "envelope.schema.json#/$defs/bbox" },
+        "id": {
+          "$ref": "envelope.schema.json#/$defs/id",
+          "description": "The track's identity, stable while it lives. It picks the color and keeps the trail; a track without one gets neither."
+        },
+        "label": {
+          "$ref": "envelope.schema.json#/$defs/label",
+          "description": "Shown in the caption, 'track' when absent. The color follows the id, not the label."
+        },
+        "confidence": {
+          "$ref": "envelope.schema.json#/$defs/confidence",
+          "description": "Compared with the viewer's confidence threshold; a track without one always passes."
+        }
+      }
+    }
+  }
+}

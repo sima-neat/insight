@@ -7,45 +7,63 @@ import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { NeatIcon, NeatPage, NeatShell, type NeatTone } from '@sima/neat-ui';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import type { Peripherals } from '../../api.generated';
 import { AppDialogs } from '../../app-dialogs';
-import type { BoardState } from '../../board/api';
-import { boardState, DEVKIT } from '../../board/board.testing';
+import { boardUrl, type BoardList } from '../../board/api';
+import { boardList, boardWith, DEVKIT, MANUAL } from '../../board/board.testing';
 import { FakeLocalStorage } from '../../fake-storage.testing';
-import type { MicrophoneItem, PeripheralSnapshot, PreviewSession } from '../../peripherals/api';
+import type { OtherItem, PreviewSession } from '../../peripherals/api';
 import { CameraPreview } from '../../peripherals/camera-preview';
-import { imx477, previewSession, sel, usb } from '../../peripherals/cameras.testing';
+import { previewSession, sel } from '../../peripherals/cameras.testing';
 import { MicTest } from '../../peripherals/mic-test';
-import { yeti } from '../../peripherals/microphones.testing';
 import { PeripheralsSession } from '../../peripherals/peripherals-session';
-import { peripheralSnapshot } from '../../peripherals/snapshots.testing';
+import { previewStreamUrl, previewUrl } from '../../peripherals/preview-state';
+import {
+  C270 as usb,
+  IMX477 as imx477,
+  NO_SCAN,
+  scanAnswer,
+  YETI as webcamMic,
+} from '../../peripherals/scans.testing';
 import { PeripheralsPage } from './peripherals.page';
 
-const BOARD_URL = '/api/board';
-const LOAD_URL = '/api/peripherals';
-const REFRESH_URL = '/api/peripherals/refresh';
-const PREVIEW_URL = '/api/peripherals/preview';
-const START_URL = '/api/peripherals/cameras/preview';
-const MIC_TEST_URL = '/api/peripherals/microphones/test';
-const stopUrl = (id: string) => `${START_URL}/${id}/stop`;
+const BOARDS_URL = '/api/boards';
+const REFRESH_URL = boardUrl(DEVKIT.id, 'peripherals/refresh');
+const START_URL = boardUrl(
+  DEVKIT.id,
+  `cameras/${encodeURIComponent(imx477.id)}/preview`,
+);
+const MIC_TEST_URL = boardUrl(DEVKIT.id, 'microphones/test');
+/** Any board's peripherals read, and any board's preview read. */
+const isLoad = (request: { method: string; url: string }) =>
+  request.method === 'GET' && request.url.endsWith('/peripherals');
+const isPreviewRead = (request: { method: string; url: string }) =>
+  request.method === 'GET' && request.url.endsWith('/cameras/preview');
+const isStart = (request: { method: string; url: string }) =>
+  request.method === 'POST' && /\/cameras\/[^/]+\/preview$/.test(request.url);
+/** Matches the stop of `session`, which names it. */
+const stopOf =
+  (session: PreviewSession) =>
+  (request: { method: string; urlWithParams: string }): boolean =>
+    request.method === 'POST' &&
+    request.urlWithParams === `${previewUrl(session, '/stop')}?preview=${session.id}`;
+
+/** The devices of a scan that found them all. */
+const ALL = [usb, imx477, webcamMic];
+/** The server's hint for a problem of Sentinel's. */
+const STATUS_HINT = 'Check `systemctl status simaai-sentinel` on the board, then Refresh.';
 
 const mode30 = sel('NV12', 1920, 1080, 30);
 const live30 = previewSession();
-/** The webcam's microphone: the same USB device as the C270 camera. */
-const webcamMic: MicrophoneItem = {
-  ...yeti,
-  device: { ...yeti.device, part_of: { id: usb.id, name: usb.name } },
-};
 // Checked already: an unknown state would make the board service check it as the app starts.
-const devkit = boardState({
-  target: DEVKIT,
-  generation: 3,
-  status: { state: 'connected', checked_at: '2026-10-25T10:00:00Z', error: null },
+const connected = { state: 'connected' as const, checked_at: '2026-10-25T10:00:00Z' };
+const devkit = boardWith(DEVKIT, { status: connected });
+const manual = boardWith(MANUAL, { status: connected });
+/** The error shape the server answers with. */
+const failure = (code: string, message: string, hint?: string) => ({
+  error: { code, message, ...(hint ? { hint } : {}) },
 });
-const unreachable = {
-  error: 'Could not connect to sima@192.168.1.20.',
-  code: 'unreachable',
-  hint: '',
-};
+const unreachable = failure('unreachable', 'Could not connect to sima@192.168.1.20.');
 const badGateway = { status: 502, statusText: 'Bad Gateway' };
 const serverError = { status: 500, statusText: 'Internal Server Error' };
 
@@ -122,43 +140,51 @@ describe('PeripheralsPage', () => {
     }
   }
 
-  /** Answers every pending request to `url` with `body` (or a failure with its status). */
+  type Matcher = (request: { method: string; url: string; urlWithParams: string }) => boolean;
+
+  /**
+   * Answers every pending request to `url` (or that `url` matches) with `body`, or a failure with
+   * its status.
+   */
   function answer(
     method: 'GET' | 'POST',
-    url: string,
+    url: string | Matcher,
     body: object,
     status?: { status: number; statusText: string },
   ): number {
-    const requests = http.match({ method, url });
+    const requests = http.match(typeof url === 'string' ? { method, url } : url);
     for (const request of requests) request.flush(body, status);
     return requests.length;
   }
 
-  const posts = (url: string) => http.match({ method: 'POST', url });
+  const posts = (url: string | Matcher) =>
+    http.match(typeof url === 'string' ? { method: 'POST', url } : url);
 
   /** Opens Peripherals and answers what it reads as it opens. */
   async function visit({
     board = devkit,
-    snapshot = peripheralSnapshot([usb, imx477, webcamMic]),
+    peripherals = scanAnswer(ALL),
     preview = null,
   }: {
-    board?: BoardState;
-    snapshot?: PeripheralSnapshot;
+    board?: BoardList;
+    peripherals?: Peripherals;
     preview?: PreviewSession | null;
   } = {}): Promise<void> {
     await TestBed.inject(Router).navigateByUrl('/peripherals');
     await settle();
-    answer('GET', BOARD_URL, board);
-    answer('GET', LOAD_URL, snapshot);
-    answer('GET', PREVIEW_URL, { session: preview });
+    // The boards first: the page reads the selected board's peripherals and preview.
+    answer('GET', BOARDS_URL, board);
+    await settle();
+    answer('GET', isLoad, peripherals);
+    answer('GET', isPreviewRead, { preview });
     await settle();
   }
 
-  /** Answers the scan a visit started, with `snapshot`, and the board read that ends it. */
-  async function endScan(snapshot: PeripheralSnapshot): Promise<void> {
-    answer('POST', REFRESH_URL, snapshot);
+  /** Answers the scan a visit started, with `peripherals`, and the board read that ends it. */
+  async function endScan(peripherals: Peripherals): Promise<void> {
+    answer('POST', REFRESH_URL, peripherals);
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
   }
 
@@ -282,20 +308,18 @@ describe('PeripheralsPage', () => {
     expect(toolbar().textContent).toContain('Scanned 1 min ago');
   });
 
-  // F27: the spec greys a kind with no devices, not scanned yet, or unsupported.
+  // A kind with no devices, not scanned yet, or with no view is greyed.
   it('a kind Insight has no view for is a muted heading even with devices, its rows Not supported yet', async () => {
-    const lidar = (id: string) => ({
+    const lidar = (id: string, notes: string[] = []): OtherItem => ({
       id,
       kind: 'lidar',
       connection: 'ethernet',
       name: `Ouster ${id}`,
-      device: {},
-      availability: { state: 'unknown' as const, users: [], reason: null },
-      notes: [],
+      notes,
       errors: [],
     });
-    const noted = { ...lidar('os-1'), notes: ['Reported by a newer SiMa Sentinel.'] };
-    await visit({ snapshot: peripheralSnapshot([imx477, noted, lidar('os-2')]) });
+    const noted = lidar('os-1', ['Reported by a newer SiMa Sentinel.']);
+    await visit({ peripherals: scanAnswer([imx477, noted, lidar('os-2')]) });
     expect(groups()[2]).toEqual({
       heading: 'LiDAR · 2',
       muted: true,
@@ -306,7 +330,7 @@ describe('PeripheralsPage', () => {
     });
     expect(iconOf(rowOf('Ouster os-1'))).toBe('lidar');
 
-    // Its panel says so, under its name and chip, with what the backend reports in Details.
+    // Its panel says so, under its name and chip, with what Sentinel reports in Details.
     rowOf('Ouster os-1').click();
     await settle();
     expect(aside()!.querySelector('h2')?.textContent?.trim()).toBe('Ouster os-1');
@@ -322,58 +346,60 @@ describe('PeripheralsPage', () => {
     );
   });
 
-  // F23: the list belongs to the page, so the page tells each row what this page does with it.
+  // The list belongs to the page, so the page tells each row what this page does with it.
   it('rows say Previewing for the camera this page previews and Testing for the microphone it tests', async () => {
     await visit();
     const preview = pageInjector().get(CameraPreview);
-    const started = preview.start(imx477, mode30, 3);
-    answer('POST', START_URL, { session: live30 });
+    const started = preview.start(imx477, mode30, DEVKIT.id);
+    answer('POST', START_URL, { preview: live30 });
     await started;
     await settle();
     expect(chipOf(imx477.name)).toBe('Previewing');
     expect(toneOf(rowOf(imx477.name))).toBe('info');
     expect(chipOf('HD Webcam C270')).toBe('Unsupported');
 
-    void pageInjector().get(MicTest).start(webcamMic, 3);
+    void pageInjector().get(MicTest).start(webcamMic, DEVKIT.id);
     await settle();
     expect(chipOf('Yeti Nano')).toBe('Testing');
     expect(toneOf(rowOf('Yeti Nano'))).toBe('info');
 
     await leave();
-    answer('POST', stopUrl(live30.id), { session: null });
-    http.match(MIC_TEST_URL).forEach((request) => request.flush({ test: null }));
+    answer('POST', stopOf(live30), { preview: null });
+    http
+      .match((request) => request.url.includes('/microphones/'))
+      .forEach((request) => request.flush({ test: null }));
   });
 
   it('scans on every visit: a failed scan, or a snapshot already scanned, does not spare the next one', async () => {
-    await visit({ snapshot: peripheralSnapshot(null) });
+    await visit({ peripherals: NO_SCAN });
     const [scan] = posts(REFRESH_URL);
     expect(scan).toBeDefined();
     expect(status()).toBe('Scanning sima@192.168.1.20');
     scan.flush(unreachable, badGateway);
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(status()).toBe('');
 
     await leave();
-    await visit({ snapshot: peripheralSnapshot(null) });
+    await visit({ peripherals: NO_SCAN });
     const [again] = posts(REFRESH_URL);
     expect(again).toBeDefined();
-    again.flush(peripheralSnapshot([imx477]));
+    again.flush(scanAnswer([imx477]));
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(calloutHeadings()).not.toContain('Scan failed: Could not connect to sima@192.168.1.20.');
 
     // Scanned already, and scanned again.
     await leave();
-    await visit({ snapshot: peripheralSnapshot([imx477]) });
+    await visit({ peripherals: scanAnswer([imx477]) });
     expect(posts(REFRESH_URL)).toHaveLength(1);
   });
 
   it("a visit's scan is silent when it succeeds, and says so when it fails", async () => {
-    await visit({ snapshot: peripheralSnapshot(null) });
-    await endScan(peripheralSnapshot([imx477]));
+    await visit({ peripherals: NO_SCAN });
+    await endScan(scanAnswer([imx477]));
     expect(toasts.status).not.toHaveBeenCalled();
     expect(toasts.error).not.toHaveBeenCalled();
     expect(rowOf(imx477.name)).toBeDefined();
@@ -382,14 +408,14 @@ describe('PeripheralsPage', () => {
     await visit();
     posts(REFRESH_URL)[0].flush(unreachable, badGateway);
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(calloutHeadings()).toContain('Scan failed: Could not connect to sima@192.168.1.20.');
     expect(toasts.status).not.toHaveBeenCalled();
   });
 
-  it('scans nothing on a visit without a board target', async () => {
-    await visit({ board: boardState({ generation: 3 }) });
+  it('scans nothing on a visit without a board', async () => {
+    await visit({ board: boardList() });
     expect(posts(REFRESH_URL)).toHaveLength(0);
   });
 
@@ -399,36 +425,36 @@ describe('PeripheralsPage', () => {
     TestBed.inject(PeripheralsSession).resume = {
       cameraId: imx477.id,
       mode: mode30,
-      generation: 3,
+      board: DEVKIT.id,
     };
-    await visit({ snapshot: peripheralSnapshot([usb, imx477]) });
+    await visit({ peripherals: scanAnswer([usb, imx477]) });
     const [scan] = posts(REFRESH_URL);
     expect(scan).toBeDefined();
     expect(posts(START_URL)).toHaveLength(0);
 
-    scan.flush(peripheralSnapshot([usb, imx477]));
+    scan.flush(scanAnswer([usb, imx477]));
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     const [restart] = posts(START_URL);
-    expect(restart.request.body).toEqual({ id: imx477.id, ...mode30 });
-    restart.flush({ session: live30 });
+    expect(restart.request.body).toEqual(mode30);
+    restart.flush({ preview: live30 });
     await settle();
     expect(chipOf(imx477.name)).toBe('Previewing');
     await leave();
-    answer('POST', stopUrl(live30.id), { session: null });
+    answer('POST', stopOf(live30), { preview: null });
   });
 
   it("the preview the last visit left running is not started after a visit's scan that failed", async () => {
     TestBed.inject(PeripheralsSession).resume = {
       cameraId: imx477.id,
       mode: mode30,
-      generation: 3,
+      board: DEVKIT.id,
     };
-    await visit({ snapshot: peripheralSnapshot([usb, imx477]) });
+    await visit({ peripherals: scanAnswer([usb, imx477]) });
     posts(REFRESH_URL)[0].flush(unreachable, badGateway);
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(calloutHeadings()).toContain('Scan failed: Could not connect to sima@192.168.1.20.');
     expect(posts(START_URL)).toHaveLength(0);
@@ -439,27 +465,27 @@ describe('PeripheralsPage', () => {
     TestBed.inject(PeripheralsSession).resume = {
       cameraId: imx477.id,
       mode: mode30,
-      generation: 3,
+      board: DEVKIT.id,
     };
-    await visit({ snapshot: peripheralSnapshot([usb, imx477]) });
+    await visit({ peripherals: scanAnswer([usb, imx477]) });
     const [scan] = posts(REFRESH_URL);
-    const started = pageInjector().get(CameraPreview).start(imx477, mode30, 3);
-    answer('POST', START_URL, { session: live30 });
+    const started = pageInjector().get(CameraPreview).start(imx477, mode30, DEVKIT.id);
+    answer('POST', START_URL, { preview: live30 });
     await started;
 
-    scan.flush(peripheralSnapshot([usb, imx477]));
+    scan.flush(scanAnswer([usb, imx477]));
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(posts(START_URL)).toHaveLength(0);
     await leave();
-    answer('POST', stopUrl(live30.id), { session: null });
+    answer('POST', stopOf(live30), { preview: null });
   });
 
   it('Refresh shows Scanning… N s, stops the preview first and toasts the result', async () => {
     await visit({ preview: live30 });
     // The visit's own scan ended.
-    await endScan(peripheralSnapshot([usb, imx477, webcamMic]));
+    await endScan(scanAnswer(ALL));
     expect(refreshButton().textContent!.trim()).toBe('Refresh');
     refreshButton().click();
     await settle();
@@ -468,16 +494,16 @@ describe('PeripheralsPage', () => {
     refreshButton().click();
     await settle();
     expect(posts(REFRESH_URL)).toHaveLength(0);
-    const stops = posts(stopUrl(live30.id));
+    const stops = posts(stopOf(live30));
     expect(stops).toHaveLength(1);
-    stops[0].flush({ session: null });
+    stops[0].flush({ preview: null });
     await settle();
     const scans = posts(REFRESH_URL);
     expect(scans).toHaveLength(1);
     const [scan] = scans;
     expect(refreshButton().textContent!.trim()).toBe('Scanning… 0 s');
     expect(refreshButton().getAttribute('aria-disabled')).toBe('true');
-    // #170's busy section: the list is being replaced.
+    // The section is busy: the list is being replaced.
     expect(root().querySelector('app-list-column')!.getAttribute('aria-busy')).toBe('true');
 
     vi.advanceTimersByTime(3000);
@@ -488,9 +514,11 @@ describe('PeripheralsPage', () => {
     await settle();
     expect(posts(REFRESH_URL)).toHaveLength(0);
 
-    scan.flush(peripheralSnapshot([imx477, webcamMic], { scanned_at: '2026-10-25T10:00:33Z' }));
+    scan.flush(
+      scanAnswer([imx477, webcamMic], { scanned_at: '2026-10-25T10:00:33Z' }),
+    );
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(toasts.status).toHaveBeenCalledExactlyOnceWith(
       'Scan complete: 1 camera, 1 microphone on sima@192.168.1.20.',
@@ -501,21 +529,21 @@ describe('PeripheralsPage', () => {
     expect(toolbar().textContent).toContain('Scanned just now');
   });
 
-  // Review Focus 1, at the page: another tab, the board dialog or a re-read on focus switched it.
-  it('shows the board-changed banner and blocks preview while the snapshot is for another generation', async () => {
+  // Another tab, the board dialog or a re-read on focus switched the board.
+  it('shows the board-changed banner and blocks preview while the snapshot is of another board', async () => {
     await visit({ preview: live30 });
-    await endScan(peripheralSnapshot([usb, imx477, webcamMic]));
+    await endScan(scanAnswer(ALL));
     expect(chipOf(imx477.name)).toBe('Previewing');
 
     window.dispatchEvent(new Event('focus'));
-    answer('GET', BOARD_URL, boardState({ target: DEVKIT, generation: 4 }));
+    answer('GET', BOARDS_URL, manual);
     await settle();
     expect(calloutHeadings()).toEqual(['Board changed — refresh']);
     expect(status()).toBe('The board changed. Refresh before starting a preview.');
-    // The backend stopped the old board's preview with the change: it is let go of, unstopped.
+    // The server stopped the old board's preview with the change: it is let go of, unstopped.
     expect(pageInjector().get(CameraPreview).state().status).toBe('idle');
     expect(chipOf(imx477.name)).toBe('Available');
-    expect(posts(stopUrl(live30.id))).toHaveLength(0);
+    expect(posts(stopOf(live30))).toHaveLength(0);
     // The camera's Start waits for a refresh, and says so.
     const start = aside()!.querySelector<HTMLButtonElement>('app-camera-panel .actions button')!;
     expect(start.textContent!.trim()).toBe('Start preview');
@@ -526,28 +554,25 @@ describe('PeripheralsPage', () => {
 
     // Leaving records nothing to start again, and stops nothing.
     await leave();
-    expect(posts(stopUrl(live30.id))).toHaveLength(0);
+    expect(posts(stopOf(live30))).toHaveLength(0);
     expect(TestBed.inject(PeripheralsSession).resume).toBeNull();
 
     // A preview left on the old board is never started on the new one.
     TestBed.inject(PeripheralsSession).resume = {
       cameraId: imx477.id,
       mode: mode30,
-      generation: 3,
+      board: DEVKIT.id,
     };
-    await visit({
-      board: boardState({ target: DEVKIT, generation: 4 }),
-      snapshot: peripheralSnapshot([imx477], { generation: 4 }),
-    });
-    expect(posts(START_URL)).toHaveLength(0);
+    await visit({ board: manual, peripherals: scanAnswer([imx477]) });
+    expect(http.match(isStart)).toHaveLength(0);
     expect(TestBed.inject(PeripheralsSession).resume).toBeNull();
   });
 
   it('a connection failure offers Open board settings; issues and the change summary show above the list', async () => {
-    await visit({ snapshot: peripheralSnapshot(null) });
+    await visit({ peripherals: NO_SCAN });
     posts(REFRESH_URL)[0].flush(unreachable, badGateway);
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(calloutHeadings()).toEqual(['Scan failed: Could not connect to sima@192.168.1.20.']);
     buttonNamed('Open board settings')!.click();
@@ -556,42 +581,49 @@ describe('PeripheralsPage', () => {
     refreshButton().click();
     await settle();
     posts(REFRESH_URL)[0].flush(
-      peripheralSnapshot([imx477], {
+      scanAnswer([imx477], {
         changes: { added: [{ id: imx477.id, name: 'imx477' }], removed: [] },
         issues: [
-          { severity: 'warning', code: 'c', message: 'Camera overlays unknown.', hint: null },
+          {
+            code: 'c',
+            message:
+              "SiMa Sentinel could not read part of the board's camera setup: Camera overlays unknown.",
+            hint: STATUS_HINT,
+          },
         ],
       }),
     );
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(calloutHeadings()).toEqual(['Warning']);
     const banners = root().querySelector('app-peripherals-banners')!;
     expect(banners.textContent).toContain('New: imx477');
-    expect(banners.textContent).toContain('Camera overlays unknown.');
+    expect(banners.textContent).toContain(
+      "SiMa Sentinel could not read part of the board's camera setup: Camera overlays unknown.",
+    );
     expect(
       banners.compareDocumentPosition(listbox()!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
-  // Spec: leaving Peripherals stops the preview, coming back starts it again (Review Focus 2).
+  // Leaving Peripherals stops the preview, coming back starts it again.
   it('leaving with a live preview stops it and coming back starts it again once', async () => {
     await visit();
-    const started = pageInjector().get(CameraPreview).start(imx477, mode30, 3);
-    answer('POST', START_URL, { session: live30 });
+    const started = pageInjector().get(CameraPreview).start(imx477, mode30, DEVKIT.id);
+    answer('POST', START_URL, { preview: live30 });
     await started;
 
     await leave();
-    expect(answer('POST', stopUrl(live30.id), { session: null })).toBe(1);
+    expect(answer('POST', stopOf(live30), { preview: null })).toBe(1);
     await settle();
 
-    await visit({ snapshot: peripheralSnapshot([usb, imx477]) });
-    await endScan(peripheralSnapshot([usb, imx477]));
+    await visit({ peripherals: scanAnswer([usb, imx477]) });
+    await endScan(scanAnswer([usb, imx477]));
     const [restart] = posts(START_URL);
-    expect(restart.request.body).toEqual({ id: imx477.id, ...mode30 });
+    expect(restart.request.body).toEqual(mode30);
     expect(posts(START_URL)).toHaveLength(0);
-    restart.flush({ session: { ...live30, id: '9a2d', stream_url: `${START_URL}/9a2d/stream` } });
+    restart.flush({ preview: { ...live30, id: '9a2d' } });
     await settle();
     expect(selectedRow()).toBe(rowOf(imx477.name));
     expect(chipOf(imx477.name)).toBe('Previewing');
@@ -599,53 +631,49 @@ describe('PeripheralsPage', () => {
 
     // Without a preview to come back to, coming back starts nothing.
     const stopped = pageInjector().get(CameraPreview).stop();
-    answer('POST', stopUrl('9a2d'), { session: null });
+    answer('POST', stopOf({ ...live30, id: '9a2d' }), { preview: null });
     await stopped;
     await leave();
     await visit();
     expect(posts(START_URL)).toHaveLength(0);
   });
 
-  // Task 12's M-1: the previous visit's start still runs on the board when the page comes back.
+  // The previous visit's start still runs on the board when the page comes back.
   it("coming back while the last visit's start is still out waits for it to stop before starting again", async () => {
     await visit();
-    void pageInjector().get(CameraPreview).start(imx477, mode30, 3);
+    void pageInjector().get(CameraPreview).start(imx477, mode30, DEVKIT.id);
     const [late] = posts(START_URL);
     await leave();
 
     await TestBed.inject(Router).navigateByUrl('/peripherals');
     await settle();
-    answer('GET', BOARD_URL, devkit);
-    answer('GET', LOAD_URL, peripheralSnapshot([imx477]));
+    answer('GET', BOARDS_URL, devkit);
+    await settle();
+    answer('GET', isLoad, scanAnswer([imx477]));
     await settle();
     // The running preview is not read, and nothing started, while the old start is out.
-    http.expectNone(PREVIEW_URL);
+    http.expectNone(isPreviewRead);
     expect(posts(START_URL)).toHaveLength(0);
 
-    late.flush({ session: live30 });
+    late.flush({ preview: live30 });
     await settle();
-    http.expectNone(PREVIEW_URL);
-    answer('POST', stopUrl(live30.id), { session: null });
+    http.expectNone(isPreviewRead);
+    answer('POST', stopOf(live30), { preview: null });
     await settle();
-    answer('GET', PREVIEW_URL, { session: null });
+    answer('GET', isPreviewRead, { preview: null });
     await settle();
-    await endScan(peripheralSnapshot([imx477]));
+    await endScan(scanAnswer([imx477]));
     const [restart] = posts(START_URL);
-    expect(restart.request.body).toEqual({ id: imx477.id, ...mode30 });
+    expect(restart.request.body).toEqual(mode30);
   });
 
   it('a preview running at entry is adopted with its camera and mode', async () => {
-    const webcam = previewSession({
-      id: 'c270',
-      camera_id: usb.id,
-      mode: sel('MJPG', 1280, 720, 30),
-      stream_url: `${START_URL}/c270/stream`,
-    });
+    const webcam = previewSession({ id: 'c270', camera: usb.id, mode: sel('MJPG', 1280, 720, 30) });
     // A preview left running when the page was last left loses to the one running now.
     TestBed.inject(PeripheralsSession).resume = {
       cameraId: imx477.id,
       mode: mode30,
-      generation: 3,
+      board: DEVKIT.id,
     };
     await visit({ preview: webcam });
     expect(selectedRow()).toBe(rowOf('HD Webcam C270'));
@@ -656,28 +684,28 @@ describe('PeripheralsPage', () => {
     expect(pageInjector().get(CameraPreview).state().status).toBe('live');
     expect(posts(START_URL)).toHaveLength(0);
     expect(TestBed.inject(PeripheralsSession).resume).toBeNull();
-    // The scan would make the backend stop the preview just taken up: a visit never does that.
+    // The scan would make the server stop the preview just taken up: a visit never does that.
     expect(posts(REFRESH_URL)).toHaveLength(0);
   });
 
   it('a preview running at entry opens the side panel it shows in, rather than being stopped', async () => {
     storage.values.set('neat-insight:peripherals:aside', 'closed');
     await visit({ preview: live30 });
-    expect(aside()?.querySelector('app-camera-panel app-preview-frame img')?.getAttribute('src')).toBe(
-      live30.stream_url,
-    );
+    expect(
+      aside()?.querySelector('app-camera-panel app-preview-frame img')?.getAttribute('src'),
+    ).toBe(previewStreamUrl(live30));
     expect(storage.values.get('neat-insight:peripherals:aside')).toBe('open');
-    expect(posts(stopUrl(live30.id))).toHaveLength(0);
+    expect(posts(stopOf(live30))).toHaveLength(0);
     expect(posts(REFRESH_URL)).toHaveLength(0);
     expect(pageInjector().get(CameraPreview).state().status).toBe('live');
     await leave();
-    answer('POST', stopUrl(live30.id), { session: null });
+    answer('POST', stopOf(live30), { preview: null });
   });
 
   /**
-   * Presses the shown camera's Start, which the backend refuses because `running` already runs
+   * Presses the shown camera's Start, which the server refuses because `running` already runs
    * (another tab, or a client of the API, started it after this page read the preview); the page
-   * then reads the running preview, as #170 did.
+   * then reads the running preview.
    */
   async function startRefusedFor(running: PreviewSession): Promise<void> {
     startButton().click();
@@ -685,29 +713,27 @@ describe('PeripheralsPage', () => {
     answer(
       'POST',
       START_URL,
-      {
-        error: `A preview of ${running.camera_id} is already starting or running.`,
-        code: 'preview_active',
-        hint: 'Stop that preview before starting another one.',
-        camera_id: running.camera_id,
-      },
+      failure(
+        'preview_active',
+        `A preview of ${running.camera} is already running.`,
+        'Stop that preview before starting another.',
+      ),
       { status: 409, statusText: 'Conflict' },
     );
     await settle();
-    answer('GET', PREVIEW_URL, { session: running });
+    answer('GET', isPreviewRead, { preview: running });
     await settle();
   }
   const startButton = (): HTMLButtonElement =>
     aside()!.querySelector<HTMLButtonElement>('app-camera-panel .actions button')!;
   const webcamLive = previewSession({
     id: 'c270',
-    camera_id: usb.id,
+    camera: usb.id,
     mode: sel('MJPG', 1280, 720, 30),
-    stream_url: `${START_URL}/c270/stream`,
   });
 
-  // Final review I-1 (Review Focus 3): a refused Start takes the running preview up the way
-  // entering the page does, rather than leaving it, which stopped it.
+  // A refused Start takes the running preview up the way entering the page does, rather than
+  // leaving it, which would stop it.
   it("a Start refused for another camera's preview selects that camera and its mode, and stops nothing", async () => {
     await visit();
     expect(selectedRow()).toBe(rowOf(imx477.name));
@@ -728,15 +754,15 @@ describe('PeripheralsPage', () => {
     });
     expect(
       aside()!.querySelector('app-camera-panel app-preview-frame img')?.getAttribute('src'),
-    ).toBe(webcamLive.stream_url);
+    ).toBe(previewStreamUrl(webcamLive));
     expect(chipOf('HD Webcam C270')).toBe('Previewing');
     await settle();
-    expect(posts(stopUrl(webcamLive.id))).toHaveLength(0);
+    expect(posts(stopOf(webcamLive))).toHaveLength(0);
     expect(posts(START_URL)).toHaveLength(0);
 
     // It is this page's now: leaving stops it, as it would one adopted on entry.
     await leave();
-    expect(answer('POST', stopUrl(webcamLive.id), { session: null })).toBe(1);
+    expect(answer('POST', stopOf(webcamLive), { preview: null })).toBe(1);
   });
 
   it('a Start refused for a preview another tab shows selects its camera, in another tab, with Stop', async () => {
@@ -751,19 +777,15 @@ describe('PeripheralsPage', () => {
     );
     expect(startButton().textContent!.trim()).toBe('Stop preview');
     await settle();
-    expect(posts(stopUrl(webcamLive.id))).toHaveLength(0);
+    expect(posts(stopOf(webcamLive))).toHaveLength(0);
 
     // The other tab's to stop: leaving lets go of it.
     await leave();
-    expect(posts(stopUrl(webcamLive.id))).toHaveLength(0);
+    expect(posts(stopOf(webcamLive))).toHaveLength(0);
   });
 
   it('a Start refused for the same camera in another mode remembers that mode, so the pickers match the video', async () => {
-    const running60 = previewSession({
-      id: '9a2d',
-      mode: sel('NV12', 1920, 1080, 60),
-      stream_url: `${START_URL}/9a2d/stream`,
-    });
+    const running60 = previewSession({ id: '9a2d', mode: sel('NV12', 1920, 1080, 60) });
     await visit();
     await startRefusedFor(running60);
 
@@ -773,17 +795,13 @@ describe('PeripheralsPage', () => {
     );
     expect(pageInjector().get(CameraPreview).state().session).toEqual(running60);
     await settle();
-    expect(posts(stopUrl(running60.id))).toHaveLength(0);
+    expect(posts(stopOf(running60))).toHaveLength(0);
     await leave();
-    answer('POST', stopUrl(running60.id), { session: null });
+    answer('POST', stopOf(running60), { preview: null });
   });
 
   it('a Start refused for a camera the scan does not list says so, and leaves that preview alone', async () => {
-    const unlisted = previewSession({
-      id: 'e4d1',
-      camera_id: 'mipi:/base/axi/i2c@88000/imx477@1a',
-      stream_url: `${START_URL}/e4d1/stream`,
-    });
+    const unlisted = previewSession({ id: 'e4d1', camera: 'camera:imx477 6-001a' });
     await visit();
     await startRefusedFor(unlisted);
 
@@ -792,17 +810,16 @@ describe('PeripheralsPage', () => {
     const state = pageInjector().get(CameraPreview).state();
     expect(state.status).toBe('error');
     expect(state.error?.code).toBe('preview_active');
-    expect(aside()!.textContent).toContain(
-      'The running preview is on mipi:/base/axi/i2c@88000/imx477@1a.',
-    );
+    // The server's refusal names the camera it runs on.
+    expect(aside()!.textContent).toContain('A preview of camera:imx477 6-001a is already running.');
     await settle();
-    expect(posts(stopUrl(unlisted.id))).toHaveLength(0);
+    expect(posts(stopOf(unlisted))).toHaveLength(0);
     await leave();
-    expect(posts(stopUrl(unlisted.id))).toHaveLength(0);
+    expect(posts(stopOf(unlisted))).toHaveLength(0);
   });
 
-  // Ruling F4: the row says Previewing (F23); the panel's title names the camera's own state and
-  // the status chip the preview's, so the panel never shows Previewing beside Live.
+  // The row says Previewing; the panel's title names the camera's own state and the status chip
+  // the preview's, so the panel never shows Previewing beside Live.
   it("the side panel shows the selected camera's panel, titled with the camera's own chip", async () => {
     await visit({ preview: live30 });
     expect(chipOf(imx477.name)).toBe('Previewing');
@@ -814,10 +831,10 @@ describe('PeripheralsPage', () => {
     expect(panel.querySelector('.status neat-status-chip')?.textContent?.trim()).toBe('Live');
     expect(panel.textContent).not.toContain('Previewing');
     expect(panel.querySelector('app-preview-frame img')?.getAttribute('src')).toBe(
-      live30.stream_url,
+      previewStreamUrl(live30),
     );
     await leave();
-    answer('POST', stopUrl(live30.id), { session: null });
+    answer('POST', stopOf(live30), { preview: null });
   });
 
   it('leaving a camera stops its preview: another device selected, or the side panel closed', async () => {
@@ -825,7 +842,7 @@ describe('PeripheralsPage', () => {
     const preview = pageInjector().get(CameraPreview);
     rowOf('HD Webcam C270').click();
     await settle();
-    expect(answer('POST', stopUrl(live30.id), { session: null })).toBe(1);
+    expect(answer('POST', stopOf(live30), { preview: null })).toBe(1);
     await settle();
     expect(preview.state().status).toBe('idle');
 
@@ -834,12 +851,12 @@ describe('PeripheralsPage', () => {
     await settle();
     aside()!.querySelector<HTMLButtonElement>('app-camera-panel .actions button')!.click();
     await settle();
-    answer('POST', START_URL, { session: live30 });
+    answer('POST', START_URL, { preview: live30 });
     await settle();
     expect(preview.state().status).toBe('live');
     sidePanelToggle()!.click();
     await settle();
-    expect(answer('POST', stopUrl(live30.id), { session: null })).toBe(1);
+    expect(answer('POST', stopOf(live30), { preview: null })).toBe(1);
     await settle();
     expect(preview.state().status).toBe('idle');
   });
@@ -850,15 +867,11 @@ describe('PeripheralsPage', () => {
     // Loading: the board's first read and the snapshot's are out.
     expect(root().textContent).toContain('Loading peripherals…');
     expect(listbox()).toBeNull();
-    answer('GET', BOARD_URL, boardState());
-    answer(
-      'GET',
-      LOAD_URL,
-      { error: 'No board is selected.', code: 'no_target', hint: '' },
-      { status: 409, statusText: 'Conflict' },
-    );
-    answer('GET', PREVIEW_URL, { session: null });
+    answer('GET', BOARDS_URL, boardList());
     await settle();
+    // Without a board there is nothing to read.
+    expect(http.match(isLoad)).toHaveLength(0);
+    expect(http.match(isPreviewRead)).toHaveLength(0);
     expect(listbox()).toBeNull();
     expect(calloutHeadings()).toEqual(['No board selected']);
     expect(root().textContent).toContain(
@@ -868,7 +881,7 @@ describe('PeripheralsPage', () => {
     expect(dialogs.openBoard).toHaveBeenCalledTimes(1);
     // Nothing to scan, and no Refresh until a board is chosen.
     expect(posts(REFRESH_URL)).toHaveLength(0);
-    // Final review M-5: it keeps the focus (aria-disabled), so a keyboard reaches its tooltip.
+    // It keeps the focus (aria-disabled), so a keyboard reaches its tooltip.
     expect(refreshButton().disabled).toBe(false);
     expect(refreshButton().getAttribute('aria-disabled')).toBe('true');
     refreshButton().click();
@@ -880,15 +893,15 @@ describe('PeripheralsPage', () => {
     await leave();
     await visit();
     window.dispatchEvent(new Event('focus'));
-    answer('GET', BOARD_URL, { error: 'Bad gateway' }, badGateway);
+    answer('GET', BOARDS_URL, failure('bad_gateway', 'Bad gateway'), badGateway);
     await settle();
     // A last good state is kept: the list stays, and the board block shows the error.
     expect(listbox()).not.toBeNull();
     expect(aside()?.querySelector('h2')?.textContent?.trim()).toBe(imx477.name);
 
-    // The board loses its target: no device of the old scan stays in the side panel.
+    // No board is selected any more: no device of the old scan stays in the side panel.
     window.dispatchEvent(new Event('focus'));
-    answer('GET', BOARD_URL, boardState({ generation: 4 }));
+    answer('GET', BOARDS_URL, boardList());
     await settle();
     expect(calloutHeadings()).toContain('No board selected');
     expect(aside()?.querySelector('h2')).toBeNull();
@@ -897,9 +910,7 @@ describe('PeripheralsPage', () => {
   it('a board that cannot be read at all says why, with the board settings', async () => {
     await TestBed.inject(Router).navigateByUrl('/peripherals');
     await settle();
-    answer('GET', BOARD_URL, { error: 'Internal Server Error' }, serverError);
-    answer('GET', LOAD_URL, peripheralSnapshot(null));
-    answer('GET', PREVIEW_URL, { session: null });
+    answer('GET', BOARDS_URL, failure('internal_error', 'Internal Server Error'), serverError);
     await settle();
     expect(listbox()).toBeNull();
     expect(root().querySelector('app-board-problem-notice')?.textContent).toContain(
@@ -910,13 +921,13 @@ describe('PeripheralsPage', () => {
     expect(posts(REFRESH_URL)).toHaveLength(0);
   });
 
-  // Ruling Q9: Peripherals says what failed (Review Focus 4).
   it('a failed read of the peripherals says what failed above the list', async () => {
     await TestBed.inject(Router).navigateByUrl('/peripherals');
     await settle();
-    answer('GET', BOARD_URL, devkit);
-    answer('GET', LOAD_URL, { error: 'Internal Server Error' }, serverError);
-    answer('GET', PREVIEW_URL, { session: null });
+    answer('GET', BOARDS_URL, devkit);
+    await settle();
+    answer('GET', isLoad, failure('internal_error', 'Internal Server Error'), serverError);
+    answer('GET', isPreviewRead, { preview: null });
     await settle();
     expect(calloutHeadings()).toEqual(['Could not load peripherals: Internal Server Error']);
     expect(groups().map((group) => group.heading)).toEqual([
@@ -925,12 +936,12 @@ describe('PeripheralsPage', () => {
       'LiDAR · not scanned yet',
     ]);
 
-    // A scan that answers says the peripherals were read after all: the failure goes (#170).
+    // A scan that answers says the peripherals were read after all: the failure goes.
     refreshButton().click();
     await settle();
-    posts(REFRESH_URL)[0].flush(peripheralSnapshot([imx477]));
+    posts(REFRESH_URL)[0].flush(scanAnswer([imx477]));
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(calloutHeadings()).toEqual([]);
     expect(groups()[0].heading).toBe('Cameras · 1');
@@ -950,9 +961,9 @@ describe('PeripheralsPage', () => {
     // A rescan still listing it keeps it.
     refreshButton().click();
     await settle();
-    posts(REFRESH_URL)[0].flush(peripheralSnapshot([imx477, webcamMic]));
+    posts(REFRESH_URL)[0].flush(scanAnswer([imx477, webcamMic]));
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(selectedRow()).toBe(rowOf('Yeti Nano'));
 
@@ -960,12 +971,12 @@ describe('PeripheralsPage', () => {
     refreshButton().click();
     await settle();
     posts(REFRESH_URL)[0].flush(
-      peripheralSnapshot([imx477], {
+      scanAnswer([imx477], {
         changes: { added: [], removed: [{ id: webcamMic.id, name: 'Yeti Nano' }] },
       }),
     );
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(selectedRow()).toBeUndefined();
     expect(aside()?.querySelector('neat-callout [role="heading"]')?.textContent?.trim()).toBe(
@@ -979,44 +990,46 @@ describe('PeripheralsPage', () => {
     // Coming back finds it where it was left.
     await leave();
     expect(TestBed.inject(PeripheralsSession).selectedId).toBe(webcamMic.id);
-    await visit({ snapshot: peripheralSnapshot([usb, imx477, webcamMic]) });
+    await visit({ peripherals: scanAnswer(ALL) });
     expect(selectedRow()).toBe(rowOf('Yeti Nano'));
 
     // Gone from a later scan and not reported removed: the first device instead.
     refreshButton().click();
     await settle();
-    posts(REFRESH_URL)[0].flush(peripheralSnapshot([usb]));
+    posts(REFRESH_URL)[0].flush(scanAnswer([usb]));
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     expect(selectedRow()).toBe(rowOf('HD Webcam C270'));
   });
 
-  // F28: #170's guidance, the MIPI power-off advice included, when there is no device to show.
+  // The guidance, the MIPI power-off advice included, when there is no device to show.
   it('the side panel guides an unscanned board and an empty scan', async () => {
-    await visit({ snapshot: peripheralSnapshot(null) });
+    await visit({ peripherals: NO_SCAN });
     expect(aside()?.textContent?.trim()).toBe('Scanning sima@192.168.1.20…');
     posts(REFRESH_URL)[0].flush(unreachable, badGateway);
     await settle();
-    answer('GET', BOARD_URL, devkit);
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     // Hidden while the scan failure explains why there is nothing.
     expect(aside()?.textContent?.trim()).toBe('');
 
-    // Another board, whose scan finds nothing.
+    // The next visit's scan finds nothing, with a note of Sentinel's.
     await leave();
-    await visit({
-      board: boardState({ target: DEVKIT, generation: 5 }),
-      snapshot: peripheralSnapshot(null, { generation: 5 }),
-    });
+    await visit({ peripherals: NO_SCAN });
     posts(REFRESH_URL)[0].flush(
-      peripheralSnapshot([], {
-        generation: 5,
-        issues: [{ severity: 'info', code: 'a', message: 'No overlays.', hint: null }],
+      scanAnswer([], {
+        issues: [
+          {
+            code: 'a',
+            message: "SiMa Sentinel could not read part of the board's camera setup: No overlays.",
+            hint: STATUS_HINT,
+          },
+        ],
       }),
     );
     await settle();
-    answer('GET', BOARD_URL, boardState({ target: DEVKIT, generation: 5 }));
+    answer('GET', BOARDS_URL, devkit);
     await settle();
     const text = aside()!.textContent!.replace(/\s+/g, ' ');
     expect(text).toContain('No cameras detected on sima@192.168.1.20');

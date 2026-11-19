@@ -151,27 +151,23 @@ describe('ViewerTile', () => {
     expect(text('.status')).toBe('H.264 · 640×480 · 15.0 fps · 812.4 kb/s · 15 msg/s');
   });
 
-  it('applies the channel’s sync buffer and retention, again only when one of them changes', async () => {
+  it('applies the channel’s sync buffer to the connection and its retention to the tile, each only when it changes', async () => {
     expect(connection().syncBuffers).toEqual([300]);
-    expect(connection().retentions).toEqual([0]);
     expect(kitTile().retentionMs()).toBe(0);
 
     host().store.set(2, 'general.videoSyncBufferMs', 500);
     await fixture.whenStable();
     expect(connection().syncBuffers).toEqual([300, 500]);
-    expect(connection().retentions).toEqual([0]);
 
     host().store.set('global', 'general.metadataRetentionMs', 2000);
     await fixture.whenStable();
     expect(connection().syncBuffers).toEqual([300, 500]);
-    expect(connection().retentions).toEqual([0, 2000]);
     expect(kitTile().retentionMs()).toBe(2000);
 
     // An overlay setting changes the tile's settings, not the connection.
     host().store.set(2, 'general.lineWidth', 4);
     await fixture.whenStable();
     expect(connection().syncBuffers).toEqual([300, 500]);
-    expect(connection().retentions).toEqual([0, 2000]);
     expect(kitTile().settings().general.lineWidth).toBe(4);
   });
 

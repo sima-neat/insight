@@ -1,19 +1,27 @@
 import { BoardProblem } from '../board/board-error';
-import { ApiRequestError } from '../sources/stream-lines';
-import installFailures from '../../../../tests/fixtures/sentinel/install-failures.json';
-import { MAX_POLL_MS, POLL_MS, failureOf, haltsPolling, pollDelay } from './sentinel-failure';
+import { ApiRequestError } from '../sources/api-errors';
+import {
+  MAX_POLL_MS,
+  POLL_MS,
+  failureOf,
+  haltsPolling,
+  hintCommand,
+  pollDelay,
+  sentinelUnusable,
+} from './sentinel-failure';
 
-/**
- * What POST /api/sentinel/install answers when it refuses or fails, captured from
- * `neat_insight.sentinel.api` (#170's `install-failures.json`).
- */
-const INSTALL: Record<string, { status: number; body: Record<string, unknown> }> = installFailures;
+/** An error as an answer's `error` carries it: a code, a sentence and maybe a hint. */
+const detail = (code: string, message = 'x', hint?: string) => ({
+  code,
+  message,
+  ...(hint === undefined ? {} : { hint }),
+});
 
-const BOARD_PILL = 'from the board pill in the top bar';
+/** A failed request as the server answers it: the error shape, with a board's extras. */
+const answered = (status: number, code: string, message: string, extra: object = {}) =>
+  new ApiRequestError(status, message, { error: { code, message }, ...extra });
 
 describe('polling', () => {
-  // The backoff assertions of #170's "values, changes, durations, ... read as a developer
-  // expects; polling backs off".
   it('polling backs off from 2 s to a cap of 30 s', () => {
     expect([0, 1, 3, 99].map(pollDelay)).toEqual([POLL_MS, 4000, 16000, MAX_POLL_MS]);
     expect([POLL_MS, MAX_POLL_MS]).toEqual([2000, 30000]);
@@ -47,146 +55,106 @@ describe('polling', () => {
       expect(haltsPolling(code), code).toBe(false);
     }
   });
+
+  it('only a daemon that is not there, or speaks another API, makes Sentinel unusable', () => {
+    for (const code of [
+      'sentinel_missing',
+      'sentinel_stopped',
+      'sentinel_denied',
+      'sentinel_schema',
+      'sentinel_outdated',
+    ]) {
+      expect(sentinelUnusable(code), code).toBe(true);
+    }
+    for (const code of ['sentinel_failed', 'timeout', 'unreachable', 'network', 'not_found', '']) {
+      expect(sentinelUnusable(code), code).toBe(false);
+    }
+  });
 });
 
 describe('failureOf', () => {
-  it('every backend failure becomes a title, a sentence and a place to fix it', () => {
+  it('a failure is headed by the backend’s message, with its hint and the place to fix it', () => {
     const noBoard = failureOf(
-      { error: 'No board is selected.', code: 'no_target', hint: 'Enter the board address.' },
+      detail('no_target', 'No board is selected.', 'Enter the board address.'),
       null,
     );
-    expect([noBoard.title, noBoard.hint, noBoard.board, noBoard.retryable]).toEqual([
-      'No board is selected',
-      'Enter the board address.',
-      true,
+    expect(noBoard).toMatchObject({
+      title: 'No board is selected.',
+      detail: '',
+      hint: 'Enter the board address.',
+      board: true,
+      retryable: false,
+    });
+
+    const hostKey = { host: '192.168.1.20', expected: 'SHA256:old', presented: 'SHA256:new' };
+    expect(
+      failureOf(answered(409, 'host_key_changed', 'host key changed', { host_key: hostKey }), null)
+        .problem.hostKey,
+    ).toEqual(hostKey);
+
+    const schema = failureOf(detail('sentinel_schema', 'Sentinel speaks schema 2'), null);
+    expect([schema.title, schema.detail, schema.board]).toEqual([
+      'Sentinel speaks schema 2',
+      '',
       false,
     ]);
-    expect(noBoard.problem.message).toBe('No board is selected.');
-
-    const unreachable = failureOf(
-      { error: 'ssh: connect failed', code: 'unreachable', hint: null },
-      null,
-    );
-    expect(unreachable.board).toBe(true);
-    expect(unreachable.hint).toContain(BOARD_PILL);
-
-    expect(
-      failureOf(
-        {
-          error: 'host key changed',
-          code: 'host_key_changed',
-          presented_fingerprint: 'SHA256:new',
-        },
-        null,
-      ).problem.details['presented_fingerprint'],
-    ).toBe('SHA256:new');
-
-    const schema = failureOf({ error: 'Sentinel speaks schema 2', code: 'sentinel_schema' }, null);
-    expect([schema.title, schema.board]).toEqual([
-      'Sentinel and Insight speak different API versions',
-      false,
-    ]);
-    expect(
-      failureOf({ error: 'socket cannot be opened', code: 'sentinel_denied' }, null).daemon,
-    ).toBe(true);
-    expect(
-      failureOf(
-        { error: 'installer failed', code: 'sentinel_failed', detail: 'exit 1\nlog tail' },
-        null,
-      ).detail,
-    ).toBe('exit 1\nlog tail');
-
-    const tooLarge = failureOf(
-      {
-        error: 'larger than the 12 MiB Insight reads',
-        code: 'response_too_large',
-        limit_bytes: 12582912,
-      },
-      null,
-    );
-    expect([tooLarge.title, tooLarge.board, tooLarge.daemon]).toEqual([
-      'Sentinel answered with more than Insight reads',
-      false,
-      false,
-    ]);
-    expect(failureOf({ error: 'boom', code: 'unheard_of' }, null).title).toBe(
-      'Something went wrong',
-    );
+    expect(failureOf(detail('sentinel_denied'), null).daemon).toBe(true);
+    expect(failureOf(detail('unheard_of', 'Something odd.'), null).title).toBe('Something odd.');
     expect(failureOf(new Error('plain'), null)).toMatchObject({
       code: '',
-      title: 'Something went wrong',
-      hint: '',
+      title: 'plain',
       detail: '',
+      hint: '',
     });
-    const body = { error: 'no active trace', code: 'trace_conflict', generation: 4 };
-    expect(failureOf(new ApiRequestError(409, 'no active trace', body), 3).generation).toBe(4);
-    const noGeneration = { error: 'no board', code: 'no_target' };
-    expect(failureOf(new ApiRequestError(409, 'no board', noGeneration), 3).generation).toBe(3);
     // A problem the board already read is read as it is.
-    const problem = new BoardProblem('Sentinel is gone', 'sentinel_missing', '', {});
-    expect(failureOf(problem, 2).problem).toBe(problem);
+    const problem = new BoardProblem('Sentinel is gone', 'sentinel_missing', '');
+    expect(failureOf(problem, 'local').problem).toBe(problem);
   });
 
-  it('a request that never reached Insight is titled as that, with the hint to retry', () => {
-    const failure = failureOf(new ApiRequestError(0, 'Failed to fetch', null), 1);
+  it('a code whose message is technical or Sentinel’s own text gets a title, the message below it', () => {
+    const unreachable = failureOf(
+      detail(
+        'unreachable',
+        'Could not connect to 192.168.2.254:22: connection refused',
+        'Check that `ssh -p 22 sima@192.168.2.254` works from this machine.',
+      ),
+      null,
+    );
+    expect(unreachable).toMatchObject({
+      title: 'The board could not be reached',
+      detail: 'Could not connect to 192.168.2.254:22: connection refused',
+      hint: 'Check that `ssh -p 22 sima@192.168.2.254` works from this machine.',
+      board: true,
+      daemon: false,
+    });
+    expect(failureOf(detail('sentinel_outdated', 'No /v1/runs.'), null)).toMatchObject({
+      title: 'Sentinel on the board is older than Insight',
+      detail: 'No /v1/runs.',
+    });
+  });
+
+  it('a request that never reached Insight says so, with the hint to retry', () => {
+    const failure = failureOf(new ApiRequestError(0, 'Failed to fetch', null), 'local');
     expect([failure.code, failure.title, failure.board, failure.retryable]).toEqual([
       'network',
-      'Insight is not answering',
+      'Could not reach the Insight server.',
       false,
       true,
     ]);
     expect(failure.hint).toBe('Check that Insight is still running, then retry.');
   });
 
-  it('fallback hints point at the board pill in the top bar', () => {
-    const hint = (code: string) => failureOf({ error: 'x', code }, null).hint;
-    expect(hint('no_target')).toBe('Choose a board with the board pill in the top bar.');
-    expect(hint('unreachable')).toBe(
-      'Fix the connection from the board pill in the top bar, then retry.',
-    );
-    expect(hint('auth_failed')).toBe(hint('unreachable'));
-    expect(hint('host_key_changed')).toBe(
-      'Confirm the fingerprint in the board dialog, from the board pill in the top bar, before trusting the new key.',
-    );
-    // The rest keep #170's words, and nothing still points at a "Board panel above".
-    expect(hint('timeout')).toBe('Check the board is awake and on the network, then retry.');
-    expect(hint('sentinel_missing')).toBe(
-      'Install Sentinel from this page, or start it on the board.',
-    );
-    expect(hint('sentinel_stopped')).toBe(
-      'Start it on the board with `sudo systemctl start simaai-sentinel`.',
-    );
-    expect(hint('sentinel_failed')).toBe('Check `systemctl status simaai-sentinel` on the board.');
-    expect(hint('unheard_of')).toBe('');
-    for (const code of ['no_target', 'unreachable', 'auth_failed', 'host_key_changed']) {
-      expect(hint(code)).not.toMatch(/Board panel/);
-    }
-  });
-
-  it('the backend’s own hint wins over the fallback', () => {
-    const gone = failureOf(
-      {
-        error: 'The board could not be reached.',
-        code: 'unreachable',
-        hint: 'Check that the board is powered on and on the network, and that `ssh -p 22 sima@192.168.2.254` works from this machine.',
-      },
-      null,
-    );
-    expect([gone.board, gone.daemon]).toEqual([true, false]);
-    expect(gone.hint).toMatch(/ssh -p 22 sima@192\.168\.2\.254/);
-  });
-
   it('only failures a retry can fix are retryable', () => {
-    const notRetryable = [
+    for (const code of [
       'no_target',
       'auth_failed',
       'host_key_changed',
       'sentinel_missing',
       'sentinel_denied',
       'sentinel_schema',
-    ];
-    for (const code of notRetryable) {
-      expect(failureOf({ error: 'x', code }, null).retryable, code).toBe(false);
+      'sentinel_outdated',
+    ]) {
+      expect(failureOf(detail(code), null).retryable, code).toBe(false);
     }
     for (const code of [
       'unreachable',
@@ -196,7 +164,6 @@ describe('failureOf', () => {
       'command_failed',
       'sentinel_stopped',
       'sentinel_failed',
-      'already_installed',
       'trace_conflict',
       'not_found',
       'invalid_request',
@@ -204,110 +171,37 @@ describe('failureOf', () => {
       'response_too_large',
       'network',
       'bad_response',
-      'stale_snapshot',
+      'board_changed',
       'unheard_of',
       '',
     ]) {
-      expect(failureOf({ error: 'x', code }, null).retryable, code).toBe(true);
+      expect(failureOf(detail(code), null).retryable, code).toBe(true);
     }
   });
 
-  it('an install that is refused or fails is titled as an install, not as a read', () => {
-    const failure = (name: string) => failureOf(INSTALL[name].body, 7, 'install');
-    const refused = failure('already_installed');
-    expect(INSTALL['already_installed'].status).toBe(409);
-    expect([refused.title, refused.detail]).toEqual(['Sentinel is already installed', '']);
-    expect(refused.hint).toMatch(/would end a trace in flight/);
-
-    const noCli = failure('sima_cli_missing');
-    expect([noCli.code, noCli.title]).toEqual([
-      'sentinel_failed',
-      'Sentinel could not be installed',
-    ]);
-    expect(noCli.problem.message).toMatch(/`sima-cli` was not found on the board/);
-    expect(noCli.hint).toMatch(/Install sima-cli on the board/);
-
-    const sudo = failure('sudo_denied');
-    expect([sudo.code, sudo.title, sudo.detail]).toEqual([
-      'sentinel_denied',
-      'Installing Sentinel needs sudo on the board',
-      'sudo: a password is required',
-    ]);
-    expect(sudo.hint).toMatch(/in a shell on the board/);
-
-    const failed = failure('installer_failed');
-    expect(failed.title).toBe('Sentinel could not be installed');
-    expect(failed.problem.message).toMatch(/failed on the board \(exit 1\)/);
-    expect(failed.detail).toMatch(/vulcan: not found/);
-
-    const down = failure('installer_left_it_down');
-    expect(down.title).toBe('Sentinel could not be installed');
-    expect(down.problem.message).toMatch(/the simaai-sentinel service is inactive/);
-    expect(down.hint).toMatch(/systemctl status simaai-sentinel/);
-
-    // Only the sudo refusal is one a retry cannot fix; the others are board or installer states.
-    const retryable = [
-      'already_installed',
-      'sima_cli_missing',
-      'sudo_denied',
-      'installer_failed',
-    ].map((name) => {
-      const one = failure(name);
-      return [one.board, one.retryable, one.action, one.generation];
-    });
-    expect(retryable).toEqual([
-      [false, true, 'install', 7],
-      [false, true, 'install', 7],
-      [false, false, 'install', 7],
-      [false, true, 'install', 7],
-    ]);
-
-    const timeout = { code: 'timeout', error: 'The board took too long to answer.' };
-    const slow = failureOf(timeout, null, 'install');
-    expect(slow.title).toBe('The installer did not finish in time');
-    expect(slow.hint).toMatch(/as long as it needs/);
-    expect(failureOf(timeout, null).title).toBe('The board took too long to answer');
-    expect(failureOf(timeout, null).action).toBe('read');
+  it('a trace conflict is titled by what was being asked; a delete’s message says it', () => {
+    const conflict = (action: 'read' | 'start' | 'stop' | 'delete') =>
+      failureOf(detail('trace_conflict', 'Run r1 is still recording.'), 'local', action);
+    expect(conflict('start').title).toBe('That trace cannot start');
+    expect(conflict('stop').title).toBe('The trace changed before it was stopped');
+    expect(conflict('stop').detail).toBe('Run r1 is still recording.');
+    expect(conflict('delete').title).toBe('Run r1 is still recording.');
+    expect(conflict('read').title).toBe('Run r1 is still recording.');
   });
 
-  it('a board that changed under a request says so, whatever the request was', () => {
-    for (const action of ['read', 'install', 'start', 'stop', 'delete'] as const) {
-      const failure = failureOf({ error: 'x', code: 'stale_snapshot' }, 1, action);
-      expect([failure.title, failure.hint, failure.action], action).toEqual([
-        'The board changed while Insight was working',
-        'Nothing was changed. Insight has read the board again.',
-        action,
-      ]);
-    }
-    // The backend's own hint still wins over the page's.
+  it('a failure carries the board it was asked of', () => {
+    expect(failureOf(detail('unreachable'), 'local').boardId).toBe('local');
+    expect(failureOf(detail('unreachable'), null).boardId).toBeNull();
+  });
+});
+
+describe('hintCommand', () => {
+  it('is the first command a hint names in backticks', () => {
     expect(
-      failureOf({ error: 'x', code: 'stale_snapshot', hint: 'Try again.' }, 1, 'start').hint,
-    ).toBe('Try again.');
-  });
-
-  it('a trace conflict is titled by what was being asked', () => {
-    const title = (action: 'read' | 'start' | 'stop' | 'delete') =>
-      failureOf({ error: 'x', code: 'trace_conflict' }, 1, action).title;
-    expect(title('start')).toBe('That trace cannot start');
-    expect(title('stop')).toBe('The trace changed before it was stopped');
-    expect(title('delete')).toBe('That run is still recording');
-    // The default keeps the wording the code had before the actions existed.
-    expect(title('read')).toBe('That trace cannot start');
-  });
-
-  it('a run that is gone is titled as a deleted run only when it was being deleted', () => {
-    const gone = { error: 'x', code: 'not_found' };
-    expect(failureOf(gone, 1, 'delete').title).toBe('That run is no longer on the board');
-    expect(failureOf(gone, 1).title).toBe('That run is not on this board');
-    expect(failureOf(gone, 1, 'stop').title).toBe('That run is not on this board');
-  });
-
-  it('a failure that lands after a board switch carries the generation it was issued under', () => {
-    const unreachable = { error: 'ssh: connect failed', code: 'unreachable' };
-    expect(failureOf(unreachable, 3).generation).toBe(3);
-    expect(failureOf(unreachable, null).generation).toBeNull();
-    // The generation the backend names is the board that answered, which may be another one.
-    expect(failureOf({ ...unreachable, generation: 5 }, 3).generation).toBe(5);
-    expect(failureOf({ ...unreachable, generation: '5' }, 3).generation).toBe(3);
+      hintCommand('Install it on the board with `sima-cli neat install sentinel`, then retry.'),
+    ).toBe('sima-cli neat install sentinel');
+    expect(hintCommand('Run ` sudo a ` and then `b`.')).toBe('sudo a');
+    expect(hintCommand('Check the board.')).toBe('');
+    expect(hintCommand('')).toBe('');
   });
 });

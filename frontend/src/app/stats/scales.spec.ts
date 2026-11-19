@@ -1,8 +1,6 @@
 import { THERMAL_SCALE, niceCeil, powerCeiling, scaleFor } from './scales';
 
 describe('scales', () => {
-  // #170's "scales stay fixed: percentages 0-100, temperatures 40-90, the rest a round number
-  // above the peak", as [min, max] pairs.
   it('scales stay fixed: percentages 0-100, temperatures 40-90, the rest a round number above the peak', () => {
     expect(THERMAL_SCALE).toEqual([40, 90]);
     expect(scaleFor('%', [[12, 99]])).toEqual([0, 100]);

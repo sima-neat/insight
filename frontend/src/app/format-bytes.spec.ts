@@ -1,7 +1,7 @@
 import { formatBytes } from './format-bytes';
 
 describe('formatBytes', () => {
-  it('reads as #170 does: B, then KB and MB to one decimal, then GB to two', () => {
+  it('reads B, then KB and MB to one decimal, then GB to two', () => {
     expect(formatBytes(0)).toBe('0 B');
     expect(formatBytes(1023)).toBe('1023 B');
     expect(formatBytes(1024)).toBe('1.0 KB');
@@ -10,10 +10,7 @@ describe('formatBytes', () => {
     expect(formatBytes(1.2 * 1024 ** 3)).toBe('1.20 GB');
   });
 
-  // #170's Stats sizes ("values, changes, durations, sizes, ..." in model.test.js) were
-  // [0, 2048, 8 GiB, 1.5 GiB] read '0 B', '2 kB', '8 GB', '1.5 GB' through its second formatter.
-  // The app has one, in the media library's style, so the same counts read as below.
-  it('reads the sizes #170 showed for the machine Insight runs on in the one style', () => {
+  it('reads the sizes of the machine Insight runs on in the same style', () => {
     expect([0, 2048, 8 * 1024 ** 3, 1536 * 1024 ** 2].map(formatBytes)).toEqual([
       '0 B',
       '2.0 KB',

@@ -5,8 +5,9 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NeatLevelMeter } from '@sima/neat-ui/level-meter';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
+import { boardUrl } from '../../board/api';
 import { BoardService } from '../../board/board.service';
-import { boardState, DEVKIT, FakeBoard } from '../../board/board.testing';
+import { boardWith, DEVKIT, FakeBoard, MANUAL } from '../../board/board.testing';
 import type { MicrophoneItem, MicTestStatus } from '../../peripherals/api';
 import { usb } from '../../peripherals/cameras.testing';
 import { deviceRow } from '../../peripherals/devices';
@@ -16,69 +17,25 @@ import {
   micTestStatus,
   onboardMic,
   readyTest,
+  testAudioUrl,
   yeti,
 } from '../../peripherals/microphones.testing';
 import { MicrophonePanel } from './microphone-panel';
 
-const TEST_URL = '/api/peripherals/microphones/test';
-const STOP_URL = '/api/peripherals/microphones/test/stop';
-const IN_USE_HINT =
-  'Stop the application that is recording from it, then test again. Insight never stops it for you.';
+const TEST_URL = boardUrl(DEVKIT.id, 'microphones/test');
+const START_URL = boardUrl(DEVKIT.id, `microphones/${encodeURIComponent(yeti.id)}/test`);
+/** The stop of the Yeti's test `id`, which names the test. */
+const stopUrl = (id: string) => `${START_URL}/stop?test=${id}`;
+/** The error shape the server answers with. */
+const failure = (code: string, message: string, hint: string) => ({
+  error: { code, message, hint },
+});
 
 /** The webcam's microphone: the same USB device as the C270 camera. */
 const webcamMic: MicrophoneItem = {
   ...yeti,
   device: { ...yeti.device, part_of: { id: usb.id, name: usb.name } },
 };
-
-/** An `AudioNode` that records what it is connected to. */
-class FakeNode {
-  readonly connected: unknown[] = [];
-  connect(destination: unknown): void {
-    this.connected.push(destination);
-  }
-}
-
-class FakeAnalyser extends FakeNode {
-  fftSize = 2048;
-  /** What the analyser hears now, the same over its whole window. */
-  level = 0;
-  getFloatTimeDomainData(target: Float32Array): void {
-    target.fill(this.level);
-  }
-}
-
-/** Web Audio's `AudioContext` as far as the playback level uses it, under the test's control. */
-class FakeAudioContext extends EventTarget {
-  static made: FakeAudioContext[] = [];
-
-  state: AudioContextState = 'running';
-  readonly destination = new FakeNode();
-  readonly sources: HTMLMediaElement[] = [];
-  readonly analysers: FakeAnalyser[] = [];
-  readonly close = vi.fn(async () => undefined);
-  readonly resume = vi.fn(async () => undefined);
-
-  constructor() {
-    super();
-    FakeAudioContext.made.push(this);
-  }
-
-  createMediaElementSource(element: HTMLMediaElement): FakeNode {
-    // A media element accepts one source in its lifetime, as in browsers.
-    if (FakeAudioContext.made.some((context) => context.sources.includes(element))) {
-      throw new DOMException('Already connected', 'InvalidStateError');
-    }
-    this.sources.push(element);
-    return new FakeNode();
-  }
-
-  createAnalyser(): FakeAnalyser {
-    const analyser = new FakeAnalyser();
-    this.analysers.push(analyser);
-    return analyser;
-  }
-}
 
 @Component({
   imports: [MicrophonePanel],
@@ -97,7 +54,7 @@ class Host {
   /** Whether the side panel shows the microphone; the page keeps its test either way. */
   readonly shown = signal(true);
   readonly microphone = signal<MicrophoneItem>(yeti);
-  /** The chip as the page builds it: the device row's, with this page's test (ruling F23). */
+  /** The chip as the page builds it: the device row's, with this page's test. */
   readonly chip = computed(() => {
     const test = this.micTest.state();
     const testing = test.status === 'recording' || test.status === 'playing' ? test.micId : null;
@@ -115,15 +72,13 @@ describe('MicrophonePanel', () => {
   beforeEach(() => {
     // The test's poll and its retries are timeouts: the test moves them on itself.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
-    FakeAudioContext.made = [];
-    vi.stubGlobal('AudioContext', FakeAudioContext);
     // jsdom does not play media.
     play = vi.fn(async () => undefined);
     pause = vi.fn();
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(play);
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pause);
     board = new FakeBoard();
-    board.state.set(boardState({ target: DEVKIT, generation: 3 }));
+    board.state.set(boardWith(DEVKIT));
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
@@ -142,7 +97,6 @@ describe('MicrophonePanel', () => {
     } finally {
       // Restored even when the check fails, so that one failing test does not fail the next.
       vi.useRealTimers();
-      vi.unstubAllGlobals();
       vi.restoreAllMocks();
     }
   });
@@ -162,18 +116,22 @@ describe('MicrophonePanel', () => {
     await settle();
   }
 
-  /** Answers the status read sent now (the panel's resume, or a poll) with the backend's test. */
-  async function answerRead(test: MicTestStatus | null): Promise<void> {
-    http.expectOne({ method: 'GET', url: TEST_URL }).flush({ test });
+  /** Answers the status read sent now (the panel's resume, or a poll) with the board's test. */
+  async function answerRead(test: MicTestStatus | null, url = TEST_URL): Promise<void> {
+    http.expectOne({ method: 'GET', url }).flush({ test });
     await settle();
   }
 
   async function answerStart(test: MicTestStatus): Promise<void> {
-    const request = http.expectOne({ method: 'POST', url: TEST_URL });
-    expect(request.request.body).toEqual({ id: yeti.id });
+    const request = http.expectOne({ method: 'POST', url: START_URL });
+    expect(request.request.body).toEqual({});
     request.flush({ test }, { status: 202, statusText: 'Accepted' });
     await settle();
   }
+
+  /** Expects the stop of test `id`. */
+  const expectStop = (id: string) =>
+    http.expectOne((request) => request.method === 'POST' && request.urlWithParams === stopUrl(id));
 
   async function nextPoll(): Promise<void> {
     await vi.advanceTimersByTimeAsync(MIC_TEST_POLL_MS);
@@ -211,11 +169,12 @@ describe('MicrophonePanel', () => {
       (candidate) => candidate.textContent!.trim() === 'Replay',
     );
   const caption = (): string => panel().querySelector('.caption')?.textContent?.trim() ?? '';
-  const announced = (): string =>
-    panel().querySelector('app-announcement')!.textContent!.trim();
+  const announced = (): string => panel().querySelector('app-announcement')!.textContent!.trim();
   /** What the meter reads now: the level its `sample` gives, or null with none. */
   const meterReads = (): number | null | undefined => {
-    const sample = fixture.debugElement.query(By.directive(NeatLevelMeter)).componentInstance.sample();
+    const sample = fixture.debugElement
+      .query(By.directive(NeatLevelMeter))
+      .componentInstance.sample();
     return sample === null ? undefined : sample();
   };
   const audio = (): HTMLAudioElement => panel().querySelector('audio')!;
@@ -255,10 +214,12 @@ describe('MicrophonePanel', () => {
     expect(headings()).toEqual(['Capture', 'Test Microphone']);
     expect(captureLines()).toEqual(['S24_3LE · 2 ch · 24-bit · 32 · 44.1 · 48 kHz']);
     expect(
-      panel().querySelector('app-device-details button[aria-expanded]')?.getAttribute('aria-expanded'),
+      panel()
+        .querySelector('app-device-details button[aria-expanded]')
+        ?.getAttribute('aria-expanded'),
     ).toBe('false');
 
-    // A problem the backend reports with the device shows under the title, as #170's panel did.
+    // A problem reported with the device shows under the title.
     fixture.componentInstance.microphone.set({
       ...webcamMic,
       errors: [
@@ -296,21 +257,12 @@ describe('MicrophonePanel', () => {
   it('records with the meter and the clock, plays back by itself, then offers Replay', async () => {
     await open();
     await answerRead(null);
-    // No audio context before a click: one made without a gesture would stay suspended.
-    expect(FakeAudioContext.made).toHaveLength(0);
     expect(button().textContent!.trim()).toBe('Test microphone');
     expect(meterReads()).toBeUndefined();
     expect(caption()).toBe('');
     expect(audio().hidden).toBe(true);
 
     button().click();
-    // The click made the playback level over the panel's <audio>, while the gesture lasts
-    // (ruling F11): the recording plays with no click of its own once it is in.
-    expect(FakeAudioContext.made).toHaveLength(1);
-    const [context] = FakeAudioContext.made;
-    // Compared by identity: `toEqual` would match any audio element with the same attributes.
-    expect(context.sources).toHaveLength(1);
-    expect(context.sources[0]).toBe(audio());
     await settle();
     await answerStart(micTestStatus());
     await nextPoll();
@@ -328,24 +280,21 @@ describe('MicrophonePanel', () => {
     expect(button().disabled).toBe(false);
     button().click();
     await settle();
-    const stop = http.expectOne({ method: 'POST', url: STOP_URL });
-    expect(stop.request.body).toEqual({ token: 't1' });
-    stop.flush({ test: micTestStatus() });
+    expectStop('t1').flush({ test: micTestStatus() });
     await settle();
     await nextPoll();
     await answerRead(readyTest());
 
-    // The recording plays by itself, and the meter follows it through the level made on the click.
-    expect(audio().getAttribute('src')).toBe('/api/peripherals/microphones/test/t1.wav');
+    // The recording plays by itself; the meter is dark, as it is for anything but a recording.
+    expect(audio().getAttribute('src')).toBe(testAudioUrl('t1'));
     expect(play).toHaveBeenCalledTimes(1);
     expect(button().textContent!.trim()).toBe('Stop playing');
     expect(button().hasAttribute('aria-disabled')).toBe(false);
     expect(caption()).toBe('Recording playing');
     expect(announced()).toBe('Recording playing.');
-    context.analysers[0].level = 0.5;
-    expect(meterReads()).toBeCloseTo(-6.02, 2);
+    expect(meterReads()).toBeUndefined();
 
-    // Played to the end: Replay stands where the caption was, and the meter is dark.
+    // Played to the end: Replay stands where the caption was.
     audio().dispatchEvent(new Event('ended'));
     await settle();
     expect(button().textContent!.trim()).toBe('Test microphone');
@@ -354,14 +303,11 @@ describe('MicrophonePanel', () => {
     expect(meterReads()).toBeUndefined();
     expect(callouts()).toEqual([]);
 
-    // Replay plays it again through the same level: one context, one source for the element.
+    // Replay plays it again.
     replayButton()!.click();
     await settle();
     expect(play).toHaveBeenCalledTimes(2);
     expect(caption()).toBe('Recording playing');
-    expect(meterReads()).toBeCloseTo(-6.02, 2);
-    expect(FakeAudioContext.made).toHaveLength(1);
-    expect(context.sources).toHaveLength(1);
 
     // Stop playing ends it here.
     const paused = pause.mock.calls.length;
@@ -370,16 +316,13 @@ describe('MicrophonePanel', () => {
     expect(pause).toHaveBeenCalledTimes(paused + 1);
     expect(replayButton()).toBeDefined();
 
-    // The side panel closing mid-playback ends the playback and closes the level; opening it
-    // again offers Replay.
+    // The side panel closing mid-playback ends the playback; opening it again offers Replay.
     replayButton()!.click();
     await settle();
     expect(caption()).toBe('Recording playing');
-    expect(context.close).not.toHaveBeenCalled();
     fixture.componentInstance.shown.set(false);
     await settle();
     expect(pause).toHaveBeenCalledTimes(paused + 2);
-    expect(context.close).toHaveBeenCalledTimes(1);
     expect(micTest().state().status).toBe('done');
     fixture.componentInstance.shown.set(true);
     await settle();
@@ -390,29 +333,19 @@ describe('MicrophonePanel', () => {
   it('a panel opened mid-recording takes the recording up', async () => {
     await open();
     // Opening reads the board's test (`resume`): the Yeti is recording, started on another visit.
-    await answerRead(micTestStatus({ token: 'other', elapsed_ms: 12_300, level_dbfs: -20 }));
+    await answerRead(micTestStatus({ id: 'other', elapsed_ms: 12_300, level_dbfs: -20 }));
     expect(button().textContent!.trim()).toBe('Stop recording');
     expect(caption()).toBe('Recording · 0:12');
     expect(meterReads()).toBe(-20);
-    // Taken up with no click: no audio context yet.
-    expect(FakeAudioContext.made).toHaveLength(0);
 
-    // Stop names the recording taken up, and its click makes the playback level (ruling F11).
+    // Stop names the recording taken up.
     button().click();
-    expect(FakeAudioContext.made).toHaveLength(1);
-    const [context] = FakeAudioContext.made;
-    expect(context.sources).toHaveLength(1);
-    expect(context.sources[0]).toBe(audio());
     await settle();
-    const stop = http.expectOne({ method: 'POST', url: STOP_URL });
-    expect(stop.request.body).toEqual({ token: 'other' });
-    stop.flush({ test: micTestStatus({ token: 'other' }) });
+    expectStop('other').flush({ test: micTestStatus({ id: 'other' }) });
     await settle();
     await nextPoll();
-    await answerRead(readyTest({ token: 'other' }));
+    await answerRead(readyTest({ id: 'other' }));
     expect(caption()).toBe('Recording playing');
-    context.analysers[0].level = 0.25;
-    expect(meterReads()).toBeCloseTo(-12.04, 2);
     audio().dispatchEvent(new Event('ended'));
     await settle();
     expect(replayButton()).toBeDefined();
@@ -426,24 +359,24 @@ describe('MicrophonePanel', () => {
     expect(replayButton()).toBeDefined();
 
     // Another microphone's panel, then the Yeti's again: its recording is taken up from the
-    // board, and Replay plays it in the new panel's element, with a level made on that click.
+    // board, and Replay plays it in the new panel's element.
     fixture.componentInstance.microphone.set(onboardMic);
     await settle();
-    await answerRead(readyTest({ token: 'other' }));
+    await answerRead(readyTest({ id: 'other' }));
     expect(replayButton()).toBeUndefined();
     fixture.componentInstance.microphone.set(yeti);
     await settle();
-    await answerRead(readyTest({ token: 'other' }));
+    await answerRead(readyTest({ id: 'other' }));
     replayButton()!.click();
     await settle();
+    // Compared by identity: `toEqual` would match any audio element with the same attributes.
     expect(play.mock.contexts.at(-1)).toBe(audio());
-    expect(FakeAudioContext.made.at(-1)!.sources[0]).toBe(audio());
     expect(caption()).toBe('Recording playing');
     button().click();
     await settle();
 
     // A Refresh listing the same device keeps it; the device's record or the board changing
-    // starts afresh, reading the board's test again (ruling F12).
+    // starts afresh, reading the board's test again.
     fixture.componentInstance.microphone.set({ ...yeti, notes: ['Refreshed.'] });
     await settle();
     http.expectNone(TEST_URL);
@@ -453,9 +386,9 @@ describe('MicrophonePanel', () => {
     expect(replayButton()).toBeUndefined();
     await answerRead(null);
     expect(button().textContent!.trim()).toBe('Test microphone');
-    board.state.set(boardState({ target: DEVKIT, generation: 4 }));
+    board.state.set(boardWith(MANUAL));
     await settle();
-    await answerRead(null);
+    await answerRead(null, boardUrl(MANUAL.id, 'microphones/test'));
     expect(button().textContent!.trim()).toBe('Test microphone');
   });
 
@@ -463,7 +396,7 @@ describe('MicrophonePanel', () => {
     await record();
     await nextPoll();
     await answerRead(readyTest({ level: { peak_dbfs: null, rms_dbfs: null, silent: true } }));
-    // Said once the playback is over, as #170 did.
+    // Said once the playback is over.
     expect(callouts()).toEqual([]);
     audio().dispatchEvent(new Event('ended'));
     await settle();
@@ -476,21 +409,24 @@ describe('MicrophonePanel', () => {
       },
     ]);
 
-    // The microphone is open in another application: the board's message, with the panel's hint.
+    // The microphone is open in another application: the board's message, with its hint.
     button().click();
     await settle();
     expect(callouts()).toEqual([]);
-    http.expectOne({ method: 'POST', url: TEST_URL }).flush(
-      {
-        error: 'Open in arecord (pid 812).',
-        code: 'microphone_in_use',
-        hint: 'Close the other application.',
-      },
-      { status: 409, statusText: 'Conflict' },
-    );
+    http
+      .expectOne({ method: 'POST', url: START_URL })
+      .flush(
+        failure('microphone_in_use', 'Open in arecord (pid 812).', 'Close the other application.'),
+        { status: 409, statusText: 'Conflict' },
+      );
     await settle();
     expect(callouts()).toEqual([
-      { tone: 'danger', announce: 'alert', heading: 'Open in arecord (pid 812).', body: IN_USE_HINT },
+      {
+        tone: 'danger',
+        announce: 'alert',
+        heading: 'Open in arecord (pid 812).',
+        body: 'Close the other application.',
+      },
     ]);
     // The heading sits under "Test Microphone" in the outline.
     expect(panel().querySelector('neat-callout [role="heading"]')!.getAttribute('aria-level')).toBe(
@@ -500,17 +436,17 @@ describe('MicrophonePanel', () => {
     expect(button().hasAttribute('aria-disabled')).toBe(false);
   });
 
-  // Review Focus 5: each leaves a usable button and an honest message.
+  // Each leaves a usable button and an honest message.
   it('a failed stop keeps Stop and says why; a test that ends early says so', async () => {
     await record();
     button().click();
     await settle();
-    http.expectOne({ method: 'POST', url: STOP_URL }).error(new ProgressEvent('error'));
+    expectStop('t1').error(new ProgressEvent('error'));
     await settle();
     expect(button().textContent!.trim()).toBe('Stop recording');
     expect(button().hasAttribute('aria-disabled')).toBe(false);
     expect(caption()).toBe('Recording · 0:04');
-    // The stop's answer was lost on the way: #170's network words (ruling Q6).
+    // The stop's answer was lost on the way: the network words.
     expect(callouts()).toEqual([
       {
         tone: 'danger',
@@ -537,7 +473,7 @@ describe('MicrophonePanel', () => {
   });
 
   it('the row chip says Testing while this microphone records or plays', async () => {
-    // F23: the rows' chips are the page's (its spec); the panel's title repeats the row's chip.
+    // The rows' chips are the page's (its spec); the panel's title repeats the row's chip.
     await record();
     expect(titleChip()).toEqual({ label: 'Testing', tone: 'info' });
     await nextPoll();

@@ -1,6 +1,5 @@
 import { Injectable, signal, type WritableSignal } from '@angular/core';
 import { type NeatAsideOpen, neatAsideOpen } from '@sima/neat-ui';
-import { storedAsideWidth, storeAsideWidth } from './aside-width';
 import { PrefixedStorage } from './prefixed-storage';
 
 /** The pages whose side panel is remembered here; the Viewer keeps its own with its layout. */
@@ -9,21 +8,22 @@ export type AsidePage = 'streaming' | 'media' | 'peripherals' | 'stats';
 const OPEN = 'open';
 const CLOSED = 'closed';
 
+const openName = (page: AsidePage) => `${page}:aside`;
 const widthName = (page: AsidePage) => `${page}:aside-width`;
 
 /**
- * Whether Streaming's, Media's, Peripherals' and Stats' side panels are open: remembered per page,
- * across visits and reloads, as the Viewer remembers its own (`LayoutPrefs.inspector`). The rule
- * for when a panel is open is the same on all five pages; only how long a phone's choice lives
- * differs, as the last sentence says. The width the user dragged a panel to is remembered the same
- * way, as `neat-insight:<page>:aside-width` (`width`), and the Viewer keeps its own beside its
- * layout (`LayoutPrefs.inspectorWidth`).
- * Open is stored as `neat-insight:<page>:aside`; on a wide screen a panel is open until the user closes it,
- * as it was before anything was remembered. A narrow screen floats the panel over the page, so
- * there it starts closed and opening or closing it is not remembered (`neatAsideOpen`): a phone
- * must not overwrite what was chosen on a wide screen. That choice lives as long as this root
- * service, so a phone keeps an opened panel for the session; the Viewer's inspector, owned by its
- * page, starts closed on every visit.
+ * Whether Streaming's, Media's, Peripherals' and Stats' side panels are open, and how wide:
+ * remembered per page, across visits and reloads, as the Viewer remembers its own
+ * (`LayoutPrefs.inspector`, `LayoutPrefs.inspectorWidth`). Open is stored as the text `open` or
+ * `closed` under `neat-insight:<page>:aside`, the width in pixels as text under
+ * `neat-insight:<page>:aside-width`. Both are plain text, which the kit's `neatStoredSignal` (JSON)
+ * cannot read: `open` and `closed` are not JSON.
+ *
+ * On a wide screen a panel is open until the user closes it. A narrow screen floats the panel over
+ * the page, so there it starts closed and opening or closing it is not remembered
+ * (`neatAsideOpen`): a phone must not overwrite what was chosen on a wide screen. That choice
+ * lives as long as this root service, so a phone keeps an opened panel for the session; the
+ * Viewer's inspector, owned by its page, starts closed on every visit.
  */
 @Injectable({ providedIn: 'root' })
 export class AsidePrefs {
@@ -73,20 +73,29 @@ export class AsidePrefs {
   setWidth(page: AsidePage, width: number | null): void {
     if (this.widths[page]() === width) return;
     this.widths[page].set(width);
-    storeAsideWidth(this.storage, widthName(page), width);
+    if (width === null) this.storage.remove(widthName(page));
+    else this.storage.set(widthName(page), String(width));
   }
 
   private remember(page: AsidePage, open: boolean): void {
     if (this.state[page]() === open) return;
     this.state[page].set(open);
-    this.storage.set(`${page}:aside`, open ? OPEN : CLOSED);
+    this.storage.set(openName(page), open ? OPEN : CLOSED);
   }
 
   private read(page: AsidePage): boolean {
-    return this.storage.get(`${page}:aside`) !== CLOSED;
+    return this.storage.get(openName(page)) !== CLOSED;
   }
 
+  /**
+   * The stored width, or null for the default. A value that is not a positive number (edited by
+   * hand, or written by another version) is the default: the kit clamps any width it is given, so
+   * only what cannot be a width has to be refused here.
+   */
   private readWidth(page: AsidePage): number | null {
-    return storedAsideWidth(this.storage, widthName(page));
+    const stored = this.storage.get(widthName(page));
+    if (stored === null || stored.trim() === '') return null;
+    const width = Number(stored);
+    return Number.isFinite(width) && width > 0 ? width : null;
   }
 }

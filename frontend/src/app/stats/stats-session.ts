@@ -4,7 +4,7 @@ import type { OverviewCardId } from './telemetry';
 /**
  * Where the user left Stats, so that coming back from another page finds it as it was. Provided in
  * root because the page is created afresh on every visit; kept in memory only, so a reload starts
- * over, as #170 did. Like `PeripheralsSession` for Peripherals.
+ * over. Like `PeripheralsSession` for Peripherals.
  */
 @Injectable({ providedIn: 'root' })
 export class StatsSession {
@@ -28,19 +28,19 @@ export class StatsSession {
    */
   readonly compareSeries: WritableSignal<string | null> = signal(null);
 
-  /** The board generation `run` and `checkedRuns` were chosen on; undefined before the first. */
-  private runsGeneration: number | undefined = undefined;
+  /** The id of the board `run` and `checkedRuns` were chosen on; undefined before the first. */
+  private runsBoard: string | undefined = undefined;
 
   /**
    * Follows the board the page shows. The selected and ticked runs are ids on the board they were
-   * chosen on, so another board (a new generation, switched to here or while Stats was away)
-   * starts with none rather than with ids its own runs may not have.
+   * chosen on, so another board (switched to here or while Stats was away) starts with none rather
+   * than with ids its own runs may not have.
    */
-  followBoard(generation: number): void {
-    if (this.runsGeneration !== undefined && generation !== this.runsGeneration) {
+  followBoard(board: string): void {
+    if (this.runsBoard !== undefined && board !== this.runsBoard) {
       this.run.set(null);
       this.checkedRuns.set([]);
     }
-    this.runsGeneration = generation;
+    this.runsBoard = board;
   }
 }

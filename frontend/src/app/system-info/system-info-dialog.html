@@ -1,4 +1,4 @@
-<!-- Environment, Insight and Update check read alike: a list of what neat reported, or why there is none. -->
+<!-- Environment, Insight and Update check read alike: a list of what was reported, or why there is none. -->
 <ng-template #keyValues let-label="label" let-entries="entries">
   <neat-collapsible [label]="label" [open]="true" [headingLevel]="3">
     @if (entries.length) {
@@ -24,15 +24,28 @@
         <neat-error-note>Could not refresh: {{ failure }}</neat-error-note>
       }
 
-      @if (neatMissing()) {
-        <neat-callout tone="info">
-          The <code neatCode>neat</code> command is not installed here, so the environment,
-          component versions and update check are unknown.
-        </neat-callout>
-      } @else {
-        <ng-container
-          *ngTemplateOutlet="keyValues; context: { label: 'Environment', entries: environment() }"
-        />
+      @switch (neatState()) {
+        @case ('ready') {
+          <ng-container
+            *ngTemplateOutlet="keyValues; context: { label: 'Environment', entries: environment() }"
+          />
+        }
+        @case ('missing') {
+          <neat-callout tone="info">
+            The <code neatCode>neat</code> command is not installed here, so the environment,
+            component versions and update check are unknown.
+          </neat-callout>
+        }
+        @case ('failed') {
+          <neat-error-note
+            >Could not read <code neatCode>neat</code>: {{ neatError() }}</neat-error-note
+          >
+        }
+        @default {
+          <p neatNote role="status">
+            Reading the environment, components and update check from <code neatCode>neat</code>…
+          </p>
+        }
       }
 
       <ng-container
@@ -44,9 +57,9 @@
       <p neatNote role="status">Loading system information…</p>
     }
 
-    <!-- Outside the block of neat's data, which is split around it so that the section still sits
-         after Insight: the host's readings do not come from neat, so a failed or slow /api/sysinfo
-         does not hide them. -->
+    <!-- Outside the block of System Info's data, which is split around it so that the section
+         still sits after Insight: the host's readings are a request of their own, so a failed or
+         slow /api/system does not hide them. -->
     <neat-collapsible label="This computer" [open]="true" [headingLevel]="3">
       @if (readings(); as readings) {
         <p neatNote>{{ readings.note }}</p>
@@ -62,13 +75,13 @@
       @if (readingsNotice()) {
         <p neatNote>{{ readingsNotice() }}</p>
       }
-      @if (metricsFailure(); as failure) {
+      @if (hostFailure(); as failure) {
         <neat-error-note>Could not read this computer: {{ failure }}</neat-error-note>
       }
     </neat-collapsible>
 
     @if (info()) {
-      @if (!neatMissing()) {
+      @if (neatState() === 'ready') {
         <neat-collapsible label="Components" [headingLevel]="3">
           @if (components().length) {
             <dl neatDetails>
@@ -106,7 +119,7 @@
         }
       </neat-collapsible>
 
-      @if (!neatMissing()) {
+      @if (neatState() === 'ready') {
         <ng-container
           *ngTemplateOutlet="keyValues; context: { label: 'Update check', entries: updateCheck() }"
         />

@@ -29,7 +29,7 @@ export function pageOverflow(page: Page) {
 
 /**
  * The top bar's items that spill out of it, and how far the page tools overflow their region. With
- * `toolbarMayScroll` (Ruling R14: tablets) the tools may overflow and scroll sideways: whatever is
+ * `toolbarMayScroll` (a tablet) the tools may overflow and scroll sideways: whatever is
  * inside their region counts as clipped by it, so only the region itself has to stay in the bar.
  * A page without tools (Stats) has no region, which overflows by nothing.
  */

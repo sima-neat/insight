@@ -32,14 +32,6 @@
   list-style: none;
 }
 
-/* What the board said keeps its lines; a long one wraps rather than widening the page. */
-pre {
-  margin: 0;
-  font-size: var(--neat-text-xs);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 /* The recorded line and the time are about the run named first. */
 .secondary {
   color: var(--muted-foreground);

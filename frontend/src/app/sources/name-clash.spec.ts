@@ -1,46 +1,41 @@
-import type { Slot } from './api';
+import { ApiRequestError } from './api-errors';
 import { isArchiveUpload, nameClash, skippedText, uploadConflict } from './name-clash';
-import { ApiRequestError } from './stream-lines';
-
-const slot = (index: number, file: string): Slot => ({
-  index,
-  file,
-  state: 'stopped',
-  transport: '',
-  codec: '',
-  type: 'file',
-  allowed_transports: [],
-  urls: {},
-});
+import { fileSlot } from './slots.testing';
 
 const CONFLICT = { existing: 'clip.mp4', suggested: 'clip_2.mp4' };
 
+/** The library's error shape for a refusal, with what it adds beside `error`. */
+const refusal = (status: number, code: string, extra: Record<string, unknown> = {}) =>
+  new ApiRequestError(status, code, { error: { code, message: code }, ...extra });
+
 describe('uploadConflict', () => {
-  it('reads the clash from the 409 an upload is refused with', () => {
-    const refused = new ApiRequestError(409, 'A file with this name exists.', {
-      error: 'A file with this name exists.',
-      conflict: CONFLICT,
-    });
-    expect(uploadConflict(refused)).toEqual(CONFLICT);
+  it('reads the clash from the 409 name_taken an upload is refused with', () => {
+    expect(uploadConflict(refusal(409, 'name_taken', { conflict: CONFLICT }))).toEqual(CONFLICT);
   });
 
-  it('is null for any other failure, and for a 409 without a clash', () => {
-    expect(uploadConflict(new ApiRequestError(400, 'No file provided.', null))).toBeNull();
-    expect(uploadConflict(new ApiRequestError(409, 'Busy', { error: 'Busy' }))).toBeNull();
+  it('is null for any other failure, and for a name_taken without a clash', () => {
+    expect(uploadConflict(refusal(400, 'invalid_request'))).toBeNull();
+    expect(uploadConflict(refusal(409, 'in_use', { slots: [3] }))).toBeNull();
     expect(
-      uploadConflict(new ApiRequestError(409, 'x', { conflict: { existing: 'a.mp4' } })),
+      uploadConflict(refusal(409, 'name_taken', { conflict: { existing: 'a.mp4' } })),
     ).toBeNull();
     expect(uploadConflict(new Error('boom'))).toBeNull();
   });
 });
 
 describe('isArchiveUpload', () => {
-  it('tells the archives the server extracts into a folder, as app.py does', () => {
+  it('tells the archives the server unpacks into a folder', () => {
     expect(
-      ['clips.zip', 'clips.TAR', 'clips.tar.gz', 'clips.gz', 'clip.mp4', 'zip.mov'].map(
-        isArchiveUpload,
-      ),
-    ).toEqual([true, true, true, true, false, false]);
+      [
+        'clips.zip',
+        'clips.TAR',
+        'clips.tar.gz',
+        'clips.tgz',
+        'clips.gz',
+        'clip.mp4',
+        'zip.mov',
+      ].map(isArchiveUpload),
+    ).toEqual([true, true, true, true, true, false, false]);
   });
 });
 
@@ -53,14 +48,14 @@ describe('nameClash', () => {
   });
 
   it('names the slots that use what a Replace swaps', () => {
-    expect(nameClash(CONFLICT, [slot(3, 'clip.mp4'), slot(9, 'clip.mp4')], true)).toEqual({
+    expect(nameClash(CONFLICT, [fileSlot(3, 'clip.mp4'), fileSlot(9, 'clip.mp4')], true)).toEqual({
       question: 'clip.mp4 already exists.',
       notes: ['In use on src3, src9'],
     });
   });
 
-  it('says when the slots could not be checked, under the last known ones (Q16)', () => {
-    expect(nameClash(CONFLICT, [slot(3, 'clip.mp4')], false)).toEqual({
+  it('says when the slots could not be checked, under the last known ones', () => {
+    expect(nameClash(CONFLICT, [fileSlot(3, 'clip.mp4')], false)).toEqual({
       question: 'clip.mp4 already exists.',
       notes: ['In use on src3', 'Could not check which slots use these files.'],
     });

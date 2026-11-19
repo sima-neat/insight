@@ -13,7 +13,7 @@ import { NeatInput } from '@sima/neat-ui/input';
 import { parseFps, stepFps } from '../../sources/fps';
 
 /**
- * A slot's output frame rate (#170's `FpsStepper`): − and + step by 5 down to 1, with no upper
+ * A slot's output frame rate: − and + step by 5 down to 1, with no upper
  * bound, and the field takes any whole number. A step commits at once; a typed number commits on
  * Enter, which keeps the focus in the field, or when the field is left after typing (leaving an
  * untouched field chooses nothing, so tabbing past it commits nothing). A draft that is not a whole number of at least 1 is marked

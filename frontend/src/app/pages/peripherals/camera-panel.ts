@@ -6,7 +6,7 @@ import {
   input,
   linkedSignal,
 } from '@angular/core';
-import { NeatAsideActions, NeatAsidePanel, NeatButton, NeatCode, NeatNote } from '@sima/neat-ui';
+import { NeatAsideActions, NeatAsidePanel, NeatButton, NeatNote } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatSelect } from '@sima/neat-ui/select';
@@ -17,7 +17,7 @@ import { BoardSettingsAction } from '../../board/board-settings-action';
 import { BoardService } from '../../board/board.service';
 import { ticking } from '../../clock';
 import { PanelTitle } from '../../panel-title';
-import type { CameraItem, CameraModeChoice } from '../../peripherals/api';
+import type { CameraItem, PreviewMode } from '../../peripherals/api';
 import {
   blockedFormatSummary,
   cameraSummaryLine,
@@ -37,7 +37,6 @@ import { PeripheralsSession } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
 import {
   PREVIEW_IDLE,
-  previewErrorInfo,
   type PreviewState,
   previewStatus,
   previewStreamUrl,
@@ -55,7 +54,7 @@ interface PreviewAction {
   waiting: boolean;
 }
 
-/** Board failures that the board's settings fix, as #170's preview error offered them for. */
+/** Board failures that the board's settings fix. */
 function opensBoardSettings(code: string): boolean {
   return code === 'no_target' || CONNECTION_CODES.has(code);
 }
@@ -63,9 +62,7 @@ function opensBoardSettings(code: string): boolean {
 let nextId = 0;
 
 /**
- * The selected camera in Peripherals' side panel (spec, "Camera panel"; #170's `CameraDetail` and
- * `PreviewPane`, copy per Inv-PB §2.3), top to bottom as settled with the mockup: its name and
- * chip (with why it is not Available, when it is not), the preview, its status chip and line, the
+ * The selected camera in Peripherals' side panel, top to bottom: its name and chip (with why it is not Available, when it is not), the preview, its status chip and line, the
  * two mode pickers, Start or Stop preview, then the collapsed Details.
  *
  * The preview is the page's (`CameraPreview`), one per Insight. This panel shows it only when it
@@ -74,7 +71,7 @@ let nextId = 0;
  * the panel afresh per camera and leaves the preview when the panel goes.
  *
  * The mode the user picks is remembered per camera (`PeripheralsSession.modes`); the frame rate is
- * chosen for the user, as #170 did. Picking a mode while the preview starts or streams restarts it
+ * chosen for the user. Picking a mode while the preview starts or streams restarts it
  * on that mode (`CameraPreview.changeMode`).
  */
 @Component({
@@ -87,7 +84,6 @@ let nextId = 0;
     NeatAsideActions,
     NeatButton,
     NeatCallout,
-    NeatCode,
     NeatCollapsible,
     NeatNote,
     NeatSelect,
@@ -113,8 +109,8 @@ export class CameraPanel {
   protected readonly reasonId = `camera-panel-reason-${nextId++}`;
 
   /**
-   * The title's chip: the camera's own state (its tier, or Last scan), not the row's Previewing
-   * (ruling F4): the status chip under the preview says what the preview does, so the panel never
+   * The title's chip: the camera's own state (its tier, or Last scan), not the row's Previewing:
+   * the status chip under the preview says what the preview does, so the panel never
    * shows Previewing beside Live.
    */
   protected readonly titleChip = computed(() => deviceChip(this.camera()));
@@ -147,7 +143,7 @@ export class CameraPanel {
 
   /**
    * The preview as this panel shows it: the page's when it is this camera's, and a stop under way
-   * whatever it stops (#170's pane did the same). Another camera's reads as not running.
+   * whatever it stops. Another camera's reads as not running.
    */
   protected readonly view = computed<PreviewState>(() => {
     const state = this.preview.state();
@@ -159,13 +155,13 @@ export class CameraPanel {
     previewBlock({
       camera: this.camera(),
       selection: this.selection(),
-      stale: isSnapshotStale(this.board.state(), this.peripherals.snapshot()),
+      stale: isSnapshotStale(this.board.id(), this.peripherals.snapshot()),
       // Any camera's: another camera's preview blocks this one's Start.
       session: this.preview.state().session,
-      target: this.board.state()?.target ?? null,
+      target: this.board.target(),
     }),
   );
-  /** Only Insight's own stream path is ever loaded (`previewStreamUrl`). */
+  /** The stream of the preview this panel shows live, as the board's preview route serves it. */
   private readonly streamUrl = computed(() => {
     const view = this.view();
     return view.status === 'live' ? previewStreamUrl(view.session) : null;
@@ -194,13 +190,11 @@ export class CameraPanel {
     switch (view.status) {
       case 'live': {
         const session = view.session;
-        if (!session || !this.streamUrl()) {
-          return 'The preview stream could not be opened. Stop the preview and report it with the board label.';
-        }
+        if (!session) return '';
         const { mode, camera_fps } = session;
         const rate = rateLabel(camera_fps);
         // A MIPI camera's rate is the most its sensor delivers in the mode (SiMa Sentinel's
-        // `max_fps`), so it reads "up to"; any other camera's is its mode's (#170's `ceiling`).
+        // `max_fps`), so it reads "up to"; any other camera's is its mode's.
         const shownRate = rate && this.camera().connection === 'mipi' ? `up to ${rate}` : rate;
         return ['Live preview', sizeLabel(mode.width, mode.height), mode.format, shownRate]
           .filter(Boolean)
@@ -222,14 +216,14 @@ export class CameraPanel {
     }
   });
   /**
-   * #170's preview status pill, beside the status line (ruling F2): "In another tab" among them,
-   * which the spec asks for with Stop. Idle has none: its sentence says it is not running.
+   * The preview's status chip, beside the status line: "In another tab" among them, with Stop.
+   * Idle has none: its sentence says it is not running.
    */
   protected readonly statusChip = computed(() => {
     const view = this.view();
     return view.status === 'idle' ? null : previewStatus(view);
   });
-  /** #170's status lines for screen readers; the status line ticks, so it is not a live region. */
+  /** The status lines for screen readers; the status line ticks, so it is not a live region. */
   protected readonly announcement = computed(() => {
     switch (this.view().status) {
       case 'live':
@@ -259,7 +253,7 @@ export class CameraPanel {
     return !action.stop && !action.waiting && this.block().blocked;
   });
 
-  protected readonly error = computed(() => previewErrorInfo(this.view().error));
+  protected readonly error = computed(() => this.view().error);
   protected readonly errorOpensBoard = computed(() => {
     const error = this.error();
     return error !== null && opensBoardSettings(error.code);
@@ -272,10 +266,10 @@ export class CameraPanel {
       void this.preview.stop();
       return;
     }
-    const board = this.board.state();
+    const board = this.board.id();
     const selection = this.selection();
     if (this.block().blocked || !board || !selection) return;
-    void this.preview.start(this.camera(), selection, board.generation);
+    void this.preview.start(this.camera(), selection, board);
   }
 
   protected pickFormat(format: string | null): void {
@@ -300,7 +294,7 @@ export class CameraPanel {
    * Remembers the mode the pickers resolve to for this camera. A preview that starts or streams
    * then restarts on it; `changeMode` leaves another camera's alone.
    */
-  private choose(wanted: Partial<CameraModeChoice>): void {
+  private choose(wanted: Partial<PreviewMode>): void {
     const camera = this.camera();
     const next = resolveSelection(camera, wanted);
     if (!next) return;

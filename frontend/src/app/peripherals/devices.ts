@@ -1,20 +1,17 @@
 /**
  * The device model: what Peripherals' list, rows and Details say about a scan, as pure functions
- * of the snapshot (#170's `peripherals/model.js`, copy per Inv-PB §2.2). #170's tones map to the
- * kit's: ok `success`, warn `warning`, periph-danger `danger`, periph-info `info`, none `neutral`;
- * Unsupported is `neutral`, not red, since USB cameras are Unsupported and preview fine (spec,
- * "One chip per row").
+ * of the snapshot. Unsupported is `neutral`, not red, since USB cameras are Unsupported and
+ * preview fine; each row has one chip.
  */
 
 import type { NeatIconName, NeatTone } from '@sima/neat-ui';
 import type { NeatSelectListGroup } from '@sima/neat-ui/select-list';
-import type { BoardState, CameraSetup } from '../board/api';
+import type { CameraSetup } from '../board/api';
 import type {
   CameraItem,
-  DeviceChanges,
   MicrophoneItem,
+  PeripheralChanges,
   PeripheralItem,
-  PeripheralIssue,
   PeripheralSnapshot,
   SupportTier,
   UsbFacts,
@@ -57,7 +54,7 @@ export interface DeviceGroups {
 
 /**
  * The kinds Insight knows a name and an icon for, in the list's order. Cameras and microphones
- * have a view; LiDAR is a name only, as in #170. A kind the backend invents gets the generic
+ * have a view; LiDAR is a name only. A kind Sentinel invents gets the generic
  * `device` icon.
  */
 const KNOWN_KINDS: readonly { kind: string; label: string; icon: NeatIconName }[] = [
@@ -70,8 +67,7 @@ const VIEWED_KINDS: ReadonlySet<string> = new Set(['camera', 'microphone']);
 
 /**
  * The order of the connections within a kind's group. A connection not listed comes after these,
- * in the scan's order: #170 dropped such devices from its lists (Inv-PB §1.1), which hid a device
- * the board reported.
+ * in the scan's order, so that no device the board reported is hidden.
  */
 const CONNECTION_ORDER: Readonly<Record<string, readonly string[]>> = {
   camera: ['mipi', 'usb'],
@@ -80,14 +76,7 @@ const CONNECTION_ORDER: Readonly<Record<string, readonly string[]>> = {
 
 const TIERS: Record<SupportTier, DeviceChip> = {
   available: { label: 'Available', tone: 'success' },
-  unverified: { label: 'Unverified', tone: 'warning' },
   unsupported: { label: 'Unsupported', tone: 'neutral' },
-};
-
-const SEVERITIES: Record<PeripheralIssue['severity'], DeviceChip & { rank: number }> = {
-  error: { label: 'Error', tone: 'danger', rank: 0 },
-  warning: { label: 'Warning', tone: 'warning', rank: 1 },
-  info: { label: 'Info', tone: 'info', rank: 2 },
 };
 
 const PREVIEWING: DeviceChip = { label: 'Previewing', tone: 'info' };
@@ -95,9 +84,9 @@ const TESTING: DeviceChip = { label: 'Testing', tone: 'info' };
 const LAST_SCAN: DeviceChip = { label: 'Last scan', tone: 'neutral' };
 const NOT_SUPPORTED: DeviceChip = { label: 'Not supported yet', tone: 'neutral' };
 
-/** A snapshot counts as scanned once a scan made it; the empty one before any has no `scan_id`. */
+/** A snapshot counts as scanned once a scan made it; the empty one before any has no `scanned_at`. */
 export function isScanned(snapshot: PeripheralSnapshot | null): snapshot is PeripheralSnapshot {
-  return snapshot !== null && snapshot.scan_id !== null;
+  return snapshot !== null && snapshot.scanned_at !== null;
 }
 
 export function isCamera(item: PeripheralItem): item is CameraItem {
@@ -113,14 +102,9 @@ export function countLabel(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-/** A tier's label and tone; anything but the three tiers reads as Unsupported. */
+/** A tier's label and tone; anything but the two tiers reads as Unsupported. */
 export function tierInfo(tier: SupportTier): DeviceChip {
   return TIERS[tier] ?? TIERS.unsupported;
-}
-
-/** A Sentinel issue's severity label, tone and sort rank; an unknown severity reads as Info. */
-export function severityInfo(severity: string): DeviceChip & { rank: number } {
-  return SEVERITIES[severity as PeripheralIssue['severity']] ?? SEVERITIES.info;
 }
 
 /**
@@ -131,7 +115,7 @@ export function severityInfo(severity: string): DeviceChip & { rank: number } {
  *
  * A heading counts its devices ("Cameras · 3"), or says why it has none: "none found" after a
  * scan, "not scanned yet" before one. It is muted when it has no devices, and for a kind Insight
- * has no view for even with devices (ruling F27), whose rows say "Not supported yet".
+ * has no view for even with devices, whose rows say "Not supported yet".
  */
 export function deviceGroups(snapshot: PeripheralSnapshot | null): DeviceGroups {
   const scanned = isScanned(snapshot);
@@ -184,7 +168,7 @@ export function resolveDeviceId(
   return items[0]?.id ?? null;
 }
 
-/** A device's row: its kind icon, name and subtitle, connection, and one chip (spec, "One chip per row"). */
+/** A device's row: its kind icon, name and subtitle, connection, and one chip. */
 export function deviceRow(item: PeripheralItem, activity: DeviceActivity): DeviceRow {
   return {
     item,
@@ -239,8 +223,8 @@ export function deviceFacts(item: PeripheralItem): DeviceFact[] {
 }
 
 /** The change summary's lines: the devices gone since the last scan, then the new ones. */
-export function changeSummary(changes: DeviceChanges | null): string[] {
-  const names = (list: DeviceChanges['added']) =>
+export function changeSummary(changes: PeripheralChanges | null): string[] {
+  const names = (list: PeripheralChanges['added']) =>
     list.map((device) => device.name || device.id).join(', ');
   const lines: string[] = [];
   if (changes?.removed.length)
@@ -249,37 +233,31 @@ export function changeSummary(changes: DeviceChanges | null): string[] {
   return lines;
 }
 
-/** The issues, errors first, then warnings, then info; the scan's order within each. */
-export function sortIssues(issues: readonly PeripheralIssue[]): PeripheralIssue[] {
-  return [...issues].sort((a, b) => severityInfo(a.severity).rank - severityInfo(b.severity).rank);
-}
-
 /**
- * The snapshot describes another board than the one selected: it was scanned for an earlier
- * generation. The page then asks for a refresh and blocks previews.
+ * The snapshot describes another board than the one selected (`boardId`): it was scanned before
+ * the board changed. The page then asks for a refresh and blocks previews.
  */
 export function isSnapshotStale(
-  board: Pick<BoardState, 'generation'> | null,
+  boardId: string | null,
   snapshot: PeripheralSnapshot | null,
 ): boolean {
-  return board !== null && isScanned(snapshot) && snapshot.generation !== board.generation;
+  return boardId !== null && isScanned(snapshot) && snapshot.board.id !== boardId;
 }
 
 /**
- * The camera setup SiMa Sentinel read from the board's device tree, for the board it scanned:
- * null before a scan, after the selected board changed, or from an older Sentinel.
+ * The camera setup SiMa Sentinel read from the device tree of board `boardId` in its last scan:
+ * null before a scan, for a scan of another board, or from an older Sentinel.
  */
 export function boardCameraSetup(
-  board: Pick<BoardState, 'generation'> | null,
+  boardId: string | null,
   snapshot: PeripheralSnapshot | null,
 ): CameraSetup | null {
-  if (board === null || !isScanned(snapshot) || snapshot.generation !== board.generation) {
-    return null;
-  }
-  return snapshot.camera_setup;
+  if (boardId === null || !isScanned(snapshot) || snapshot.board.id !== boardId) return null;
+  const setup = snapshot.camera_setup;
+  return setup && { model: setup.model, overlays: [...setup.overlays] };
 }
 
-/** A kind's group label, as #170 named a kind it had no name for: "gps_unit" reads "Gps units". */
+/** A kind's group label for a kind Insight has no name for: "gps_unit" reads "Gps units". */
 function kindLabel(kind: string): string {
   const text = kind.replace(/[_-]+/g, ' ').trim();
   if (!text) return 'Other';
@@ -343,7 +321,7 @@ function connectionLabel(item: PeripheralItem): string {
 
 /**
  * The USB generation the link speed implies. Without a speed, which the backend never sends for
- * a microphone, it is "USB": guessing 1.1 would mislabel the device (ruling F18).
+ * a microphone, it is "USB": guessing 1.1 would mislabel the device.
  */
 function usbLabel(speedMbps: number | undefined): string {
   if (speedMbps === undefined) return 'USB';
@@ -366,7 +344,7 @@ function rowChip(item: PeripheralItem, activity: DeviceActivity): DeviceChip {
 
 /**
  * A device's own state, without what the page does with it: a camera kept from an earlier scan,
- * else its tier. The camera panel's title shows it (ruling F4), since the panel's status chip
+ * else its tier. The camera panel's title shows it, since the panel's status chip
  * shows the preview's state.
  */
 export function deviceChip(item: PeripheralItem): DeviceChip {
@@ -390,8 +368,8 @@ function usbFacts(usb: UsbFacts | undefined): [string, string | number | null | 
 }
 
 /** "0: Nano (Yeti Nano)", from the parts the card reported; null with none. */
-function alsaCard(index: number | null, id: string | null, name: string | null): string | null {
-  const head = [index === null ? '' : String(index), id ?? ''].filter(Boolean).join(': ');
+function alsaCard(index?: number, id?: string, name?: string): string | null {
+  const head = [index === undefined ? '' : String(index), id ?? ''].filter(Boolean).join(': ');
   const text = [head, name ? `(${name})` : ''].filter(Boolean).join(' ');
   return text || null;
 }

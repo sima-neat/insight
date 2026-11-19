@@ -33,11 +33,11 @@ import {
   timeout,
   timer,
 } from 'rxjs';
-import type { Slot } from '../../sources/api';
+import type { Slot } from '../../api.generated';
 import { EndsStream, filePreview, PreviewFrame } from '../../sources/preview-frame';
 import { isLive, previewSrc } from '../../sources/slot-row';
 
-/** How often the live image is checked for its first frame (#170). */
+/** How often the live image is checked for its first frame. */
 const FRAME_CHECK_MS = 100;
 /** How long the check of a failed preview waits for the server before calling it unavailable. */
 const PROBE_TIMEOUT_MS = 3000;
@@ -64,7 +64,7 @@ export type PreviewFailure = 'busy' | 'failed';
 /**
  * Calls `onFrame` once the image shows its first frame, checking every 100 ms; returns the stop.
  * A multipart MJPEG `<img>` fires `load` unreliably (Chrome only once the stream ends), so the
- * frame is noticed by the image gaining a width (#170). The checks are a plain timer: the app has
+ * frame is noticed by the image gaining a width. The checks are a plain timer: the app has
  * no zone, so they cause no change detection; only `onFrame` changes what is shown.
  */
 export function watchFirstFrame(
@@ -104,7 +104,7 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
 }
 
 /**
- * What the selected slot shows (spec, "Live preview"): the stream for every kind while it is live,
+ * What the selected slot shows: the stream for every kind while it is live,
  * through the server's MJPEG preview route; the file itself, labelled so, for a file slot that is
  * not; and the local camera of a webcam this browser publishes until its stream is live. There is
  * no on/off switch: one preview per panel, so at most one per browser tab.
@@ -114,8 +114,8 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
  * previews, is asked for again by itself a few times before it is reported (`PREVIEW_RETRIES`),
  * while "Connecting…" stays up.
  *
- * A badge in the frame's top left says what the picture is (spec, "Top bar, rail and preview
- * badge"): "Live" whenever the slot is live, whatever its source and however its preview is doing
+ * A badge in the frame's top left says what the picture is: "Live" whenever the slot is live,
+ * whatever its source and however its preview is doing
  * (connecting, retrying or failed: the slot is live, and the message says the rest), and otherwise
  * what is shown instead: "File preview", "Camera preview", or "Not live" for a pull that waits or
  * fails. A frame that shows nothing else has none. The badge text is the frame's accessible
@@ -139,7 +139,7 @@ export class SlotPreview {
   /** The pause before the next automatic retry, while there is one. */
   private pause: Subscription | null = null;
 
-  private readonly index = computed(() => this.slot().index);
+  private readonly n = computed(() => this.slot().n);
   /**
    * A new one for each stream (set in the constructor, where the stream's key is watched) and for
    * each retry, so a restarted stream never asks for the URL of the one before: the browser might
@@ -147,12 +147,9 @@ export class SlotPreview {
    */
   private readonly token = signal(Date.now());
   /** The publisher's session, which a reconnect between two polls changes. */
-  private readonly since = computed(() => {
-    const slot = this.slot();
-    return (slot.state === 'external' ? slot.external?.since : slot.pull?.since) ?? null;
-  });
+  private readonly since = computed(() => this.slot().publisher?.since ?? null);
   protected readonly liveSrc = computed(() =>
-    isLive(this.slot()) ? previewSrc(this.slot().index, this.token(), this.since()) : null,
+    isLive(this.slot()) ? previewSrc(this.n(), this.token(), this.since()) : null,
   );
   /**
    * The live image, one or none, keyed by its URL: rendered with `@for` so a new URL is a new
@@ -174,7 +171,7 @@ export class SlotPreview {
    * does not change this.
    */
   private readonly stream = computed(() =>
-    isLive(this.slot()) ? `${this.index()}|${this.since()}` : null,
+    isLive(this.slot()) ? `${this.n()}|${this.since()}` : null,
   );
   /**
    * The automatic retries made on this stream, since its image last stayed up or the user asked
@@ -200,22 +197,27 @@ export class SlotPreview {
    */
   protected readonly file = computed(() => {
     const slot = this.slot();
-    return slot.state === 'stopped' ? filePreview(slot.file, slot.codec === 'mjpeg') : null;
+    return slot.kind === 'file' && !isLive(slot) && slot.file
+      ? filePreview(slot.file, slot.codec === 'mjpeg')
+      : null;
   });
   /** The webcam's own camera, until its stream is live. */
   protected readonly camera = computed(() =>
-    isLive(this.slot()) || this.slot().type !== 'webcam' ? null : this.localStream(),
+    isLive(this.slot()) || this.slot().kind !== 'webcam' ? null : this.localStream(),
   );
   /** What to say where there is nothing to show. */
   protected readonly idleText = computed(() => {
     const slot = this.slot();
-    if (slot.state === 'pulled') {
-      const pull = slot.pull;
-      if (pull?.status === 'auth_failed') return pull.error ?? '';
-      const reason = pull?.status === 'unreachable' && pull.error ? ` (${pull.error})` : '';
+    const pull = slot.pull;
+    if (slot.kind === 'pull' && pull) {
+      if (pull.status === 'auth_failed' || pull.status === 'needs_credentials') {
+        return pull.error ?? '';
+      }
+      if (pull.status === 'stopped') return 'Start this source to pull the camera.';
+      const reason = pull.status === 'unreachable' && pull.error ? ` (${pull.error})` : '';
       return `Waiting for the camera…${reason}`;
     }
-    if (slot.type === 'webcam') return 'Start this source to preview the live webcam.';
+    if (slot.kind === 'webcam') return 'Start this source to preview the live webcam.';
     return slot.file ? '' : 'Assign a media file to preview.';
   });
 
@@ -230,7 +232,7 @@ export class SlotPreview {
       if (isLive(slot)) return { label: 'Live', live: true };
       if (this.file()) return { label: 'File preview', live: false };
       if (this.camera()) return { label: 'Camera preview', live: false };
-      if (slot.state === 'pulled') return { label: 'Not live', live: false };
+      if (slot.kind === 'pull') return { label: 'Not live', live: false };
       return null;
     },
   );

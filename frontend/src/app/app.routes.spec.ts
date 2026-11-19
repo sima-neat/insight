@@ -81,15 +81,7 @@ describe('routes', () => {
     expect(router.url).toBe('/streaming');
   });
 
-  it('redirects /rtsp to /streaming and /visualizer to /stats', async () => {
-    await harness.navigateByUrl('/rtsp', StreamingPage);
-    expect(router.url).toBe('/streaming');
-
-    await harness.navigateByUrl('/visualizer', StatsPage);
-    expect(router.url).toBe('/stats');
-  });
-
-  it.each(['/workspace', '/genai', '/media/unknown/nested'])(
+  it.each(['/workspace', '/visualizer', '/media/unknown/nested'])(
     'redirects unknown paths such as %s to /streaming',
     async (path) => {
       await harness.navigateByUrl(path, StreamingPage);

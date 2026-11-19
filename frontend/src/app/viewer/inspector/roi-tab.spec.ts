@@ -138,7 +138,7 @@ describe('RoiTab', () => {
     await settle();
   }
 
-  it('the hint and list copy match the spec, and No regions. shows for an empty list', async () => {
+  it('shows the hint and the list copy, and No regions. for an empty list', async () => {
     await render('global');
 
     expect(radios().map(radioLabel)).toEqual(['Off', 'Inclusion', 'Exclusion']);
@@ -245,7 +245,7 @@ describe('RoiTab', () => {
     });
   });
 
-  it('the parts come in the spec’s order: field, Draw, hint, list, notes, switches', async () => {
+  it('the parts come in order: field, Draw, hint, list, notes, switches', async () => {
     await render('global', {
       'roi:global': stored([SQUARE]),
       'roi:channel:3': stored([]),

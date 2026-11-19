@@ -1,6 +1,6 @@
 ---
 name: sima-use-neat-insight
-description: Use when working with the neat-insight Flask API, frontend, media sources, streaming source controls, vf viewer URLs, UDP/RTP ingest statistics, WebRTC egress/browser statistics, metrics endpoints, health checks, or coding-agent API documentation for neat-insight. This skill helps agents inspect service state, upload/delete/inspect media, assign and control media-source streams, debug inbound vf streams and browser delivery, build viewer links, and understand endpoint request/response contracts.
+description: Use when working with the neat-insight API, frontend, media sources, streaming source controls, viewer URLs, the Viewer's channels (an app's RTP video on UDP 9000+N and JSON metadata on 9100+N, matched and sent to browsers over WebRTC), metrics endpoints, health checks, or coding-agent API documentation for neat-insight. This skill helps agents inspect service state, upload/delete/inspect media, assign and control media-source streams, debug why an app's video or boxes do not show, build viewer links, and understand endpoint request/response contracts.
 ---
 
 # Use Neat Insight
@@ -10,6 +10,12 @@ description: Use when working with the neat-insight Flask API, frontend, media s
 Use the neat-insight HTTP API as the control plane for media management, streaming source playback, runtime metrics, environment metadata, and frontend serving. Prefer these APIs over editing persisted state files directly unless the user explicitly asks for low-level debugging.
 
 Default local backend URL is `https://127.0.0.1:9900`. The service uses a local mkcert certificate in normal development, so local API clients may need to trust mkcert or pass an insecure TLS option for diagnostics.
+
+The server describes its whole API at `GET /api/openapi.yaml`: the OpenAPI 3.0 document it was built from, in YAML, with every route, its parameters, request bodies, answers and error codes. Read it for endpoint-level details this skill leaves out, or to generate a client:
+
+```bash
+curl -k https://127.0.0.1:9900/api/openapi.yaml -o neat-insight-openapi.yaml
+```
 
 User-facing documentation lives at `https://developer.sima.ai/software/tools/insight/`. Read that documentation when the user asks for conceptual guidance, SDK usage, UI workflows, or installation instructions rather than endpoint-level API details.
 
@@ -31,14 +37,14 @@ Default container ports are:
 | Name | Default host/container port | Purpose |
 | --- | --- | --- |
 | `mainUI` | TCP `9900` | Main Insight UI and API. |
-| `videoUI` | TCP `8081` | WebRTC Video Viewer UI. |
+| `videoUI` | TCP `8081` | Not served any more: the Viewer is `/viewer` on `mainUI`. `neat --json` may still list the port. |
 | `rtsp.tcp` | TCP `8554` | RTSP media-source server. |
 | `videoUDP` | UDP `9000-9079` | Video RTP ingest for viewer channels `0-79`. |
 | `metadataUDP` | UDP `9100-9179` | Metadata JSON ingest for viewer channels `0-79`. |
 | `webRTC` | UDP `40000-40199` by default | WebRTC media transport range. |
-| `webSSH` | TCP `8022` | Browser shell to a paired DevKit when available. |
+| `webSSH` | TCP `8022` | Not served any more: Insight has no browser shell (`GET /api/boards` gives the `ssh` command instead). The SDK may still publish the port. |
 
-If default host ports are already in use, `sima-cli` can allocate non-default host ports. Do not assume `9900`, `8081`, `8554`, `9000`, or `9100` are the browser/device-facing ports. Parse `neat --json` and use `exposedPorts[*].hostPortStart` and `hostPortEnd`.
+If default host ports are already in use, `sima-cli` can allocate non-default host ports. Do not assume `9900`, `8554`, `9000`, or `9100` are the browser/device-facing ports. Parse `neat --json` and use `exposedPorts[*].hostPortStart` and `hostPortEnd` (Insight's `/api/system` passes them on as `neat.exposed_ports`).
 
 Example `neat --json` shape:
 
@@ -75,293 +81,179 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 ## Operating Rules
 
 - Call `/api/health` first when connecting to a running neat-insight instance.
-- Use JSON request bodies for POST endpoints except `/api/upload/media`, which uses multipart form field `file` and an optional `on_conflict` (`ask`, `keep_both`, `replace`); a name that is already taken answers 409 unless `on_conflict` is set.
-- Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
-- Use `/api/mediasrc` to read source state before changing assignments or playback.
-- Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments and cached FPS renditions for deleted files, including files inside a deleted directory.
-- Peripherals never captures video: SiMa Sentinel on the board discovers the cameras and microphones (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog; only an explicit camera preview captures video and only an explicit microphone test records audio. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
-- Preview is the only Peripherals operation that touches the sensor, and only while it runs: over the board connection Insight runs `gst-launch-1.0` (`libcamerasrc` for MIPI, `v4l2src` on the `/dev/v4l/by-id` path for USB) that writes multipart JPEG (at most 640 px wide, up to 15 fps) to stdout, and relays it at the session's `stream_url` as `multipart/x-mixed-replace`. It uses no vf channel, UDP port, or PyNeat. Discovery never captures. A failed start carries the pipeline's stderr in `detail`. The session's `camera_fps` is the rate the camera runs at: a USB mode's own rate; for MIPI, Sentinel's `max_fps` from one Sentinel rescan after the first frame (no Insight scan is recorded and the preview keeps running), `null` until then or when Sentinel cannot report it.
-- Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; System Info's host readings (`/api/metrics`) still read the legacy REMOTE_DEVKIT target.
+- Send request bodies as JSON, except `/api/media/uploads`, which is multipart (`file`, optional `on_conflict`). A request that changes something (any method but GET, HEAD and OPTIONS) sent by a page of another website is refused with 403 `cross_origin`; curl and scripts, which send no `Origin`, are not.
+- Treat file paths returned by media APIs as library paths, relative to the media folder. Do not send absolute host paths.
+- Read `/api/slots` before changing assignments or playback.
+- Clear or reassign the slots that use a file before deleting it: `/api/media/delete` refuses (409 `in_use`, naming the `slots`).
+- Board-facing features (Peripherals, Stats) use one selected board from `GET /api/boards`: the board entered by hand, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Its `id` names it in every board path (`/api/boards/local/...`, `/api/boards/ssh%3Asima%40192.168.1.20%3A22/...`, URL-escaped); any other id is 404 `not_found`. Enter a board with `POST /api/boards` only when the user names one; never send passwords: Insight signs in with the SSH keys of the account it runs as. There is no browser shell: the boards answer's `selected.ssh` is the command to open one.
+- Peripherals never captures video by itself: SiMa Sentinel on the board discovers the cameras and microphones, and Insight answers the devices it found, with Sentinel's own verdict on each camera mode and whether Insight's preview takes it. Only an explicit camera preview captures video and only an explicit microphone test records audio. When Sentinel is missing or fails, surface its error (`sentinel_missing` with the install command `sima-cli neat install sentinel`, `sentinel_stopped`, ...); never add an Insight-side hardware scan as a fallback.
+- A camera preview runs `gst-launch-1.0` on the board over its SSH connection (`libcamerasrc` for MIPI, `v4l2src` on the `/dev/v4l/by-id` path for USB), writing multipart JPEG (at most 640 px wide, up to 15 fps), which Insight relays as `multipart/x-mixed-replace`. It uses no Viewer channel, UDP port or PyNeat.
 - Use `/api/viewer-url` for viewer links instead of hand-building them when the browser target should match the current backend host.
-- Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
-- Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
-- Use `neat-insight-metadata-test` or `neat_insight/tools/multisrc-harness.sh` when vf metadata/DataChannel behavior needs reproducible synthetic traffic.
-- Overlay colors are assigned per identity from one palette (`webrtc/static/js/metadata-colors.js`): class label for detection, segmentation and classification, `id` for tracking and pose. See `docs/user-interface.md#metadata-colors` before judging colors in a screenshot.
+- Use `/api/ingest/stats?all=1&verbose=1` first when an app's video or boxes do not show: it says per channel what arrives, what Insight sent on, and how many browsers watch, before you suspect the browser, ICE, or the decoder. See [Localizing A Video Or Overlay Problem](#localizing-a-video-or-overlay-problem).
+- Insight gets no reports from browsers. What happens after Insight sends a picture (decoding, late metadata, drawing) shows only in the browser: the tile's status bar, the console with `debug=1` in the Viewer URL, and `chrome://webrtc-internals`.
+- Use `neat-insight-metadata-test` when the Viewer's path needs a reproducible feed: video and metadata matched to its frames on one channel (see [Synthetic Metadata Testing](#synthetic-metadata-testing)).
+- Overlay colors are assigned per identity from one palette: class label for detection, segmentation and classification, `id` for tracking and pose. See `docs/user-interface.md#metadata-colors` before judging colors in a screenshot.
 - Use the SDK port map before instructing DevKit-side apps or external tools to connect to Insight. Default ports only apply when the SDK was able to publish the defaults.
 - For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
-- Test overlay rendering on `videoUI`, not `mainUI`. Only the vf viewer loads `/static/drawing.js`; the console's Video Viewer bundles no overlay renderer and draws only what a browser cached from an older install.
-- Hard-reload the viewer after installing a new Insight before trusting a rendering result. A browser can serve a stale `drawing.js` for days.
+- Test overlay rendering on the Viewer page, `/viewer` on `mainUI` (`/api/viewer-url` builds the link). Nothing is served on `videoUI` (8081) any more.
+- Hard-reload the Viewer after installing a new Insight before trusting a rendering result, so the browser does not run a cached older frontend.
 - Global Viewer Configuration saves are authoritative: they clear stored channel settings so the change takes effect everywhere. Settings opened from a tile create a later channel override; **Use Global Settings** discards it. Metadata types also have a **Show Overlay** switch; use it instead of treating style rows as visibility controls.
 - **Panel Transparency** in the 3D Pose tab adds transparency to auxiliary-panel surfaces without fading the visualization or controls. A global save applies the value to every channel.
-- Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters below.
-- Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond, so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
+- Open the Viewer on a channel before reading its counters. While no browser watches, metadata is neither matched nor sent on, so `metadata.messages_forwarded` stays flat.
+- Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond (`docs/contracts.md`), so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
 - Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
-- A source with `state: "external"` is held by a publisher Insight did not start. Do not call start/assign/stop on it (409); call `/api/mediasrc/takeover` only when the user explicitly wants that stream disconnected. Bulk endpoints leave the external stream alone and report such slots in `skipped_external`; `reset` still clears the stored assignment of every slot.
-- A source with `state: "pulled"` is a network stream Insight pulls into the slot (session-only). Do not call start/assign/prepare/takeover on it (409); call stop only when the user wants the pull released. Stop All and Reset stop pulls too and report them in `stopped_pulled`; Auto Assign and Bulk Start skip such slots and report them in `skipped_pulled`. Never echo the URL a user gave for a pull with its credentials; the API never returns them.
+- A slot with `state: "external"` is held by a publisher Insight did not start. Assigning or starting it is 409 `slot_busy`; call `/api/slots/{n}/take-over` only when the user explicitly wants that stream disconnected. Bulk routes leave the external stream alone and report such slots in `skipped_external`; reset still clears the assignment of every slot.
+- A slot of `kind: "pull"` is a camera MediaMTX pulls. Stop keeps the camera and Start pulls again; delete the slot to forget it. Auto-assign leaves it alone (`skipped_pulled`). Never echo the URL a user gave for a pull with its credentials; the API never returns them.
 
 ## Health And Metrics
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Return service identity, status, UTC timestamp, and the startup-scoped browser ICE address/public origin applied by Insight. |
-| `GET` | `/api/metrics` | Return a point-in-time system metrics payload with CPU, memory, disk, temperature, MLA, remote, and `pipeline_status` compatibility fields. `cpu_load` is total CPU use (also for the remote DevKit); locally it is measured since the previous read, without blocking. |
-| `GET` | `/api/neat-metrics` | Open a server-sent events stream of JSON metrics events from the local metrics broker. |
-| `GET` | `/api/ingest/stats` | Return active vf UDP/RTP ingest streams and compact transport, media, forwarding, and WebRTC stats. |
-| `GET` | `/api/egress/stats` | Return active vf WebRTC egress peers with RTCP feedback and browser decode/render stats. |
-| `GET` | `/api/logs/<logname>` | Return recent `EV74` or `syslog` lines as `text/plain`; unknown or missing logs return 404. |
-| `GET` | `/api/system/tools` | Return booleans for `ffmpeg`, `ffprobe`, and `gst-launch-1.0` availability on `PATH`. |
+| `GET` | `/api/openapi.yaml` | Return the API's OpenAPI document (YAML), as the server was built with it. |
+| `GET` | `/api/channels` | Return which Viewer channels receive video (see [Channels](#channels)). |
+| `GET` | `/api/ingest/stats` | Return what arrives on each channel and what Insight sent on, in the frozen shape that the SDK's tests read. |
 
 Example:
 
 ```bash
 curl -k https://127.0.0.1:9900/api/health
-curl -k https://127.0.0.1:9900/api/metrics
-curl -k https://127.0.0.1:9900/api/ingest/stats
-curl -k https://127.0.0.1:9900/api/egress/stats
-curl -k https://127.0.0.1:9900/api/system/tools
-```
-
-## Ingest Stats
-
-`/api/ingest/stats` proxies vf's non-decoding ingest stats for both video RTP (UDP `9000-9079`) and metadata JSON (UDP `9100-9179`). Use it to answer whether UDP is reaching vf, whether vf has a WebRTC track attached, whether H.264 or H.265 parameter sets and keyframes are present, and whether metadata is flowing to the viewer.
-
-| Query | Behavior |
-| --- | --- |
-| none | Return active channels only with compact stats. |
-| `all=1` | Include inactive channels, useful for checking configured UDP ports. |
-| `verbose=1` | Include diagnostics such as NAL type counts, payload type history, estimated sequence gaps, jitter estimate, malformed packet count, and recent errors. |
-| `all=1&verbose=1` | Return the full diagnostic view for all vf channels. |
-
-Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H.264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. A healthy H.265 stream should also show `media.seen_vps` and periodic `media.keyframe_count` growth. Metadata should show increasing `metadata.messages_received`. If it grows while `metadata.messages_forwarded` stays flat, inspect the correlation outcomes below before moving to the DataChannel.
-
-Examples:
-
-```bash
-curl -k https://127.0.0.1:9900/api/ingest/stats
 curl -k 'https://127.0.0.1:9900/api/ingest/stats?all=1&verbose=1'
 ```
 
-### Metadata Correlation
+## System Info
 
-Overlays are drawn only when a metadata message is matched to the video frame it
-describes. Insight matches `metadata.timestamp * 90` against the incoming video
-RTP timestamp within ±90 units — one millisecond. Use these fields inside each
-channel's `metadata` object to attribute an overlay failure without a packet
-capture.
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/system` | Insight's `version` and `build`, where it runs (`place`: `board`, `sdk`, `host`), its data folder, `web_ui_url`, the network and ports it resolved at start (certificate host, browser ICE address, public origin, channel count, WebRTC range, the RTSP and WHIP host ports); and `neat`: an allowlist of `neat --json`'s fields (`environment`, `components` with versions and updates, the `insight` service, `update_check`, `exposed_ports`). Never its code UI section or passwords. From memory; neat runs once at start (`neat.state` is `reading` until it ends, then `ready`, `missing` or `failed`) and again with `?refresh=true`, which takes up to 15 s because neat checks online for updates. |
+| `GET` | `/api/system/host` | The machine Insight runs on, not the board: `cpu_percent` since the reading before (never blocking), `memory` and the `disk` of Insight's data folder (`total`, `used` in bytes, `percent`). |
+
+```bash
+curl -k 'https://127.0.0.1:9900/api/system?refresh=true' | jq '.neat.components'
+curl -k https://127.0.0.1:9900/api/system/host
+```
+
+## Channels
+
+Insight's Go server (`server/`) serves the Viewer's path itself. For channel `N` it receives RTP on UDP `9000 + N` and metadata JSON on UDP `9100 + N`, matches each metadata message to the frame its `timestamp` names, and sends both to the browsers watching `N` over WebRTC. The rules an app follows (payload types, keyframes, the message envelope, the five metadata types, the timestamp rule) are in `docs/contracts.md`. Read it there rather than guessing a format.
+
+Insight serves channels `0` to `count - 1`: 80 on a DevKit, and in the SDK the number of channels the container publishes (4 by default). An app that sends to a higher channel gets no tile. `/api/channels` lists every channel, and `/api/viewer-url` returns the count as `max_video_channels`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/channels` | `{channels: [{channel, video: {active}}]}`: every channel, and whether video arrived on it in the last 3 s. The Viewer's Hide empty reads it. It is read from memory, so poll it freely. |
+| `POST` | `/api/channels/{N}/offer` | The Viewer's WebRTC offer in, Insight's answer out: JSON `{"type", "sdp"}`, at most 64 KiB. Its error codes are under [Error Handling](#error-handling). |
+| `GET` | `/api/ingest/stats` | Frozen: what arrives on each channel and what became of it ([below](#ingest-stats)). |
+
+### Ingest Stats
+
+`/api/ingest/stats` keeps vf's field names because the SDK's network and smoke tests read them. Per channel:
 
 | Field | Meaning |
 | --- | --- |
-| `matched_video_first` | Metadata matched a frame that was already retained. |
-| `matched_metadata_first` | Metadata waited, and a later frame released it. |
-| `pending_video` | Frame timestamp mappings retained now for lookup; matches do not remove them. |
-| `pending_metadata` | Messages waiting now for their frame. |
-| `expired_video` | Frame mappings retired after retention, whether or not they matched metadata. |
-| `expired_metadata` | Messages that aged past retention without matching. |
-| `evicted_video` | Frame mappings retired inside retention, by capacity or a source restart, whether or not they matched metadata. |
-| `evicted_metadata` | Messages dropped inside retention, by capacity or a source restart. |
-| `video_first_lag_recent_median_ms` | Median time between a frame's arrival and its metadata's arrival, over the most recent video-first matches. Omitted without samples. |
-| `video_first_lag_recent_max_ms` | Largest such lag among the same matches. Omitted without samples. |
-| `video_first_lag_samples` | Number of matches the two lag values are based on, at most 256. |
-| `messages_forwarded` | Delivered to a browser DataChannel. Not a correlation result. |
-| `dropped_no_data_channel` | Reached forwarding, but no browser peer accepted it. |
-| `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
-
-A frame may be described by several metadata types at once. Send one message per
-type, all carrying the source frame's `timestamp` in integer milliseconds; the
-correlator matches each against the retained frame mapping, and the viewer draws
-every type it holds for that frame.
-A separate panel accepts `type: "auxiliary-visualization"` for data that should
-not cover the video. Its generic `data` object requires `schema_version: 1`, a
-stable `id`, a registered `renderer`, and an object `payload`. Auxiliary views
-require the exact correlated RTP timestamp; a matched view may remain for 160 ms
-across a delivery gap. Multiple IDs become tabs. Keep their channel and source
-PTS identical to the video and overlay messages.
-The built-in `blazepose-3d` renderer reads named finite `x`, `y`, and `z` values
-from `payload.poses[].keypoints[]`. Its **3D Pose** Viewer Configuration tab sets
-panel visibility, size, transparency, camera angle, and reference-cube visibility
-globally or per channel. The renderer draws each correlated frame directly,
-without smoothing or automatic motion. Pose Estimation settings separately
-control the 2D overlay, joint markers, and landmark names.
-A second ordinary message of the same type for the same frame replaces the first;
-auxiliary messages replace only the view with the same `data.id`. Retained
-messages draw in arrival order. Metadata without a correlated RTP timestamp uses
-the single-message arrival fallback, since types cannot safely be grouped without
-a shared frame identity.
-
-A failing drawing strategy does not stop other types or subsequent frames. Check
-the browser console for a warning, emitted once per channel and metadata type.
-Shared ROI polygons draw once per frame; each type still applies its ROI filter.
-
-Every timestamped message leaves through exactly one of matched, expired, or
-evicted, or is still counted in `pending_metadata`. The video fields describe
-the lifetime of reusable timestamp mappings, not match or loss outcomes.
-
-Read them in this order:
-
-- `rtp.packets_received` flat: video is not reaching Insight, so correlation
-  cannot happen.
-- `rtp.packets_received` climbing while `forwarding.packets_forwarded` stays
-  flat: frames are not entering correlation. Check
-  `forwarding.webrtc_track_attached`, `forwarding.packets_dropped_no_track`, and
-  `forwarding.write_errors` first.
-- `messages_received` climbing while every correlation outcome stays flat: the
-  messages have no usable `timestamp` and bypass correlation. Check
-  `invalid_json` and the producer schema.
-- `matched_*` both zero while `pending_metadata`, `expired_metadata`, or
-  `evicted_metadata` climbs, with `forwarding.packets_forwarded` also climbing:
-  timestamps are not matching. Compare the metadata timestamp against the video
-  RTP timestamp.
-- `matched_*` climbing, then stopping while `forwarding.packets_forwarded` keeps
-  climbing: progressive drift. Overlays that "worked and then stopped" are this.
-- `evicted_metadata` climbing: unmatched metadata reached the capacity bound or
-  was cleared by a source restart.
-- `pending_metadata` high with matches still occurring: ordinary arrival skew.
-- `matched_video_first` climbing with `video_first_lag_recent_median_ms` above
-  the viewer's video sync buffer (300 ms by default): correlation works, but the
-  browser has already shown each frame when its metadata arrives. Overlays are
-  missing or flicker. Confirm with `metadata_late` in `/api/egress/stats`, then
-  raise the video sync buffer for the channel or make the producer send sooner.
-- `matched_*` climbing but `messages_forwarded` flat: correlation works. Inspect
-  the DataChannel, the viewer, and the browser cache instead.
-
-Two properties to respect when reading:
-
-- Only `pending_video` and `pending_metadata` are instantaneous depths;
-  the `video_first_lag_*` fields describe the most recent matches; everything
-  else is cumulative. Sample twice over a known interval and compare
-  the deltas, or a long-running channel looks broken from its history alone.
-- Retention only binds while arrivals fit in the correlator's capacity. At the
-  ~100 messages per second measured on a DevKit, capacity holds ~2.5 s, so a
-  sustained metadata mismatch can report `evicted_metadata` before
-  `expired_metadata`. Both mean timestamped metadata failed to match.
-
-## Egress Stats
-
-`/api/egress/stats` proxies vf's WebRTC delivery stats. Use it after `/api/ingest/stats` confirms RTP is arriving, especially when the viewer has bitrate but no visible video.
+| `channel`, `udp_port`, `active` | The channel, its video port, and whether video arrived in the last 3 s. |
+| `first_packet_at`, `last_packet_at`, `remote_addr` | When video first and last arrived, and from where. |
+| `rtp.ssrc`, `rtp.payload_type` | The sender's SSRC and the last payload type seen. |
+| `rtp.packets_received`, `rtp.bytes_received`, `rtp.bitrate_bps`, `rtp.packet_rate_pps` | Packets and bytes received, and their rates over the last second. |
+| `media.codec` | `H264` (payload type 96), `H265` (98), or `unknown` before video and for a payload type Insight does not play. |
+| `media.seen_sps`, `media.idr_count` | Whether a sequence parameter set arrived, and the keyframes seen: IDRs for H.264, IRAPs for H.265. |
+| `metadata.udp_port`, `metadata.active`, `metadata.first_message_at`, `metadata.last_message_at`, `metadata.remote_addr` | The metadata port and the same facts for its messages. |
+| `metadata.messages_received`, `metadata.bytes_received`, `metadata.bitrate_bps`, `metadata.message_rate_mps` | Messages received, whole or joined from chunks, and their rates. |
+| `metadata.messages_forwarded` | Messages sent to at least one browser: an untimed one at once, a timed one once matched to the frame its `timestamp` names. A timed message that finds no frame within 5 s is dropped. |
+| `metadata.invalid_json` | Datagrams that were not a JSON object. |
+| `webrtc.peer_count` | Browsers connected to the channel's video, including connections still being set up. |
+| `diagnostics` (with `verbose=1`) | `malformed_packets`, `unsupported_packets` (a payload type Insight does not play; RTP/JPEG, 26, is planned) and `recent_errors`, the latest problems, oldest first, each starting with its time. |
 
 | Query | Behavior |
 | --- | --- |
-| none | Return active channels and peers only. |
-| `all=1` | Include inactive channels/peers, useful after reconnects or closed browser sessions. |
-| `verbose=1` | Include peer diagnostics such as recent RTCP read errors. |
-| `all=1&verbose=1` | Return the full egress diagnostic view. |
+| none | Only channels receiving video now. A channel with metadata but no video is left out. |
+| `all=1` | Every channel. |
+| `verbose=1` | Adds `diagnostics`. |
 
-`all=1` returns closed and failed peers alongside live ones, so a channel can list far more peers than it has viewers. `peer_count` counts only active peers while the `peers` array holds every returned record, and any total computed across that array includes dead sessions. Filter on each peer's `active` field before aggregating, or omit `all=1` when you want the live view.
-
-A peer is `active` when its connection is up. That is not a statement about how current its numbers are: a viewer whose tab is backgrounded stops reporting while staying connected, so its `browser` block can be minutes old and still appear under an active peer. Compare the peer's `last_browser_report_at` against the response's top-level `time` — both are server timestamps — before trusting `frames_decoded` or `frames_per_second`.
-
-Each channel includes a `metadata` summary with counts of metadata messages dropped due to having no open DataChannel. Each peer includes connection states, RTCP feedback, the latest browser report when the viewer is connected, and a `metadata` object that reflects vf's server-side metadata DataChannel sends (message/byte counters plus rate estimates and send errors). RTCP feedback can show receiver reports, PLI/FIR keyframe requests, NACKs, REMB bitrate estimates, loss, and jitter. Browser reports come from `RTCPeerConnection.getStats()` plus the video element state, including `frames_decoded`, `frames_dropped`, `frames_per_second`, `ready_state`, `current_time`, and `active`.
-
-Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms`, `inbound_rtp.decoder_implementation`, `inbound_rtp.power_efficient_decoder`, and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
-
-`synchronization.timestamped_metadata_pending` counts queued messages, including
-each metadata type for a shared frame. Both pending counts and the expiry/eviction
-counters use messages, and so does `metadata_late`; `timestamp_matches` counts
-matched video-frame callbacks.
-
-The `synchronization` object also reports late metadata:
-
-| Field | Meaning |
-| --- | --- |
-| `metadata_late` | Cumulative count of messages that arrived after their frame had been presented. The browser discards them. |
-| `metadata_lateness_recent_median_ms` | Median time by which those messages missed their frame, over the last 5 s of presented frames. Omitted without samples. |
-| `metadata_lateness_recent_max_ms` | Largest such time in the same window. Omitted without samples. |
-
-`metadata_late` climbing means the video sync buffer is smaller than the producer's metadata lag. It is not a capacity or loss problem: `metadata_evicted` stays flat. The buffer needed is roughly `video_sync_buffer_ms` plus the lateness. These counters only advance while the viewer tab is visible.
-
-Examples:
+Counters are cumulative since Insight started. Rates cover the last second and drop to `0` once a side has been quiet for 3 s. Sample twice a few seconds apart and compare, or a long-running channel looks broken from its history alone.
 
 ```bash
-curl -k https://127.0.0.1:9900/api/egress/stats
-curl -k 'https://127.0.0.1:9900/api/egress/stats?all=1&verbose=1'
+curl -k 'https://127.0.0.1:9900/api/ingest/stats?all=1&verbose=1' | jq '.channels[] | select(.channel == 1)'
 ```
 
-## Localizing A Video Problem
+## Localizing A Video Or Overlay Problem
 
-"The video is stalled" can fail at any hop between the application and the
-browser's decoder. Walk these in order and stop at the first one that fails;
-each step names the field that decides it. Take two samples a few seconds apart
-and compare deltas, because every counter here is cumulative.
+"My app's video or boxes don't show" can fail at any hop between the app and the browser. Open the Viewer on the channel first, since metadata is sent on only while a browser watches. Then walk these steps against the channel in `/api/ingest/stats?all=1&verbose=1` and stop at the first one that fails.
 
 | Step | Question | Field | Failing means |
 | --- | --- | --- | --- |
-| 1 | Is RTP reaching vf? | `rtp.packets_received` rising, channel `active` | Nothing arrived. Check app receiver host/port against `neat --json`, not vf. |
-| 2 | Is vf forwarding it? | `forwarding.packets_forwarded` rising with `rtp.packets_received` | vf is dropping. Check `diagnostics.estimated_sequence_gaps` and `diagnostics.malformed_packets`. |
-| 3 | Is a viewer attached? | `forwarding.webrtc_track_attached` | No browser is bound to the channel. `forwarding.packets_dropped_no_track` counts what was discarded meanwhile. |
-| 4 | Is the browser receiving? | peer `browser.inbound_rtp.packets_received` rising | Transport problem between vf and the browser. Check the peer's ICE and connection states. |
-| 5 | Is the browser decoding? | `browser.inbound_rtp.frames_decoded` rising | Frames arrive but do not decode. Continue to step 6. |
-| 6 | Which decoder did it get? | `browser.inbound_rtp.decoder_implementation` | A name starting with `Null` means the browser has no decoder for the negotiated codec. Reconnecting cannot fix it. |
+| 1 | Does video reach Insight? | `rtp.packets_received` rising, `active` | Nothing arrived. Check the app's host and port against `neat --json` (`videoUDP` `hostPortStart + N`) and that `N` is below the channel count. |
+| 2 | Can Insight play it? | `media.codec` not `unknown` | `diagnostics.unsupported_packets` is rising: the app sends a payload type other than 96 or 98. `rtp.payload_type` names it; 26 is RTP/JPEG, which is not played yet. |
+| 3 | Are there keyframes? | `media.idr_count` growing | A viewer starts at the next keyframe, and Insight cannot ask the app for one. Send a keyframe at least every second, with the parameter sets in band. |
+| 4 | Is a browser connected? | `webrtc.peer_count` at least 1 | The offer failed. Read its error code in the browser's network panel or the console with `debug=1` ([Error Handling](#error-handling)). |
+| 5 | Does the browser get and decode pictures? | In the browser | A viewer is listed but its tile shows nothing: the WebRTC connection is not up (the browser cannot reach the `webRTC` UDP range, or `network.browser_ice_address` in `/api/health` is wrong), or no keyframe has come yet. An H.265 tile in a browser without H.265 shows "Codec not supported by this browser"; otherwise look at `chrome://webrtc-internals` and the console with `debug=1`. |
+| 6 | Does metadata reach Insight? | `metadata.messages_received` rising | Check the `metadataUDP` port for the same `N` as the video. `metadata.invalid_json` rising means the datagrams are not JSON objects. |
+| 7 | Is metadata sent on? | `metadata.messages_forwarded` rising | Read the cases below. |
 
-Step 5 is where codec problems surface. If `frames_received` rises while
-`frames_decoded` stays flat and `frames_dropped` rises to match, the stream
-reached the browser intact and the decoder rejected it — vf and the application
-are both healthy and the fault is browser-side.
+Reading the metadata counters while a browser watches:
 
-Two field notes that matter when reading this:
-
-- `media.idr_count` stays `0` for H.265. Use `media.keyframe_count` for H.265
-  random-access points; `idr_count` applies to H.264 only.
-- `forwarding.webrtc_track_attached` means a viewer is bound to the channel,
-  not that a track object exists. With no viewer open it is `false` and
-  `packets_dropped_no_track` climbs, which is expected rather than a fault.
-
-When `/offer` fails, the HTTP response carries a stable short message; the
-underlying cause is written to the vf service log with its channel index. Read
-the log rather than inferring from the response text, which is identical across
-several different causes.
+- `messages_received` rising while `messages_forwarded` stays flat: the timed messages name no frame. A `timestamp` must be whole milliseconds on the video's RTP clock (`T = R // 90`, see "Matching a message to its frame" in `docs/contracts.md`), or the video stopped.
+- `messages_forwarded` rising, then stopping while the video goes on: progressive drift. Overlays that "worked and then stopped" are this.
+- A message without a usable `timestamp` (absent, negative, fractional, or a string) is untimed and sent on at once: the Viewer draws it on whatever frame shows when it arrives, so boxes lag or jitter.
+- `messages_forwarded` rising but no overlay: Insight's side works. Check in the browser: the tile's **Metadata late** chip (raise the video sync buffer, `docs/user-interface.md#late-metadata`), the type's **Show Overlay** switch, the confidence threshold, a region of interest, a console warning for an unknown `type`, and coordinates that are not pixels of the video as sent. Frame-accurate drawing needs a Chromium-based browser.
 
 ## Synthetic Metadata Testing
 
-For viewer and vf metadata-path testing, use the bundled metadata sender instead of building ad hoc UDP emitters.
-
-Examples:
+For viewer and metadata-path testing, use the bundled test feed instead of building ad hoc UDP emitters. `neat-insight-metadata-test <channel>` sends one Viewer channel an H.264 test pattern (640x480 at 15 fps, a white square sweeping across it) on UDP `9000+channel` and, for every frame, one message of each type asked for on `9100+channel`, drawn on the square. Every message follows the metadata contract: its `timestamp` names its frame, so the overlays follow the square, and one that leaves it on screen shows a frame-matching problem. It needs ffmpeg with libx264 and runs until Ctrl-C.
 
 ```bash
-neat-insight-metadata-test --count 1 --types object-detection
-neat-insight-metadata-test --count 4 --types object-detection,classification --fps 30
-neat_insight/tools/multisrc-harness.sh start --count 16 --meta-types object-detection,segmentation
+neat-insight-metadata-test 0
+neat-insight-metadata-test 1 --types object-detection,tracking,pose-estimation,segmentation,classification
+neat-insight-metadata-test 2 --host 192.168.1.30 --metadata-delay-ms 300
 ```
 
-The metadata sender targets UDP `9100+channel` by default and emits JSON compatible with Insight's metadata overlays. It supports `object-detection`, `classification`, `pose-estimation`, `segmentation`, and `tracking`, and sends several identities per type so color assignment can be checked.
+`--host` is the machine Insight runs on (`127.0.0.1` by default); `--types` takes `object-detection` (the default), `classification`, `tracking`, `pose-estimation` and `segmentation`, comma-separated; `--metadata-delay-ms` holds each message back after its frame, as a slow model would, to provoke the Viewer's **Metadata late** notice. Run one feed per channel.
 
-## Segmentation Metadata
+## Metadata Format
 
-`type: "segmentation"` carries `data.segments[]`, one entry per instance with `label`, `confidence`, `bbox` in frame pixels, `mask_format`, `mask`, and optional `show_rectangle`.
+The message envelope, the five types (`object-detection`, `classification`, `tracking`, `pose-estimation`, `segmentation`), their fields and coordinates are in `docs/contracts.md#metadata`, with a JSON Schema per type in `docs/schemas/metadata/`. Validate a message against them before debugging the Viewer. Send one message per type per frame, each with the frame's `timestamp`.
 
-The two mask formats use different coordinate frames:
+- An RLE segmentation mask covers its `bbox`, not the frame, runs column-major starting with background, and `counts` is a JSON array of integers, not the compressed string `pycocotools.mask.encode()` returns. Only `show_rectangle: true` outlines a segment's `bbox`.
+- `auxiliary-visualization` is not a type of the contract; the Viewer ignores it like any unknown type.
+- Dropped segments and unknown types warn once per channel in the browser console. Check there first when an overlay does not render.
 
-| `mask_format` | `mask` | Coordinate frame |
-| --- | --- | --- |
-| `polygon` | `[[x, y], ...]`, at least three points | Frame-absolute. `bbox` optional, derived from the extent when absent. |
-| `rle` | `{"size": [h, w], "counts": [...]}` | Bbox-local: `size` covers the `bbox` rectangle, not the image. `bbox` required. |
+## Media Library
 
-Segment bounding rectangles are hidden by default for both mask formats. Set
-`show_rectangle: true` on a segment to draw its `bbox` outline; only boolean `true`
-opts in. The `bbox` still places the label and RLE mask and drives ROI filtering.
-
-RLE runs are column-major, the first run is background, and `counts` is a JSON array of integers — not the compressed byte string `pycocotools.mask.encode()` returns. Send the mask at mask-head resolution; the viewer stretches it onto `bbox` with interpolation.
-
-Dropped segments warn once per channel and id in the browser console. Check there first when segments do not render.
-
-## Media Sources
+The media library is the folder the Media page shows and the slots stream from: `/workspace/.insight-media` in the SDK (it outlives the container), `~/neat-insight/media` on a DevKit, `~/.simaai/neat-insight/media` elsewhere. Every path is a library path: relative to that folder, with `/`. Hidden entries and macOS archive metadata are not part of the library. Errors carry `code`; a refused delete adds `slots`, a taken upload name adds `conflict`.
 
 | Method | Path | Request | Response |
 | --- | --- | --- | --- |
-| `GET` | `/api/media-files` | None | Recursive folder tree under the media directory; hidden files and macOS archive metadata are omitted. File nodes carry `streamable` (accepted by the media-source streamer), folder nodes carry `streamable_count`; the UI hides files with `streamable: false`. |
-| `POST` | `/api/upload/media` | Multipart form field `file`, optional `on_conflict` (`ask` default, `keep_both`, `replace`) | Streaming `text/plain` progress while saving a file or extracting `zip`, `tar`, `gz`, or `tar.gz` archives (into a folder named after the archive). A taken name (for an archive, its folder) answers 409 `{error, conflict: {existing, suggested}}` and saves nothing unless `on_conflict` is `keep_both` (saves as `name_2`) or `replace` (restarts file slots that were streaming the replaced file). The stream is HTTP 200 even on failure: look for `Failed to extract archive:` or `Failed to save upload:` and a missing `Upload complete.`; a `Could not restart srcN: …` line is only a warning. |
-| `POST` | `/api/delete-media` | JSON `{"path": "relative/path"}` | `{"message": "Deleted successfully"}`; clears media-source assignments and cached FPS renditions for deleted files (directories included). |
-| `POST` | `/api/media-info` | JSON `{"path": "relative/path"}` | File size plus image dimensions for JPG/PNG or video track metadata from ffprobe, including detected codec when available. |
-| `GET` | `/api/media-preview/mjpeg?path=<path>` | Query string | Multipart MJPEG preview for MJPEG media files that browsers cannot preview directly. |
-| `GET` | `/media/<path:filename>` | Relative media path | Raw media file content for preview or download. |
+| `GET` | `/api/media` | None | The tree from the root folder: `{name, path, folder, children?, streamable, streamable_count?, probe}`, folders first. A file's `probe` is `null` while it is being probed (and for a link that leads out of the library); then it says `kind` (`video`, `image`, `unknown`), `codec` (`h264`, `h265`, `mjpeg` or ffprobe's name), `codec_name`, `profile`, `width`, `height`, `fps`, `frame_rate`, `duration_ms`, `size`, `streamable` and, when ffprobe failed, `problem`. Poll it again for probes still running. |
+| `GET` | `/api/media/info?path=<path>` | Query | `{name, path, probe}`, probed now when the file changed. 400 `invalid_path` outside the library, 404 `not_found`. |
+| `POST` | `/api/media/delete` | JSON `{"paths": ["a.mp4", "folder"]}` | `{paths}`. Removes files, links and folders with what they hold. Refuses the whole request, removing nothing, when a path is not in the library (400) or a slot uses one of the files (409 `in_use`, with `slots`): clear or reassign those slots first. |
+| `POST` | `/api/media/uploads` | Multipart field `file`, optional `on_conflict` (`ask` default, `keep_both`, `replace`) | 201 with what was saved (`{path, folder?, reencoded?, restarted?, unassigned?, warnings?}`) when the board streams the file well; 202 with a job when it is re-encoded first (B-frames, another codec, profile or pixel format, keyframes more than 4 s apart) with the catalog's encoder settings, whose `result` is what was saved. Archives (`zip`, `tar`, `tar.gz`, `tgz`) unpack into a folder named after them. A taken name with `ask` is 409 `name_taken` with `conflict: {existing, suggested}` and saves nothing; `keep_both` saves as `name_2`, `replace` restarts the slots that streamed the replaced file. 413 `too_large` above 8 GiB, 507 `no_space`. |
+| `GET` | `/api/media/file?path=<path>` | Query | The file, with range requests: video and pictures as themselves, anything else as a download. |
+| `GET` | `/api/media/preview.mjpg?path=<path>` | Query | The file as a looping `multipart/x-mixed-replace` MJPEG stream, one shared relay per file. 503 `ffmpeg_missing` without FFmpeg, 429 when Insight relays as many streams as it may. |
+| `GET` | `/api/catalog` | None | SiMa's published sample clips: the catalog index (`sources`, `assets`), each asset with its download `url`. 502 `catalog_unavailable` when it cannot be fetched. |
+| `POST` | `/api/catalog/imports` | JSON `{"path": "<asset path>"}` | 202 with a job that downloads the asset into `catalog/<source>/`, checks its size and SHA-256, and saves it (a taken name as `name_2`). |
+| `GET` | `/api/renditions` | None | `{count, bytes, in_use}` of the frame-rate renditions the slots keep in the library's hidden `.renditions` folder. |
+| `DELETE` | `/api/renditions` | None | `{removed, freed_bytes, kept}`: removes every rendition but those a slot streams or is about to. |
 
 Examples:
 
 ```bash
-curl -k https://127.0.0.1:9900/api/media-files
-curl -k -F "file=@sample.mp4" https://127.0.0.1:9900/api/upload/media
-curl -k -H "Content-Type: application/json" \
-  -d '{"path":"sample.mp4"}' \
-  https://127.0.0.1:9900/api/media-info
+curl -k https://127.0.0.1:9900/api/media
+curl -k -F "file=@sample.mp4" https://127.0.0.1:9900/api/media/uploads
+curl -k 'https://127.0.0.1:9900/api/media/info?path=sample.mp4'
+curl -k -H "Content-Type: application/json" -d '{"paths":["sample.mp4"]}' \
+  https://127.0.0.1:9900/api/media/delete
+```
+
+## Jobs
+
+Long work runs as a job that outlives the request that started it: a rendition's encode (`rendition`), an upload's re-encode (`upload`), a catalog download (`catalog_import`). A job is `{id, kind, title, state, progress: {percent?, phase, detail}, result?, error?, created_at, started_at?, finished_at?}`; `state` is `queued`, `running`, `done`, `failed` or `cancelled`. The routes that start one answer with it (an upload's 202, an import's 202, a preparing slot's `job`). One encode, one re-encode and two downloads run at once; the rest wait `queued`. Finished jobs are kept for 10 minutes. Stopping a slot cancels its rendition's encode.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| `GET` | `/api/jobs/{id}/events` | Server-Sent Events: one `data:` line of the job's JSON at once and after each change, the last its final state, then the stream ends; 404 `job_not_found`. Close an `EventSource` on a final state, or it reconnects. |
+
+```bash
+curl -k -N https://127.0.0.1:9900/api/jobs/<id>/events
 ```
 
 ## Standard Test Videos
@@ -378,7 +270,7 @@ https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4
 https://artifacts.sima-neat.com/assets/videos/480p30/video16.mp4
 ```
 
-When the user asks to prepare Insight media and `/api/media-files` returns no usable video files, download one or more standard videos to a temporary location and import them through the media upload API. Do not assume a host filesystem path is visible to Insight; use `/api/upload/media`.
+When the user asks to prepare Insight media and `/api/media` holds no streamable video, import clips from the catalog (`/api/catalog`, `/api/catalog/imports`), or download one or more standard videos to a temporary location and upload them. Do not assume a host filesystem path is visible to Insight; use `/api/media/uploads`.
 
 Example:
 
@@ -387,59 +279,62 @@ tmpdir="$(mktemp -d)"
 curl -fL "https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4" \
   -o "${tmpdir}/video01.mp4"
 curl -k -F "file=@${tmpdir}/video01.mp4" \
-  https://127.0.0.1:9900/api/upload/media
-curl -k https://127.0.0.1:9900/api/media-files
+  https://127.0.0.1:9900/api/media/uploads
+curl -k https://127.0.0.1:9900/api/media
 ```
 
-For multi-stream testing, import multiple files, then use `/api/mediasrc/auto-assign-all` and `/api/mediasrc/start-bulk`.
+For multi-stream testing, import several files, then call `/api/slots/auto-assign` and `/api/slots/start`.
 
-## Media Sources
+## Sources (Slots)
 
-Media sources are indexed source slots. Each source object includes an `index`, an assigned relative `file`, playback `state` (`playing`, `stopped`, `external` or `pulled`), selected `transport`, detected `codec`, `allowed_transports`, and generated stream `urls`. Each source also carries `readers` (current mediamtx readers) and, while external, an `external` object with protocol, address, since, codec_supported, width, height, fps and bitrate_bps; while pulled, a `pull` object with status (`connecting`, `live`, `unreachable`, `auth_failed`), scheme, host, path, error, since, codec_supported, width, height, fps and bitrate_bps.
+The sources are 48 slots, `src1` to `src48`, each published by MediaMTX (which Insight's server runs) as `rtsp://<host>:8554/srcN`. A slot streams a library file, a browser's webcam, or a camera MediaMTX pulls. Insight keeps only what was asked of each slot (`<data>/sources.json`); everything else is derived from the world when the slots are listed, so poll `/api/slots` (it is read from memory) rather than waiting on an answer. After a restart every slot is stopped, and a pull whose URL held credentials needs its URL again.
 
-Codec and transport are derived from the assigned media:
+A slot (`GET /api/slots` answers `{count, slots}`) is:
 
-- H.264 media uses RTSP/H.264.
-- HEVC/H.265 media uses RTSP/H.265.
-- MJPEG media can use RTSP/MJPEG or HTTP multipart MJPEG.
+| Field | Meaning |
+| --- | --- |
+| `n`, `kind` | Its number, and what feeds it: `none`, `file`, `webcam`, `pull`. |
+| `file`, `fps`, `native_fps` | A file slot's library path, its output rate when not the file's own, and the file's own rate once probed. |
+| `codec` | The file's or the stream's codec (`h264`, `h265`, `mjpeg`, or another); absent while unknown. |
+| `pull` | A pull's `scheme`, `host`, `path` (never credentials), `status` (`live`, `connecting`, `unreachable`, `auth_failed`, `needs_credentials`, `stopped`) and `error`. |
+| `run` | The user's Start: the slot is to run. |
+| `state` | `idle`, `preparing` (a rendition is encoded, see `job`), `starting`, `live`, `failed` (see `error`) or `external` (a publisher Insight did not start holds it). |
+| `publisher` | While MediaMTX has the stream: `protocol`, `address`, `since`, `codec`, `codec_supported`, `width`, `height`, `fps`, `bitrate_bps`. |
+| `readers` | Who reads the stream (`protocol`, `address`, `label: "insight preview"` for Insight's own). |
+| `urls` | `rtsp`, plus `http_mjpeg` for an MJPEG stream and `whip` for a webcam slot, on the host the request used (the public origin for HTTP and WHIP when one is configured). |
+| `active_file` | What the publisher streams: the file or its rendition (`.renditions/...`). |
 
 | Method | Path | Request | Behavior |
 | --- | --- | --- | --- |
-| `GET` | `/api/mediasrc/videos` | None | Return sorted relative media paths accepted by the media-source streamer. |
-| `GET` | `/api/mediasrc` | None | Return persisted source assignments, playback states, transport/codec data, allowed transports, and generated stream URLs. `native_fps` is null until the assigned file has been probed; the listing never waits for a probe but starts one in the background, so a later call shows it. |
-| `POST` | `/api/mediasrc/assign` | JSON `{"index": 1, "file": "video.mp4", "transport": "rtsp", "fps": 15}` | Assign or clear one source; if it was playing, restart with the new file. Transport is honored only when compatible with the detected codec. `fps` (any whole number from 1, or null for the source rate; a rate no codec level covers for the file's resolution fails at start or prepare) selects the output frame rate; changing `file` without `fps` resets it. Returns 409 for an external slot. |
-| `POST` | `/api/mediasrc/auto-assign-all` | None | Stop active sources, assign unique available videos to source slots in index order, and persist stopped assignments. Slots whose file changes lose their `fps` override. |
-| `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. Returns 409 for an external slot, or if the slot was stopped, reassigned, reset or unassigned while its FPS rendition was being prepared (start it again). |
-| `POST` | `/api/mediasrc/prepare` | JSON `{"index": 1}` | Create or reuse the FPS rendition `start` will stream when the slot's `fps` differs from the media's native rate; streams `text/plain` progress ending in `Rendition ready:`, `Reusing rendition:`, `Source frame rate matches`, or `Error:`. Renditions encode one at a time; a waiting prepare repeats `Waiting for another rendition to finish encoding…`. An encode needs the rendition's expected size plus 1 GB free, otherwise it ends in `Error:`. `start` does the same silently when `prepare` is skipped. |
-| `GET` | `/api/mediasrc/renditions` | None | Return `{"count": int, "bytes": int}` for all currently stored FPS renditions. |
-| `POST` | `/api/mediasrc/renditions/clear` | None | Delete every cached FPS rendition except one a playing source is currently streaming; returns `{"removed": int, "freed_bytes": int, "kept": [rel paths]}`. |
-| `POST` | `/api/mediasrc/start-bulk` | JSON `{"count": 4}` | Start the first `count` assigned sources in index order and report `started`, `already_running`, and `errors`. |
-| `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. Returns 409 for an external slot that carries no Insight stream. On a pulled slot it stops the pull: 502 when MediaMTX could not confirm it (the slot stays pulled; retry), 409 while the pull is still being set up (retry in a moment). |
-| `POST` | `/api/mediasrc/stop-all` | None | Stop every source and return how many were previously playing. |
-| `POST` | `/api/mediasrc/takeover` | JSON `{"index": 2}` | Disconnect the external publisher holding a slot (409 when the slot is not external, 502 when the mediamtx API is unreachable). |
-| `POST` | `/api/mediasrc/pull` | JSON `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` | Pull an existing RTSP/RTSPS stream into the slot (mediamtx forwards it unchanged). 400 with `reason: "auth_failed"` when the camera rejects the credentials, 409 when the slot is streaming, external or pulled, 502 when mediamtx refuses or cannot be reached while configuring the slot. `stop` releases it. |
-| `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments, including for an externally held slot; the external stream keeps running and its slot is listed in `skipped_external`. |
-| `GET` | `/stream/http/src<int:index>.mjpg` | None | Active HTTP multipart MJPEG stream for an HTTP/MJPEG source. |
-| `GET` | `/stream/http/src<int:index>.jpg` | None | One JPEG snapshot from an active HTTP/MJPEG source. |
-| `GET` | `/stream/preview/src<int:index>.mjpg` | None | Multipart MJPEG preview of any live slot at the source frame rate. Max 4 concurrent (429). |
+| `GET` | `/api/slots` | None | Every slot as it stands. |
+| `PUT` | `/api/slots/{n}` | JSON `{"kind": "file", "file": "video.mp4", "fps": 15}` | Assign a file, at its own rate without `fps`. A slot that streamed a file keeps running with the new one; any other is stopped. 400 `not_streamable` for a codec other than H.264, H.265 or MJPEG, `fps_not_supported` for an `fps` on an MJPEG file or one of unknown size. With an `fps` other than the file's own, Start encodes a rendition first (`state: "preparing"`, `job`) with the catalog's encoder settings, which needs its expected size plus 1 GB free. |
+| `PUT` | `/api/slots/{n}` | JSON `{"kind": "pull", "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` | Probe the camera, then have MediaMTX pull it (forwarded unchanged) and start. 422 `pull_auth_failed` when it refuses the credentials, 502 `pull_unreachable` when it does not answer. Credentials are kept in memory only. |
+| `PUT` | `/api/slots/{n}` | JSON `{"kind": "webcam"}` | A browser's webcam: the answer's `urls.whip` is where the browser publishes; MediaMTX re-encodes it onto `srcN`. |
+| `DELETE` | `/api/slots/{n}` | None | Nothing assigned, stopped. |
+| `POST` | `/api/slots/{n}/start` | None | Make it run; answers before the stream is live. Starting a failed slot tries again. 409 `nothing_assigned`, `pull_needs_credentials`. |
+| `POST` | `/api/slots/{n}/stop` | None | Stop it (publisher, encode, pull, webcam publisher); the assignment stays. |
+| `POST` | `/api/slots/{n}/take-over` | None | Disconnect the external publisher holding it. 409 `not_external`, 503 `mediamtx_unavailable`, 502 `mediamtx_failed`. |
+| `GET` | `/api/slots/{n}/preview.mjpg` | None | The live picture as MJPEG at most 640 px wide, one shared relay per slot; 409 `slot_not_live`. |
+| `POST` | `/api/slots/start` | JSON `{"count": 4}` | Start the first `count` file slots no external publisher holds: `{started, already_running, skipped_external, errors: [{n, code, error}]}`. |
+| `POST` | `/api/slots/stop` | None | Stop every slot: `{stopped, skipped_external}`. |
+| `POST` | `/api/slots/reset` | None | Stop every slot and clear it: `{stopped, skipped_external}`; external streams go on. |
+| `POST` | `/api/slots/auto-assign` | None | Give the library's streamable files, in path order, one per slot, every slot stopped: `{assigned, available, skipped_external, skipped_pulled}`. External and pulling slots keep what they have. |
+| `GET` | `/stream/http/srcN.mjpg` | None | Frozen: an MJPEG slot's stream as `multipart/x-mixed-replace; boundary=frame`, the same pictures for every reader (`urls.http_mjpeg`); 409 `not_mjpeg` or `slot_not_live`. |
 
 Common workflow:
 
 ```bash
-curl -k https://127.0.0.1:9900/api/mediasrc/videos
-curl -k -H "Content-Type: application/json" \
-  -d '{"index":1,"file":"sample.mp4"}' \
-  https://127.0.0.1:9900/api/mediasrc/assign
-curl -k -H "Content-Type: application/json" \
-  -d '{"index":1}' \
-  https://127.0.0.1:9900/api/mediasrc/start
-curl -k https://127.0.0.1:9900/api/mediasrc
+curl -k -X PUT -H "Content-Type: application/json" \
+  -d '{"kind":"file","file":"sample.mp4"}' \
+  https://127.0.0.1:9900/api/slots/1
+curl -k -X POST https://127.0.0.1:9900/api/slots/1/start
+curl -k https://127.0.0.1:9900/api/slots | jq '.slots[0] | {state, error, urls}'
 ```
 
 ```bash
-curl -k -H "Content-Type: application/json" \
-  -d '{"index":3,"url":"rtsp://192.168.1.10:554/stream1","username":"admin","password":"secret"}' \
-  https://127.0.0.1:9900/api/mediasrc/pull
+curl -k -X PUT -H "Content-Type: application/json" \
+  -d '{"kind":"pull","url":"rtsp://192.168.1.10:554/stream1","username":"admin","password":"secret"}' \
+  https://127.0.0.1:9900/api/slots/3
 ```
 
 If the consumer runs outside the SDK container, build RTSP URLs from the SDK port map rather than using the container-local default. For source `src1`, use:
@@ -448,91 +343,79 @@ If the consumer runs outside the SDK container, build RTSP URLs from the SDK por
 rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/src1
 ```
 
-Use `/api/mediasrc` to confirm source assignment and playback state after starting streams.
+`urls.rtsp` already names the `rtsp.tcp` host port of the port map, on the host the request used.
 
 ## Environment And Viewer
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/envinfo` | Return `is_sima_board` and `is_remote_devkit_configured` frontend flags. |
-| `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
-| `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
-| `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the URL of Insight's `/viewer` page, with `src` and `max_channels` in its query and `mode` only when it is `light` or `dark`. |
-| `POST` | `/api/vf/offer?channel=<N>` | Relay the browser's JSON WebRTC offer to vf and return vf's answer with its status code and body unchanged (`N` is 0-79, offers up to 64 KiB). `400` for an invalid channel, `413` for an oversized offer and `415` for a request that is not `Content-Type: application/json` are answered without calling vf; `502` means vf is unreachable and `504` that it did not answer within 8 s. vf's own `503` (no codec identified yet) and `415` (browser cannot decode the codec) pass through. |
+| `GET` | `/api/viewer-url?mode=light&src=0,1` | Return `url`, a link to Insight's `/viewer` page with `src` (the channels asked for, all by default; numbers out of range are dropped), `max_channels`, and `mode` only when it is `light` or `dark`; plus `max_video_channels` (the channel count), `channel_limit_source` (`devkit`, `sdk-port-map`, `legacy-default`), and `sdk_channel_limited`. Frozen. |
+| `POST` | `/api/channels/{N}/offer` | The Viewer's WebRTC offer for channel `N` (see [Channels](#channels)). |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
-Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL is on the same origin as the request (scheme, host and port as the browser reached Insight), or on the launch-URL public origin when one is configured; it no longer points at the `videoUI` port.
+Use `/api/system` (what Insight resolved at start) and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL is on the same origin as the request (scheme, host and port as the browser reached Insight), or on the launch-URL public origin when one is configured. Nothing is served on the `videoUI` port any more.
 
-Hosted environments can opt into a separate browser-facing network configuration by writing `/home/docker/.insight-config/browser-ice-address` and/or `/home/docker/.insight-config/launch-url` before restarting Insight. The ICE file supplies one IPv4 address to both vf and MediaMTX; the launch URL supplies the trusted origin for viewer, WHIP, and HTTP MJPEG links. Missing files retain the existing `CONTAINER_HOST_IP` and request-host/port-map behavior. A present invalid browser ICE address prevents readiness. An invalid launch URL logs a warning and preserves the request-host/port-map fallback.
-
-## GenAI Studio
-
-Insight relays calls to the GenAI Studio backend on a board (started there with `run.sh`, HTTPS port `5000`). The board's self-signed certificate is accepted by Insight, so clients only call Insight.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/genai/settings` | Return the board address in use (`url`) and the configured and default addresses. |
-| `POST` | `/api/genai/settings` | Set or clear `url` (`https://host[:port]`); an empty string clears it. |
-| `GET`, `POST` | `/api/genai/<path>` | Forward a Studio API call (`health`, `voices`, `v1/…`, `audio/…`, `models/…`, `benchmark/…`, `tts/…`, `piperplus/…`, `supertonic/…`, `voices/…`, `rag/…`, `board-camera/…`) and stream the answer back unchanged, including binary answers such as a `board-camera/snapshot` JPEG; `shutdown` and other paths return 404. |
-
-The default address is `https://127.0.0.1:5000` on a board, otherwise `https://<DEVKIT_SYNC_DEVKIT_IP>:5000`. Relay errors carry a `reason`: `bad-request` (400), `not-relayed` (404), `unreachable` (502), `not-configured` or `invalid-address` (503), and `cfg-unreadable` or `cfg-unwritable` (500).
-
-```bash
-curl -k https://127.0.0.1:9900/api/genai/health
-curl -k -N https://127.0.0.1:9900/api/genai/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"<loaded-model>","stream":true,"messages":[{"role":"user","content":"Hello"}]}'
-curl -k https://127.0.0.1:9900/api/genai/board-camera/devices
-curl -k -o frame.jpg 'https://127.0.0.1:9900/api/genai/board-camera/snapshot?device=/dev/video16'
-```
+Hosted environments can opt into a separate browser-facing network configuration by writing `/home/docker/.insight-config/browser-ice-address` and/or `/home/docker/.insight-config/launch-url` before restarting Insight. The ICE file supplies one IPv4 address to both the Viewer's channels and MediaMTX; the launch URL supplies the trusted origin for viewer, WHIP, and HTTP MJPEG links. Missing files retain the existing `CONTAINER_HOST_IP` and request-host/port-map behavior. A present invalid browser ICE address prevents readiness. An invalid launch URL logs a warning and preserves the request-host/port-map fallback.
 
 ## Board And Peripherals
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/board` | Selected board target, its `source` (`manual`, `on-board`, `sdk-env`), defaults, `generation`, and last status. Never connects. |
-| `POST` | `/api/board/select` | JSON `{"host", "port", "user"}` saves a manual target; `{"reset": true}` restores the default. |
-| `POST` | `/api/board/test` | Connect and read the board's host name, machine, and build version. |
-| `POST` | `/api/board/trust-host-key` | JSON `{"fingerprint"}`; trust the key a reflashed board presented (`presented_fingerprint` from `host_key_changed`). |
-| `GET` | `/api/peripherals` | Last camera and microphone scan for the selected board, or an empty snapshot with `scanned_at: null`. |
-| `POST` | `/api/peripherals/refresh` | Ask SiMa Sentinel to rescan MIPI and USB cameras and ALSA microphones, use the catalog of the scan Sentinel runs for that refresh, and mark each camera mode Available or Unsupported. |
-| `GET` | `/api/peripherals/preview` | The running preview session, or `null`. |
-| `POST` | `/api/peripherals/cameras/preview` | JSON `{"id"}` plus an optional `{"format", "width", "height", "fps"}` (MIPI: an Available mode; USB: any listed MJPG or raw mode); start the board pipeline, wait up to 10 s (two frame periods for a mode slower than 0.2 fps, at most 60 s) for its first frame, and return the session with its `stream_url`. Refuses a busy camera (`409 camera_in_use`, also when libcamera or v4l2src reports it busy) and never stops the process holding it; `502 tool_missing` when the board has no `gst-launch-1.0` or lacks a GStreamer element the pipeline needs (named in `tool`); `502 command_failed` with the pipeline's stderr in `detail`. |
-| `GET` | `/api/peripherals/cameras/preview/<session_id>/stream` | The JPEG frames as `multipart/x-mixed-replace; boundary=frame`, one viewer per session (`409 preview_active` for a second). The preview stops when this response ends, when nobody opens it within 15 s of the start, or after 10 s (two frame periods for a mode slower than 0.2 fps, at most 60 s) without a frame. |
-| `POST` | `/api/peripherals/cameras/preview/<session_id>/stop` | Close the stream and kill the pipeline by PID on the board, releasing the camera; returns `{"session": null}` for a session that already ended. |
-| `POST` | `/api/peripherals/microphones/test` | JSON `{"id"}` (optional `"seconds"`, 1-30); re-read Sentinel's catalog, then record from that microphone on the board until stopped (at most 30 s, 48 kHz, 2 channels); 202 with the test. One test at a time. |
-| `GET` | `/api/peripherals/microphones/test` | The selected board's latest test: live `level_dbfs` and `elapsed_ms` while recording, then `level` and `audio_url`, or `error`; `null` before any test or once a scan lists another device under that id. Never connects. |
-| `POST` | `/api/peripherals/microphones/test/stop` | End the test named by `{"token": ...}` (from the start) now; another token stops nothing. The result arrives through `GET`. |
-| `GET` | `/api/peripherals/microphones/test/<token>.wav` | The finished recording of the selected board as WAV; 404 once a newer test replaced it, another board was selected, or a scan lists another device under that id. |
+| `GET` | `/api/boards` | `boards` (each `{id, mode, source, host?, port?, user?, label}`, the selected one first) and `selected` (`id`, `label`, `status` with `state` `unknown`, `connected` or `error`, `checked_at` and the last `error`, `identity` once read, and `ssh`, the command that opens a shell on it). Never connects. |
+| `POST` | `/api/boards` | JSON `{"host", "port"?, "user"?}` (22 and `sima` by default): save it as the board entered by hand and select it. |
+| `DELETE` | `/api/boards/{id}` | Forget the entered board; the selection falls back to the board Insight runs on or the SDK's DevKit (409 `not_entered` for those). |
+| `POST` | `/api/boards/{id}/check` | Connect and read the board's `hostname`, `machine`, `build` and host key fingerprint. |
+| `POST` | `/api/boards/{id}/trust-host-key` | JSON `{"fingerprint"}`: trust the key a reflashed board presented (`host_key.presented` of `host_key_changed`), after the user confirmed it. The board is replaced; check it again. |
+| `GET` | `/api/boards/{id}/peripherals` | `{scan}`: the last scan, or `null` before the first. Never connects. A scan is `{scanned_at, scan_ms, items, issues, camera_setup, changes}`: `items` the devices (`kind` `camera` with `formats` → `sizes` → `fps`, each rate with Sentinel's `tier` and `reason` and `previewable`, and a `default_selection`; `microphone` with its `capture` formats; any other kind with its name and `notes`), `issues` Sentinel's providers that failed, `camera_setup` the board's camera overlays, `changes` the devices `added` and `removed` since the scan before. |
+| `POST` | `/api/boards/{id}/peripherals/refresh` | Have Sentinel rescan the cameras and microphones; a running preview stops first. |
+| `GET` | `/api/boards/{id}/cameras/preview` | `{preview}`: the running preview (`id`, `camera`, `mode`, `started_at`, `camera_fps`, `viewer`), or `null`. |
+| `POST` | `/api/boards/{id}/cameras/{camera}/preview` | JSON `{"format", "width", "height", "fps"}` of a mode the last scan marks `previewable` (MIPI: NV12, not marked unavailable by Sentinel, at most the camera's rate; USB: MJPG or a raw format, at a rate it advertises). Starts the pipeline and waits up to 10 s (two frame periods of a slower mode, at most 60 s) for its first picture. |
+| `GET` | `/api/boards/{id}/cameras/{camera}/preview.mjpg?preview=` | The pictures as `multipart/x-mixed-replace; boundary=frame`, one viewer (409 `preview_active` for a second). The preview stops when this answer ends, when nobody opens it within 15 s of the start, or after 10 s without a picture. |
+| `POST` | `/api/boards/{id}/cameras/{camera}/preview/stop?preview=` | Stop it, killing the pipeline and releasing the camera; answers `{preview}` afterwards. |
+| `GET` | `/api/boards/{id}/microphones/test` | `{test}`: the latest test, `null` before one. Poll it while it records: `state` `recording` with `level_dbfs` and `elapsed_ms`, then `ready` with `level` (`peak_dbfs`, `rms_dbfs`, `silent`) or `failed` with `error`. |
+| `POST` | `/api/boards/{id}/microphones/{microphone}/test` | Optional JSON `{"seconds"}` (1 to 30, 30 by default): record from the ALSA device the last scan names, until stopped; 202 with the test. One test at a time (409 `test_running`). |
+| `POST` | `/api/boards/{id}/microphones/{microphone}/test/stop?test=` | End it now and answer with its result; with `test`, a stop meant for an earlier test stops nothing. |
+| `GET` | `/api/boards/{id}/microphones/{microphone}/test.wav?test=` | The finished recording as WAV, with ranges; 404 once another test replaced it. |
 
-Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. Each mode's `support.tier` and `reason` are SiMa Sentinel's own verdict (its per-mode `available` and `reason`, sentinel#43). On Platform 3.0 the modes are the sensor's sizes (`sensor_mode`), and Insight also marks IMX477 sizes wider than 4032 `unsupported`, because libcamera streams them at 4032 wide. With a Sentinel that gives no verdict, Insight applies the same rule: a mode is `available` when Sentinel's `board` block lists the camera's sensor (its `configured_cameras` entry for the camera id) among the sensors the board's camera overlays support, the mode is an ISP output size (`isp_output`), and its format is NV12; otherwise it is `unsupported` with a `reason`. NV12 is a fixed fact about Neat's `CameraInput`, not queried from the board. USB cameras are always `unsupported`, and without Sentinel's `board` block every mode is. A camera or format is `available` when any of its modes is; `exportable` and `default_selection` follow the Available modes. Sentinel failures return `peripheral_missing`, `peripheral_refused`, `peripheral_denied` or `peripheral_unavailable` (503; also Sentinel's 429 when 8 refreshes already wait, with a retry hint), `peripheral_version` or `peripheral_response` (502), and `timeout` (504) when Sentinel's refresh scan does not finish within 10 s or the board does not answer. A request answered after the selected board changed returns 409 `stale_snapshot`; refresh first.
-
-Besides a camera preview, a microphone test is the only Peripherals action that opens a device. It records only from the `plughw:` selector Sentinel's current catalog names for that id, never from a card number, and returns 409 `stale_snapshot` when that microphone's capture target or identity in Sentinel's catalog changed since the scan (a change elsewhere in the catalog, such as a previewing camera's rate, does not count), 409 `microphone_in_use` when a live check at test start finds the capture PCM open (naming the process where visible; Sentinel's own availability does not decide), and 409 `test_running` while another test records. Treat these, a missing `arecord` (`tool_missing`), and a silent result as visible outcomes; never stop another process or switch to a different device.
+Board errors carry `code`, `message` and `hint`: `auth_failed` adds `command` (how to make and authorize a key), `host_key_changed` (409) adds `host_key` with both fingerprints, `unreachable` and `timeout`. Each camera mode's `available` and `reason` are Sentinel's own verdict; Insight adds none. A preview refuses a busy camera (409 `camera_in_use`, from what libcamera or v4l2src print) and never stops the process holding it; 422 `mode_adjusted` when libcamera streams another size (the hint names it); 502 `tool_missing` without `gst-launch-1.0` or one of its elements; 504 `preview_timeout`. A test whose microphone another process holds ends `failed` with `microphone_in_use`; a missing `arecord` with `tool_missing`. A device listed from a provider that failed in the last scan is 409 `stale_scan`, an action before any scan 409 `no_scan`. Treat these and a silent result as outcomes to show; never stop another process or switch to another device.
 
 ## Board Telemetry (Sentinel)
 
+Stats reads SiMa Sentinel on the selected board through Insight, which passes Sentinel's answers on (without their `schema` marker) and keeps no telemetry of its own.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/sentinel` | Whether SiMa Sentinel runs on the selected board: its daemon state, health and `generation`. A missing or failing daemon is a state in the answer, not an error status. |
-| `POST` | `/api/sentinel/install?generation=` | Install or update Sentinel on the selected board; `generation` (from the last read) refuses the install with `409 stale_snapshot` if another board was selected since. |
-| `GET` | `/api/sentinel/metrics` | The board's metrics with labels, units, thresholds and status, plus recent samples as aligned per-metric series when `history=<n>` (at most 240) is set. |
+| `GET` | `/api/boards/{id}/sentinel/health` | `{health, started_at}`: Sentinel's `/v1/health` (version, cached samples, collector errors, active trace) and when its service started. Without Sentinel: 502 `sentinel_missing` (not installed; the hint has `sima-cli neat install sentinel`), `sentinel_stopped`, `sentinel_denied`, `sentinel_schema`, `sentinel_outdated`. Insight installs nothing. |
+| `GET` | `/api/boards/{id}/sentinel/cache?after=` | Sentinel's cache: the metric definitions (key, label, short label, unit, group, description, warn and critical thresholds), the latest sample and its recent `samples` (240, about 8 minutes; each `{timestamp, values}`, an unmeasured metric `null`, never zero), with `full`. |
+| `GET` | `/api/boards/{id}/sentinel/traces/active` | `{trace, summary}`, nulls when nothing records. |
+| `POST` | `/api/boards/{id}/sentinel/traces` | JSON `{"name", "note"?, "tags"?}`: start recording (a name of at most 80 bytes, no control characters, no comma). 409 `trace_conflict` while another records or when the name is taken. |
+| `POST` | `/api/boards/{id}/sentinel/traces/stop?trace=` | Stop and save the active trace, or only the one `trace` names. |
+| `GET` | `/api/boards/{id}/sentinel/runs` | The runs on the board: `{runs}`, each with `id`, `name`, times, `samples`, `energy_joules`. |
+| `GET` | `/api/boards/{id}/sentinel/runs/{run}` | One run by id or name, with its samples. |
+| `DELETE` | `/api/boards/{id}/sentinel/runs/{run}` | Delete a finished run by its id (`20260924T175231.958Z-baseline`; any other form is 400) with `simaai-sentinel runs delete` on the board: `{deleted, runs}`. |
+| `GET` | `/api/boards/{id}/sentinel/compare?runs=a,b` | Compare 2 to 8 runs against the first, every run with its samples. |
 
-To poll the history, call `/api/sentinel/metrics?history=240` once, then send the newest `history.timestamps` entry you hold as `after` and `history.epoch` as `epoch`, and append the samples that come back.
-A `history.full: true` answer (a first read, a restart, a gap in polling, a reseed, or an `after` the board no longer holds) replaces everything you hold, and its `epoch` is the one to send from then on.
+To follow the Live history, read `cache` once, then send the newest sample's `timestamp` you hold as `after` and append the samples that come back. A `full: true` answer (no `after`, one the cache no longer holds after a daemon restart or a long pause, or a board clock that stepped back) replaces everything you hold.
 
 ## Error Handling
 
-Most JSON API errors return `{"error": "message"}` with an HTTP error status. Common statuses are:
+Every API error answers `{"error": {"code", "message", "hint"}}` with an HTTP error status, `hint` only when there is one; branch on `code`. A path under `/api/` that names no route is 404 `not_found`. Common statuses are:
+
+- `403 cross_origin` for a change sent by a page of another website.
 
 - `400` for missing or invalid request fields.
-- `403` for unsafe media paths.
-- `404` for missing logs, media files, or media-source indexes.
-- `500` for local processing or stream startup failures.
-- `502` for unreachable or unreadable remote devkit build information, or an unreachable GenAI Studio board.
-- GenAI Studio relay errors carry a `reason`: `400 bad-request` for an invalid board address, `404 not-relayed`, `502 unreachable`, `503 not-configured` or `invalid-address`, and `500 cfg-unreadable` or `cfg-unwritable` when Insight's `cfg.json` cannot be read (nothing is changed or relayed) or saved.
-- `415` from vf `/offer`, passed through by `/api/vf/offer`, when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
-- `503` from vf `/offer`, passed through by `/api/vf/offer`, until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
-- `502` from `/api/mediasrc/pull` when mediamtx refuses or cannot be reached while configuring the slot.
+- `404` for missing media files, slots, jobs or runs, and for a board id that is not the selected board's.
+- `409` for a conflict with the current state: a busy slot (`slot_busy`), a file in use (`in_use`), a taken name (`name_taken`), a slot not live (`slot_not_live`).
+- `500 internal_error` for local processing or stream startup failures; the message says what failed.
+- `502` for a board that cannot be reached or signed in to, or a Sentinel that cannot be used.
+- `POST /api/channels/{N}/offer` codes. A 5xx is worth retrying, a 4xx is final:
+  - `503 no_video`: no video of a codec Insight plays has reached the channel yet (payload type 96 or 98). Retry.
+  - `503 codec_changed`: the channel's codec changed while the offer was answered. Retry.
+  - `500 negotiation_failed`: Insight could not set up the connection, or did not answer within 10 s. The cause is in Insight's server log, with the channel.
+  - `415 codec_unsupported`: the browser's offer does not list the channel's codec, so it has no decoder for it. Final for that browser.
+  - `413 offer_too_large`: the offer is larger than 64 KiB.
+  - `400 invalid_offer`: the body is no JSON session description or no valid SDP offer. `400 no_such_channel`: `N` is not below the channel count (`400 invalid_request` when it is no integer).
+- `502 pull_unreachable` from `PUT /api/slots/{n}` when a camera does not answer; `502 mediamtx_failed` when MediaMTX refuses a call. Relayed MJPEG streams answer `429` at their cap, `502` when their ffmpeg fails, `504` when it sends no picture.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.

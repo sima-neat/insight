@@ -6,10 +6,12 @@ import { By } from '@angular/platform-browser';
 import { NeatSelect } from '@sima/neat-ui/select';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { AppDialogs } from '../../app-dialogs';
+import { boardUrl } from '../../board/api';
 import { BoardService } from '../../board/board.service';
-import { boardState, DEVKIT, FakeBoard, FakePeripherals } from '../../board/board.testing';
+import { boardWith, DEVKIT, FakeBoard, FakePeripherals, MANUAL } from '../../board/board.testing';
 import type { CameraItem, PreviewSession } from '../../peripherals/api';
 import { CameraPreview } from '../../peripherals/camera-preview';
+import { previewStreamUrl, previewUrl } from '../../peripherals/preview-state';
 import {
   format,
   imx477,
@@ -26,29 +28,33 @@ import { PeripheralsService } from '../../peripherals/peripherals.service';
 import { peripheralSnapshot } from '../../peripherals/snapshots.testing';
 import { CameraPanel } from './camera-panel';
 
-const PREVIEW_URL = '/api/peripherals/preview';
-const START_URL = '/api/peripherals/cameras/preview';
-const stopUrl = (id: string) => `${START_URL}/${id}/stop`;
+const PREVIEW_URL = boardUrl(DEVKIT.id, 'cameras/preview');
+const START_URL = boardUrl(DEVKIT.id, `cameras/${encodeURIComponent(imx477.id)}/preview`);
+const USB_START_URL = boardUrl(DEVKIT.id, `cameras/${encodeURIComponent(usb.id)}/preview`);
+/** Matches the stop of `session`, which names it. */
+const stopOf =
+  (session: PreviewSession) =>
+  (request: { method: string; urlWithParams: string }): boolean =>
+    request.method === 'POST' &&
+    request.urlWithParams === `${previewUrl(session, '/stop')}?preview=${session.id}`;
+/** The error shape the server answers with. */
+const failure = (code: string, message: string, hint?: string) => ({
+  error: { code, message, ...(hint ? { hint } : {}) },
+});
 const badGateway = { status: 502, statusText: 'Bad Gateway' };
 
 /** The imx477 with two Available sizes, so a size can be changed while it streams. */
 const imx477Two: CameraItem = {
   ...imx477,
   formats: [
-    format('NV12', 'NV12 (YUV 4:2:0)', true, support('available'), [
+    format('NV12', 'NV12 (YUV 4:2:0)', support('available'), [
       size(1920, 1080, [30, 'available']),
       size(1280, 720, [60, 'available']),
     ]),
   ],
 };
 const usbMjpg = sel('MJPG', 1280, 720, 30);
-const usbLive = previewSession({
-  id: '77ab',
-  camera_id: usb.id,
-  mode: usbMjpg,
-  stream_url: '/api/peripherals/cameras/preview/77ab/stream',
-  camera_fps: 30,
-});
+const usbLive = previewSession({ id: '77ab', camera: usb.id, mode: usbMjpg, camera_fps: 30 });
 
 @Component({
   imports: [CameraPanel],
@@ -88,7 +94,7 @@ describe('CameraPanel', () => {
       },
     );
     board = new FakeBoard();
-    board.state.set(boardState({ target: DEVKIT, generation: 3 }));
+    board.state.set(boardWith(DEVKIT));
     peripherals = new FakePeripherals();
     peripherals.snapshot.set(peripheralSnapshot([imx477, usb]));
     dialogs = { openBoard: vi.fn(async () => undefined) };
@@ -135,7 +141,7 @@ describe('CameraPanel', () => {
     panel().querySelector('app-panel-title neat-status-chip')!.textContent!.trim();
   /** The status line's sentence; '' when there is none. */
   const statusLine = (): string => panel().querySelector('.status > p')?.textContent?.trim() ?? '';
-  /** #170's preview status beside the status line, as its words and tone; null when idle. */
+  /** The preview's status beside the status line, as its words and tone; null when idle. */
   const statusChip = (): { label: string; tone: string } | null => {
     const chip = fixture.debugElement
       .queryAll(By.directive(NeatStatusChip))
@@ -144,8 +150,7 @@ describe('CameraPanel', () => {
       ? { label: chip.nativeElement.textContent.trim(), tone: chip.componentInstance.tone() }
       : null;
   };
-  const announced = (): string =>
-    panel().querySelector('app-announcement')!.textContent!.trim();
+  const announced = (): string => panel().querySelector('app-announcement')!.textContent!.trim();
   const image = (): HTMLImageElement | null => panel().querySelector('app-preview-frame img');
   const button = (label: string): HTMLButtonElement | undefined =>
     [...panel().querySelectorAll<HTMLButtonElement>('button')].find(
@@ -174,9 +179,7 @@ describe('CameraPanel', () => {
       .queryAll(By.directive(NeatSelect))
       .find((debug) => debug.componentInstance.label() === label)!;
   const selected = (label: string): string =>
-    select(label)
-      .nativeElement.querySelector('[data-slot="select-value"]')!
-      .textContent!.trim();
+    select(label).nativeElement.querySelector('[data-slot="select-value"]')!.textContent!.trim();
   /** Picks an option as the user would; `neat-select` reports the pick through its model. */
   async function pick(label: string, value: string): Promise<void> {
     select(label).componentInstance.value.set(value);
@@ -192,9 +195,9 @@ describe('CameraPanel', () => {
     await settle();
     expect(title()).toBe(imx477.name);
     expect(titleChip()).toBe('Available');
-    expect(
-      fixture.debugElement.query(By.directive(NeatStatusChip)).componentInstance.tone(),
-    ).toBe('success');
+    expect(fixture.debugElement.query(By.directive(NeatStatusChip)).componentInstance.tone()).toBe(
+      'success',
+    );
 
     const parts = [...panel().children]
       .filter((child) => child.tagName !== 'APP-ANNOUNCEMENT')
@@ -225,7 +228,7 @@ describe('CameraPanel', () => {
     ).toBe('false');
   });
 
-  // Ruling F4: the title names the camera's own state, never the preview's: the status chip does.
+  // The title names the camera's own state, never the preview's: the status chip does.
   it("the title's chip is the camera's own (its tier, or Last scan), whatever the preview does", async () => {
     await settle();
     preview.adopt(previewSession());
@@ -260,32 +263,33 @@ describe('CameraPanel', () => {
     await settle();
     expect(statusLine()).toBe('Live preview · 1280×720 · MJPG · 30 fps');
 
-    // Only a MIPI camera's rate is a ceiling (#170): a connection the backend names otherwise
-    // reads its rate as it is.
+    // Only a MIPI camera's rate is a ceiling: a connection Sentinel names otherwise reads its rate
+    // as it is.
     const other: CameraItem = { ...imx477, id: 'gmsl:cam0', connection: 'gmsl' };
     await show(other);
-    preview.adopt(previewSession({ camera_id: other.id, camera_fps: 66.18 }));
+    preview.adopt(previewSession({ camera: other.id, camera_fps: 66.18 }));
     await settle();
     expect(statusLine()).toBe('Live preview · 1920×1080 · NV12 · 66 fps');
   });
 
   it('Start is blocked with the reason under it; a mode change while live restarts the preview', async () => {
     // The scan shown is of the board before a change.
-    board.state.set(boardState({ target: DEVKIT, generation: 4 }));
+    board.state.set(boardWith(MANUAL));
     await show(imx477Two);
     expect(mainButton().disabled).toBe(true);
     expect(reason()).toBe('The board changed after this scan. Refresh before starting a preview.');
 
-    // Refreshed: the scan is of the board selected now.
-    peripherals.snapshot.set(peripheralSnapshot([imx477Two, usb], { generation: 4 }));
+    // Refreshed: the scan is of the board selected now, and the preview starts on it.
+    peripherals.snapshot.set(peripheralSnapshot([imx477Two, usb], { board: { id: MANUAL.id } }));
     await settle();
     expect(mainButton().disabled).toBe(false);
     expect(mainButton().hasAttribute('aria-describedby')).toBe(false);
 
+    const manualStart = boardUrl(MANUAL.id, `cameras/${encodeURIComponent(imx477Two.id)}/preview`);
     await startPreview();
-    const start = http.expectOne({ method: 'POST', url: START_URL });
-    expect(start.request.body).toEqual({ id: imx477Two.id, ...sel('NV12', 1920, 1080, 30) });
-    start.flush({ session: previewSession({ generation: 4 }) });
+    const start = http.expectOne({ method: 'POST', url: manualStart });
+    expect(start.request.body).toEqual(sel('NV12', 1920, 1080, 30));
+    start.flush({ preview: previewSession() });
     await settle();
     expect(mainButton().textContent!.trim()).toBe('Stop preview');
 
@@ -294,19 +298,17 @@ describe('CameraPanel', () => {
     expect(TestBed.inject(PeripheralsSession).modes().get(imx477Two.id)).toEqual(
       sel('NV12', 1280, 720, 60),
     );
-    http.expectOne({ method: 'POST', url: stopUrl('8f1c') }).flush({ session: null });
+    http.expectOne(stopOf(previewSession({ board: MANUAL.id }))).flush({ preview: null });
     await settle();
-    const restart = http.expectOne({ method: 'POST', url: START_URL });
-    expect(restart.request.body).toEqual({ id: imx477Two.id, ...sel('NV12', 1280, 720, 60) });
-    restart.flush({
-      session: previewSession({ id: '9a2d', generation: 4, mode: sel('NV12', 1280, 720, 60) }),
-    });
+    const restart = http.expectOne({ method: 'POST', url: manualStart });
+    expect(restart.request.body).toEqual(sel('NV12', 1280, 720, 60));
+    restart.flush({ preview: previewSession({ id: '9a2d', mode: sel('NV12', 1280, 720, 60) }) });
     await settle();
     expect(statusLine()).toBe('Live preview · 1280×720 · NV12');
     expect(selected('Resolution')).toBe('1280×720');
   });
 
-  // Spec, "Camera panel": another tab shows "In another tab" with Stop (final review I-3).
+  // A preview another tab shows reads "In another tab", with Stop.
   it('In another tab shows its status, the sentence, Stop and no image', async () => {
     await settle();
     preview.adopt({ ...previewSession(), viewer: true });
@@ -318,56 +320,50 @@ describe('CameraPanel', () => {
 
     mainButton().click();
     await settle();
-    http.expectOne({ method: 'POST', url: stopUrl('8f1c') }).flush({ session: null });
+    http.expectOne(stopOf(previewSession())).flush({ preview: null });
     await settle();
     expect(statusLine()).toBe('Not running');
   });
 
-  it('a preview error shows its recovery line and the board output folded', async () => {
+  it("a preview error shows the server's message and its hint", async () => {
     await settle();
     await startPreview();
-    http.expectOne({ method: 'POST', url: START_URL }).flush(
-      {
-        error: 'The preview pipeline could not start.',
-        code: 'command_failed',
-        detail: 'ERROR: from element /GstPipeline:pipeline0/GstLibcameraSrc',
-      },
-      badGateway,
-    );
+    http
+      .expectOne({ method: 'POST', url: START_URL })
+      .flush(
+        failure(
+          'command_failed',
+          "The preview's pipeline stopped before it sent a picture.",
+          'Check that the camera is connected and that no other application holds it. The board said: ERROR: no camera.',
+        ),
+        badGateway,
+      );
     await settle();
-    const [failure] = callouts();
-    expect(failure.heading).toBe('The preview pipeline could not start.');
-    expect(failure.element.getAttribute('role')).toBe('alert');
-    // No hint from the backend: the recovery line is Insight's own for the code.
-    expect(failure.text).toContain(
-      'The preview pipeline could not start on the board. The board output below says why.',
-    );
-    const output = failure.element.querySelector<HTMLElement>('neat-collapsible')!;
-    const outputTrigger = output.querySelector('button[aria-expanded]')!;
-    expect(outputTrigger.textContent!.trim()).toBe('Board output');
-    expect(outputTrigger.getAttribute('aria-expanded')).toBe('false');
-    expect(output.querySelector('pre')?.textContent).toBe(
-      'ERROR: from element /GstPipeline:pipeline0/GstLibcameraSrc',
-    );
+    const [shown] = callouts();
+    expect(shown.heading).toBe("The preview's pipeline stopped before it sent a picture.");
+    expect(shown.element.getAttribute('role')).toBe('alert');
+    // The server's hint is the recovery line, with what the board said.
+    expect(shown.text).toContain('The board said: ERROR: no camera.');
     expect(button('Open board settings')).toBeUndefined();
     // The Start row stays, as the retry. The callout says why, so no sentence repeats the chip.
     expect(statusChip()).toEqual({ label: 'Could not start', tone: 'danger' });
     expect(statusLine()).toBe('');
     expect(mainButton().textContent!.trim()).toBe('Start preview');
 
-    // A connection failure offers the board settings; the backend's hint is the recovery line.
+    // A connection failure offers the board settings.
     await startPreview();
-    http.expectOne({ method: 'POST', url: START_URL }).flush(
-      {
-        error: 'Could not connect to sima@192.168.1.20.',
-        code: 'unreachable',
-        hint: 'Check that the board is powered on.',
-      },
-      badGateway,
-    );
+    http
+      .expectOne({ method: 'POST', url: START_URL })
+      .flush(
+        failure(
+          'unreachable',
+          'Could not connect to sima@192.168.1.20.',
+          'Check that the board is powered on.',
+        ),
+        badGateway,
+      );
     await settle();
     expect(callouts()[0].text).toContain('Check that the board is powered on.');
-    expect(callouts()[0].text).not.toContain('Board output');
     button('Open board settings')!.click();
     expect(dialogs.openBoard).toHaveBeenCalledTimes(1);
   });
@@ -394,14 +390,14 @@ describe('CameraPanel', () => {
     const first = http.expectOne({ method: 'POST', url: START_URL });
     await pick('Resolution', '1280x720');
     // No session yet, so nothing to stop: the start in flight is stopped once it answers.
-    http.expectNone({ method: 'POST', url: stopUrl('8f1c') });
-    first.flush({ session: previewSession() });
+    http.expectNone(stopOf(previewSession()));
+    first.flush({ preview: previewSession() });
     await settle();
-    http.expectOne({ method: 'POST', url: stopUrl('8f1c') }).flush({ session: null });
+    http.expectOne(stopOf(previewSession())).flush({ preview: null });
     await settle();
     const restart = http.expectOne({ method: 'POST', url: START_URL });
-    expect(restart.request.body).toEqual({ id: imx477Two.id, ...sel('NV12', 1280, 720, 60) });
-    restart.flush({ session: previewSession({ id: '9a2d', mode: sel('NV12', 1280, 720, 60) }) });
+    expect(restart.request.body).toEqual(sel('NV12', 1280, 720, 60));
+    restart.flush({ preview: previewSession({ id: '9a2d', mode: sel('NV12', 1280, 720, 60) }) });
     await settle();
     expect(statusLine()).toBe('Live preview · 1280×720 · NV12');
   });
@@ -416,23 +412,21 @@ describe('CameraPanel', () => {
     );
     // No stop, no start (afterEach verifies): the imx477's preview streams on.
     expect(preview.state().status).toBe('live');
-    expect(preview.state().session?.camera_id).toBe(imx477.id);
+    expect(preview.state().session?.camera).toBe(imx477.id);
   });
-
-  // #170's PreviewPane.test.js, adapted to the panel (ruling F7).
 
   it('Start preview sends the selected mode', async () => {
     await settle();
     await startPreview();
     const start = http.expectOne({ method: 'POST', url: START_URL });
-    expect(start.request.body).toEqual({ id: imx477.id, ...sel('NV12', 1920, 1080, 30) });
+    expect(start.request.body).toEqual(sel('NV12', 1920, 1080, 30));
     expect(statusLine()).toBe('Starting the camera on the board… 0 s');
     expect(statusChip()).toEqual({ label: 'Starting…', tone: 'info' });
     expect(announced()).toBe('Starting the preview');
     vi.advanceTimersByTime(3000);
     await settle();
     expect(statusLine()).toBe('Starting the camera on the board… 3 s');
-    start.flush({ session: previewSession() });
+    start.flush({ preview: previewSession() });
     await settle();
   });
 
@@ -446,12 +440,12 @@ describe('CameraPanel', () => {
 
     // A second start while the first is out sets a new starting state, as a new object, but it is
     // not another start of the camera: the count goes on.
-    void preview.start(imx477, sel('NV12', 1920, 1080, 30), 3);
+    void preview.start(imx477, sel('NV12', 1920, 1080, 30), DEVKIT.id);
     const again = http.expectOne({ method: 'POST', url: START_URL });
     await settle();
     expect(statusLine()).toBe('Starting the camera on the board… 3 s');
-    start.flush({ session: previewSession() });
-    again.flush({ session: previewSession() });
+    start.flush({ preview: previewSession() });
+    again.flush({ preview: previewSession() });
     await settle();
   });
 
@@ -460,8 +454,8 @@ describe('CameraPanel', () => {
     preview.adopt(previewSession());
     void preview.stop();
     http
-      .expectOne({ method: 'POST', url: stopUrl('8f1c') })
-      .flush({ error: 'Could not stop the preview.', code: 'unreachable' }, badGateway);
+      .expectOne(stopOf(previewSession()))
+      .flush(failure('unreachable', 'Could not stop the preview.'), badGateway);
     await settle();
 
     await show(usb);
@@ -469,7 +463,9 @@ describe('CameraPanel', () => {
     expect(button('Stop preview')).toBeUndefined();
     expect(mainButton().textContent!.trim()).toBe('Start preview');
     expect(mainButton().disabled).toBe(true);
-    expect(reason()).toMatch(/already running on mipi:\/base\/axi\/pcie@120000/);
+    expect(reason()).toBe(
+      `A preview is already running on ${imx477.id}. Stop it before starting this one.`,
+    );
     expect(statusLine()).toBe('Not running');
     expect(callouts()).toEqual([]);
 
@@ -484,25 +480,17 @@ describe('CameraPanel', () => {
     await settle();
     preview.adopt(previewSession());
     await settle();
-    expect(image()?.getAttribute('src')).toBe('/api/peripherals/cameras/preview/8f1c/stream');
+    expect(image()?.getAttribute('src')).toBe(previewStreamUrl(previewSession()));
     expect(image()?.alt).toBe(`Live preview of ${imx477.name}`);
     expect(panel().querySelector('iframe')).toBeNull();
 
     image()!.dispatchEvent(new Event('error'));
     await settle();
-    http.expectOne({ method: 'GET', url: PREVIEW_URL }).flush({ session: null });
+    http.expectOne({ method: 'GET', url: PREVIEW_URL }).flush({ preview: null });
     await settle();
     expect(image()).toBeNull();
     expect(statusLine()).toBe('Not running');
     expect(callouts()[0].heading).toBe('The preview stream stopped.');
-
-    // A stream address that is not Insight's own API path is never loaded.
-    preview.adopt(previewSession({ stream_url: 'https://evil.example/x' }));
-    await settle();
-    expect(image()).toBeNull();
-    expect(statusLine()).toBe(
-      'The preview stream could not be opened. Stop the preview and report it with the board label.',
-    );
   });
 
   it('a USB camera can start a preview of any mode it lists in a format the preview reads', async () => {
@@ -510,17 +498,22 @@ describe('CameraPanel', () => {
     expect(selected('Pixel format')).toBe('Motion-JPEG');
     expect(mainButton().disabled).toBe(false);
     await startPreview();
-    const start = http.expectOne({ method: 'POST', url: START_URL });
-    expect(start.request.body).toEqual({ id: usb.id, ...usbMjpg });
-    start.flush({ session: usbLive });
+    const start = http.expectOne({ method: 'POST', url: USB_START_URL });
+    expect(start.request.body).toEqual(usbMjpg);
+    start.flush({ preview: usbLive });
     await settle();
     expect(statusLine()).toBe('Live preview · 1280×720 · MJPG · 30 fps');
   });
 
-  it('Start is disabled for a USB format the backend cannot preview, with the reason', async () => {
+  it('Start is disabled for a USB format the preview cannot read, with the reason', async () => {
     const h264: CameraItem = {
       ...usb,
-      formats: [...usb.formats, { ...usb.formats[0], format: 'H264', label: 'H.264' }],
+      formats: [
+        ...usb.formats,
+        format('H264', 'H.264', support('unsupported'), [
+          size(1280, 720, [30, 'unsupported', false]),
+        ]),
+      ],
     };
     await show(h264);
     await pick('Pixel format', 'H264');
@@ -552,23 +545,6 @@ describe('CameraPanel', () => {
     expect(button('Stop preview')).toBeDefined();
   });
 
-  it("a failed start's board output is folded, so the error stays one row", async () => {
-    await settle();
-    await startPreview();
-    http.expectOne({ method: 'POST', url: START_URL }).flush(
-      {
-        error: 'The preview pipeline could not start.',
-        code: 'command_failed',
-        detail: 'ERROR: from element /GstPipeline...',
-      },
-      badGateway,
-    );
-    await settle();
-    const details = callouts()[0].element.querySelector('neat-collapsible')!;
-    expect(details.querySelector('button')!.getAttribute('aria-expanded')).toBe('false');
-    expect(details.querySelector('pre')).not.toBeNull();
-  });
-
   it('a start with no session yet offers no Stop, since there is no preview to stop', async () => {
     await settle();
     await startPreview();
@@ -577,7 +553,7 @@ describe('CameraPanel', () => {
     expect(mainButton().textContent!.trim()).toBe('Start preview');
     expect(mainButton().getAttribute('aria-disabled')).toBe('true');
     mainButton().click();
-    http.expectOne({ method: 'POST', url: START_URL }).flush({ session: previewSession() });
+    http.expectOne({ method: 'POST', url: START_URL }).flush({ preview: previewSession() });
     await settle();
     expect(button('Stop preview')).toBeDefined();
 
@@ -588,12 +564,11 @@ describe('CameraPanel', () => {
     expect(statusLine()).toBe('Stopping the preview…');
     expect(statusChip()).toEqual({ label: 'Stopping…', tone: 'info' });
     expect(announced()).toBe('Stopping the preview');
-    http.expectOne({ method: 'POST', url: stopUrl('8f1c') }).flush({ session: null });
+    http.expectOne(stopOf(previewSession())).flush({ preview: null });
     await settle();
     expect(statusLine()).toBe('Not running');
   });
 
-  // #170's model.test.js "the detail pane shows one explanation line, chosen by priority", at the panel.
   it('the panel shows one explanation line, chosen by priority', async () => {
     await show(imx568);
     expect(notes()).toEqual([NOT_IN_OVERLAYS]);
@@ -617,7 +592,7 @@ describe('CameraPanel', () => {
 
     const rawOnly: CameraItem = {
       ...imx568,
-      formats: [format('RGB888', 'RGB888', false, support('unsupported'), [size(1920, 1080)])],
+      formats: [format('RGB888', 'RGB888', support('unsupported'), [size(1920, 1080)])],
     };
     await show(rawOnly);
     expect(panel().querySelector('neat-select')).toBeNull();
@@ -635,7 +610,9 @@ describe('CameraPanel', () => {
       'RGB888: no sizes with a frame rate were reported for it.',
     );
     expect(mainButton().disabled).toBe(true);
-    expect(reason()).toBe(NOT_IN_OVERLAYS);
+    // Why the camera is Unsupported is the line under its title; Start says what it lacks.
+    expect(notes()).toEqual([NOT_IN_OVERLAYS]);
+    expect(reason()).toBe('This camera reports no mode Insight can start.');
 
     // Modes that could not be read: the camera's error above says why.
     await show({

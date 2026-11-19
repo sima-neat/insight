@@ -86,7 +86,7 @@ describe('formatChannelStatus', () => {
     ).toBe('H.265 · ?×? · N/A fps · 0.0 kb/s · 30 msg/s');
   });
 
-  it('says "Waiting for stream" while vf has nothing to send, and nothing while connecting', () => {
+  it('says "Waiting for stream" while the server has nothing to send, and nothing while connecting', () => {
     expect(formatChannelStatus({ ...FAILED, phase: 'waiting' })).toBe('Waiting for stream');
     // The tile's label already names the channel, which is all the original showed then.
     expect(formatChannelStatus({ ...FAILED, phase: 'connecting' })).toBe('');

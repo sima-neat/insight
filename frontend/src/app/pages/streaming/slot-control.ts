@@ -1,43 +1,37 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { Slot } from '../../sources/api';
+import type { Slot } from '../../api.generated';
 import { CamerasService } from '../../sources/cameras.service';
-import {
-  allCommitsSucceeded,
-  type CommitResult,
-  needsRendition,
-  withCommittedFps,
-} from '../../sources/fps';
-import { failureText } from '../../sources/progress-lines';
+import { allCommitsSucceeded, type CommitResult } from '../../sources/fps';
 import { SlotsService } from '../../sources/slots.service';
-import { messageOf } from '../../sources/stream-lines';
+import { messageOf } from '../../sources/api-errors';
 
-/** How a start ended: started, cancelled while encoding, or skipped because its rate commit failed. */
-export type StartOutcome = 'started' | 'cancelled' | 'skipped';
+/** How a start ended: started (the slot is on its way), or skipped because its rate commit failed. */
+export type StartOutcome = 'started' | 'skipped';
 
-/** The set with `index` in it or out of it, as a new set. */
-function withMember(all: ReadonlySet<number>, index: number, member: boolean): ReadonlySet<number> {
+/** The set with `n` in it or out of it, as a new set. */
+function withMember(all: ReadonlySet<number>, n: number, member: boolean): ReadonlySet<number> {
   const next = new Set(all);
-  if (member) next.add(index);
-  else next.delete(index);
+  if (member) next.add(n);
+  else next.delete(n);
   return next;
 }
 
 /**
  * The Streaming side panel's work on a slot that has to outlive the panel: the panel shows one
- * slot and is built afresh for each, while a frame-rate commit, an encode or a start goes on when
- * another slot is selected, or the page is left and come back to (Cancel encoding must still
- * reach the encode). Root-provided for that reason; only the lazy Streaming page imports it.
+ * slot and is built afresh for each, while a frame-rate commit or a start goes on when another
+ * slot is selected, or the page is left and come back to. Root-provided for that reason; only the
+ * lazy Streaming page imports it.
  *
- * **Frame-rate commits** (#170's `commitFps`). The stepper commits when its field is left, so a
+ * **Frame-rate commits.** The stepper commits when its field is left, so a
  * click on Start, or on Start… for a bulk start, comes right after a commit that has not landed.
  * Both wait for it, so the server starts the rate just chosen and the start does not race the
  * assignment on the server; neither sends anything when it was refused. A refusal is reported
  * here, once, whoever waits for it.
  *
- * **Starting** a file slot at a rate other than its own encodes the rendition first
- * (`SlotsService.prepare`, whose progress the list and the panel show), then starts it. The encode
- * can be cancelled; the start then ends quietly.
+ * **Starting** a file slot at a rate other than its own makes the server encode the rendition
+ * first: the slot is `preparing` meanwhile, its progress in `SlotsService.encodes`. Cancel
+ * encoding stops the slot, which cancels the encode.
  */
 @Injectable({ providedIn: 'root' })
 export class SlotControl {
@@ -53,10 +47,6 @@ export class SlotControl {
    */
   readonly busy = computed<ReadonlySet<number>>(() => new Set(this.busyCounts().keys()));
 
-  private readonly preparingState = signal<ReadonlySet<number>>(new Set());
-  /** Slots whose start is encoding a rendition, which Cancel encoding can stop. */
-  readonly preparing = this.preparingState.asReadonly();
-
   private readonly startingState = signal<ReadonlySet<number>>(new Set());
   /**
    * Slots with a start in flight, from the click to its answer: the list and the panel say
@@ -65,32 +55,30 @@ export class SlotControl {
   readonly starting = this.startingState.asReadonly();
 
   private readonly commits = new Map<number, Promise<CommitResult>>();
-  /** How to cancel each running encode: it ends the request and settles its start as cancelled. */
-  private readonly cancels = new Map<number, () => void>();
 
   /**
-   * Sets the slot's output frame rate (null: the file's own), with the file and transport it has,
-   * as #170 did. Resolves with the outcome; a refusal is shown as an error toast.
+   * Sets the file slot's output frame rate (null: the file's own), with the file it has.
+   * Resolves with the outcome; a refusal is shown as an error toast.
    *
-   * Through `SlotsService.assign`, not `CamerasService.assignFile`: the stepper only shows for a
-   * slot with a file, never a webcam, and a commit must not count as a slot change, which would
+   * Through `SlotsService.assignFile`, not `CamerasService.assignFile`: the stepper only shows for
+   * a slot with a file, never a webcam, and a commit must not count as a slot change, which would
    * make a bulk start refuse ("Waiting for a source change…") rather than wait for it.
    */
   commitFps(slot: Slot, fps: number | null): Promise<CommitResult> {
-    const index = slot.index;
+    const n = slot.n;
     const commit: Promise<CommitResult> = this.slots
-      .assign({ index, file: slot.file, transport: slot.transport || 'rtsp', fps })
+      .assignFile(n, slot.file ?? '', fps)
       .then(
-        (): CommitResult => ({ ok: true, fps }),
+        (): CommitResult => ({ ok: true }),
         (failure: unknown): CommitResult => {
           this.toasts.error(messageOf(failure));
           return { ok: false };
         },
       )
       .finally(() => {
-        if (this.commits.get(index) === commit) this.commits.delete(index);
+        if (this.commits.get(n) === commit) this.commits.delete(n);
       });
-    this.commits.set(index, commit);
+    this.commits.set(n, commit);
     return commit;
   }
 
@@ -101,38 +89,29 @@ export class SlotControl {
 
   /**
    * Starts the slot as it is once its rate commit, if any, has landed: a webcam by publishing this
-   * browser's camera, a file at its own rate directly, at another rate after encoding the
-   * rendition. Rejects with a message to show.
+   * browser's camera, anything else on the server (a file at another rate after its rendition is
+   * encoded). Rejects with a message to show.
    */
-  async start(index: number): Promise<StartOutcome> {
+  async start(n: number): Promise<StartOutcome> {
     // Taken before `run`, which waits for it too and by then the commit is no longer pending.
-    const pending = this.commits.get(index);
-    this.setStarting(index, true);
+    const pending = this.commits.get(n);
+    this.setStarting(n, true);
     try {
-      return await this.run(index, async () => {
-        const current = this.slots.slots()?.find((slot) => slot.index === index);
-        const slot = withCommittedFps(current, pending ? await pending : undefined);
-        if (!slot) return 'skipped';
-        if (slot.type === 'webcam') {
-          await this.cameras.publish(index);
-          return 'started';
-        }
-        if (!needsRendition(slot)) {
-          await this.slots.start({ index });
-          return 'started';
-        }
-        if ((await this.prepare(index, slot.fps!)) === 'cancelled') return 'cancelled';
-        await this.slots.startAfterPrepare(index);
+      return await this.run(n, async () => {
+        if (pending && !(await pending).ok) return 'skipped';
+        const slot = this.slots.slots()?.find((s) => s.n === n);
+        if (slot?.kind === 'webcam') await this.cameras.publish(n);
+        else await this.slots.start(n);
         return 'started';
       });
     } finally {
-      this.setStarting(index, false);
+      this.setStarting(n, false);
     }
   }
 
-  /** Stops the slot's encode; its start then ends as cancelled. Does nothing when none runs. */
-  cancelEncoding(index: number): void {
-    this.cancels.get(index)?.();
+  /** Stops the slot, which cancels its rendition's encode; its start then has nothing to wait for. */
+  cancelEncoding(n: number): Promise<unknown> {
+    return this.run(n, () => this.slots.stop(n));
   }
 
   /**
@@ -141,71 +120,26 @@ export class SlotControl {
    * (a Clear, another file, a camera) could be undone by it. The commit itself is not `busy`: the
    * click on Start that follows the blur which commits must still go through.
    */
-  async run<T>(index: number, work: () => Promise<T>): Promise<T> {
-    this.adjustBusy(index, 1);
+  async run<T>(n: number, work: () => Promise<T>): Promise<T> {
+    this.adjustBusy(n, 1);
     try {
-      await this.commits.get(index);
+      await this.commits.get(n);
       return await work();
     } finally {
-      this.adjustBusy(index, -1);
+      this.adjustBusy(n, -1);
     }
   }
 
-  /**
-   * Encodes the slot's rendition and resolves once it is ready, or as cancelled. A refused request
-   * rejects with the server's message; a failure the server reports in its lines (the response is
-   * still a 200) rejects with #170's message for it.
-   */
-  private prepare(index: number, fps: number): Promise<'done' | 'cancelled'> {
-    return new Promise((resolve, reject) => {
-      const lines: string[] = [];
-      const end = () => {
-        this.cancels.delete(index);
-        this.setPreparing(index, false);
-      };
-      this.cancels.set(index, () => {
-        subscription.unsubscribe();
-        end();
-        resolve('cancelled');
-      });
-      this.setPreparing(index, true);
-      const subscription = this.slots.prepare(index).subscribe({
-        next: (event) => {
-          if (event.kind === 'line') lines.push(event.text);
-        },
-        error: (failure: unknown) => {
-          end();
-          reject(failure);
-        },
-        complete: () => {
-          end();
-          const failed = failureText(lines);
-          if (failed === null) resolve('done');
-          else
-            reject(
-              new Error(
-                `Encoding src${index} at ${fps} fps failed. Partial output was removed; the source file is unchanged. ${failed}`,
-              ),
-            );
-        },
-      });
-    });
+  private setStarting(n: number, starting: boolean): void {
+    this.startingState.update((all) => withMember(all, n, starting));
   }
 
-  private setPreparing(index: number, preparing: boolean): void {
-    this.preparingState.update((all) => withMember(all, index, preparing));
-  }
-
-  private setStarting(index: number, starting: boolean): void {
-    this.startingState.update((all) => withMember(all, index, starting));
-  }
-
-  private adjustBusy(index: number, by: 1 | -1): void {
+  private adjustBusy(n: number, by: 1 | -1): void {
     this.busyCounts.update((counts) => {
       const next = new Map(counts);
-      const count = (counts.get(index) ?? 0) + by;
-      if (count > 0) next.set(index, count);
-      else next.delete(index);
+      const count = (counts.get(n) ?? 0) + by;
+      if (count > 0) next.set(n, count);
+      else next.delete(n);
       return next;
     });
   }

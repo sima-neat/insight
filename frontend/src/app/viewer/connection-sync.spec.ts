@@ -8,13 +8,10 @@ class Target implements SyncTarget {
   setSyncBuffer(ms: number): void {
     this.calls.push(`buffer ${ms}`);
   }
-  setMetadataRetention(ms: number): void {
-    this.calls.push(`retention ${ms}`);
-  }
 }
 
 describe('followSyncSettings', () => {
-  it('applies each value to the connection when it changes, and both to a new connection', () => {
+  it('applies the buffer to the connection when it changes, and to a new connection', () => {
     const first = new Target();
     const connection = signal<SyncTarget | null>(null);
     const sync = signal<SyncSettings | null>({ videoSyncBufferMs: 300, metadataRetentionMs: 0 });
@@ -23,23 +20,23 @@ describe('followSyncSettings', () => {
 
     connection.set(first);
     TestBed.tick();
-    expect(first.calls).toEqual(['buffer 300', 'retention 0']);
+    expect(first.calls).toEqual(['buffer 300']);
 
-    // A retention change must not re-apply the buffer, and the other way round.
+    // A retention change must not re-apply the buffer.
     sync.set({ videoSyncBufferMs: 300, metadataRetentionMs: 2000 });
     TestBed.tick();
     sync.set({ videoSyncBufferMs: 500, metadataRetentionMs: 2000 });
     TestBed.tick();
-    expect(first.calls).toEqual(['buffer 300', 'retention 0', 'retention 2000', 'buffer 500']);
+    expect(first.calls).toEqual(['buffer 300', 'buffer 500']);
 
     const second = new Target();
     connection.set(second);
     TestBed.tick();
-    expect(second.calls).toEqual(['buffer 500', 'retention 2000']);
+    expect(second.calls).toEqual(['buffer 500']);
 
     // No settings (no channel): nothing to apply.
     sync.set(null);
     TestBed.tick();
-    expect(second.calls).toHaveLength(2);
+    expect(second.calls).toHaveLength(1);
   });
 });

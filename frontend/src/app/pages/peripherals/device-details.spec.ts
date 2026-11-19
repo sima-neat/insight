@@ -19,8 +19,6 @@ const bare: OtherItem = {
   kind: 'future_sensor',
   connection: 'future',
   name: 'Future sensor',
-  device: {},
-  availability: { state: 'unknown', users: [], reason: null },
   notes: [],
   errors: [],
 };
@@ -53,7 +51,9 @@ describe('DeviceDetails', () => {
     expect(trigger()?.textContent?.trim()).toBe('Details');
     expect(trigger()?.getAttribute('aria-expanded')).toBe('false');
     // Not a heading: the panel's Details is a disclosure, not part of the page's outline.
-    expect(root().querySelector('[role="heading"] button, h1 button, h2 button, h3 button')).toBeNull();
+    expect(
+      root().querySelector('[role="heading"] button, h1 button, h2 button, h3 button'),
+    ).toBeNull();
     expect(facts()).toEqual([
       ['Video node', '/dev/video0'],
       ['By-id link', '/dev/v4l/by-id/usb-046d_0825_2F6D4A10-video-index0'],
@@ -91,12 +91,7 @@ describe('DeviceDetails', () => {
     expect(root().querySelector('app-device-details')?.children).toHaveLength(0);
 
     await show(onboardMic);
-    expect(facts().map(([term]) => term)).toEqual([
-      'ALSA card',
-      'Driver',
-      'ALSA name',
-      'PCM node',
-    ]);
+    expect(facts().map(([term]) => term)).toEqual(['ALSA card', 'Driver', 'ALSA name', 'PCM node']);
     expect(notes()).toEqual(['Capture formats cannot be read without opening the device.']);
   });
 });

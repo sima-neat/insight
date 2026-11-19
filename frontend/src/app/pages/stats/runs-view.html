@@ -11,13 +11,11 @@
           @for (failure of report.failures; track $index) {
             <li>
               <p>{{ failure.name }}: {{ failure.title }}</p>
-              <p>{{ failure.message }}</p>
+              @if (failure.detail) {
+                <p>{{ failure.detail }}</p>
+              }
               @if (failure.hint) {
                 <p neatNote>{{ failure.hint }}</p>
-              }
-              <!-- What the board said, such as the CLI's output, keeps its lines. -->
-              @if (failure.detail) {
-                <pre>{{ failure.detail }}</pre>
               }
             </li>
           }

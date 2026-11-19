@@ -39,21 +39,3 @@
   margin: 0;
   padding-inline-start: var(--neat-space-4);
 }
-
-/*
- * The board's output is a log: kept as it came, wrapped to the panel rather than scrolled
- * sideways, and scrolled within a few lines' height. It takes the focus (tabindex) so that a
- * keyboard can scroll it.
- */
-.output {
-  margin: 0;
-  max-block-size: 12rem;
-  overflow: auto;
-  font-size: var(--neat-text-xs);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.output:focus-visible {
-  outline: var(--neat-focus-ring-width) solid var(--ring);
-}

@@ -1,12 +1,12 @@
 import type { NeatTone } from '@sima/neat-ui';
-import type { Slot, SlotExternal, SlotPull, SlotPullStatus, SlotReader } from './api';
+import type { Slot, SlotPublisher, SlotPull, SlotReader } from '../api.generated';
 import { customRate } from './fps';
-import type { Progress } from './progress-lines';
+import type { Progress } from './jobs';
 import type { Camera } from './webcam-publishing';
 
 /**
- * What the app shows of a slot, worked out from the server's answer (Inv-SM §1.2) and what only
- * this browser knows: the camera picked for a webcam slot and an encode in progress. Pure
+ * What the app shows of a slot, worked out from the server's answer (`GET /api/slots`) and what
+ * only this browser knows: the camera picked for a webcam slot and a start in flight. Pure
  * functions, so Streaming's list computes its rows once per answer, and its slot panel, Media's
  * "In use" and the import dialog's warnings name slots, states and codecs in the same words.
  */
@@ -34,11 +34,11 @@ export interface SlotRow {
   readonly codecWarning: string | null;
 }
 
-/** What only this browser knows about a slot. */
+/** What only this browser knows about a slot, and how far its encode has got. */
 export interface SlotLocal {
   /** The camera this browser picked for a webcam slot. */
   readonly camera?: Camera;
-  /** The rendition `SlotsService.prepare` is encoding for the slot's start. */
+  /** The rendition being encoded for the slot's start (`SlotsService.encodes`). */
   readonly encode?: Progress;
   /** A start of the slot is in flight: from the click until the server has answered. */
   readonly starting?: boolean;
@@ -52,15 +52,18 @@ const IDLE: SlotStateView = { label: 'Idle', tone: 'neutral' };
 const LIVE: SlotStateView = { label: 'Live', tone: 'success' };
 const ENCODING: SlotStateView = { label: 'Encoding', tone: 'info' };
 const STARTING: SlotStateView = { label: 'Starting…', tone: 'info' };
+const FAILED: SlotStateView = { label: 'Failed', tone: 'danger' };
 const EXTERNAL: SlotStateView = { label: 'External', tone: 'highlight' };
-const PULL_STATES: Record<SlotPullStatus, SlotStateView> = {
+const PULL_STATES: Record<SlotPull['status'], SlotStateView> = {
   connecting: { label: 'Connecting…', tone: 'info' },
-  live: { label: 'Pulled', tone: 'success' },
+  live: LIVE,
   unreachable: { label: 'Unreachable', tone: 'warning' },
   auth_failed: { label: 'Auth failed', tone: 'danger' },
+  needs_credentials: { label: 'Needs URL', tone: 'warning' },
+  stopped: { label: 'Stopped', tone: 'neutral' },
 };
 
-/** The codecs Insight streams (#170's `STREAMING_CODECS`); any other on the wire reads in capitals. */
+/** The codecs Insight streams; any other on the wire reads in capitals. */
 const CODEC_LABELS: Readonly<Record<string, string>> = {
   h264: 'H.264',
   h265: 'H.265',
@@ -70,7 +73,7 @@ const CODEC_LABELS: Readonly<Record<string, string>> = {
   unknown: 'Unknown',
 };
 
-/** #170's names for the protocols MediaMTX reports a publisher by; others read in capitals. */
+/** Names for the protocols MediaMTX reports a publisher by; others read in capitals. */
 const PROTOCOL_LABELS: Readonly<Record<string, string>> = {
   rtsp: 'RTSP',
   rtsps: 'RTSPS',
@@ -82,65 +85,84 @@ const PROTOCOL_LABELS: Readonly<Record<string, string>> = {
 
 /**
  * What a warning about the slots using some files adds when the slots could not be fetched again
- * before it (ruling Q16): the slots it names are the last known ones. Media's delete confirmation
- * and the import dialog's name clash say it alike.
+ * before it: the slots it names are the last known ones. Media's delete and the
+ * import dialog's name clash say it alike.
  */
 export const SLOTS_NOT_CHECKED = 'Could not check which slots use these files.';
 
-/** What a cell shows for a value there is none of, as #170 does. */
+/** What a cell shows for a value there is none of. */
 const NONE = '-';
 
-/** A file or a webcam is assigned; a pull or an external publisher may sit over either. */
+/** A file, a camera to pull or a webcam is assigned; an external publisher may sit over it. */
 export function isAssigned(slot: Slot): boolean {
-  return slot.type === 'webcam' || slot.file !== '';
+  return slot.kind !== 'none';
 }
 
-/** What the "In use" filter shows: a slot that is assigned, external or pulled. */
+/** What the "In use" filter shows: a slot that is assigned or held by an external publisher. */
 export function isInUse(slot: Slot): boolean {
-  return isAssigned(slot) || slot.state === 'external' || slot.state === 'pulled';
+  return isAssigned(slot) || slot.state === 'external';
 }
 
 export function slotName(slot: Slot): string {
-  return `src${slot.index}`;
+  return `src${slot.n}`;
 }
 
-/** An external publisher or a pull shows over the assignment it leaves in place underneath. */
+/** An external publisher shows over the assignment it leaves in place underneath. */
 export function slotKind(slot: Slot): SlotKind {
   if (slot.state === 'external') return 'EXT';
-  if (slot.state === 'pulled') return 'URL';
-  if (slot.type === 'webcam') return 'CAM';
-  return slot.file ? 'VID' : '';
+  switch (slot.kind) {
+    case 'pull':
+      return 'URL';
+    case 'webcam':
+      return 'CAM';
+    case 'file':
+      return 'VID';
+    default:
+      return '';
+  }
 }
 
 /**
- * A start in flight reads Starting… until the server says the slot is live; the encode before it
- * keeps its own word, and a publisher or a pull holds the slot whatever is being started.
+ * A pull says how its connection stands. Otherwise an encode reads Encoding, and a start in flight
+ * reads Starting… until the server says the slot is on its way; a publisher holds the slot
+ * whatever is being started.
  */
 export function slotState(slot: Slot, encode?: Progress, starting = false): SlotStateView {
   if (slot.state === 'external') return EXTERNAL;
-  if (slot.state === 'pulled') return PULL_STATES[slot.pull?.status ?? 'connecting'];
-  if (encode) return ENCODING;
-  if (slot.state === 'playing') return LIVE;
-  return starting ? STARTING : IDLE;
+  if (slot.kind === 'pull' && slot.pull) {
+    if (slot.pull.status === 'stopped') return starting ? STARTING : IDLE;
+    return PULL_STATES[slot.pull.status];
+  }
+  if (encode || slot.state === 'preparing') return ENCODING;
+  switch (slot.state) {
+    case 'live':
+      return LIVE;
+    case 'starting':
+      return STARTING;
+    case 'failed':
+      return FAILED;
+    default:
+      return starting ? STARTING : IDLE;
+  }
 }
 
 export function slotSource(slot: Slot, camera?: Camera): string {
-  if (slot.state === 'external' && slot.external) return externalChip(slot.external);
-  if (slot.state === 'pulled' && slot.pull) return pullChip(slot.pull);
+  if (slot.state === 'external' && slot.publisher) return externalChip(slot.publisher);
+  if (slot.kind === 'pull' && slot.pull) return pullChip(slot.pull, slot.publisher);
   // After a reload a webcam slot has no camera until one is picked again in this browser.
-  if (slot.type === 'webcam') return camera?.label ?? 'Select a camera';
+  if (slot.kind === 'webcam') return camera?.label ?? 'Select a camera';
   return slot.file || 'Not assigned';
 }
 
 /**
- * The chips below are #170's (`externalSource.js`) word for word. An external publisher:
- * `⇢ RTSP · 192.168.1.20:41234 · 1280×720 · 30 fps`, leaving out the address and the video
- * while they are not known.
+ * An external publisher:
+ * `⇢ RTSP · 192.168.1.20 · 1280×720 · 30 fps`, leaving out the address and the video while they
+ * are not known.
  */
-export function externalChip(external: SlotExternal): string {
-  const parts = [protocolLabel(external.protocol)];
-  if (external.address) parts.push(external.address);
-  const video = dimensionsText(external);
+export function externalChip(publisher: SlotPublisher): string {
+  const parts = [protocolLabel(publisher.protocol)];
+  if (publisher.address) parts.push(publisher.address);
+  const video = dimensionsText(publisher);
   if (video) parts.push(video);
   return `⇢ ${parts.join(' · ')}`;
 }
@@ -149,11 +171,11 @@ export function externalChip(external: SlotExternal): string {
  * A pull always names the camera it pulls from, so a row that cannot reach it says which:
  * `⇠ RTSP · 10.0.0.7:554 · ` and then the video while live, or what the pull is doing about it.
  */
-export function pullChip(pull: SlotPull): string {
+export function pullChip(pull: SlotPull, publisher?: SlotPublisher): string {
   const parts = [protocolLabel(pull.scheme), pull.host || NONE];
   switch (pull.status) {
     case 'live': {
-      const video = dimensionsText(pull);
+      const video = publisher ? dimensionsText(publisher) : '';
       if (video) parts.push(video);
       break;
     }
@@ -166,6 +188,12 @@ export function pullChip(pull: SlotPull): string {
     case 'connecting':
       parts.push('connecting…');
       break;
+    case 'needs_credentials':
+      parts.push('stream URL needed again');
+      break;
+    case 'stopped':
+      parts.push('stopped');
+      break;
   }
   return `⇠ ${parts.join(' · ')}`;
 }
@@ -177,13 +205,13 @@ export function protocolLabel(protocol: string): string {
 
 /** `1280×720 · 30 fps`, each part only once it is known; empty before either is. */
 export function dimensionsText(stream: {
-  width: number | null;
-  height: number | null;
-  fps: number | null;
+  readonly width?: number;
+  readonly height?: number;
+  readonly fps?: number;
 }): string {
   const parts: string[] = [];
   if (stream.width && stream.height) parts.push(`${stream.width}×${stream.height}`);
-  if (stream.fps) parts.push(`${stream.fps} fps`);
+  if (stream.fps) parts.push(fpsText(stream.fps));
   return parts.join(' · ');
 }
 
@@ -192,92 +220,83 @@ export function dimensionsText(stream: {
  * always goes out at the normalizer's rate, which the server does not report, so it shows none.
  */
 export function slotRate(slot: Slot, encode?: Progress): string {
-  if (slot.state === 'external') return fpsText(slot.external?.fps);
-  if (slot.state === 'pulled') {
+  if (slot.state === 'external') return fpsText(slot.publisher?.fps);
+  if (slot.kind === 'pull') {
     if (slot.pull?.status === 'unreachable') return 'retrying…';
-    return slot.pull?.status === 'live' ? fpsText(slot.pull.fps) : '';
+    return slot.pull?.status === 'live' ? fpsText(slot.publisher?.fps) : '';
   }
   if (encode) return encode.percent === null ? 'encoding' : `encoding ${encode.percent}%`;
-  if (slot.type === 'webcam' || !slot.file) return '';
+  if (slot.kind !== 'file') return '';
   const fps = slot.fps ?? slot.native_fps;
-  if (fps == null) return '';
+  if (fps === undefined) return '';
   return customRate(slot) !== null ? `${fps} fps · rendition` : `${fps} fps`;
 }
 
-export function codecLabel(codec: string): string {
+export function codecLabel(codec: string | undefined): string {
   if (!codec) return NONE;
   return CODEC_LABELS[codec] ?? codec.toUpperCase();
 }
 
-/** The codec on the wire or of the assigned media; "-" while there is none to name, as in #170. */
+/** The codec on the wire or of the assigned file; "-" while there is none to name. */
 export function slotCodec(slot: Slot): string {
-  if (slot.state === 'pulled') return slot.pull?.status === 'live' ? codecLabel(slot.codec) : NONE;
   if (slot.state === 'external') return codecLabel(slot.codec);
+  if (slot.kind === 'pull') return slot.pull?.status === 'live' ? codecLabel(slot.codec) : NONE;
   return isAssigned(slot) ? codecLabel(slot.codec) : NONE;
 }
 
 /**
- * #170's warning for a stream Neat pipelines cannot decode, or null. Only an external publisher,
+ * The warning for a stream Neat pipelines cannot decode, or null. Only an external publisher,
  * or a pull while live, can carry one.
  */
 export function codecWarning(slot: Slot): string | null {
-  const stream =
-    slot.state === 'external'
-      ? slot.external
-      : slot.state === 'pulled' && slot.pull?.status === 'live'
-        ? slot.pull
-        : undefined;
-  return stream?.codec_supported === false
+  const held = slot.state === 'external' || (slot.kind === 'pull' && slot.pull?.status === 'live');
+  return held && slot.publisher?.codec_supported === false
     ? `${codecLabel(slot.codec)} cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.`
     : null;
 }
 
-/** The pull status's label, as the state chip shows it. */
+/** The pull status's label, as the slot's details say it. */
 export function pullStatusLabel(pull: SlotPull): string {
   return PULL_STATES[pull.status].label;
 }
 
 /**
- * Whether the slot has a stream to watch: Insight streams it, a publisher holds it, or a pull
- * receives video. The server's preview route serves exactly these.
+ * Whether the slot has a stream to watch: MediaMTX has it, from Insight's publisher, a pulled
+ * camera, a webcam or an external publisher. The server's preview route serves exactly these.
  */
 export function isLive(slot: Slot): boolean {
-  return (
-    slot.state === 'playing' ||
-    slot.state === 'external' ||
-    (slot.state === 'pulled' && slot.pull?.status === 'live')
-  );
+  return slot.state === 'live' || slot.state === 'external';
 }
 
 /**
- * The URL a reader opens the slot at (#170's Copy URL): the RTSP URL the server reports, with the
- * SDK's mapped port, or the HTTP MJPEG one for a slot on that transport. Null when the server
- * reports none.
+ * Whether the slot is on: the user started it (`run`), so Stop is what it offers. A webcam is
+ * on while a browser publishes it, since the server keeps a webcam slot started from its
+ * assignment on, waiting for a browser.
  */
-export function streamUrl(slot: Slot): string | null {
-  if (slot.transport === 'http')
-    return slot.urls.http_mjpeg ?? `/stream/http/src${slot.index}.mjpg`;
-  return slot.urls.rtsp ?? null;
+export function isRunning(slot: Slot): boolean {
+  if (slot.kind === 'webcam') return slot.state === 'live' || slot.state === 'starting';
+  return slot.run;
 }
 
 /**
- * What a file or webcam slot puts out (#170's "Output" line): `RTSP / H.264 · 25 fps`, the rate
- * being the one set, else the file's own. A webcam always goes out at the normalizer's rate, which
- * the server does not report.
+ * What a slot puts out: `RTSP / H.264 · 25 fps`, the rate being the one set,
+ * else the file's own; an MJPEG stream also goes out over HTTP. A webcam always goes out at the
+ * normalizer's rate, which the server does not report.
  */
 export function slotOutput(slot: Slot): string {
-  const base = `${slot.transport ? slot.transport.toUpperCase() : NONE} / ${codecLabel(slot.codec)}`;
-  const fps = slot.type === 'file' ? (slot.fps ?? slot.native_fps) : null;
-  return fps == null ? base : `${base} · ${fps} fps`;
+  const protocols = slot.urls.http_mjpeg ? 'RTSP and HTTP' : 'RTSP';
+  const base = `${protocols} / ${codecLabel(slot.codec)}`;
+  const fps = slot.kind === 'file' ? (slot.fps ?? slot.native_fps) : undefined;
+  return fps === undefined ? base : `${base} · ${fps} fps`;
 }
 
 /**
- * The rest are #170's (`externalSource.js`) as well. The preview of a live slot: `token` makes a
+ * The preview of a live slot: `token` makes a
  * new request (another slot, a retry), and `since` changes with the publisher's session, so a
  * publisher that reconnected between two polls gets a new image rather than the ended one.
  */
-export function previewSrc(index: number, token: number, since?: string | null): string {
-  return `/stream/preview/src${index}.mjpg?t=${token}${since ? `&s=${encodeURIComponent(since)}` : ''}`;
+export function previewSrc(n: number, token: number, since?: string | null): string {
+  return `/api/slots/${n}/preview.mjpg?t=${token}${since ? `&s=${encodeURIComponent(since)}` : ''}`;
 }
 
 /** How long a stream has been live, `12m 04s` or `1h 02m`; "-" while unknown. */
@@ -299,10 +318,9 @@ export function formatBitrate(bps: number | null | undefined): string {
 }
 
 /** `2 · 10.42.0.79, insight preview`: the count, then each reader by label, address or protocol. */
-export function readersText(readers: readonly SlotReader[] | undefined): string {
-  const list = readers ?? [];
-  if (list.length === 0) return '0';
-  return `${list.length} · ${list.map((r) => r.label || r.address || r.protocol).join(', ')}`;
+export function readersText(readers: readonly SlotReader[]): string {
+  if (readers.length === 0) return '0';
+  return `${readers.length} · ${readers.map((r) => r.label || r.address || r.protocol).join(', ')}`;
 }
 
 /** Where a pull reads from, built from the server's record, which never carries credentials. */
@@ -323,6 +341,7 @@ export function slotRow(slot: Slot, local: SlotLocal = {}): SlotRow {
   };
 }
 
-function fpsText(fps: number | null | undefined): string {
-  return fps == null ? '' : `${fps} fps`;
+/** A rate in whole frames per second; a stream's measured rate (29.97) reads as its nearest. */
+function fpsText(fps: number | undefined): string {
+  return fps === undefined ? '' : `${Math.round(fps)} fps`;
 }

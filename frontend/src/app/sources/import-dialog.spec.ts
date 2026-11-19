@@ -1,23 +1,22 @@
 import { Location } from '@angular/common';
 import { provideLocationMocks } from '@angular/common/testing';
-import { Component, getDebugNode, inject, type Type } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
-import { NeatButton } from '@sima/neat-ui';
-import { NeatInput } from '@sima/neat-ui/input';
-import { NeatSelect } from '@sima/neat-ui/select';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import type { CatalogAsset, CatalogIndex, YoutubePreview } from './api';
+import type { CatalogAsset, CatalogIndex } from './catalog';
 import { ImportDialogs } from './import-dialog';
 import type { ImportKind } from './import-runner';
 import {
-  done,
   FakeLibrary,
   FakeSlots,
   FakeToasts,
   fileSlot,
-  lines,
+  jobFailed,
+  preparing,
   refuse,
+  saved,
+  sent,
   tick,
 } from './import.testing';
 import { MediaLibraryService } from './media-library.service';
@@ -60,7 +59,6 @@ const asset = (overrides: Partial<CatalogAsset>): CatalogAsset => ({
 
 const CATALOG: CatalogIndex = {
   schema: '1',
-  generated_at: null,
   index_url: '',
   base_url: '',
   sources: [
@@ -79,18 +77,6 @@ const CATALOG: CatalogIndex = {
     }),
     asset({ path: 'street/1080_hevc.mp4', profile: '1080p30', codec: 'hevc', target_height: 1080 }),
   ],
-};
-
-const PREVIEW: YoutubePreview = {
-  video_id: 'abc',
-  normalized_url: 'https://www.youtube.com/watch?v=abc',
-  embed_url: 'https://www.youtube.com/embed/abc?start=30',
-  thumbnail_url: '',
-  clip_start: 30,
-  title: 'Street walk',
-  duration: 600,
-  is_live: false,
-  live_status: 'not_live',
 };
 
 describe('ImportDialog', () => {
@@ -162,10 +148,6 @@ describe('ImportDialog', () => {
     [...dialog()!.querySelectorAll<HTMLElement>('[role="tab"]')].find(
       (one) => one.textContent?.trim() === name,
     )!;
-  const field = (label: string): HTMLInputElement =>
-    [...dialog()!.querySelectorAll('label')]
-      .find((one) => one.querySelector('span')?.textContent?.trim() === label)!
-      .querySelector('input')!;
   const list = (label: string) =>
     dialog()!.querySelector<HTMLElement>(`[role="listbox"][aria-label="${label}"]`)!;
   const options = (label: string) => [
@@ -192,12 +174,6 @@ describe('ImportDialog', () => {
 
   async function click(element: HTMLElement | undefined): Promise<void> {
     element!.click();
-    await settle();
-  }
-
-  async function type(input: HTMLInputElement, value: string): Promise<void> {
-    input.value = value;
-    input.dispatchEvent(new Event('input'));
     await settle();
   }
 
@@ -241,7 +217,7 @@ describe('ImportDialog', () => {
   const clash = () => [...dialog()!.querySelectorAll('.clash p, .clash button')].map(text);
   const alert = () => text(dialog()!.querySelector('neat-error-note[role="alert"]'));
 
-  it('uploads files in order with byte progress, then processing lines, then closes on success', async () => {
+  it('uploads files in order with byte progress, then their re-encode, then closes on success', async () => {
     await open();
     expect(text(dialog()!.querySelector('h2'))).toBe('Import media');
     expect(text()).toContain(
@@ -252,11 +228,13 @@ describe('ImportDialog', () => {
     expect(library.calls.map((call) => call.body)).toEqual([
       { name: 'a.mp4', onConflict: undefined },
     ]);
-    library.last.events.next({ kind: 'upload', loaded: 50, total: 200 });
+    sent(library.last, 50, 200);
     await settle();
     expect(progress()).toEqual({ title: 'Uploading media 1/2 25%', detail: 'a.mp4', value: '25' });
 
-    lines(library.last, 'Uploaded to /data/media/a.mp4', 'Optimizing a.mp4: 40% (00:04 / 00:10)');
+    preparing(library.last, {
+      progress: { phase: 'encode', detail: '00:04 / 00:10', percent: 40 },
+    });
     await settle();
     expect(progress()).toEqual({
       title: 'Preparing media 1/2 40%',
@@ -268,16 +246,14 @@ describe('ImportDialog', () => {
     expect(dialog()).not.toBeNull();
     expect(dialog()!.querySelector('neat-drop-zone button')!.hasAttribute('disabled')).toBe(true);
 
-    lines(library.last, 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'a.mp4', { reencoded: ['a.mp4'] });
     await settle();
     expect(library.calls.map((call) => call.body)).toEqual([
       { name: 'a.mp4', onConflict: undefined },
       { name: 'b.mp4', onConflict: undefined },
     ]);
     expect(progress()!.title).toBe('Uploading media 2/2');
-    lines(library.last, 'Uploaded to /data/media/b.mp4', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'b.mp4');
     await settle();
 
     expect(dialog()).toBeNull();
@@ -303,8 +279,7 @@ describe('ImportDialog', () => {
     expect(document.activeElement).toBe(button('Keep both'));
     await click(button('Keep both'));
     expect(library.last.body).toEqual({ name: 'a.mp4', onConflict: 'keep_both' });
-    lines(library.last, 'Uploaded to /data/media/a_2.mp4', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'a_2.mp4');
     await settle();
 
     refuse(library.last, 'b.mp4', 'b_2.mp4');
@@ -312,8 +287,7 @@ describe('ImportDialog', () => {
     expect(clash()).toEqual(['b.mp4 already exists.', 'Replace', 'Keep both', 'Skip']);
     await click(button('Replace'));
     expect(library.last.body).toEqual({ name: 'b.mp4', onConflict: 'replace' });
-    lines(library.last, 'Uploaded to /data/media/b.mp4', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'b.mp4');
     await settle();
 
     refuse(library.last, 'c.mp4', 'c_2.mp4');
@@ -325,26 +299,17 @@ describe('ImportDialog', () => {
     expect(opener.result).toBe('b.mp4');
   });
 
-  it('a failure line keeps the dialog open and reports the file', async () => {
+  it('a failed re-encode keeps the dialog open and reports the file', async () => {
     await open();
     await drop('a.mp4');
-    lines(
-      library.last,
-      'Uploaded to /data/media/a.mp4',
-      'FFmpeg conversion failed for a.mp4: moov atom not found',
-      'Invalid data found when processing input',
-    );
-    await settle();
-    // Read on to the end: the server is still working.
-    expect(library.last.unsubscribed).toBe(false);
-    lines(library.last, 'Upload complete.');
-    done(library.last);
+    preparing(library.last);
+    jobFailed(library.last, 'Preparing a.mp4 for streaming failed: moov atom not found.');
     await settle();
 
     const failure =
-      'Uploaded and prepared 0/1 file(s). a.mp4: FFmpeg conversion failed for a.mp4: moov atom not found\nInvalid data found when processing input';
+      'Uploaded and prepared 0/1 file(s). a.mp4: Preparing a.mp4 for streaming failed: moov atom not found.';
     expect(dialog()).not.toBeNull();
-    expect(alert()).toBe(failure.replace('\n', ' '));
+    expect(alert()).toBe(failure);
     expect(toasts.error).toHaveBeenCalledWith(failure);
     expect(progress()).toBeNull();
     // Idle again: it may close, and drops are taken.
@@ -354,10 +319,10 @@ describe('ImportDialog', () => {
     expect(opener.result).toBeNull();
   });
 
-  it('leaving the page mid-upload continues it in a progress toast', async () => {
+  it('leaving the page mid-upload lets it go on, and a toast says how it ended', async () => {
     await open();
     await drop('a.mp4');
-    library.last.events.next({ kind: 'upload', loaded: 1, total: 2 });
+    sent(library.last, 1, 2);
     await settle();
 
     // The browser's Back button: navigation closes even a dialog that is busy.
@@ -365,40 +330,32 @@ describe('ImportDialog', () => {
     await settle();
     expect(dialog()).toBeNull();
     expect(opener.result).toBeNull();
-    const [toast] = toasts.progressToasts;
-    expect(toast.title).toBe('Uploading media');
-    expect(toast.update).toHaveBeenLastCalledWith('Uploading media · a.mp4', 50);
 
-    lines(library.last, 'Uploaded to /data/media/a.mp4', 'Optimizing a.mp4: 40% (00:04 / 00:10)');
-    expect(toast.update).toHaveBeenLastCalledWith('Preparing media · a.mp4 - 00:04 / 00:10', 40);
-    lines(library.last, 'Upload complete.');
-    done(library.last);
+    preparing(library.last, {
+      progress: { phase: 'encode', detail: '00:04 / 00:10', percent: 40 },
+    });
+    saved(library.last, 'a.mp4');
     await settle();
 
     expect(library.last.unsubscribed).toBe(false);
-    expect(toast.done).toHaveBeenCalledWith('Uploaded and prepared 1 file(s).');
-    expect(toasts.status).not.toHaveBeenCalled();
+    expect(toasts.status).toHaveBeenCalledWith('Uploaded and prepared 1 file(s).');
   });
 
-  it('opened again while the work is in a toast, the dialog takes it back to the end', async () => {
+  it('opened again while earlier work runs, the dialog sees it to the end', async () => {
     await open();
     await drop('a.mp4', 'b.mp4');
     TestBed.inject(Location).back();
     await settle();
-    const [toast] = toasts.progressToasts;
 
     await TestBed.inject(Router).navigateByUrl('/media');
     await settle();
     await open();
-    expect(toast.dismiss).toHaveBeenCalledOnce();
-    expect(toast.done).not.toHaveBeenCalled();
     expect(progress()!.title).toBe('Uploading media 1/2');
     // It is this dialog's work now: not dismissed by Escape, and it closes when the work is done.
     await escape();
     expect(dialog()).not.toBeNull();
 
-    lines(library.last, 'Uploaded to /data/media/a.mp4', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'a.mp4');
     await settle();
     refuse(library.last, 'b.mp4', 'b_2.mp4');
     await settle();
@@ -425,16 +382,14 @@ describe('ImportDialog', () => {
     ]);
     await click(button('Replace'));
     expect(library.last.body).toEqual({ name: 'clips.zip', onConflict: 'replace' });
-    lines(library.last, 'Saved archive; extracting into /data/media/clips', 'Archive extracted.');
-    lines(library.last, 'Restarted src2.', 'Restarted src6.', 'Upload complete.');
-    done(library.last);
+    saved(library.last, 'clips', { folder: true, restarted: [2, 6] });
     await settle();
 
     expect(dialog()).toBeNull();
     expect(opener.result).toBe('clips');
   });
 
-  it('a clash whose slots could not be checked says so (Q16)', async () => {
+  it('a clash whose slots could not be checked says so', async () => {
     slots.refresh.mockRejectedValueOnce(new Error('MediaMTX is down'));
     await open();
     await drop('a.mp4');
@@ -486,15 +441,19 @@ describe('ImportDialog', () => {
       rows: [['720p30', 'H.265', '1280x720', '1.0 MB']],
     });
     expect(text()).toContain('A narrow alley');
+    // The summary beside the preview has no actions, so no box for them; the footer's has.
+    expect(dialog()!.querySelector('app-import-preview .actions')).toBeNull();
+    expect(
+      dialog()!.querySelector('app-import-preview ~ app-import-summary .actions'),
+    ).not.toBeNull();
 
     await click(tab('Catalog by asset type'));
     await click(options('Catalog assets')[1]);
     expect(text()).toContain('1 asset(s) selected');
     await click(button('Import Selected'));
     expect(library.calls.map((call) => call.body)).toEqual(['street/1080_hevc.mp4']);
-    lines(library.last, 'Saved catalog asset to catalog/street/1080_hevc.mp4');
-    lines(library.last, 'Catalog import complete.');
-    done(library.last);
+    preparing(library.last, { kind: 'catalog_import' });
+    saved(library.last, 'catalog/street/1080_hevc.mp4');
     await settle();
 
     expect(dialog()).toBeNull();
@@ -551,7 +510,7 @@ describe('ImportDialog', () => {
     expect(await headingsAt(300, 'name', 'Catalog variants')).toEqual(['Resolution & FPS', 'Size']);
   });
 
-  it('by asset type, assets are checked and imported one after the other (Q17)', async () => {
+  it('by asset type, assets are checked and imported one after the other', async () => {
     library.catalog.mockResolvedValue(CATALOG);
     await open('catalog');
     const assets = list('Catalog assets');
@@ -566,7 +525,7 @@ describe('ImportDialog', () => {
     expect(button('Clear')!.disabled).toBe(true);
     expect(button('Import Selected')!.disabled).toBe(true);
 
-    // A click on a box, or anywhere on the row as on #170's checkbox labels, checks the asset.
+    // A click on a box, or anywhere on the row, checks the asset.
     await click(box(0));
     await click(options('Catalog assets')[2]);
     expect(checked()).toEqual([true, false, true]);
@@ -576,7 +535,7 @@ describe('ImportDialog', () => {
     await click(options('Catalog assets')[2]);
     expect(checked()).toEqual([true, false, false]);
 
-    // As #170: a check the filter hides is dropped, and widening the filter does not restore it.
+    // A check the filter hides is dropped, and widening the filter does not restore it.
     const codec = filters.querySelectorAll('neat-select')[1];
     await pick(codec, 'H.265');
     expect(text()).toContain('2 matching assets / 0 selected');
@@ -599,138 +558,18 @@ describe('ImportDialog', () => {
     await click(button('Import Selected'));
     expect(library.calls.map((call) => call.body)).toEqual(['alley/720_hevc.mp4']);
     expect(progress()!.title).toBe('Importing catalog asset 1/2');
-    lines(library.last, 'Saved catalog asset to catalog/alley/720_hevc.mp4');
-    done(library.last);
+    saved(library.last, 'catalog/alley/720_hevc.mp4');
     await settle();
     expect(library.calls.map((call) => call.body)).toEqual([
       'alley/720_hevc.mp4',
       'street/1080_hevc.mp4',
     ]);
-    lines(library.last, 'Saved catalog asset to catalog/street/1080_hevc.mp4');
-    done(library.last);
+    saved(library.last, 'catalog/street/1080_hevc.mp4');
     await settle();
 
     expect(dialog()).toBeNull();
     expect(opener.result).toBe('catalog/street/1080_hevc.mp4');
     expect(toasts.status).toHaveBeenCalledWith('Imported 2 catalog asset(s).');
-  });
-
-  it('YouTube import needs a validated link and Cancel Import aborts it', async () => {
-    library.validateYoutube.mockResolvedValue(PREVIEW);
-    await open('youtube');
-    expect(button('Import')!.disabled).toBe(true);
-    expect(text()).toContain('Validate a YouTube link to show the preview before import.');
-
-    await type(field('YouTube URL'), 'https://youtu.be/abc?t=30');
-    await click(button('Validate'));
-    expect(library.validateYoutube).toHaveBeenCalledWith('https://youtu.be/abc?t=30');
-    expect(field('YouTube URL').value).toBe('https://www.youtube.com/watch?v=abc');
-    expect(field('Start Time').value).toBe('30');
-    expect(dialog()!.querySelector('iframe')!.getAttribute('src')).toBe(PREVIEW.embed_url);
-    expect(text()).toContain(
-      'Insight will import up to 5 minute(s) from 30 as 1080p30 H.264 with B-frames disabled.',
-    );
-    expect(text()).toContain('Ready to import YouTube video');
-
-    // A different link needs validating again.
-    await type(field('YouTube URL'), 'https://youtu.be/other');
-    expect(button('Import')!.disabled).toBe(true);
-    await type(field('YouTube URL'), 'https://youtu.be/abc?t=30');
-    await click(button('Validate'));
-
-    await click(button('Import'));
-    expect(library.last.body).toEqual({
-      url: 'https://www.youtube.com/watch?v=abc',
-      target: '1080p30',
-      clip_start: '30',
-      clip_duration: 300,
-    });
-    expect(button('Importing...')!.disabled).toBe(true);
-    await click(button('Cancel Import'));
-
-    expect(library.last.unsubscribed).toBe(true);
-    expect(toasts.status).toHaveBeenCalledWith('YouTube import canceled.');
-    expect(dialog()).not.toBeNull();
-    expect(button('Cancel Import')).toBeUndefined();
-  });
-
-  it('lines up the YouTube row: kit fields, and every control in it of the small size', async () => {
-    await open('youtube');
-    const row = dialog()!.querySelector('app-import-youtube .form')!;
-    const sizeOf = <T extends { size: () => string }>(element: Element, type: Type<T>) =>
-      getDebugNode(element)!.injector.get(type).size();
-
-    expect([...row.querySelectorAll('neat-field label > span')].map(text)).toEqual([
-      'YouTube URL',
-      'Start Time',
-    ]);
-    expect(
-      [...row.querySelectorAll('neat-field input')].map((input) => sizeOf(input, NeatInput)),
-    ).toEqual(['small', 'small']);
-    expect(
-      [...row.querySelectorAll('neat-select')].map((select) => sizeOf(select, NeatSelect)),
-    ).toEqual(['small', 'small']);
-    expect(sizeOf(row.querySelector(':scope > button')!, NeatButton)).toBe('small');
-  });
-
-  it('a live link says the clip length caps the import, as #170 did', async () => {
-    library.validateYoutube.mockResolvedValue({ ...PREVIEW, is_live: true });
-    await open('youtube');
-    await type(field('YouTube URL'), 'https://youtu.be/abc');
-    await click(button('Validate'));
-    const notes = [...dialog()!.querySelectorAll('app-import-preview p')].map(text);
-    expect(notes).toEqual([
-      'https://www.youtube.com/watch?v=abc',
-      'Live stream import is clipped to the selected duration.',
-      'Insight will import up to 5 minute(s) from 30 as 1080p30 H.264 with B-frames disabled.',
-    ]);
-    // The summary beside the preview has no actions, so no box for them; the footer has.
-    expect(dialog()!.querySelector('app-import-preview .actions')).toBeNull();
-    expect(
-      dialog()!.querySelector('app-import-preview ~ app-import-summary .actions'),
-    ).not.toBeNull();
-  });
-
-  it('a validation that fails without a message says it could not validate the link', async () => {
-    library.validateYoutube.mockRejectedValue(undefined);
-    await open('youtube');
-    await type(field('YouTube URL'), 'https://youtu.be/abc');
-    await click(button('Validate'));
-    expect(alert()).toBe('Could not validate YouTube URL.');
-  });
-
-  it('a failed YouTube import keeps the dialog open and shows the whole failure', async () => {
-    library.validateYoutube.mockResolvedValue(PREVIEW);
-    await open('youtube');
-    await type(field('YouTube URL'), 'https://youtu.be/abc');
-    await click(button('Validate'));
-    await click(button('Import'));
-    lines(
-      library.last,
-      'Downloading YouTube video: 12%',
-      'YouTube import failed: ERROR: unable to download video data',
-      'HTTP Error 403: Forbidden',
-    );
-    done(library.last);
-    await settle();
-
-    const failure =
-      'YouTube import failed: ERROR: unable to download video data\nHTTP Error 403: Forbidden';
-    expect(dialog()).not.toBeNull();
-    expect(alert()).toBe(failure.replace('\n', ' '));
-    expect(toasts.error).toHaveBeenCalledWith(failure);
-    expect(button('Import')!.disabled).toBe(false);
-  });
-
-  it('the preview frames YouTube’s embed page only', async () => {
-    library.validateYoutube.mockResolvedValue({
-      ...PREVIEW,
-      embed_url: 'https://example.com/embed/abc',
-    });
-    await open('youtube');
-    await type(field('YouTube URL'), 'https://youtu.be/abc');
-    await click(button('Validate'));
-    expect(dialog()!.querySelector('iframe')!.src).toBe('about:blank');
   });
 
   it('a drop holding files Insight cannot import uploads the rest and names those', async () => {

@@ -6,446 +6,153 @@ sidebar_position: 3
 
 # User Interface
 
-Insight is organized around the development tasks you perform while validating a vision application: inspect files, prepare media, start sources, view output, and watch runtime health.
+## The rail and the top bar
 
-On a wide screen, a view's side panel can be made wider or narrower: drag its edge, or focus the
-edge and use the arrow keys (Home and End jump to the narrowest and widest), and double-click the
-edge to return to the default width. The panel is at least 18rem wide and at most as wide as leaves
-20rem for the rest of the view. Each view remembers its own width in this browser. On a phone the
-panel floats over the view instead and cannot be resized.
+The **rail** on the left lists the pages: **Media**, **Streaming**, **Viewer**, **Peripherals** and
+**Stats**. At its bottom are the selected board (see [The board](#the-board)), **System
+information**, the theme, and **Collapse** or **Show labels**.
 
-## The top bar and the rail
+The **top bar** belongs to the page you are on: its title, then the page's own tools at the right,
+**Kiosk mode** (the page without the rail and the bar) and the **Side panel** toggle. Most pages
+show what you select in their side panel. On a wide screen you can drag the panel's edge to resize
+it, and double-click the edge to reset it; Insight remembers each page's panel in this browser. On
+a phone the panel opens over the page.
 
-The **top bar** belongs to the page you are on: the Insight logo, the page's title, then the page's
-own tools at the right. After the tools comes **Kiosk mode**, the one control of the whole app that
-stays in the bar, because it changes how the page is shown. Last, at the far right edge above the
-side panel, is the page's **Side panel** toggle. On a phone the logo, **Kiosk mode** and the toggle
-share the bar's first row, and the page's tools take the second.
+## Media
 
-The **rail** at the left belongs to the app. It lists the pages, and its bottom holds the controls
-that are not about one page: the selected board, **System information** and the theme (**Dark
-theme** or **Light theme**, whichever a click switches to), then the rail's own control, **Show
-labels** while it is collapsed and **Collapse** while it is expanded. Collapsed, each item is an
-icon and its name appears as a tooltip when you point at it or focus it. The rail remembers whether
-it is expanded. On a phone it opens over the page, and it closes again when you follow a link.
+![Media with a file selected: the library on the left, its preview and details in the side panel](images/ui-media.webp)
 
-The board block, set apart by a line above and below it, names the selected board and its state (see
-**Selected board** below). **System information** opens the panel described under System
-Information.
+Media is the library of video files that sources play. **Import…** opens **Import media**:
 
-## Workspace
+- **Local files**: choose or drop MP4, MOV, AVI, MKV or WebM files with H.264, H.265 or MJPEG
+  video, or a `.zip` or `.tar.gz` of them. MP4 uploads are normalized for low-latency playback.
+- **Catalog**: SiMa's test videos, by asset type (filtered by resolution, frame rate and codec) or
+  by name with each one's variants. Importing needs network access.
 
-The Workspace view lets you browse the project files visible to Insight. In the Neat Development Environment, this is normally `/workspace`; outside the SDK, Insight falls back to the current working directory.
+![The Catalog tab of Import media, with one asset selected](images/ui-import-catalog.webp)
 
-Use Workspace to:
+The library is a folder tree with a breadcrumb and a filter that searches the current folder and
+everything beneath it. The **In use** column names the slots that play a file. Files Insight cannot
+stream stay listed, grayed out, so you can still look at or delete them.
 
-- Search and browse source files, configuration, model artifacts, and generated outputs.
-- Preview text, code, Markdown, images, and selected binary artifacts.
-- Inspect MPK package archives without manually extracting them.
-- View specialized development artifacts such as MLA stats, MPK manifests, and pipeline sequence files.
+Select a file to see it in the side panel: a preview, its codec, size, resolution, duration and
+frame rate, and **Delete…**. Tick files to delete several at once; the ticks take a file manager's
+gestures (Ctrl-click or Cmd-click, Shift-click, Ctrl+A or Cmd+A), here and in Stats' runs.
 
-Workspace is especially useful when an application produces several build outputs and logs. It gives you a browser-accessible way to inspect those artifacts while staying in the same development session.
+## Streaming
 
-![Insight Workspace view showing a pipeline sequence graph and workspace artifacts.](images/insight-workspace-overview.png)
+![Streaming with slot src1 live: the slot list, and the slot's preview, source and URL in the side panel](images/ui-streaming.webp)
 
-## Media Sources
+Streaming lists the 48 source slots, `src1` to `src48`, with each one's kind, source, state, frame
+rate and codec. The toolbar shows **All 48** or only the slots **In use**. The **More actions** (⋯)
+menu acts on all slots: **Auto assign** (a different file for each slot), **Start…** (how many to
+start), **Stop all**, **Reset**, and **Clear renditions**.
 
-Media Sources is where you add and manage media files used for application tests. Select **Import Media** to open the import dialog, then choose one of three sources:
+A slot's state is **Idle**, **Starting…**, **Encoding**, **Live**, **Failed** or **External** (a
+program outside Insight publishes into it); a pulled camera is **Connecting…**, **Live**,
+**Unreachable** or **Auth failed**. A codec Neat cannot decode is marked with a warning.
 
-- **Local files**: Choose or drag and drop one or more files from your computer. H.264 MP4 uploads are normalized for low-latency playback with B-frames disabled while preserving the source frame rate.
-- **Catalog**: Import from SiMa's curated video catalog for repeatable tests with known assets. Browse by asset type or name, search the catalog, filter by resolution, frame rate, and codec, preview a video, then import one variant or select and import several matching assets.
-- **YouTube**: Paste a regular YouTube video URL, validate it to display a preview, and choose a start time, clip length, and output profile. Insight supports 1-, 3-, or 5-minute clips at `1080p30`, `720p30`, or `480p30`. The imported clip is converted to WebRTC-friendly H.264 with B-frames disabled. Active live streams are not supported; use a regular video or an archived live stream.
+Select a slot to open its side panel: a preview, **Start** or **Stop**, the **Source** it plays, its
+output frame rate, and its details with the URL to **Copy**. The **Source** is one of:
 
-Catalog and YouTube imports require network access. Insight displays progress while it downloads and prepares the media, then saves the result in the local media library.
+- **File**: **Change…** picks a file from the library, **Clear** removes it.
+- **Camera**: a webcam on the computer running your browser. **Enable camera access**, then pick a
+  camera in the list; the browser publishes it while the tab stays open.
+- **Stream URL**: an RTSP or RTSPS camera Insight pulls, with its username and password. Insight
+  keeps the password in memory only.
 
-Supported video formats include common container formats such as `mp4`, `mov`, `avi`, `mkv`, and `webm`. Insight also recognizes MJPEG assets and HEVC/H.265 media for codec-aware streaming. MJPEG and HEVC media are preserved so they can be streamed with their original codec behavior.
+A file plays at its own frame rate unless you set another one: on **Start**, Insight then encodes a
+copy at that rate (a rendition) once and reuses it. MJPEG files keep their own rate.
 
-After importing media, you can filter the file list, preview a selected file, inspect its basic metadata, or delete files that are no longer needed. Use Media Sources before configuring streaming sources so you know which files are available, which codec Insight detected, and whether they are readable.
+A slot that another program publishes into is **External**. **Take over…** disconnects that
+program. See [Common workflows](workflows.md) for webcams, IP cameras and external publishers.
 
-The library is shown as folders. Folder rows open the folder and list its subfolders and videos. Each folder row shows how many streamable videos it holds, its subfolders included, and the line under the breadcrumb counts the same for the folder you are in. The breadcrumb shows where you are; click any part of it, **Media Root** included, to go back up to that level. The filter searches the current folder and everything beneath it and shows matches with their path relative to the current folder. Files Insight cannot stream are listed greyed with a **Not streamable** tag so you can still preview or delete them; the assign dialog in Streaming Sources hides them and greys out folders without a streamable video. Folder names are ordinary labels you choose, for example `30FPS/` or `120FPS-720p-h264/`; Insight never reads video settings from them. In the Neat SDK the library lives at `/workspace/.insight-media/`, so it survives SDK restarts. Uploads always land at the top of the library.
+## Viewer
 
-Tick files to delete several at once. Lists with tick boxes, here and in Stats' **Runs**, take a
-file manager's gestures: clicking the selected row ticks or unticks it; Ctrl-click (Cmd-click on a
-Mac) ticks or unticks any row; Shift-click ticks every row from the one you last clicked to this
-one; and Ctrl+A (Cmd+A) ticks every row. Shift-click and Ctrl+A only tick: they skip rows that
-cannot be ticked and untick nothing. Dragging over rows does not tick them.
+![The Viewer with four channels of the test feed: detection boxes with tracks, a segmentation mask, a pose and a classification](images/ui-viewer.webp)
 
-![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
+The Viewer shows the channels your apps send, as a grid of tiles, with their metadata drawn over
+the video. The toolbar sets the tile **Size**, fits all tiles or a number of them on a page
+(**Fit all**, **Fit N**), turns pages, and **Go to channel** jumps to one (`/`). The ⋯ menu shows or
+hides each tile's bar, and can hide channels without video.
 
-Media Sources combines importing, file selection, preview, metadata inspection, and delete actions in one view. Imported catalog assets are stored under `catalog/`, and YouTube clips are stored under `youtube/`, so you can identify how files entered the library.
+Select a tile to show that channel in the side panel; with no tile selected, the panel's settings
+apply to **All channels**. A setting you change on one channel overrides the global value there
+and can be reset. The panel's tabs:
 
-## Streaming Sources
+![Channel 0 selected: its stream details and the Metadata tab in the side panel](images/ui-viewer-metadata.webp)
 
-The Streaming Sources view turns uploaded media files into live source slots. Each source slot can expose an RTSP URL:
+- **Metadata**: for each type (object detection, segmentation, tracking, pose, classification),
+  whether its overlay shows, its confidence threshold, and its own options, such as the mask
+  opacity or the track trails.
+- **ROI**: regions of interest you draw on a channel, to show and to filter detections by. They
+  stay in this browser.
+- **General**: the **Video sync buffer** (how long the video is held back so metadata can catch up,
+  300 ms by default), **Metadata retention** and **Line width**.
 
-```text
-rtsp://127.0.0.1:8554/src1
-rtsp://127.0.0.1:8554/src2
-rtsp://127.0.0.1:8554/src3
-```
+When much of a channel's metadata arrives after its frame was shown, the tile shows **Metadata
+late**. Select it to raise the video sync buffer for that channel or for all of them.
 
-Those URLs are correct for applications running in the same SDK container as Insight. If the application runs on a DevKit or another external machine, use the SDK host IP address and the mapped `rtsp.tcp` host port from `neat --json`.
-
-Insight selects codec and transport options from the assigned media:
-
-- H.264 media streams over RTSP as H.264.
-- HEVC/H.265 media streams over RTSP as H.265.
-- MJPEG media can stream over RTSP as MJPEG or over HTTP as multipart MJPEG.
-
-The codec is determined by the selected media and is not manually changed in the UI. MJPEG over RTSP is encoded into RTP-compatible MJPEG, while HTTP MJPEG can preserve MJPEG frames for camera-style HTTP testing.
-
-Select a source row to open its side panel. Its **Source** switch chooses what the slot takes its video from, and applies at once. **File** shows the slot's file: **Change…** opens **Source for srcN**, which has the same folder browser as Media Sources, so pick a video there and select **Assign**; **Clear** unassigns it. **Camera** makes the slot a webcam source, and you assign one of your cameras by selecting it in the list. **Stream URL** pulls a network stream (see below). Switching a stopped slot to Camera or Stream URL removes the file it had, and switching away from Camera removes its camera. On a slot that is streaming, the switch first asks whether to stop it, naming what the switch removes; **Cancel** leaves the slot and the switch as they were. A slot you leave on **Stream URL** while it is empty shows that form again when you come back to it in the same session. You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
-
-The toolbar holds the filter (**All 48** or **In use**) and the **More actions** (⋯) menu; the **Side panel** toggle sits at the far right of the top bar. The ⋯ menu has the actions on all slots: **Auto assign**, **Start…** (which asks how many streams to start), **Stop all**, and, after a line, **Reset** and **Clear renditions**. While a slot is changing, they wait; each one's tooltip says why. **Start** in the side panel shows a spinning glyph while a start is in progress, and the live preview, if its stream is not ready yet, tries again a few times before it says **Preview unavailable**, with **Retry**.
-
-This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
-
-![Insight Streaming Sources view showing assigned source slots and source preview.](images/insight-rtsp-source.png)
-
-The Streaming Sources view lets you assign media files to source slots, start or stop streams, copy the active stream URL, and preview the selected source before wiring it into an application.
-
-A badge in the top left corner of the preview says what you are looking at. **Live** with a pulsing dot means the slot is live, whatever its source (a file Insight streams, a webcam, an external publisher, a pulled stream), and it stays while the preview connects, retries or fails: the message in the frame then says what is wrong with the preview, not with the stream. When the slot is not live, a grey dot and a label say what the frame shows instead: **File preview** for the file of a stopped slot, **Camera preview** for your local camera before the webcam streams, and **Not live** over the waiting text of a pulled stream that has not connected yet or has failed. A frame that shows nothing else has no badge.
-
-### Use a webcam as a source
-
-A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first.
-
-1. Select a source slot and switch its **Source** to **Camera**. The slot becomes a webcam source (its row shows `[CAM]`) at once, with no camera chosen yet.
-2. Select **Enable camera access**, there or under **Local cameras** in Media Sources. The browser asks for camera permission; Insight cannot grant it for you. After you allow access, your cameras are listed in the tab.
-3. Click a camera in the list (or move to it with the arrow keys and press Enter): it is assigned to the slot at once, and the list marks it. Then select **Start**. The browser publishes the camera to Insight, and the slot reports `Live`. Choose another camera to replace it: on a live slot the stream continues on the new camera after a brief gap. To drop the camera, switch the slot's **Source** to **File** or **Stream URL**.
-4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
-
-The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
-
-The preview beside the source list shows your local camera feed while capture is active. It is not the video the board received, and it does not show the delay that a receiving application sees; if publishing fails, capture stops and the preview clears. Its badge says **Camera preview** until the slot is live, and then **Live**, when the preview switches to the stream the board received.
-
-Selecting **Stop**, unplugging the camera, or closing the browser tab ends the stream and returns the slot to `Idle`. **Stop All**, **Reset** and **Auto Assign** also release every webcam, because each of them takes those slots away: Reset and Auto Assign clear the camera selection as well, so pick the camera again afterwards. The browser tab must stay open while the webcam is publishing: it is the component sending video to Insight. For the same reason, a webcam source is never restored as `Live` after Insight restarts — reselect the camera and start it again.
-
-Reloading the page ends the stream as well, and the tab forgets its cameras: the slot stays a webcam source, but has no camera until you pick one again.
-
-If starting a webcam fails, the message names the cause:
-
-| What you see | What to do |
-| --- | --- |
-| Camera permission was denied | Allow camera access for the Insight site in your browser settings, then re-enable camera access under Media Sources → Local cameras. |
-| That camera is no longer available | The camera was disconnected. Select **Refresh cameras** and reselect it. |
-| The camera could not be started | Another application is using the camera. Close it and retry. |
-| Could not reach the webcam publish endpoint | The browser could not reach the publish listener. Trust the `webrtcWhip` endpoint's certificate (open its URL once to accept it) and confirm the port is reachable (see [Ports and Network Behavior](ports-network.md)). |
-| Webcam publish was rejected | Insight could not accept the stream. Confirm the `webrtcWhip` port is reachable (see [Ports and Network Behavior](ports-network.md)) and that your browser trusts the Insight certificate. |
-
-Browsers only allow camera access on pages they consider secure. If **Enable camera access** does nothing, open Insight over HTTPS and trust its certificate first; see [Install and Upgrade](install-upgrade.md).
-
-### External streams
-
-Any RTSP, WebRTC (WHIP) or SRT tool can publish directly to a source slot, for example ffmpeg capturing a camera on the host:
-
-```bash
-ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p \
-  -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2
-```
-
-The SDK container maps the RTSP port (8554) and the WHIP port (`webrtcWhip`, 8889); SRT publishers must run inside the container or on a DevKit-native install.
-
-Insight shows such a slot as **External** within about two seconds: the row is read-only, the chip lists protocol, publisher address and, once probed, resolution and frame rate. The codec cell turns amber with a warning when the stream uses a codec Neat pipelines cannot decode (anything other than H.264, H.265 or MJPEG). Copy URL stays available; applications keep reading `rtsp://…/srcN` as usual, regardless of the publish protocol.
-
-Whoever publishes first holds the slot. Starting a file on an External slot, or publishing to a slot Insight is already streaming, is rejected instead of silently replacing the running stream. **Take over** — the square stop glyph in the External row — disconnects the external publisher (and its readers) after a confirmation; the slot returns to Idle with its previous file assignment. A publisher that reconnects automatically may re-take an idle slot, so stop the external tool first when you want to reuse the slot for a file.
-
-The Source Preview panel can show an External slot live at the source's own frame rate; the preview is **off by default** (remembered per browser) and decodes nothing while off. After selecting another external slot, a "Connecting" indicator is shown until the first frame of the new stream arrives. That wait is mostly the time until the publisher's next keyframe, so give streams you intend to preview a keyframe interval of about a second (`-g 30` at 30 fps in the example above; encoder defaults are often several seconds). Inside the SDK container, publishers and readers outside the container appear with the Docker bridge address rather than their real IP.
-
-Auto Assign, Bulk Start, Stop All and Reset never touch an External stream; the result message lists which slots were skipped. Reset still clears the stored assignment of every slot, External ones included.
-
-![Insight Streaming Sources view with two External slots, one of them flagged for an unsupported codec.](images/insight-external-source.png)
-
-External slots show the publisher, its address and the probed stream format; the codec cell turns amber when Neat pipelines cannot decode the stream.
-
-### Pulled streams
-
-A stream that already exists on the network, typically an IP camera, can be pulled into a slot. Select an Idle slot, switch its **Source** to **Stream URL** (which removes the file or camera the slot had), enter the camera's `rtsp://` or `rtsps://` URL and, if the camera needs them, its username and password, then press **Pull**. Insight configures mediamtx to pull the stream and forward it unchanged to `rtsp://…:8554/srcN`; nothing is decoded or re-encoded, and applications read the slot like any other.
-
-The row shows **Pulled** in teal once frames arrive, with the source host, resolution and frame rate in the chip and the codec in the codec cell. Before that it shows **Connecting…**. If the camera cannot be reached the row turns amber, **Unreachable**, with the reason; mediamtx keeps retrying and the row returns to Pulled by itself when the camera is back. If the camera rejects the username or password when you press **Pull**, the panel shows the message and the slot is unchanged. The row shows **Auth failed** in red only if the camera starts rejecting the credentials later, for example after it was unreachable at first, and stays there: press **Stop** and pull again with the right credentials. A password is only ever kept in memory; Insight never writes it to disk, shows it again, or logs it, and a pulled slot is not restored after Insight restarts.
-
-**Stop** on the row releases the pull and the slot returns to Idle with its previous file assignment. Assigning a file, starting, or taking over a pulled slot is rejected. **Stop All** and **Reset** stop pulls too, since Insight started them, and leave only External streams running. Auto Assign and Bulk Start skip pulled slots like External ones and list them in the result message.
-
-The Source Preview panel works for pulled slots exactly like for External ones (preview off by default). An `rtsps://` camera with a self-signed certificate is reported as unreachable with a certificate message in this release.
-
-### Frame rate
-
-The Source Preview panel shows an FPS control under the file name of the selected source, and the row notes the chosen rate next to the file once it is set. When you assign a video, the control shows the frame rate detected in the file. Use the `−` and `+` buttons to change it in steps of 5, or type any whole number from 1. **Native** sets the source back to the file's own frame rate. While a source streams at its native rate, the rate next to the file and the rendition hint are greyed out. A rate the encoder cannot reach at the file's resolution (beyond the highest H.264 or H.265 level) is refused when the source starts, with a message naming the limit.
-
-When the value differs from the file's native frame rate, starting the source first creates a *rendition*: a copy of the video re-encoded at the requested constant frame rate with the same encoding rules as the Insight media catalog (H.264 baseline or H.265 main, `yuv420p`, no B-frames, one reference frame, a closed one-second GOP). The row shows **Encoding** with a progress bar in the preview panel, then goes **Live** streaming the rendition. Renditions are stored under `.renditions/` in the media directory and recorded in `renditions.json`, so the next start — including after restarting Insight — reuses them instead of encoding again. Replacing a source file with different content invalidates its old renditions. Deleting a source file removes its renditions. Byte-identical files (for example a copy under another name) share one rendition, which stays until the last of them is deleted or replaced. If encoding fails, the source file is untouched and no partial rendition is kept.
-
-Insight encodes one rendition at a time. While another rendition is being encoded, the preview panel shows **Waiting for another rendition to finish encoding…** and the encode starts as soon as the other one is done. Before encoding, Insight checks the free space in the media directory: it needs the rendition's expected size plus 1 GB to spare, and otherwise the start fails with a message saying how much space is needed. Clear renditions or free up space, then start the source again.
-
-MJPEG sources cannot change frame rate; the control is disabled for them.
-
-**Clear renditions** in the Streaming Sources ⋯ menu deletes every cached rendition (except ones a playing source is using); they are re-created on the next start.
-
-## Video Viewer
-
-The Video Viewer displays low-latency WebRTC streams from the video forwarder.
-
-For channel `N`:
-
-```text
-video:    UDP 9000 + N
-metadata: UDP 9100 + N
-```
-
-For example, channel `0` uses video UDP `9000` and metadata UDP `9100`; channel `1` uses video UDP `9001` and metadata UDP `9101`.
-
-If the sender runs on a DevKit or another external machine, use the mapped `videoUDP` and `metadataUDP` host port ranges from `neat --json`. The channel math is the same, but the starting ports may be different.
-
-The viewer can render metadata overlays for common vision outputs, including object detection, classification, pose estimation, segmentation, and tracking. Each metadata type has a **Show Overlay** switch, so its output can be hidden without changing confidence thresholds or styles. Pose Estimation also lets you show or hide joint markers and opt into landmark names; names are hidden by default to keep a full-body pose readable. The viewer can also show frame-correlated data in a separate per-channel auxiliary panel; the built-in BlazePose 3D view is the first renderer. Multiple auxiliary views appear as tabs, and the panel can be collapsed, expanded, or hidden. See [Auxiliary Visualizations](auxiliary-visualizations.md) for the protocol. Viewer settings let you tune overlay behavior such as confidence thresholds, ROI display, tracking history, and synchronization buffering. When a video frame has no metadata of a type, for example because inference runs slower than the video, the viewer keeps drawing that type's last overlay for up to 200 ms; a new message of that type replaces it, even one with no objects. Metadata timestamps use source PTS milliseconds and are omitted when unavailable.
-
-### Global and channel settings
-
-Viewer settings exist in two scopes. The settings button of the viewer page opens the global settings. The button at the right end of a tile's status bar opens the settings of that channel; the dialog's title names the channel.
-
-A channel follows the global settings. To give a channel its own value, open its settings, switch on **Own value** next to the setting, set the value and select **Save**. A value that a channel sets itself takes precedence over the global value. Switching **Own value** off again makes the channel follow the global value. Class colors work per entry: the channel's dialog shows the global entries as **from global**, and **Override** copies one into an entry of the channel.
-
-In the global dialog, an amber warning icon at the end of a setting's row marks a setting that channels set themselves; its tooltip says how many. Select the icon to list those channels with their values. **Use global value** removes a channel's own value at once, without **Save**. **Reset all channels to the global settings…** removes the own values of every channel after a confirmation; regions of interest are kept.
-
-Settings are stored in the browser. They are not shared between browsers or machines.
-
-### Metadata colors
-
-Overlays pick colors from one shared palette of 40 colors so that different identities stay apart on a crowded frame. The first 20 colors are the most distinct; the other 20 are only used when more than 20 identities need a color at once: classes across all channels, or tracks or poses on one channel. Each metadata type defines what identity means:
-
-| Metadata type | Colored by | Parts that share the color |
-|---|---|---|
-| `object-detection` | class `label` | box, label, confidence |
-| `segmentation` | class `label` | mask, outline, box, label |
-| `classification` | class `label` | each label line |
-| `tracking` | track `id` | box, label, history trail |
-| `pose-estimation` | pose `id` | keypoints, skeleton, keypoint names, box, label |
-
-A color is allocated the first time an identity appears. Class labels share one allocation across all channels, so `bicycle` has the same color on every tile and `person` looks the same in detection, segmentation and classification. Overrides are per metadata type: an object-detection entry for `person` does not recolor `person` in segmentation or classification. Tracks and poses are allocated per channel, because an `id` is only unique within one stream; their colors start over when the channel reconnects. An identity keeps its color while it is on screen on any channel. Once it has been gone for more than 5 seconds, its color can be handed to a new identity. When more identities are on screen than the palette holds, new identities share the color of the one drawn longest ago rather than taking a color from anything visible.
-
-Tracks and poses without an `id` draw in one neutral color. Senders that want per-person or per-track colors must include `id`.
-
-Object detection and segmentation settings hold optional per-class overrides. An entry for a label fixes that class's color and line style. An entry labelled `default` fixes the color of every class without its own entry. Without any entries, all classes are colored automatically.
-
-**Line Width** on the General tab sets how wide every overlay line is drawn: detection boxes, segment outlines, track boxes and trails, and pose skeletons. It is 3 px by default and can be set from 1 to 10 px. A per-class entry's **Thin** or **Thick** still sets the width for its own class. Like the other settings, a channel can use its own value.
-
-### Late metadata
-
-An overlay is drawn only if its metadata has reached the browser by the time the video frame is shown. The viewer holds video back by the video sync buffer (300 ms by default) to give metadata that time. An application that sends metadata later than the buffer allows loses its overlays, even though video and message rate look healthy.
-
-When at least half of the recent messages arrive after their frame, the tile shows a **Metadata late** chip in its status bar. Select it to see:
-
-| Value | Meaning |
-|---|---|
-| Arrives after its frame | How long after the frame was shown its metadata arrived, as measured by this browser. |
-| Video sync buffer | The buffer in effect for this channel. |
-| Late messages | Share of recent messages that arrived too late to be drawn. |
-
-The panel offers two ways to raise the buffer to a value that covers the measured lateness:
-
-| Button | Effect |
-|---|---|
-| **Raise for this channel to N ms** | Sets the video sync buffer of this channel only. Other channels keep their setting. |
-| **Raise globally to N ms** | Sets the global video sync buffer. It applies to every channel that has no value of its own. If this channel had its own value, that value is removed. |
-| **Use global value (V ms)** | Shown instead of **Raise globally to N ms** when the global video sync buffer already covers the measured lateness. Removes this channel's own value; the global value is not changed. |
-
-The video of every affected channel is delayed by the additional time. The viewer never changes the buffer by itself, and the panel never lowers the global buffer. After a change, the viewer waits a few seconds before it judges lateness again, because the browser moves to a larger buffer gradually.
-
-The chip disappears once fewer than a tenth of the messages are late. If the buffer needed would exceed the maximum of 4000 ms, the panel offers no button: the application has to send its metadata sooner. If the lateness could not be measured, because the metadata does not belong to the frames that were shown, the panel says so and offers no button either.
-
-Applications that forward the encoded input stream unchanged and send metadata only after decode and inference are the typical case, because their video does not wait for inference.
-
-Use the Video Viewer to confirm:
-
-- The application is sending video to the expected channel.
-- Metadata is arriving on the matching metadata channel.
-- Overlays align with the video frame.
-- Auxiliary views clear and update with the corresponding video frame.
-- Browser playback is healthy.
-
-![Insight Video Viewer showing a four-channel WebRTC grid.](images/insight-video-viewer.png)
-
-The Video Viewer can show one or more channels at a time, with pagination and channel selection controls for larger multi-stream tests.
+The settings are kept in this browser. The Viewer's address takes options
+([Contracts, Viewing](contracts.md#viewing)), so a link can open it on given channels.
 
 ## Peripherals
 
-Peripherals lists the cameras and microphones connected to a board and shows what each one reports. SiMa Sentinel on the board discovers them; Insight reads Sentinel's catalog. Discovery reads device information only: it never opens or streams a device, so devices stay available to your applications. Only a camera preview or a microphone test opens a device, and only while it runs.
+Peripherals lists the cameras and microphones of the selected board, as Sentinel on the board
+reports them. Insight scans the board when you open the page; **Refresh** scans again. Scanning
+never opens a device, so your apps keep them.
 
-### Selected board
-
-Insight works with one selected board, shown at the bottom of the rail with a dot that says how it
-is doing. While it is connected the block is quiet: the board's short name (**DevKit** for the SDK's
-paired board, **Board** for one you entered, **This board** when Insight runs on it) and its
-address, with a green dot. In any other state the second line says so in words and in the dot's
-colour: **Error** (red), **Checking…** (amber), **Not selected** or **Not checked** (grey). With the
-rail collapsed only the icon and its dot show, and the tooltip (and the name a screen reader reads)
-gives the name, the address and the state, for example "DevKit — 192.168.100.200 — Connected".
-Select the block to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals and Stats use this selection.
-
-When Insight opens with a board whose connection was never tested, it tests it once by itself, and
-the board block says **Checking…** until the board answers, which can take until the connection times
-out when the board is unreachable. A board you change to in the board settings is not tested
-until you select **Check again**, so the block says **Not checked** until then.
-
-The board is chosen in this order:
-
-- **A board you entered**: open the board settings and give its address, SSH port, and user. **Use default** returns to the automatic choice.
-- **Insight installed on the board**: Insight inspects the board it runs on.
-- **Neat SDK**: the DevKit paired with `sima-cli sdk setup --devkit <ip>`.
-
-Insight connects over SSH with the keys of the account that runs it. It never asks for or stores a password. If authentication fails, the page shows the `ssh-copy-id` command that authorizes a key on the board. After a board is reflashed it presents a new SSH host key; Insight refuses to connect until you compare the fingerprints and select **Trust new key**.
-
-### Cameras and modes
-
-Insight scans the board each time you open the page, unless a camera preview is running then, since a scan stops it; select **Refresh** to scan again at any time. A scan asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, and the pixel formats and resolutions the camera reports. No camera's resolutions show a frame rate: a MIPI camera's rate depends on the sensor mode it is running in, so it is not known before the camera runs, and the page treats every camera the same way. Insight does not set frame rates. Each mode is in one of three states, and the pixel format and resolution menus group their entries under them:
-
-| State | Meaning |
-| --- | --- |
-| Available | The board's camera overlays support the camera's sensor, the ISP outputs the mode's size, and its pixel format is NV12. |
-| Unverified | On a board whose ISP takes the sensor's sizes at run time (Platform 3.0), an NV12 size of a supported sensor that SiMa Sentinel cannot confirm libcamera streams exactly, because libcamera may crop it from a larger mode. It can be selected and previewed to check; it is never preselected. |
-| Unsupported | Any of those fails. A USB camera is always Unsupported, because it has no camera overlay on the board, and the page shows no reason for it. For a MIPI camera the reason says which: the sensor is not in the board's camera overlays; the ISP cannot output the size; the format is not NV12; or, on a board whose ISP takes the sensor's sizes at run time (Platform 3.0), the size is wider than libcamera streams (4032 pixels on the IMX477). A Sentinel too old to report the board's camera overlays leaves every mode Unsupported until you update it. |
-
-SiMa Sentinel decides each mode's state and gives its reason; Insight shows that answer. With a Sentinel too old to decide, Insight applies the same rule to Sentinel's catalog. The overlay check matches the sensor Sentinel links to the camera in the board's device tree against the sensors the overlays installed under `/boot` support. The NV12 condition is a fixed fact about Neat's `CameraInput`, which outputs NV12; Insight does not query Neat on the board. Every detected camera shows a **Connected** pill and its state: **Available** when any of its modes is, otherwise **Unverified** when any of its modes is, otherwise **Unsupported**; an Unverified or Unsupported camera's panel says why. Insight does not say whether another program is using a camera.
-
-### Preview a camera
-
-Select **Start preview** to see what a camera sees. Insight runs a GStreamer pipeline on the board over its existing connection: it captures the selected mode (`libcamerasrc` for a MIPI camera, `v4l2src` for a USB camera), scales it to at most 640 pixels wide at up to 15 fps, and sends JPEG frames back, which the page shows as they arrive. Nothing else on the board is needed beyond GStreamer itself; if `gst-launch-1.0` is missing, the preview names the packages to install (`gstreamer1.0-tools`, `gstreamer1.0-plugins-base`, `gstreamer1.0-plugins-good`, and `gstreamer1.0-libcamera` for MIPI cameras).
-
-A preview holds the camera, so your application cannot open it until you stop the preview. Insight will not start one on a camera another process is already using, and it never stops that process for you. Capture stops when you select **Stop**, leave the page, refresh the scan, or change the selected board. A closed browser stops it too. If Insight stops or restarts, the board pipeline exits at its next frame, once its output connection has closed; after a silent network loss it can hold the camera until the board's SSH connection times out. To clear a preview that still holds the camera, select **Stop** while the page still shows it, wait for that timeout, or end the `gst-launch-1.0` process on the board.
-
-A MIPI camera previews its Available and Unverified modes. On a board whose ISP takes the sensor's sizes at run time (Platform 3.0), a size the sensor lists may still not be one libcamera outputs; the preview then names the size libcamera streams at so you can pick it. A USB camera previews any mode it lists in MJPG or a raw format such as YUYV, even though its modes are Unsupported for Neat's `CameraInput`; Insight opens it by its stable `/dev/v4l/by-id` path when the board has one.
-
-While a preview runs, the mode beside it shows the camera's frame rate, which can be faster than the preview's 15 fps. The preview asks the camera for the selected mode's rate. For a USB camera the rate shown is that mode's rate. For a MIPI camera it is the most the sensor delivers in this mode, shown as "up to", which Insight asks SiMa Sentinel for once the first frame arrives, so it appears a few seconds after the picture; if Sentinel cannot report it, no rate is shown.
-
-### Camera setup
-
-A Sentinel that reads the board's device tree also reports how the board is set up for cameras. After a scan, the board settings show the board **Model** and a **Camera setup** line naming the overlays the board loads that configure a camera sensor. With an older Sentinel, these details do not appear.
-
-### Microphones
-
-A scan also lists every ALSA capture device SiMa Sentinel reports, USB or on-board. For each microphone Insight shows its name, the ALSA device name to open it with (for example `hw:CARD=Nano,DEV=0`), and, for USB audio devices, the sample formats, channel counts, bit depths, and sample rates it captures. On-board sound cards do not report these, and the page says so.
-
-Discovery never opens a sound device: Sentinel reads `/proc/asound` and sysfs. A USB microphone keeps the same identity when it is unplugged and plugged back into the same port, even when its card number changes; in another port it is a different microphone.
-
-To hear a microphone, select **Test microphone** and speak; the level meter shows what the microphone hears. Select **Stop recording** when you are done (a test stops by itself after 30 seconds), and Insight plays the recording back in the page. **Stop playing** ends the playback. If the recording stays below about -60 dBFS, the page says nothing was picked up; check the microphone's mute button and gain. Only the test opens the device, and only while it records. Before recording, Insight re-reads Sentinel's catalog and records only from the device Sentinel names; if the board's devices changed since the last scan, the page asks you to refresh first. If another application has the microphone open, the test is refused and that application is left alone. Insight does not configure audio input: Core has no audio input.
+- **A camera** shows its pixel formats and resolutions, each **Available** to Neat's camera input
+  or **Unsupported** with the reason. **Start preview** shows what the camera sees, at a low frame
+  rate. While it runs, the preview holds the camera, and your app cannot open it; leaving the page
+  stops it.
+- **A microphone** shows what it captures. **Test microphone** records with a level meter, then
+  plays the recording back.
 
 ## Stats
 
-Stats reads the board's own telemetry from Sentinel, the `simaai-sentinel` daemon, so you can separate application behavior from device behavior. A dropped frame may come from the stream path, but it may also correlate with board power, on-die temperature, CPU load, or memory pressure.
+Stats shows the selected board's telemetry from Sentinel. Its views are **Live** and **Runs** in
+the rail, and **Compare**, opened from Runs; each has its own address to bookmark or share. If
+Sentinel is missing or stopped, the page shows the command that installs or starts it, to run on
+the board.
 
-Stats works on the selected board, chosen in the same **Board** panel the Peripherals page uses.
+![Stats Live: cards for temperature, power, CPU, memory and network, and the Thermal area in the side panel](images/ui-stats-live.webp)
 
-### Sentinel daemon
+- **Live** shows cards for the hottest temperature, board power, CPU and memory use and network
+  traffic, and **All metrics** below them. Select a card for its area (**Thermal**, **Power**,
+  **System**, **Storage & Network**) in the side panel. **Pause** stops the updates, and **Export
+  CSV** in the ⋯ menu saves the samples Sentinel holds.
+- **Record**, on every view, records a trace on the board until you **Stop** it; the trace is saved
+  as a run.
+- **Runs** lists the saved runs. Select one for its metrics in the side panel. Tick two to eight
+  for **Compare**, or **Delete** them.
+- **Compare** overlays one series of the runs (total power, temperature, CPU, memory) against a
+  **Baseline** run, with a summary per run, a **Per-metric comparison** table and **Export CSV**.
 
-The page first reports whether Sentinel is installed and running on that board, and its version. When it is missing, select **Install Sentinel**: Insight runs `sima-cli neat install sentinel` on the board itself, which needs `sima-cli` there and passwordless `sudo`. When either is missing, the page names the command to run in a shell on the board instead. An installed and running daemon is never reinstalled from here, because the installer restarts it and would end a trace in flight.
+![Runs with a run selected: its metrics in the side panel](images/ui-stats-runs.webp)
 
-An install that is refused or fails is reported as an install rather than as a failed read: the page says the install did not happen, gives the board's own sentence for why — no `sima-cli`, no passwordless `sudo`, an installer that exited non-zero, or one that finished with the service still down — and keeps the installer's output behind **Installer output**.
+![Compare: the CPU usage of a loaded run against an idle baseline, with a summary per run](images/ui-stats-compare.webp)
 
-### Live metrics
+## The board
 
-The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sentinel ops`). A status line shows whether the readings are live and when the current Sentinel session started, which is what the session average and peak cover. **Export CSV** downloads every metric at each sample Sentinel holds for the session (its last 240, about eight minutes; record a trace under **Runs** for longer), and **Pause updates** stops polling. Below it are six tabs:
+The board block at the bottom of the rail names the selected board and whether Insight reaches it,
+with a dot in the state's color. Select it to open **Board**: the board's details, **Check again**,
+the `ssh` command to open a shell on it, and **Change board**, where you enter a board's address,
+SSH port and user, or go back to the default.
 
-- **Overview**: charts of the hottest temperature sensor, board power, CPU usage, Linux memory, MLA memory, and network traffic, with **All metrics** folded beneath them, every metric in Sentinel's order.
-- **Thermal**: the hottest sensor over time, then each sensor group (MLA, APU, CVU, TOP, Board) as small charts.
-- **Power**: current, session-average, and session-peak power as figures, board power over the window with the session average marked, and the power rails stacked so the top edge is the board total.
-- **System**: **CPU & memory** charts CPU usage, load average, Linux memory, MLA memory, and EV74 CMA use. **Per-core CPU** is a heatmap of load, a row per core and a column per 10 seconds of the window in one blue, with each core's one-minute average and the busiest core; an average past a core's limits turns amber or red.
-- **Storage & Network**: eMMC use, network receive and transmit, eMMC reads and writes, and their metrics.
+![The Board dialog for a connected DevKit](images/ui-board.webp)
 
-Charts use fixed scales (percentages 0-100, temperatures 40-90 °C, anything else up to a round number above its peak), show the warning and critical levels Sentinel defines, and read out every series at a point when you hover. Colour means status: a chart is blue until its reading passes a warning or critical level, then amber or red. A tab's name is marked when a metric in it is past a threshold. A metric the board cannot measure reads as an em dash, never as zero.
+Without a board you entered, Insight uses the board it runs on, or in the SDK the DevKit paired
+with `sima-cli sdk setup --devkit <ip>`. It connects with the SSH keys of the account that runs it
+and never asks for a password. When the board refuses the key, Insight shows the `ssh-copy-id`
+command that authorizes it; when a reflashed board presents a new host key, Insight asks you to
+compare and trust it.
 
-Charts cover the whole window Sentinel keeps, 240 samples (about eight minutes): on the first read of a board, and again after a pause in polling of more than a minute, Insight takes them from Sentinel's own cache, then adds a sample every two seconds while the tab is open and visible. Polling also stops when the browser tab is hidden or the view is left.
+## System information
 
-If the board stops answering while you are looking at it, polling stops and the panels stay, holding the last values read and the board's own explanation of what failed, rather than emptying the page. Selecting a different board is not the same thing: that clears everything first, so one board's numbers are never shown under another board's name.
+![System information in the SDK](images/ui-system-info.webp)
 
-### Traces and runs
-
-Stats has two views, the tabs under the top bar: **Live**, described above, and **Runs**, the traces you recorded. The tabs are links, so each is reached with Tab and opened with Enter, and the open one is underlined. While a comparison is open there is a third tab, **Compare**, which leads back to that comparison, and **Runs** leads back to the list. The toolbar keeps only what the view you are in can do. Each view, and each comparison, has its own address, so you can bookmark one or send it to a colleague.
-
-A trace records every sample around a workload. Select **Record** in the toolbar, on any view once Sentinel is ready on the board: Insight offers a name made from the time (such as `run-2026-10-25-0841`), which you can change, and you can add a note and comma-separated tags. Select **Start**, and the toolbar says “Recording”, with the trace's name and how long it has been recording, beside **Stop**, which saves the trace as a run on the board. Sentinel records one trace at a time and refuses a name a saved run already uses. A name cannot contain a comma, because Sentinel compares runs from a comma-separated list; Insight refuses one, and any other name or note the board would refuse, before it sends the request. A trace started somewhere else — the Sentinel CLI, another browser — shows in the toolbar within 30 seconds, and **Stop** stops the trace the toolbar names: if another trace has started in its place meanwhile, the stop is refused and the page says the trace changed.
-
-**Runs** lists the runs saved on the board, newest first, with the one still recording at the top. Each row shows the run's name, whether it is complete or still recording, its duration, the energy Sentinel measured over the run, its sample count, and when it started. Runs survive a daemon restart. Select a run to see it in the side panel: its note and tags, then every metric it recorded under its group, with the mean, smallest and largest value over that run's samples, worded in the metric's unit. A metric whose largest value crossed its warning or critical threshold is marked. The run's metadata — its sample interval, Sentinel version, and the board it ran on — is folded below that. If the run is deleted on the board while you look at it, the panel says it is no longer there.
-
-Tick runs to act on several at once, with the same gestures as in Media Sources (Shift-click, Ctrl+A and the others): a bar above the list says how many are selected, with **Compare**, **Delete** and **Clear**. The recording run cannot be ticked, and at most eight runs can: once eight are ticked, the count reads “8 selected, the most that can be compared”, and the others show a greyed box, which gives the reason when you point at it and which a screen reader reads out with the row. **Delete** asks first, then deletes the runs one at a time and says how many went. If some were not deleted, the page names them, with the board's reason where it gave one, and they stay ticked.
-
-**Compare** opens the comparison of two to eight ticked runs, measured against the first one you ticked, the baseline; choose another baseline in the comparison's header. Each run has its colour, and the baseline is marked “B”. Pick a series — total power, thermal maximum, CPU usage, CPU load, RAM, MLA memory, or EV74 CMA, whichever every run recorded in one unit — and the chart overlays it for every run, from each run's start, over the time they all cover. Beneath it, a summary gives each run's sample count, minimum, mean, median, P95 and maximum of that series, its mean's change against the baseline, and the run's energy. A run that took no reading of the series says “No samples” there rather than leaving the chart without it.
-
-**Per-metric comparison**, folded below the chart, puts the run totals (duration, energy and sample count) and every metric in rows and the runs in columns. Each cell shows that metric's mean over the run, with its change against the baseline beside it; a change too small to print shows as “<0.01%” rather than as no change at all, and changes are plain text, because whether lower is better depends on the metric. Tabs narrow the table to one group of metrics, and **Changes only** hides the rows where no run differs from the baseline; a line above the table says how many rows are hidden. A cell without a value shows “—”: the run took no reading of that metric, or Sentinel did not summarise the run, which the table then says above it. **Export CSV** downloads every row, whatever the table shows, with each run's mean and change as plain numbers and an empty field where a value is missing.
-
-A comparison is read only once the run list shows every run in it saved and finished. If a run in the address is no longer on the board, the page names it rather than asking for a comparison that would fail; a run still recording can be compared once its trace has stopped.
-
-Opening and comparing runs has a size limit. Insight reads at most 12 MiB of Sentinel's answer from the board, and a saved run carries every sample it recorded, one every two seconds. A run longer than about three hours cannot be opened, and runs whose lengths add up to more than about three hours cannot be compared together. Insight then says the answer was too large to read. Record shorter traces for runs you want to open or compare.
-
-### Values from a board you have left
-
-Reading a board takes an SSH round trip, so an answer can arrive after you have selected another board. Selecting it cancels everything still on its way from the previous board: the new board is checked at once, and a late answer from the old one is dropped rather than shown as the new board's. **Stop** names the board its trace was read from, and is refused rather than stopping a trace on another board. When the selected board changes somewhere else — another browser tab, or an API client — the values already on the page are labelled with the board they came from, with a way to read them again.
-
-### Insight host
-
-Below the runs, a compact panel reports the machine Insight itself runs on — the SDK container, or the board Insight is installed on — from `/api/metrics`: CPU load, memory, disk, and a temperature where the platform exposes one. It answers a different question from the board telemetry above it, such as whether the container is running out of disk, and it is read every 15 seconds rather than every two. When the legacy `REMOTE_DEVKIT` configuration is set, this panel reports that connection instead, and says so. When the endpoint answers with no reading at all, the panel says that rather than listing its labels against em dashes.
-
-### NEAT profiling timeline
-
-Last on the tab, the profiling timeline plots numeric fields from the profiling events Insight streams from a running application. It is independent of Sentinel: it measures the application, not the device.
-
-## GenAI Studio
-
-The GenAI Studio view runs language, vision and speech models on a board. It talks to GenAI Studio from Neat Apps, which runs on the board in backend-only mode; Insight relays every call, so the browser never connects to the board directly.
-
-Start the backend on the board first, from the GenAI Studio application directory:
-
-```bash
-./run.sh
-```
-
-The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud**, **Think first** (greyed out for models that always answer directly) and **Use my documents**, and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Benchmark** (the gauge), **Tutorial**, **Settings** and **Full screen**.
-
-The status label, and a banner when something needs attention, show the backend's state and what to do next:
-
-- **Not set up**: no board is selected, and the settings open. Enter the board's address, such as `https://192.168.1.20:5000`. On a board, Insight defaults to the local backend; in the Neat Development Environment it defaults to the paired DevKit.
-- **Not running**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address.
-- **Error**: the board answered with an error, or the address is not GenAI Studio. The banner shows the board's message.
-- **Starting**: the backend answers but its model server is not ready yet.
-- **Busy**: a model is loading. Chat and speech wait until it finishes.
-- **Incompatible**: the board's GenAI Studio API version does not match this Insight. Update the one the banner names.
-- **Ready**: chat and speech are available. A voice that failed to load on the board is reported here too.
-
-**No model yet**: when the board has no chat or vision model (or only ones it can't run), the chat says so instead of leaving the message box greyed out. **Download Qwen3 VL 4B** downloads `simaai/Qwen3-VL-4B-Instruct-Autoround-a16w4`, a vision-language model, onto the board with its progress under the button, then loads it; the button shows the download size once the board has looked it up, and warns when the board has less free space. **Browse models** opens **Settings**, **Models** at the Hugging Face search, listing the models the board can download. When the board does not allow downloads, the chat says to set `server.hub.allow_download: true` in GenAI Studio's `config.local.yaml` on the board and restart GenAI Studio; when the board can't reach Hugging Face, it says so, and **Check again** asks again. If Hugging Face has renamed a model, the failed download names the new id and offers to download that instead.
-
-**Chat** is one conversation in the middle of the page. Type in the message box, or press the microphone, speak, and press it again: your words are transcribed and sent. With a model that sees images, attach a picture, take one with this browser's camera, or take one with a camera plugged into the board: the video camera button lists the board's cameras (`/dev/videoN`), and **Take a picture** attaches the board's picture to your next message. The board camera needs GenAI Studio that reports the `board_camera` feature; on an older one the button is hidden and the camera button's tooltip says why. Replies appear as they are written; the stop button ends one early, and **New chat** starts over so the model forgets the conversation. **Read aloud** reads one reply and **Stop speaking** ends it; **Read replies aloud** reads every reply, starting with the first sentence while the rest is still being written. The browser asks for microphone and camera permission the first time.
-
-Under each reply, Insight shows how fast it was produced, measured in the browser:
-
-- **First token**: from sending to the first text of the reply.
-- **Speed** and **Tokens**: tokens per second and the reply's length. Speed comes from the board when it reports it; otherwise Insight calculates it in the browser.
-- **Total**: from sending to the end of the reply.
-- **First audio**, **RTF** and **Voice**, when the reply is read aloud: the time until it started playing, the real-time factor (seconds of compute per second of speech; below 1 is faster than real time), and the speech engine.
-- **Transcribed** and **Language**, under a spoken question: the time from the end of the recording to the text, and the language heard.
-
-**Vision** (the eye under the message box) shows the camera as large as fits, at most half the screen's height, with the latest answer and the controls under it, like the standalone GenAI Studio's full-screen vision. Choose **This browser's camera** or **Board camera** (the board takes a new picture for each question; **Take a picture** shows one to aim with), type a question or pick **What do you see?**, **Describe the scene in detail** or **Read any text in view**, then:
-
-- **Ask** asks once about the current picture.
-- **Loop** asks the same question about a new picture after each answer, one request at a time, with a short pause between answers, until you press **Stop**. A question edited during the loop is asked from the next picture on. With **Read answers aloud** on, each answer is read before the next picture is taken.
-
-The loop also stops when the model changes or no longer sees images, the board stops answering or starts another operation, a picture or answer fails (the reason is shown), the board address changes, or you close the view or leave the tab. Vision questions are separate requests without the chat's history, and their answers are not added to the chat. **Full screen** in the view uses the whole screen; Esc or **Close** returns to the chat.
-
-**Export chat** saves the conversation as a `.log` text file (`neat-chat-<date>-<time>.log`) with the export time and model at the top, then each turn; pictures appear as `[image]`.
-
-**SiMaSentry Solutions** opens three demo apps that run on the loaded chat model through Insight: **SiMaSentry-Med** (clinical chat and medical image review), **SiMaSentry-Safe** (PPE and hazard checks) and **SiMaSentry-Sec** (security footage analysis and change detection). Their picture features need a model that sees images. The models run on the board, but voice input inside these apps uses the browser's own speech recognition, which may send audio to an online service (Chrome does). An app's own Home button, **Back** or Esc returns to the launcher; **Close** returns to the chat.
-
-**Benchmark** measures the board's chat models. Choose one or more models, the number of runs (1 to 50), the reply length in tokens (8 to 2048) and, optionally, a prompt, then **Run benchmark**. Each model runs in turn; a model that isn't loaded is loaded first, which can unload the chat model, so reload it from the **Model** menu afterwards. Progress and the reply appear while it runs, and **Stop** ends it. The results compare tokens per second (mean, p90 and standard deviation), time to first token and reply length, with the fastest values highlighted; **Each run** lists the runs of the last model. **Download CSV** and **Download JSON** save the results.
-
-**Use my documents** answers from the document database on the board: the board looks up the passages that match each question and adds them before the model answers, and a note under the reply names the sections used (or says nothing matched). **Settings**, **Documents** shows what the database holds, uploads a Markdown file (replacing the documents), resets to the default SiMa document, or clears it. **View documents** lists what was ingested: the source file, the number of sections (chunks) and each section's heading path and text, with **Filter sections…** to find a passage (up to the first 2,000 sections). Documents need GenAI Studio with document search (the switch is greyed out with the reason otherwise).
-
-**Settings** shows one card per area: **Board**, **Replies**, **Models**, **Voice**, **Documents** and **Troubleshooting**. Each card's title has a one-line summary of how it is set now, for example `192.168.1.20:5000 · Ready`, `Default system prompt · longest reply 512 tokens` or `Qwen3 VL 4B loaded · 3 models on the board`.
-
-- **Board**: the board's address.
-- **Replies**: **System prompt** is the instructions sent with every chat and vision question. Until you change it, the box shows the default: "You are a helpful assistant. Answer clearly and concisely. Use Markdown formatting when it helps. Answer the question in the language it was asked in." Edit it to replace the default; **Reset to default** puts the default back, and a box left empty sends the default (an empty prompt is never sent). The tab still adds one sentence saying whether the message has a picture, because small vision models otherwise misjudge that. **Longest reply** sets the most tokens a reply may have (32 to 2048, default 512, as in the standalone GenAI Studio); it is sent as `max_tokens` and does not change the benchmark, which has its own setting. This browser remembers both.
-- **Models**: the free disk space, then each model on the board as a row with its kind (**Chat**, **Vision** or **Speech**), size and state (**Loaded**, **In use** for the speech model, **Loading…**, **Not loaded** or **Can't run here**, with the reason as its tooltip). **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. **Delete** removes a downloaded model's files from the board after you confirm; it is offered only for models that are not loaded and not the speech model in use, and the board's reason is shown if it refuses. **Get more models** searches Hugging Face and **Download** puts a model on the board; on a board that does not allow downloads it says how to allow them.
-- **Voice**: the voice engine, voice and the language you speak.
-- **Documents**: see **Use my documents** above.
-
-If a model load fails or replies stop, restart GenAI Studio on the board (`./run.sh stop`, then `./run.sh`); that frees the accelerator, and the model can then be loaded again. **Settings**, **Troubleshooting** repeats this.
-
-## System Information
-
-The system information panel summarizes the environment Insight can see. In the Neat Development Environment, it can show SDK and component information, Insight status, update information, and exposed port mappings such as `mainUI` and `videoUI`.
-
-This is the first place to check when a URL does not match the default port. Insight reads the available port map and uses the mapped `videoUI` port when opening the viewer. For command-line workflows, `neat --json` shows the same port-map information.
+**System information** in the rail shows Insight's version and settings (its address, ports,
+data folder, certificate and channel count), the computer Insight runs on (CPU, memory, disk), and
+in the SDK the installed components, available updates and the ports the SDK publishes. It is the
+first place to look when a port or an address is not what you expect.

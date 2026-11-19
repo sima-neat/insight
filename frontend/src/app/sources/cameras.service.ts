@@ -1,10 +1,10 @@
 import { computed, DestroyRef, DOCUMENT, inject, Injectable, signal } from '@angular/core';
 import { NeatToasts } from '@sima/neat-ui/toast';
+import type { Slot } from '../api.generated';
 import { LatestOnly } from '../polling';
-import type { AssignRequest, PublisherRelease, ReleasedWebcam, SuccessResponse } from './api';
 import { CAMERA_MEDIA, type PublishPeer } from './camera-media';
-import { SlotsService } from './slots.service';
-import { ApiRequestError, messageOf } from './stream-lines';
+import { type PullRequest, SlotsService } from './slots.service';
+import { messageOf } from './api-errors';
 import {
   camerasFromDevices,
   closeAllWebcamSessions,
@@ -30,6 +30,7 @@ export type CameraAccessState = 'unknown' | 'requesting' | 'granted' | 'denied' 
 const UNSUPPORTED_TEXT = 'This browser cannot access cameras.';
 const NO_CAMERA_TEXT = 'Select a webcam for this source before starting it.';
 const NO_PUBLISH_URL_TEXT = 'No publish URL for this source; reassign the webcam and try again.';
+const NOT_LIVE_TEXT = 'The webcam did not start publishing in time.';
 /** What a slot's camera is called when the camera is gone from the list by the time it is assigned. */
 const UNKNOWN_CAMERA_LABEL = 'Webcam';
 
@@ -39,8 +40,6 @@ interface WebcamSession {
   readonly stream: MediaStream;
   /** MediaMTX's WHIP resource, to delete when the session ends; null if it named none. */
   readonly deleteUrl: string | null;
-  /** The `Id` header of the WHIP POST: the session a stop or a release claim names. Null if absent. */
-  readonly sessionId: string | null;
   readonly watcher: DisconnectWatcher;
 }
 
@@ -51,31 +50,31 @@ class StartSuperseded extends Error {
   }
 }
 
-/** The claim a stop or a conversion makes that this tab closed the webcam: only for a session it can name. */
-function releaseClaim(session: WebcamSession | null | undefined): PublisherRelease {
-  return session?.sessionId
-    ? { publisher_released: true, publisher_session: session.sessionId }
-    : {};
+/** Thrown when the slot being started stopped being a webcam (another tab assigned it). */
+class NoLongerWebcam extends Error {
+  constructor(n: number) {
+    super(`src${n} is no longer a webcam source.`);
+  }
 }
 
 /**
  * The cameras this browser has, and the webcams it publishes to streaming slots over WHIP. A root
  * service because a publish lives as long as the app does: leaving the Streaming page must not
- * end a camera that is on air. Sessions end by `release`, `releaseAll`, a lost connection, a
- * removed camera, or the page going away (`pagehide`).
+ * end a camera that is on air. Sessions end by `release`, `releaseAll`, a reassignment, a lost
+ * connection, a removed camera, or the page going away (`pagehide`).
  *
- * **How this tab and Insight agree about a webcam it publishes** (from #170):
- * - Insight never owns the publisher; only this tab can end it. So every path that ends a session
- *   here also records the stop with the server, naming the WHIP session it ended.
- * - A "released" claim is made only for a session this tab held and can name. The server honours
- *   it only for that session, so a stale claim can never mark another browser's camera stopped.
+ * **How this tab and Insight share a webcam slot.** The server makes a slot a webcam's on
+ * `assignWebcam` and answers with where to publish (`urls.whip`); the browser publishes there and
+ * the slot is live once MediaMTX has its stream. A stop or a reassignment of the slot, from this
+ * tab or any other, disconnects whatever publishes on it. So every path that ends a session here
+ * closes the camera and the peer connection itself, and tells the server (a stop, or the new
+ * assignment), and every assignment from Streaming goes through this service, which ends the
+ * slot's session first:
  * - A start spans several awaits (the camera, the offer, the server's confirmation). Each slot has
  *   a generation that everything which changes the slot moves on, and a start checks it after
  *   each await and abandons itself rather than publish a camera the user already replaced.
  * - While a request that changes a slot's webcam is in flight the slot is `changingSlots`: a
- *   second action then would race it. In particular a second stop would find no session left and
- *   send an unbound stop, which the server carries out by kicking whichever publisher holds the
- *   slot, perhaps a replacement another tab just started.
+ *   second action then would race it.
  *
  * **Errors.** An action the user takes rejects with a message to show. A session that ends on its
  * own (a lost connection, a removed camera) has no action to reject, so its failures are an error
@@ -120,7 +119,7 @@ export class CamerasService {
   readonly changingSlots = computed<ReadonlySet<number>>(() => new Set(this.changeCounts().keys()));
   /**
    * Whether any slot is changing. The bulk actions wait for it: a webcam being assigned or started
-   * answers after the bulk action cleared its slot and would register the slot as a webcam again.
+   * answers after the bulk action cleared its slot and would make the slot a webcam again.
    */
   readonly anyChanging = computed(() => this.changeCounts().size > 0);
 
@@ -136,13 +135,13 @@ export class CamerasService {
     destroyRef.onDestroy(this.media.onDeviceChange(() => void this.refreshCameras()));
 
     // A reload or close does not run any teardown, and MediaMTX would hold the path another 15-20 s,
-    // so record a stop for each owned webcam now. `pagehide` (not `beforeunload`) also fires when
-    // the page enters the back-forward cache; skip that, since the page and its sessions may come back.
+    // so stop each slot this tab publishes now. `pagehide` (not `beforeunload`) also fires when the
+    // page enters the back-forward cache; skip that, since the page and its sessions may come back.
     const window = inject(DOCUMENT).defaultView;
     if (window) {
       const onPageHide = (event: PageTransitionEvent) => {
         if (event.persisted) return;
-        recordWebcamStopsOnExit(this.sessions);
+        recordWebcamStopsOnExit(this.sessions.keys());
         this.closeAllSessions();
       };
       window.addEventListener('pagehide', onPageHide);
@@ -190,12 +189,11 @@ export class CamerasService {
   }
 
   /**
-   * Registers the slot as a webcam on the server and remembers `deviceId` as its camera; nothing is
+   * Makes the slot a webcam on the server and remembers `deviceId` as its camera; nothing is
    * published until `publish`. With no `deviceId` the slot is a webcam with no camera yet (the
    * source switch's Camera), and any camera it had is forgotten. A session the slot has is ended
-   * first (the old track would keep publishing to the same MediaMTX path, and the new one would be
-   * refused), and the server is told by the release claim. Rejects with the server's message,
-   * leaving the slot with no camera.
+   * first: the old track would keep publishing to the same MediaMTX path, and the new one would be
+   * refused. Rejects with the server's message, leaving the slot with no camera.
    */
   assign(slot: number, deviceId: string | null): Promise<void> {
     const camera: Camera | null =
@@ -206,19 +204,18 @@ export class CamerasService {
             label:
               this.cameras().find((c) => c.deviceId === deviceId)?.label ?? UNKNOWN_CAMERA_LABEL,
           };
-    const claim = releaseClaim(this.sessions.get(slot));
     return this.whileChanging(slot, async () => {
       // The slot is invalidated by this, so the generation is the one this assignment belongs to;
       // if it has moved by the time the server answers, a stop or bulk action got there first.
       this.teardown(slot);
       const generation = this.generations.get(slot);
       try {
-        await this.slots.assignWebcam({ index: slot, ...claim });
+        await this.slots.assignWebcam(slot);
         if (this.generations.get(slot) === generation) this.setCamera(slot, camera);
       } catch (failure) {
         // The camera we closed above is not coming back, and the server's slot may or may not
-        // have changed (a 409 from another tab, a 502 from MediaMTX): show no camera rather than
-        // one that was never confirmed; the slots' refetch shows what the server holds.
+        // have changed: show no camera rather than one that was never confirmed; the slots'
+        // refetch shows what the server holds.
         if (this.generations.get(slot) === generation) this.setCamera(slot, null);
         throw failure;
       }
@@ -226,68 +223,65 @@ export class CamerasService {
   }
 
   /**
-   * Assigns a file (or `file: ''` to clear) to a slot that may be one of this tab's webcams. Use
-   * this rather than `SlotsService.assign` for any slot that can be a webcam: it ends the slot's
-   * session and forgets its camera first, and passes the release claim that lets the server
-   * convert the slot without waiting for MediaMTX to confirm the publisher gone.
+   * Assigns a library file to a slot that may be one of this tab's webcams, at the file's own
+   * rate. Use this, `assignPull` and `clear` rather than `SlotsService`'s for any slot that can be
+   * a webcam: they end the slot's session and forget its camera first.
    */
-  assignFile(request: Omit<AssignRequest, keyof PublisherRelease>): Promise<SuccessResponse> {
-    const slot = request.index;
-    const claim = releaseClaim(this.sessions.get(slot));
-    return this.whileChanging(slot, () => {
-      this.teardown(slot);
-      this.setCamera(slot, null);
-      return this.slots.assign({ ...request, ...claim });
-    });
+  assignFile(slot: number, file: string): Promise<Slot> {
+    return this.reassign(slot, () => this.slots.assignFile(slot, file));
+  }
+
+  /** Makes the slot pull a camera, as `assignFile` assigns a file. */
+  assignPull(slot: number, pull: PullRequest): Promise<Slot> {
+    return this.reassign(slot, () => this.slots.assignPull(slot, pull));
+  }
+
+  /** Leaves the slot with nothing assigned, as `assignFile` assigns a file. */
+  clear(slot: number): Promise<Slot> {
+    return this.reassign(slot, () => this.slots.clear(slot));
   }
 
   /**
    * Publishes the slot's camera (picked with `assign`) over WHIP and resolves once the server
-   * reports the slot live. Resolves quietly when something else took the slot meanwhile (a stop, a
-   * new assignment, a bulk action): that is the user changing their mind. Otherwise rejects with a
-   * message to show, after releasing the camera and the MediaMTX path it had opened.
+   * reports the slot live. Resolves quietly when this tab took the slot back meanwhile (a stop, a
+   * new assignment, a bulk action): that is the user changing their mind. Otherwise rejects with
+   * a message to show, after releasing the camera and the MediaMTX path it had opened.
    */
   async publish(slot: number): Promise<void> {
     const camera = this.assignments().get(slot);
     if (!camera) throw new Error(NO_CAMERA_TEXT);
-    const whipUrl = this.slots.slots()?.find((s) => s.index === slot)?.urls.whip;
+    const whipUrl = this.slots.slots()?.find((s) => s.n === slot)?.urls.whip;
     if (!whipUrl) throw new Error(NO_PUBLISH_URL_TEXT);
 
     await this.whileChanging(slot, () => this.start(slot, camera, whipUrl));
   }
 
   /**
-   * Ends the slot's session and stops the slot on the server, naming the session so a slot another
-   * browser has taken is left alone. A slot this tab has no session for gets a plain stop, which
-   * the server carries out by kicking the publisher once MediaMTX confirms it. The camera is
-   * assigned still. Rejects with the server's message; this tab's session is over either way.
+   * Ends the slot's session and stops the slot on the server, which disconnects whatever still
+   * publishes on it. The camera is assigned still. Rejects with the server's message; this tab's
+   * session is over either way.
    */
-  async release(slot: number): Promise<void> {
-    await this.stopBound(slot, this.sessions.get(slot) ?? null);
+  release(slot: number): Promise<void> {
+    return this.whileChanging(slot, async () => {
+      this.teardown(slot);
+      await this.slots.stop(slot);
+    });
   }
 
   /**
-   * Ends every session at once, ahead of a bulk action that stops or rewrites the slots: only this
-   * browser can end a webcam publish, so a bulk action that skipped this would leave cameras
-   * publishing while the UI said everything stopped. Returns the sessions it closed, to pass as the
-   * bulk request's `released_webcams` so the server verifies them instead of kicking.
+   * Ends every session at once, ahead of a bulk action that stops or rewrites the slots: the
+   * server disconnects the publishers, and this browser lets go of its cameras.
    *
    * `clearAssignments` also forgets every slot's camera: for an action (reset, auto assign) that
-   * turns the slots back into file slots. Stop all keeps them.
+   * takes the webcams away. Stop all keeps them.
    */
-  releaseAll({
-    clearAssignments = false,
-  }: { clearAssignments?: boolean } = {}): readonly ReleasedWebcam[] {
-    const claims = [...this.sessions].flatMap(([index, session]) =>
-      session.sessionId ? [{ index, session: session.sessionId }] : [],
-    );
+  releaseAll({ clearAssignments = false }: { clearAssignments?: boolean } = {}): void {
     // A start that has not finished owns no session yet, so closing the registry alone would let
     // it complete after the bulk action and publish a camera the user just stopped. Invalidate
     // every slot that has ever started one: a stale generation is harmless, a missed one is not.
     for (const slot of this.generations.keys()) this.invalidate(slot);
     this.closeAllSessions();
     if (clearAssignments) this.assignmentsState.set(new Map());
-    return claims;
   }
 
   private async start(slot: number, camera: Camera, whipUrl: string): Promise<void> {
@@ -307,6 +301,12 @@ export class CamerasService {
     } = {};
 
     try {
+      // A webcam slot that was stopped takes no publisher until it is started again: the server
+      // would disconnect the camera at once.
+      const started = await this.slots.start(slot);
+      if (started.kind !== 'webcam') throw new NoLongerWebcam(slot);
+      if (superseded()) throw new StartSuperseded();
+
       // Video only: the ticket's initial scope.
       const stream = await this.media.getUserMedia({
         video: { deviceId: { exact: camera.deviceId } },
@@ -324,16 +324,16 @@ export class CamerasService {
       );
       const watcher = createDisconnectWatcher({
         onLost: () => {
-          // A slot this tab no longer holds is not ours to stop. Otherwise stop it the same
-          // session-bound, held way a click does, naming the session that was lost.
-          const lost = this.sessions.get(slot);
-          if (lost) this.inBackground(this.stopBound(slot, lost));
+          // A slot this tab no longer publishes (or not yet) is not ours to stop. Otherwise stop it
+          // the same held way a click does.
+          const current = this.sessions.get(slot);
+          if (current && current === built.session) this.inBackground(this.release(slot));
         },
       });
       built.watcher = watcher;
       peer.addEventListener('connectionstatechange', () => watcher.update(peer.connectionState));
 
-      const { answerSdp, deleteUrl, sessionId } = await publishWebcamOffer(peer, whipUrl);
+      const { answerSdp, deleteUrl } = await publishWebcamOffer(peer, whipUrl);
       // MediaMTX holds a session for this path from the POST onward, so the session is built the
       // moment the POST returns, before the supersession check and before the answer is applied.
       // Either failure then reaches the catch with the delete URL in hand and releases the path,
@@ -341,7 +341,7 @@ export class CamerasService {
       // registry only while this start is current: a superseded start that wrote its session
       // would replace the newer start's, which would then be in no registry and could not be
       // closed.
-      const session: WebcamSession = { pc: peer, stream, deleteUrl, sessionId, watcher };
+      const session: WebcamSession = { pc: peer, stream, deleteUrl, watcher };
       built.session = session;
       if (superseded()) throw new StartSuperseded();
       this.sessions.set(slot, session);
@@ -350,31 +350,23 @@ export class CamerasService {
       if (superseded()) throw new StartSuperseded();
       this.setStream(slot, stream);
 
-      // The server records the slot as playing only once MediaMTX sees the path, which lags the
-      // WHIP exchange by the ICE handshake. The slot can still be reassigned during that wait, so
-      // check on every attempt: starting a slot that is now a file source would leave that file
-      // unexpectedly playing.
+      // The slot is live only once MediaMTX has the normalized stream, which lags the WHIP
+      // exchange by the ICE handshake and the normalizer's start. The slot can still be changed
+      // during that wait, here or in another tab, so each attempt checks both.
       await confirmWebcamPublishing(
         async () => {
           if (superseded()) throw new StartSuperseded();
-          // `expect_type`: if another tab turned this slot into a file between polls, the server
-          // answers 410 (terminal below) instead of starting that file. `superseded()` only
-          // catches changes this tab made; another tab's does not move this generation.
-          return this.slots.confirmWebcamStart(slot);
+          await this.slots.refresh();
+          const now = this.slots.slots()?.find((s) => s.n === slot);
+          if (now?.kind !== 'webcam') throw new NoLongerWebcam(slot);
+          if (now.state !== 'live') throw new Error(NOT_LIVE_TEXT);
         },
-        // Stop retrying on outcomes that will not change within the window:
-        // - 410: another tab made the slot a file source; it can never become ours.
-        // - 502: MediaMTX's control API is unreachable; every /start blocks about a second on the
-        //   dead API, so retrying just hammers a server already known to be down.
+        // Stop retrying on outcomes that will not change within the window.
         {
           isTerminal: (error) =>
-            error instanceof StartSuperseded ||
-            (error instanceof ApiRequestError && (error.status === 410 || error.status === 502)),
+            error instanceof StartSuperseded || error instanceof NoLongerWebcam,
         },
       );
-      // The loop does not settle per attempt (that would delay each 250 ms step by two refetches);
-      // the server now says playing, so fetch the slots once.
-      await this.slots.settleChange();
     } catch (failure) {
       if (!built.registered) {
         // Failed or abandoned before the session was registered, with the camera open, the
@@ -396,16 +388,12 @@ export class CamerasService {
     }
   }
 
-  /**
-   * The one safe way to stop a webcam this tab owns, shared by a click, a lost connection and a
-   * removed camera. The slot stays `changing` for the whole request so that a second stop cannot
-   * fire after the session is gone (see the class comment). `session` is captured by the caller
-   * before the teardown so the stop names the session it is about; null releases nothing.
-   */
-  private stopBound(slot: number, session: WebcamSession | null): Promise<SuccessResponse> {
+  /** Runs an assignment that takes the slot from any webcam it was: its session and camera go first. */
+  private reassign<T>(slot: number, change: () => Promise<T>): Promise<T> {
     return this.whileChanging(slot, () => {
       this.teardown(slot);
-      return this.slots.stop({ index: slot, ...releaseClaim(session) });
+      this.setCamera(slot, null);
+      return change();
     });
   }
 
@@ -431,10 +419,10 @@ export class CamerasService {
       // A choice this tab never published is only a local one: there is nothing to stop, and the
       // slot may well be another browser's. A published one is stopped like a lost connection.
       // A start still in flight is abandoned either way: it would publish a camera that is gone.
-      const session = this.sessions.get(slot);
+      const published = this.sessions.has(slot);
       this.invalidate(slot);
       this.setCamera(slot, null);
-      if (session) this.inBackground(this.stopBound(slot, session));
+      if (published) this.inBackground(this.release(slot));
     }
   }
 

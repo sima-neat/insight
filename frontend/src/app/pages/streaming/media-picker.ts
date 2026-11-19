@@ -23,7 +23,7 @@ import {
   revealIn,
 } from '../../sources/media-browser';
 import { MediaLibraryService, toFileNodes } from '../../sources/media-library.service';
-import { messageOf } from '../../sources/stream-lines';
+import { messageOf } from '../../sources/api-errors';
 
 /**
  * The content of the "Source for srcN" dialog that the side panel's Change… opens: the media
@@ -34,7 +34,7 @@ import { messageOf } from '../../sources/stream-lines';
  * The library is fetched as the picker opens: files may have arrived since (another tab, the API).
  *
  * "Import…" asks for the import dialog (`importRequested`); once an import has saved a file,
- * `reveal` shows it here, picked (ruling Q1: the slot panel wires the two).
+ * `reveal` shows it here, picked (the slot panel wires the two).
  *
  * Its host takes no box of its own: the dialog's body and actions must be the dialog panel's own
  * items, so the body scrolls and the actions stay in view.

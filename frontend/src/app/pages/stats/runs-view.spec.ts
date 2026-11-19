@@ -27,9 +27,8 @@ class FakeRuns {
 }
 
 /** A delete failure of `code` as `SentinelRuns` resolves it. */
-function failure(code: string, hint = '', detail?: string): SentinelFailure {
-  const details = detail === undefined ? {} : { detail };
-  return failureOf(new BoardProblem(`Failed with ${code}.`, code, hint, details), 7, 'delete');
+function failure(code: string, hint = '', message = `Failed with ${code}.`): SentinelFailure {
+  return failureOf(new BoardProblem(message, code, hint), 'local', 'delete');
 }
 
 /** `count` finished runs, newest first. */
@@ -419,7 +418,7 @@ describe('RunsView', () => {
   it('a failure that stops the batch lists the failure, the runs not tried (still ticked) and the deleted ones', async () => {
     runs.deleteRuns.mockResolvedValue({
       deleted: [TES3.id],
-      failed: [{ id: HW_SHORT.id, failure: failure('stale_snapshot', 'Check the board.') }],
+      failed: [{ id: HW_SHORT.id, failure: failure('sentinel_failed', 'Check the board.') }],
       notTried: [HW_LONG.id],
     });
     await renderChecked(TES3.id, HW_SHORT.id, HW_LONG.id);
@@ -428,10 +427,10 @@ describe('RunsView', () => {
 
     const report = callout()!;
     expect(text(report.querySelector('[role="heading"]'))).toBe('2 of 3 runs were not deleted');
-    // Each failure's title, then what the backend said, then its hint (#170).
+    // Each failure's title, then what the backend said where the title is not it, then its hint.
     expect([...report.querySelectorAll('.failures p')].map(text)).toEqual([
-      `insight-hw-1790177227: ${failure('stale_snapshot').title}`,
-      'Failed with stale_snapshot.',
+      'insight-hw-1790177227: Sentinel could not answer',
+      'Failed with sentinel_failed.',
       'Check the board.',
     ]);
     expect(text(report)).toContain('Not tried, so still selected: insight-hw-1790177178');
@@ -445,7 +444,7 @@ describe('RunsView', () => {
   it('one run not deleted is named in the heading, with what the board said', async () => {
     runs.deleteRuns.mockResolvedValue({
       deleted: [],
-      failed: [{ id: TES3.id, failure: failure('sentinel_failed', '', 'rm: permission denied') }],
+      failed: [{ id: TES3.id, failure: failure('sentinel_denied', '', 'rm: permission denied') }],
       notTried: [],
     });
     await renderChecked(TES3.id);
@@ -453,7 +452,7 @@ describe('RunsView', () => {
     await click(barButton('Delete'));
 
     expect(text(callout()!.querySelector('[role="heading"]'))).toBe('Run tes3 was not deleted');
-    expect(text(callout()!.querySelector('pre'))).toBe('rm: permission denied');
+    expect(text(callout())).toContain('rm: permission denied');
     expect(session.checkedRuns()).toEqual([TES3.id]);
   });
 
@@ -485,7 +484,7 @@ describe('RunsView', () => {
 
   it('a failed read shows its title and hint with Retry, over the runs read before', async () => {
     runs.runsFailure.set(
-      failureOf(new BoardProblem('Sentinel failed.', 'sentinel_failed', 'Restart it.', {}), 7),
+      failureOf(new BoardProblem('Sentinel failed.', 'sentinel_failed', 'Restart it.'), 'local'),
     );
     await render();
 

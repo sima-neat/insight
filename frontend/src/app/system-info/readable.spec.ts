@@ -1,11 +1,98 @@
+import type { SystemInsight } from './api';
 import {
   componentNote,
   componentStatus,
   componentVersion,
   displayValue,
+  entriesOf,
+  insightEntries,
   portSummary,
   readableKey,
 } from './readable';
+
+/** Insight's own facts as `GET /api/system` answers them in the SDK. */
+const INSIGHT: SystemInsight = {
+  version: '0.12.0',
+  build: { go_version: 'go1.26.0', platform: 'linux/arm64' },
+  place: 'sdk',
+  data_dir: '/home/sima/.local/share/neat-insight',
+  port: 9900,
+  web_ui_url: 'https://10.1.1.5:9900',
+  network: { certificate_host: '10.1.1.5', browser_ice_address_source: 'default' },
+  ports: {
+    channels: 16,
+    channels_source: 'port map',
+    webrtc_start: 9200,
+    webrtc_end: 9215,
+    rtsp: 8554,
+    whip: 8889,
+    whip_ice: 8189,
+  },
+};
+
+describe('insightEntries', () => {
+  it('lists Insight’s version, build, place, addresses and ports, then neat’s word on its service', () => {
+    expect(insightEntries(INSIGHT, { serviceState: 'Running', venv: '/opt/insight' })).toEqual([
+      ['Version', '0.12.0'],
+      ['Build', 'go1.26.0 · linux/arm64'],
+      ['Runs', 'In the Neat SDK'],
+      ['Web UI URL', 'https://10.1.1.5:9900'],
+      ['Port', '9900'],
+      ['Data folder', '/home/sima/.local/share/neat-insight'],
+      ['Certificate host', '10.1.1.5'],
+      ['Channels', '16 (port map)'],
+      ['WebRTC ports', '9200–9215'],
+      ['RTSP port', '8554'],
+      ['WHIP port', '8889'],
+      ['WHIP ICE port', '8189'],
+      ['Service state', 'Running'],
+      ['Virtual environment', '/opt/insight'],
+    ]);
+  });
+
+  it('adds the build’s revision and time and the network’s resolved addresses, and leaves out what was not resolved', () => {
+    const entries = insightEntries({
+      ...INSIGHT,
+      place: 'board',
+      build: {
+        ...INSIGHT.build,
+        revision: '0123456789abcdef0123',
+        time: '2026-11-18T12:00:00Z',
+        modified: true,
+      },
+      network: {
+        certificate_host: 'devkit.local',
+        browser_ice_address: '192.168.1.20',
+        browser_ice_address_source: 'flag',
+        public_origin: 'https://insight.example.com',
+        url_routing: 'path',
+      },
+      ports: { ...INSIGHT.ports, rtsp: 0 },
+    });
+    expect(entries).toContainEqual([
+      'Build',
+      '0123456789ab (modified) · 2026-11-18T12:00:00Z · go1.26.0 · linux/arm64',
+    ]);
+    expect(entries).toContainEqual(['Runs', 'On the board']);
+    expect(entries).toContainEqual(['Browser ICE address', '192.168.1.20 (flag)']);
+    expect(entries).toContainEqual(['Public origin', 'https://insight.example.com']);
+    expect(entries).toContainEqual(['URL routing', 'path']);
+    // The SDK publishes no RTSP port here, and neat has not answered.
+    expect(entries.map(([term]) => term)).not.toContain('RTSP port');
+    expect(entries.map(([term]) => term)).not.toContain('Service state');
+  });
+});
+
+describe('entriesOf', () => {
+  it('lists a section of neat’s answer as words', () => {
+    expect(entriesOf({ sdkVersion: '2.1.0', offline: true, errors: ['a', 'b'] })).toEqual([
+      ['SDK version', '2.1.0'],
+      ['Offline', 'Yes'],
+      ['Errors', 'a, b'],
+    ]);
+    expect(entriesOf(undefined)).toEqual([]);
+  });
+});
 
 describe('readableKey', () => {
   it('readableKey reads camelCase, snake_case and dotted keys as words with their acronyms', () => {
@@ -21,7 +108,7 @@ describe('readableKey', () => {
     expect(readableKey('Sysroot')).toBe('Sysroot');
   });
 
-  it('keeps #170’s special case: duration_ms reads "Duration"', () => {
+  it('keeps its one special case: duration_ms reads "Duration"', () => {
     expect(readableKey('duration_ms')).toBe('Duration');
   });
 });
@@ -69,7 +156,7 @@ describe('componentStatus', () => {
     expect(componentStatus({})).toBeNull();
   });
 
-  it('says nothing of the update for a component that is not installed (#170 showed "-")', () => {
+  it('says nothing of the update for a component that is not installed', () => {
     expect(componentStatus({ installed: false, updateAvailable: false })).toBeNull();
     expect(componentStatus({ installed: false, updateAvailable: true })).toBeNull();
   });
@@ -93,9 +180,13 @@ describe('portSummary', () => {
     expect(
       portSummary({ name: 'rtp', protocol: 'udp', hostPortStart: 9000, hostPortEnd: 9079 }),
     ).toBe('UDP 9000–9079');
-    expect(portSummary({ name: 'x', protocol: 'tcp', hostPortStart: 80 })).toBe('TCP 80');
-    expect(portSummary({ name: 'x', hostPortStart: 80 })).toBe('80');
-    expect(portSummary({ name: 'x', protocol: 'tcp', hostPortStart: null })).toBe('-');
+    expect(portSummary({ name: 'x', protocol: 'tcp', hostPortStart: 80, hostPortEnd: null })).toBe(
+      'TCP 80',
+    );
+    expect(portSummary({ name: 'x', hostPortStart: 80, hostPortEnd: null })).toBe('80');
+    expect(
+      portSummary({ name: 'x', protocol: 'tcp', hostPortStart: null, hostPortEnd: null }),
+    ).toBe('-');
   });
 });
 

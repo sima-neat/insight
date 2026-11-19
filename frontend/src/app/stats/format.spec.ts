@@ -18,7 +18,8 @@ import {
   unitAfter,
   unitSuffix,
 } from './format';
-import { METRICS_LIVE } from './stats.testing';
+import { joinMetric } from './metrics';
+import { LIVE_METRICS } from './stats.testing';
 
 const metric = (extra: Partial<SentinelMetric>): SentinelMetric => ({
   key: 'rtsn_0',
@@ -35,7 +36,6 @@ const metric = (extra: Partial<SentinelMetric>): SentinelMetric => ({
 });
 
 describe('what a metric is', () => {
-  // #170's "a temperature is told by its unit first, and by its name only when it has no unit".
   it('a temperature is told by its unit first, and by its name only when it has no unit', () => {
     const thermal = [
       { key: 'rtsn_0', unit: 'C' },
@@ -72,9 +72,7 @@ describe('what a metric is', () => {
   });
 
   it('every live metric lands in exactly one section, and the board has all three', () => {
-    const sections = new Set(
-      METRICS_LIVE.groups.flatMap((group) => group.metrics.map((m) => metricSection(m))),
-    );
+    const sections = new Set(LIVE_METRICS.map((metric) => metricSection(joinMetric(metric, null))));
     expect([...sections].sort()).toEqual(['power', 'system', 'thermal']);
   });
 
@@ -88,8 +86,6 @@ describe('what a metric is', () => {
 });
 
 describe('values and units', () => {
-  // The value and size assertions of #170's "values, changes, durations, sizes, time ranges and
-  // statuses read as a developer expects".
   it('values read with their unit, and an unmeasured one is an em dash, never zero', () => {
     const cases: [number | null | undefined, string | null][] = [
       [72, 'C'],
@@ -136,8 +132,6 @@ describe('values and units', () => {
     ]);
   });
 
-  // The `fixedValue` half of #170's "time labels use board timestamps only, in whole words;
-  // figures in a row share their decimals".
   it('figures in a row share their decimals', () => {
     expect([
       fixedValue(12, 'W', 1),
@@ -182,7 +176,7 @@ describe('how a status is worded and drawn', () => {
       { label: 'Critical', tone: 'danger' },
       { label: 'Not measured', tone: 'neutral' },
     ]);
-    // A status Insight does not know reads as not measured, as #170's did.
+    // A status Insight does not know reads as not measured.
     expect(statusLabel('nonsense' as MetricStatus).label).toBe('Not measured');
   });
 

@@ -1,20 +1,21 @@
 /**
- * The microphone test as a state machine, and the words and steps around it, as pure functions
- * (#170's `peripherals/model.js` and `api.js`, copy per Inv-PB §2.4). `MicTest` composes them.
+ * The microphone test as a state machine, and the words and steps around it, as pure functions.
+ * `MicTest` composes them.
  *
- * Like a video call's "Test microphone": the board records until Stop (or the backend's cap of
- * 30 s) while a meter shows the live level, then the recording plays back here with the meter
- * following the playback. The backend runs one test per Insight (Inv-PB §4.2).
+ * Like a video call's "Test microphone": the board records until Stop (or the server's cap of
+ * 30 s) while a meter shows the live level, then the recording plays back here. The server runs
+ * one test per board.
  */
 
+import { boardUrl } from '../board/api';
 import { BoardProblem } from '../board/board-error';
 import { clock } from '../sources/fps';
-import type { MicrophoneItem, MicTestLevel, MicTestResponse, MicTestStatus } from './api';
+import type { MicLevel, MicrophoneItem, MicTestStatus } from './api';
 
 export type MicTestPhase = 'idle' | 'recording' | 'playing' | 'done' | 'error';
 
 /**
- * What the test shows. `test` is the backend's finished test (its recording and levels) while it
+ * What the test shows. `test` is the board's finished test (its recording and levels) while it
  * plays or is done. `error` is why the test failed, or, while still recording, why a stop failed.
  */
 export interface MicTestState {
@@ -67,8 +68,8 @@ export const MIC_TEST_IDLE: MicTestState = Object.freeze({
 const SILENCE_NOTICE =
   "Nothing was picked up. Check the microphone's mute button and gain, then test again.";
 
-/** The status read's codes that mean the test is gone, so retrying is pointless. */
-const TERMINAL_STATUS_CODES: ReadonlySet<string> = new Set(['not_found', 'stale_snapshot']);
+/** The status read's codes that mean the test is gone (its board was replaced), so retrying is pointless. */
+const TERMINAL_STATUS_CODES: ReadonlySet<string> = new Set(['not_found', 'board_changed']);
 
 export function nextMicTestState(state: MicTestState, event: MicTestEvent): MicTestState {
   switch (event.type) {
@@ -99,13 +100,19 @@ export function nextMicTestState(state: MicTestState, event: MicTestEvent): MicT
 }
 
 /**
- * The backend's current test when it belongs to this microphone and is still recording or has a
+ * The board's current test when it belongs to this microphone and is still recording or has a
  * recording to replay. A panel opened after it started (another microphone was shown in between)
  * takes it up instead of looking idle while the board records.
  */
 export function micTestToResume(micId: string, test: MicTestStatus | null): MicTestStatus | null {
-  if (!test || test.id !== micId) return null;
+  if (!test || test.microphone !== micId) return null;
   return test.state === 'recording' || test.state === 'ready' ? test : null;
+}
+
+/** A finished test's recording, which names the test so that one replaced since is not played. */
+export function micTestAudioUrl(test: MicTestStatus): string {
+  const path = `microphones/${encodeURIComponent(test.microphone)}/test.wav`;
+  return `${boardUrl(test.board, path)}?test=${encodeURIComponent(test.id)}`;
 }
 
 /**
@@ -118,37 +125,22 @@ export function micStartMayHaveRun(error: Pick<BoardProblem, 'code'>): boolean {
 }
 
 /**
- * The backend's test a failed start takes up: the current test for this microphone when it is not
- * the one the panel already held (`heldToken`); otherwise null, and the start's error stands.
+ * The board's test a failed start takes up: the current test for this microphone when it is not
+ * the one the panel already held (`heldId`); otherwise null, and the start's error stands.
  */
 export function micTestAfterFailedStart(
   micId: string,
   error: Pick<BoardProblem, 'code'>,
   test: MicTestStatus | null,
-  heldToken: string | null,
+  heldId: string | null,
 ): MicTestStatus | null {
   if (!micStartMayHaveRun(error)) return null;
-  return test?.token === heldToken ? null : micTestToResume(micId, test);
+  return test?.id === heldId ? null : micTestToResume(micId, test);
 }
 
 /** What to say about a finished recording: only when it needs attention. */
-export function micLevelNotice(level: MicTestLevel | null | undefined): string {
+export function micLevelNotice(level: MicLevel | null | undefined): string {
   return level?.silent ? SILENCE_NOTICE : '';
-}
-
-/** The recovery line under a test's error: the panel's own for the codes it knows. */
-export function micTestErrorAction(error: Pick<BoardProblem, 'code' | 'hint'> | null): string {
-  switch (error?.code) {
-    case 'microphone_in_use':
-      return 'Stop the application that is recording from it, then test again. Insight never stops it for you.';
-    case 'not_found':
-    case 'stale_snapshot':
-      return 'Refresh, then test again.';
-    case 'tool_missing':
-      return 'Install alsa-utils on the board, then test again.';
-    default:
-      return error?.hint ?? '';
-  }
 }
 
 /** The one button's label and what pressing it does, for each state. */
@@ -167,9 +159,9 @@ export function micTestCaption(status: MicTestPhase, seconds: number): string {
   return status === 'playing' ? 'Recording playing' : '';
 }
 
-/** The problem shown when the backend no longer runs the test this panel read. */
+/** The problem shown when the board no longer runs the test this panel read. */
 export function testEndedProblem(): BoardProblem {
-  return new BoardProblem('The test ended before it finished.', '', 'Test again.', {});
+  return new BoardProblem('The test ended before it finished.', '', 'Test again.');
 }
 
 export function sampleRateLabel(hz: number): string {
@@ -199,7 +191,7 @@ export function captureModes(mic: Pick<MicrophoneItem, 'capture'>): CaptureMode[
 }
 
 /**
- * Reads the backend's current test, retrying a failed read. The read never contacts the board, so
+ * Reads the board's current test, retrying a failed read. The read never contacts the board, so
  * a failure is a network blip or an Insight restart, not the end of the recording. Codes that mean
  * the test is gone end it at once, and so does a run of `maxFailures` failures. `isActive` says
  * whether anyone still wants the answer: a page that went sends no further read.
@@ -210,11 +202,11 @@ export async function readMicTest({
   wait = () => new Promise((resolve) => setTimeout(resolve, MIC_TEST_POLL_MS)),
   maxFailures = MIC_TEST_MAX_FAILURES,
 }: {
-  request: () => Promise<MicTestResponse>;
+  request: () => Promise<MicTestStatus | null>;
   isActive?: () => boolean;
   wait?: () => Promise<unknown>;
   maxFailures?: number;
-}): Promise<MicTestResponse> {
+}): Promise<MicTestStatus | null> {
   for (let failures = 1; ; failures++) {
     try {
       return await request();

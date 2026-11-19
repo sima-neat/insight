@@ -47,7 +47,7 @@
         <neat-icon name="more" />
       </button>
       <ng-template neatPopoverContent>
-        <!-- The Sentinel facts head the menu, each once it is known (spec, "Sentinel facts"). -->
+        <!-- The Sentinel facts head the menu, each once it is known. -->
         @if (version(); as version) {
           <p neatNote>Sentinel {{ version }}</p>
         }
@@ -70,7 +70,7 @@
   }
 </ng-container>
 
-<!-- The panel is about what the view shows, so its toggle shows only with it (F15). -->
+<!-- The panel is about what the view shows, so its toggle shows only with it. -->
 @if (body() === 'ready' && view() !== 'compare') {
   <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('stats', $event)" />
 }
@@ -212,44 +212,21 @@
           <app-board-settings-action neatCalloutActions />
         </app-board-problem-notice>
       } @else {
-        <div class="empty" [attr.aria-busy]="installing()?.here || telemetry.rechecking() || null">
-          <neat-callout [tone]="notReady().tone" [heading]="notReady().heading" [headingLevel]="2">
-            @if (notReady().body; as body) {
-              <p>{{ body }}</p>
+        @let shown = notReady();
+        <div class="empty" [attr.aria-busy]="telemetry.rechecking() || null">
+          <neat-callout [tone]="shown.tone" [heading]="shown.heading" [headingLevel]="2">
+            @if (shown.message) {
+              <p>{{ shown.message }}</p>
             }
-            @if (canInstall()) {
-              <!--
-                While an install runs, or the state is read again after one, it waits with
-                aria-disabled rather than disabled, so that a keyboard still reaches the tooltip
-                that names the board an install runs on.
-              -->
-              <button
-                neatButton
-                neatCalloutActions
-                type="button"
-                size="small"
-                [neatTooltip]="installTooltip()"
-                neatTooltipPosition="bottom"
-                [attr.aria-disabled]="installWaits() || null"
-                (click)="installSentinel()"
-              >
-                @if (installing()?.here) {
-                  Installing…
-                } @else if (telemetry.rechecking()) {
-                  Checking…
-                } @else {
-                  Install Sentinel
-                }
-              </button>
-            } @else {
-              <ng-container ngProjectAs="[neatCalloutActions]" [ngTemplateOutlet]="checkAgain" />
+            @if (shown.hint) {
+              <p neatNote>{{ shown.hint }}</p>
             }
+            <!-- Insight runs nothing on the board for this: the command is the user's to run. -->
+            @if (shown.command) {
+              <app-copy-command [command]="shown.command" label="command for the board" />
+            }
+            <ng-container ngProjectAs="[neatCalloutActions]" [ngTemplateOutlet]="checkAgain" />
           </neat-callout>
-          @if (installerOutput(); as output) {
-            <neat-collapsible label="Installer output">
-              <pre>{{ output }}</pre>
-            </neat-collapsible>
-          }
         </div>
       }
     }
@@ -286,7 +263,7 @@
   }
 </neat-page>
 
-<!-- Check again asks the board's service manager again (`refresh=1`), and says so while it does. -->
+<!-- Check again asks Sentinel's health again, and says so while it does. -->
 <ng-template #checkAgain>
   <button
     neatButton

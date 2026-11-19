@@ -48,8 +48,8 @@ function ownValueCount(own: ScopeOverrides): number {
 }
 
 /**
- * The viewer's overlay settings: a global scope plus per-channel overrides, one setting at a time
- * (Inv §5c). A change applies at once and is stored at once; there is no Save step.
+ * The viewer's overlay settings: a global scope plus per-channel overrides, one setting at a time.
+ * A change applies at once and is stored at once; there is no Save step.
  *
  * Every stored scope is read and parsed when the store opens, and a scope again just before this
  * store writes it. From then on the scopes live in signals, and each channel's resolved settings
@@ -188,7 +188,7 @@ export class ViewerSettingsStore {
   }
 
   /**
-   * The late notice's global action (Inv §4g, `applyGlobalGeneral`): the channel gives up its own
+   * The late notice's global action: the channel gives up its own
    * value and follows global, which is raised to `value` when below it and never lowered. Both
    * scopes change before anything reads them again, so no one sees half of it.
    */

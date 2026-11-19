@@ -6,15 +6,15 @@ describe('StatsSession', () => {
     const session = TestBed.inject(StatsSession);
     session.card.set('board-power');
     session.compareSeries.set('thermal_max');
-    session.followBoard(3);
+    session.followBoard('local');
     session.run.set('a');
     session.checkedRuns.set(['a', 'b']);
 
-    session.followBoard(3);
+    session.followBoard('local');
     expect(session.run()).toBe('a');
     expect(session.checkedRuns()).toEqual(['a', 'b']);
 
-    session.followBoard(4);
+    session.followBoard('ssh:sima@192.168.1.20:22');
     expect(session.run()).toBeNull();
     expect(session.checkedRuns()).toEqual([]);
     // Where the user was on Live, and the series Compare draws, are not about the board's runs.

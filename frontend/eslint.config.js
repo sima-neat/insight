@@ -16,6 +16,9 @@ const KIT_INTERNALS_MESSAGE =
   "Names starting with ɵ are the kit's internals, not its public API. If you need one, propose a kit change (see AGENTS.md).";
 
 module.exports = defineConfig([
+  // Written by `npm run api:types` from the server's API document, never by hand; `check:api`
+  // (part of `npm run lint`) fails when it differs from what the document makes.
+  { ignores: ['src/app/api.generated.ts'] },
   {
     files: ['**/*.ts'],
     extends: [

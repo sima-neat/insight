@@ -48,9 +48,8 @@ interface DeleteReport {
   readonly failures: readonly {
     name: string;
     title: string;
-    message: string;
-    hint: string;
     detail: string;
+    hint: string;
   }[];
   /** The runs after the failure that stopped the batch: still selected. */
   readonly notTried: readonly string[];
@@ -59,7 +58,7 @@ interface DeleteReport {
 
 const plural = (count: number): string => (count === 1 ? 'run' : 'runs');
 
-/** The confirmation before deleting the runs named, in the app's dialog (spec, "Delete"). */
+/** The confirmation before deleting the runs named, in the app's dialog. */
 function deleteQuestion(names: readonly string[]): NeatConfirmOptions {
   return {
     title: names.length === 1 ? `Delete ${names[0]}?` : `Delete ${names.length} runs?`,
@@ -71,7 +70,7 @@ function deleteQuestion(names: readonly string[]): NeatConfirmOptions {
 
 /**
  * What a delete of `ids` did, by name, when it did not delete them all; null when it did. One run
- * asked for is named in the title; several are counted (#170's wording).
+ * asked for is named in the title; several are counted.
  */
 function deleteReport(
   ids: readonly string[],
@@ -88,9 +87,8 @@ function deleteReport(
     failures: outcome.failed.map(({ id, failure }) => ({
       name: nameOf(id),
       title: failure.title,
-      message: failure.problem.message,
-      hint: failure.hint,
       detail: failure.detail,
+      hint: failure.hint,
     })),
     notTried: outcome.notTried.map(nameOf),
     deleted: outcome.deleted.map(nameOf),
@@ -99,7 +97,7 @@ function deleteReport(
 
 /**
  * Stats' Runs view: the runs saved on the board, the one recording first as Sentinel lists it,
- * one row each with its recorded line and when it started (spec, "Run list"). A click on a row
+ * one row each with its recorded line and when it started. A click on a row
  * selects the run, whose detail the side panel shows (the page builds the panel). Ticking runs
  * (at most 8, never the recording one) brings up the selection bar: Compare opens their
  * comparison, the first ticked as baseline; Delete asks, then deletes them one at a time.

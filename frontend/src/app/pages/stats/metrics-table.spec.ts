@@ -5,6 +5,7 @@ import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { liveWindow, withMetrics } from './area.testing';
 import { MetricsTable } from './metrics-table';
 import type { SentinelMetric } from '../../stats/api';
+import { LIVE_VALUES } from '../../stats/stats.testing';
 import type { TelemetryWindow } from '../../stats/telemetry';
 
 describe('MetricsTable', () => {
@@ -28,7 +29,8 @@ describe('MetricsTable', () => {
   const rows = (): HTMLTableRowElement[] => [...root().querySelectorAll('tbody tr')] as never;
 
   it('lists name, group, value, sparkline and status, in the order given', async () => {
-    window = liveWindow(10, { values: (_key, i) => i });
+    // A history of its own index, up to the captured reading, which is the value.
+    window = liveWindow(10, { values: (key, i) => (i === 9 ? (LIVE_VALUES[key] ?? null) : i) });
     await show(pick('net_tx_mbps', 'disk_emmc_used_pct', 'rtsn_0'));
 
     const table = root().querySelector('table')!;
