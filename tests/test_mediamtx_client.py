@@ -247,6 +247,36 @@ class ClientTests(unittest.TestCase):
         client = mediamtx.MediamtxClient(request=request, clock=clock)
         self.assertTrue(client.snapshot(fresh=True)["src5"].ready)
 
+    def test_fresh_snapshot_gives_no_answer_when_a_later_reading_failed_to_finish(self):
+        # A poll that starts during the fresh check reads paths/list after it and sees a new
+        # publisher, then fails on a session list. Its reading never becomes a snapshot, so the
+        # fresh check's older "free" answer must not be returned as current.
+        clock = FakeClock()
+        current = {"paths": [dict(PATHS[4])]}  # src5, no publisher
+        state = {"polled": False, "in_poll": False}
+        client = None
+
+        def request(method, url):
+            endpoint = url.split("/v3/", 1)[1].split("?", 1)[0]
+            if endpoint == "paths/list":
+                return 200, json.dumps({"items": current["paths"]}).encode()
+            if state["in_poll"]:
+                raise OSError("session list failed")
+            if not state["polled"]:  # the fresh check's first session list
+                state["polled"] = True
+                current["paths"] = [dict(PATHS[1], name="src5", confName="src5")]
+                clock.now += 2.0
+                state["in_poll"] = True
+                with self.assertLogs(level=logging.WARNING):
+                    self.assertIsNone(client.snapshot())  # the poll fails after paths/list
+                state["in_poll"] = False
+            return 200, json.dumps({"items": []}).encode()
+
+        client = mediamtx.MediamtxClient(request=request, clock=clock)
+        self.assertIsNone(client.snapshot(fresh=True))  # unknown, so the pull asks again
+        clock.now += 2.0
+        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)  # a full reading sees it
+
     def test_fresh_snapshot_asks_during_the_backoff_and_never_returns_stale_data(self):
         client, calls, clock, state = self._flaky_client()
         self.assertIsNotNone(client.snapshot())

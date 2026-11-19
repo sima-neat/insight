@@ -239,6 +239,8 @@ class MediamtxClient:
         self._lock = threading.Lock()
         self._snapshot: Optional[dict] = None
         self._snapshot_at: Optional[float] = None
+        # The latest paths/list reading, also from a refresh that failed after it.
+        self._paths_seen_at: Optional[float] = None
         self._unavailable_until = 0.0
         self._warned = False
         self._ever_succeeded = False
@@ -278,6 +280,9 @@ class MediamtxClient:
                 paths = self._get_items("paths/list")
                 # Publishers come from paths/list: this is when this answer saw them.
                 observed = self._clock()
+                with self._lock:
+                    if generation == self._generation and (self._paths_seen_at is None or observed > self._paths_seen_at):
+                        self._paths_seen_at = observed
                 sessions = {endpoint: self._get_items(f"{endpoint}/list", missing_ok=True) for endpoint, _ in SESSION_KINDS.values()}
                 built = build_snapshot(paths, sessions)
             except Exception as exc:  # any unusable answer means "API unavailable", never a 500
@@ -296,6 +301,11 @@ class MediamtxClient:
                 if self._snapshot_at is None or observed >= self._snapshot_at:
                     self._snapshot, self._snapshot_at = built, observed
                     self._update_rates(observed)
+                # A later paths/list reading that never became a snapshot (its session lists
+                # failed, or it is still running) may have seen a publisher this one lacks:
+                # a fresh check gets no answer then, and the caller asks again.
+                if fresh and self._paths_seen_at is not None and self._paths_seen_at > self._snapshot_at:
+                    return None
                 return self._snapshot
         return built
 
@@ -423,6 +433,7 @@ class MediamtxClient:
     def _invalidate(self) -> None:
         with self._lock:
             self._snapshot_at = None
+            self._paths_seen_at = None
             # Also drop a back-off from an earlier failed refresh: the next snapshot must
             # be fetched, never the cached one that still holds the kicked publisher.
             self._unavailable_until = 0.0
