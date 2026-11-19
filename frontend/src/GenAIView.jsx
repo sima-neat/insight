@@ -488,7 +488,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const settingsDialog = useRef(null)
   const settingsBox = useRef(null)
   const settingsClose = useRef(null)
-  const catalogAutoSynced = useRef(false)
+  // The board the catalog last synced for on its own; undefined until it has.
+  const catalogAutoSyncedFor = useRef(undefined)
   const catalogFromOtherBoard = useRef(false)
   const catalogNow = useRef(modelCatalog)
   const lastStatus = useRef(null)
@@ -828,7 +829,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setVoice('')
     setCatalogSync(false)
     lastStatus.current = null
-    catalogAutoSynced.current = false
+    catalogAutoSyncedFor.current = undefined
     // Boards can allow other accounts: what was saved may not apply to this one.
     catalogFromOtherBoard.current = true
     cardsAsked.current.clear()
@@ -1009,11 +1010,15 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     if (!allowed.searchModels || catalogSync) return
     const id = ++catalogSyncId.current
     const board = ticket()
-    const source = settingsNow.current?.url || null
     const current = () => id === catalogSyncId.current && board.live()
     setCatalogSync(true)
     try {
-      const results = await getJson('models/hub/search', { signal: board.signal })
+      // The rows are saved under the address read now: another tab can switch the
+      // shared board while this view still holds the settings it loaded earlier.
+      const [results, source] = await Promise.all([
+        getJson('models/hub/search', { signal: board.signal }),
+        getSettings().then((s) => s.url || null, () => settingsNow.current?.url || null)
+      ])
       if (!current()) return
       setHubReach((prev) => hubReachOf(results) || prev)
       if (results.enabled === false) return
@@ -1137,18 +1142,24 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   // comparison uses it, so the board-switch handling above still sees the move.
   useEffect(() => {
     if (!settingsOpen || settingsTab !== 'models') return undefined
-    if (downloads.state !== 'available' || !allowed.searchModels || catalogAutoSynced.current) return undefined
+    if (downloads.state !== 'available' || !allowed.searchModels) return undefined
     let cancelled = false
     const decide = (board) => {
-      if (cancelled || catalogAutoSynced.current) return
-      if (!catalogNeedsSync(modelCatalog, board, { fromOtherBoard: catalogFromOtherBoard.current })) return
-      catalogAutoSynced.current = true
+      if (cancelled) return
+      const options = { fromOtherBoard: catalogFromOtherBoard.current, autoSyncedFor: catalogAutoSyncedFor.current }
+      if (!catalogNeedsSync(modelCatalog, board, options)) return
+      catalogAutoSyncedFor.current = board
       catalogFromOtherBoard.current = false
       syncCatalog()
     }
-    getSettings().then((s) => decide(s.url), () => decide(settings?.url))
+    const check = () => getSettings().then((s) => decide(s.url || null), () => decide(settings?.url || null))
+    check()
+    // The list can stay open while another tab switches the board: look again on return.
+    const onVisible = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [settingsOpen, settingsTab, modelCatalog.syncedAt, modelCatalog.board, settings?.url, downloads.state, allowed.searchModels])
 

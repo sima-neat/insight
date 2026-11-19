@@ -208,6 +208,21 @@ test('opening the model list syncs a catalog saved for the board another tab lef
   assert.equal(catalogNeedsSync(saved, null), false)  // address unknown: no claim
 })
 
+test('auto-sync runs once per board, again after every later switch', () => {
+  const b = 'https://192.168.2.9:5000'
+  const c = 'https://192.168.2.11:5000'
+  // Synced for B after a switch A -> B made in another tab: B is not synced again.
+  const forB = { ...CATALOG, syncedAt: 2_000, board: b }
+  assert.equal(catalogNeedsSync(forB, b, { autoSyncedFor: b }), false)
+  // A second switch B -> C, also in another tab, syncs once more.
+  assert.equal(catalogNeedsSync(forB, c, { autoSyncedFor: b }), true)
+  // A failed sync for C keeps B's rows, and is not retried on its own.
+  assert.equal(catalogNeedsSync(forB, c, { autoSyncedFor: c }), false)
+  // Nothing synced yet, with the board unknown: the first look still fills it.
+  assert.equal(catalogNeedsSync({ ...CATALOG, syncedAt: null }, null), true)
+  assert.equal(catalogNeedsSync({ ...CATALOG, syncedAt: null }, null, { autoSyncedFor: null }), false)
+})
+
 test('a saved catalog is for another board unless it names the current one', () => {
   const here = 'https://192.168.2.3:5000'
   assert.equal(savedForOtherBoard({ ...CATALOG, board: here }, here), false)
