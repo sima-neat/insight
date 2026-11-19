@@ -343,22 +343,24 @@ the same arguments and names its interpreter in `NEAT_INSIGHT_PYTHON`.
 - **Startup** (`cmd/neat-insight`): the configuration is resolved once (`internal/config`: where
   Insight runs, its data folder, the hosted-mode files sima-cli writes, the SDK's port map), then
   the certificate (`internal/certs`: the SDK's, a valid earlier one, or a new one from mkcert,
-  which Insight never installs), then the channels, MediaMTX, the sources and the old backend.
+  which Insight never installs), then the channels, MediaMTX, the sources, the board registry and
+  the old backend.
   The programs Insight ships (`mediamtx`, its `mediamtx.yml`, `ffmpeg_nodelay.so`) are found beside
   the server's binary (`neat_insight/bin/`); ffmpeg and ffprobe on `PATH`. Shutdown runs the other
-  way: the HTTP server, then the slots' publishers and encodes, the relays and the jobs, then the
-  children.
+  way: the HTTP server, then the board's preview and microphone test and its connection, the
+  slots' publishers and encodes, the relays and the jobs, then the children.
 - **Children** run under `internal/supervisor`: each in its own process group, stopped as a group,
   restarted with back-off when it is a service, its PID in `<data>/run/` so the next start stops
   what a crashed run left behind (and only that: the PID must still run the same program and lead
   its own group).
 - **The old backend** (`internal/legacy`) is a child: Flask with `--behind-proxy` on a free
-  loopback port, plain HTTP, the server's certificate passed to it for webssh. Every `/api/` and
-  `/swagger-ui-assets/` request the server does not handle is passed to it, with the browser's
-  host and `X-Forwarded-Proto: https`, streamed. Each phase of the rewrite moves routes from it to
-  the server: `/api/health` first, then the channels, then the sources and the media library. It
-  no longer starts MediaMTX or frees its ports. The YouTube import (`/api/import/youtube*`) stays
-  there for now and saves into the same media folder.
+  loopback port, plain HTTP. Every `/api/` and `/swagger-ui-assets/` request the server does not
+  handle is passed to it, with the browser's host and `X-Forwarded-Proto: https`, streamed. Each
+  phase of the rewrite moves routes from it to the server: `/api/health` first, then the
+  channels, then the sources and the media library, then the board, Peripherals, Stats and System
+  Info. It no longer starts MediaMTX or frees its ports, and runs no webssh. What it still serves:
+  the YouTube import (`/api/import/youtube*`, saving into the same media folder), the workspace,
+  GenAI Studio's relay and the profiler's `/api/neat-metrics`, and its own `/api/health`.
 - **MediaMTX** (`internal/mediamtx`) is the server's child, restarted when it exits: its
   configuration is the shipped `mediamtx.yml` rendered into `<data>/run/` with this run's API
   password and publisher tag (readable by the owner only), and its WHIP listener serves the
@@ -378,6 +380,37 @@ the same arguments and names its interpreter in `NEAT_INSIGHT_PYTHON`.
   preview, a slot's HTTP MJPEG output, a file's preview), capped, stopped a few seconds after the
   last reader, ended when it stalls. **Jobs** (`internal/jobs`, `/api/jobs...`): renditions'
   encodes, uploads' re-encodes and catalog downloads, with progress as Server-Sent Events.
+- **The board** (`internal/board`, routes `/api/boards...`): one selected board, the one entered
+  (`<data>/board-target.json`), else the board Insight runs on, else the DevKit the SDK is paired
+  with (`DEVKIT_SYNC_DEVKIT_*`), resolved at start and on a change. Its id (`local`,
+  `ssh:sima@192.168.1.20:22`) names it in every board path, so a request for a replaced board is
+  404 `not_found`. One SSH connection per board, keys only (the service account's `~/.ssh`, no
+  agent, no password), host keys pinned in Insight's own `<data>/known_hosts` with an explicit
+  trust of a new one; Sentinel is reached through that connection's Unix-socket forwarding, so
+  nothing starts on the board per request. On a board, the same operations run locally. There is
+  no shell: the boards answer carries the `ssh` command line. Board failures answer the error
+  shape with `host_key` (both fingerprints) or `command` (the one that authorizes the key).
+- **Sentinel** (`internal/sentinel`, `/api/boards/{id}/sentinel/...`) is an allowlisted proxy:
+  health (with the service's start from systemd), metric definitions, the latest sample, the
+  cache, the active trace, traces started and stopped, runs listed, read and compared, answered as
+  Sentinel answers them without its schema marker; Insight keeps no telemetry. The Live view's
+  history is Sentinel's own `/v1/cache`: `after` (the newest sample held) answers only newer ones
+  with `full: false`, else all of them with `full: true`. A run is deleted with Sentinel's CLI
+  (`simaai-sentinel runs delete`), its id checked against Sentinel's id form first and passed as
+  one argument. A missing socket is told apart (not installed, stopped) by `systemctl`; the
+  answer gives the command (`sima-cli neat install sentinel`), Insight installs nothing.
+- **Peripherals** (`internal/peripherals`): Sentinel's peripheral catalog, kept as the board's
+  last scan with what changed, its camera verdicts Sentinel's own; a camera preview (a GStreamer
+  pipeline on the board over `board.Stream`, its multipart JPEG read with the relay's reader and
+  relayed to one viewer, stopped with its viewer, unclaimed for 15 s or stalled); a microphone
+  test (`arecord` of the device the scan names, its live level, the WAV in memory). One scan,
+  preview and test per board, dropped when the board changes. Tests reach a board through
+  `internal/board/boardtest`: the local board, with the test's scripts for the board's programs
+  and its own Sentinel on a socket.
+- **System Info** (`internal/system`, `/api/system`, `/api/system/host`): Insight's version and
+  build and what it resolved at start, plus an allowlist of `neat --json`'s fields (never its code
+  UI section or passwords), run once at start and on `?refresh=true`; the host's CPU (two samples
+  of /proc/stat, never blocking), memory and the data folder's disk.
 - **Channels** (`internal/channels`) are the Viewer's path, which replaced vf: each binds UDP
   9000+N (RTP) and 9100+N (metadata), assembles whole pictures (vf's rules: start flags, sequence
   breaks, the H.265 gate), rewrites their sequence and timestamps onto one outgoing clock, matches

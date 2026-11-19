@@ -36,9 +36,9 @@ Default container ports are:
 | `videoUDP` | UDP `9000-9079` | Video RTP ingest for viewer channels `0-79`. |
 | `metadataUDP` | UDP `9100-9179` | Metadata JSON ingest for viewer channels `0-79`. |
 | `webRTC` | UDP `40000-40199` by default | WebRTC media transport range. |
-| `webSSH` | TCP `8022` | Browser shell to a paired DevKit when available. |
+| `webSSH` | TCP `8022` | Not served any more: Insight has no browser shell (`GET /api/boards` gives the `ssh` command instead). The SDK may still publish the port. |
 
-If default host ports are already in use, `sima-cli` can allocate non-default host ports. Do not assume `9900`, `8554`, `9000`, or `9100` are the browser/device-facing ports. Parse `neat --json` and use `exposedPorts[*].hostPortStart` and `hostPortEnd`.
+If default host ports are already in use, `sima-cli` can allocate non-default host ports. Do not assume `9900`, `8554`, `9000`, or `9100` are the browser/device-facing ports. Parse `neat --json` and use `exposedPorts[*].hostPortStart` and `hostPortEnd` (Insight's `/api/system` passes them on as `neat.exposed_ports`).
 
 Example `neat --json` shape:
 
@@ -79,9 +79,9 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Treat file paths returned by media APIs as library paths, relative to the media folder. Do not send absolute host paths.
 - Read `/api/slots` before changing assignments or playback.
 - Clear or reassign the slots that use a file before deleting it: `/api/media/delete` refuses (409 `in_use`, naming the `slots`).
-- Peripherals never captures video: SiMa Sentinel on the board discovers the cameras and microphones (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog; only an explicit camera preview captures video and only an explicit microphone test records audio. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
-- Preview is the only Peripherals operation that touches the sensor, and only while it runs: over the board connection Insight runs `gst-launch-1.0` (`libcamerasrc` for MIPI, `v4l2src` on the `/dev/v4l/by-id` path for USB) that writes multipart JPEG (at most 640 px wide, up to 15 fps) to stdout, and relays it at the session's `stream_url` as `multipart/x-mixed-replace`. It uses no Viewer channel, UDP port, or PyNeat. Discovery never captures. A failed start carries the pipeline's stderr in `detail`. The session's `camera_fps` is the rate the camera runs at: a USB mode's own rate; for MIPI, Sentinel's `max_fps` from one Sentinel rescan after the first frame (no Insight scan is recorded and the preview keeps running), `null` until then or when Sentinel cannot report it.
-- Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; System Info's host readings (`/api/metrics`) still read the legacy REMOTE_DEVKIT target.
+- Board-facing features (Peripherals, Stats) use one selected board from `GET /api/boards`: the board entered by hand, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Its `id` names it in every board path (`/api/boards/local/...`, `/api/boards/ssh%3Asima%40192.168.1.20%3A22/...`, URL-escaped); any other id is 404 `not_found`. Enter a board with `POST /api/boards` only when the user names one; never send passwords: Insight signs in with the SSH keys of the account it runs as. There is no browser shell: the boards answer's `selected.ssh` is the command to open one.
+- Peripherals never captures video by itself: SiMa Sentinel on the board discovers the cameras and microphones, and Insight passes its catalog on, with Sentinel's own verdict on each camera mode. Only an explicit camera preview captures video and only an explicit microphone test records audio. When Sentinel is missing or fails, surface its error (`sentinel_missing` with the install command `sima-cli neat install sentinel`, `sentinel_stopped`, ...); never add an Insight-side hardware scan as a fallback.
+- A camera preview runs `gst-launch-1.0` on the board over its SSH connection (`libcamerasrc` for MIPI, `v4l2src` on the `/dev/v4l/by-id` path for USB), writing multipart JPEG (at most 640 px wide, up to 15 fps), which Insight relays as `multipart/x-mixed-replace`. It uses no Viewer channel, UDP port or PyNeat.
 - Use `/api/viewer-url` for viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/channels` first when an app's video or boxes do not show: it says per channel what arrives, what Insight matched, and how many browsers watch, before you suspect the browser, ICE, or the decoder. See [Localizing A Video Or Overlay Problem](#localizing-a-video-or-overlay-problem).
 - Insight gets no reports from browsers. What happens after Insight sends a picture (decoding, late metadata, drawing) shows only in the browser: the tile's status bar, the console with `debug=1` in the Viewer URL, and `chrome://webrtc-internals`.
@@ -104,20 +104,27 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Return service identity, status, UTC timestamp, and the startup-scoped browser ICE address/public origin applied by Insight. |
-| `GET` | `/api/metrics` | Return a point-in-time system metrics payload with CPU, memory, disk, temperature, MLA, remote, and `pipeline_status` compatibility fields. `cpu_load` is total CPU use (also for the remote DevKit); locally it is measured since the previous read, without blocking. |
 | `GET` | `/api/neat-metrics` | Open a server-sent events stream of JSON metrics events from the local metrics broker. |
 | `GET` | `/api/channels` | Return every Viewer channel with its video, metadata, viewers, and recent errors (see [Channels](#channels)). |
 | `GET` | `/api/ingest/stats` | Return the same counters in the older, frozen shape that the SDK's tests read. |
-| `GET` | `/api/logs/<logname>` | Return recent `EV74` or `syslog` lines as `text/plain`; unknown or missing logs return 404. |
-| `GET` | `/api/system/tools` | Return booleans for `ffmpeg`, `ffprobe`, and `gst-launch-1.0` availability on `PATH`. |
 
 Example:
 
 ```bash
 curl -k https://127.0.0.1:9900/api/health
-curl -k https://127.0.0.1:9900/api/metrics
 curl -k https://127.0.0.1:9900/api/channels
-curl -k https://127.0.0.1:9900/api/system/tools
+```
+
+## System Info
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/system` | Insight's `version` and `build`, where it runs (`place`: `board`, `sdk`, `host`), its data folder, `web_ui_url`, the network and ports it resolved at start (certificate host, browser ICE address, public origin, channel count, WebRTC range, the RTSP and WHIP host ports); and `neat`: an allowlist of `neat --json`'s fields (`environment`, `components` with versions and updates, the `insight` service, `update_check`, `exposed_ports`). Never its code UI section or passwords. From memory; neat runs once at start (`neat.state` is `reading` until it ends, then `ready`, `missing` or `failed`) and again with `?refresh=true`, which takes up to 15 s because neat checks online for updates. |
+| `GET` | `/api/system/host` | The machine Insight runs on, not the board: `cpu_percent` since the reading before (never blocking), `memory` and the `disk` of Insight's data folder (`total`, `used` in bytes, `percent`). |
+
+```bash
+curl -k 'https://127.0.0.1:9900/api/system?refresh=true' | jq '.neat.components'
+curl -k https://127.0.0.1:9900/api/system/host
 ```
 
 ## Channels
@@ -350,15 +357,12 @@ rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/src1
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/envinfo` | Return `is_sima_board` and `is_remote_devkit_configured` frontend flags. |
-| `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
-| `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
 | `GET` | `/api/viewer-url?mode=light&src=0,1` | Return `url`, a link to Insight's `/viewer` page with `src` (the channels asked for, all by default; numbers out of range are dropped), `max_channels`, and `mode` only when it is `light` or `dark`; plus `max_video_channels` (the channel count), `channel_limit_source` (`devkit`, `sdk-port-map`, `legacy-default`), and `sdk_channel_limited`. Frozen. |
 | `POST` | `/api/channels/{N}/offer` | The Viewer's WebRTC offer for channel `N` (see [Channels](#channels)). |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
-Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL is on the same origin as the request (scheme, host and port as the browser reached Insight), or on the launch-URL public origin when one is configured. Nothing is served on the `videoUI` port any more.
+Use `/api/system` (what Insight resolved at start) and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL is on the same origin as the request (scheme, host and port as the browser reached Insight), or on the launch-URL public origin when one is configured. Nothing is served on the `videoUI` port any more.
 
 Hosted environments can opt into a separate browser-facing network configuration by writing `/home/docker/.insight-config/browser-ice-address` and/or `/home/docker/.insight-config/launch-url` before restarting Insight. The ICE file supplies one IPv4 address to both the Viewer's channels and MediaMTX; the launch URL supplies the trusted origin for viewer, WHIP, and HTTP MJPEG links. Missing files retain the existing `CONTAINER_HOST_IP` and request-host/port-map behavior. A present invalid browser ICE address prevents readiness. An invalid launch URL logs a warning and preserves the request-host/port-map fallback.
 
@@ -387,45 +391,53 @@ curl -k -o frame.jpg 'https://127.0.0.1:9900/api/genai/board-camera/snapshot?dev
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/board` | Selected board target, its `source` (`manual`, `on-board`, `sdk-env`), defaults, `generation`, and last status. Never connects. |
-| `POST` | `/api/board/select` | JSON `{"host", "port", "user"}` saves a manual target; `{"reset": true}` restores the default. |
-| `POST` | `/api/board/test` | Connect and read the board's host name, machine, and build version. |
-| `POST` | `/api/board/trust-host-key` | JSON `{"fingerprint"}`; trust the key a reflashed board presented (`presented_fingerprint` from `host_key_changed`). |
-| `GET` | `/api/peripherals` | Last camera and microphone scan for the selected board, or an empty snapshot with `scanned_at: null`. |
-| `POST` | `/api/peripherals/refresh` | Ask SiMa Sentinel to rescan MIPI and USB cameras and ALSA microphones, use the catalog of the scan Sentinel runs for that refresh, and mark each camera mode Available or Unsupported. |
-| `GET` | `/api/peripherals/preview` | The running preview session, or `null`. |
-| `POST` | `/api/peripherals/cameras/preview` | JSON `{"id"}` plus an optional `{"format", "width", "height", "fps"}` (MIPI: an Available mode; USB: any listed MJPG or raw mode); start the board pipeline, wait up to 10 s (two frame periods for a mode slower than 0.2 fps, at most 60 s) for its first frame, and return the session with its `stream_url`. Refuses a busy camera (`409 camera_in_use`, also when libcamera or v4l2src reports it busy) and never stops the process holding it; `502 tool_missing` when the board has no `gst-launch-1.0` or lacks a GStreamer element the pipeline needs (named in `tool`); `502 command_failed` with the pipeline's stderr in `detail`. |
-| `GET` | `/api/peripherals/cameras/preview/<session_id>/stream` | The JPEG frames as `multipart/x-mixed-replace; boundary=frame`, one viewer per session (`409 preview_active` for a second). The preview stops when this response ends, when nobody opens it within 15 s of the start, or after 10 s (two frame periods for a mode slower than 0.2 fps, at most 60 s) without a frame. |
-| `POST` | `/api/peripherals/cameras/preview/<session_id>/stop` | Close the stream and kill the pipeline by PID on the board, releasing the camera; returns `{"session": null}` for a session that already ended. |
-| `POST` | `/api/peripherals/microphones/test` | JSON `{"id"}` (optional `"seconds"`, 1-30); re-read Sentinel's catalog, then record from that microphone on the board until stopped (at most 30 s, 48 kHz, 2 channels); 202 with the test. One test at a time. |
-| `GET` | `/api/peripherals/microphones/test` | The selected board's latest test: live `level_dbfs` and `elapsed_ms` while recording, then `level` and `audio_url`, or `error`; `null` before any test or once a scan lists another device under that id. Never connects. |
-| `POST` | `/api/peripherals/microphones/test/stop` | End the test named by `{"token": ...}` (from the start) now; another token stops nothing. The result arrives through `GET`. |
-| `GET` | `/api/peripherals/microphones/test/<token>.wav` | The finished recording of the selected board as WAV; 404 once a newer test replaced it, another board was selected, or a scan lists another device under that id. |
+| `GET` | `/api/boards` | `boards` (each `{id, mode, source, host?, port?, user?, label}`, the selected one first) and `selected` (`id`, `label`, `status` with `state` `unknown`, `connected` or `error`, `checked_at` and the last `error`, `identity` once read, and `ssh`, the command that opens a shell on it). Never connects. |
+| `POST` | `/api/boards` | JSON `{"host", "port"?, "user"?}` (22 and `sima` by default): save it as the board entered by hand and select it. |
+| `DELETE` | `/api/boards/{id}` | Forget the entered board; the selection falls back to the board Insight runs on or the SDK's DevKit (409 `not_entered` for those). |
+| `POST` | `/api/boards/{id}/check` | Connect and read the board's `hostname`, `machine`, `build` and host key fingerprint. |
+| `POST` | `/api/boards/{id}/trust-host-key` | JSON `{"fingerprint"}`: trust the key a reflashed board presented (`host_key.presented` of `host_key_changed`), after the user confirmed it. The board is replaced; check it again. |
+| `GET` | `/api/boards/{id}/peripherals` | `{scan}`: the last scan, or `null` before the first. Never connects. A scan is `{scanned_at, scan_ms, catalog, changes}`: `catalog` is Sentinel's catalog as it wrote it (`devices` with their `modes`, `errors`, `board`), `changes` the devices `added` and `removed` since the scan before. |
+| `POST` | `/api/boards/{id}/peripherals/refresh` | Have Sentinel rescan the cameras and microphones; a running preview stops first. |
+| `GET` | `/api/boards/{id}/cameras/preview` | `{preview}`: the running preview (`id`, `camera`, `mode`, `started_at`, `camera_fps`, `viewer`), or `null`. |
+| `POST` | `/api/boards/{id}/cameras/{camera}/preview` | JSON `{"format", "width", "height", "fps"}` of a mode the last scan lists (MIPI: NV12, not marked unavailable by Sentinel, at most the camera's rate; USB: MJPG or a raw format, at a rate it advertises). Starts the pipeline and waits up to 10 s (two frame periods of a slower mode, at most 60 s) for its first picture. |
+| `GET` | `/api/boards/{id}/cameras/{camera}/preview.mjpg?preview=` | The pictures as `multipart/x-mixed-replace; boundary=frame`, one viewer (409 `preview_active` for a second). The preview stops when this answer ends, when nobody opens it within 15 s of the start, or after 10 s without a picture. |
+| `POST` | `/api/boards/{id}/cameras/{camera}/preview/stop?preview=` | Stop it, killing the pipeline and releasing the camera; answers `{preview}` afterwards. |
+| `GET` | `/api/boards/{id}/microphones/test` | `{test}`: the latest test, `null` before one. Poll it while it records: `state` `recording` with `level_dbfs` and `elapsed_ms`, then `ready` with `level` (`peak_dbfs`, `rms_dbfs`, `silent`) or `failed` with `error`. |
+| `POST` | `/api/boards/{id}/microphones/{microphone}/test` | Optional JSON `{"seconds"}` (1 to 30, 30 by default): record from the ALSA device the last scan names, until stopped; 202 with the test. One test at a time (409 `test_running`). |
+| `POST` | `/api/boards/{id}/microphones/{microphone}/test/stop?test=` | End it now and answer with its result; with `test`, a stop meant for an earlier test stops nothing. |
+| `GET` | `/api/boards/{id}/microphones/{microphone}/test.wav?test=` | The finished recording as WAV, with ranges; 404 once another test replaced it. |
 
-Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. Each mode's `support.tier` and `reason` are SiMa Sentinel's own verdict (its per-mode `available` and `reason`, sentinel#43). On Platform 3.0 the modes are the sensor's sizes (`sensor_mode`), and Insight also marks IMX477 sizes wider than 4032 `unsupported`, because libcamera streams them at 4032 wide. With a Sentinel that gives no verdict, Insight applies the same rule: a mode is `available` when Sentinel's `board` block lists the camera's sensor (its `configured_cameras` entry for the camera id) among the sensors the board's camera overlays support, the mode is an ISP output size (`isp_output`), and its format is NV12; otherwise it is `unsupported` with a `reason`. NV12 is a fixed fact about Neat's `CameraInput`, not queried from the board. USB cameras are always `unsupported`, and without Sentinel's `board` block every mode is. A camera or format is `available` when any of its modes is; `exportable` and `default_selection` follow the Available modes. Sentinel failures return `peripheral_missing`, `peripheral_refused`, `peripheral_denied` or `peripheral_unavailable` (503; also Sentinel's 429 when 8 refreshes already wait, with a retry hint), `peripheral_version` or `peripheral_response` (502), and `timeout` (504) when Sentinel's refresh scan does not finish within 10 s or the board does not answer. A request answered after the selected board changed returns 409 `stale_snapshot`; refresh first.
-
-Besides a camera preview, a microphone test is the only Peripherals action that opens a device. It records only from the `plughw:` selector Sentinel's current catalog names for that id, never from a card number, and returns 409 `stale_snapshot` when that microphone's capture target or identity in Sentinel's catalog changed since the scan (a change elsewhere in the catalog, such as a previewing camera's rate, does not count), 409 `microphone_in_use` when a live check at test start finds the capture PCM open (naming the process where visible; Sentinel's own availability does not decide), and 409 `test_running` while another test records. Treat these, a missing `arecord` (`tool_missing`), and a silent result as visible outcomes; never stop another process or switch to a different device.
+Board errors carry `code`, `message` and `hint`: `auth_failed` adds `command` (how to make and authorize a key), `host_key_changed` (409) adds `host_key` with both fingerprints, `unreachable` and `timeout`. Each camera mode's `available` and `reason` are Sentinel's own verdict; Insight adds none. A preview refuses a busy camera (409 `camera_in_use`, from what libcamera or v4l2src print) and never stops the process holding it; 422 `mode_adjusted` when libcamera streams another size (the hint names it); 502 `tool_missing` without `gst-launch-1.0` or one of its elements; 504 `preview_timeout`. A test whose microphone another process holds ends `failed` with `microphone_in_use`; a missing `arecord` with `tool_missing`. A device listed from a provider that failed in the last scan is 409 `stale_scan`, an action before any scan 409 `no_scan`. Treat these and a silent result as outcomes to show; never stop another process or switch to another device.
 
 ## Board Telemetry (Sentinel)
 
+Stats reads SiMa Sentinel on the selected board through Insight, which passes Sentinel's answers on (without their `schema` marker) and keeps no telemetry of its own.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/sentinel` | Whether SiMa Sentinel runs on the selected board: its daemon state, health and `generation`. A missing or failing daemon is a state in the answer, not an error status. |
-| `POST` | `/api/sentinel/install?generation=` | Install or update Sentinel on the selected board; `generation` (from the last read) refuses the install with `409 stale_snapshot` if another board was selected since. |
-| `GET` | `/api/sentinel/metrics` | The board's metrics with labels, units, thresholds and status, plus recent samples as aligned per-metric series when `history=<n>` (at most 240) is set. |
+| `GET` | `/api/boards/{id}/sentinel/health` | `{health, started_at}`: Sentinel's `/v1/health` (version, cached samples, collector errors, active trace) and when its service started. Without Sentinel: 502 `sentinel_missing` (not installed; the hint has `sima-cli neat install sentinel`), `sentinel_stopped`, `sentinel_denied`, `sentinel_schema`, `sentinel_outdated`. Insight installs nothing. |
+| `GET` | `/api/boards/{id}/sentinel/metrics` | The metric definitions: key, label, short label, unit, group, description, warn and critical thresholds. |
+| `GET` | `/api/boards/{id}/sentinel/samples/latest` | The newest sample, `{timestamp, values}`; an unmeasured metric is `null`, never zero. |
+| `GET` | `/api/boards/{id}/sentinel/cache?after=` | Sentinel's cache: definitions, latest sample and its recent `samples` (240, about 8 minutes), with `full`. |
+| `GET` | `/api/boards/{id}/sentinel/traces/active` | `{trace, summary}`, nulls when nothing records. |
+| `POST` | `/api/boards/{id}/sentinel/traces` | JSON `{"name", "note"?, "tags"?}`: start recording (a name of at most 80 bytes, no control characters, no comma). 409 `trace_conflict` while another records or when the name is taken. |
+| `POST` | `/api/boards/{id}/sentinel/traces/stop?trace=` | Stop and save the active trace, or only the one `trace` names. |
+| `GET` | `/api/boards/{id}/sentinel/runs` | The runs on the board: `{runs}`, each with `id`, `name`, times, `samples`, `energy_joules`. |
+| `GET` | `/api/boards/{id}/sentinel/runs/{run}` | One run by id or name, with its samples. |
+| `DELETE` | `/api/boards/{id}/sentinel/runs/{run}` | Delete a finished run by its id (`20260924T175231.958Z-baseline`; any other form is 400) with `simaai-sentinel runs delete` on the board: `{deleted, runs}`. |
+| `GET` | `/api/boards/{id}/sentinel/compare?runs=a,b&raw=true` | Compare 2 to 8 runs against the first. |
 
-To poll the history, call `/api/sentinel/metrics?history=240` once, then send the newest `history.timestamps` entry you hold as `after` and `history.epoch` as `epoch`, and append the samples that come back.
-A `history.full: true` answer (a first read, a restart, a gap in polling, a reseed, or an `after` the board no longer holds) replaces everything you hold, and its `epoch` is the one to send from then on.
+To follow the Live history, read `cache` once, then send the newest sample's `timestamp` you hold as `after` and append the samples that come back. A `full: true` answer (no `after`, one the cache no longer holds after a daemon restart or a long pause, or a board clock that stepped back) replaces everything you hold.
 
 ## Error Handling
 
-Most JSON API errors return `{"error": "message"}` with an HTTP error status. Routes the Go server serves (the channels, the slots, the media library, the jobs) answer `{"error": {"code", "message", "hint"}}` instead, `hint` only when there is one; branch on `code`. Common statuses are:
+Most JSON API errors return `{"error": "message"}` with an HTTP error status. Routes the Go server serves (the channels, the slots, the media library, the jobs, the boards, Peripherals, Sentinel, System Info) answer `{"error": {"code", "message", "hint"}}` instead, `hint` only when there is one; branch on `code`. Common statuses are:
 
 - `400` for missing or invalid request fields.
-- `404` for missing logs, media files, slots or jobs.
+- `404` for missing media files, slots, jobs or runs, and for a board id that is not the selected board's.
 - `409` for a conflict with the current state: a busy slot (`slot_busy`), a file in use (`in_use`), a taken name (`name_taken`), a slot not live (`slot_not_live`).
 - `500` for local processing or stream startup failures.
-- `502` for unreachable or unreadable remote devkit build information, or an unreachable GenAI Studio board.
+- `502` for a board that cannot be reached or signed in to, a Sentinel that cannot be used, or an unreachable GenAI Studio board.
 - GenAI Studio relay errors carry a `reason`: `400 bad-request` for an invalid board address, `404 not-relayed`, `502 unreachable`, `503 not-configured` or `invalid-address`, and `500 cfg-unreadable` or `cfg-unwritable` when Insight's `cfg.json` cannot be read (nothing is changed or relayed) or saved.
 - `POST /api/channels/{N}/offer` codes. A 5xx is worth retrying, a 4xx is final:
   - `503 no_video`: no video of a codec Insight plays has reached the channel yet (payload type 96 or 98). Retry.
