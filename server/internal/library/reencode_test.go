@@ -64,60 +64,23 @@ func TestPlanEncode(t *testing.T) {
 		}
 	}
 	plan, _ := f.lib.planEncode(t.Context(), filepath.Join(dir, "sparse.mp4"))
-	if !slices.Equal(plan.reasons, []string{"keyframes 10 s apart"}) || plan.codec != media.CodecH264 ||
-		plan.gop != 30 || plan.bitrate != "12M" {
+	want := media.Encode{Codec: media.CodecH264, Width: 1920, Height: 1080, FPS: 30}
+	if !slices.Equal(plan.reasons, []string{"keyframes 10 s apart"}) || plan.encode != want {
 		t.Fatalf("sparse.mp4: %+v", plan)
 	}
 	plan, _ = f.lib.planEncode(t.Context(), filepath.Join(dir, "hevc.mkv"))
-	if plan.codec != media.CodecH265 || plan.gop != 60 || plan.bitrate != "35M" || plan.duration != time.Minute {
+	want = media.Encode{Codec: media.CodecH265, Width: 3840, Height: 2160, FPS: 60}
+	if plan.encode != want || plan.duration != time.Minute {
 		t.Fatalf("hevc.mkv: %+v", plan)
 	}
 }
 
-func TestBitrateGOPAndName(t *testing.T) {
-	for _, test := range []struct {
-		w, h int
-		fps  float64
-		want string
-	}{
-		{3840, 2160, 30, "35M"}, {1920, 1080, 120, "18M"}, {1920, 1080, 30, "12M"},
-		{1080, 1920, 30, "12M"}, {1280, 720, 60, "8M"}, {1280, 720, 15, "2M"}, {1280, 720, 30, "5M"},
-		{1280, 720, 0, "5M"}, {854, 480, 30, "3M"}, {568, 320, 30, "1M"}, {0, 0, 0, "1M"},
-	} {
-		if got := bitrateFor(test.w, test.h, test.fps); got != test.want {
-			t.Errorf("bitrateFor(%d, %d, %v) = %s, want %s", test.w, test.h, test.fps, got, test.want)
-		}
-	}
-	for fps, want := range map[float64]int{0: 30, 29.97: 30, 25: 25, 0.2: 1, 1000: 240} {
-		if got := gopFor(fps); got != want {
-			t.Errorf("gopFor(%v) = %d, want %d", fps, got, want)
-		}
-	}
+func TestEncodedName(t *testing.T) {
 	for name, want := range map[string]string{"a.mp4": "a.mp4", "a.MOV": "a.MOV", "a.mkv": "a.mkv",
 		"a.webm": "a.mp4", "a.avi": "a.mp4", "a": "a.mp4", "a.b.flv": "a.b.mp4"} {
 		if got := encodedName(name); got != want {
 			t.Errorf("encodedName(%q) = %q, want %q", name, got, want)
 		}
-	}
-}
-
-func TestEncodeArgs(t *testing.T) {
-	h264Args := strings.Join(encodeArgs("/in.mov", "/out.mp4", encodePlan{codec: media.CodecH264, gop: 25, bitrate: "5M"}), " ")
-	for _, want := range []string{"-i /in.mov -map 0:v:0 -an", "-c:v libx264", "-profile:v baseline",
-		"-g 25 -keyint_min 25 -sc_threshold 0 -bf 0", "-b:v 5M -maxrate 5M -bufsize 5M",
-		"-movflags +faststart", "-progress pipe:1 -nostats /out.mp4"} {
-		if !strings.Contains(h264Args, want) {
-			t.Errorf("the H.264 arguments lack %q: %s", want, h264Args)
-		}
-	}
-	h265Args := strings.Join(encodeArgs("/in.mkv", "/out.mkv", encodePlan{codec: media.CodecH265, gop: 30, bitrate: "12M"}), " ")
-	for _, want := range []string{"-c:v libx265", "-profile:v main", "keyint=30:min-keyint=30:scenecut=0:bframes=0"} {
-		if !strings.Contains(h265Args, want) {
-			t.Errorf("the H.265 arguments lack %q: %s", want, h265Args)
-		}
-	}
-	if strings.Contains(h265Args, "faststart") {
-		t.Errorf("an MKV is given MP4's faststart: %s", h265Args)
 	}
 }
 

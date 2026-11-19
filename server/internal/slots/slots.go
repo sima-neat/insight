@@ -85,28 +85,6 @@ type Relay interface {
 	Serve(w http.ResponseWriter, req *http.Request, key, source string)
 }
 
-// Process is a child the supervisor runs (*supervisor.Process).
-type Process interface {
-	Status() supervisor.Status
-	Tail() []string
-	Done() <-chan struct{}
-	Stop(ctx context.Context) error
-}
-
-// Starter starts a child under supervision.
-type Starter func(spec supervisor.Spec) (Process, error)
-
-// SupervisorStarter is the Starter that runs children under s.
-func SupervisorStarter(s *supervisor.Supervisor) Starter {
-	return func(spec supervisor.Spec) (Process, error) {
-		p, err := s.Start(spec)
-		if err != nil {
-			return nil, err // not a nil *supervisor.Process in a non-nil Process
-		}
-		return p, nil
-	}
-}
-
 // URLOptions say how apps and browsers reach the slots, resolved once at start.
 type URLOptions struct {
 	// RTSPPort is the port apps read sources on: the SDK port map's rtsp.tcp host port, or 0
@@ -135,8 +113,8 @@ type Options struct {
 	PublisherQuery string
 	// RTSPBase is MediaMTX's RTSP listener as Insight reaches it; "" for mediamtx.RTSPURL.
 	RTSPBase string
-	// Start runs the publishers and the encodes (SupervisorStarter).
-	Start Starter
+	// Start runs the publishers and the encodes (Supervisor.Starter).
+	Start supervisor.Starter
 	// Jobs runs the renditions' encodes as jobs of kind RenditionJob.
 	Jobs *jobs.Runner
 	// Relays serve the slot previews and the slots' HTTP MJPEG output; their Start must make
@@ -176,11 +154,10 @@ const (
 // concurrent use; every operation changes the desired state in memory, saves it and returns,
 // and the slot's reconcile does the rest.
 type Manager struct {
-	opts  Options
-	root  string
-	urls  urls
-	env   []string // the publishers' environment
-	shims shimAliases
+	opts Options
+	root string
+	urls urls
+	env  []string // the publishers' environment
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -234,7 +211,7 @@ func New(opts Options) (*Manager, error) {
 	if m.opts.encode == nil {
 		m.opts.encode = m.runEncode
 	}
-	m.env = preloadEnv(opts.Preload, &m.shims)
+	m.env = preloadEnv(opts.Preload)
 	for i := range m.rt {
 		m.rt[i] = &slotRuntime{wake: make(chan struct{}, 1)}
 		// A camera URL without secrets was kept whole; one with secrets needs them again.
@@ -265,7 +242,7 @@ func (m *Manager) Close(ctx context.Context) error {
 	m.cancel()
 	m.done.Wait()
 	m.mu.Lock()
-	var procs []Process
+	var procs []supervisor.Child
 	for _, rt := range m.rt {
 		if rt.proc != nil {
 			procs = append(procs, rt.proc)
@@ -278,7 +255,7 @@ func (m *Manager) Close(ctx context.Context) error {
 	}
 	m.mu.Unlock()
 	for _, e := range encodes {
-		m.opts.Jobs.Cancel(e.job.ID())
+		e.job.Cancel()
 	}
 	var problems []error
 	for _, p := range procs {
@@ -293,7 +270,6 @@ func (m *Manager) Close(ctx context.Context) error {
 			problems = append(problems, fmt.Errorf("an encode did not stop: %w", ctx.Err()))
 		}
 	}
-	m.shims.remove()
 	return errors.Join(problems...)
 }
 

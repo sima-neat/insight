@@ -124,7 +124,7 @@ func startLive(t *testing.T) *live {
 		MediaMTX:       client,
 		PublisherQuery: secrets.PublisherQuery(),
 		RTSPBase:       l.rtsp,
-		Start:          SupervisorStarter(sup),
+		Start:          sup.Starter(),
 		Jobs:           runner,
 		Relays:         relays,
 		FFmpeg:         ffmpeg,

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"insight/internal/apierr"
 	"insight/internal/media"
 )
 
@@ -19,18 +20,18 @@ import (
 func (l *Library) File(w http.ResponseWriter, r *http.Request, rel string) {
 	abs, err := l.existingFile(rel)
 	if err != nil {
-		WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	f, err := os.Open(abs)
 	if err != nil {
-		WriteError(w, notFound("There is no file %s in the media library.", rel))
+		apierr.WriteError(w, notFound("There is no file %s in the media library.", rel))
 		return
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	header := w.Header()
@@ -68,16 +69,16 @@ const PreviewKeyPrefix = "file:"
 func (l *Library) Preview(w http.ResponseWriter, r *http.Request, rel string) {
 	abs, err := l.existingFile(rel)
 	if err != nil {
-		WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	if l.ffmpeg == "" {
-		WriteError(w, &Error{Status: http.StatusServiceUnavailable, Code: CodeFFmpegMissing,
+		apierr.WriteError(w, &apierr.Error{Status: http.StatusServiceUnavailable, Code: CodeFFmpegMissing,
 			Message: "Previews need FFmpeg, which is not installed."})
 		return
 	}
 	if l.relays == nil {
-		WriteError(w, errors.New("the library has no relays for previews"))
+		apierr.WriteError(w, errors.New("the library has no relays for previews"))
 		return
 	}
 	l.relays.Serve(w, r, PreviewKeyPrefix+l.libraryPath(abs), abs)

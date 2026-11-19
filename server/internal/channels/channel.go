@@ -68,7 +68,6 @@ func (c *Channel) video(raw []byte, from netip.AddrPort, now time.Time) {
 	}
 	unit, ready := c.assembler.accept(&packet, raw)
 	if m.track.bindings.Load() == 0 {
-		c.stats.count(func(s *stats) { s.video.noViewer++ })
 		if ready {
 			c.assembler.rearm()
 		}
@@ -78,7 +77,7 @@ func (c *Channel) video(raw []byte, from netip.AddrPort, now time.Time) {
 		return
 	}
 	outgoing := c.line.frame(unit.timestamp, unit.ssrc, unit.afterSequenceBreak, now)
-	sent, size := false, 0
+	sent := false
 	for _, raw := range unit.packets {
 		if err := c.seq.stamp(raw, outgoing); err != nil {
 			continue // accept parsed it, so it has a header
@@ -87,12 +86,11 @@ func (c *Channel) video(raw []byte, from netip.AddrPort, now time.Time) {
 			c.stats.failed("sending video: %v", err)
 			continue
 		}
-		sent, size = true, size+len(raw)
+		sent = true
 	}
 	if !sent {
 		return
 	}
-	c.stats.frameSent(size, now)
 	for _, out := range c.corr.frame(unit.ssrc, unit.timestamp, outgoing, now) {
 		c.enqueue(out)
 	}
@@ -118,7 +116,6 @@ func (c *Channel) publish(codec Codec) (*media, error) {
 // metadata takes one metadata datagram; buf is the reader's and reused after the call.
 func (c *Channel) metadata(buf []byte, from netip.AddrPort, now time.Time) {
 	result := c.joiner.accept(buf, from, now)
-	c.stats.metadataDatagram(result)
 	if !result.complete {
 		return
 	}
@@ -132,9 +129,7 @@ func (c *Channel) metadata(buf []byte, from netip.AddrPort, now time.Time) {
 		return
 	}
 	if c.views.count() == 0 {
-		// No browser to draw it: not a matching failure, so it does not wait for a frame.
-		c.stats.count(func(s *stats) { s.metadata.noViewer++ })
-		return
+		return // no browser to draw it, so it does not wait for a frame
 	}
 	if !msg.timed {
 		c.enqueue(outbound{msg: msg})
@@ -154,7 +149,6 @@ func (c *Channel) enqueue(out outbound) {
 		}
 		select {
 		case <-c.queue:
-			c.stats.count(func(s *stats) { s.metadata.queueFull++ })
 		default:
 		}
 	}
@@ -183,20 +177,15 @@ func (c *Channel) send(out outbound) {
 			continue
 		}
 		if err := dc.SendText(text); err != nil {
-			c.stats.count(func(s *stats) { s.metadata.sendErrors++ })
 			c.stats.failed("sending metadata to a browser: %v", err)
 			c.views.remove(dc)
 			continue
 		}
 		sent = true
 	}
-	c.stats.count(func(s *stats) {
-		if sent {
-			s.metadata.forwarded++
-		} else {
-			s.metadata.noViewer++
-		}
-	})
+	if sent {
+		c.stats.count(func(s *stats) { s.metadata.forwarded++ })
+	}
 }
 
 // viewers are the metadata DataChannels open to the channel's browsers.

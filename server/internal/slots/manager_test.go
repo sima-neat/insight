@@ -121,7 +121,6 @@ func TestAssigningAFileChecksIt(t *testing.T) {
 	wantCode(t, h.m.AssignFile(1, "missing.mp4", 0), CodeFileNotFound)
 	wantCode(t, h.m.AssignFile(1, "vp9.webm", 0), CodeNotStreamable)
 	wantCode(t, h.m.AssignFile(1, "big.mp4", -1), CodeInvalidFPS)
-	wantCode(t, h.m.AssignFile(1, "big.mp4", 1000), CodeFPSNotSupported)
 
 	// A file not probed yet is taken, and probed.
 	abs := filepath.Join(h.root, "new.mp4")
@@ -192,7 +191,7 @@ func TestARenditionIsEncodedAsAJobBeforeTheSlotStreamsIt(t *testing.T) {
 	if s.State != Preparing || s.Job == "" || *s.FPS != 15 {
 		t.Fatalf("a slot waiting for its rendition: %+v", s)
 	}
-	job, ok := h.jobs.Get(s.Job)
+	job, ok := jobSnapshot(h.jobs, s.Job)
 	if !ok || job.Kind != RenditionJob || job.Title != "Encode a.mp4 at 15 fps" {
 		t.Fatalf("the job: %+v", job)
 	}
@@ -221,7 +220,7 @@ func TestARenditionIsEncodedAsAJobBeforeTheSlotStreamsIt(t *testing.T) {
 	}
 	run := h.encoder.run(0)
 	encode := strings.Join(run.args, " ")
-	for _, want := range []string{"-i file:" + abs, "fps=15", "-profile:v baseline", "-level:v 3.1", "-b:v 2000000", "-f mp4 file:" + run.output} {
+	for _, want := range []string{"-i file:" + abs, "fps=15", "-profile:v baseline", "-b:v 2000000", "-f mp4 file:" + run.output} {
 		if !strings.Contains(encode, want) {
 			t.Errorf("the encode's arguments %q lack %q", encode, want)
 		}
@@ -249,7 +248,7 @@ func TestAFailedRenditionFailsTheSlotUntilItIsStartedAgain(t *testing.T) {
 	eventually(t, "the slot streams", func() bool { h.settle(); return len(h.starter.running(pathName(1))) == 1 })
 }
 
-func TestStoppingOrCancellingStopsTheEncode(t *testing.T) {
+func TestStoppingStopsTheEncode(t *testing.T) {
 	h := newHarness(t)
 	h.encoder.release = make(chan error)
 	h.file("a.mp4", h264Info)
@@ -260,16 +259,9 @@ func TestStoppingOrCancellingStopsTheEncode(t *testing.T) {
 	must(t, h.m.Stop(1))
 	h.settle()
 	eventually(t, "the encode is cancelled", func() bool {
-		job, _ := h.jobs.Get(id)
+		job, _ := jobSnapshot(h.jobs, id)
 		return job.State == jobs.Cancelled
 	})
-
-	// Cancelling the job (the jobs API) stops the slot.
-	must(t, h.m.Start(1))
-	eventually(t, "a new encode", func() bool { h.settle(); s := h.slot(1); return s.Job != "" && s.Job != id })
-	id = h.slot(1).Job
-	h.jobs.Cancel(id)
-	eventually(t, "the slot stops", func() bool { h.settle(); return !h.slot(1).Run })
 }
 
 func TestAnExternalPublisherHoldsTheSlot(t *testing.T) {
@@ -498,6 +490,8 @@ func TestRestoredSlotsComeBackStopped(t *testing.T) {
 	_, err := h.m.AssignWebcam(2, "")
 	must(t, err)
 	h.settle()
+	// The encode runs as a job, on a goroutine of its own.
+	eventually(t, "the rendition's encode", func() bool { return h.encoder.count() == 1 })
 	encodes, publishers := h.encoder.count(), h.starter.count()
 
 	h.reopen()

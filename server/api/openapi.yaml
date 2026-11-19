@@ -6,7 +6,9 @@ info:
     server's Go types and the frontend's TypeScript types are generated from it. Routes marked
     "Frozen" are used outside Insight (the Neat SDK, sima-cli) and keep their paths and fields.
     One more is Frozen and served beside them: `GET /stream/http/srcN.mjpg`, a slot's HTTP MJPEG
-    output (docs/contracts.md, "Sources"), the same as `urls.http_mjpeg`.
+    output (docs/contracts.md, "Sources"), the same as `urls.http_mjpeg`. A request that changes
+    something (any method but GET, HEAD and OPTIONS) sent by a page of another origin is refused
+    with 403 `cross_origin`; the UI's own, and tools that send no Origin (curl, scripts), are not.
   version: "1"
 paths:
   /api/health:
@@ -41,10 +43,10 @@ paths:
   /api/channels:
     get:
       operationId: listChannels
-      summary: The Viewer's channels and what arrives on them
+      summary: Which of the Viewer's channels receive video
       description: >-
-        Every channel Insight serves (0 to count - 1), with the video and metadata its app sends
-        (docs/contracts.md) and the browsers watching it. Read from memory; poll it freely.
+        Every channel Insight serves, and whether video arrives on it (docs/contracts.md). Read
+        from memory; poll it freely. What arrives in detail is `/api/ingest/stats`.
       responses:
         "200":
           description: The channels.
@@ -57,9 +59,7 @@ paths:
       operationId: offerChannel
       summary: Watch a channel over WebRTC
       description: >-
-        The browser's SDP offer in, Insight's answer out. The offer must be sent as
-        application/json, so a cross-site form cannot open a connection through a visitor's
-        browser. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec,
+        The browser's SDP offer in, Insight's answer out. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec,
         `codec_changed` when it changes); a 4xx is final (415 `codec_unsupported`: this browser
         cannot decode the channel's codec).
       parameters:
@@ -92,8 +92,7 @@ paths:
       summary: What arrives on each channel, in the old shape
       description: >-
         Frozen: the SDK's network test and smoke test read these fields. Without `all`, only
-        channels receiving video now. `verbose` adds `diagnostics`. New code reads
-        `/api/channels`.
+        channels receiving video now. `verbose` adds `diagnostics`.
       parameters:
         - name: all
           in: query
@@ -185,7 +184,6 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
-        "415": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
@@ -311,7 +309,6 @@ paths:
                 $ref: "#/components/schemas/SlotStartResult"
         "400": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
-        "415": { $ref: "#/components/responses/Error" }
   /api/slots/stop:
     post:
       operationId: stopSlots
@@ -382,10 +379,9 @@ paths:
       operationId: getMediaTree
       summary: The media library as a tree, with each file's probe
       description: >-
-        Folders first. A file's `probe` is null while it is being probed (`probing`), and then
-        says its codec, size, rate and whether a slot can stream it. Hidden files and macOS
-        archive metadata are left out. Read from a walk of the media folder at most a few
-        seconds old.
+        Folders first. A file's `probe` is null while it is being probed, and then says its
+        codec, size, rate and whether a slot can stream it. Hidden files and macOS archive
+        metadata are left out. Read from a walk of the media folder at most a few seconds old.
       responses:
         "200":
           description: The library's root folder.
@@ -434,7 +430,6 @@ paths:
         "400": { $ref: "#/components/responses/LibraryError" }
         "404": { $ref: "#/components/responses/LibraryError" }
         "409": { $ref: "#/components/responses/LibraryError" }
-        "415": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/LibraryError" }
   /api/media/uploads:
     post:
@@ -563,50 +558,7 @@ paths:
                 $ref: "#/components/schemas/Job"
         "400": { $ref: "#/components/responses/LibraryError" }
         "404": { $ref: "#/components/responses/LibraryError" }
-        "415": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/LibraryError" }
-  /api/jobs:
-    get:
-      operationId: listJobs
-      summary: The running and recent jobs
-      description: >-
-        Renditions' encodes, uploads' re-encodes and catalog imports, oldest first. Finished
-        jobs are kept for 10 minutes.
-      responses:
-        "200":
-          description: The jobs.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/JobList"
-  /api/jobs/{id}:
-    parameters:
-      - $ref: "#/components/parameters/JobID"
-    get:
-      operationId: getJob
-      summary: One job
-      responses:
-        "200":
-          description: The job as it is now.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Job"
-        "404": { $ref: "#/components/responses/Error" }
-    delete:
-      operationId: cancelJob
-      summary: Cancel a job
-      description: >-
-        A queued job ends at once; a running one stays `running` until its work has cleaned up,
-        then is `cancelled`. Cancelling a finished job changes nothing.
-      responses:
-        "200":
-          description: The job after the call.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Job"
-        "404": { $ref: "#/components/responses/Error" }
   /api/jobs/{id}/events:
     parameters:
       - $ref: "#/components/parameters/JobID"
@@ -666,7 +618,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/BoardList"
         "400": { $ref: "#/components/responses/Error" }
-        "415": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
   /api/boards/{id}:
     parameters:
@@ -735,7 +686,6 @@ paths:
                 $ref: "#/components/schemas/BoardList"
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
-        "415": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
   /api/boards/{id}/peripherals:
     parameters:
@@ -826,7 +776,6 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/BoardError" }
-        "415": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/BoardError" }
         "503": { $ref: "#/components/responses/Error" }
@@ -922,7 +871,6 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/BoardError" }
-        "415": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/BoardError" }
         "503": { $ref: "#/components/responses/Error" }
@@ -997,34 +945,6 @@ paths:
         "409": { $ref: "#/components/responses/BoardError" }
         "502": { $ref: "#/components/responses/BoardError" }
         "504": { $ref: "#/components/responses/BoardError" }
-  /api/boards/{id}/sentinel/metrics:
-    parameters:
-      - $ref: "#/components/parameters/BoardID"
-    get:
-      operationId: getSentinelMetrics
-      summary: Sentinel's metric definitions
-      description: >-
-        `/v1/metrics` as Sentinel answers it: each metric's key, label, short label, unit,
-        group, description and warn and critical thresholds.
-      responses:
-        "200": { $ref: "#/components/responses/SentinelBody" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/BoardError" }
-        "502": { $ref: "#/components/responses/BoardError" }
-        "504": { $ref: "#/components/responses/BoardError" }
-  /api/boards/{id}/sentinel/samples/latest:
-    parameters:
-      - $ref: "#/components/parameters/BoardID"
-    get:
-      operationId: getSentinelLatestSample
-      summary: Sentinel's newest sample
-      description: '`/v1/samples/latest`: `{version, updated_at, sample: {timestamp, values}}`; an unmeasured metric is null.'
-      responses:
-        "200": { $ref: "#/components/responses/SentinelBody" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/BoardError" }
-        "502": { $ref: "#/components/responses/BoardError" }
-        "504": { $ref: "#/components/responses/BoardError" }
   /api/boards/{id}/sentinel/cache:
     parameters:
       - $ref: "#/components/parameters/BoardID"
@@ -1091,7 +1011,6 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/BoardError" }
         "413": { $ref: "#/components/responses/Error" }
-        "415": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/BoardError" }
         "504": { $ref: "#/components/responses/BoardError" }
   /api/boards/{id}/sentinel/traces/stop:
@@ -1178,18 +1097,12 @@ paths:
         description: 2 to 8 runs' ids or names, comma-separated; the first is the baseline.
         schema:
           type: string
-      - name: raw
-        in: query
-        required: false
-        description: Add every run's samples.
-        schema:
-          type: boolean
     get:
       operationId: compareSentinelRuns
       summary: Compare runs against a baseline
       description: >-
         `/v1/compare`: `{baseline_id, generated_at, runs, summaries, baseline_deltas_pct}`, the
-        runs in full with `raw`.
+        runs in full, their samples included.
       responses:
         "200": { $ref: "#/components/responses/SentinelBody" }
         "400": { $ref: "#/components/responses/Error" }
@@ -1333,100 +1246,28 @@ components:
           type: string
     ChannelList:
       type: object
-      required: [count, channels]
+      required: [channels]
       properties:
-        count:
-          type: integer
-          description: How many channels Insight serves.
         channels:
           type: array
+          description: Every channel, 0 to the count Insight serves less one.
           items:
             $ref: "#/components/schemas/Channel"
     Channel:
       type: object
-      required: [channel, video, metadata, viewers, errors]
+      required: [channel, video]
       properties:
         channel:
           type: integer
-        viewers:
-          type: integer
-          description: Browsers connected to the channel's video.
         video:
           $ref: "#/components/schemas/ChannelVideo"
-        metadata:
-          $ref: "#/components/schemas/ChannelMetadata"
-        errors:
-          type: array
-          description: The latest problems, oldest first, each starting with its time.
-          items:
-            type: string
     ChannelVideo:
       type: object
-      required: [port, active, payload_type, unsupported_packets, packets, bits_per_second, frames_per_second, keyframes]
+      required: [active]
       properties:
-        port:
-          type: integer
         active:
           type: boolean
           description: Video arrived in the last 3 s.
-        codec:
-          type: string
-          description: H264 or H265; absent before any video, and for a payload type Insight does not play.
-        payload_type:
-          type: integer
-        unsupported_packets:
-          type: integer
-          description: Packets of a payload type Insight does not play (RTP/JPEG is planned).
-        packets:
-          type: integer
-        bits_per_second:
-          type: number
-          format: double
-        frames_per_second:
-          type: number
-          format: double
-          description: Whole pictures sent on to browsers.
-        keyframes:
-          type: integer
-        last_at:
-          type: string
-          format: date-time
-        sender:
-          type: string
-          description: The address the last packet came from.
-    ChannelMetadata:
-      type: object
-      required: [port, active, received, messages_per_second, matched, unmatched, invalid, no_viewer]
-      properties:
-        port:
-          type: integer
-        active:
-          type: boolean
-          description: A message arrived in the last 3 s.
-        received:
-          type: integer
-        messages_per_second:
-          type: number
-          format: double
-        matched:
-          type: integer
-          description: Messages drawn on the frame their timestamp names.
-        unmatched:
-          type: integer
-          description: >-
-            Timed messages that found no frame within 5 s: a timestamp in another unit or clock,
-            or video that stopped.
-        invalid:
-          type: integer
-          description: Datagrams that were no JSON object.
-        no_viewer:
-          type: integer
-          description: Messages that arrived while no browser watched.
-        last_at:
-          type: string
-          format: date-time
-        sender:
-          type: string
     IngestStats:
       type: object
       required: [time, active_ttl_ms, channels]
@@ -1877,8 +1718,6 @@ components:
           description: Null while the file is being probed, and for a folder.
           allOf:
             - $ref: "#/components/schemas/MediaProbe"
-        probing:
-          type: boolean
     MediaProbe:
       type: object
       description: What ffprobe says about a file's first video stream.
@@ -1894,8 +1733,6 @@ components:
           type: string
           description: The codec as the UI shows it (H.264).
         profile:
-          type: string
-        pixel_format:
           type: string
         width:
           type: integer
@@ -1913,8 +1750,6 @@ components:
         size:
           type: integer
           format: int64
-        has_b_frames:
-          type: boolean
         streamable:
           type: boolean
         problem:
@@ -2048,14 +1883,6 @@ components:
         path:
           type: string
           description: An asset's path in the catalog.
-    JobList:
-      type: object
-      required: [jobs]
-      properties:
-        jobs:
-          type: array
-          items:
-            $ref: "#/components/schemas/Job"
     Job:
       type: object
       description: Long work (an encode, a re-encode, a download) at one moment.

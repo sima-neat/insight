@@ -1,5 +1,5 @@
 /**
- * A comparison of saved runs (`GET .../sentinel/compare?raw=true`) and what the comparison view
+ * A comparison of saved runs (`GET .../sentinel/compare`) and what the comparison view
  * derives from it: the address, the overlay of one series over the runs' common window with its
  * summary, the per-metric table with its groups and filter, and the CSV. Pure functions over plain
  * data.
@@ -36,8 +36,8 @@ export function isCompareExport(body: unknown): body is CompareExport {
 
 /**
  * Whether Sentinel summarised every compared run. A run without a summary has no cells in the
- * per-metric table (they read "—"), which the view says (#170: "Sentinel summarised only some of
- * these runs").
+ * per-metric table (they read "—"), which the view says ("Sentinel summarised only some of these
+ * runs").
  */
 export function summarisesEveryRun(answer: CompareExport): boolean {
   return answer.runs.every((run) => isObject(answer.summaries[run.metadata.id]));
@@ -73,7 +73,7 @@ export function orderedIds(ids: readonly string[], baseline: string | null): str
   return [baseline, ...ids.filter((id) => id !== baseline)];
 }
 
-/** #170's series to compare; thermal max is derived per sample from each run's own sensors. */
+/** The series to compare; thermal max is derived per sample from each run's own sensors. */
 export const COMPARE_SERIES: readonly { key: string; label: string }[] = [
   { key: POWER_KEY, label: 'Total power' },
   { key: THERMAL_MAX, label: 'Thermal max' },
@@ -159,7 +159,7 @@ function spanEnd(points: readonly Point[]): number | null {
 /**
  * Each run's timeline and the common window: as long as the shortest run among those with
  * readings to span it. A run without them is left out of the window rather than shrinking it to
- * nothing, which collapsed every line in #170 (Inv-S §13.28). Null when no run spans any time.
+ * nothing, which would collapse every line. Null when no run spans any time.
  */
 function commonWindow(
   runs: readonly SavedRun[],
@@ -373,7 +373,7 @@ export interface CompareTableRow {
  * The totals Sentinel reports per run beside its metric summaries. It publishes no change for
  * them, so `compareTable` works it out against the baseline's total, as Sentinel does for a mean.
  * The duration comes in milliseconds and reads in seconds, as in the rest of the view; the keys
- * stay Sentinel's, as #170's CSV wrote them.
+ * stay Sentinel's.
  */
 const RUN_TOTALS: readonly {
   key: string;
@@ -524,7 +524,7 @@ function csvRunName(run: SavedRun, baseline: boolean): string {
 }
 
 /**
- * The comparison as CSV (#170's columns): every row of the per-metric table, whatever filter is
+ * The comparison as CSV: every row of the per-metric table, whatever filter is
  * on screen, with each run's mean and change, unformatted. A missing value is an empty field,
  * never a dash or a zero, which a spreadsheet would read as a value; units have their own column.
  */

@@ -29,8 +29,6 @@ type Entry struct {
 	// Probe is what probing said about a file, null while it is being probed and for a file
 	// that is not probed (a link that leads out of the library).
 	Probe *Probe `json:"probe"`
-	// Probing says that a probe of the file is queued or running.
-	Probing bool `json:"probing,omitempty"`
 }
 
 // Probe is what ffprobe says about a library file (media.Info).
@@ -39,17 +37,15 @@ type Probe struct {
 	// Codec is "h264", "h265", "mjpeg" or ffprobe's name of another codec.
 	Codec string `json:"codec,omitempty"`
 	// CodecName is the codec as the UI shows it ("H.264").
-	CodecName   string  `json:"codec_name,omitempty"`
-	Profile     string  `json:"profile,omitempty"`
-	PixelFormat string  `json:"pixel_format,omitempty"`
-	Width       int     `json:"width,omitempty"`
-	Height      int     `json:"height,omitempty"`
-	FPS         float64 `json:"fps,omitempty"`
+	CodecName string  `json:"codec_name,omitempty"`
+	Profile   string  `json:"profile,omitempty"`
+	Width     int     `json:"width,omitempty"`
+	Height    int     `json:"height,omitempty"`
+	FPS       float64 `json:"fps,omitempty"`
 	// FrameRate is the rate as ffprobe writes it ("30000/1001").
 	FrameRate  string `json:"frame_rate,omitempty"`
 	DurationMS int64  `json:"duration_ms,omitempty"`
 	Size       int64  `json:"size"`
-	HasBFrames bool   `json:"has_b_frames,omitempty"`
 	Streamable bool   `json:"streamable"`
 	// Problem says why ffprobe could not read the file.
 	Problem string `json:"problem,omitempty"`
@@ -58,9 +54,9 @@ type Probe struct {
 func probeOf(info media.Info) *Probe {
 	return &Probe{
 		Kind: info.Kind, Codec: info.Codec, CodecName: info.CodecName, Profile: info.Profile,
-		PixelFormat: info.PixelFormat, Width: info.Width, Height: info.Height, FPS: info.FPS,
+		Width: info.Width, Height: info.Height, FPS: info.FPS,
 		FrameRate: info.FrameRate, DurationMS: info.Duration.Milliseconds(), Size: info.Size,
-		HasBFrames: info.HasBFrames, Streamable: info.Streamable(), Problem: info.Problem,
+		Streamable: info.Streamable(), Problem: info.Problem,
 	}
 }
 
@@ -163,7 +159,6 @@ func (l *Library) entry(s scanNode) Entry {
 		return e
 	}
 	l.cache.Want(s.abs)
-	e.Probing = true
 	e.Streamable = s.node.Streamable
 	return e
 }

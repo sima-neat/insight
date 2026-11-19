@@ -129,9 +129,6 @@ func read(conn *net.UDPConn, take func([]byte, netip.AddrPort, time.Time), copyE
 	}
 }
 
-// Count is how many channels the set serves.
-func (s *Set) Count() int { return len(s.channels) }
-
 // Ports are channel index's UDP ports.
 func (s *Set) Ports(index int) (video, metadata int) {
 	return s.ports[index].video, s.ports[index].metadata
@@ -167,11 +164,9 @@ type VideoState struct {
 	Codec                      string // "H264", "H265", or "" before any or for another payload type
 	Packets, Bytes             uint64
 	PacketsPerSecond, BitsPerS float64
-	FramesPerSecond            float64 // whole pictures sent on to browsers
 	Keyframes                  uint64
 	SeenSPS                    bool
 	Unsupported, Malformed     uint64
-	NoViewer                   uint64
 }
 
 // MetadataState is what arrived on a channel's metadata port and what became of it.
@@ -182,13 +177,9 @@ type MetadataState struct {
 	Received, Bytes           uint64
 	MessagesPerSecond, BitsPS float64
 	Invalid                   uint64
-	Chunks, Reassembled       uint64
-	ReassemblyDrops           uint64
-	Forwarded                 uint64
-	NoViewer, QueueFull       uint64
-	SendErrors                uint64
-	Matched, Unmatched        uint64
-	Pending                   uint64
+	// Forwarded are the messages sent to at least one browser: untimed ones at once, timed ones
+	// once matched to their frame.
+	Forwarded uint64
 }
 
 // States are every channel's state now.
@@ -202,7 +193,6 @@ func (s *Set) States(now time.Time) []State {
 }
 
 func (c *Channel) state(now time.Time) State {
-	counts := c.corr.snapshot(now)
 	viewers := 0
 	if m := c.media.Load(); m != nil {
 		viewers = m.viewers()
@@ -214,22 +204,18 @@ func (c *Channel) state(now time.Time) State {
 
 	videoActive := !v.last.IsZero() && now.Sub(v.last) <= activeFor
 	packetRate, bitRate := v.rate.at(videoActive)
-	frameRate, _ := v.frames.at(videoActive)
 	state.Video = VideoState{
 		Active: videoActive, First: v.first, Last: v.last, Remote: addressText(v.remote),
 		SSRC: v.ssrc, PayloadType: v.payloadType, Codec: v.codec.String(),
 		Packets: v.packets, Bytes: v.bytes, PacketsPerSecond: packetRate, BitsPerS: bitRate,
-		FramesPerSecond: frameRate, Keyframes: v.keyframes, SeenSPS: v.seenSPS,
-		Unsupported: v.unsupported, Malformed: v.malformed, NoViewer: v.noViewer,
+		Keyframes: v.keyframes, SeenSPS: v.seenSPS, Unsupported: v.unsupported, Malformed: v.malformed,
 	}
 	metadataActive := !m.last.IsZero() && now.Sub(m.last) <= activeFor
 	messageRate, metadataBits := m.rate.at(metadataActive)
 	state.Metadata = MetadataState{
 		Active: metadataActive, First: m.first, Last: m.last, Remote: addressText(m.remote),
 		Received: m.received, Bytes: m.bytes, MessagesPerSecond: messageRate, BitsPS: metadataBits,
-		Invalid: m.invalid, Chunks: m.chunks, Reassembled: m.reassembled, ReassemblyDrops: m.reassemblyDrops,
-		Forwarded: m.forwarded, NoViewer: m.noViewer, QueueFull: m.queueFull, SendErrors: m.sendErrors,
-		Matched: counts.Matched, Unmatched: counts.Unmatched, Pending: counts.Pending,
+		Invalid: m.invalid, Forwarded: m.forwarded,
 	}
 	return state
 }

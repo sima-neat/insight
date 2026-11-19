@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"insight/internal/apierr"
 )
 
 // The archives an upload may be: unpacked into a folder named after the archive. A .gz is a
@@ -198,7 +200,7 @@ func (u *unpacker) file(name string, open func() (io.ReadCloser, error)) error {
 		return u.writeError(name, closeErr)
 	}
 	if n > room {
-		return &Error{Status: http.StatusRequestEntityTooLarge, Code: CodeTooLarge,
+		return &apierr.Error{Status: http.StatusRequestEntityTooLarge, Code: CodeTooLarge,
 			Message: fmt.Sprintf("The archive unpacks to more than %s.", sizeText(u.maxBytes))}
 	}
 	if err != nil {

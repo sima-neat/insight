@@ -94,8 +94,8 @@ func (r *Registry) Selected() (*Board, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.selected == nil {
-		return nil, &Error{Code: CodeNoTarget, Message: "No board is selected.",
-			Hint: "Enter the board's address, pair the SDK with `sima-cli sdk setup --devkit <ip>`, or run Insight on the board."}
+		return nil, boardError(CodeNoTarget, "No board is selected.",
+			"Enter the board's address, pair the SDK with `sima-cli sdk setup --devkit <ip>`, or run Insight on the board.", nil)
 	}
 	return r.selected, nil
 }
@@ -110,8 +110,8 @@ func (r *Registry) Board(id string) (*Board, error) {
 
 func (r *Registry) board(id string) (*Board, error) {
 	if r.selected == nil || r.selected.ID() != id {
-		return nil, &Error{Code: CodeNotFound, Message: fmt.Sprintf("%s is not the selected board.", id),
-			Hint: "Read the boards again and use the selected one."}
+		return nil, boardError(CodeNotFound, fmt.Sprintf("%s is not the selected board.", id),
+			"Read the boards again and use the selected one.", nil)
 	}
 	return r.selected, nil
 }
@@ -120,8 +120,8 @@ func (r *Registry) board(id string) (*Board, error) {
 // than the one selected replaces it: the old one is closed.
 func (r *Registry) Select(target Target) (*Board, error) {
 	if target.Mode != ModeSSH {
-		return nil, &Error{Code: CodeInvalidRequest, Message: "Only a board reached over SSH can be entered.",
-			Hint: "Forget the entered board to use the board Insight runs on."}
+		return nil, boardError(CodeInvalidRequest, "Only a board reached over SSH can be entered.",
+			"Forget the entered board to use the board Insight runs on.", nil)
 	}
 	target, err := SSHTarget(target.Host, target.Port, target.User, SourceManual)
 	if err != nil {
@@ -151,7 +151,7 @@ func (r *Registry) Forget() error {
 }
 
 // TrustHostKey trusts the host key the board id presented when it was refused, which the
-// user confirmed by its fingerprint (HostKeyChange.Presented), and replaces the board: the
+// user confirmed by its fingerprint (the host key change's presented fingerprint), and replaces the board: the
 // trusted key may be another board's, so nothing carries over from the old one.
 func (r *Registry) TrustHostKey(id, fingerprint string) (*Board, error) {
 	r.mu.Lock()
@@ -162,8 +162,8 @@ func (r *Registry) TrustHostKey(id, fingerprint string) (*Board, error) {
 	}
 	key := old.t.presentedKey()
 	if key == nil || ssh.FingerprintSHA256(key) != fingerprint {
-		return nil, &Error{Code: CodeInvalidRequest, Message: "That host key is not the one the board presented.",
-			Hint: "Check the connection again and confirm the fingerprint it reports."}
+		return nil, boardError(CodeInvalidRequest, "That host key is not the one the board presented.",
+			"Check the connection again and confirm the fingerprint it reports.", nil)
 	}
 	if err := r.hosts.replace(old.Target().address(), key); err != nil {
 		return nil, err

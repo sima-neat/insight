@@ -1,7 +1,6 @@
 package slots
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,17 +13,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
+	"insight/internal/apierr"
 	"insight/internal/jobs"
 	"insight/internal/media"
 	"insight/internal/supervisor"
 )
 
-// A rendition is a copy of a library file encoded at another constant frame rate, so that a slot
-// with an FPS override still streams with stream copy. Renditions are kept in the media folder's
+// A rendition is a copy of a library file encoded at another constant frame rate (media.Encode),
+// so that a slot with an FPS override still streams with stream copy. Renditions are kept in the media folder's
 // hidden .renditions folder, one file each, named after what they are of:
 //
 //	<stem>_<path hash>_<version hash>_<fps>fps_<codec>.mp4
@@ -85,8 +84,7 @@ func checkRendition(source string, info media.Info, fps int) error {
 	case info.Width <= 0 || info.Height <= 0:
 		return newError(http.StatusBadRequest, CodeFPSNotSupported, "The size of %s is unknown, so it cannot change its frame rate.", source)
 	}
-	_, err := videoLevel(info.Codec, info.Width, info.Height, fps)
-	return err
+	return nil
 }
 
 func renditionName(source string, st stamp, fps int, codec string) string {
@@ -128,9 +126,6 @@ func shortHash(text string) string {
 type encodeJob struct {
 	job *jobs.Job
 	r   rendition
-	// released is set when the slots let go of it and cancelled it, so that a slot that wants
-	// the rendition again before the encode has ended starts a new one rather than stopping.
-	released bool
 }
 
 // startEncodeLocked submits r's encode and follows it to its end; m.mu is held.
@@ -154,13 +149,12 @@ func (m *Manager) releaseEncodeLocked(name string) {
 			return
 		}
 	}
-	e.released = true
-	m.opts.Jobs.Cancel(e.job.ID())
+	e.job.Cancel()
 }
 
 // finishEncode waits for an encode to end and tells the slots that waited for it: a done one
-// lets them start, a failed one stops them trying with its error, and a cancelled one (by the
-// user, from the job's Cancel) stops them.
+// lets them start, a failed one stops them trying with its error. One is cancelled only once no
+// slot waits for it, or as Insight stops; a slot that wants the rendition again starts a new one.
 func (m *Manager) finishEncode(e *encodeJob) {
 	<-e.job.Done()
 	result := e.job.Snapshot()
@@ -174,11 +168,8 @@ func (m *Manager) finishEncode(e *encodeJob) {
 			continue
 		}
 		n := i + 1
-		switch {
-		case result.State == jobs.Failed:
+		if result.State == jobs.Failed {
 			rt.blocked = result.Error
-		case result.State == jobs.Cancelled && !e.released:
-			m.store.setRun(n, false)
 		}
 		rt.rendition = ""
 		woken = append(woken, n)
@@ -203,16 +194,13 @@ func (m *Manager) encodeWork(r rendition) jobs.Work {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("The renditions folder could not be made: %v", err)
 		}
-		expected := int64(float64(videoBitrate(r.height, r.fps)) * r.duration.Seconds() / 8)
+		encode := media.Encode{Codec: r.codec, Width: r.width, Height: r.height, FPS: float64(r.fps), Resample: true}
+		expected := int64(float64(media.VideoBitrate(r.width, r.height, encode.FPS)) * r.duration.Seconds() / 8)
 		if err := checkFreeSpace(dir, expected); err != nil {
 			return nil, err
 		}
 		tmp := filepath.Join(dir, "."+r.name+".tmp")
-		args, err := encodeArgs(r.abs, tmp, r.codec, r.width, r.height, r.fps)
-		if err != nil {
-			return nil, err
-		}
-		run := encodeRun{name: "encode-" + shortHash(r.name), args: args, output: tmp, duration: r.duration}
+		run := encodeRun{name: "encode-" + shortHash(r.name), args: encode.Args(r.abs, tmp, "mp4"), output: tmp, duration: r.duration}
 		if err := m.opts.encode(ctx, run, progress); err != nil {
 			_ = os.Remove(tmp) // this encode's own output
 			if ctx.Err() != nil {
@@ -277,69 +265,9 @@ type encoder func(ctx context.Context, run encodeRun, progress *jobs.Progress) e
 // runEncode runs ffmpeg under the supervisor, following its progress, and stops it when ctx
 // ends.
 func (m *Manager) runEncode(ctx context.Context, run encodeRun, progress *jobs.Progress) error {
-	follow := &progressLines{f: &jobs.FFmpegProgress{Duration: run.duration}, progress: progress}
-	proc, err := m.opts.Start(supervisor.Spec{
-		Name: run.name, Path: m.opts.FFmpeg, Args: run.args, Grace: publisherGrace, Output: follow,
-	})
-	if err != nil {
-		return err
-	}
-	select {
-	case <-proc.Done():
-	case <-ctx.Done():
-		stop, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		defer cancel()
-		_ = proc.Stop(stop)
-		return ctx.Err()
-	}
-	if exit := proc.Status().LastExit; exit != "exit status 0" {
-		return errors.New(follow.failure(exit))
-	}
-	return nil
-}
-
-// progressLines takes the encode's lines as the supervisor writes them ("[name] line") and
-// reports its progress.
-type progressLines struct {
-	mu       sync.Mutex
-	partial  []byte
-	f        *jobs.FFmpegProgress
-	progress *jobs.Progress
-}
-
-func (p *progressLines) Write(b []byte) (int, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.partial = append(p.partial, b...)
-	for {
-		line, rest, found := bytes.Cut(p.partial, []byte("\n"))
-		if !found {
-			break
-		}
-		text := string(line)
-		if _, after, ok := strings.Cut(text, "] "); ok && strings.HasPrefix(text, "[") {
-			text = after
-		}
-		if p.f.Line(text) {
-			if percent, ok := p.f.Percent(); ok {
-				p.progress.SetPercent(percent)
-			}
-			p.progress.SetDetail(p.f.Detail())
-		}
-		p.partial = append(p.partial[:0], rest...)
-	}
-	return len(b), nil
-}
-
-// failure says why a run that ended with exit failed: ffmpeg's last diagnostics, else exit.
-func (p *progressLines) failure(exit string) string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	lines := p.f.Diagnostics()
-	if len(lines) == 0 {
-		return "ffmpeg ended with " + exit
-	}
-	return strings.Join(lines[max(0, len(lines)-4):], "; ")
+	return jobs.RunFFmpeg(ctx, m.opts.Start, supervisor.Spec{
+		Name: run.name, Path: m.opts.FFmpeg, Args: run.args, Grace: publisherGrace,
+	}, run.duration, progress.Follow)
 }
 
 // RenditionUsage is what the renditions take on the disk.
@@ -407,7 +335,7 @@ func (m *Manager) renditionsInUseLocked() map[string]bool {
 func (m *Manager) RenditionUsage() (RenditionUsage, error) {
 	list, err := m.listRenditions()
 	if err != nil {
-		return RenditionUsage{}, &Error{Status: http.StatusInternalServerError, Code: CodeRenditionsFailed, Message: err.Error()}
+		return RenditionUsage{}, &apierr.Error{Status: http.StatusInternalServerError, Code: CodeRenditionsFailed, Message: err.Error()}
 	}
 	m.mu.Lock()
 	used := m.renditionsInUseLocked()
@@ -444,7 +372,7 @@ func (m *Manager) PruneRenditions() error {
 func (m *Manager) removeRenditions(stale func(renditionEntry) bool) (RenditionsCleared, error) {
 	list, err := m.listRenditions()
 	if err != nil {
-		return RenditionsCleared{}, &Error{Status: http.StatusInternalServerError, Code: CodeRenditionsFailed, Message: err.Error()}
+		return RenditionsCleared{}, &apierr.Error{Status: http.StatusInternalServerError, Code: CodeRenditionsFailed, Message: err.Error()}
 	}
 	m.mu.Lock()
 	used := m.renditionsInUseLocked()
@@ -469,7 +397,7 @@ func (m *Manager) removeRenditions(stale func(renditionEntry) bool) (RenditionsC
 		result.FreedBytes += r.size
 	}
 	if err := errors.Join(problems...); err != nil {
-		return result, &Error{Status: http.StatusInternalServerError, Code: CodeRenditionsFailed,
+		return result, &apierr.Error{Status: http.StatusInternalServerError, Code: CodeRenditionsFailed,
 			Message: fmt.Sprintf("Some renditions could not be removed: %v", err)}
 	}
 	return result, nil

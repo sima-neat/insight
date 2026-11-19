@@ -3,13 +3,12 @@
 // cancelled, and is kept for a while after it ends so that a browser tab opened later still sees
 // how it went.
 //
-// A job outlives the request that started it. Its state is read from memory (Get, List) or
-// followed as it changes (Subscribe, ServeEvents); progress reaches subscribers at most every
-// 250 ms, however often the work reports it, and every change of state at once.
+// A job outlives the request that started it. Its state is followed as it changes (Subscribe,
+// ServeEvents); progress reaches subscribers at most every 250 ms, however often the work reports
+// it, and every change of state at once.
 package jobs
 
 import (
-	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -88,7 +87,6 @@ type Runner struct {
 	every   time.Duration
 
 	mu       sync.Mutex
-	seq      uint64
 	jobs     map[string]*Job
 	queues   map[Kind][]*Job
 	running  map[Kind]int
@@ -119,7 +117,6 @@ func (r *Runner) limit(kind Kind) int {
 type Job struct {
 	r       *Runner
 	id      string
-	seq     uint64
 	kind    Kind
 	title   string
 	work    Work
@@ -168,8 +165,6 @@ func (r *Runner) Submit(kind Kind, title string, work Work) *Job {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pruneLocked()
-	r.seq++
-	j.seq = r.seq
 	r.jobs[j.id] = j
 	if r.closed {
 		r.finishLocked(j, Cancelled, nil, "")
@@ -180,46 +175,14 @@ func (r *Runner) Submit(kind Kind, title string, work Work) *Job {
 	return j
 }
 
-// Get returns the job with this ID, if it is active or finished recently.
-func (r *Runner) Get(id string) (Snapshot, bool) {
-	j, ok := r.lookup(id)
-	if !ok {
-		return Snapshot{}, false
-	}
-	return j.Snapshot(), true
-}
-
-// List returns the active and recently finished jobs, oldest first.
-func (r *Runner) List() []Snapshot {
-	r.mu.Lock()
-	r.pruneLocked()
-	all := make([]*Job, 0, len(r.jobs))
-	for _, j := range r.jobs {
-		all = append(all, j)
-	}
-	r.mu.Unlock()
-	slices.SortFunc(all, func(a, b *Job) int { return cmp.Compare(a.seq, b.seq) })
-	out := make([]Snapshot, len(all))
-	for i, j := range all {
-		out[i] = j.Snapshot()
-	}
-	return out
-}
-
 // Cancel cancels the job: a queued one ends at once without running; a running one has its
 // context cancelled and stays running until its work returns, so that what it cleans up is gone
 // before the job is reported cancelled (a work that finishes regardless is done). Cancelling a
-// finished job changes nothing. It returns the job as it is after the call.
-func (r *Runner) Cancel(id string) (Snapshot, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.pruneLocked()
-	j, ok := r.jobs[id]
-	if !ok {
-		return Snapshot{}, false
-	}
-	r.cancelLocked(j)
-	return j.Snapshot(), true
+// finished job changes nothing.
+func (j *Job) Cancel() {
+	j.r.mu.Lock()
+	defer j.r.mu.Unlock()
+	j.r.cancelLocked(j)
 }
 
 func (r *Runner) cancelLocked(j *Job) {

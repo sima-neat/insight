@@ -12,6 +12,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"insight/api"
 )
 
 // knownHosts is Insight's own known_hosts file, not the user's: the first key a board presents
@@ -26,8 +28,8 @@ type knownHosts struct {
 }
 
 // check decides on the key a board at address (host:port) presents: nil when it is trusted or
-// was just saved as the first one, a *HostKeyChange when another one is trusted.
-func (k *knownHosts) check(address string, key ssh.PublicKey) (*HostKeyChange, error) {
+// was just saved as the first one, the change when another one is trusted.
+func (k *knownHosts) check(address string, key ssh.PublicKey) (*api.HostKeyChange, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	name := knownhosts.Normalize(address)
@@ -58,7 +60,7 @@ func (k *knownHosts) check(address string, key ssh.PublicKey) (*HostKeyChange, e
 			break
 		}
 	}
-	return &HostKeyChange{
+	return &api.HostKeyChange{
 		Host:      name,
 		Expected:  ssh.FingerprintSHA256(expected),
 		Presented: ssh.FingerprintSHA256(key),

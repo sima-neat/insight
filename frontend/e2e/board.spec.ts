@@ -148,7 +148,7 @@ for (const { name, size } of VIEWPORTS) {
       (route) =>
         route.fulfill({
           status: 500,
-          json: { error: { code: 'internal', message: 'Insight failed.' } },
+          json: { error: { code: 'internal_error', message: 'Insight failed.' } },
         }),
     );
     await dialog.getByRole('button', { name: 'Refresh' }).click();

@@ -23,7 +23,6 @@ type fakeChannels struct {
 	index  int
 }
 
-func (f *fakeChannels) Count() int                        { return len(f.states) }
 func (f *fakeChannels) States(time.Time) []channels.State { return f.states }
 func (f *fakeChannels) Offer(_ context.Context, index int, offer channels.Description) (channels.Description, error) {
 	f.index, f.got = index, offer
@@ -70,8 +69,6 @@ func TestOffer(t *testing.T) {
 		status                          int
 		code                            string
 	}{
-		{"a form post", "/api/channels/0/offer", "application/x-www-form-urlencoded", `{"type":"offer","sdp":"x"}`, 415, "json_only"},
-		{"text", "/api/channels/0/offer", "text/plain", `{"type":"offer","sdp":"x"}`, 415, "json_only"},
 		{"too large", "/api/channels/0/offer", "application/json", `{"type":"offer","sdp":"` + strings.Repeat("x", 70<<10) + `"}`, 413, "offer_too_large"},
 		{"not JSON", "/api/channels/0/offer", "application/json", `v=0`, 400, "invalid_offer"},
 		{"no number", "/api/channels/x/offer", "application/json", `{}`, 400, "invalid_request"},
@@ -145,27 +142,13 @@ func TestIngestStatsKeepsTheFieldsTheSDKReads(t *testing.T) {
 }
 
 func TestChannelList(t *testing.T) {
-	h := handlerWith(&fakeChannels{states: []channels.State{{Channel: 0, VideoPort: 9000, MetadataPort: 9100,
-		Video: channels.VideoState{Active: true, Codec: "H265"}, Metadata: channels.MetadataState{Matched: 3, Unmatched: 1}}}}, config.Config{})
+	h := handlerWith(&fakeChannels{states: []channels.State{
+		{Channel: 0, Video: channels.VideoState{Active: true, Codec: "H265"}},
+		{Channel: 1},
+	}}, config.Config{})
 	w := serve(t, h, http.MethodGet, "/api/channels")
-	var list struct {
-		Count    int
-		Channels []struct {
-			Channel int
-			Video   struct {
-				Active bool
-				Codec  string
-			}
-			Metadata struct{ Matched, Unmatched int }
-			Errors   []string
-		}
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
-		t.Fatal(err)
-	}
-	c := list.Channels[0]
-	if list.Count != 1 || !c.Video.Active || c.Video.Codec != "H265" || c.Metadata.Matched != 3 || c.Metadata.Unmatched != 1 || c.Errors == nil {
-		t.Fatalf("%s", w.Body.String())
+	if got := strings.TrimSpace(w.Body.String()); got != `{"channels":[{"channel":0,"video":{"active":true}},{"channel":1,"video":{"active":false}}]}` {
+		t.Fatalf("%s", got)
 	}
 }
 

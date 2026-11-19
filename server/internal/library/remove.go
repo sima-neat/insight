@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"insight/internal/apierr"
 	"insight/internal/media"
 )
 
@@ -97,7 +98,7 @@ func (l *Library) Delete(paths []string) (Deleted, error) {
 	if len(slots) > 0 {
 		slices.Sort(slots)
 		slots = slices.Compact(slots)
-		return Deleted{}, &Error{
+		return Deleted{}, &apierr.Error{
 			Status: http.StatusConflict, Code: CodeInUse, Slots: slots,
 			Message: fmt.Sprintf("%s %s used by %s.", listText(used), isAre(len(used)), slotNames(slots)),
 			Hint:    "Clear those slots, then delete again.",

@@ -3,29 +3,28 @@ package library
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"insight/internal/jobs"
 	"insight/internal/media"
-	"insight/internal/procgroup"
+	"insight/internal/supervisor"
 )
 
 // An upload is re-encoded only when the board would stream it badly; one it streams well is
 // saved as it came, whatever its container. These are the rules, in one place. They are what
 // the published catalog's files are made to (media-assets/build_media_assets.py), relaxed where
 // a board's decoder takes more than that: which H.264 profiles the board decodes in hardware
-// is an assumption, not measured.
+// is an assumption, not measured. The re-encode itself is the catalog's (media.Encode).
 var (
 	// keptProfiles are the profiles kept per codec; "" (ffprobe names none) is kept too.
 	keptProfiles = map[string][]string{
@@ -42,12 +41,10 @@ const maxKeyframeGap = 4 * time.Second
 
 // encodePlan is how an upload is re-encoded.
 type encodePlan struct {
-	// codec is media.CodecH265 for an H.265 upload, media.CodecH264 for any other.
-	codec string
+	// encode is H.265 for an H.265 upload, H.264 for any other, at its own size and rate.
+	encode media.Encode
 	// reasons say why, for the result ("B-frames", "codec VP9").
 	reasons  []string
-	gop      int    // frames between keyframes: one second's worth
-	bitrate  string // ffmpeg's notation, "12M"
 	duration time.Duration
 }
 
@@ -68,17 +65,15 @@ func (l *Library) planEncode(ctx context.Context, abs string) (encodePlan, bool)
 	if len(reasons) == 0 {
 		return encodePlan{}, false
 	}
-	plan := encodePlan{
-		codec:    media.CodecH264,
-		reasons:  reasons,
-		gop:      gopFor(info.FPS),
-		bitrate:  bitrateFor(info.Width, info.Height, info.FPS),
-		duration: info.Duration,
-	}
+	codec := media.CodecH264
 	if info.Codec == media.CodecH265 {
-		plan.codec = media.CodecH265
+		codec = media.CodecH265
 	}
-	return plan, true
+	return encodePlan{
+		encode:   media.Encode{Codec: codec, Width: info.Width, Height: info.Height, FPS: info.FPS},
+		reasons:  reasons,
+		duration: info.Duration,
+	}, true
 }
 
 // encodeReasons are what in the probe makes a video stream badly; none for one kept. MJPEG is
@@ -104,117 +99,37 @@ func encodeReasons(info media.Info) []string {
 	return reasons
 }
 
-// gopFor is one second of frames at fps, 30 when the rate is unknown.
-func gopFor(fps float64) int {
-	if fps <= 0 {
-		return 30
-	}
-	return min(240, max(1, int(math.Round(fps))))
-}
-
-// bitrateFor scales the bitrate to the picture, as the catalog's files are made: by the shorter
-// side, so that a portrait video counts as its landscape twin, and the frame rate.
-func bitrateFor(width, height int, fps float64) string {
-	side := min(width, height)
-	switch {
-	case side >= 2160:
-		return "35M"
-	case side >= 1080 && fps >= 100:
-		return "18M"
-	case side >= 1080:
-		return "12M"
-	case side >= 720 && fps >= 60:
-		return "8M"
-	case side >= 720 && fps > 0 && fps <= 20:
-		return "2M"
-	case side >= 720:
-		return "5M"
-	case side >= 480:
-		return "3M"
-	}
-	return "1M"
-}
-
-// keptContainers can carry the re-encoded stream; an upload in another container (WebM, AVI)
-// is re-encoded into MP4 and named so.
-var keptContainers = map[string]bool{".mp4": true, ".m4v": true, ".mov": true, ".mkv": true}
+// muxers are the containers that can carry the re-encoded stream, with ffmpeg's muxer for each;
+// an upload in another container (WebM, AVI) is re-encoded into MP4 and named so.
+var muxers = map[string]string{".mp4": "mp4", ".m4v": "mp4", ".mov": "mov", ".mkv": "matroska"}
 
 // encodedName is the name a re-encoded upload is saved under.
 func encodedName(name string) string {
 	ext := filepath.Ext(name)
-	if keptContainers[strings.ToLower(ext)] {
+	if _, kept := muxers[strings.ToLower(ext)]; kept {
 		return name
 	}
 	return strings.TrimSuffix(name, ext) + ".mp4"
 }
 
-// encodeArgs are ffmpeg's arguments to re-encode in into out by plan: the first video stream
-// only (as the old backend's optimizer did, no audio), at its own size and rate, with a keyframe
-// every second and no B-frames.
-func encodeArgs(in, out string, plan encodePlan) []string {
-	gop := strconv.Itoa(plan.gop)
-	args := []string{
-		"-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-		"-i", in, "-map", "0:v:0", "-an",
-	}
-	rate := []string{"-b:v", plan.bitrate, "-maxrate", plan.bitrate, "-bufsize", plan.bitrate}
-	if plan.codec == media.CodecH265 {
-		args = append(args, "-c:v", "libx265", "-preset", "veryfast", "-profile:v", "main",
-			"-pix_fmt", "yuv420p")
-		args = append(args, rate...)
-		args = append(args, "-x265-params",
-			"keyint="+gop+":min-keyint="+gop+":scenecut=0:bframes=0:repeat-headers=1:aud=1:log-level=error",
-			"-tag:v", "hvc1")
-	} else {
-		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "baseline",
-			"-pix_fmt", "yuv420p", "-g", gop, "-keyint_min", gop, "-sc_threshold", "0", "-bf", "0")
-		args = append(args, rate...)
-		args = append(args, "-x264-params", "repeat-headers=1:aud=1")
-	}
-	switch strings.ToLower(filepath.Ext(out)) {
-	case ".mp4", ".m4v", ".mov":
-		args = append(args, "-movflags", "+faststart")
-	}
-	return append(args, "-progress", "pipe:1", "-nostats", out)
-}
-
-// encode re-encodes in into out by plan, handing ffmpeg's progress to moved. When ctx ends,
-// ffmpeg is killed and ctx's error returned.
+// encode re-encodes in into out by plan, under the supervisor, handing ffmpeg's progress to
+// moved. When ctx ends, ffmpeg is stopped and ctx's error returned.
 func (l *Library) encode(ctx context.Context, in, out string, plan encodePlan, moved func(*jobs.FFmpegProgress)) error {
 	if l.ffmpeg == "" {
 		return errors.New("FFmpeg is not installed")
 	}
-	cmd := exec.Command(l.ffmpeg, encodeArgs(in, out, plan)...)
-	procgroup.Own(cmd)
-	output, w, err := os.Pipe()
-	if err != nil {
-		return err
+	sum := sha256.Sum256([]byte(out))
+	spec := supervisor.Spec{
+		Name: fmt.Sprintf("reencode-%x", sum[:8]), Path: l.ffmpeg,
+		Args: plan.encode.Args(in, out, muxers[strings.ToLower(filepath.Ext(out))]),
 	}
-	defer output.Close()
-	cmd.Stdout, cmd.Stderr = w, w
-	err = cmd.Start()
-	w.Close() // ffmpeg holds its own copy
-	if err != nil {
-		return fmt.Errorf("starting FFmpeg: %w", err)
-	}
-	pid := cmd.Process.Pid
-	stop := context.AfterFunc(ctx, func() { _ = procgroup.Signal(pid, syscall.SIGKILL) })
-	// Read until ffmpeg's output ends, then stop the kill before reaping it: until it is
-	// reaped, its pid cannot name another process.
-	followed, readErr := jobs.FollowFFmpegWith(output, plan.duration, moved)
-	stop()
-	waitErr := cmd.Wait()
-	switch {
-	case ctx.Err() != nil:
-		return ctx.Err()
-	case waitErr != nil:
-		detail := waitErr.Error()
-		if lines := followed.Diagnostics(); len(lines) > 0 {
-			detail = lines[len(lines)-1]
+	if err := jobs.RunFFmpeg(ctx, l.start, spec, plan.duration, moved); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		return fmt.Errorf("FFmpeg could not re-encode %s: %s", filepath.Base(in), detail)
+		return fmt.Errorf("FFmpeg could not re-encode %s: %v", filepath.Base(in), err)
 	}
-	return readErr
+	return nil
 }
 
 // KeyframeProber measures the longest time between two keyframes in the first seconds of the

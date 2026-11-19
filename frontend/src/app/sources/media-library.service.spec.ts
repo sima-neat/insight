@@ -180,7 +180,7 @@ describe('MediaLibraryService', () => {
       const failed = library.refresh();
       http
         .expectOne(TREE_URL)
-        .flush(refusal('internal', 'disk gone'), { status: 500, statusText: 'Server Error' });
+        .flush(refusal('internal_error', 'disk gone'), { status: 500, statusText: 'Server Error' });
 
       await expect(failed).rejects.toMatchObject({ status: 500, message: 'disk gone' });
       expect(library.tree()).toEqual([file('a.mp4')]);
@@ -228,7 +228,7 @@ describe('MediaLibraryService', () => {
 
     it("rejects with the server's message when the newest request fails", async () => {
       const info = library.info('a.mp4');
-      infoOf('a.mp4').flush(refusal('internal', 'Probe failed'), {
+      infoOf('a.mp4').flush(refusal('internal_error', 'Probe failed'), {
         status: 500,
         statusText: 'Server Error',
       });

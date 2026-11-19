@@ -129,20 +129,20 @@ describe('PeripheralsService', () => {
     expect(service.snapshot()).toMatchObject({ scan_id: null, items: [] });
 
     const failed = service.load();
-    http.expectOne(loadUrl(1)).flush(failure('internal', 'Insight broke.'), badGateway);
+    http.expectOne(loadUrl(1)).flush(failure('internal_error', 'Insight broke.'), badGateway);
     const problem = await failed.then(
       () => null,
       (error: unknown) => error,
     );
     expect(problem).toBeInstanceOf(BoardProblem);
-    expect((problem as BoardProblem).code).toBe('internal');
+    expect((problem as BoardProblem).code).toBe('internal_error');
     expect(boardReload).not.toHaveBeenCalled();
 
     // A newer read that failed still answered for the older one, which is not applied after it.
     const older2 = service.load();
     const newer2 = service.load();
     const [slow, fast] = http.match(loadUrl(1));
-    fast.flush(failure('internal', 'Insight broke.'), badGateway);
+    fast.flush(failure('internal_error', 'Insight broke.'), badGateway);
     await expect(newer2).rejects.toBeInstanceOf(BoardProblem);
     slow.flush(answer(3));
     await older2;

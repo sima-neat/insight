@@ -496,70 +496,20 @@ type CatalogImportRequest struct {
 
 // Channel defines model for Channel.
 type Channel struct {
-	Channel int `json:"channel"`
-
-	// Errors The latest problems, oldest first, each starting with its time.
-	Errors   []string        `json:"errors"`
-	Metadata ChannelMetadata `json:"metadata"`
-	Video    ChannelVideo    `json:"video"`
-
-	// Viewers Browsers connected to the channel's video.
-	Viewers int `json:"viewers"`
+	Channel int          `json:"channel"`
+	Video   ChannelVideo `json:"video"`
 }
 
 // ChannelList defines model for ChannelList.
 type ChannelList struct {
+	// Channels Every channel, 0 to the count Insight serves less one.
 	Channels []Channel `json:"channels"`
-
-	// Count How many channels Insight serves.
-	Count int `json:"count"`
-}
-
-// ChannelMetadata defines model for ChannelMetadata.
-type ChannelMetadata struct {
-	// Active A message arrived in the last 3 s.
-	Active bool `json:"active"`
-
-	// Invalid Datagrams that were no JSON object.
-	Invalid int        `json:"invalid"`
-	LastAt  *time.Time `json:"last_at,omitempty"`
-
-	// Matched Messages drawn on the frame their timestamp names.
-	Matched           int     `json:"matched"`
-	MessagesPerSecond float64 `json:"messages_per_second"`
-
-	// NoViewer Messages that arrived while no browser watched.
-	NoViewer int     `json:"no_viewer"`
-	Port     int     `json:"port"`
-	Received int     `json:"received"`
-	Sender   *string `json:"sender,omitempty"`
-
-	// Unmatched Timed messages that found no frame within 5 s: a timestamp in another unit or clock, or video that stopped.
-	Unmatched int `json:"unmatched"`
 }
 
 // ChannelVideo defines model for ChannelVideo.
 type ChannelVideo struct {
 	// Active Video arrived in the last 3 s.
-	Active        bool    `json:"active"`
-	BitsPerSecond float64 `json:"bits_per_second"`
-
-	// Codec H264 or H265; absent before any video, and for a payload type Insight does not play.
-	Codec *string `json:"codec,omitempty"`
-
-	// FramesPerSecond Whole pictures sent on to browsers.
-	FramesPerSecond float64    `json:"frames_per_second"`
-	Keyframes       int        `json:"keyframes"`
-	LastAt          *time.Time `json:"last_at,omitempty"`
-	Packets         int        `json:"packets"`
-	PayloadType     int        `json:"payload_type"`
-	Port            int        `json:"port"`
-
-	// Sender The address the last packet came from.
-	Sender *string `json:"sender,omitempty"`
-
-	// UnsupportedPackets Packets of a payload type Insight does not play (RTP/JPEG is planned).
-	UnsupportedPackets int `json:"unsupported_packets"`
+	Active bool `json:"active"`
 }
 
 // DeviceRef defines model for DeviceRef.
@@ -710,11 +660,6 @@ type Job struct {
 // JobState defines model for Job.State.
 type JobState string
 
-// JobList defines model for JobList.
-type JobList struct {
-	Jobs []Job `json:"jobs"`
-}
-
 // JobProgress defines model for JobProgress.
 type JobProgress struct {
 	Detail  string   `json:"detail"`
@@ -766,8 +711,7 @@ type MediaEntry struct {
 	Path string `json:"path"`
 
 	// Probe Null while the file is being probed, and for a folder.
-	Probe   *MediaProbe `json:"probe"`
-	Probing *bool       `json:"probing,omitempty"`
+	Probe *MediaProbe `json:"probe"`
 
 	// Streamable Whether a slot can stream the file: from its probe, else from its extension; for a folder, whether any file below it is.
 	Streamable bool `json:"streamable"`
@@ -796,11 +740,9 @@ type MediaProbe struct {
 	Fps        *float64 `json:"fps,omitempty"`
 
 	// FrameRate The rate as ffprobe writes it (30000/1001).
-	FrameRate   *string        `json:"frame_rate,omitempty"`
-	HasBFrames  *bool          `json:"has_b_frames,omitempty"`
-	Height      *int           `json:"height,omitempty"`
-	Kind        MediaProbeKind `json:"kind"`
-	PixelFormat *string        `json:"pixel_format,omitempty"`
+	FrameRate *string        `json:"frame_rate,omitempty"`
+	Height    *int           `json:"height,omitempty"`
+	Kind      MediaProbeKind `json:"kind"`
 
 	// Problem Why ffprobe could not read the file.
 	Problem    *string `json:"problem,omitempty"`
@@ -1348,9 +1290,6 @@ type GetSentinelCacheParams struct {
 type CompareSentinelRunsParams struct {
 	// Runs 2 to 8 runs' ids or names, comma-separated; the first is the baseline.
 	Runs string `form:"runs" json:"runs"`
-
-	// Raw Add every run's samples.
-	Raw *bool `form:"raw,omitempty" json:"raw,omitempty"`
 }
 
 // StopSentinelTraceParams defines parameters for StopSentinelTrace.
@@ -1644,9 +1583,6 @@ type ServerInterface interface {
 	// GetSentinelHealth Whether Sentinel runs on the board
 	// (GET /api/boards/{id}/sentinel/health)
 	GetSentinelHealth(w http.ResponseWriter, r *http.Request, id BoardID)
-	// GetSentinelMetrics Sentinel's metric definitions
-	// (GET /api/boards/{id}/sentinel/metrics)
-	GetSentinelMetrics(w http.ResponseWriter, r *http.Request, id BoardID)
 	// ListSentinelRuns The runs Sentinel holds
 	// (GET /api/boards/{id}/sentinel/runs)
 	ListSentinelRuns(w http.ResponseWriter, r *http.Request, id BoardID)
@@ -1656,9 +1592,6 @@ type ServerInterface interface {
 	// GetSentinelRun One run in full
 	// (GET /api/boards/{id}/sentinel/runs/{run})
 	GetSentinelRun(w http.ResponseWriter, r *http.Request, id BoardID, run string)
-	// GetSentinelLatestSample Sentinel's newest sample
-	// (GET /api/boards/{id}/sentinel/samples/latest)
-	GetSentinelLatestSample(w http.ResponseWriter, r *http.Request, id BoardID)
 	// StartSentinelTrace Start recording a named trace
 	// (POST /api/boards/{id}/sentinel/traces)
 	StartSentinelTrace(w http.ResponseWriter, r *http.Request, id BoardID)
@@ -1677,7 +1610,7 @@ type ServerInterface interface {
 	// ImportCatalogAsset Download a catalog asset into the library
 	// (POST /api/catalog/imports)
 	ImportCatalogAsset(w http.ResponseWriter, r *http.Request)
-	// ListChannels The Viewer's channels and what arrives on them
+	// ListChannels Which of the Viewer's channels receive video
 	// (GET /api/channels)
 	ListChannels(w http.ResponseWriter, r *http.Request)
 	// OfferChannel Watch a channel over WebRTC
@@ -1689,15 +1622,6 @@ type ServerInterface interface {
 	// GetIngestStats What arrives on each channel, in the old shape
 	// (GET /api/ingest/stats)
 	GetIngestStats(w http.ResponseWriter, r *http.Request, params GetIngestStatsParams)
-	// ListJobs The running and recent jobs
-	// (GET /api/jobs)
-	ListJobs(w http.ResponseWriter, r *http.Request)
-	// CancelJob Cancel a job
-	// (DELETE /api/jobs/{id})
-	CancelJob(w http.ResponseWriter, r *http.Request, id JobID)
-	// GetJob One job
-	// (GET /api/jobs/{id})
-	GetJob(w http.ResponseWriter, r *http.Request, id JobID)
 	// FollowJob A job's changes as Server-Sent Events
 	// (GET /api/jobs/{id}/events)
 	FollowJob(w http.ResponseWriter, r *http.Request, id JobID)
@@ -2312,19 +2236,6 @@ func (siw *ServerInterfaceWrapper) CompareSentinelRuns(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Optional query parameter "raw" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "raw", r.URL.Query(), &params.Raw, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "raw"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "raw", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CompareSentinelRuns(w, r, id, params)
 	}))
@@ -2353,32 +2264,6 @@ func (siw *ServerInterfaceWrapper) GetSentinelHealth(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetSentinelHealth(w, r, id)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetSentinelMetrics operation middleware
-func (siw *ServerInterfaceWrapper) GetSentinelMetrics(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id BoardID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetSentinelMetrics(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2475,32 +2360,6 @@ func (siw *ServerInterfaceWrapper) GetSentinelRun(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetSentinelRun(w, r, id, run)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetSentinelLatestSample operation middleware
-func (siw *ServerInterfaceWrapper) GetSentinelLatestSample(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id BoardID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetSentinelLatestSample(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2749,72 +2608,6 @@ func (siw *ServerInterfaceWrapper) GetIngestStats(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetIngestStats(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListJobs operation middleware
-func (siw *ServerInterfaceWrapper) ListJobs(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListJobs(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// CancelJob operation middleware
-func (siw *ServerInterfaceWrapper) CancelJob(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id JobID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CancelJob(w, r, id)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetJob operation middleware
-func (siw *ServerInterfaceWrapper) GetJob(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id JobID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetJob(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3499,9 +3292,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/media/preview.mjpg", wrapper.PreviewMedia)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/catalog", wrapper.GetCatalog)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/catalog/imports", wrapper.ImportCatalogAsset)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/jobs", wrapper.ListJobs)
-	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/jobs/{id}", wrapper.CancelJob)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/jobs/{id}", wrapper.GetJob)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/jobs/{id}/events", wrapper.FollowJob)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards", wrapper.ListBoards)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards", wrapper.SelectBoard)
@@ -3519,8 +3309,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/microphones/{microphone}/test/stop", wrapper.StopMicrophoneTest)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/microphones/{microphone}/test.wav", wrapper.GetMicrophoneTestAudio)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/health", wrapper.GetSentinelHealth)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/metrics", wrapper.GetSentinelMetrics)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/samples/latest", wrapper.GetSentinelLatestSample)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/cache", wrapper.GetSentinelCache)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/boards/{id}/sentinel/traces/active", wrapper.GetSentinelActiveTrace)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/boards/{id}/sentinel/traces", wrapper.StartSentinelTrace)

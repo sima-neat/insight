@@ -40,25 +40,16 @@ type pendingMessage struct {
 	at  time.Time
 }
 
-// correlationCounts says what became of timed messages.
-type correlationCounts struct {
-	Matched uint64 // drawn on their frame
-	// Unmatched waited the whole retention for a frame (wrong unit or clock, or the video
-	// stopped) or were pushed out by newer ones.
-	Unmatched uint64
-	Pending   uint64
-}
-
 // correlator pairs each timed message with the frame it names, whichever arrives first: a frame
 // is kept for messages still to come, a message waits for its frame. Both sides hold at most
-// correlationCapacity entries for correlationRetention, oldest first.
+// correlationCapacity entries for correlationRetention, oldest first; a message that finds no
+// frame in that time (a timestamp in another unit or clock, or video that stopped) is dropped.
 type correlator struct {
 	mu      sync.Mutex
 	ssrc    uint32
 	hasSSRC bool
 	frames  []frameStamp
 	pending []pendingMessage
-	counts  correlationCounts
 }
 
 // frame records a frame sent with outgoing for source, and returns the messages waiting for it.
@@ -68,7 +59,6 @@ func (c *correlator) frame(ssrc, source, outgoing uint32, now time.Time) []outbo
 	c.prune(now)
 	if c.hasSSRC && ssrc != c.ssrc {
 		// A new sender's timestamps start anywhere: an old entry could match the wrong frame.
-		c.counts.Unmatched += uint64(len(c.pending))
 		c.frames, c.pending = c.frames[:0], c.pending[:0]
 	}
 	c.ssrc, c.hasSSRC = ssrc, true
@@ -87,7 +77,6 @@ func (c *correlator) frame(ssrc, source, outgoing uint32, now time.Time) []outbo
 		kept = append(kept, p)
 	}
 	c.pending = kept
-	c.counts.Matched += uint64(len(ready))
 	return ready
 }
 
@@ -98,24 +87,13 @@ func (c *correlator) message(msg message, now time.Time) (outbound, bool) {
 	defer c.mu.Unlock()
 	c.prune(now)
 	if frame, ok := c.closest(msg.stamp); ok {
-		c.counts.Matched++
 		return outbound{msg: msg, outgoing: frame.outgoing, matched: true}, true
 	}
 	if len(c.pending) == correlationCapacity {
 		c.pending = append(c.pending[:0], c.pending[1:]...)
-		c.counts.Unmatched++
 	}
 	c.pending = append(c.pending, pendingMessage{msg, now})
 	return outbound{}, false
-}
-
-func (c *correlator) snapshot(now time.Time) correlationCounts {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.prune(now)
-	counts := c.counts
-	counts.Pending = uint64(len(c.pending))
-	return counts
 }
 
 // closest is the newest-first nearest frame within the tolerance.
@@ -141,7 +119,6 @@ func (c *correlator) prune(now time.Time) {
 	for first < len(c.pending) && now.Sub(c.pending[first].at) > correlationRetention {
 		first++
 	}
-	c.counts.Unmatched += uint64(first)
 	c.pending = append(c.pending[:0], c.pending[first:]...)
 }
 

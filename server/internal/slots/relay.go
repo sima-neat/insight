@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os/exec"
 
+	"insight/internal/apierr"
 	"insight/internal/media"
 	"insight/internal/mediamtx"
 )
@@ -28,7 +29,7 @@ func RelayCommand(ffmpegPath, key, source string) (*exec.Cmd, bool) {
 // however many browsers watch it; 409 while the slot is not live.
 func (m *Manager) Preview(w http.ResponseWriter, req *http.Request, n int) {
 	if err := m.checkLive(n, false); err != nil {
-		WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	m.opts.Relays.Serve(w, req, previewKey(n), m.opts.RTSPBase+"/"+pathName(n)+"?"+mediamtx.PreviewReaderQuery)
@@ -39,7 +40,7 @@ func (m *Manager) Preview(w http.ResponseWriter, req *http.Request, n int) {
 // no MJPEG stream.
 func (m *Manager) ServeHTTPMJPEG(w http.ResponseWriter, req *http.Request, n int) {
 	if err := m.checkLive(n, true); err != nil {
-		WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	m.opts.Relays.Serve(w, req, mjpegKey(n), m.opts.RTSPBase+"/"+pathName(n))
@@ -58,8 +59,8 @@ func (m *Manager) checkLive(n int, mjpeg bool) error {
 	case !ok || !path.Ready:
 		return newError(http.StatusConflict, CodeNotLive, "src%d is not live.", n)
 	case mjpeg && path.Codec != media.CodecMJPEG:
-		return newError(http.StatusConflict, CodeNotMJPEG, "src%d does not carry MJPEG, so it has no HTTP MJPEG output.", n).
-			withHint("Read it over RTSP.")
+		return withHint(newError(http.StatusConflict, CodeNotMJPEG, "src%d does not carry MJPEG, so it has no HTTP MJPEG output.", n),
+			"Read it over RTSP.")
 	}
 	return nil
 }

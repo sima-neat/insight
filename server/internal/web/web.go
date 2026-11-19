@@ -4,8 +4,9 @@ package web
 import (
 	"encoding/json"
 	"errors"
-	"mime"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"insight/api"
@@ -42,7 +43,13 @@ type Deps struct {
 	Now func() time.Time
 }
 
-// NewHandler routes every request.
+// NewHandler routes every request. A request that changes something is refused when a page of
+// another origin sent it (http.CrossOriginProtection): a visitor's browser must not let another
+// website start, stop, delete or upload anything here. Browsers say where a request comes from
+// (Sec-Fetch-Site, else Origin against the Host they sent, which stays the browser's own through
+// a port map); tools that send neither (curl, scripts) are let through. The public origin a
+// shared proxy serves Insight under is trusted too, for a browser that says only Origin through
+// a proxy that rewrites Host.
 func NewHandler(deps Deps) http.Handler {
 	if deps.Now == nil {
 		deps.Now = time.Now
@@ -66,7 +73,18 @@ func NewHandler(deps Deps) http.Handler {
 		apierr.Write(w, http.StatusNotFound, "not_found", "There is no such API route.", "")
 	}))
 	mux.Handle("/", deps.UI)
-	return mux
+
+	protection := http.NewCrossOriginProtection()
+	if origin := deps.Config.Network.PublicOrigin; origin != "" {
+		if err := protection.AddTrustedOrigin(strings.TrimSuffix(origin, "/")); err != nil {
+			slog.Warn("the public origin cannot be trusted for writes", "origin", origin, "error", err)
+		}
+	}
+	protection.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apierr.Write(w, http.StatusForbidden, "cross_origin", "Insight refuses changes sent by another website.",
+			"Use Insight's own page.")
+	}))
+	return protection.Handler(mux)
 }
 
 // noStore keeps browsers and proxies from caching API answers, which describe the moment.
@@ -115,24 +133,9 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // maxBodyBytes bounds a JSON request body; the API's are a few hundred bytes.
 const maxBodyBytes = 1 << 20
 
-// requireJSON refuses a body that is not sent as application/json: a cross-site page can post a
-// form or text without a CORS preflight, which must not change anything through a visitor's
-// browser. what names the body in the message ("The offer").
-func requireJSON(w http.ResponseWriter, r *http.Request, what string) bool {
-	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
-		apierr.Write(w, http.StatusUnsupportedMediaType, "json_only", what+" must be sent as application/json.", "")
-		return false
-	}
-	return true
-}
-
-// decodeJSON reads a JSON request body into dst, or answers why it cannot: 415 when it is not
-// sent as JSON, 413 when it is too large, 400 when it is not the object the route takes (a
-// field it does not know included).
+// decodeJSON reads a JSON request body into dst, or answers why it cannot: 413 when it is too
+// large, 400 when it is not the object the route takes (a field it does not know included).
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	if !requireJSON(w, r, "The request") {
-		return false
-	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {

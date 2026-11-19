@@ -35,16 +35,6 @@ func ReadHealth(ctx context.Context, b *board.Board) (Health, error) {
 	return health, nil
 }
 
-// Metrics are Sentinel's metric definitions (/v1/metrics).
-func Metrics(ctx context.Context, b *board.Board) (Body, error) {
-	return Call(ctx, b, http.MethodGet, "/v1/metrics", nil)
-}
-
-// Latest is Sentinel's newest sample (/v1/samples/latest).
-func Latest(ctx context.Context, b *board.Board) (Body, error) {
-	return Call(ctx, b, http.MethodGet, "/v1/samples/latest", nil)
-}
-
 // ActiveTrace is the trace being recorded and its summary so far, or nulls (/v1/traces/active).
 func ActiveTrace(ctx context.Context, b *board.Board) (Body, error) {
 	return Call(ctx, b, http.MethodGet, "/v1/traces/active", nil)
@@ -63,9 +53,9 @@ func Run(ctx context.Context, b *board.Board, run string) (Body, error) {
 // MaxCompared is how many runs one comparison takes.
 const MaxCompared = 8
 
-// Compare compares runs (ids or names), the first as the baseline; raw adds every run's samples
+// Compare compares runs (ids or names), the first as the baseline, with every run's samples
 // (/v1/compare).
-func Compare(ctx context.Context, b *board.Board, runs []string, raw bool) (Body, error) {
+func Compare(ctx context.Context, b *board.Board, runs []string) (Body, error) {
 	if len(runs) < 2 || len(runs) > MaxCompared {
 		return nil, apierr.Errorf(http.StatusBadRequest, CodeInvalidRequest,
 			"Pass runs=<baseline>,<other>; the first run is the baseline.",
@@ -79,11 +69,7 @@ func Compare(ctx context.Context, b *board.Board, runs []string, raw bool) (Body
 		}
 		escaped[i] = url.QueryEscape(run)
 	}
-	path := "/v1/compare?runs=" + strings.Join(escaped, ",")
-	if raw {
-		path += "&raw=1"
-	}
-	return Call(ctx, b, http.MethodGet, path, nil)
+	return Call(ctx, b, http.MethodGet, "/v1/compare?runs="+strings.Join(escaped, ",")+"&raw=1", nil)
 }
 
 // ReadCache is Sentinel's cache (/v1/cache): its metric definitions, newest sample and recent

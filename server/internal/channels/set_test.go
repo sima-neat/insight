@@ -227,7 +227,7 @@ func TestAViewerGetsTheVideoAndTheMetadataMatchedToItsFrames(t *testing.T) {
 	})
 
 	state := s.States(time.Now())[0]
-	if !state.Video.Active || state.Video.Codec != "H264" || state.Viewers != 1 || state.Metadata.Matched == 0 || state.Video.Keyframes == 0 {
+	if !state.Video.Active || state.Video.Codec != "H264" || state.Viewers != 1 || state.Metadata.Forwarded == 0 || state.Video.Keyframes == 0 {
 		t.Fatalf("state %+v", state)
 	}
 }
@@ -287,8 +287,14 @@ func TestMetadataWithoutAViewerIsCountedNotKept(t *testing.T) {
 	}
 	waitFor(t, "two messages counted", func() bool { return s.States(time.Now())[0].Metadata.Received == 2 })
 	state := s.States(time.Now())[0].Metadata
-	if state.NoViewer != 1 || state.Invalid != 1 || state.Pending != 0 || !state.Active {
+	if state.Invalid != 1 || state.Forwarded != 0 || !state.Active {
 		t.Fatalf("%+v", state)
+	}
+	corr := &s.channels[0].corr
+	corr.mu.Lock()
+	defer corr.mu.Unlock()
+	if len(corr.pending) != 0 {
+		t.Fatalf("%d messages wait for a frame no browser watches", len(corr.pending))
 	}
 }
 

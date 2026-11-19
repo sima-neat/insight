@@ -27,6 +27,7 @@ import (
 	"insight/internal/jobs"
 	"insight/internal/media"
 	"insight/internal/relay"
+	"insight/internal/supervisor"
 )
 
 // FileUser is what the library needs of the slots: which slots use a library file, and how to
@@ -74,6 +75,8 @@ type Options struct {
 	Cache *media.Cache
 	// FFmpeg and FFprobe are the tools' paths, "" when they are not installed.
 	FFmpeg, FFprobe string
+	// Start runs the re-encodes (Supervisor.Starter).
+	Start supervisor.Starter
 	// Probe probes an upload before it joins the library; nil probes with FFprobe.
 	Probe media.Prober
 	// Keyframes measures how far apart an upload's keyframes are; nil measures with FFprobe.
@@ -103,6 +106,7 @@ type Library struct {
 	root      string
 	cache     *media.Cache
 	ffmpeg    string
+	start     supervisor.Starter
 	probe     media.Prober
 	keyframes KeyframeProber
 	jobs      *jobs.Runner
@@ -127,13 +131,14 @@ func New(opts Options) (*Library, error) {
 	switch {
 	case opts.Root == "":
 		return nil, errors.New("library: Root is required")
-	case opts.Cache == nil || opts.Jobs == nil || opts.Files == nil:
-		return nil, errors.New("library: Cache, Jobs and Files are required")
+	case opts.Cache == nil || opts.Jobs == nil || opts.Files == nil || opts.Start == nil:
+		return nil, errors.New("library: Cache, Jobs, Files and Start are required")
 	}
 	l := &Library{
 		root:      filepath.Clean(opts.Root),
 		cache:     opts.Cache,
 		ffmpeg:    opts.FFmpeg,
+		start:     opts.Start,
 		probe:     opts.Probe,
 		keyframes: opts.Keyframes,
 		jobs:      opts.Jobs,

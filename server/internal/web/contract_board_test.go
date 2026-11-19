@@ -32,10 +32,6 @@ const (
 var sentinelAnswers = map[string]string{
 	"GET /v1/health": `{"schema":1,"version":"main:80ab7de4da31","cached_samples":2,"metric_count":1,"errors":[],` +
 		`"latest_sample_at":"2026-09-22T20:55:43Z","updated_at":"2026-09-22T20:55:43Z","active_trace":null}`,
-	"GET /v1/metrics": `{"schema":1,"metrics":[{"key":"cpu_usage_pct","label":"CPU usage","short":"CPU%","unit":"%",` +
-		`"group":"CPU","description":"CPU use.","warn":80.0,"critical":95.0}]}`,
-	"GET /v1/samples/latest": `{"schema":1,"version":"v","updated_at":"2026-09-22T20:55:43Z",` +
-		`"sample":{"timestamp":"2026-09-22T20:55:43Z","values":{"cpu_usage_pct":12.5}}}`,
 	"GET /v1/cache": `{"schema":1,"version":"v","metrics":[],"latest":null,"errors":[],"samples":[` +
 		`{"timestamp":"2026-09-22T20:55:41Z","values":{"cpu_usage_pct":10}},{"timestamp":"2026-09-22T20:55:43Z","values":{"cpu_usage_pct":12.5}}]}`,
 	"GET /v1/traces/active":                `{"schema":1,"trace":null,"summary":null}`,
@@ -121,8 +117,6 @@ func (c *contract) boardRoutes() {
 	if health := c.ok(c.get(s + "/health")); !strings.Contains(health, `"started_at":"`) || strings.Contains(health, `"schema"`) {
 		t.Errorf("the health: %s", health)
 	}
-	c.ok(c.get(s + "/metrics"))
-	c.ok(c.get(s + "/samples/latest"))
 	if cache := c.ok(c.get(s + "/cache?after=2026-09-22T20:55:41Z")); !strings.Contains(cache, `"full":false`) {
 		t.Errorf("the cache: %s", cache)
 	}
@@ -133,7 +127,7 @@ func (c *contract) boardRoutes() {
 	c.ok(c.get(s + "/runs"))
 	c.ok(c.get(s + "/runs/" + contractRun))
 	c.refused(c.get(s+"/runs/nope"), 404, "not_found")
-	c.ok(c.get(s + "/compare?runs=a,b&raw=true"))
+	c.ok(c.get(s + "/compare?runs=a,b"))
 	c.refused(c.get(s+"/compare?runs=a"), 400, "invalid_request")
 	c.refused(c.send(http.MethodDelete, s+"/runs/"+url.PathEscape("$(reboot)"), ""), 400, "invalid_request")
 	if deleted := c.ok(c.send(http.MethodDelete, s+"/runs/"+contractRun, "")); !strings.Contains(deleted, `"runs":{"runs":[]}`) {

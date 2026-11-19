@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"insight/internal/apierr"
 	"insight/internal/media"
 	"insight/internal/mediamtx"
 )
@@ -112,16 +113,16 @@ func (m *Manager) resolveFile(file string) (string, error) {
 	return abs, nil
 }
 
-func notStreamable(file string, info media.Info) *Error {
+func notStreamable(file string, info media.Info) *apierr.Error {
 	what := "it has no video"
 	switch {
 	case info.Problem != "":
 		what = info.Problem
 	case info.Codec != "":
-		what = "its codec is " + codecLabel(info.Codec)
+		what = "its codec is " + media.CodecName(info.Codec)
 	}
-	return newError(http.StatusBadRequest, CodeNotStreamable,
-		"%s cannot be streamed: %s.", file, what).withHint("A source streams H.264, H.265 or MJPEG.")
+	return withHint(newError(http.StatusBadRequest, CodeNotStreamable,
+		"%s cannot be streamed: %s.", file, what), "A source streams H.264, H.265 or MJPEG.")
 }
 
 // AssignPull makes slot n pull a camera: MediaMTX pulls url (rtsp:// or rtsps://) and forwards
@@ -371,7 +372,7 @@ func (m *Manager) StartFirst(count int) (StartResult, error) {
 }
 
 func failureOf(n int, err error) SlotFailure {
-	var e *Error
+	var e *apierr.Error
 	if errors.As(err, &e) {
 		return SlotFailure{N: n, Code: e.Code, Error: e.Message}
 	}

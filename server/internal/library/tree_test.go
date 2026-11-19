@@ -23,8 +23,8 @@ func find(tree Entry, rel string) (Entry, bool) {
 	return Entry{}, false
 }
 
-// probedTree waits until no file of the tree is being probed.
-func probedTree(t *testing.T, l *Library) Entry {
+// probedTree waits until each of the files rels has its probe.
+func probedTree(t *testing.T, l *Library, rels ...string) Entry {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -32,7 +32,13 @@ func probedTree(t *testing.T, l *Library) Entry {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !probing(tree) {
+		probed := true
+		for _, rel := range rels {
+			if e, _ := find(tree, rel); e.Probe == nil {
+				probed = false
+			}
+		}
+		if probed {
 			return tree
 		}
 		if time.Now().After(deadline) {
@@ -40,18 +46,6 @@ func probedTree(t *testing.T, l *Library) Entry {
 		}
 		time.Sleep(time.Millisecond)
 	}
-}
-
-func probing(e Entry) bool {
-	if e.Probing {
-		return true
-	}
-	for _, child := range e.Children {
-		if probing(child) {
-			return true
-		}
-	}
-	return false
 }
 
 func TestTreeTakesStreamableFromTheProbe(t *testing.T) {
@@ -69,11 +63,11 @@ func TestTreeTakesStreamableFromTheProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Before its probe a file is judged by its extension.
-	if e, _ := find(first, "sub/vp9.webm"); !e.Probing || e.Probe != nil || !e.Streamable {
+	if e, _ := find(first, "sub/vp9.webm"); e.Probe != nil || !e.Streamable {
 		t.Fatalf("vp9.webm before its probe: %+v", e)
 	}
 
-	tree := probedTree(t, f.lib)
+	tree := probedTree(t, f.lib, "clip.mp4", "sub/vp9.webm", "raw.h264", "sub/deep.mp4")
 	for rel, want := range map[string]bool{
 		"clip.mp4": true, "sub/vp9.webm": false, "raw.h264": true, "sub/deep.mp4": true,
 	} {
@@ -84,7 +78,7 @@ func TestTreeTakesStreamableFromTheProbe(t *testing.T) {
 	}
 	// A link that leads out of the library, or nowhere, is never probed.
 	for _, rel := range []string{"link-out.mp4", "dangling.mp4"} {
-		if e, _ := find(tree, rel); e.Probe != nil || e.Probing || e.Streamable {
+		if e, _ := find(tree, rel); e.Probe != nil || e.Streamable {
 			t.Errorf("%s: %+v", rel, e)
 		}
 	}
@@ -94,7 +88,7 @@ func TestTreeTakesStreamableFromTheProbe(t *testing.T) {
 	}
 	f.probes.set("link-in.bin", h264()) // ffprobe follows the link; the fake goes by name
 	f.lib.changed()
-	tree = probedTree(t, f.lib)
+	tree = probedTree(t, f.lib, "link-in.bin")
 	if e, _ := find(tree, "link-in.bin"); e.Probe == nil || !e.Streamable {
 		t.Errorf("link-in.bin: %+v", e)
 	}
@@ -170,7 +164,7 @@ func TestStreamableFilesAreInPathOrder(t *testing.T) {
 		f.probes.set(name, h264())
 	}
 	f.probes.set("vp9.webm", media.Info{Kind: media.KindVideo, Codec: "vp9", CodecName: "vp9"})
-	probedTree(t, f.lib)
+	probedTree(t, f.lib, "b.mp4", "a/z.mp4", "a/notes.txt", "a/vp9.webm", "A.mp4")
 
 	paths, err := f.lib.StreamableFiles()
 	if err != nil {

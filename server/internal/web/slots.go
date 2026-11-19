@@ -7,7 +7,6 @@ import (
 
 	"insight/api"
 	"insight/internal/apierr"
-	"insight/internal/library"
 	"insight/internal/slots"
 )
 
@@ -63,12 +62,12 @@ func (h *handlers) TakeOverSlot(w http.ResponseWriter, r *http.Request, n api.Sl
 // answerSlot answers an operation on slot n: its error, or the slot as it stands after it.
 func (h *handlers) answerSlot(w http.ResponseWriter, r *http.Request, n int, err error) {
 	if err != nil {
-		slots.WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	slot, err := h.deps.Slots.Slot(n, r.Host)
 	if err != nil {
-		slots.WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, slot)
@@ -98,7 +97,7 @@ func (h *handlers) StartSlots(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.deps.Slots.StartFirst(body.Count)
 	if err != nil {
-		slots.WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -115,7 +114,7 @@ func (h *handlers) ResetSlots(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) AutoAssignSlots(w http.ResponseWriter, r *http.Request) {
 	files, err := h.deps.Library.StreamableFiles()
 	if err != nil {
-		library.WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, h.deps.Slots.AutoAssign(files))
@@ -124,7 +123,7 @@ func (h *handlers) AutoAssignSlots(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) GetRenditionUsage(w http.ResponseWriter, r *http.Request) {
 	usage, err := h.deps.Slots.RenditionUsage()
 	if err != nil {
-		slots.WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, usage)
@@ -133,7 +132,7 @@ func (h *handlers) GetRenditionUsage(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) ClearRenditions(w http.ResponseWriter, r *http.Request) {
 	cleared, err := h.deps.Slots.ClearRenditions()
 	if err != nil {
-		slots.WriteError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, cleared)

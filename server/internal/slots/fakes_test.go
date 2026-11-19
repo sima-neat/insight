@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"insight/internal/apierr"
 	"insight/internal/jobs"
 	"insight/internal/media"
 	"insight/internal/mediamtx"
@@ -212,7 +213,7 @@ type fakeStarter struct {
 	err     error
 }
 
-func (f *fakeStarter) start(spec supervisor.Spec) (Process, error) {
+func (f *fakeStarter) start(spec supervisor.Spec) (supervisor.Child, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
@@ -269,6 +270,16 @@ func (f *fakeRelay) servedAll() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.served...)
+}
+
+// jobSnapshot is the job with this ID as it is now.
+func jobSnapshot(r *jobs.Runner, id string) (jobs.Snapshot, bool) {
+	events, unsubscribe, ok := r.Subscribe(id)
+	if !ok {
+		return jobs.Snapshot{}, false
+	}
+	defer unsubscribe()
+	return <-events, true
 }
 
 // fakeEncoder writes each encode's output when the test lets it, or fails it.
@@ -484,10 +495,10 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// wantCode checks err is an *Error with code.
+// wantCode checks err is an *apierr.Error with code.
 func wantCode(t *testing.T, err error, code string) {
 	t.Helper()
-	var e *Error
+	var e *apierr.Error
 	if !errors.As(err, &e) || e.Code != code {
 		t.Fatalf("got %v, want an error %s", err, code)
 	}

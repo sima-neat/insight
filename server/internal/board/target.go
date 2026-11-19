@@ -88,16 +88,13 @@ func SSHTarget(host string, port int, user string, source Source) (Target, error
 		user = DefaultUser
 	}
 	if !validHost(host) {
-		return Target{}, &Error{Code: CodeInvalidRequest,
-			Message: "Enter the board's IP address or host name.", Hint: "For example 192.168.2.2"}
+		return Target{}, boardError(CodeInvalidRequest, "Enter the board's IP address or host name.", "For example 192.168.2.2", nil)
 	}
 	if port < 1 || port > 65535 {
-		return Target{}, &Error{Code: CodeInvalidRequest,
-			Message: "The SSH port must be between 1 and 65535.", Hint: "DevKits use port 22."}
+		return Target{}, boardError(CodeInvalidRequest, "The SSH port must be between 1 and 65535.", "DevKits use port 22.", nil)
 	}
 	if !userPattern.MatchString(user) {
-		return Target{}, &Error{Code: CodeInvalidRequest,
-			Message: "Enter a valid SSH user name.", Hint: "DevKits use the 'sima' account."}
+		return Target{}, boardError(CodeInvalidRequest, "Enter a valid SSH user name.", "DevKits use the 'sima' account.", nil)
 	}
 	return Target{Mode: ModeSSH, Host: host, Port: port, User: user, Source: source}, nil
 }

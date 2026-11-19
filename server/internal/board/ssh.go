@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"insight/api"
+	"insight/internal/apierr"
 )
 
 const (
@@ -72,10 +75,8 @@ func (s *sshTransport) open(ctx context.Context, c *ssh.Client, command string) 
 		return nil, err
 	}
 	p := &sshProcess{session: session, host: s.target.Host}
-	if p.in, err = session.StdinPipe(); err == nil {
-		if p.out, err = session.StdoutPipe(); err == nil {
-			p.errs, err = session.StderrPipe()
-		}
+	if p.out, err = session.StdoutPipe(); err == nil {
+		p.errs, err = session.StderrPipe()
 	}
 	if err == nil {
 		// Start waits for the board's reply; closing the session ends that wait.
@@ -123,9 +124,8 @@ func (s *sshTransport) use(ctx context.Context, f func(*ssh.Client) error) error
 			return err
 		}
 		if alive(ctx, c) {
-			return &Error{Code: CodeCommandFailed, Err: err,
-				Message: fmt.Sprintf("%s refused to run the command over SSH.", s.target.Host),
-				Hint:    fmt.Sprintf("Check that `ssh -p %d %s true` runs a command on the board.", s.target.Port, s.login())}
+			return boardError(CodeCommandFailed, fmt.Sprintf("%s refused to run the command over SSH.", s.target.Host),
+				fmt.Sprintf("Check that `ssh -p %d %s true` runs a command on the board.", s.target.Port, s.login()), err)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -262,7 +262,7 @@ type handshake struct {
 	mu        sync.Mutex
 	presented ssh.PublicKey
 	accepted  bool
-	change    *HostKeyChange
+	change    *api.HostKeyChange
 }
 
 func (s *sshTransport) connect(ctx context.Context) (*ssh.Client, ssh.PublicKey, error) {
@@ -324,13 +324,12 @@ func (s *sshTransport) connect(ctx context.Context) (*ssh.Client, ssh.PublicKey,
 		s.mu.Unlock()
 		switch {
 		case seen.change != nil:
-			return nil, nil, &Error{
-				Code:    CodeHostKeyChanged,
-				Message: fmt.Sprintf("%s presented a different SSH host key than the one Insight trusted.", s.target.Host),
-				Hint: "This is expected after the board is reflashed. If you reflashed it, trust the new key; " +
-					"otherwise check that the address still points to your board.",
-				HostKey: seen.change,
-			}
+			changed := boardError(CodeHostKeyChanged,
+				fmt.Sprintf("%s presented a different SSH host key than the one Insight trusted.", s.target.Host),
+				"This is expected after the board is reflashed. If you reflashed it, trust the new key; "+
+					"otherwise check that the address still points to your board.", nil)
+			changed.HostKey = seen.change
+			return nil, nil, changed
 		case seen.accepted && strings.Contains(err.Error(), "unable to authenticate"):
 			return nil, nil, s.authFailed(err)
 		default:
@@ -351,9 +350,8 @@ func (s *sshTransport) connectFailed(ctx context.Context, err error) error {
 	var dns *net.DNSError
 	switch {
 	case errors.As(err, &dns):
-		return &Error{Code: CodeUnreachable,
-			Message: fmt.Sprintf("The host name %s could not be resolved.", s.target.Host),
-			Hint:    "Use the board's IP address, or check DNS on this machine.", Err: err}
+		return boardError(CodeUnreachable, fmt.Sprintf("The host name %s could not be resolved.", s.target.Host),
+			"Use the board's IP address, or check DNS on this machine.", err)
 	case errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, net.ErrClosed):
 		return s.unreachable(fmt.Sprintf("%s did not answer on port %d within %s.",
 			s.target.Host, s.target.Port, connectTimeout), err)
@@ -362,29 +360,26 @@ func (s *sshTransport) connectFailed(ctx context.Context, err error) error {
 	}
 }
 
-func (s *sshTransport) unreachable(message string, err error) *Error {
-	return &Error{Code: CodeUnreachable, Message: message, Err: err,
-		Hint: fmt.Sprintf("Check that the board is powered on and on the network, and that `ssh -p %d %s` works from this machine.",
-			s.target.Port, s.login())}
+func (s *sshTransport) unreachable(message string, err error) *apierr.Error {
+	return boardError(CodeUnreachable, message,
+		fmt.Sprintf("Check that the board is powered on and on the network, and that `ssh -p %d %s` works from this machine.",
+			s.target.Port, s.login()), err)
 }
 
-func (s *sshTransport) authFailed(err error) *Error {
+func (s *sshTransport) authFailed(err error) *apierr.Error {
 	account := localAccount()
 	command := fmt.Sprintf("ssh-copy-id -p %d %s", s.target.Port, s.login())
 	if account == "root" {
 		command = "sudo -H " + command
 	}
-	return &Error{
-		Code:    CodeAuthFailed,
-		Message: fmt.Sprintf("SSH key authentication as %s on %s failed.", s.target.User, s.target.Host),
-		Hint: fmt.Sprintf("Insight signs in with the SSH keys of the '%s' account on this machine. "+
-			"Authorize one on the board, then retry: %s", account, command),
-		Command: command,
-		Err:     err,
-	}
+	failed := boardError(CodeAuthFailed, fmt.Sprintf("SSH key authentication as %s on %s failed.", s.target.User, s.target.Host),
+		fmt.Sprintf("Insight signs in with the SSH keys of the '%s' account on this machine. "+
+			"Authorize one on the board, then retry: %s", account, command), err)
+	failed.Command = command
+	return failed
 }
 
-func (s *sshTransport) noKey() *Error {
+func (s *sshTransport) noKey() *apierr.Error {
 	account := localAccount()
 	sudo := ""
 	if account == "root" {
@@ -393,14 +388,12 @@ func (s *sshTransport) noKey() *Error {
 	key := shellQuote(filepath.Join(s.sshDir, "id_ed25519"))
 	command := fmt.Sprintf(`%sssh-keygen -t ed25519 -N "" -f %s && %sssh-copy-id -p %d %s`,
 		sudo, key, sudo, s.target.Port, s.login())
-	return &Error{
-		Code: CodeAuthFailed,
-		Message: fmt.Sprintf("The '%s' account on this machine has no SSH key to sign in to %s with.",
-			account, s.target.Host),
-		Hint: fmt.Sprintf("Insight signs in with the SSH keys of the '%s' account, and it has none. "+
-			"Create one and authorize it on the board, then retry: %s", account, command),
-		Command: command,
-	}
+	missing := boardError(CodeAuthFailed,
+		fmt.Sprintf("The '%s' account on this machine has no SSH key to sign in to %s with.", account, s.target.Host),
+		fmt.Sprintf("Insight signs in with the SSH keys of the '%s' account, and it has none. "+
+			"Create one and authorize it on the board, then retry: %s", account, command), nil)
+	missing.Command = command
+	return missing
 }
 
 // login is user@host as a shell command takes it.
@@ -448,15 +441,13 @@ func loadSigners(dir string) []ssh.Signer {
 type sshProcess struct {
 	session *ssh.Session
 	host    string
-	in      io.WriteCloser
 	out     io.Reader
 	errs    io.Reader
 	once    sync.Once
 }
 
-func (p *sshProcess) stdin() io.WriteCloser { return p.in }
-func (p *sshProcess) stdout() io.Reader     { return p.out }
-func (p *sshProcess) stderr() io.Reader     { return p.errs }
+func (p *sshProcess) stdout() io.Reader { return p.out }
+func (p *sshProcess) stderr() io.Reader { return p.errs }
 
 func (p *sshProcess) wait() (int, error) {
 	err := p.session.Wait()
@@ -467,9 +458,8 @@ func (p *sshProcess) wait() (int, error) {
 	case errors.As(err, &exit):
 		return exit.ExitStatus(), nil
 	default:
-		return 0, &Error{Code: CodeUnreachable,
-			Message: fmt.Sprintf("The SSH session to %s ended before the command finished.", p.host),
-			Hint:    "Check that the board is still powered on and on the network, then retry.", Err: err}
+		return 0, boardError(CodeUnreachable, fmt.Sprintf("The SSH session to %s ended before the command finished.", p.host),
+			"Check that the board is still powered on and on the network, then retry.", err)
 	}
 }
 

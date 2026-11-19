@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// Carried over from vf's tests (webrtc/metadata_sync_test.go), with the contract's open points 3
-// and 7 (whole-number timestamps, a producer's "_insight") added.
+// Carried over from vf's tests (webrtc/metadata_sync_test.go), with whole-number timestamps and a
+// producer's own "_insight" added.
 
 func timedMessage(t *testing.T, ms int64) message {
 	t.Helper()
@@ -60,8 +60,8 @@ func TestAMessageWaitsForItsFrame(t *testing.T) {
 	if len(ready) != 1 || outgoingOf(t, ready[0]) != 8765 {
 		t.Fatalf("released %d", len(ready))
 	}
-	if got := c.snapshot(now0.Add(time.Millisecond)); got.Matched != 1 || got.Pending != 0 {
-		t.Fatalf("%+v", got)
+	if len(c.pending) != 0 {
+		t.Fatalf("%d messages still wait", len(c.pending))
 	}
 }
 
@@ -74,14 +74,14 @@ func TestMatchingCrossesTheRTPWrap(t *testing.T) {
 	}
 }
 
-func TestAMessageThatWaitedTooLongIsUnmatched(t *testing.T) {
+func TestAMessageThatWaitedTooLongIsDropped(t *testing.T) {
 	var c correlator
 	c.message(timedMessage(t, 2000), now0)
 	if ready := c.frame(7, 2000*90, 8765, now0.Add(6*time.Second)); len(ready) != 0 {
 		t.Fatal("an expired message was released")
 	}
-	if got := c.snapshot(now0.Add(6 * time.Second)); got.Unmatched != 1 || got.Matched != 0 {
-		t.Fatalf("%+v", got)
+	if len(c.pending) != 0 {
+		t.Fatalf("%d messages still wait", len(c.pending))
 	}
 }
 
@@ -104,11 +104,11 @@ func TestANewSenderClearsBothSides(t *testing.T) {
 	c.frame(7, 1000*90, 1, now0)
 	c.message(timedMessage(t, 5000), now0)
 	c.frame(8, 0, 2, now0) // another SSRC
+	if len(c.pending) != 0 {
+		t.Fatalf("%d messages of the old sender still wait", len(c.pending))
+	}
 	if _, ok := c.message(timedMessage(t, 1000), now0); ok {
 		t.Fatal("the old sender's frame matched")
-	}
-	if got := c.snapshot(now0); got.Unmatched != 1 {
-		t.Fatalf("%+v", got)
 	}
 }
 
@@ -117,8 +117,8 @@ func TestBothSidesAreBounded(t *testing.T) {
 	for i := range correlationCapacity + 10 {
 		c.message(timedMessage(t, int64(i)), now0)
 	}
-	if got := c.snapshot(now0); got.Pending != correlationCapacity || got.Unmatched != 10 {
-		t.Fatalf("%+v", got)
+	if len(c.pending) != correlationCapacity || c.pending[0].msg.stamp != 10*90 {
+		t.Fatalf("%d messages wait, the oldest stamped %d", len(c.pending), c.pending[0].msg.stamp)
 	}
 	for i := range correlationCapacity + 10 {
 		c.frame(7, uint32(1_000_000+i*3000), uint32(i), now0)

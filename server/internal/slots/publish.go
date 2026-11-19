@@ -1,12 +1,12 @@
 package slots
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"insight/internal/media"
 )
@@ -66,9 +66,10 @@ func relayArgs(key, source string) (args []string, ok bool) {
 
 // preloadEnv returns Insight's environment with the TCP_NODELAY shim preloaded, which
 // ffmpeg's RTSP muxer needs to send each picture at once instead of waiting for Nagle's
-// algorithm. Without a shim (a platform without one, a source checkout) it returns nil, the
-// inherited environment.
-func preloadEnv(shim string, aliases *shimAliases) []string {
+// algorithm. Without a shim (a platform without one, a source checkout), or with one whose path
+// LD_PRELOAD cannot take (a space or colon separates its entries, a "$" starts one of the
+// loader's own variables), it returns nil, the inherited environment.
+func preloadEnv(shim string) []string {
 	if shim == "" {
 		return nil
 	}
@@ -76,7 +77,10 @@ func preloadEnv(shim string, aliases *shimAliases) []string {
 		slog.Warn("the TCP_NODELAY shim is missing; RTSP publishers run with Nagle's algorithm", "shim", shim)
 		return nil
 	}
-	path, err := aliases.loaderSafe(shim)
+	path, err := filepath.Abs(shim)
+	if err == nil && strings.ContainsAny(path, " \t\n:$") {
+		err = errors.New("LD_PRELOAD cannot name a path with a space, a colon or a $")
+	}
 	if err != nil {
 		slog.Warn("the TCP_NODELAY shim cannot be preloaded; RTSP publishers run with Nagle's algorithm",
 			"shim", shim, "error", err)
@@ -94,56 +98,6 @@ func preloadEnv(shim string, aliases *shimAliases) []string {
 		env = append(env, entry)
 	}
 	return append(env, "LD_PRELOAD="+preload)
-}
-
-// shimAliases makes a loader-safe name for a shim whose path LD_PRELOAD cannot take as it is
-// (a space or colon separates entries, and a "$" starts one of the loader's own variables): a
-// link to it in a private folder, made once and removed by remove.
-type shimAliases struct {
-	mu  sync.Mutex
-	dir string // the folder this made, "" before
-}
-
-func loaderUnsafe(path string) bool { return strings.ContainsAny(path, " \t\n:$") }
-
-func (a *shimAliases) loaderSafe(shim string) (string, error) {
-	shim, err := filepath.Abs(shim)
-	if err != nil {
-		return "", err
-	}
-	if !loaderUnsafe(shim) {
-		return shim, nil
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.dir == "" {
-		root := os.TempDir()
-		if loaderUnsafe(root) {
-			root = "/tmp"
-		}
-		dir, err := os.MkdirTemp(root, "neat-insight-preload-")
-		if err != nil {
-			return "", err
-		}
-		if err := os.Symlink(shim, filepath.Join(dir, "ffmpeg_nodelay.so")); err != nil {
-			_ = os.Remove(dir) // the empty folder this call made
-			return "", err
-		}
-		a.dir = dir
-	}
-	return filepath.Join(a.dir, "ffmpeg_nodelay.so"), nil
-}
-
-// remove deletes the link and the folder loaderSafe made, if it made them.
-func (a *shimAliases) remove() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.dir == "" {
-		return
-	}
-	_ = os.Remove(filepath.Join(a.dir, "ffmpeg_nodelay.so"))
-	_ = os.Remove(a.dir)
-	a.dir = ""
 }
 
 // pathName is slot n's MediaMTX path, srcN.

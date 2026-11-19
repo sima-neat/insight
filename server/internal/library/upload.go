@@ -194,12 +194,7 @@ func (l *Library) uploadFile(ctx context.Context, up received, stage string) (Up
 		out := filepath.Join(stage, "encoded", name)
 		err := os.Mkdir(filepath.Dir(out), 0o755)
 		if err == nil {
-			err = l.encode(ctx, up.staged, out, plan, func(f *jobs.FFmpegProgress) {
-				if percent, ok := f.Percent(); ok {
-					p.SetPercent(percent)
-				}
-				p.SetDetail(f.Detail())
-			})
+			err = l.encode(ctx, up.staged, out, plan, p.Follow)
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err() // cancelled: nothing is saved

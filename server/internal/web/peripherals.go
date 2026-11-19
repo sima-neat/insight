@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"insight/api"
+	"insight/internal/apierr"
 	"insight/internal/peripherals"
 )
 
@@ -77,9 +78,9 @@ func (h *handlers) GetMicrophoneTest(w http.ResponseWriter, r *http.Request, id 
 }
 
 func (h *handlers) StartMicrophoneTest(w http.ResponseWriter, r *http.Request, id api.BoardID, microphone api.MicrophoneID) {
-	// The body is optional; one that is sent must be JSON.
+	// The body is optional.
 	var request api.MicTestRequest
-	if r.ContentLength != 0 || r.Header.Get("Content-Type") != "" {
+	if r.ContentLength != 0 {
 		if !decodeJSON(w, r, &request) {
 			return
 		}
@@ -112,7 +113,7 @@ func (h *handlers) GetMicrophoneTestAudio(w http.ResponseWriter, r *http.Request
 // respond answers with an operation's result: its error, or body with status.
 func respond(w http.ResponseWriter, status int, body any, err error) {
 	if err != nil {
-		writeError(w, err)
+		apierr.WriteError(w, err)
 		return
 	}
 	writeJSON(w, status, body)

@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"insight/internal/apierr"
 )
 
 // SentinelSocket is where Sentinel's API listens on a board.
@@ -72,7 +74,7 @@ type Status struct {
 	// CheckedAt is when it was found; zero while StateUnknown.
 	CheckedAt time.Time
 	// Err is the failure while StateError.
-	Err *Error
+	Err *apierr.Error
 	// Identity is the last identity read, kept through later failures.
 	Identity *Identity
 }
@@ -115,17 +117,17 @@ func (b *Board) Status() Status {
 	return b.status
 }
 
-// Run runs argv on the board, feeding it stdin (nil for none), and gives its exit status and
-// output once it ends. It fails, and the command is killed, when ctx ends first (CodeTimeout
+// Run runs argv on the board, its stdin empty, and gives its exit status and output once it
+// ends. It fails, and the command is killed, when ctx ends first (CodeTimeout
 // for a deadline) or the output grows past MaxOutput (CodeCommandFailed). A program the board
 // does not have is no failure: it exits 127, as a shell reports it. Over SSH, argv is quoted
 // into one command line for the account's shell.
-func (b *Board) Run(ctx context.Context, argv []string, stdin io.Reader) (Result, error) {
+func (b *Board) Run(ctx context.Context, argv []string) (Result, error) {
 	p, err := b.start(ctx, argv)
 	if err != nil {
 		return Result{}, err
 	}
-	result, err := collect(ctx, p, argv, stdin)
+	result, err := collect(ctx, p, argv)
 	if err != nil {
 		return Result{}, b.failed(ctx, err, argv[0])
 	}
@@ -145,7 +147,7 @@ func (b *Board) Stream(ctx context.Context, argv []string) (*Stream, error) {
 
 func (b *Board) start(ctx context.Context, argv []string) (process, error) {
 	if len(argv) == 0 {
-		return nil, &Error{Code: CodeInvalidRequest, Message: "No command to run."}
+		return nil, boardError(CodeInvalidRequest, "No command to run.", "", nil)
 	}
 	if b.isClosed() {
 		return nil, boardChanged()
@@ -165,11 +167,10 @@ func (b *Board) failed(ctx context.Context, err error, what string) error {
 		return boardChanged()
 	}
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
-		return &Error{Code: CodeTimeout, Err: err,
-			Message: fmt.Sprintf("`%s` did not finish in time on %s.", what, b.Target().Label()),
-			Hint:    "The board may be busy. Retry the action; if it keeps timing out, check the board's load over SSH."}
+		return boardError(CodeTimeout, fmt.Sprintf("`%s` did not finish in time on %s.", what, b.Target().Label()),
+			"The board may be busy. Retry the action; if it keeps timing out, check the board's load over SSH.", err)
 	}
-	var failure *Error
+	var failure *apierr.Error
 	if errors.As(err, &failure) {
 		switch failure.Code {
 		case CodeUnreachable, CodeAuthFailed, CodeHostKeyChanged:
@@ -186,12 +187,12 @@ func (b *Board) failed(ctx context.Context, err error, what string) error {
 // CodeSentinelMissing, CodeSentinelDenied or CodeSentinelFailed.
 func (b *Board) Sentinel(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	if !strings.HasPrefix(path, "/") {
-		return nil, &Error{Code: CodeInvalidRequest, Message: fmt.Sprintf("Sentinel path %q does not start with /.", path)}
+		return nil, boardError(CodeInvalidRequest, fmt.Sprintf("Sentinel path %q does not start with /.", path), "", nil)
 	}
 	// Sentinel's own client (the old backend's) sends Host: localhost.
 	request, err := http.NewRequestWithContext(ctx, method, "http://localhost"+path, body)
 	if err != nil {
-		return nil, &Error{Code: CodeInvalidRequest, Message: "Not a Sentinel request.", Err: err}
+		return nil, boardError(CodeInvalidRequest, "Not a Sentinel request.", "", err)
 	}
 	request.Header.Set("Accept", "application/json")
 	if body != nil {
@@ -201,7 +202,7 @@ func (b *Board) Sentinel(ctx context.Context, method, path string, body io.Reade
 	if err == nil {
 		return response, nil
 	}
-	var failure *Error
+	var failure *apierr.Error
 	switch {
 	case errors.As(err, &failure):
 		return nil, failure
@@ -226,7 +227,7 @@ func (b *Board) dialSentinel(ctx context.Context) (net.Conn, error) {
 	if err == nil {
 		return conn, nil
 	}
-	var failure *Error
+	var failure *apierr.Error
 	switch {
 	case ctx.Err() != nil:
 		return nil, ctx.Err()
@@ -254,7 +255,7 @@ const socketScript = `if [ ! -S "$1" ]; then echo missing; elif [ ! -w "$1" ]; t
 const startHint = "Start it on the board with `sudo systemctl start simaai-sentinel`, then retry."
 
 func (b *Board) diagnoseSocket(ctx context.Context, cause error) error {
-	result, err := b.Run(ctx, []string{"sh", "-c", socketScript, "sh", b.socket}, nil)
+	result, err := b.Run(ctx, []string{"sh", "-c", socketScript, "sh", b.socket})
 	if err != nil {
 		return err
 	}
@@ -273,20 +274,20 @@ func (b *Board) diagnoseSocket(ctx context.Context, cause error) error {
 	}
 }
 
-func (b *Board) sentinelMissing(cause error) *Error {
+func (b *Board) sentinelMissing(cause error) *apierr.Error {
 	return b.sentinelError(CodeSentinelMissing, "%s does not exist on %s.",
 		"Install Sentinel on the board with `sima-cli neat install sentinel`, then retry.", cause)
 }
 
-func (b *Board) sentinelDenied(cause error) *Error {
+func (b *Board) sentinelDenied(cause error) *apierr.Error {
 	return b.sentinelError(CodeSentinelDenied, "%s on %s cannot be opened by this user.",
 		"The socket is normally mode 0666. Check its permissions on the board, or connect as a user that may open it.", cause)
 }
 
 // sentinelError words a socket failure; message takes the socket's name and the board's label.
-func (b *Board) sentinelError(code Code, message, hint string, cause error) *Error {
+func (b *Board) sentinelError(code, message, hint string, cause error) *apierr.Error {
 	socket := fmt.Sprintf("Sentinel's API socket %s", b.socket)
-	return &Error{Code: code, Message: fmt.Sprintf(message, socket, b.Target().Label()), Hint: hint, Err: cause}
+	return boardError(code, fmt.Sprintf(message, socket, b.Target().Label()), hint, cause)
 }
 
 // identityScript prints the board's host name, then /etc/build, where a SiMa board names its
@@ -295,7 +296,7 @@ const identityScript = "hostname; echo @@; cat /etc/build /etc/buildinfo 2>/dev/
 
 // Identity reads what the board says about itself and records the result in the status.
 func (b *Board) Identity(ctx context.Context) (Identity, error) {
-	result, err := b.Run(ctx, []string{"sh", "-c", identityScript}, nil)
+	result, err := b.Run(ctx, []string{"sh", "-c", identityScript})
 	if err != nil {
 		return Identity{}, err
 	}
@@ -314,8 +315,8 @@ func (b *Board) Identity(ctx context.Context) (Identity, error) {
 		}
 	}
 	if identity.Hostname == "" && identity.Machine == "" && identity.Build == "" {
-		failure := &Error{Code: CodeCommandFailed, Message: "Could not read the board's identity.",
-			Hint: "Check that `sh`, `hostname` and `cat` run for this user on the board over SSH."}
+		failure := boardError(CodeCommandFailed, "Could not read the board's identity.",
+			"Check that `sh`, `hostname` and `cat` run for this user on the board over SSH.", nil)
 		b.record(Status{State: StateError, Err: failure})
 		return Identity{}, failure
 	}

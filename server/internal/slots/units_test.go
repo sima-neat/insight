@@ -89,47 +89,6 @@ func TestProbeFailuresAreClassified(t *testing.T) {
 	}
 }
 
-func TestRenditionLevels(t *testing.T) {
-	cases := []struct {
-		codec              string
-		width, height, fps int
-		level              string
-		bitrate            int64
-	}{
-		{"h264", 1280, 720, 15, "3.1", 2_000_000},
-		{"h264", 1280, 720, 30, "3.1", 5_000_000},
-		{"h264", 640, 480, 30, "3.0", 3_000_000},
-		{"h264", 1920, 1080, 30, "4.0", 12_000_000},
-		{"h264", 1920, 1080, 60, "4.2", 12_000_000},
-		{"h264", 3840, 2160, 30, "5.1", 35_000_000},
-		{"h265", 3840, 2160, 30, "5.1", 35_000_000}, // the bitrate needs more than 5.0
-		{"h265", 1920, 1080, 30, "4.0", 12_000_000},
-		{"h265", 1920, 1080, 60, "4.1", 12_000_000},
-		{"h264", 640, 480, 20000, "", 3_000_000},
-		{"h264", 32768, 64, 1, "", 3_000_000}, // wider than any level allows
-	}
-	for _, c := range cases {
-		level, err := videoLevel(c.codec, c.width, c.height, c.fps)
-		if level != c.level || (c.level == "") != (err != nil) {
-			t.Errorf("%s %dx%d@%d: %q %v, want %q", c.codec, c.width, c.height, c.fps, level, err, c.level)
-		}
-		if got := videoBitrate(c.height, c.fps); got != c.bitrate {
-			t.Errorf("%dx%d@%d: bitrate %d, want %d", c.width, c.height, c.fps, got, c.bitrate)
-		}
-	}
-	if _, err := videoLevel("mjpeg", 640, 480, 30); err == nil {
-		t.Error("an MJPEG rendition has a level")
-	}
-	args, err := encodeArgs("/m/a.mp4", "/m/.renditions/.x.tmp", "h265", 1920, 1080, 30)
-	must(t, err)
-	joined := strings.Join(args, " ")
-	for _, want := range []string{"-c:v libx265", "level-idc=4.0", "keyint=30", "tick_rate=30/1", "-progress pipe:1", "-f mp4 file:/m/.renditions/.x.tmp"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("the H.265 encode lacks %q: %s", want, joined)
-		}
-	}
-}
-
 func TestRenditionNames(t *testing.T) {
 	st := stamp{size: 100, mtime: 5}
 	name := renditionName("clips/My clip (1).mp4", st, 15, "h264")

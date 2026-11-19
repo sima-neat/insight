@@ -45,10 +45,18 @@ func next(t *testing.T, events <-chan Snapshot) (Snapshot, bool) {
 	}
 }
 
+// kept are the jobs the runner holds now, active or finished recently.
+func kept(r *Runner) []*Job {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked()
+	return slices.Collect(maps.Values(r.jobs))
+}
+
 func states(r *Runner, kind Kind) map[State]int {
 	out := map[State]int{}
-	for _, s := range r.List() {
-		if s.Kind == kind {
+	for _, j := range kept(r) {
+		if s := j.Snapshot(); s.Kind == kind {
 			out[s.State]++
 		}
 	}
@@ -132,12 +140,6 @@ func TestQueueRunsInSubmissionOrder(t *testing.T) {
 	if !slices.Equal(order, []int{0, 1, 2, 3, 4}) {
 		t.Errorf("ran in order %v", order)
 	}
-	list := r.List()
-	for i, s := range list {
-		if s.ID != all[i].ID() {
-			t.Fatalf("List is not in submission order")
-		}
-	}
 }
 
 func TestCancelQueuedNeverRuns(t *testing.T) {
@@ -154,8 +156,8 @@ func TestCancelQueuedNeverRuns(t *testing.T) {
 	})
 	third := r.Submit("encode", "third", idle)
 
-	s, ok := r.Cancel(second.ID())
-	if !ok || s.State != Cancelled || s.FinishedAt == nil || s.StartedAt != nil {
+	second.Cancel()
+	if s := second.Snapshot(); s.State != Cancelled || s.FinishedAt == nil || s.StartedAt != nil {
 		t.Fatalf("cancelled queued job: %+v", s)
 	}
 	select {
@@ -189,11 +191,11 @@ func TestCancelRunningWaitsForTheWork(t *testing.T) {
 	})
 	queued := r.Submit("encode", "next", idle)
 	<-started
-	s, ok := r.Cancel(j.ID())
-	if !ok || s.State != Running {
+	j.Cancel()
+	if s := j.Snapshot(); s.State != Running {
 		t.Fatalf("right after Cancel the job is %s, want running until its work returns", s.State)
 	}
-	s = waitDone(t, j)
+	s := waitDone(t, j)
 	select {
 	case <-cleaned:
 	default:
@@ -205,11 +207,9 @@ func TestCancelRunningWaitsForTheWork(t *testing.T) {
 	if s := waitDone(t, queued); s.State != Done {
 		t.Errorf("the next job ended %s", s.State)
 	}
-	if again, _ := r.Cancel(j.ID()); again.State != Cancelled {
+	j.Cancel()
+	if again := j.Snapshot(); again.State != Cancelled {
 		t.Errorf("cancelling a finished job changed it to %s", again.State)
-	}
-	if _, ok := r.Cancel("no-such-job"); ok {
-		t.Error("an unknown job was cancelled")
 	}
 }
 
@@ -222,7 +222,7 @@ func TestCancelledWorkThatFinishesAnywayIsDone(t *testing.T) {
 		return "kept", nil
 	})
 	<-started
-	r.Cancel(j.ID())
+	j.Cancel()
 	if s := waitDone(t, j); s.State != Done || s.Result != "kept" {
 		t.Errorf("got %+v", s)
 	}
@@ -424,15 +424,15 @@ func TestFinishedJobsAreDroppedAfterAWhile(t *testing.T) {
 	r.keep = 30 * time.Millisecond
 	j := r.Submit("encode", "encode", idle)
 	waitDone(t, j)
-	if _, ok := r.Get(j.ID()); !ok {
+	if _, _, ok := r.Subscribe(j.ID()); !ok {
 		t.Fatal("a job just finished is gone")
 	}
 	time.Sleep(60 * time.Millisecond)
-	if _, ok := r.Get(j.ID()); ok {
+	if _, _, ok := r.Subscribe(j.ID()); ok {
 		t.Error("a finished job outlived keep")
 	}
-	if n := len(r.List()); n != 0 {
-		t.Errorf("List has %d jobs", n)
+	if n := len(kept(r)); n != 0 {
+		t.Errorf("%d jobs kept", n)
 	}
 }
 
@@ -452,10 +452,12 @@ func TestAtMostMaxKeptFinishedJobs(t *testing.T) {
 		finished = append(finished, j)
 	}
 	var ids []string
-	for _, s := range r.List() {
-		ids = append(ids, s.ID)
+	for _, j := range kept(r) {
+		ids = append(ids, j.ID())
 	}
 	want := []string{active.ID(), finished[2].ID(), finished[3].ID()}
+	slices.Sort(ids)
+	slices.Sort(want)
 	if !slices.Equal(ids, want) {
 		t.Errorf("kept %v, want the running job and the last two finished %v", ids, want)
 	}

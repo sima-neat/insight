@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"insight/api"
+	"insight/internal/channels"
 	"insight/internal/config"
 )
 
@@ -102,5 +104,52 @@ func TestTheAPIDocument(t *testing.T) {
 	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/yaml" ||
 		!bytes.Equal(w.Body.Bytes(), api.Document) || !bytes.HasPrefix(api.Document, []byte("openapi: 3.")) {
 		t.Fatalf("%d %s, %d bytes", w.Code, w.Header().Get("Content-Type"), w.Body.Len())
+	}
+}
+
+func TestWritesFromAnotherWebsiteAreRefused(t *testing.T) {
+	set := &fakeChannels{states: make([]channels.State, 1), answer: channels.Description{Type: "answer", SDP: "v=0"}}
+	hosted := config.Config{Network: config.Network{PublicOrigin: "https://insight.example.com/"}}
+	offer := `{"type":"offer","sdp":"v=0"}`
+	for _, c := range []struct {
+		name, method, target, host string
+		headers                    map[string]string
+		cfg                        config.Config
+		refused                    bool
+	}{
+		{"the UI's own page", http.MethodPost, "/api/channels/0/offer", "10.0.0.5:9900",
+			map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "https://10.0.0.5:9900"}, config.Config{}, false},
+		{"another website", http.MethodPost, "/api/channels/0/offer", "10.0.0.5:9900",
+			map[string]string{"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"}, config.Config{}, true},
+		{"another port of the same host", http.MethodPost, "/api/channels/0/offer", "10.0.0.5:9900",
+			map[string]string{"Sec-Fetch-Site": "same-site", "Origin": "https://10.0.0.5:8080"}, config.Config{}, true},
+		{"a body-less write", http.MethodPost, "/api/slots/stop", "10.0.0.5:9900",
+			map[string]string{"Sec-Fetch-Site": "cross-site"}, config.Config{}, true},
+		{"a multipart upload", http.MethodPost, "/api/media/uploads", "10.0.0.5:9900",
+			map[string]string{"Sec-Fetch-Site": "cross-site", "Content-Type": "multipart/form-data; boundary=x"}, config.Config{}, true},
+		{"an older browser, another website", http.MethodPost, "/api/channels/0/offer", "10.0.0.5:9900",
+			map[string]string{"Origin": "https://evil.example"}, config.Config{}, true},
+		// A port map changes the port Insight listens on, not the Host the browser sends.
+		{"an older browser through a port map", http.MethodPost, "/api/channels/0/offer", "localhost:19900",
+			map[string]string{"Origin": "https://localhost:19900"}, config.Config{}, false},
+		{"an older browser through a proxy that rewrites Host", http.MethodPost, "/api/channels/0/offer", "10.77.0.1:9900",
+			map[string]string{"Origin": "https://insight.example.com"}, hosted, false},
+		{"curl or a script", http.MethodPost, "/api/channels/0/offer", "127.0.0.1:9900", nil, config.Config{}, false},
+		{"a read from another website", http.MethodGet, "/api/health", "10.0.0.5:9900",
+			map[string]string{"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"}, config.Config{}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := NewHandler(Deps{Config: c.cfg, Channels: set, UI: marker("ui"), Now: fixed})
+			r := httptest.NewRequest(c.method, c.target, strings.NewReader(offer))
+			r.Host = c.host
+			for key, value := range c.headers {
+				r.Header.Set(key, value)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if refused := w.Code == http.StatusForbidden; refused != c.refused || refused && errorCode(t, w) != "cross_origin" {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }

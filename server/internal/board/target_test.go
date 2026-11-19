@@ -129,7 +129,7 @@ func TestRegistrySelection(t *testing.T) {
 	if got, err := r.Board(manual.ID()); got != manual || err != nil {
 		t.Errorf("the selected board: %v", err)
 	}
-	if _, err := sdk.Run(t.Context(), []string{"true"}, nil); codeOf(err) != CodeBoardChanged {
+	if _, err := sdk.Run(t.Context(), []string{"true"}); codeOf(err) != CodeBoardChanged {
 		t.Errorf("the replaced board ran: %v", err)
 	}
 

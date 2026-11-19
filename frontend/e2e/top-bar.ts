@@ -159,32 +159,7 @@ export const answerEmptyLibrary = (page: Page) =>
  * `count` channels listed (server/api/openapi.yaml), none of them active.
  */
 export const idleChannels = (count: number) => ({
-  count,
-  channels: Array.from({ length: count }, (_, channel) => ({
-    channel,
-    viewers: 0,
-    errors: [],
-    video: {
-      port: 9000 + channel,
-      active: false,
-      payload_type: 0,
-      unsupported_packets: 0,
-      packets: 0,
-      bits_per_second: 0,
-      frames_per_second: 0,
-      keyframes: 0,
-    },
-    metadata: {
-      port: 9100 + channel,
-      active: false,
-      received: 0,
-      messages_per_second: 0,
-      matched: 0,
-      unmatched: 0,
-      invalid: 0,
-      no_viewer: 0,
-    },
-  })),
+  channels: Array.from({ length: count }, (_, channel) => ({ channel, video: { active: false } })),
 });
 
 /** The channel a `POST /api/channels/<n>/offer` names, or null for any other path. */

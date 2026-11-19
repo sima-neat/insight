@@ -15,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"insight/internal/apierr"
 	"insight/internal/jobs"
 	"insight/internal/media"
+	"insight/internal/supervisor"
 )
 
 // fakeFiles are slots: using says which slots use which library path.
@@ -154,7 +156,13 @@ func newFixture(t *testing.T, change func(*Options)) *fixture {
 		defer cancel()
 		_ = f.jobs.Shutdown(ctx)
 	})
+	sup, err := supervisor.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sup.StopAll(context.Background()) })
 	opts := Options{
+		Start:     sup.Starter(),
 		Root:      root,
 		Cache:     media.NewCache(t.Context(), f.probes.probe),
 		Probe:     f.probes.probe,
@@ -292,7 +300,7 @@ func waitJob(t *testing.T, job *jobs.Job) jobs.Snapshot {
 
 // code is err's library error code, "" for none.
 func code(err error) string {
-	var e *Error
+	var e *apierr.Error
 	if errors.As(err, &e) {
 		return e.Code
 	}
@@ -307,8 +315,8 @@ func fakeFFmpeg(t *testing.T, behavior string) string {
 	script := `#!/bin/sh
 in=""; out=""; prev=""
 for a in "$@"; do
-	if [ "$prev" = "-i" ]; then in="$a"; fi
-	prev="$a"; out="$a"
+	if [ "$prev" = "-i" ]; then in="${a#file:}"; fi
+	prev="$a"; out="${a#file:}"
 done
 echo "out_time_us=500000"
 echo "progress=continue"

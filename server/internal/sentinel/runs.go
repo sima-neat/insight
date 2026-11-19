@@ -142,7 +142,7 @@ func DeleteRun(ctx context.Context, b *board.Board, id string) (Deleted, error) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
 	defer cancel()
-	result, err := b.Run(ctx, []string{"sh", "-c", deleteScript, "sh", id}, nil)
+	result, err := b.Run(ctx, []string{"sh", "-c", deleteScript, "sh", id})
 	if err != nil {
 		return Deleted{}, err
 	}

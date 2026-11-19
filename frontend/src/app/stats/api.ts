@@ -175,9 +175,9 @@ export interface RunTotals {
 }
 
 /**
- * `GET .../sentinel/compare?raw=true`, keyed by run id. `runs` are full runs (without `raw` they
- * are the metadata only). Each run's `baseline_deltas_pct` is its mean's change against the
- * baseline's, in percent; null where either run has no mean for the metric.
+ * `GET .../sentinel/compare`, keyed by run id. `runs` are full runs, their samples included. Each
+ * run's `baseline_deltas_pct` is its mean's change against the baseline's, in percent; null where
+ * either run has no mean for the metric.
  */
 export interface CompareExport {
   baseline_id: string;

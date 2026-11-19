@@ -87,7 +87,7 @@ func startSources(cfg config.Config, pair certs.Pair, sup *supervisor.Supervisor
 		Probes:         probes,
 		MediaMTX:       mediamtx.NewClient(mediamtx.APIURL, secrets),
 		PublisherQuery: secrets.PublisherQuery(),
-		Start:          slots.SupervisorStarter(sup),
+		Start:          sup.Starter(),
 		Jobs:           s.jobs,
 		Relays:         s.relays,
 		FFmpeg:         ffmpeg,
@@ -102,7 +102,7 @@ func startSources(cfg config.Config, pair certs.Pair, sup *supervisor.Supervisor
 		return nil, err
 	}
 	if s.library, err = library.New(library.Options{
-		Root: root, Cache: probes, FFmpeg: ffmpeg, FFprobe: ffprobe,
+		Root: root, Cache: probes, FFmpeg: ffmpeg, FFprobe: ffprobe, Start: sup.Starter(),
 		Jobs: s.jobs, Relays: s.relays, Files: s.slots,
 	}); err != nil {
 		s.close(context.Background())

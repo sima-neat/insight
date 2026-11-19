@@ -6,41 +6,12 @@ import { ChannelLiveness, liveChannels } from './channel-liveness';
 const CHANNELS_URL = '/api/channels';
 const COUNT = 8;
 
-/**
- * A `/api/channels` answer as the server gives it (server/api/openapi.yaml): every channel, the
- * `live` ones receiving video and metadata.
- */
+/** A `/api/channels` answer as the server gives it (server/api/openapi.yaml): every channel. */
 const channelList = (...live: number[]) => ({
-  count: COUNT,
-  channels: Array.from({ length: COUNT }, (_, channel) => {
-    const active = live.includes(channel);
-    return {
-      channel,
-      viewers: active ? 1 : 0,
-      errors: [],
-      video: {
-        port: 9000 + channel,
-        active,
-        ...(active && { codec: 'H264', last_at: '2026-11-18T12:00:00Z', sender: '10.0.0.2:5000' }),
-        payload_type: active ? 96 : 0,
-        unsupported_packets: 0,
-        packets: active ? 4000 : 0,
-        bits_per_second: active ? 4_000_000 : 0,
-        frames_per_second: active ? 30 : 0,
-        keyframes: active ? 10 : 0,
-      },
-      metadata: {
-        port: 9100 + channel,
-        active,
-        received: active ? 300 : 0,
-        messages_per_second: active ? 30 : 0,
-        matched: active ? 290 : 0,
-        unmatched: 0,
-        invalid: 0,
-        no_viewer: 0,
-      },
-    };
-  }),
+  channels: Array.from({ length: COUNT }, (_, channel) => ({
+    channel,
+    video: { active: live.includes(channel) },
+  })),
 });
 
 describe('liveChannels', () => {

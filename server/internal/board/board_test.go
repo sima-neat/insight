@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"insight/internal/apierr"
 )
 
 // fixture is a registry whose selected board is a test SSH server, found as the SDK's DevKit.
@@ -72,8 +74,8 @@ func testContext(t *testing.T) context.Context {
 	return ctx
 }
 
-func codeOf(err error) Code {
-	var failure *Error
+func codeOf(err error) string {
+	var failure *apierr.Error
 	if errors.As(err, &failure) {
 		return failure.Code
 	}
@@ -82,7 +84,7 @@ func codeOf(err error) Code {
 
 func mustRun(t *testing.T, board *Board, argv ...string) Result {
 	t.Helper()
-	result, err := board.Run(testContext(t), argv, nil)
+	result, err := board.Run(testContext(t), argv)
 	if err != nil {
 		t.Fatalf("%v: %v", argv, err)
 	}
@@ -104,8 +106,8 @@ func TestRunOverSSH(t *testing.T) {
 	if result.Exit != 3 || string(result.Stderr) != "oops\n" {
 		t.Errorf("exit: %+v", result)
 	}
-	piped, err := board.Run(testContext(t), []string{"cat"}, strings.NewReader("from stdin"))
-	if err != nil || string(piped.Stdout) != "from stdin" {
+	// Its stdin is empty, so a command that reads it ends at once.
+	if piped, err := board.Run(testContext(t), []string{"cat"}); err != nil || piped.Exit != 0 || len(piped.Stdout) != 0 {
 		t.Errorf("stdin: %+v %v", piped, err)
 	}
 	if result := mustRun(t, board, "no-such-program-here"); result.Exit != 127 {
@@ -120,7 +122,7 @@ func TestRunTimesOutAndKills(t *testing.T) {
 	f := newFixture(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
 	defer cancel()
-	_, err := f.board(t).Run(ctx, []string{"sleep", "30"}, nil)
+	_, err := f.board(t).Run(ctx, []string{"sleep", "30"})
 	if codeOf(err) != CodeTimeout {
 		t.Fatalf("got %v, want a timeout", err)
 	}
@@ -294,8 +296,8 @@ func TestChangedHostKeyRefusedThenTrusted(t *testing.T) {
 	reflashed := newSigner(t)
 	f.server.setHostKey(reflashed)
 	f.server.dropConnections()
-	_, err := old.Run(testContext(t), []string{"true"}, nil)
-	var failure *Error
+	_, err := old.Run(testContext(t), []string{"true"})
+	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != CodeHostKeyChanged || failure.HostKey == nil {
 		t.Fatalf("got %v, want a changed host key", err)
 	}
@@ -308,7 +310,7 @@ func TestChangedHostKeyRefusedThenTrusted(t *testing.T) {
 	if status := old.Status(); status.State != StateError || status.Err.Code != CodeHostKeyChanged {
 		t.Errorf("status %+v", status)
 	}
-	if _, err := old.Run(testContext(t), []string{"true"}, nil); codeOf(err) != CodeHostKeyChanged {
+	if _, err := old.Run(testContext(t), []string{"true"}); codeOf(err) != CodeHostKeyChanged {
 		t.Errorf("a second try: %v", err)
 	}
 
@@ -322,7 +324,7 @@ func TestChangedHostKeyRefusedThenTrusted(t *testing.T) {
 	if trusted == old || trusted.ID() != old.ID() {
 		t.Errorf("the board was not replaced")
 	}
-	if _, err := old.Run(testContext(t), []string{"true"}, nil); codeOf(err) != CodeBoardChanged {
+	if _, err := old.Run(testContext(t), []string{"true"}); codeOf(err) != CodeBoardChanged {
 		t.Errorf("the replaced board: %v", err)
 	}
 	mustRun(t, trusted, "true")
@@ -361,7 +363,7 @@ func TestClosedBoardEndsItsCommands(t *testing.T) {
 	}
 	_ = stream.Close()
 	eventually(t, "the command's end", func() bool { return f.server.commands() == 0 })
-	if _, err := board.Run(testContext(t), []string{"true"}, nil); codeOf(err) != CodeBoardChanged {
+	if _, err := board.Run(testContext(t), []string{"true"}); codeOf(err) != CodeBoardChanged {
 		t.Errorf("the replaced board: %v", err)
 	}
 }
@@ -369,8 +371,8 @@ func TestClosedBoardEndsItsCommands(t *testing.T) {
 func TestAuthFailures(t *testing.T) {
 	f := newFixture(t)
 	writeClientKey(t, f.sshDir) // a new key the server does not know
-	_, err := f.board(t).Run(testContext(t), []string{"true"}, nil)
-	var failure *Error
+	_, err := f.board(t).Run(testContext(t), []string{"true"})
+	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != CodeAuthFailed || !strings.Contains(failure.Command, "ssh-copy-id -p") {
 		t.Errorf("an unknown key: %v", err)
 	}
@@ -378,7 +380,7 @@ func TestAuthFailures(t *testing.T) {
 	if err := os.Remove(filepath.Join(f.sshDir, "id_ed25519")); err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.board(t).Run(testContext(t), []string{"true"}, nil)
+	_, err = f.board(t).Run(testContext(t), []string{"true"})
 	if !errors.As(err, &failure) || failure.Code != CodeAuthFailed || !strings.Contains(failure.Command, "ssh-keygen") {
 		t.Errorf("no key: %v", err)
 	}
@@ -399,7 +401,7 @@ func TestUnreachable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := board.Run(testContext(t), []string{"true"}, nil); codeOf(err) != CodeUnreachable {
+	if _, err := board.Run(testContext(t), []string{"true"}); codeOf(err) != CodeUnreachable {
 		t.Errorf("got %v", err)
 	}
 }
@@ -425,16 +427,16 @@ func TestLocalBoard(t *testing.T) {
 		!strings.Contains(string(result.Stderr), "command not found") {
 		t.Errorf("a missing program: %+v", result)
 	}
-	piped, err := board.Run(testContext(t), []string{"cat"}, strings.NewReader("from stdin"))
-	if err != nil || string(piped.Stdout) != "from stdin" {
+	// Its stdin is empty, so a command that reads it ends at once.
+	if piped, err := board.Run(testContext(t), []string{"cat"}); err != nil || piped.Exit != 0 || len(piped.Stdout) != 0 {
 		t.Errorf("stdin: %+v %v", piped, err)
 	}
-	if _, err := board.Run(testContext(t), []string{"head", "-c", strconv.Itoa(MaxOutput + 1), "/dev/zero"}, nil); codeOf(err) != CodeCommandFailed {
+	if _, err := board.Run(testContext(t), []string{"head", "-c", strconv.Itoa(MaxOutput + 1), "/dev/zero"}); codeOf(err) != CodeCommandFailed {
 		t.Errorf("too much output: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
-	if _, err := board.Run(ctx, []string{"sleep", "30"}, nil); codeOf(err) != CodeTimeout {
+	if _, err := board.Run(ctx, []string{"sleep", "30"}); codeOf(err) != CodeTimeout {
 		t.Errorf("timeout: %v", err)
 	}
 

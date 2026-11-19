@@ -26,7 +26,7 @@ type slotRuntime struct {
 	// The publisher of a file slot, while it runs: what it streams, as an absolute path and as
 	// the library path the slot shows (the file, or its rendition under .renditions), and the
 	// codec it was started for.
-	proc       Process
+	proc       supervisor.Child
 	procInput  string
 	procActive string
 

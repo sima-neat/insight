@@ -93,6 +93,29 @@ type Process struct {
 	done chan struct{} // closed when the child has exited for good
 }
 
+// Child is a supervised child as the code that starts one sees it (*Process), so that its tests
+// can stand in for one.
+type Child interface {
+	Status() Status
+	Tail() []string
+	Done() <-chan struct{}
+	Stop(ctx context.Context) error
+}
+
+// Starter starts a child under supervision.
+type Starter func(spec Spec) (Child, error)
+
+// Starter is the Starter that runs children under s.
+func (s *Supervisor) Starter() Starter {
+	return func(spec Spec) (Child, error) {
+		p, err := s.Start(spec)
+		if err != nil {
+			return nil, err // not a nil *Process in a non-nil Child
+		}
+		return p, nil
+	}
+}
+
 // Start runs spec's child. It fails when the program cannot be started at all; later exits are
 // handled by the restart policy.
 func (s *Supervisor) Start(spec Spec) (*Process, error) {

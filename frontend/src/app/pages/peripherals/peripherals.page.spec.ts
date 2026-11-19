@@ -908,7 +908,7 @@ describe('PeripheralsPage', () => {
   it('a board that cannot be read at all says why, with the board settings', async () => {
     await TestBed.inject(Router).navigateByUrl('/peripherals');
     await settle();
-    answer('GET', BOARDS_URL, failure('internal', 'Internal Server Error'), serverError);
+    answer('GET', BOARDS_URL, failure('internal_error', 'Internal Server Error'), serverError);
     await settle();
     expect(listbox()).toBeNull();
     expect(root().querySelector('app-board-problem-notice')?.textContent).toContain(
@@ -924,7 +924,7 @@ describe('PeripheralsPage', () => {
     await settle();
     answer('GET', BOARDS_URL, devkit);
     await settle();
-    answer('GET', isLoad, failure('internal', 'Internal Server Error'), serverError);
+    answer('GET', isLoad, failure('internal_error', 'Internal Server Error'), serverError);
     answer('GET', isPreviewRead, { preview: null });
     await settle();
     expect(calloutHeadings()).toEqual(['Could not load peripherals: Internal Server Error']);

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"insight/internal/apierr"
 	"insight/internal/jobs"
 )
 
@@ -74,8 +75,8 @@ func (l *Library) Catalog(ctx context.Context) (*Catalog, error) {
 	l.mu.Unlock()
 	catalog, err := l.fetchCatalog(ctx)
 	if err != nil {
-		return nil, &Error{
-			Status: http.StatusBadGateway, Code: CodeCatalogUnavailable, err: err,
+		return nil, &apierr.Error{
+			Status: http.StatusBadGateway, Code: CodeCatalogUnavailable, Err: err,
 			Message: fmt.Sprintf("The media catalog could not be fetched: %v.", err),
 			Hint:    "The catalog needs internet access from Insight.",
 		}
@@ -143,7 +144,7 @@ func assetPath(p string) (string, error) {
 	p = strings.ReplaceAll(strings.TrimSpace(p), `\`, "/")
 	clean := path.Clean(p)
 	if p == "" || strings.HasPrefix(p, "/") || !filepath.IsLocal(clean) || strings.ContainsAny(clean, "?#\x00") {
-		return "", &Error{Status: http.StatusBadRequest, Code: CodeInvalidPath,
+		return "", &apierr.Error{Status: http.StatusBadRequest, Code: CodeInvalidPath,
 			Message: fmt.Sprintf("%q is not a path of the media catalog.", p)}
 	}
 	return clean, nil

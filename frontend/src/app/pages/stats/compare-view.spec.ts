@@ -176,12 +176,11 @@ describe('CompareView', () => {
   const baselineSelect = (): NeatSelect<string> =>
     harness.fixture.debugElement.query(By.directive(NeatSelect)).componentInstance;
 
-  it('asks Sentinel for the runs with the baseline first and their raw samples', async () => {
+  it('asks Sentinel for the runs with the baseline first', async () => {
     await open(`runs=${OTHER},${BASELINE}&baseline=${BASELINE}`);
     const request = compareRequest();
     expect(request.request.method).toBe('GET');
     expect(request.request.params.get('runs')).toBe(`${BASELINE},${OTHER}`);
-    expect(request.request.params.get('raw')).toBe('true');
     expect(text(root().querySelector('[role="status"]'))).toBe(
       'Reading the comparison from the board…',
     );
@@ -610,7 +609,6 @@ describe('CompareView', () => {
     await settle();
     const local = http.expectOne((request) => request.url === '/api/boards/local/sentinel/compare');
     expect(local.request.params.get('runs')).toBe(`${BASELINE},${OTHER}`);
-    expect(local.request.params.get('raw')).toBe('true');
     await flush(first, answer());
     expect(chips()).toHaveLength(0);
     expect(text(root().querySelector('[role="status"]'))).toBe(

@@ -3,8 +3,7 @@
 // marker dropped), with its failures in the API's error shape. Sentinel's API is the one its
 // public clients use; Insight keeps no copy of what it holds.
 //
-// Stats reads its health, metric definitions, samples and cache, records traces and lists,
-// reads, compares and deletes runs. The Live view's incremental history comes from Sentinel's
+// Stats reads its health and cache, records traces and lists, reads, compares and deletes runs. The Live view's incremental history comes from Sentinel's
 // own cache (ReadCache). Peripherals asks for the peripheral catalog through Call.
 package sentinel
 
@@ -56,8 +55,8 @@ const (
 )
 
 // Call sends one request to b's Sentinel, body as JSON (nil for none), and gives its answer:
-// a 2xx JSON object of Schema. A refusal or failure is an *apierr.Error, or the board's
-// *board.Error when the board or Sentinel's socket cannot be reached.
+// a 2xx JSON object of Schema. A refusal or failure is an *apierr.Error, the board's own when the
+// board or Sentinel's socket cannot be reached.
 func Call(ctx context.Context, b *board.Board, method, path string, body any) (Body, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
@@ -96,7 +95,7 @@ func Call(ctx context.Context, b *board.Board, method, path string, body any) (B
 		return nil, &apierr.Error{Status: http.StatusBadGateway, Code: CodeFailed,
 			Message: "Sentinel answered with something that is not a JSON object.", Hint: statusHint}
 	}
-	// Health, metrics, the cache and runs say their schema; the peripheral catalog says none (it
+	// Health, the cache and runs say their schema; the peripheral catalog says none (it
 	// has a revision), so an answer is checked when it carries one.
 	var schema int
 	if raw, ok := parsed["schema"]; ok && (json.Unmarshal(raw, &schema) != nil || schema != Schema) {
@@ -170,7 +169,7 @@ type daemon struct {
 }
 
 func readDaemon(ctx context.Context, b *board.Board) (daemon, error) {
-	result, err := b.Run(ctx, []string{"sh", "-c", daemonScript}, nil)
+	result, err := b.Run(ctx, []string{"sh", "-c", daemonScript})
 	if err != nil {
 		return daemon{}, err
 	}
@@ -202,7 +201,7 @@ func parseDaemon(output string, now time.Time) daemon {
 // diagnose words a failure to reach Sentinel's socket: a missing socket is a daemon that is not
 // installed or not running, which systemd tells apart.
 func diagnose(ctx context.Context, b *board.Board, err error) error {
-	var failure *board.Error
+	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != board.CodeSentinelMissing || ctx.Err() != nil {
 		return err
 	}
@@ -213,7 +212,7 @@ func diagnose(ctx context.Context, b *board.Board, err error) error {
 	label := b.Target().Label()
 	switch {
 	case d.loaded == "not-found":
-		return &apierr.Error{Status: http.StatusBadGateway, Code: string(board.CodeSentinelMissing), Err: err,
+		return &apierr.Error{Status: http.StatusBadGateway, Code: board.CodeSentinelMissing, Err: err,
 			Message: fmt.Sprintf("Sentinel is not installed on %s.", label),
 			Hint:    "Install it on the board with `" + installCommand + "`, then retry."}
 	case d.loaded == "loaded" && d.active != "active":

@@ -1,26 +1,25 @@
 package jobs
 
 import (
-	"bufio"
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
-	"io"
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"insight/internal/supervisor"
 )
 
-const (
-	// diagnosticLines is how many of ffmpeg's last other lines are kept for a failure's message.
-	diagnosticLines = 8
-	// maxLineBytes cuts a longer line, so that reading never stops while ffmpeg still writes.
-	maxLineBytes = 4096
-)
+// diagnosticLines is how many of ffmpeg's last other lines are kept for a failure's message.
+const diagnosticLines = 8
 
 // FFmpegProgress follows one ffmpeg run's "-progress pipe:1" output: blocks of key=value lines
 // ("out_time_us=2933333" ... "progress=continue"), read from its stdout with its stderr merged in,
-// as Insight runs ffmpeg for long work. Every other line is a diagnostic, the last few kept for
+// as the supervisor runs it (RunFFmpeg). Every other line is a diagnostic, the last few kept for
 // the message of a failed run.
 type FFmpegProgress struct {
 	// Duration is the length of the output when it is known (from ffprobe), else 0.
@@ -92,64 +91,81 @@ func (f *FFmpegProgress) Diagnostics() []string {
 	return append([]string(nil), f.diagnostics...)
 }
 
-// FollowFFmpeg reads ffmpeg's output from r until it ends, reporting the output time reached on
-// progress as a percent of duration (none when duration is 0) and as its detail. The phase is the
-// caller's. It returns what it followed, for the diagnostics of a failed run, and a read error.
-func FollowFFmpeg(r io.Reader, duration time.Duration, progress *Progress) (*FFmpegProgress, error) {
-	return FollowFFmpegWith(r, duration, func(f *FFmpegProgress) {
-		if percent, ok := f.Percent(); ok {
-			progress.SetPercent(percent)
-		}
-		progress.SetDetail(f.Detail())
-	})
+// Follow reports a move of an ffmpeg run's output time on the job: the share of its duration
+// as the percent, when known, and the time reached as the detail. The phase is the caller's.
+// A run that is one of several reports through a function of its own instead.
+func (p *Progress) Follow(f *FFmpegProgress) {
+	if percent, ok := f.Percent(); ok {
+		p.SetPercent(percent)
+	}
+	p.SetDetail(f.Detail())
 }
 
-// FollowFFmpegWith reads ffmpeg's output as FollowFFmpeg does, but hands each move of the output
-// time, and the end, to moved, for work that reports one run as part of a larger whole (one file
-// of several).
-func FollowFFmpegWith(r io.Reader, duration time.Duration, moved func(*FFmpegProgress)) (*FFmpegProgress, error) {
-	f := &FFmpegProgress{Duration: duration}
-	lines := bufio.NewScanner(r)
-	lines.Buffer(make([]byte, 0, maxLineBytes), maxLineBytes)
-	lines.Split(splitLines())
-	for lines.Scan() {
-		if f.Line(lines.Text()) {
-			moved(f)
-		}
+// stopTimeout bounds stopping an ffmpeg run whose work was cancelled.
+const stopTimeout = 10 * time.Second
+
+// RunFFmpeg runs ffmpeg as spec says (its arguments with "-progress pipe:1"), under start (the
+// supervisor's Starter), and returns once it has ended: nil when it exited 0, else an error
+// whose message is ffmpeg's last diagnostics. Each move of the output time, and the end, is
+// handed to moved; duration is the output's length when it is known, else 0. When ctx ends,
+// ffmpeg is stopped and ctx's error returned.
+func RunFFmpeg(ctx context.Context, start supervisor.Starter, spec supervisor.Spec, duration time.Duration, moved func(*FFmpegProgress)) error {
+	lines := &ffmpegLines{prefix: "[" + spec.Name + "] ", f: &FFmpegProgress{Duration: duration}, moved: moved}
+	spec.Output = lines
+	proc, err := start(spec)
+	if err != nil {
+		return err
 	}
-	if err := lines.Err(); err != nil {
-		return f, fmt.Errorf("reading ffmpeg's output: %w", err)
+	select {
+	case <-proc.Done():
+	case <-ctx.Done():
+		stop, cancel := context.WithTimeout(context.Background(), stopTimeout)
+		defer cancel()
+		_ = proc.Stop(stop)
+		return ctx.Err()
 	}
-	return f, nil
+	if exit := proc.Status().LastExit; exit != "exit status 0" {
+		return errors.New(lines.failure(exit))
+	}
+	return nil
 }
 
-// splitLines splits at "\n" or "\r" (ffmpeg's own status line ends in "\r"), and cuts a line
-// longer than maxLineBytes, skipping the rest of it.
-func splitLines() bufio.SplitFunc {
-	skipping := false
-	return func(data []byte, atEOF bool) (int, []byte, error) {
-		if end := bytes.IndexAny(data, "\r\n"); end >= 0 {
-			if skipping {
-				skipping = false
-				return end + 1, nil, nil
-			}
-			return end + 1, data[:end], nil
+// ffmpegLines takes a run's lines as the supervisor writes them ("[name] line") and follows them.
+type ffmpegLines struct {
+	prefix string
+	moved  func(*FFmpegProgress)
+
+	mu      sync.Mutex
+	partial []byte
+	f       *FFmpegProgress
+}
+
+func (l *ffmpegLines) Write(b []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.partial = append(l.partial, b...)
+	for {
+		line, rest, found := bytes.Cut(l.partial, []byte("\n"))
+		if !found {
+			break
 		}
-		if len(data) >= maxLineBytes {
-			if skipping {
-				return len(data), nil, nil
-			}
-			skipping = true
-			return len(data), data[:maxLineBytes], nil
+		if l.f.Line(strings.TrimPrefix(string(line), l.prefix)) {
+			l.moved(l.f)
 		}
-		if atEOF && len(data) > 0 {
-			if skipping {
-				return len(data), nil, nil
-			}
-			return len(data), data, nil
-		}
-		return 0, nil, nil
+		l.partial = append(l.partial[:0], rest...)
 	}
+	return len(b), nil
+}
+
+// failure says why a run that ended with exit failed: ffmpeg's last diagnostics, else exit.
+func (l *ffmpegLines) failure(exit string) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	lines := l.f.Diagnostics()
+	if len(lines) == 0 {
+		return "ffmpeg ended with " + exit
+	}
+	return strings.Join(lines[max(0, len(lines)-4):], "; ")
 }
 
 // progressField splits a progress line, a lower-case key and "=" at its start ("out_time_us=…",

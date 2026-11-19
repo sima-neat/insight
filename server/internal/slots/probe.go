@@ -6,17 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os/exec"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
+
+	"insight/internal/media"
 )
 
 // StreamInfo is what a probe of a live stream says about its first video track.
 type StreamInfo struct {
-	Codec         string // "h264", "h265", "mjpeg", or ffprobe's name of another codec
+	Codec         string // media.CodecOf ffprobe's name
 	Width, Height int
 	FPS           float64 // 0 when unknown
 }
@@ -130,40 +130,6 @@ func parseStreamProbe(out []byte) (StreamInfo, error) {
 		return StreamInfo{}, &ProbeError{Detail: "The stream has no video track"}
 	}
 	s := probe.Streams[0]
-	info := StreamInfo{Codec: codecOf(s.CodecName), Width: s.Width, Height: s.Height}
-	for _, text := range []string{s.AvgFrameRate, s.RFrameRate} {
-		if fps := rational(text); fps > 0 {
-			info.FPS = fps
-			break
-		}
-	}
-	return info, nil
-}
-
-// codecOf names ffprobe's codec by the library's names for the ones the slots stream.
-func codecOf(ffprobeName string) string {
-	if ffprobeName == "hevc" {
-		return "h265"
-	}
-	return ffprobeName
-}
-
-// rational reads ffprobe's "num/den"; 0 for "0/0", "N/A" and anything not a positive rate.
-func rational(text string) float64 {
-	num, den, found := strings.Cut(text, "/")
-	n, err := strconv.ParseFloat(num, 64)
-	if err != nil {
-		return 0
-	}
-	if found {
-		d, err := strconv.ParseFloat(den, 64)
-		if err != nil || d == 0 {
-			return 0
-		}
-		n /= d
-	}
-	if !(n > 0) || math.IsInf(n, 0) {
-		return 0
-	}
-	return n
+	_, fps := media.FrameRate(s.AvgFrameRate, s.RFrameRate)
+	return StreamInfo{Codec: media.CodecOf(s.CodecName), Width: s.Width, Height: s.Height, FPS: fps}, nil
 }

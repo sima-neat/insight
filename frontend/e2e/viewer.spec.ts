@@ -468,15 +468,23 @@ test.describe('a deployed build with the test feed on channel 0', () => {
     page,
     request,
   }) => {
-    // Channel 0 as Insight's server counts it: the browsers watching, and the feed's messages it
-    // matched to the frame their timestamp names (a running total).
+    // Channel 0 as Insight's server counts it (`/api/ingest/stats`): the browsers watching, and
+    // the feed's messages it sent on to them (a running total). The feed's messages are all timed,
+    // and a timed message is sent on only once it is matched to the frame its timestamp names.
     const channel0 = async () => {
-      const response = await request.get('/api/channels');
+      const response = await request.get('/api/ingest/stats?all=1');
       const answer = (await response.json()) as {
-        channels: { channel: number; viewers: number; metadata: { matched: number } }[];
+        channels: {
+          channel: number;
+          webrtc: { peer_count: number };
+          metadata: { messages_forwarded: number };
+        }[];
       };
       const entry = answer.channels.find((candidate) => candidate.channel === 0);
-      return { viewers: entry?.viewers ?? 0, matched: entry?.metadata.matched ?? 0 };
+      return {
+        viewers: entry?.webrtc.peer_count ?? 0,
+        matched: entry?.metadata.messages_forwarded ?? 0,
+      };
     };
     // Earlier tests (or another Viewer) may have watched channel 0: only what follows counts.
     const before = (await channel0()).matched;

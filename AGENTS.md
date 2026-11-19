@@ -15,14 +15,20 @@ repo.
   `feat/backend-rewrite` (see "The server" below). It listens on `--port` and serves the web UI
   and the API.
 - `neat_insight/`: the Python package that ships the server: the `neat-insight` command
-  (`launcher.py`), which runs the server binary, and the metadata test tools (`tools/`).
+  (`launcher.py`), which runs the server binary, and the `neat-insight-metadata-test` command
+  (`tools/metadata_test.py`), the test feed below. The test feed imports nothing of the package,
+  because `scripts/test-feed.sh` copies the file into the SDK container on its own.
 - `webrtc/mediamtx.yml`: MediaMTX's configuration, all that is left of vf's folder (the server's
   channels replaced vf). The build copies it beside the server's binary, which renders it for
   MediaMTX at start (see "MediaMTX" below).
-- `docs/contracts.md`: what an app follows to show up in Insight (source URLs, channel ports, the
-  metadata format with its JSON Schemas in `docs/schemas/metadata/`).
-- `UPSTREAM.md`: the `sima-neat/insight` baseline this repo was copied from. Backend changes from
-  upstream are ported by hand, and every port appends a line to its log.
+- `docs/`: the user docs, which developer.sima.ai publishes under `/tools/insight/`, so their file
+  names and front matter stay as they are. `docs/contracts.md` is what an app follows to show up
+  in Insight (source URLs, channel ports, the metadata format with its JSON Schemas in
+  `docs/schemas/metadata/`). The translations in `docs/i18n/` are regenerated from the English
+  pages before a release.
+- `build.sh` builds the release wheels; `scripts/` holds the build and dev helpers named under
+  "Commands" and the Vulcan release scripts; `media-assets/` builds the media catalog Insight
+  imports from.
 
 ## Rules for the frontend
 
@@ -262,7 +268,7 @@ merging.
   read finds another trace than before; its start, stop and delete go to the board they were asked
   for, by its id, so one that outlives a board switch is refused (404 `not_found`) rather than
   made on the new board. Compare asks Sentinel for the comparison itself
-  (`/api/boards/{id}/sentinel/compare?raw=true`, the baseline first), once the run list says every
+  (`/api/boards/{id}/sentinel/compare`, the baseline first), once the run list says every
   run is still on the board and finished. Insight installs and starts nothing on the board: where
   Sentinel is missing or stopped, the page shows the command the error's hint names, with Copy
   (`app-copy-command`), and Check again asks once more. `StatsSession` (root) keeps the chosen
@@ -329,14 +335,25 @@ the same arguments.
   `server/` writes the Go types and routing (`api/api.gen.go`, oapi-codegen, a `tool` in `go.mod`),
   and CI fails when they differ. A route is added to the YAML first, then implemented. Routes
   marked Frozen there are used outside Insight (the SDK, sima-cli) and keep their paths and fields.
-  Handlers may answer with a package's own types where they match the schema:
-  `internal/web/contract_test.go` sends requests to the real handlers and checks every request and
+  Handlers answer with the generated `api.*` types where they build the answer at the web edge
+  (the boards, the channels), and with a package's own types where it builds the answer (the
+  slots, the library, jobs, peripherals, System Info), whose fields the domain code reads and
+  writes: `internal/web/contract_test.go` sends requests to the real handlers and checks every request and
   answer against the YAML (statuses documented, no field the schema does not name), and fails
   while any operation of the YAML goes unanswered. A new route needs a call there. The server
   serves the YAML itself at `GET /api/openapi.yaml` (embedded at build time, `api.Document`), so
   agents and tools read the API from the running server.
-- **Errors have one shape**, `{"error": {"code", "message", "hint"?}}` (`internal/apierr`). A
-  path under `/api/` that names no route answers it with 404 `not_found`.
+- **Errors have one shape**, `{"error": {"code", "message", "hint"?}}`, and one type,
+  `apierr.Error` (`internal/apierr`), whose optional `HostKey`, `Command`, `Conflict` and `Slots`
+  go beside `error` in the answer. Every package returns it; anything else is a 500
+  `internal_error` with its message. A path under `/api/` that names no route answers it with 404
+  `not_found`.
+- **Cross-site writes are refused.** The handler is wrapped in Go's `http.CrossOriginProtection`:
+  a request that changes something (any method but GET, HEAD and OPTIONS) from a page of another
+  origin is 403 `cross_origin`, by the browser's `Sec-Fetch-Site`, else its `Origin` against the
+  `Host` it sent (a port map leaves that the browser's own). Requests without either (curl,
+  scripts) pass, and the hosted public origin is trusted for a proxy that rewrites `Host`. So
+  request bodies need no content-type check of their own.
 - **Startup** (`cmd/neat-insight`): the configuration is resolved once (`internal/config`: where
   Insight runs, its data folder, the hosted-mode files sima-cli writes, the SDK's port map), then
   the certificate (`internal/certs`: the SDK's, a valid earlier one, or a new one from mkcert,
@@ -368,10 +385,16 @@ the same arguments.
   `internal/library` for the routes' work, `/api/media...` and `/api/catalog...`): the media folder
   is `/workspace/.insight-media` in the SDK, `<data>/media` elsewhere. The slots are its
   `FileUser`, so it refuses to delete a file a slot plays and restarts the slots on a replaced one.
+- **Encodes** (a slot's rendition at another frame rate, an upload the board would stream badly)
+  have one rule, `media.Encode`: the published catalog's encoder settings
+  (`media-assets/build_media_assets.py`), its bitrate by the picture's shorter side and rate
+  (`media.VideoBitrate`), the level left to the encoder. Both run ffmpeg under the supervisor
+  with `jobs.RunFFmpeg`, which follows its progress for the job.
 - **MJPEG relays** (`internal/relay`): one ffmpeg per stream however many readers (a slot's
   preview, a slot's HTTP MJPEG output, a file's preview), capped, stopped a few seconds after the
-  last reader, ended when it stalls. **Jobs** (`internal/jobs`, `/api/jobs...`): renditions'
-  encodes, uploads' re-encodes and catalog downloads, with progress as Server-Sent Events.
+  last reader, ended when it stalls. **Jobs** (`internal/jobs`, `/api/jobs/{id}/events`):
+  renditions' encodes, uploads' re-encodes and catalog downloads, with progress as Server-Sent
+  Events; the routes that start one answer with it.
 - **The board** (`internal/board`, routes `/api/boards...`): one selected board, the one entered
   (`<data>/board-target.json`), else the board Insight runs on, else the DevKit the SDK is paired
   with (`DEVKIT_SYNC_DEVKIT_*`), resolved at start and on a change. Its id (`local`,
@@ -383,8 +406,8 @@ the same arguments.
   no shell: the boards answer carries the `ssh` command line. Board failures answer the error
   shape with `host_key` (both fingerprints) or `command` (the one that authorizes the key).
 - **Sentinel** (`internal/sentinel`, `/api/boards/{id}/sentinel/...`) is an allowlisted proxy:
-  health (with the service's start from systemd), metric definitions, the latest sample, the
-  cache, the active trace, traces started and stopped, runs listed, read and compared, answered as
+  health (with the service's start from systemd), the cache, the active trace, traces started
+  and stopped, runs listed, read and compared (with their samples), answered as
   Sentinel answers them without its schema marker; Insight keeps no telemetry. The Live view's
   history is Sentinel's own `/v1/cache`: `after` (the newest sample held) answers only newer ones
   with `full: false`, else all of them with `full: true`. A run is deleted with Sentinel's CLI
@@ -408,8 +431,9 @@ the same arguments.
   breaks, the H.265 gate), rewrites their sequence and timestamps onto one outgoing clock, matches
   metadata to frames by the contract's rule (`docs/contracts.md`), and sends both to the browsers
   watching over WebRTC (Pion; one shared track per channel and codec, NACKs answered). Routes:
-  `/api/channels`, `POST /api/channels/{n}/offer`, and the frozen `/api/ingest/stats` and
-  `/api/viewer-url`. The count and the WebRTC port range come from the SDK's port map, read once.
+  `/api/channels` (which channels receive video, for the Viewer's Hide empty), `POST
+  /api/channels/{n}/offer`, and the frozen `/api/ingest/stats` (what arrives and what was sent on,
+  the counters only it reads) and `/api/viewer-url`. The count and the WebRTC port range come from the SDK's port map, read once.
   The connection tests need a network interface besides loopback (Pion gathers no loopback
   candidates), so they fail inside a network sandbox.
 
@@ -447,7 +471,7 @@ Node 24 is required for the frontend (`.node-version`; Angular 22 supports
 | `npm run build`        | Production build into `frontend/dist`                                                               |
 | `npm run check:bundle` | Checks the built bundle: video, lazy pages and the two dialogs stay out of the initial one          |
 | `npm run e2e`          | Playwright end-to-end tests (`frontend/e2e`)                                                        |
-| `npm run api:types`    | Generates `src/app/api.generated.ts` from `server/api/openapi.yaml` (`check:api`, in lint, checks) |
+| `npm run api:types`    | Generates `src/app/api.generated.ts` from `server/api/openapi.yaml` (`check:api`, in lint, checks)  |
 
 The server's checks run in `server/`: `gofmt -l .`, `go vet ./...`, `go test -race ./...`, and
 `go generate ./...` after a change to `api/openapi.yaml`. The tests against a real MediaMTX run
@@ -456,11 +480,47 @@ scripts' tests (the media assets, the test feed) run from the repo root with
 `python -m unittest discover -s tests`. Run lint, the unit tests and the build before opening a
 PR; CI (`.github/workflows/tests.yml`) runs the same.
 
-To try a branch in the Neat SDK container on `:9900`, run `scripts/deploy-sdk-dev.sh` from this
-checkout with Node 24 and Go on `PATH` (`--no-frontend` skips the frontend build, `--restore`
-brings back the stock service). It builds the server for the container and starts it in the dev
-copy. The `sima-insight-dev-deploy` skill's own `deploy.sh` predates the server and does not build
-it.
+**Building the wheel.** `./build.sh` builds the frontend, then for each target the server with
+the frontend embedded (`scripts/build-server.sh`), downloads MediaMTX, builds the Linux wheels'
+`LD_PRELOAD` shim (`tools/ffmpeg_nodelay.c`, which keeps the RTSP publishers' TCP sockets free of
+Nagle delay) and writes the wheel to `dist/`. It needs Python 3.10+ with setuptools and wheel,
+Node 24, Go (`server/go.mod` names the version; Go fetches that toolchain itself unless
+`GOTOOLCHAIN=local`), and a C compiler per Linux target (`gcc`, or `gcc-aarch64-linux-gnu` and
+`gcc-x86-64-linux-gnu` to cross-build). Options: `--target-platform
+<host|all|linux-aarch64|linux-amd64|macos-arm64>`, `--skip-frontend`, `--skip-shim`, and
+`--install` into the active virtualenv. The release workflows call it per platform, so it never
+prompts.
+
+**Trying a branch in the Neat SDK container** on `:9900`: `scripts/deploy-sdk-dev.sh`, run from
+this checkout with Node 24 and Go on `PATH`, builds the frontend and the server for the container,
+syncs the checkout to the dev copy `~/workspace/.insight-dev` (the container's
+`/workspace/.insight-dev`), stops the stock service and starts the dev build (`--no-frontend` skips
+the frontend build, `--restore` brings back the stock service). It never touches
+`/opt/neat-insight`. The dev copy is made once, with MediaMTX in its `neat_insight/bin/` and its
+own virtualenv:
+
+```bash
+C=$(docker ps --format '{{.Names}}' | grep -m1 sima-neat-sdk)
+./build.sh
+rsync -a --exclude .git --exclude node_modules ./ ~/workspace/.insight-dev/
+docker exec "$C" bash -c 'cd /workspace/.insight-dev && python3 -m venv .venv && .venv/bin/pip install -e .'
+```
+
+A deploy restarts MediaMTX, so external publishers (a webcam, a test feed) start again; reload the
+browser tab. The `sima-insight-dev-deploy` skill's own `deploy.sh` predates the server and does not
+build it.
+
+**The test feed.** `scripts/test-feed.sh <channel>` runs `neat_insight/tools/metadata_test.py` (the
+`neat-insight-metadata-test` command) in the SDK container: a test pattern on `9000+N` and metadata
+matched to its frames on `9100+N`, until Ctrl-C; options after the channel go to the feed
+(`--types`, `--metadata-delay-ms`), and `scripts/test-feed.sh stop [<channel>]` stops it from
+another terminal. Keep it off channels a real pipeline feeds.
+
+**End-to-end tests against a deployed build:** `INSIGHT_BASE_URL=https://127.0.0.1:9900 npm run
+e2e`. They then record no screenshots, videos or traces. The Viewer's playback tests run only this
+way, with the test feed on channel 0; one of them restarts the feed detached, so
+`scripts/test-feed.sh stop 0` ends it afterwards. The first run needs Chromium with its system libraries:
+`npx playwright install --with-deps chromium`.
 
 ## Quality bar
 

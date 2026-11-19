@@ -72,10 +72,6 @@ func codeOf(err error) string {
 	if errors.As(err, &e) {
 		return e.Code
 	}
-	var b *board.Error
-	if errors.As(err, &b) {
-		return string(b.Code)
-	}
 	return ""
 }
 
@@ -83,7 +79,7 @@ func TestCallDropsTheSchemaAndRefusesAnother(t *testing.T) {
 	fake := newFake()
 	f := boardtest.New(t, fake)
 	fake.answer("GET /v1/metrics", 200, `{"schema":1,"metrics":[{"key":"cpu_usage_pct"}]}`)
-	body, err := Metrics(ctx(t), f.Board)
+	body, err := Call(ctx(t), f.Board, http.MethodGet, "/v1/metrics", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,16 +88,16 @@ func TestCallDropsTheSchemaAndRefusesAnother(t *testing.T) {
 	}
 
 	fake.answer("GET /v1/metrics", 200, `{"schema":2,"metrics":[]}`)
-	if _, err := Metrics(ctx(t), f.Board); codeOf(err) != CodeSchema {
+	if _, err := Call(ctx(t), f.Board, http.MethodGet, "/v1/metrics", nil); codeOf(err) != CodeSchema {
 		t.Errorf("another schema: %v", err)
 	}
 	// The peripheral catalog carries no schema (Sentinel 3.0 on a DevKit): it passes.
 	fake.answer("GET /v1/metrics", 200, `{"revision":3,"metrics":[]}`)
-	if _, err := Metrics(ctx(t), f.Board); err != nil {
+	if _, err := Call(ctx(t), f.Board, http.MethodGet, "/v1/metrics", nil); err != nil {
 		t.Errorf("no schema: %v", err)
 	}
 	fake.answer("GET /v1/metrics", 200, `[1]`)
-	if _, err := Metrics(ctx(t), f.Board); codeOf(err) != CodeFailed {
+	if _, err := Call(ctx(t), f.Board, http.MethodGet, "/v1/metrics", nil); codeOf(err) != CodeFailed {
 		t.Errorf("not an object: %v", err)
 	}
 }
@@ -300,11 +296,11 @@ func TestCompare(t *testing.T) {
 	fake := newFake()
 	f := boardtest.New(t, fake)
 	fake.answer("GET /v1/compare?runs=base%2Bline,other&raw=1", 200, `{"schema":1,"baseline_id":"x"}`)
-	if _, err := Compare(ctx(t), f.Board, []string{"base+line", "other"}, true); err != nil {
+	if _, err := Compare(ctx(t), f.Board, []string{"base+line", "other"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, runs := range [][]string{{"one"}, make([]string, MaxCompared+1), {"a", ""}} {
-		if _, err := Compare(ctx(t), f.Board, runs, false); codeOf(err) != CodeInvalidRequest {
+		if _, err := Compare(ctx(t), f.Board, runs); codeOf(err) != CodeInvalidRequest {
 			t.Errorf("%v: %v", runs, err)
 		}
 	}

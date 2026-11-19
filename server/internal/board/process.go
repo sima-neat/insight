@@ -27,9 +27,8 @@ type Result struct {
 	Stderr []byte
 }
 
-// process is a command started on a board, over SSH or locally.
+// process is a command started on a board, over SSH or locally, its stdin empty.
 type process interface {
-	stdin() io.WriteCloser
 	stdout() io.Reader
 	stderr() io.Reader
 	// wait waits for the command to end, once its output has been read, and gives its exit
@@ -39,10 +38,9 @@ type process interface {
 	kill()
 }
 
-// collect feeds stdin to p, reads its output within MaxOutput and waits for it to end. When
-// ctx ends first, or the output grows too large, p is killed.
-func collect(ctx context.Context, p process, argv []string, stdin io.Reader) (Result, error) {
-	feed(p.stdin(), stdin)
+// collect reads p's output within MaxOutput and waits for it to end. When ctx ends first, or
+// the output grows too large, p is killed.
+func collect(ctx context.Context, p process, argv []string) (Result, error) {
 	var stdout, stderr bytes.Buffer
 	budget := &outputBudget{left: MaxOutput, exceeded: make(chan struct{})}
 	var readers sync.WaitGroup
@@ -61,8 +59,7 @@ func collect(ctx context.Context, p process, argv []string, stdin io.Reader) (Re
 	case <-ctx.Done():
 		failure = ctx.Err()
 	case <-budget.exceeded:
-		failure = &Error{Code: CodeCommandFailed,
-			Message: fmt.Sprintf("`%s` printed more than %d bytes.", argv[0], MaxOutput)}
+		failure = boardError(CodeCommandFailed, fmt.Sprintf("`%s` printed more than %d bytes.", argv[0], MaxOutput), "", nil)
 	}
 	if failure != nil {
 		p.kill()
@@ -76,19 +73,6 @@ func collect(ctx context.Context, p process, argv []string, stdin io.Reader) (Re
 		return Result{}, err
 	}
 	return Result{Exit: exit, Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, nil
-}
-
-// feed copies stdin to the command and closes the command's stdin, at once when there is
-// none. A command that exits without reading it all is no failure, as for a shell.
-func feed(to io.WriteCloser, stdin io.Reader) {
-	if stdin == nil {
-		_ = to.Close()
-		return
-	}
-	go func() {
-		_, _ = io.Copy(to, stdin)
-		_ = to.Close()
-	}()
 }
 
 // outputBudget is what a command's stdout and stderr may still write together.
@@ -133,7 +117,6 @@ type Stream struct {
 
 func newStream(ctx context.Context, p process) *Stream {
 	s := &Stream{p: p, out: p.stdout(), errs: &headTail{}, errsDone: make(chan struct{})}
-	feed(p.stdin(), nil)
 	go func() {
 		defer close(s.errsDone)
 		_, _ = io.Copy(s.errs, p.stderr())
@@ -204,13 +187,7 @@ type exited struct {
 	reason string
 }
 
-func (e exited) stdin() io.WriteCloser { return nopWriteCloser{} }
-func (e exited) stdout() io.Reader     { return bytes.NewReader(nil) }
-func (e exited) stderr() io.Reader     { return bytes.NewReader([]byte(e.reason + "\n")) }
-func (e exited) wait() (int, error)    { return e.status, nil }
-func (e exited) kill()                 {}
-
-type nopWriteCloser struct{}
-
-func (nopWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
-func (nopWriteCloser) Close() error                { return nil }
+func (e exited) stdout() io.Reader  { return bytes.NewReader(nil) }
+func (e exited) stderr() io.Reader  { return bytes.NewReader([]byte(e.reason + "\n")) }
+func (e exited) wait() (int, error) { return e.status, nil }
+func (e exited) kill()              {}

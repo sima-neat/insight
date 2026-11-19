@@ -6,14 +6,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"insight/internal/apierr"
 )
 
-func TestWriteError(t *testing.T) {
+func TestTheLibrarysErrorsAnswer(t *testing.T) {
 	f := newFixture(t, nil)
 	f.write(t, "clip.mp4", "old")
 	_, err := f.upload(t, "clip.mp4", []byte("new"), "")
 	rec := httptest.NewRecorder()
-	WriteError(rec, err)
+	apierr.WriteError(rec, err)
 	want := `{"error":{"code":"name_taken","hint":"Replace it, or keep both under another name.","message":"clip.mp4 already exists."},"conflict":{"existing":"clip.mp4","suggested":"clip_2.mp4"}}`
 	if rec.Code != http.StatusConflict || strings.TrimSpace(rec.Body.String()) != want {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
@@ -22,14 +24,14 @@ func TestWriteError(t *testing.T) {
 	f.files.use("clip.mp4", 4)
 	_, err = f.lib.Delete([]string{"clip.mp4"})
 	rec = httptest.NewRecorder()
-	WriteError(rec, err)
+	apierr.WriteError(rec, err)
 	if !strings.Contains(rec.Body.String(), `"slots":[4]`) || rec.Code != http.StatusConflict {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 
 	rec = httptest.NewRecorder()
-	WriteError(rec, errors.New("reading the media folder: permission denied"))
-	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), `"code":"internal"`) ||
+	apierr.WriteError(rec, errors.New("reading the media folder: permission denied"))
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), `"code":"internal_error"`) ||
 		rec.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}

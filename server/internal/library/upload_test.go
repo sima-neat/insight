@@ -10,8 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"insight/api"
+	"insight/internal/apierr"
 	"insight/internal/jobs"
 	"insight/internal/media"
+	"insight/internal/supervisor"
 )
 
 func TestUploadSavesAFileAsItCame(t *testing.T) {
@@ -97,9 +100,9 @@ func TestUploadConflicts(t *testing.T) {
 
 	for _, mode := range []string{"", "ask"} {
 		_, err := f.upload(t, "clip.mp4", []byte("new"), mode)
-		var e *Error
+		var e *apierr.Error
 		if !errors.As(err, &e) || e.Code != CodeNameTaken || e.Conflict == nil ||
-			*e.Conflict != (Conflict{Existing: "clip.mp4", Suggested: "clip_3.mp4"}) {
+			*e.Conflict != (api.MediaConflict{Existing: "clip.mp4", Suggested: "clip_3.mp4"}) {
 			t.Fatalf("on_conflict %q: %v", mode, err)
 		}
 	}
@@ -249,7 +252,7 @@ func TestACancelledReencodeSavesNothingAndLeavesTheSlotsAlone(t *testing.T) {
 			break
 		}
 	}
-	f.jobs.Cancel(result.Job.ID())
+	result.Job.Cancel()
 	if s := waitJob(t, result.Job); s.State != jobs.Cancelled {
 		t.Fatalf("the job ended %s: %s", s.State, s.Error)
 	}
@@ -278,7 +281,8 @@ func TestNewSweepsStaleStagingFoldersAndNothingElse(t *testing.T) {
 	keep = append(keep, ".staging-link")
 
 	f := &fixture{root: root, files: newFakeFiles(), probes: newFakeProbes(), jobs: jobs.New(nil)}
-	if _, err := New(Options{Root: root, Cache: media.NewCache(t.Context(), f.probes.probe), Jobs: f.jobs, Files: f.files}); err != nil {
+	if _, err := New(Options{Root: root, Cache: media.NewCache(t.Context(), f.probes.probe), Jobs: f.jobs, Files: f.files,
+		Start: func(supervisor.Spec) (supervisor.Child, error) { return nil, errors.New("nothing runs here") }}); err != nil {
 		t.Fatal(err)
 	}
 	entries, _ := os.ReadDir(root)

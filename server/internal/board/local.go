@@ -37,10 +37,6 @@ func (l *localTransport) start(_ context.Context, argv []string) (process, error
 	cmd := exec.Command(argv[0], argv[1:]...)
 	procgroup.Own(cmd)
 	cmd.WaitDelay = waitDelay
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -55,13 +51,12 @@ func (l *localTransport) start(_ context.Context, argv []string) (process, error
 		return nil, boardChanged()
 	}
 	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
 		if errors.Is(err, exec.ErrNotFound) {
 			return exited{status: 127, reason: argv[0] + ": command not found"}, nil
 		}
 		return exited{status: 126, reason: fmt.Sprintf("%s: %v", argv[0], err)}, nil
 	}
-	p := &localProcess{cmd: cmd, in: stdin, out: stdout, errs: stderr, owner: l}
+	p := &localProcess{cmd: cmd, out: stdout, errs: stderr, owner: l}
 	l.active[p] = struct{}{}
 	return p, nil
 }
@@ -91,7 +86,6 @@ func (l *localTransport) close() {
 
 type localProcess struct {
 	cmd   *exec.Cmd
-	in    io.WriteCloser
 	out   io.Reader
 	errs  io.Reader
 	owner *localTransport
@@ -100,9 +94,8 @@ type localProcess struct {
 	waited bool
 }
 
-func (p *localProcess) stdin() io.WriteCloser { return p.in }
-func (p *localProcess) stdout() io.Reader     { return p.out }
-func (p *localProcess) stderr() io.Reader     { return p.errs }
+func (p *localProcess) stdout() io.Reader { return p.out }
+func (p *localProcess) stderr() io.Reader { return p.errs }
 
 func (p *localProcess) wait() (int, error) {
 	err := p.cmd.Wait()

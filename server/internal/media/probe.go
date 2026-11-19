@@ -161,19 +161,19 @@ func parseProbe(out []byte) (Info, error) {
 	stream := probe.Streams[0]
 	info := Info{
 		Kind:        KindVideo,
-		Codec:       codec(stream.CodecName),
+		Codec:       CodecOf(stream.CodecName),
 		Profile:     stream.Profile,
 		PixelFormat: stream.PixFmt,
 		Width:       stream.Width,
 		Height:      stream.Height,
 	}
-	info.CodecName = codecName(info.Codec)
+	info.CodecName = CodecName(info.Codec)
 	if pictureFormat(probe.Format.FormatName) {
 		// ffprobe gives a picture a made-up rate of 25/1; it has no rate, length or B-frames.
 		info.Kind = KindImage
 		return info, nil
 	}
-	info.FrameRate, info.FPS = frameRate(stream.AvgFrameRate, stream.RFrameRate)
+	info.FrameRate, info.FPS = FrameRate(stream.AvgFrameRate, stream.RFrameRate)
 	info.Duration = seconds(stream.Duration)
 	if info.Duration == 0 {
 		info.Duration = seconds(probe.Format.Duration)
@@ -182,8 +182,9 @@ func parseProbe(out []byte) (Info, error) {
 	return info, nil
 }
 
-// codec names a stream's codec by the library's names for the ones the slots stream.
-func codec(ffprobeName string) string {
+// CodecOf names a stream's codec, as ffprobe calls it, by the library's names for the ones the
+// slots stream (CodecH264, CodecH265, CodecMJPEG); another keeps ffprobe's name.
+func CodecOf(ffprobeName string) string {
 	switch ffprobeName {
 	case "h264":
 		return CodecH264
@@ -195,7 +196,8 @@ func codec(ffprobeName string) string {
 	return ffprobeName
 }
 
-func codecName(codec string) string {
+// CodecName is a codec as people read it: "H.264", "H.265", "MJPEG", else as it is.
+func CodecName(codec string) string {
 	switch codec {
 	case CodecH264:
 		return "H.264"
@@ -213,9 +215,10 @@ func pictureFormat(formatName string) bool {
 	return formatName == "image2" || strings.HasSuffix(formatName, "_pipe")
 }
 
-// frameRate picks the average rate when it is known and the base rate otherwise, and returns
-// the picked text with its value; "", 0 when neither is known.
-func frameRate(avg, base string) (string, float64) {
+// FrameRate picks ffprobe's average rate (avg_frame_rate) when it is known and the base rate
+// (r_frame_rate) otherwise, and returns the picked text with its value; "", 0 when neither is
+// known.
+func FrameRate(avg, base string) (string, float64) {
 	for _, text := range []string{avg, base} {
 		if fps := rational(text); fps > 0 {
 			return text, fps

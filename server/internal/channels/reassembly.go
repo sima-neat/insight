@@ -25,9 +25,7 @@ const (
 type reassembled struct {
 	message     []byte // a whole message, when complete
 	complete    bool
-	chunked     bool   // the datagram was a chunk
-	reassembled bool   // and it completed a message
-	dropped     uint64 // messages given up (malformed, expired, evicted, conflicting)
+	reassembled bool // the message was joined from chunks
 }
 
 type assemblyKey struct {
@@ -52,43 +50,40 @@ func newReassembler() *reassembler {
 	return &reassembler{assemblies: map[assemblyKey]*assembly{}}
 }
 
+// accept takes one datagram. A chunk that is malformed, conflicts with its message's other
+// chunks or makes it too large gives that message up, as do expiry and eviction by newer ones.
 func (r *reassembler) accept(datagram []byte, source netip.AddrPort, now time.Time) reassembled {
-	dropped := r.dropExpired(now)
+	r.dropExpired(now)
 	if len(datagram) == 0 || datagram[0] != chunkMagic {
-		return reassembled{message: datagram, complete: true, dropped: dropped}
+		return reassembled{message: datagram, complete: true}
 	}
-	result := reassembled{chunked: true, dropped: dropped}
 	if len(datagram) <= chunkHeaderSize || len(datagram) > maxChunkDatagram || datagram[1] != chunkVersion {
-		result.dropped++
-		return result
+		return reassembled{}
 	}
 	index, count := int(datagram[10]), int(datagram[11])
 	if count == 0 || count > maxChunkCount || index >= count {
-		result.dropped++
-		return result
+		return reassembled{}
 	}
 
 	key := assemblyKey{source: source, messageID: binary.BigEndian.Uint64(datagram[2:10])}
 	a := r.assemblies[key]
 	if a == nil {
-		if len(r.assemblies) == reassemblyPerSource && r.dropOldest() {
-			result.dropped++
+		if len(r.assemblies) == reassemblyPerSource {
+			r.dropOldest()
 		}
 		a = &assembly{chunks: make([][]byte, count), started: now}
 		r.assemblies[key] = a
 	}
 	if len(a.chunks) != count {
 		delete(r.assemblies, key)
-		result.dropped++
-		return result
+		return reassembled{}
 	}
 	fragment := datagram[chunkHeaderSize:]
 	switch {
 	case a.chunks[index] == nil:
 		if a.size+len(fragment) > maxMessageSize {
 			delete(r.assemblies, key)
-			result.dropped++
-			return result
+			return reassembled{}
 		}
 		a.chunks[index] = append([]byte(nil), fragment...)
 		a.received++
@@ -96,22 +91,20 @@ func (r *reassembler) accept(datagram []byte, source netip.AddrPort, now time.Ti
 	case !bytes.Equal(a.chunks[index], fragment):
 		// The same chunk twice with different content: one of them is wrong.
 		delete(r.assemblies, key)
-		result.dropped++
-		return result
+		return reassembled{}
 	}
 	if a.received != len(a.chunks) {
-		return result
+		return reassembled{}
 	}
 	message := make([]byte, 0, a.size)
 	for _, chunk := range a.chunks {
 		message = append(message, chunk...)
 	}
 	delete(r.assemblies, key)
-	result.message, result.complete, result.reassembled = message, true, true
-	return result
+	return reassembled{message: message, complete: true, reassembled: true}
 }
 
-func (r *reassembler) dropOldest() bool {
+func (r *reassembler) dropOldest() {
 	var (
 		oldest assemblyKey
 		at     time.Time
@@ -125,16 +118,12 @@ func (r *reassembler) dropOldest() bool {
 	if found {
 		delete(r.assemblies, oldest)
 	}
-	return found
 }
 
-func (r *reassembler) dropExpired(now time.Time) uint64 {
-	var dropped uint64
+func (r *reassembler) dropExpired(now time.Time) {
 	for key, a := range r.assemblies {
 		if now.Sub(a.started) > reassemblyMaxAge {
 			delete(r.assemblies, key)
-			dropped++
 		}
 	}
-	return dropped
 }

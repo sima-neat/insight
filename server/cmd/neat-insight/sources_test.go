@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"insight/internal/jobs"
 	"insight/internal/library"
 	"insight/internal/media"
+	"insight/internal/supervisor"
 )
 
 type noSlots struct{}
@@ -18,10 +20,14 @@ func (noSlots) SlotsUsing(string) []int                { return nil }
 func (noSlots) Restart(context.Context, []int) []error { return nil }
 func (noSlots) Unassign([]int)                         {}
 
+func startNothing(supervisor.Spec) (supervisor.Child, error) {
+	return nil, errors.New("nothing runs here")
+}
+
 func TestProducersHandEachKeyToItsOwner(t *testing.T) {
 	root := t.TempDir()
 	lib, err := library.New(library.Options{Root: root, Cache: media.NewCache(t.Context(), nil),
-		FFmpeg: "/opt/ffmpeg", Jobs: jobs.New(nil), Files: noSlots{}})
+		FFmpeg: "/opt/ffmpeg", Start: startNothing, Jobs: jobs.New(nil), Files: noSlots{}})
 	if err != nil {
 		t.Fatal(err)
 	}

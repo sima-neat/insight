@@ -361,7 +361,7 @@ export class CompareView {
     try {
       const answer = await firstValueFrom(
         this.http
-          .get<unknown>(boardUrl(id, 'sentinel/compare'), { params: { runs, raw: true } })
+          .get<unknown>(boardUrl(id, 'sentinel/compare'), { params: { runs } })
           .pipe(withRequestErrors()),
       );
       if (!current()) return;

@@ -210,7 +210,7 @@ func TestCancelledImportSavesNothing(t *testing.T) {
 			break
 		}
 	}
-	f.jobs.Cancel(job.ID())
+	job.Cancel()
 	if s := waitJob(t, job); s.State != jobs.Cancelled {
 		t.Fatalf("the job ended %s: %s", s.State, s.Error)
 	}

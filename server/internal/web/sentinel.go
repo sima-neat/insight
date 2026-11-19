@@ -17,20 +17,6 @@ func (h *handlers) GetSentinelHealth(w http.ResponseWriter, r *http.Request, id 
 	}
 }
 
-func (h *handlers) GetSentinelMetrics(w http.ResponseWriter, r *http.Request, id api.BoardID) {
-	if b, ok := h.board(w, id); ok {
-		body, err := sentinel.Metrics(r.Context(), b)
-		respond(w, http.StatusOK, body, err)
-	}
-}
-
-func (h *handlers) GetSentinelLatestSample(w http.ResponseWriter, r *http.Request, id api.BoardID) {
-	if b, ok := h.board(w, id); ok {
-		body, err := sentinel.Latest(r.Context(), b)
-		respond(w, http.StatusOK, body, err)
-	}
-}
-
 func (h *handlers) GetSentinelCache(w http.ResponseWriter, r *http.Request, id api.BoardID, params api.GetSentinelCacheParams) {
 	if b, ok := h.board(w, id); ok {
 		body, err := sentinel.ReadCache(r.Context(), b, value(params.After))
@@ -93,7 +79,7 @@ func (h *handlers) CompareSentinelRuns(w http.ResponseWriter, r *http.Request, i
 		}
 	}
 	if b, ok := h.board(w, id); ok {
-		body, err := sentinel.Compare(r.Context(), b, runs, value(params.Raw))
+		body, err := sentinel.Compare(r.Context(), b, runs)
 		respond(w, http.StatusOK, body, err)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sync"
 	"testing"
+
+	"insight/internal/apierr"
 )
 
 // The guard is tested on plain strings: nothing is removed by these cases.
@@ -147,7 +149,7 @@ func TestDeleteRefusesWhatSlotsUse(t *testing.T) {
 		}
 	}
 	_, err := f.lib.Delete([]string{"clip.mp4", "link-sub"})
-	if e := err.(*Error); !slices.Equal(e.Slots, []int{3, 5, 9}) || e.Message != "clip.mp4, link-sub/deep.mp4 are used by src3, src5, src9." {
+	if e := err.(*apierr.Error); !slices.Equal(e.Slots, []int{3, 5, 9}) || e.Message != "clip.mp4, link-sub/deep.mp4 are used by src3, src5, src9." {
 		t.Fatalf("in_use names %v: %s", e.Slots, e.Message)
 	}
 	if len(stub.removed) != 0 {

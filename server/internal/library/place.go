@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"insight/api"
+	"insight/internal/apierr"
 	"insight/internal/media"
 )
 
@@ -99,11 +101,11 @@ func (l *Library) nameTaken(abs string, folder bool, meanwhile string) error {
 			break
 		}
 	}
-	return &Error{
+	return &apierr.Error{
 		Status: http.StatusConflict, Code: CodeNameTaken,
 		Message:  fmt.Sprintf("%s already exists%s.", rel, meanwhile),
 		Hint:     "Replace it, or keep both under another name.",
-		Conflict: &Conflict{Existing: rel, Suggested: suggested},
+		Conflict: &api.MediaConflict{Existing: rel, Suggested: suggested},
 	}
 }
 

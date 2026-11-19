@@ -17,7 +17,6 @@ import (
 
 // ChannelSet is what the routes need of the channels.
 type ChannelSet interface {
-	Count() int
 	States(now time.Time) []channels.State
 	Offer(ctx context.Context, index int, offer channels.Description) (channels.Description, error)
 }
@@ -32,35 +31,14 @@ const (
 
 func (h *handlers) ListChannels(w http.ResponseWriter, r *http.Request) {
 	states := h.deps.Channels.States(h.deps.Now())
-	list := api.ChannelList{Count: h.deps.Channels.Count(), Channels: make([]api.Channel, len(states))}
+	list := api.ChannelList{Channels: make([]api.Channel, len(states))}
 	for i, s := range states {
-		list.Channels[i] = api.Channel{
-			Channel: s.Channel,
-			Viewers: s.Viewers,
-			Errors:  nonNil(s.Errors),
-			Video: api.ChannelVideo{
-				Port: s.VideoPort, Active: s.Video.Active, Codec: optional(s.Video.Codec),
-				PayloadType: int(s.Video.PayloadType), UnsupportedPackets: int(s.Video.Unsupported),
-				Packets: int(s.Video.Packets), BitsPerSecond: s.Video.BitsPerS,
-				FramesPerSecond: s.Video.FramesPerSecond, Keyframes: int(s.Video.Keyframes),
-				LastAt: optionalTime(s.Video.Last), Sender: optional(s.Video.Remote),
-			},
-			Metadata: api.ChannelMetadata{
-				Port: s.MetadataPort, Active: s.Metadata.Active, Received: int(s.Metadata.Received),
-				MessagesPerSecond: s.Metadata.MessagesPerSecond, Matched: int(s.Metadata.Matched),
-				Unmatched: int(s.Metadata.Unmatched), Invalid: int(s.Metadata.Invalid),
-				NoViewer: int(s.Metadata.NoViewer), LastAt: optionalTime(s.Metadata.Last),
-				Sender: optional(s.Metadata.Remote),
-			},
-		}
+		list.Channels[i] = api.Channel{Channel: s.Channel, Video: api.ChannelVideo{Active: s.Video.Active}}
 	}
 	writeJSON(w, http.StatusOK, list)
 }
 
 func (h *handlers) OfferChannel(w http.ResponseWriter, r *http.Request, channel int) {
-	if !requireJSON(w, r, "The offer") {
-		return
-	}
 	var offer api.SessionDescription
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxOfferBytes)).Decode(&offer); err != nil {
 		var tooLarge *http.MaxBytesError
@@ -177,14 +155,6 @@ func truthy(value *string) bool {
 		return true
 	}
 	return false
-}
-
-func optionalTime(t time.Time) *time.Time {
-	if t.IsZero() {
-		return nil
-	}
-	utc := t.UTC()
-	return &utc
 }
 
 func optionalRFC3339(t time.Time) *string {

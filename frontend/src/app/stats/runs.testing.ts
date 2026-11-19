@@ -33,7 +33,7 @@ export const ACTIVE_TRACE: RunMetadata = tracesActive.trace;
 export const SAVED_RUN: SavedRun = runDetail;
 
 /**
- * `GET .../sentinel/compare?raw=true` for `tes3` (the baseline) against the run of `SAVED_RUN`,
+ * `GET .../sentinel/compare` for `tes3` (the baseline) against the run of `SAVED_RUN`,
  * four metrics each, one of which (`cpu_usage_pct`) neither run took a reading of.
  */
 export const COMPARE_RAW: CompareExport = compareRaw;

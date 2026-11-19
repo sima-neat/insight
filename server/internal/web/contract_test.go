@@ -70,7 +70,7 @@ func TestTheAPIAnswersAsItsDocumentSays(t *testing.T) {
 	c.write("still.jpg", "picture")
 	c.write("notes.txt", "text")
 	deadline := time.Now().Add(5 * time.Second)
-	for strings.Contains(c.ok(c.get("/api/media")), `"probing":true`) {
+	for !everyFileProbed(t, c.ok(c.get("/api/media"))) {
 		if time.Now().After(deadline) {
 			t.Fatal("the library's files were not probed")
 		}
@@ -91,7 +91,6 @@ func TestTheAPIAnswersAsItsDocumentSays(t *testing.T) {
 	c.refused(c.send(http.MethodPut, "/api/slots/5", `{"kind":"pull","url":"rtsp://127.0.0.1:1/cam"}`), 502, "pull_unreachable")
 	c.refused(c.send(http.MethodPut, "/api/slots/1", `{"kind":"file","file":"clip.mp4"}`), 409, "slot_busy")
 	c.refused(c.send(http.MethodPut, "/api/slots/49", `{"kind":"webcam"}`), 404, "no_such_slot")
-	c.refused(c.sendAs(http.MethodPut, "/api/slots/3", "text/plain", `{"kind":"webcam"}`), 415, "json_only")
 	c.refused(c.send(http.MethodPut, "/api/slots/3", `{"kind":"file","fsp":3}`), 400, "invalid_request")
 	c.ok(c.send(http.MethodPost, "/api/slots/3/start", ""))
 	c.ok(c.send(http.MethodPost, "/api/slots/3/stop", ""))
@@ -148,14 +147,35 @@ func TestTheAPIAnswersAsItsDocumentSays(t *testing.T) {
 	if events := c.ok(c.get("/api/jobs/" + job.ID + "/events")); !strings.Contains(events, `"state":"done"`) {
 		t.Errorf("the import's events: %s", events)
 	}
-	c.ok(c.get("/api/jobs"))
-	c.ok(c.get("/api/jobs/" + job.ID))
-	c.ok(c.send(http.MethodDelete, "/api/jobs/"+job.ID, ""))
-	c.refused(c.get("/api/jobs/nothing"), 404, "job_not_found")
+	c.refused(c.get("/api/jobs/nothing/events"), 404, "job_not_found")
 
 	c.boardRoutes()
 
 	c.allAnswered()
+}
+
+// everyFileProbed says whether every file of a /api/media answer has its probe.
+func everyFileProbed(t *testing.T, tree string) bool {
+	type entry struct {
+		Folder   bool
+		Probe    json.RawMessage
+		Children []entry
+	}
+	var probed func(e entry) bool
+	probed = func(e entry) bool {
+		if !e.Folder {
+			return string(e.Probe) != "null"
+		}
+		for _, child := range e.Children {
+			if !probed(child) {
+				return false
+			}
+		}
+		return true
+	}
+	var root entry
+	must(t, json.Unmarshal([]byte(tree), &root))
+	return probed(root)
 }
 
 // contract is the server under test and the document it is held to.
@@ -214,7 +234,7 @@ func newContract(t *testing.T) *contract {
 
 	catalog := newCatalog(t)
 	lib, err := library.New(library.Options{
-		Root: c.root, Cache: probes, FFmpeg: "/nonexistent/ffmpeg", Probe: probeByExtension,
+		Root: c.root, Cache: probes, FFmpeg: "/nonexistent/ffmpeg", Start: startNothing, Probe: probeByExtension,
 		Keyframes: func(context.Context, string) (time.Duration, error) { return time.Second, nil },
 		Jobs:      runner, Relays: relays, Files: manager,
 		CatalogIndexURL: catalog.URL + "/index.json", CatalogBaseURL: catalog.URL + "/assets/",
@@ -471,7 +491,7 @@ func (e *externalStreams) SetPullSource(context.Context, string, string) error {
 func (e *externalStreams) ClearPullSource(context.Context, string) error       { return nil }
 
 // startNothing stands in for the supervisor: the slots' publishers "run" until stopped.
-func startNothing(supervisor.Spec) (slots.Process, error) {
+func startNothing(supervisor.Spec) (supervisor.Child, error) {
 	return &idleProcess{done: make(chan struct{})}, nil
 }
 

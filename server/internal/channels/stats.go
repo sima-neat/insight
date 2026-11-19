@@ -55,7 +55,6 @@ type stats struct {
 		packets      uint64
 		bytes        uint64
 		rate         rate
-		frames       rate // whole access units sent on
 		ssrc         uint32
 		payloadType  uint8
 		codec        Codec
@@ -64,22 +63,15 @@ type stats struct {
 		keyframes    uint64
 		lastKeyframe uint32 // its RTP time, so a keyframe of several packets counts once
 		seenSPS      bool
-		noViewer     uint64 // packets that arrived while no browser watched
 	}
 	metadata struct {
-		first, last     time.Time
-		remote          netip.AddrPort
-		received        uint64
-		bytes           uint64
-		rate            rate
-		invalid         uint64
-		chunks          uint64
-		reassembled     uint64
-		reassemblyDrops uint64
-		forwarded       uint64
-		noViewer        uint64
-		queueFull       uint64
-		sendErrors      uint64
+		first, last time.Time
+		remote      netip.AddrPort
+		received    uint64
+		bytes       uint64
+		rate        rate
+		invalid     uint64
+		forwarded   uint64 // messages sent to at least one browser
 	}
 	errors []string
 }
@@ -113,28 +105,10 @@ func (s *stats) videoPacket(codec Codec, payloadType uint8, ssrc, timestamp uint
 	}
 }
 
-func (s *stats) frameSent(size int, now time.Time) {
-	s.mu.Lock()
-	s.video.frames.add(size, now)
-	s.mu.Unlock()
-}
-
 func (s *stats) count(counter func(*stats)) {
 	s.mu.Lock()
 	counter(s)
 	s.mu.Unlock()
-}
-
-func (s *stats) metadataDatagram(result reassembled) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if result.chunked {
-		s.metadata.chunks++
-	}
-	if result.reassembled {
-		s.metadata.reassembled++
-	}
-	s.metadata.reassemblyDrops += result.dropped
 }
 
 func (s *stats) metadataMessage(size int, valid bool, from netip.AddrPort, now time.Time) {

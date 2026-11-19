@@ -26,7 +26,7 @@ var t0 = time.Unix(1, 0)
 func TestAWholeMessagePassesUnchanged(t *testing.T) {
 	payload := []byte(`{"type":"object-detection","data":{"objects":[]}}`)
 	got := newReassembler().accept(payload, sender, t0)
-	if !got.complete || got.chunked || got.reassembled || got.dropped != 0 || !bytes.Equal(got.message, payload) {
+	if !got.complete || got.reassembled || !bytes.Equal(got.message, payload) {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -36,7 +36,7 @@ func TestChunksAreJoinedInAnyOrder(t *testing.T) {
 	first, second := []byte(`{"type":"tracking",`), []byte(`"data":{"tracks":[]}}`)
 
 	r := newReassembler()
-	if got := r.accept(chunk(7, 0, 2, first), sender, t0); got.complete || !got.chunked {
+	if got := r.accept(chunk(7, 0, 2, first), sender, t0); got.complete {
 		t.Fatalf("first: %+v", got)
 	}
 	if got := r.accept(chunk(7, 1, 2, second), sender, t0); !got.complete || !got.reassembled || !bytes.Equal(got.message, want) {
@@ -54,7 +54,7 @@ func TestAnIdenticalDuplicateChunkIsIgnored(t *testing.T) {
 	r := newReassembler()
 	first := chunk(11, 0, 2, []byte(`{"value":`))
 	r.accept(first, sender, t0)
-	if got := r.accept(first, sender, t0); got.complete || got.dropped != 0 {
+	if got := r.accept(first, sender, t0); got.complete || len(r.assemblies) != 1 {
 		t.Fatalf("duplicate: %+v", got)
 	}
 	if got := r.accept(chunk(11, 1, 2, []byte(`42}`)), sender, t0); !got.complete || string(got.message) != `{"value":42}` {
@@ -65,8 +65,9 @@ func TestAnIdenticalDuplicateChunkIsIgnored(t *testing.T) {
 func TestAnIncompleteMessageExpires(t *testing.T) {
 	r := newReassembler()
 	r.accept(chunk(21, 0, 2, []byte(`{"old":`)), sender, t0)
-	if got := r.accept(chunk(22, 0, 2, []byte(`{"new":`)), sender, t0.Add(reassemblyMaxAge+time.Nanosecond)); got.dropped != 1 {
-		t.Fatalf("%+v", got)
+	r.accept(chunk(22, 0, 2, []byte(`{"new":`)), sender, t0.Add(reassemblyMaxAge+time.Nanosecond))
+	if len(r.assemblies) != 1 {
+		t.Fatalf("%d messages being joined", len(r.assemblies))
 	}
 	if got := r.accept(chunk(21, 1, 2, []byte(`1}`)), sender, t0.Add(time.Second)); got.complete {
 		t.Fatal("a late chunk revived an expired message")
@@ -76,12 +77,11 @@ func TestAnIncompleteMessageExpires(t *testing.T) {
 func TestTheOldestMessageGoesAtCapacity(t *testing.T) {
 	r := newReassembler()
 	for id := uint64(1); id <= reassemblyPerSource; id++ {
-		if got := r.accept(chunk(id, 0, 2, []byte(`{"v":`)), sender, t0.Add(time.Duration(id)*time.Millisecond)); got.dropped != 0 {
-			t.Fatalf("message %d: %+v", id, got)
-		}
+		r.accept(chunk(id, 0, 2, []byte(`{"v":`)), sender, t0.Add(time.Duration(id)*time.Millisecond))
 	}
-	if got := r.accept(chunk(reassemblyPerSource+1, 0, 2, []byte(`{"v":`)), sender, t0.Add(10*time.Millisecond)); got.dropped != 1 {
-		t.Fatalf("%+v", got)
+	r.accept(chunk(reassemblyPerSource+1, 0, 2, []byte(`{"v":`)), sender, t0.Add(10*time.Millisecond))
+	if len(r.assemblies) != reassemblyPerSource {
+		t.Fatalf("%d messages being joined", len(r.assemblies))
 	}
 	if got := r.accept(chunk(1, 1, 2, []byte(`1}`)), sender, t0.Add(11*time.Millisecond)); got.complete {
 		t.Fatal("the evicted message completed")
@@ -106,8 +106,9 @@ func TestMalformedChunksAreDropped(t *testing.T) {
 	}
 	for name, datagram := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := newReassembler().accept(datagram, sender, t0); !got.chunked || got.complete || got.dropped != 1 {
-				t.Fatalf("%+v", got)
+			r := newReassembler()
+			if got := r.accept(datagram, sender, t0); got.complete || len(r.assemblies) != 0 {
+				t.Fatalf("%+v, %d messages being joined", got, len(r.assemblies))
 			}
 		})
 	}
@@ -116,17 +117,17 @@ func TestMalformedChunksAreDropped(t *testing.T) {
 func TestConflictingChunksDropTheMessage(t *testing.T) {
 	r := newReassembler()
 	r.accept(chunk(41, 0, 2, []byte(`{"value":`)), sender, t0)
-	if got := r.accept(chunk(41, 1, 3, []byte(`1}`)), sender, t0); got.complete || got.dropped != 1 {
+	if got := r.accept(chunk(41, 1, 3, []byte(`1}`)), sender, t0); got.complete || len(r.assemblies) != 0 {
 		t.Fatalf("another count: %+v", got)
 	}
 	r.accept(chunk(42, 0, 2, []byte(`{"value":`)), sender, t0)
-	if got := r.accept(chunk(42, 0, 2, []byte(`{"other":`)), sender, t0); got.complete || got.dropped != 1 {
+	if got := r.accept(chunk(42, 0, 2, []byte(`{"other":`)), sender, t0); got.complete || len(r.assemblies) != 0 {
 		t.Fatalf("another content: %+v", got)
 	}
 }
 
 func TestTheLargestMessageFitsAndOneByteMoreDoesNot(t *testing.T) {
-	send := func(id uint64, size int) reassembled {
+	send := func(id uint64, size int) (reassembled, *reassembler) {
 		payload := bytes.Repeat([]byte{'x'}, size)
 		count := byte((size + chunkPayloadSize - 1) / chunkPayloadSize)
 		r := newReassembler()
@@ -134,12 +135,12 @@ func TestTheLargestMessageFitsAndOneByteMoreDoesNot(t *testing.T) {
 		for index, offset := byte(0), 0; offset < size; index, offset = index+1, offset+chunkPayloadSize {
 			got = r.accept(chunk(id, index, count, payload[offset:min(offset+chunkPayloadSize, size)]), sender, t0)
 		}
-		return got
+		return got, r
 	}
-	if got := send(52, maxMessageSize); !got.complete || len(got.message) != maxMessageSize {
+	if got, _ := send(52, maxMessageSize); !got.complete || len(got.message) != maxMessageSize {
 		t.Fatalf("the largest message: complete %v, %d bytes", got.complete, len(got.message))
 	}
-	if got := send(51, maxMessageSize+1); got.complete || got.dropped != 1 {
-		t.Fatalf("one byte more: %+v", got)
+	if got, r := send(51, maxMessageSize+1); got.complete || len(r.assemblies) != 0 {
+		t.Fatalf("one byte more: complete %v, %d messages being joined", got.complete, len(r.assemblies))
 	}
 }

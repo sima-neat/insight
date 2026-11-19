@@ -12,39 +12,22 @@ func TestPublishersPreloadTheShim(t *testing.T) {
 	dir := t.TempDir()
 	shim := filepath.Join(dir, "ffmpeg_nodelay.so")
 	must(t, os.WriteFile(shim, []byte("elf"), 0o644))
-	var aliases shimAliases
-	if got := preloadValue(preloadEnv(shim, &aliases)); got != shim+":/lib/other.so" {
+	if got := preloadValue(preloadEnv(shim)); got != shim+":/lib/other.so" {
 		t.Errorf("LD_PRELOAD is %q", got)
 	}
-	if env := preloadEnv(filepath.Join(dir, "missing.so"), &aliases); env != nil {
+	if env := preloadEnv(filepath.Join(dir, "missing.so")); env != nil {
 		t.Error("a missing shim was preloaded")
 	}
-	if env := preloadEnv("", &aliases); env != nil {
+	if env := preloadEnv(""); env != nil {
 		t.Error("no shim changed the environment")
 	}
-
-	// A path the loader would split or expand is preloaded through a link.
-	t.Setenv("LD_PRELOAD", "")
+	// A path the loader would split or expand is not preloaded, as a missing shim is not.
 	odd := filepath.Join(dir, "my lib:$ORIGIN")
 	must(t, os.MkdirAll(odd, 0o755))
 	oddShim := filepath.Join(odd, "ffmpeg_nodelay.so")
 	must(t, os.WriteFile(oddShim, []byte("elf"), 0o644))
-	got := preloadValue(preloadEnv(oddShim, &aliases))
-	if loaderUnsafe(got) || !strings.HasSuffix(got, "/ffmpeg_nodelay.so") {
-		t.Fatalf("an unsafe shim path is preloaded as %q", got)
-	}
-	if target, err := os.Readlink(got); err != nil || target != oddShim {
-		t.Errorf("the link leads to %q (%v)", target, err)
-	}
-	if again := preloadValue(preloadEnv(oddShim, &aliases)); again != got {
-		t.Error("a second publisher made a second link")
-	}
-	aliases.remove()
-	if _, err := os.Lstat(filepath.Dir(got)); !os.IsNotExist(err) {
-		t.Error("the link's folder is left")
-	}
-	if _, err := os.Stat(oddShim); err != nil {
-		t.Error("removing the link removed the shim")
+	if env := preloadEnv(oddShim); env != nil {
+		t.Errorf("a shim the loader cannot name was preloaded as %q", preloadValue(env))
 	}
 }
 

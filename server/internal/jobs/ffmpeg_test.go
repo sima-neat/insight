@@ -3,6 +3,8 @@ package jobs
 import (
 	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -10,25 +12,58 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"insight/internal/supervisor"
 )
 
 // The samples in testdata are real output of ffmpeg 6.1 run with "-progress pipe:1 -nostats" and
-// its stderr merged into its stdout, as Insight runs it: a re-encode paced by -re (several
+// its stderr merged into its stdout, as the supervisor runs it: a re-encode paced by -re (several
 // blocks), a run at the default log level (the banner, x264's report and ffmpeg's final status
 // line among the blocks), and a run that failed to open its encoder.
 
-// follow runs FollowFFmpeg over input inside a job, as long work does.
-func follow(t *testing.T, input io.Reader, duration time.Duration) (*FFmpegProgress, Snapshot) {
+// replay stands in for the supervisor: the child "prints" output, each line as the supervisor
+// writes it to the spec's Output, then exits with exit.
+func replay(output io.Reader, exit string) supervisor.Starter {
+	return func(spec supervisor.Spec) (supervisor.Child, error) {
+		lines := bufio.NewScanner(output)
+		for lines.Scan() {
+			fmt.Fprintf(spec.Output, "[%s] %s\n", spec.Name, lines.Text())
+		}
+		child := &exited{status: supervisor.Status{LastExit: exit}, done: make(chan struct{})}
+		close(child.done)
+		return child, nil
+	}
+}
+
+type exited struct {
+	status supervisor.Status
+	done   chan struct{}
+}
+
+func (e *exited) Status() supervisor.Status      { return e.status }
+func (e *exited) Tail() []string                 { return nil }
+func (e *exited) Done() <-chan struct{}          { return e.done }
+func (e *exited) Stop(ctx context.Context) error { return nil }
+
+// follow runs RunFFmpeg over output inside a job, as long work does, and returns what it
+// followed, the job at its end and RunFFmpeg's error.
+func follow(t *testing.T, output io.Reader, exit string, duration time.Duration) (*FFmpegProgress, Snapshot, error) {
 	t.Helper()
 	r := New(nil)
+	var followed *FFmpegProgress
+	var runErr error
 	j := r.Submit("encode", "encode", func(ctx context.Context, p *Progress) (any, error) {
-		return FollowFFmpeg(input, duration, p)
+		runErr = RunFFmpeg(ctx, replay(output, exit), supervisor.Spec{Name: "encode-1"}, duration, func(f *FFmpegProgress) {
+			followed = f
+			p.Follow(f)
+		})
+		return nil, nil
 	})
 	s := waitDone(t, j)
-	if s.State != Done {
-		t.Fatalf("job %s: %s", s.State, s.Error)
+	if followed == nil {
+		followed = &FFmpegProgress{}
 	}
-	return s.Result.(*FFmpegProgress), s
+	return followed, s, runErr
 }
 
 func sample(t *testing.T, name string) *os.File {
@@ -77,8 +112,11 @@ func closeTo(got, want []float64) bool {
 	return true
 }
 
-func TestFollowFFmpegReportsOnTheJob(t *testing.T) {
-	f, s := follow(t, sample(t, "ffmpeg-encode.txt"), 4*time.Second)
+func TestRunFFmpegReportsOnTheJob(t *testing.T) {
+	f, s, err := follow(t, sample(t, "ffmpeg-encode.txt"), "exit status 0", 4*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if elapsed, _ := f.Elapsed(); elapsed != 4066667*time.Microsecond || !f.Ended() {
 		t.Errorf("elapsed %v, ended %v", elapsed, f.Ended())
 	}
@@ -87,8 +125,8 @@ func TestFollowFFmpegReportsOnTheJob(t *testing.T) {
 	}
 }
 
-func TestFollowFFmpegAtTheDefaultLogLevel(t *testing.T) {
-	f, s := follow(t, sample(t, "ffmpeg-verbose.txt"), 3*time.Second)
+func TestRunFFmpegAtTheDefaultLogLevel(t *testing.T) {
+	f, s, _ := follow(t, sample(t, "ffmpeg-verbose.txt"), "exit status 0", 3*time.Second)
 	if elapsed, _ := f.Elapsed(); elapsed != 2933333*time.Microsecond {
 		t.Errorf("elapsed %v", elapsed)
 	}
@@ -106,12 +144,37 @@ func TestFollowFFmpegAtTheDefaultLogLevel(t *testing.T) {
 	}
 }
 
-func TestFollowFFmpegOfAFailedRun(t *testing.T) {
-	f, s := follow(t, sample(t, "ffmpeg-fail.txt"), 4*time.Second)
+func TestRunFFmpegOfAFailedRun(t *testing.T) {
+	r := New(nil)
+	var err error
+	j := r.Submit("encode", "encode", func(ctx context.Context, p *Progress) (any, error) {
+		err = RunFFmpeg(ctx, replay(sample(t, "ffmpeg-fail.txt"), "exit status 1"), supervisor.Spec{Name: "encode-1"}, 4*time.Second, p.Follow)
+		return nil, nil
+	})
+	if s := waitDone(t, j); s.Progress.Percent != nil || s.Progress.Detail != "" {
+		t.Errorf("progress from a run that wrote nothing: %+v", s.Progress)
+	}
+	want := "[vost#0:0/libx264 @ 0x5d17afb42280] Error while opening encoder - maybe incorrect parameters such as bit_rate, rate, width or height.; " +
+		"Error while filtering: Invalid argument; " +
+		"[out#0/mp4 @ 0x5d17afb42280] Nothing was written into output file, because at least one of its streams received no packets."
+	if err == nil || !strings.HasPrefix(err.Error(), "[libx264 @ 0x5d17afb42280] Error setting profile baseline.; ") || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("the failure: %v", err)
+	}
+	if err := RunFFmpeg(context.Background(), replay(strings.NewReader(""), "signal: killed"), supervisor.Spec{Name: "encode-2"}, 0, func(*FFmpegProgress) {}); err == nil || err.Error() != "ffmpeg ended with signal: killed" {
+		t.Errorf("a run that said nothing: %v", err)
+	}
+}
+
+func TestFFmpegProgressOfAFailedRun(t *testing.T) {
+	f := &FFmpegProgress{Duration: 4 * time.Second}
+	lines := bufio.NewScanner(sample(t, "ffmpeg-fail.txt"))
+	for lines.Scan() {
+		f.Line(lines.Text())
+	}
 	if _, ok := f.Elapsed(); ok {
 		t.Error("an output time from N/A")
 	}
-	if _, ok := f.Percent(); ok || f.Detail() != "" || s.Progress.Percent != nil {
+	if _, ok := f.Percent(); ok || f.Detail() != "" {
 		t.Error("progress from a run that wrote nothing")
 	}
 	if !f.Ended() {
@@ -129,20 +192,32 @@ func TestFollowFFmpegOfAFailedRun(t *testing.T) {
 	}
 }
 
-func TestFollowFFmpegCutsLongLinesAndSplitsAtCarriageReturns(t *testing.T) {
-	input := "out_time_us=1000000\r" + strings.Repeat("x", 3*maxLineBytes) + "\r\n" +
-		"frame=   47 fps=0.0 q=-1.0 time=00:00:02.93 speed= 112x    \r" +
-		"out_time_us=2000000\nprogress=end"
-	f, s := follow(t, strings.NewReader(input), 0)
-	if elapsed, _ := f.Elapsed(); elapsed != 2*time.Second || !f.Ended() {
-		t.Errorf("elapsed %v, ended %v: reading stopped early", elapsed, f.Ended())
+func TestRunFFmpegStopsItWhenCancelled(t *testing.T) {
+	child := &hanging{done: make(chan struct{})}
+	start := func(supervisor.Spec) (supervisor.Child, error) { return child, nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := RunFFmpeg(ctx, start, supervisor.Spec{Name: "encode-1"}, 0, func(*FFmpegProgress) {}); !errors.Is(err, context.Canceled) {
+		t.Errorf("returned %v", err)
 	}
-	if diagnostics := f.Diagnostics(); len(diagnostics) != 1 || diagnostics[0] != strings.Repeat("x", maxLineBytes) {
-		t.Errorf("diagnostics: %d, first %d bytes", len(diagnostics), len(diagnostics[0]))
+	select {
+	case <-child.done:
+	default:
+		t.Error("ffmpeg was not stopped")
 	}
-	if s.Progress.Percent != nil || s.Progress.Detail != "00:02" {
-		t.Errorf("without a duration: percent %v, detail %q", deref(s.Progress.Percent), s.Progress.Detail)
-	}
+}
+
+// hanging is a child that runs until it is stopped.
+type hanging struct{ done chan struct{} }
+
+func (h *hanging) Status() supervisor.Status {
+	return supervisor.Status{LastExit: "signal: terminated"}
+}
+func (h *hanging) Tail() []string        { return nil }
+func (h *hanging) Done() <-chan struct{} { return h.done }
+func (h *hanging) Stop(context.Context) error {
+	close(h.done)
+	return nil
 }
 
 func TestOutTime(t *testing.T) {

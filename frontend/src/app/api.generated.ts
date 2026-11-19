@@ -52,8 +52,8 @@ export interface paths {
             readonly cookie?: never;
         };
         /**
-         * The Viewer's channels and what arrives on them
-         * @description Every channel Insight serves (0 to count - 1), with the video and metadata its app sends (docs/contracts.md) and the browsers watching it. Read from memory; poll it freely.
+         * Which of the Viewer's channels receive video
+         * @description Every channel Insight serves, and whether video arrives on it (docs/contracts.md). Read from memory; poll it freely. What arrives in detail is `/api/ingest/stats`.
          */
         readonly get: operations["listChannels"];
         readonly put?: never;
@@ -75,7 +75,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Watch a channel over WebRTC
-         * @description The browser's SDP offer in, Insight's answer out. The offer must be sent as application/json, so a cross-site form cannot open a connection through a visitor's browser. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec, `codec_changed` when it changes); a 4xx is final (415 `codec_unsupported`: this browser cannot decode the channel's codec).
+         * @description The browser's SDP offer in, Insight's answer out. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec, `codec_changed` when it changes); a 4xx is final (415 `codec_unsupported`: this browser cannot decode the channel's codec).
          */
         readonly post: operations["offerChannel"];
         readonly delete?: never;
@@ -93,7 +93,7 @@ export interface paths {
         };
         /**
          * What arrives on each channel, in the old shape
-         * @description Frozen: the SDK's network test and smoke test read these fields. Without `all`, only channels receiving video now. `verbose` adds `diagnostics`. New code reads `/api/channels`.
+         * @description Frozen: the SDK's network test and smoke test read these fields. Without `all`, only channels receiving video now. `verbose` adds `diagnostics`.
          */
         readonly get: operations["getIngestStats"];
         readonly put?: never;
@@ -373,7 +373,7 @@ export interface paths {
         };
         /**
          * The media library as a tree, with each file's probe
-         * @description Folders first. A file's `probe` is null while it is being probed (`probing`), and then says its codec, size, rate and whether a slot can stream it. Hidden files and macOS archive metadata are left out. Read from a walk of the media folder at most a few seconds old.
+         * @description Folders first. A file's `probe` is null while it is being probed, and then says its codec, size, rate and whether a slot can stream it. Hidden files and macOS archive metadata are left out. Read from a walk of the media folder at most a few seconds old.
          */
         readonly get: operations["getMediaTree"];
         readonly put?: never;
@@ -516,49 +516,6 @@ export interface paths {
          */
         readonly post: operations["importCatalogAsset"];
         readonly delete?: never;
-        readonly options?: never;
-        readonly head?: never;
-        readonly patch?: never;
-        readonly trace?: never;
-    };
-    readonly "/api/jobs": {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path?: never;
-            readonly cookie?: never;
-        };
-        /**
-         * The running and recent jobs
-         * @description Renditions' encodes, uploads' re-encodes and catalog imports, oldest first. Finished jobs are kept for 10 minutes.
-         */
-        readonly get: operations["listJobs"];
-        readonly put?: never;
-        readonly post?: never;
-        readonly delete?: never;
-        readonly options?: never;
-        readonly head?: never;
-        readonly patch?: never;
-        readonly trace?: never;
-    };
-    readonly "/api/jobs/{id}": {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                readonly id: components["parameters"]["JobID"];
-            };
-            readonly cookie?: never;
-        };
-        /** One job */
-        readonly get: operations["getJob"];
-        readonly put?: never;
-        readonly post?: never;
-        /**
-         * Cancel a job
-         * @description A queued job ends at once; a running one stays `running` until its work has cleaned up, then is `cancelled`. Cancelling a finished job changes nothing.
-         */
-        readonly delete: operations["cancelJob"];
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
@@ -956,52 +913,6 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
-    readonly "/api/boards/{id}/sentinel/metrics": {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
-                readonly id: components["parameters"]["BoardID"];
-            };
-            readonly cookie?: never;
-        };
-        /**
-         * Sentinel's metric definitions
-         * @description `/v1/metrics` as Sentinel answers it: each metric's key, label, short label, unit, group, description and warn and critical thresholds.
-         */
-        readonly get: operations["getSentinelMetrics"];
-        readonly put?: never;
-        readonly post?: never;
-        readonly delete?: never;
-        readonly options?: never;
-        readonly head?: never;
-        readonly patch?: never;
-        readonly trace?: never;
-    };
-    readonly "/api/boards/{id}/sentinel/samples/latest": {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
-                readonly id: components["parameters"]["BoardID"];
-            };
-            readonly cookie?: never;
-        };
-        /**
-         * Sentinel's newest sample
-         * @description `/v1/samples/latest`: `{version, updated_at, sample: {timestamp, values}}`; an unmeasured metric is null.
-         */
-        readonly get: operations["getSentinelLatestSample"];
-        readonly put?: never;
-        readonly post?: never;
-        readonly delete?: never;
-        readonly options?: never;
-        readonly head?: never;
-        readonly patch?: never;
-        readonly trace?: never;
-    };
     readonly "/api/boards/{id}/sentinel/cache": {
         readonly parameters: {
             readonly query?: {
@@ -1157,8 +1068,6 @@ export interface paths {
             readonly query: {
                 /** @description 2 to 8 runs' ids or names, comma-separated; the first is the baseline. */
                 readonly runs: string;
-                /** @description Add every run's samples. */
-                readonly raw?: boolean;
             };
             readonly header?: never;
             readonly path: {
@@ -1169,7 +1078,7 @@ export interface paths {
         };
         /**
          * Compare runs against a baseline
-         * @description `/v1/compare`: `{baseline_id, generated_at, runs, summaries, baseline_deltas_pct}`, the runs in full with `raw`.
+         * @description `/v1/compare`: `{baseline_id, generated_at, runs, summaries, baseline_deltas_pct}`, the runs in full, their samples included.
          */
         readonly get: operations["compareSentinelRuns"];
         readonly put?: never;
@@ -1230,60 +1139,16 @@ export interface components {
             readonly sdp: string;
         };
         readonly ChannelList: {
-            /** @description How many channels Insight serves. */
-            readonly count: number;
+            /** @description Every channel, 0 to the count Insight serves less one. */
             readonly channels: readonly components["schemas"]["Channel"][];
         };
         readonly Channel: {
             readonly channel: number;
-            /** @description Browsers connected to the channel's video. */
-            readonly viewers: number;
             readonly video: components["schemas"]["ChannelVideo"];
-            readonly metadata: components["schemas"]["ChannelMetadata"];
-            /** @description The latest problems, oldest first, each starting with its time. */
-            readonly errors: readonly string[];
         };
         readonly ChannelVideo: {
-            readonly port: number;
             /** @description Video arrived in the last 3 s. */
             readonly active: boolean;
-            /** @description H264 or H265; absent before any video, and for a payload type Insight does not play. */
-            readonly codec?: string;
-            readonly payload_type: number;
-            /** @description Packets of a payload type Insight does not play (RTP/JPEG is planned). */
-            readonly unsupported_packets: number;
-            readonly packets: number;
-            /** Format: double */
-            readonly bits_per_second: number;
-            /**
-             * Format: double
-             * @description Whole pictures sent on to browsers.
-             */
-            readonly frames_per_second: number;
-            readonly keyframes: number;
-            /** Format: date-time */
-            readonly last_at?: string;
-            /** @description The address the last packet came from. */
-            readonly sender?: string;
-        };
-        readonly ChannelMetadata: {
-            readonly port: number;
-            /** @description A message arrived in the last 3 s. */
-            readonly active: boolean;
-            readonly received: number;
-            /** Format: double */
-            readonly messages_per_second: number;
-            /** @description Messages drawn on the frame their timestamp names. */
-            readonly matched: number;
-            /** @description Timed messages that found no frame within 5 s: a timestamp in another unit or clock, or video that stopped. */
-            readonly unmatched: number;
-            /** @description Datagrams that were no JSON object. */
-            readonly invalid: number;
-            /** @description Messages that arrived while no browser watched. */
-            readonly no_viewer: number;
-            /** Format: date-time */
-            readonly last_at?: string;
-            readonly sender?: string;
         };
         readonly IngestStats: {
             readonly time: string;
@@ -1526,7 +1391,6 @@ export interface components {
             readonly streamable_count?: number;
             /** @description Null while the file is being probed, and for a folder. */
             readonly probe: components["schemas"]["MediaProbe"] | null;
-            readonly probing?: boolean;
         };
         /** @description What ffprobe says about a file's first video stream. */
         readonly MediaProbe: {
@@ -1537,7 +1401,6 @@ export interface components {
             /** @description The codec as the UI shows it (H.264). */
             readonly codec_name?: string;
             readonly profile?: string;
-            readonly pixel_format?: string;
             readonly width?: number;
             readonly height?: number;
             /** Format: double */
@@ -1548,7 +1411,6 @@ export interface components {
             readonly duration_ms?: number;
             /** Format: int64 */
             readonly size: number;
-            readonly has_b_frames?: boolean;
             readonly streamable: boolean;
             /** @description Why ffprobe could not read the file. */
             readonly problem?: string;
@@ -1620,9 +1482,6 @@ export interface components {
         readonly CatalogImportRequest: {
             /** @description An asset's path in the catalog. */
             readonly path: string;
-        };
-        readonly JobList: {
-            readonly jobs: readonly components["schemas"]["Job"][];
         };
         /** @description Long work (an encode, a re-encode, a download) at one moment. */
         readonly Job: {
@@ -2032,7 +1891,6 @@ export type SessionDescription = components['schemas']['SessionDescription'];
 export type ChannelList = components['schemas']['ChannelList'];
 export type Channel = components['schemas']['Channel'];
 export type ChannelVideo = components['schemas']['ChannelVideo'];
-export type ChannelMetadata = components['schemas']['ChannelMetadata'];
 export type IngestStats = components['schemas']['IngestStats'];
 export type IngestChannel = components['schemas']['IngestChannel'];
 export type ViewerUrl = components['schemas']['ViewerUrl'];
@@ -2065,7 +1923,6 @@ export type MediaConflict = components['schemas']['MediaConflict'];
 export type LibraryError = components['schemas']['LibraryError'];
 export type Catalog = components['schemas']['Catalog'];
 export type CatalogImportRequest = components['schemas']['CatalogImportRequest'];
-export type JobList = components['schemas']['JobList'];
 export type Job = components['schemas']['Job'];
 export type JobProgress = components['schemas']['JobProgress'];
 export type BoardError = components['schemas']['BoardError'];
@@ -2300,7 +2157,6 @@ export interface operations {
             readonly 400: components["responses"]["Error"];
             readonly 404: components["responses"]["Error"];
             readonly 409: components["responses"]["Error"];
-            readonly 415: components["responses"]["Error"];
             readonly 422: components["responses"]["Error"];
             readonly 502: components["responses"]["Error"];
             readonly 503: components["responses"]["Error"];
@@ -2464,7 +2320,6 @@ export interface operations {
             };
             readonly 400: components["responses"]["Error"];
             readonly 409: components["responses"]["Error"];
-            readonly 415: components["responses"]["Error"];
         };
     };
     readonly stopSlots: {
@@ -2642,7 +2497,6 @@ export interface operations {
             readonly 400: components["responses"]["LibraryError"];
             readonly 404: components["responses"]["LibraryError"];
             readonly 409: components["responses"]["LibraryError"];
-            readonly 415: components["responses"]["Error"];
             readonly 500: components["responses"]["LibraryError"];
         };
     };
@@ -2793,74 +2647,7 @@ export interface operations {
             };
             readonly 400: components["responses"]["LibraryError"];
             readonly 404: components["responses"]["LibraryError"];
-            readonly 415: components["responses"]["Error"];
             readonly 502: components["responses"]["LibraryError"];
-        };
-    };
-    readonly listJobs: {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path?: never;
-            readonly cookie?: never;
-        };
-        readonly requestBody?: never;
-        readonly responses: {
-            /** @description The jobs. */
-            readonly 200: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/json": components["schemas"]["JobList"];
-                };
-            };
-        };
-    };
-    readonly getJob: {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                readonly id: components["parameters"]["JobID"];
-            };
-            readonly cookie?: never;
-        };
-        readonly requestBody?: never;
-        readonly responses: {
-            /** @description The job as it is now. */
-            readonly 200: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/json": components["schemas"]["Job"];
-                };
-            };
-            readonly 404: components["responses"]["Error"];
-        };
-    };
-    readonly cancelJob: {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                readonly id: components["parameters"]["JobID"];
-            };
-            readonly cookie?: never;
-        };
-        readonly requestBody?: never;
-        readonly responses: {
-            /** @description The job after the call. */
-            readonly 200: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/json": components["schemas"]["Job"];
-                };
-            };
-            readonly 404: components["responses"]["Error"];
         };
     };
     readonly followJob: {
@@ -2929,7 +2716,6 @@ export interface operations {
                 };
             };
             readonly 400: components["responses"]["Error"];
-            readonly 415: components["responses"]["Error"];
             readonly 500: components["responses"]["Error"];
         };
     };
@@ -3013,7 +2799,6 @@ export interface operations {
             };
             readonly 400: components["responses"]["Error"];
             readonly 404: components["responses"]["Error"];
-            readonly 415: components["responses"]["Error"];
             readonly 500: components["responses"]["Error"];
         };
     };
@@ -3126,7 +2911,6 @@ export interface operations {
             readonly 400: components["responses"]["Error"];
             readonly 404: components["responses"]["Error"];
             readonly 409: components["responses"]["BoardError"];
-            readonly 415: components["responses"]["Error"];
             readonly 422: components["responses"]["Error"];
             readonly 502: components["responses"]["BoardError"];
             readonly 503: components["responses"]["Error"];
@@ -3249,7 +3033,6 @@ export interface operations {
             readonly 400: components["responses"]["Error"];
             readonly 404: components["responses"]["Error"];
             readonly 409: components["responses"]["BoardError"];
-            readonly 415: components["responses"]["Error"];
             readonly 422: components["responses"]["Error"];
             readonly 502: components["responses"]["BoardError"];
             readonly 503: components["responses"]["Error"];
@@ -3352,44 +3135,6 @@ export interface operations {
             readonly 504: components["responses"]["BoardError"];
         };
     };
-    readonly getSentinelMetrics: {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
-                readonly id: components["parameters"]["BoardID"];
-            };
-            readonly cookie?: never;
-        };
-        readonly requestBody?: never;
-        readonly responses: {
-            readonly 200: components["responses"]["SentinelBody"];
-            readonly 404: components["responses"]["Error"];
-            readonly 409: components["responses"]["BoardError"];
-            readonly 502: components["responses"]["BoardError"];
-            readonly 504: components["responses"]["BoardError"];
-        };
-    };
-    readonly getSentinelLatestSample: {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                /** @description The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`. */
-                readonly id: components["parameters"]["BoardID"];
-            };
-            readonly cookie?: never;
-        };
-        readonly requestBody?: never;
-        readonly responses: {
-            readonly 200: components["responses"]["SentinelBody"];
-            readonly 404: components["responses"]["Error"];
-            readonly 409: components["responses"]["BoardError"];
-            readonly 502: components["responses"]["BoardError"];
-            readonly 504: components["responses"]["BoardError"];
-        };
-    };
     readonly getSentinelCache: {
         readonly parameters: {
             readonly query?: {
@@ -3460,7 +3205,6 @@ export interface operations {
             readonly 404: components["responses"]["Error"];
             readonly 409: components["responses"]["BoardError"];
             readonly 413: components["responses"]["Error"];
-            readonly 415: components["responses"]["Error"];
             readonly 502: components["responses"]["BoardError"];
             readonly 504: components["responses"]["BoardError"];
         };
@@ -3562,8 +3306,6 @@ export interface operations {
             readonly query: {
                 /** @description 2 to 8 runs' ids or names, comma-separated; the first is the baseline. */
                 readonly runs: string;
-                /** @description Add every run's samples. */
-                readonly raw?: boolean;
             };
             readonly header?: never;
             readonly path: {
