@@ -44,7 +44,7 @@ const scoped = (title: string, position: number, total: number): string =>
 
 /**
  * Progress about one item: the item ("clip.mp4", an asset's label), then what the server adds
- * ("clip.mp4 - 0:12 / 0:40"), as #170 showed it.
+ * ("clip.mp4 - 0:12 / 0:40").
  */
 const about = (subject: string, detail: string): string =>
   detail && detail !== subject ? `${subject} - ${detail}` : subject;
@@ -70,13 +70,13 @@ function savedOf(saved: MediaSaved | null): MediaSaved {
 
 /**
  * Runs the import dialog's work, outside the dialog so that it outlives it: local uploads and
- * catalog imports, one piece of work at a time (spec, Media import; Review Focus 3).
+ * catalog imports, one piece of work at a time.
  *
  * While a dialog holds the runner (`hold`), the dialog shows the progress, the name-clash question
- * and the failure, and the outcome is a toast as #170's was. When the last dialog lets go while
+ * and the failure, and the outcome is a toast. When the last dialog lets go while
  * work runs (navigation closes a dialog even while it is busy), the progress moves into a progress
  * toast that reports to the end; a clash that can no longer be asked is skipped and the toast says
- * so (ruling Q17), since a 409 saved nothing. A dialog opened again while the work runs takes it
+ * so, since a 409 saved nothing. A dialog opened again while the work runs takes it
  * back from the toast: the progress, the clashes and the outcome are the dialog's again.
  *
  * An upload shows its bytes, then the job that re-encodes it when the server needs one; a catalog
@@ -181,7 +181,7 @@ export class ImportRunner {
     });
   }
 
-  /** Imports catalog assets one after the other, stopping at the first that fails, as #170 did. */
+  /** Imports catalog assets one after the other, stopping at the first that fails. */
   importCatalog(assets: readonly CatalogAsset[]): Promise<ImportOutcome> {
     return this.run('catalog', async () => {
       let path: string | null = null;
@@ -277,7 +277,7 @@ export class ImportRunner {
   }
 
   /**
-   * Says what saving changed beyond the library: a slot a Replace could not restart (ruling Q6),
+   * Says what saving changed beyond the library: a slot a Replace could not restart,
    * and the slots a replaced folder cleared because it no longer has their file. Returns what was
    * saved.
    */
@@ -293,7 +293,7 @@ export class ImportRunner {
 
   /**
    * Uploads one file: sent as it is, then, if its name exists, again with the answer to the
-   * clash. A failure is reported with the file's name, as #170 did.
+   * clash. A failure is reported with the file's name.
    */
   private async uploadFile(file: File, position: number, total: number): Promise<FileOutcome> {
     const title = scoped('Uploading media', position, total);
@@ -375,8 +375,8 @@ export class ImportRunner {
 
   /**
    * Asks what to do about a clash, naming the slots a Replace would restart: fetched again first,
-   * as before any replace (spec, "In use"), or the last known ones, said to be so, when that
-   * fetch fails (Q16). Skipped without asking once no dialog shows the work.
+   * as before any replace, or the last known ones, said to be so, when that
+   * fetch fails. Skipped without asking once no dialog shows the work.
    */
   private async ask(conflict: UploadConflict, archive: boolean): Promise<ClashChoice> {
     if (this.toast) return 'skip';

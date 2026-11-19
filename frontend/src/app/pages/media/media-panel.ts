@@ -31,7 +31,7 @@ import { messageOf } from '../../sources/api-errors';
 import { mediaInfoRows } from './media-info';
 
 /**
- * #170's delete confirmation, naming the files. `checked` is false when the slots could not be
+ * The delete confirmation, naming the files. `checked` is false when the slots could not be
  * fetched again before asking, so the files may be in use after all (the server then refuses).
  */
 export function deleteQuestion(paths: readonly string[], checked: boolean): NeatConfirmOptions {
@@ -49,7 +49,7 @@ export function deleteQuestion(paths: readonly string[], checked: boolean): Neat
 }
 
 /**
- * Why files the slots use are not deleted (spec, "In use"): Insight refuses to delete a file a
+ * Why files the slots use are not deleted: Insight refuses to delete a file a
  * slot is assigned, so the slots are named, to be cleared first.
  */
 export function inUseMessage(paths: readonly string[], inUse: readonly Slot[]): string {
@@ -58,10 +58,9 @@ export function inUseMessage(paths: readonly string[], inUse: readonly Slot[]): 
 }
 
 /**
- * Media's side panel (Inv-SM §1.1, "Selected Media"). For the selected file: its preview, what
- * ffprobe says about it (`/api/media/info`, in readable values) and Delete…. With files ticked:
- * "N selected", their paths and Delete…, which then acts on them rather than on the selected file,
- * as #170's did.
+ * Media's side panel. For the selected file: its preview, what ffprobe says about it
+ * (`/api/media/info`, in readable values) and Delete…. With files ticked: "N selected", their
+ * paths and Delete…, which then acts on them rather than on the selected file.
  *
  * Delete first fetches the slots again: files a slot uses are not deleted (the server refuses
  * them), so the panel says which slots to clear instead of asking. Otherwise it asks, then deletes
@@ -129,7 +128,7 @@ export class MediaPanel {
     const failure = this.info.error();
     return failure ? failure.message : null;
   });
-  /** The probe can tell a file is MJPEG that its extension does not (#170). */
+  /** The probe can tell a file is MJPEG that its extension does not. */
   protected readonly preview = computed(() => {
     const path = this.selected();
     const info = this.info.hasValue() ? this.info.value() : null;
@@ -149,7 +148,7 @@ export class MediaPanel {
     this.asking = true;
     let confirmed: boolean;
     try {
-      // Asked with the slots as they are now; a failed fetch asks anyway and says so (ruling Q16).
+      // Asked with the slots as they are now; a failed fetch asks anyway and says so.
       const checked = await this.slots.recheck();
       const inUse = this.inUseOn(paths);
       if (checked && inUse.length > 0) {

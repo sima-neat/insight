@@ -7,7 +7,7 @@ export interface LatenessSource {
 }
 
 /**
- * Whether a tile's "Metadata late" chip is on (Inv §4g), judged once per stats tick. It turns on
+ * Whether a tile's "Metadata late" chip is on, judged once per stats tick. It turns on
  * when half the recent messages arrive after their frame and off below a tenth.
  *
  * A change of the video sync buffer makes what was measured meaningless: the window is reset, the

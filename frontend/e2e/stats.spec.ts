@@ -308,7 +308,7 @@ for (const { name, size } of VIEWPORTS) {
 
     /**
      * Neither the document nor the shell's content area overflows, nothing spills out of the top
-     * bar (where a tablet may scroll the page's tools sideways, R14) and the side panel does not
+     * bar (where a tablet may scroll the page's tools sideways) and the side panel does not
      * scroll sideways: its content (the thermal tab strip, the metrics table) fits its width.
      */
     async function expectFits(page: Page): Promise<void> {

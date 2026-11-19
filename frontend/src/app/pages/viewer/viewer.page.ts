@@ -77,7 +77,7 @@ function describeFit(fit: Fit): string {
   return fit === 'all' ? 'fit all' : `fit ${fit}`;
 }
 
-/** The viewer storage name of the console-set debug flag (Inv §4c's `viewerDebug`). */
+/** The viewer storage name of the console-set debug flag. */
 const DEBUG_FLAG = 'debug';
 
 /**
@@ -461,7 +461,7 @@ export class ViewerPage {
   /**
    * ArrowLeft and ArrowRight page, `g` goes to the page field, `/` opens "Go to channel", Escape
    * clears the selection. Never with a modifier (those belong to the browser and the system), and
-   * never for a key the focused control takes itself, as the original viewer did (Inv §4b). Shift
+   * never for a key the focused control takes itself. Shift
    * is no modifier for `/`: on many layouts (German among them) it is how that key is typed.
    */
   protected onKeydown(event: KeyboardEvent): void {

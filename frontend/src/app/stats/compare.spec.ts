@@ -89,7 +89,7 @@ describe('compare address', () => {
 });
 
 describe('compare series', () => {
-  it('offers #170 seven series in order', () => {
+  it('offers the seven series in order', () => {
     expect(COMPARE_SERIES.map((series) => series.key)).toEqual([
       'power_current_watts',
       'thermal_max',
@@ -155,7 +155,7 @@ describe('compare overlay', () => {
   });
 
   it('draws no line for a run without samples and keeps the others over their window', () => {
-    // Inv-S §13.28: an empty run used to make the window 0 and collapse every line.
+    // An empty run must not make the window 0, which would collapse every line.
     const a = steady('a', range(0, 10, 2), () => 8);
     const empty = steady('empty', range(0, 4, 2), () => null);
     const b = steady('b', range(0, 12, 2), () => 9);

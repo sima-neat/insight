@@ -22,7 +22,7 @@ describe('LateChip', () => {
     chip = new LateChip();
   });
 
-  it('turns on at half the messages late and off below a tenth (Inv §4g hysteresis)', () => {
+  it('turns on at half the messages late and off below a tenth', () => {
     tile.share = 0.4;
     expect(chip.tick(tile, 0)).toBe(false);
     tile.share = 0.5;

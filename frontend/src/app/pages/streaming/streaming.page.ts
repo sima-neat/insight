@@ -58,17 +58,16 @@ import {
 import { SlotControl } from './slot-control';
 import { SlotPanel } from './slot-panel';
 
-/** The slots Insight has, `src1`–`src48`: hard-coded as in #170 (the spec keeps it so). */
+/** The slots Insight has, `src1`–`src48`, the server's fixed set. */
 const SLOT_COUNT = 48;
 
 type SlotFilter = 'all' | 'in-use';
 
-/** Why the bulk actions are disabled while a slot is changing (#170's `webcamBusy`). */
+/** Why the bulk actions are disabled while a slot is changing. */
 const CHANGING_TOOLTIP = 'Waiting for a source change to finish';
 
 /**
- * What a bulk action says when a slot began changing after its dialog or menu opened (ruling Q9:
- * #170's Start message, worded for each action).
+ * What a bulk action says when a slot began changing after its dialog or menu opened.
  */
 const changingMessage = (doing: 'starting' | 'stopping' | 'resetting' | 'assigning') =>
   `Waiting for a source change to finish before ${doing} sources.`;
@@ -84,7 +83,7 @@ function streamableCount(tree: readonly MediaEntry[]): number {
 
 /**
  * Streaming: the 48 slots in a list, with the selected slot in the page's side panel, and the
- * actions on all of them in the top bar's ⋯ menu (Inv-SM §1.2). The slots come from
+ * actions on all of them in the top bar's ⋯ menu. The slots come from
  * `SlotsService`, which polls them while the page is shown.
  *
  * The bulk actions that stop or rewrite slots first end the webcams this browser publishes
@@ -137,13 +136,13 @@ export class StreamingPage {
   protected readonly asides = inject(AsidePrefs);
   protected readonly asideOpen = computed(() => this.asides.open('streaming'));
   protected readonly moreOpen = signal(false);
-  /** The count the Start… dialog's slider is at: 1 at first, then the last one chosen (#170). */
+  /** The count the Start… dialog's slider is at: 1 at first, then the last one chosen. */
   protected readonly bulkCount = signal(1);
 
   private readonly session = inject(SourcesSession);
   /**
    * By number rather than the row: each poll answer brings new rows for the same slots. Where the
-   * last visit left it, src1 on the first (#170).
+   * last visit left it, src1 on the first.
    */
   private readonly selectedSlot = signal<number | null>(this.session.streaming.slot);
   /** A bulk action of this page is running; the Start… dialog's Start waits for it. */
@@ -192,7 +191,7 @@ export class StreamingPage {
   protected readonly autoAssignTooltip = computed(
     () => this.bulkTooltip() ?? 'Auto assign unique media files to all sources',
   );
-  /** Starting needs a file to stream: until the library has answered with one, Start… waits (#170). */
+  /** Starting needs a file to stream: until the library has answered with one, Start… waits. */
   protected readonly noStreamableFile = computed(() => {
     const tree = this.library.tree();
     return tree === null || streamableCount(tree) === 0;
@@ -216,7 +215,7 @@ export class StreamingPage {
     destroyRef.onDestroy(this.slots.watch());
     destroyRef.onDestroy(() => (this.session.streaming = { slot: this.selectedSlot() }));
     // Both only inform the top bar (Start… and the ⋯ menu's count). A failure leaves Start…
-    // disabled and the count unknown, as in #170; the usage is fetched again on use.
+    // disabled and the count unknown; the usage is fetched again on use.
     this.library.refresh().catch(() => undefined);
     void this.refreshRenditions();
   }
@@ -267,12 +266,12 @@ export class StreamingPage {
   }
 
   /**
-   * The dialog's Start. As in #170 the dialog closes once the server has answered, and stays open
+   * The dialog's Start. The dialog closes once the server has answered, and stays open
    * when the request was refused, or when a slot began changing meanwhile, so it can be tried again.
    *
    * Like a slot's own Start it first waits for the frame rates the side panel is committing (the
    * stepper commits as it loses focus, which opening the dialog makes it do), so the server starts
-   * the rates just chosen; when one was refused (and reported) it starts nothing (#170).
+   * the rates just chosen; when one was refused (and reported) it starts nothing.
    */
   protected async startBulk(dialog: NeatDialogRef): Promise<void> {
     const count = this.bulkCount();
@@ -300,7 +299,7 @@ export class StreamingPage {
     await this.runBulk('resetting', async () => {
       this.cameras.releaseAll({ clearAssignments: true });
       this.toasts.status(resetMessage(await this.slots.reset()));
-      // Every slot is unassigned now; #170 then shows the first.
+      // Every slot is unassigned now; show the first.
       this.selectedSlot.set(1);
     });
   }
@@ -308,7 +307,7 @@ export class StreamingPage {
   protected async clearRenditions(): Promise<void> {
     // The question names what goes, so it asks with the usage as it is now, not as the menu
     // found it: another tab may have started or cleared renditions meanwhile. It asks even when
-    // that is none, as #170's dialog did, rather than let the click do nothing.
+    // that is none, rather than let the click do nothing.
     await this.refreshRenditions();
     const usage = this.slots.renditions() ?? { count: 0, bytes: 0 };
     const confirmed = await this.confirm.ask({
@@ -333,7 +332,7 @@ export class StreamingPage {
   /**
    * Runs a bulk action with the bulk actions locked, and shows a refusal as the server words it.
    * Their buttons are disabled while a slot is changing; one that began changing after the action's
-   * dialog or menu opened is reported, as #170 did for Start, and the slots are left alone.
+   * dialog or menu opened is reported, and the slots are left alone.
    * Resolves whether the action went through; an action resolving `false` did nothing.
    */
   private async runBulk(

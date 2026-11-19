@@ -134,7 +134,7 @@
             </neat-callout>
           }
         } @empty {
-          <!-- #170's guidance where there is no device to show (ruling F28). -->
+          <!-- Guidance where there is no device to show. -->
           @if (!scanned()) {
             @if (scanning()) {
               <p neatNote>Scanning {{ target()?.label }}…</p>

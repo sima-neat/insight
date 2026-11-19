@@ -4,7 +4,7 @@ import { resolveCodecLabel, offerFailureText, type VfStatus } from './channel-st
 import { INITIAL_DECODER_HEALTH, updateDecoderHealth, type DecoderHealth } from './decoder-health';
 import { isRetryable, OfferRejectedError, requestAnswer } from './signaling';
 
-/** Fixed and unlimited, without backoff, as vf's own viewer retries (Inv §4d). */
+/** Fixed and unlimited, without backoff, as vf's own viewer retries. */
 const RECONNECT_DELAY_MS = 2000;
 /**
  * Deliberately longer than the retry delay: a decoder can legitimately produce nothing for a moment
@@ -13,11 +13,11 @@ const RECONNECT_DELAY_MS = 2000;
 const DECODER_STALL_MS = 5000;
 /**
  * ICE often recovers from a brief `disconnected` on its own. One that lasts this long gets a
- * reconnect instead of a frozen frame until ICE gives up with `failed` (Inv §6.8).
+ * reconnect instead of a frozen frame until ICE gives up with `failed`.
  */
 const ICE_DISCONNECTED_MS = 5000;
 const STATS_INTERVAL_MS = 1000;
-/** The viewer's default video sync buffer (Inv §5b), until the page sets the channel's own. */
+/** The viewer's default video sync buffer, until the page sets the channel's own. */
 const DEFAULT_SYNC_BUFFER_MS = 300;
 
 type MetadataListener = (text: string, receivedAt: number) => void;

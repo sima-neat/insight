@@ -5,7 +5,7 @@ import type { NeatColorScheme } from '@sima/neat-ui';
 /** Insight's server has at most this many channel slots, 0 to 79. */
 export const MAX_CHANNELS = 80;
 
-/** `max_channels` as the server's slots allow it: a whole number from 1 to 80, else all 80 (Inv §4c). */
+/** `max_channels` as the server's slots allow it: a whole number from 1 to 80, else all 80. */
 export function normalizeMaxChannels(value: unknown): number {
   const requested = Number(value);
   if (!Number.isInteger(requested) || requested < 1 || requested > MAX_CHANNELS) {
@@ -15,9 +15,9 @@ export function normalizeMaxChannels(value: unknown): number {
 }
 
 /**
- * The channels a `src` list names, below `maxChannels` and each once (Inv §4a). A missing `src`
- * means every channel; an empty one, none. Unlike 829ec7c, which sorted them, the list keeps the
- * order `src` gives, so a link can arrange its tiles.
+ * The channels a `src` list names, below `maxChannels` and each once. A missing `src`
+ * means every channel; an empty one, none. The list keeps the order `src` gives
+ * rather than sorting it, so a link can arrange its tiles.
  */
 export function parseChannelIndices(
   src: string | null,
@@ -34,7 +34,7 @@ export function parseChannelIndices(
   return [...channels];
 }
 
-/** The Viewer's URL parameters (Inv §4c), as the page acts on them. */
+/** The Viewer's URL parameters, as the page acts on them. */
 export interface ViewerParams {
   /** The channel subset, unparsed: `parseChannelIndices` needs the limit, which may come later. */
   readonly src: string | null;

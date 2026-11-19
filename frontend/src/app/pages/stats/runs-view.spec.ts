@@ -427,7 +427,7 @@ describe('RunsView', () => {
 
     const report = callout()!;
     expect(text(report.querySelector('[role="heading"]'))).toBe('2 of 3 runs were not deleted');
-    // Each failure's title, then what the backend said, then its hint (#170).
+    // Each failure's title, then what the backend said, then its hint.
     expect([...report.querySelectorAll('.failures p')].map(text)).toEqual([
       `insight-hw-1790177227: ${failure('stale_snapshot').title}`,
       'Failed with stale_snapshot.',

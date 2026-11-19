@@ -31,7 +31,7 @@ export interface SwitchSetting extends SettingBase {
 
 /**
  * A number setting: on a slider with a readout of its value, or in a number field followed by its
- * unit. `min`, `max` and `step` are the control's, as the old dialog had them (Inv §5b); they may
+ * unit. `min`, `max` and `step` are the control's, as the old dialog had them; they may
  * be narrower than the range the store holds values to.
  */
 export interface NumberSetting extends SettingBase {
@@ -358,7 +358,7 @@ export class SettingRow {
   }
 
   /**
-   * Gives the channel's value back at once (Inv §5c). Its line goes, and with it the focus, so
+   * Gives the channel's value back at once. Its line goes, and with it the focus, so
    * focus moves first to a neighbouring line, or to the control when this was the last.
    */
   protected useGlobal(channel: number): void {

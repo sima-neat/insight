@@ -58,7 +58,7 @@ interface DeleteReport {
 
 const plural = (count: number): string => (count === 1 ? 'run' : 'runs');
 
-/** The confirmation before deleting the runs named, in the app's dialog (spec, "Delete"). */
+/** The confirmation before deleting the runs named, in the app's dialog. */
 function deleteQuestion(names: readonly string[]): NeatConfirmOptions {
   return {
     title: names.length === 1 ? `Delete ${names[0]}?` : `Delete ${names.length} runs?`,
@@ -70,7 +70,7 @@ function deleteQuestion(names: readonly string[]): NeatConfirmOptions {
 
 /**
  * What a delete of `ids` did, by name, when it did not delete them all; null when it did. One run
- * asked for is named in the title; several are counted (#170's wording).
+ * asked for is named in the title; several are counted.
  */
 function deleteReport(
   ids: readonly string[],
@@ -97,7 +97,7 @@ function deleteReport(
 
 /**
  * Stats' Runs view: the runs saved on the board, the one recording first as Sentinel lists it,
- * one row each with its recorded line and when it started (spec, "Run list"). A click on a row
+ * one row each with its recorded line and when it started. A click on a row
  * selects the run, whose detail the side panel shows (the page builds the panel). Ticking runs
  * (at most 8, never the recording one) brings up the selection bar: Compare opens their
  * comparison, the first ticked as baseline; Delete asks, then deletes them one at a time.

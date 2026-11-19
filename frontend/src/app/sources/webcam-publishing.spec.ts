@@ -15,10 +15,8 @@ import {
   type WhipResponse,
 } from './webcam-publishing';
 
-// These are the tests of #170's `webcamPublishing.test.js` (node:test) with their assertions
-// unchanged: only the harness differs (Vitest's `expect`, and types where the original was plain
-// JavaScript). The session id and release claims are gone with the claim protocol: a stop now
-// disconnects whatever publishes, so the exit stop names only the slot.
+// The tests of `webcamPublishing.test.js` in sima-neat/insight#170, with their assertions
+// unchanged. A stop disconnects whatever publishes, so the exit stop names only the slot.
 
 /** What a `publishWebcamOffer` call needs of a peer connection; this one fails on waiting for gathering. */
 function fakePeerConnection(overrides: object = {}) {
@@ -108,7 +106,7 @@ describe('webcam publishing', () => {
   it("a transport failure reports actionable setup guidance, not 'Failed to fetch'", async () => {
     // fetch throws a TypeError when the endpoint is unreachable or its certificate
     // is rejected; the raw browser message ("Failed to fetch") is useless, so the
-    // publish must surface something the user can act on (#120).
+    // publish must surface something the user can act on (sima-neat/insight#120).
     const error = (await rejection(
       publishWebcamOffer(fakePeerConnection(), 'https://insight.local:8889/cam1/whip', async () => {
         throw new TypeError('Failed to fetch');

@@ -8,7 +8,7 @@ import { formatBytes } from '../../format-bytes';
 
 /**
  * What Streaming's bulk actions say when they are done, worded from the server's results as the
- * old backend worded them (#170's messages).
+ * old backend worded them.
  */
 
 /** " Skipped external: src3, src7." for a phrase and its slots; nothing without slots. */

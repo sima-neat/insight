@@ -22,10 +22,10 @@ function sameLink(a: ViewerLink | null, b: ViewerLink): boolean {
 }
 
 /**
- * Where the user left the Viewer, so that coming back from another page finds it as it was (the
- * spec's "layout, page, channel and settings survive navigation"; layout and settings outlive the
- * page through storage). Provided in root because the Viewer page, and everything it provides, is
- * created afresh on every visit. Kept in memory only: a reload starts on the first page.
+ * Where the user left the Viewer, so that coming back from another page finds it as it was: its
+ * layout, page, channel and settings (layout and settings outlive the page through storage).
+ * Provided in root because the Viewer page, and everything it provides, is created afresh on
+ * every visit. Kept in memory only: a reload starts on the first page.
  *
  * Connections are not kept: leaving the page still closes them.
  */

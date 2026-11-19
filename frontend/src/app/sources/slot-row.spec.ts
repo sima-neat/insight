@@ -191,7 +191,7 @@ describe('slotRow', () => {
     expect(unprobed.rate).toBe('');
     // A measured rate reads as whole frames.
     expect(slotRow(external(6, { publisher: publisher({ fps: 29.97 }) })).rate).toBe('30 fps');
-    // #170's names for the protocols; one it does not know reads in capitals, none as "-".
+    // The protocols by name; one the app does not know reads in capitals, none as "-".
     const via = (protocol: string) =>
       slotRow(external(6, { publisher: publisher({ protocol, address: undefined }) })).source;
     expect([via('rtsps'), via('srt'), via('rtmp'), via('mpegts'), via('')]).toEqual([
@@ -280,7 +280,6 @@ describe('slotRow', () => {
       '',
       '-',
     ]);
-    // What is not known reads as #170 shows it.
     expect(
       slotRow(pulled(9, { status: 'auth_failed', scheme: 'rtsps', host: '', error: undefined }))
         .source,
@@ -319,9 +318,7 @@ describe('isRunning', () => {
   });
 });
 
-// #170's `externalSource.test.js` cases for these helpers, with their assertions unchanged except
-// that the preview has no on/off switch any more (so no `enabled` argument) and is the server's
-// own route.
+// The cases of `externalSource.test.js` in sima-neat/insight#170 for these helpers.
 describe('preview, live-for, bitrate, readers and pull source', () => {
   it('preview src carries a remount token', () => {
     expect(previewSrc(2, 1737000000000)).toBe('/api/slots/2/preview.mjpg?t=1737000000000');
@@ -393,7 +390,7 @@ describe('isLive', () => {
 });
 
 describe('slotOutput', () => {
-  it("names the protocols, the codec and the rate a file slot streams at (#170's Output line)", () => {
+  it('names the protocols, the codec and the rate a file slot streams at', () => {
     expect(slotOutput(fileSlot(1, 'a.mp4', { native_fps: 25 }))).toBe('RTSP / H.264 · 25 fps');
     expect(slotOutput(fileSlot(1, 'a.mp4', { native_fps: 25, fps: 15 }))).toBe(
       'RTSP / H.264 · 15 fps',

@@ -16,7 +16,7 @@ export type StatsChartInputs = ChartInputs & { readonly reference?: NeatReferenc
  * One metric's time chart: the inputs a builder made (in `telemetry.ts`: `metricChart`,
  * `pairChart`, `thermalMaxChart`, `boardPowerChart`; the comparison's overlay from `compare.ts`) on
  * the kit's `neat-time-chart`, its values worded in the chart's unit. A null chart, a metric the
- * board does not report, draws nothing (#170). Every Stats time chart is this, so none of them
+ * board does not report, draws nothing. Every Stats time chart is this, so none of them
  * words a value or sets a scale of its own.
  */
 @Component({

@@ -23,7 +23,7 @@ function withMember(all: ReadonlySet<number>, n: number, member: boolean): Reado
  * slot is selected, or the page is left and come back to. Root-provided for that reason; only the
  * lazy Streaming page imports it.
  *
- * **Frame-rate commits** (#170's `commitFps`). The stepper commits when its field is left, so a
+ * **Frame-rate commits.** The stepper commits when its field is left, so a
  * click on Start, or on Start… for a bulk start, comes right after a commit that has not landed.
  * Both wait for it, so the server starts the rate just chosen and the start does not race the
  * assignment on the server; neither sends anything when it was refused. A refusal is reported
@@ -57,8 +57,8 @@ export class SlotControl {
   private readonly commits = new Map<number, Promise<CommitResult>>();
 
   /**
-   * Sets the file slot's output frame rate (null: the file's own), with the file it has, as #170
-   * did. Resolves with the outcome; a refusal is shown as an error toast.
+   * Sets the file slot's output frame rate (null: the file's own), with the file it has.
+   * Resolves with the outcome; a refusal is shown as an error toast.
    *
    * Through `SlotsService.assignFile`, not `CamerasService.assignFile`: the stepper only shows for
    * a slot with a file, never a webcam, and a commit must not count as a slot change, which would

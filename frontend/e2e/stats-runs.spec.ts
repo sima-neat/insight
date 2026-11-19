@@ -337,7 +337,7 @@ test('the comparison header fits a phone: the baseline and Export CSV wrap, noth
 
 /**
  * Neither the document nor the shell's content area overflows, and nothing spills out of the top
- * bar (where a tablet may scroll the page's tools sideways, R14).
+ * bar (where a tablet may scroll the page's tools sideways).
  */
 async function expectFits(page: Page, size: { width: number; height: number }): Promise<void> {
   expect(await pageOverflow(page)).toEqual([

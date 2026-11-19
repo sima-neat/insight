@@ -248,7 +248,7 @@ for (const { name, size } of VIEWPORTS) {
     expect(overflow.vertical).toBeLessThanOrEqual(0);
 
     // The top bar's own items (not the paths inside icons) must not spill out of it. Streaming's
-    // page tools do not fit beside the title on a tablet, where they scroll sideways (R14).
+    // page tools do not fit beside the title on a tablet, where they scroll sideways.
     expect(await topBarSpill(page, size === TABLET)).toEqual({ spilled: [], toolsOverflow: 0 });
   });
 }
@@ -256,7 +256,7 @@ for (const { name, size } of VIEWPORTS) {
 // Every page holds its top bar without a spill, and the rail its board and System Info: Media,
 // Streaming, Viewer and Peripherals check it in their own specs with their content, Stats here
 // with its telemetry shown, which gives it the widest tools of any page: the update chip, Pause and
-// the menu (the tablet scrolls them, R14). Stats' own spec holds its layout.
+// the menu (the tablet scrolls them). Stats' own spec holds its layout.
 for (const { name, size } of VIEWPORTS) {
   test(`Stats fits with the board and System Info in the rail at ${name}`, async ({ page }) => {
     await new FakeStatsBackend().install(page);

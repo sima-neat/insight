@@ -44,8 +44,8 @@ func parseMessage(raw []byte) (message, error) {
 }
 
 // wholeMilliseconds reads a JSON number that is a whole, non-negative count: 12345 and 12345.0
-// alike (the contract's open point 3), not 12345.5, "12345" or -1 (which Neat's apps send for
-// "none").
+// alike (a producer that computes it as a float writes the second), not 12345.5, "12345" or -1
+// (which Neat's apps send for "none").
 func wholeMilliseconds(value json.RawMessage) (uint64, bool) {
 	text := string(value)
 	if ms, err := strconv.ParseUint(text, 10, 64); err == nil {

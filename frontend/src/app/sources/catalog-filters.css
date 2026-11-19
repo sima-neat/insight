@@ -1,4 +1,4 @@
-/* Side by side, as #170's two selects were; stacked where the dialog is narrow. */
+/* Side by side; stacked where the dialog is narrow. */
 :host {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));

@@ -101,7 +101,7 @@ export class ViewerTile {
   private readonly lateChip = new LateChip();
   private readonly playing = signal(false);
   private readonly lateActive = signal(false);
-  /** Late metadata matters only while there is video for it to be late for (Inv §4g). */
+  /** Late metadata matters only while there is video for it to be late for. */
   protected readonly lateShown = computed(() => this.playing() && this.lateActive());
   /** The lateness window at the last stats tick of the current stream. */
   private readonly latenessSnapshot = signal<NeatLatenessSnapshot | null>(null);
@@ -115,7 +115,7 @@ export class ViewerTile {
 
     followSyncSettings(this.connection, this.sync);
 
-    // A new buffer makes the lateness measured with the old one meaningless (Inv §4g).
+    // A new buffer makes the lateness measured with the old one meaningless.
     let previousBufferMs: number | null = null;
     effect(() => {
       const bufferMs = this.syncBufferMs();

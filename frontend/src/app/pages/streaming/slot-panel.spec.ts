@@ -814,7 +814,7 @@ describe('SlotPanel', () => {
       await settle();
       const message = 'The camera at 10.0.0.7 rejected the username or password.';
       expect(toasts.error).toHaveBeenCalledWith(message);
-      // Also under the form, where the credentials are typed again (Q13 d, as #170's dialog).
+      // Also under the form, where the credentials are typed again.
       const inline = root().querySelector('form neat-error-note[role="alert"]')!;
       expect(text(inline)).toBe(message);
       expect(field('Stream URL').value).toBe('rtsp://10.0.0.7/stream1');
@@ -897,7 +897,7 @@ describe('SlotPanel', () => {
     expect(dialog()).toBeNull();
   });
 
-  it("the picker's Import… opens the import dialog, then shows the imported file picked (Q1)", async () => {
+  it("the picker's Import… opens the import dialog, then shows the imported file picked", async () => {
     await open();
     await click(button('Change…'));
     let finish!: (path: string | null) => void;

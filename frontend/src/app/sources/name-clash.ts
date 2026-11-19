@@ -3,7 +3,7 @@ import { ApiRequestError } from './api-errors';
 import { slotName, SLOTS_NOT_CHECKED } from './slot-row';
 
 /**
- * An upload whose name exists already (spec, "Name clashes"). The server decides: without an
+ * An upload whose name exists already. The server decides: without an
  * `on_conflict` it answers 409 `name_taken` with the name it has and the one `keep_both` would
  * save under, having saved nothing; the import dialog asks per file and sends the file again with
  * the answer.
@@ -65,7 +65,7 @@ export function nameClash(
 
 /**
  * What the outcome says of a clash that no one was there to answer: the dialog was closed by
- * leaving the page, and the upload went on in a toast, which cannot ask (ruling Q17).
+ * leaving the page, and the upload went on in a toast, which cannot ask.
  */
 export function skippedText(conflict: UploadConflict): string {
   return `Skipped ${conflict.existing}: it already exists.`;

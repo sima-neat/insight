@@ -8,8 +8,8 @@ import type { TelemetryWindow } from '../../stats/telemetry';
 
 /**
  * Metrics as a table, in the order given: name, group, value, a sparkline of the window and the
- * status (Inv-S §2.5, §2.9). Stats' All metrics lists every metric with it, and the Storage &
- * Network area its own. Hovering a name tells what it is and where Sentinel warns (#170).
+ * status. Stats' All metrics lists every metric with it, and the Storage &
+ * Network area its own. Hovering a name tells what it is and where Sentinel warns.
  */
 @Component({
   selector: 'app-metrics-table',

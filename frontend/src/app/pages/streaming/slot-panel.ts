@@ -74,7 +74,7 @@ const SOURCE_FORMS: NeatSegmentedOption<SourceForm>[] = [
   { value: 'url', label: 'Stream URL' },
 ];
 
-/** A pull accepts RTSP and RTSPS URLs only (#170). */
+/** A pull accepts RTSP and RTSPS URLs only. */
 const STREAM_URL = /^rtsps?:\/\//i;
 
 const COPY_REFUSED = 'Could not copy the URL: the browser refused access to the clipboard.';
@@ -124,8 +124,7 @@ function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
 }
 
 /**
- * The Streaming page's side panel for the selected slot (spec, "Streaming": the side panel; Inv-SM
- * §1.2's Source Preview and assign dialog, now in one place). From the top:
+ * The Streaming page's side panel for the selected slot. From the top:
  *
  * - the slot and its state, and its live preview (`SlotPreview`);
  * - its actions: Start and Stop, for a file, a webcam and a pulled camera alike (a stopped pull
@@ -139,7 +138,7 @@ function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
  * - the details: output, URLs with Copy, live for, bitrate, readers, publisher or camera, and why
  *   the slot failed.
  *
- * Every assignment from here goes through `CamerasService` (ruling Q7), which ends this browser's
+ * Every assignment from here goes through `CamerasService`, which ends this browser's
  * webcam on the slot first; a slot it is changing, or one with an action of this panel in flight
  * (`SlotControl`), holds its controls. Every refusal shows the server's message as an error toast;
  * the services fetch the slots again either way.
@@ -213,7 +212,10 @@ export class SlotPanel {
   protected readonly url = linkedSignal({ source: this.n, computation: () => '' });
   protected readonly username = linkedSignal({ source: this.n, computation: () => '' });
   protected readonly password = linkedSignal({ source: this.n, computation: () => '' });
-  /** The last pull's refusal, shown under the form (#170's dialog did) as well as in a toast. */
+  /**
+   * The last pull's refusal, shown under the form, where the credentials are typed again, as well
+   * as in a toast.
+   */
   protected readonly pullError = linkedSignal<number, string | null>({
     source: this.n,
     computation: () => null,
@@ -304,7 +306,7 @@ export class SlotPanel {
   protected readonly fpsLocked = computed(
     () => this.running() || this.encode() !== null || this.busy(),
   );
-  /** Why the rate cannot be changed, said under the stepper (#170 put it in a tooltip). */
+  /** Why the rate cannot be changed, said under the stepper. */
   protected readonly fpsReason = computed(() => {
     const slot = this.slot();
     if (!slot.file) return 'Assign media before choosing a frame rate';
@@ -378,7 +380,7 @@ export class SlotPanel {
       : [rtsp];
   });
   protected readonly readers = computed(() => readersText(this.slot().readers));
-  /** The publisher or the pulled camera holding the slot, as #170's table showed it. */
+  /** The publisher or the pulled camera holding the slot. */
   protected readonly holder = computed(() => {
     const slot = this.slot();
     if (!this.held() && slot.kind !== 'pull') return null;
@@ -388,7 +390,7 @@ export class SlotPanel {
       // A pull names no codec until it is live: "-", as the list says.
       video: `${slotCodec(slot)}${dimensions ? ` · ${dimensions}` : ''}`,
       warning: codecWarning(slot),
-      // Recomputed with each poll answer, every 2 s, which is when #170 ticked it too.
+      // Recomputed with each poll answer, every 2 s.
       liveFor: liveFor(publisher?.since, Date.now()),
       bitrate: formatBitrate(publisher?.bitrate_bps),
     };
@@ -457,7 +459,7 @@ export class SlotPanel {
     const name = `src${slot.n}`;
     const confirmed = await this.confirm.ask({
       title: `Disconnect external stream on ${name}?`,
-      // #170's dialog: the publisher's chip, its readers, and what disconnecting does.
+      // The publisher's chip, its readers, and what disconnecting does.
       message: `${slot.publisher ? `${externalChip(slot.publisher)}. ` : ''}Readers: ${readersText(slot.readers)}. The publisher and all readers will be disconnected, and ${name} goes back to what it is assigned.`,
       confirmLabel: 'Disconnect',
       tone: 'danger',
@@ -478,7 +480,7 @@ export class SlotPanel {
 
   /**
    * The picker's Import…: the import dialog opens over the picker, and what it saved is shown in
-   * the picker, picked, ready to assign (ruling Q1).
+   * the picker, picked, ready to assign.
    */
   protected async importInto(picker: MediaPicker): Promise<void> {
     const path = await this.imports.open();

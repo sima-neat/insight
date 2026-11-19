@@ -1,11 +1,11 @@
 import { NEAT_OVERLAY_DEFAULTS, type NeatOverlaySettings } from '@sima/neat-ui/video';
 
 /**
- * The viewer settings model, ported from viewer-settings-resolver.js (829ec7c, Inv §5b): every
- * setting a scope can own, with its default and the range its value is held to. A stored scope is
- * `{ version, general, types }`, and a setting's id is its path in that object. Plan 2a also stored
- * an `auxiliary` object (the BlazePose 3D panel's settings); the panel is a non-goal, so scopes
- * still holding one are read without it and the next write leaves it out.
+ * The viewer settings model, ported from viewer-settings-resolver.js (sima-neat/insight@829ec7c):
+ * every setting a scope can own, with its default and the range its value is held to. A stored
+ * scope is `{ version, general, types }`, and a setting's id is its path in that object. An earlier
+ * build also stored an `auxiliary` object (a BlazePose 3D panel's settings); Insight has no such
+ * panel, so scopes still holding one are read without it and the next write leaves it out.
  */
 
 export const SETTINGS_VERSION = 10;
@@ -55,7 +55,7 @@ export type SyncSettings = Pick<GeneralSettings, 'videoSyncBufferMs' | 'metadata
 export type TypeSettings = NeatOverlaySettings['types'];
 
 // The overlay defaults are the kit's, so a tile with nothing stored draws exactly as the kit's own
-// default settings would; the resolver spec pins the values (Inv §5b).
+// default settings would; the resolver spec pins the values.
 export const GENERAL_DEFAULTS: GeneralSettings = {
   videoSyncBufferMs: 300,
   metadataRetentionMs: 0,
@@ -108,7 +108,7 @@ export interface NumberRange {
 /**
  * The range every stored number is clamped to. These are the normalizer's ranges, which are wider
  * than some of the old dialog's controls (trail length 1..120 against 1..60, lost-track time
- * 0..30000 against 0..10000, Inv §5b); a control picks its own range within them.
+ * 0..30000 against 0..10000); a control picks its own range within them.
  */
 export const NUMBER_RANGES: Readonly<Record<NumericSettingId, NumberRange>> = {
   'general.videoSyncBufferMs': { min: 0, max: 4000, integer: true },

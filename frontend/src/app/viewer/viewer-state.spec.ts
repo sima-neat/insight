@@ -12,9 +12,9 @@ import {
 const range = (count: number, from = 0) =>
   Array.from({ length: count }, (_, index) => from + index);
 
-// Ported from 829ec7c's viewerLayout.test.js. Its page-size presets and column rules are gone
-// (the size slider and the packing grid replace them), so only the channel and capacity rules
-// remain; src order is now kept instead of sorted.
+// Ported from viewerLayout.test.js (sima-neat/insight@829ec7c), without its page-size presets and
+// column rules (the size slider and the packing grid replace them); src order is kept instead of
+// sorted.
 describe('channel parsing (ported)', () => {
   it('viewer exposes all 80 channels', () => {
     expect(MAX_CHANNELS).toBe(80);

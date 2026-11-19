@@ -3,9 +3,9 @@
  * the recording plays (`NeatLevelMeter`'s `sample`). It is raw Web Audio, kept here with its own
  * tests and outside change detection (AGENTS.md): the meter reads it once per animation frame.
  *
- * The level is the peak of the latest samples, as #170's playback meter read it and as the
+ * The level is the peak of the latest samples, as the
  * backend measures the live level while recording (`mictest.chunk_level`): recording and
- * playback then read on one scale (ruling Q19).
+ * playback then read on one scale.
  */
 
 export interface PlaybackLevel {
@@ -29,7 +29,7 @@ const NO_LEVEL: PlaybackLevel = { read: () => null, close: () => undefined };
  *   user gesture, and a context made elsewhere stays suspended.
  * - **Once per element:** a media element accepts one `MediaElementSourceNode` in its lifetime, so
  *   a second level over the same element would fail. Make one and keep it for every playback of
- *   that element (ruling F11); close it when the element goes.
+ *   that element; close it when the element goes.
  * - **Only a running context carries the audio:** routed through a suspended one, the element
  *   would play silently. So the element is wired only once the context runs; until then, and
  *   whenever Web Audio refuses, the element plays on its own and the level reads null.

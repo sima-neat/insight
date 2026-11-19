@@ -9,7 +9,7 @@ export interface InfoRow {
   readonly value: string;
 }
 
-/** What a row shows for a value the probe did not find, as #170 does. */
+/** What a row shows for a value the probe did not find. */
 const NONE = '-';
 
 const KIND_LABELS: Record<MediaProbe['kind'], string> = {
@@ -38,10 +38,10 @@ export function formatDuration(ms: number | undefined): string {
 const count = (value: number | undefined) => (value === undefined ? NONE : String(value));
 
 /**
- * `/api/media/info` as the side panel lists it: #170's rows with readable values (the size in
- * KB/MB/GB, the duration as `2:14` rather than "134.00 sec", the frame rate as `30 fps` rather
- * than `30/1`). #170's "Normalized Codec" row is left out (ruling Q15): for the codecs Insight
- * streams it reads the same as the codec row, and a file it cannot stream is tagged in the list.
+ * `/api/media/info` as the side panel lists it, in readable values (the size in KB/MB/GB, the
+ * duration as `2:14` rather than "134.00 sec", the frame rate as `30 fps` rather than `30/1`).
+ * There is no "Normalized Codec" row: for the codecs Insight streams it would read the same as
+ * the codec row, and a file it cannot stream is tagged in the list.
  * Why ffprobe could not read a file, when it could not, is the last row.
  */
 export function mediaInfoRows(info: MediaFileInfo): InfoRow[] {

@@ -133,7 +133,7 @@ test.describe('the Viewer without video', () => {
           { horizontal: 0, vertical: 0 },
           { horizontal: 0, vertical: 0 },
         ]);
-      // R14: the toolbar fits beside the title on a laptop and a desktop; a tablet scrolls it.
+      // The toolbar fits beside the title on a laptop and a desktop; a tablet scrolls it.
       await expect
         .poll(() => topBarSpill(page, size === TABLET))
         .toEqual({

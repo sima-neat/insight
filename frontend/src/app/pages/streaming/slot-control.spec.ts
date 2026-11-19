@@ -56,7 +56,7 @@ describe('SlotControl', () => {
     control = TestBed.inject(SlotControl);
   });
 
-  it('commits a frame rate with the file the slot has (#170); none is the file’s own', async () => {
+  it('commits a frame rate with the file the slot has; none is the file’s own', async () => {
     await expect(control.commitFps(fileSlot(2, 'a.mp4'), 15)).resolves.toEqual({ ok: true });
     expect(slots.assignFile).toHaveBeenCalledWith(2, 'a.mp4', 15);
     await control.commitFps(fileSlot(2, 'a.mp4', { fps: 15 }), null);

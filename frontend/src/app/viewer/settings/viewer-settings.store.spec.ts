@@ -74,12 +74,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Ported from viewerSettings.test.js (829ec7c). Storage names map viewerSettings_global to
-// settings:global and viewerSettings_channel_<N> to settings:channel:<N>; the old API's calls map
-// onto the store (resolveTypeSettings → resolved/general, followedValue → value('global'),
-// writeScopeGeneralOverride and writeScopeOwnSettings → set, clearScope* → resetOverride,
-// listChannel*Overrides → overridesOf, applyGlobalGeneral → raiseGlobal). The report lists the
-// tests and assertions that were dropped and why.
+// Ported from viewerSettings.test.js (sima-neat/insight@829ec7c). Storage names map
+// viewerSettings_global to settings:global and viewerSettings_channel_<N> to
+// settings:channel:<N>; the old API's calls map onto the store (resolveTypeSettings →
+// resolved/general, followedValue → value('global'), writeScopeGeneralOverride and
+// writeScopeOwnSettings → set, clearScope* → resetOverride, listChannel*Overrides → overridesOf,
+// applyGlobalGeneral → raiseGlobal).
 describe('ViewerSettingsStore (ported resolver tests)', () => {
   it('the previous 350 ms default migrates to the measured 300 ms floor', () => {
     const store = load({
@@ -355,7 +355,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
 
   it('a clear that storage refuses still holds for the session and leaves the stored entry alone', () => {
     // The original returned null here; the store keeps its state in memory and ViewerStorage
-    // keeps the refused write for the session instead (Review Focus 5).
+    // keeps the refused write for the session instead.
     const channel1 = { version: 4, general: { videoSyncBufferMs: 600 }, types: {} };
     const store = load(
       { 'settings:channel:1': channel1 },
@@ -714,7 +714,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
   });
 
   it('a scope stored with auxiliary.blazepose-3d values loads its other settings, and the next write stores no auxiliary key', () => {
-    // Plan 2a stored the 3D pose settings; the auxiliary panel is a non-goal, so they are not read.
+    // An earlier build stored 3D pose settings; Insight has no such panel, so they are not read.
     const store = load({
       'settings:global': {
         version: 10,

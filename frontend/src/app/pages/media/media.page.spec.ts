@@ -242,7 +242,7 @@ describe('MediaPage', () => {
     expect(toasts.error).toHaveBeenCalledWith('Media folder unreadable');
   });
 
-  it('says so when the slot status could not be refreshed (Q8)', async () => {
+  it('says so when the slot status could not be refreshed', async () => {
     await open();
     expect(notice()).toBe('');
     slots.unavailable.set(true);

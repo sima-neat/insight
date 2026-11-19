@@ -27,11 +27,11 @@ import {
 } from './schema';
 
 /**
- * The settings resolver, ported from viewer-settings-resolver.js (829ec7c, Inv §5c–5d) as pure
- * functions over parsed scopes; the store does the storage and the caching. A scope is read once
- * into its own values (`settingsOverrides`), and a channel resolves as default, then the global
- * scope's own value, then the channel's own value. "Own" means present in the scope, even when
- * equal to what the scope would otherwise follow.
+ * The settings resolver, ported from viewer-settings-resolver.js (sima-neat/insight@829ec7c) as
+ * pure functions over parsed scopes; the store does the storage and the caching. A scope is read
+ * once into its own values (`settingsOverrides`), and a channel resolves as default, then the
+ * global scope's own value, then the channel's own value. "Own" means present in the scope, even
+ * when equal to what the scope would otherwise follow.
  */
 
 /** Optional all the way down, except class row lists, which a scope owns whole. */
@@ -170,8 +170,8 @@ const TRACKING_FLAT_KEYS: readonly (readonly [string, SettingId])[] = [
 ];
 
 /**
- * Where the unversioned flat shape kept each setting. Pose and classification get nothing from it
- * (R23): the original's resolution never read them from a flat scope (only its dialog's load
+ * Where the unversioned flat shape kept each setting. Pose and classification get nothing from it:
+ * the original's resolution never read them from a flat scope (only its dialog's load
  * copied the whole flat object into both types), so tiles keep drawing what they drew before.
  */
 const LEGACY_FLAT_KEYS: readonly (readonly [string, SettingId])[] = [

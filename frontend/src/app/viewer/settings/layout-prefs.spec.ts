@@ -271,7 +271,8 @@ describe('LayoutPrefs', () => {
   });
 
   it('a layout stored with aspect "1:1" keeps its other choices, and the next write stores no aspect', () => {
-    // Plan 2a stored the tile shape; tiles are 16:9 now, so the choice is dropped on the next write.
+    // An earlier build stored the tile shape; tiles are 16:9 now, so the choice is dropped on the
+    // next write.
     fake.seed({ layout: { aspect: '1:1', bars: false, tileWidths: { 4: 300 } } });
     const prefs = open();
 

@@ -147,12 +147,12 @@ describe('MediaPicker', () => {
     expect(option('cars.mp4')).toBeDefined();
   });
 
-  it('Import… asks for the import dialog; reveal then shows the imported file in its folder once the library has it (Q1)', async () => {
+  it('Import… asks for the import dialog; reveal then shows the imported file in its folder once the library has it', async () => {
     await open('cars.mp4');
     await click(button('Import…'));
     expect(host.imports).toBe(1);
 
-    // What Task 13's import does on success: the library gains the file, and the picker reveals it.
+    // What a successful import does: the library gains the file, and the picker reveals it.
     library.refresh.mockImplementationOnce(async () => {
       library.tree.set([...TREE, mediaFolder('imports', [mediaFile('imports/clip.mp4')])]);
     });

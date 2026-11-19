@@ -10,9 +10,10 @@ import {
 } from './resolver';
 import { GENERAL_DEFAULTS, SCALAR_SETTINGS, SETTINGS_VERSION, TYPE_DEFAULTS } from './schema';
 
-// Ported from viewerSettings.test.js (829ec7c). There the resolver's normalizeSettings filled in
-// every default; here a scope is only ever read as its own values (settingsOverrides) and the
-// defaults come in at resolution, so assertions on a normalized scope read its own values.
+// Ported from viewerSettings.test.js (sima-neat/insight@829ec7c). There the resolver's
+// normalizeSettings filled in every default; here a scope is only ever read as its own values
+// (settingsOverrides) and the defaults come in at resolution, so assertions on a normalized scope
+// read its own values.
 describe('viewer settings resolver', () => {
   it('viewer synchronization settings default to a 300 ms video buffer and unlimited retention', () => {
     expect({ ...GENERAL_DEFAULTS }).toStrictEqual({
@@ -25,7 +26,7 @@ describe('viewer settings resolver', () => {
   });
 
   it('the global line width is a whole number of pixels from 1 to 10', () => {
-    // Owner review (O4): one width for every overlay line, defaulting to 3 px.
+    // One width for every overlay line, defaulting to 3 px.
     const widthOf = (lineWidth: unknown) =>
       settingsOverrides({ version: 4, general: { lineWidth } }).general.lineWidth;
 
@@ -78,7 +79,7 @@ describe('viewer settings resolver', () => {
     ).toBe(false);
   });
 
-  it('the metadata type defaults are those of Inv §5b', () => {
+  it('pins the metadata type defaults', () => {
     // TYPE_DEFAULTS comes from the kit; this pins the values the viewer has always used.
     expect(TYPE_DEFAULTS).toStrictEqual({
       'object-detection': { visible: true, confidenceThreshold: 0, objects: [] },
@@ -200,7 +201,7 @@ describe('viewer settings resolver', () => {
     expect(resolved.general.lineWidth).toBe(5);
   });
 
-  it('a legacy flat scope maps its keys and gives pose and classification nothing (R23)', () => {
+  it('a legacy flat scope maps its keys and gives pose and classification nothing', () => {
     // As the original's resolution read it: only its dialog's load copied the flat object into
     // pose and classification, so `visible` and the pose keys never reached a tile.
     const own = settingsOverrides({

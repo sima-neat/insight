@@ -425,7 +425,7 @@ test.describe('Streaming with mocked slots', () => {
             { horizontal: 0, vertical: 0 },
             { horizontal: 0, vertical: 0 },
           ]);
-        // R14: the toolbar fits beside the title on a laptop and a desktop; a tablet scrolls it.
+        // The toolbar fits beside the title on a laptop and a desktop; a tablet scrolls it.
         await expect
           .poll(() => topBarSpill(page, size === TABLET))
           .toEqual({ spilled: [], toolsOverflow: 0 });
@@ -589,7 +589,7 @@ test.describe('Streaming with mocked slots', () => {
       await page.goto('/streaming');
       await expect(rows(page)).toHaveCount(48);
 
-      // The page opens on src1, as #170 did.
+      // The page opens on src1.
       await listbox(page).focus();
       await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
       // From the list into the panel: the panel's resize handle, the main action, the source
@@ -1046,7 +1046,7 @@ test.describe('Streaming with mocked slots', () => {
     await page.goto('/streaming');
     await expect(rows(page)).toHaveCount(48);
 
-    // The page opens on src1, as #170 did.
+    // The page opens on src1.
     await listbox(page).focus();
     await expect(row(page, 'src1')).toHaveAttribute('aria-selected', 'true');
     await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
@@ -1074,7 +1074,7 @@ test.describe('Streaming with mocked slots', () => {
     await (await menuItem(page, 'Start…')).click();
     const dialog = page.getByRole('dialog', { name: 'Bulk Start Streams' });
     const slider = dialog.getByRole('slider', { name: 'How many streams do you want to start?' });
-    // Q10: it opens at 1, as #170's did.
+    // It opens at 1.
     await expect(slider).toHaveAttribute('aria-valuenow', '1');
     await slider.focus();
     await page.keyboard.press('ArrowRight');
@@ -1191,7 +1191,7 @@ test.describe('Streaming with mocked slots', () => {
     await expect(
       toast(page, 'Reset all source assignments. External stream(s) left running: src4.'),
     ).toBeVisible();
-    // Every slot is unassigned now, and the side panel shows the first, as #170 did.
+    // Every slot is unassigned now, and the side panel shows the first.
     await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText('src1');
     await expect(morePanel(page)).toHaveCount(0);
     expect(mocked.calls.get('reset')).toEqual([{}]);

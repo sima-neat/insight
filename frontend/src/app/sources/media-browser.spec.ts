@@ -40,13 +40,13 @@ describe('media browser', () => {
     expect(hiddenFileCount(TREE, 'gone')).toBe(0);
   });
 
-  it('words the hidden-files note as #170 did, and says nothing when nothing is hidden', () => {
+  it('words the hidden-files note, and says nothing when nothing is hidden', () => {
     expect(hiddenFilesNote(0)).toBeNull();
     expect(hiddenFilesNote(1)).toBe('1 file hidden because Insight cannot stream it.');
     expect(hiddenFilesNote(3)).toBe('3 files hidden because Insight cannot stream them.');
   });
 
-  it("counts videos and words the filter as #170's browser did", () => {
+  it('counts videos and words the filter', () => {
     expect(mediaCountLabel('Media Root', 1)).toBe('1 video');
     expect(mediaCountLabel('people', 4)).toBe('4 videos');
     expect(MEDIA_BROWSER_LABELS.folderCount('people', 1)).toBe(

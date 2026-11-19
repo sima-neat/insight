@@ -208,7 +208,7 @@ describe('ImportRunner', () => {
     expect(runner.failure()).toBeNull();
   });
 
-  it('a clash whose slots could not be fetched again names the last known ones and says so (Q16)', async () => {
+  it('a clash whose slots could not be fetched again names the last known ones and says so', async () => {
     slots.slots.set([fileSlot(3, 'a.mp4')]);
     slots.refresh.mockRejectedValueOnce(new ApiRequestError(500, 'MediaMTX is down', null));
     void runner.upload([new File(['x'], 'a.mp4')]);

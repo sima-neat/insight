@@ -72,7 +72,7 @@ function confidence(
 }
 
 /*
- * The old dialog's controls and ranges (Inv §5b, §5e), in its order. On/off settings are
+ * The old dialog's controls and ranges, in its order. On/off settings are
  * switches; values between bounds a pointer can cover are sliders (fractions, line width, trail
  * length); durations of up to seconds, which want an exact figure, are number fields in ms.
  */
@@ -210,7 +210,7 @@ function describeLateness(reading: LatenessReading | null): string {
  * it, so selecting a channel opens no second peer connection. While the channel has a grid tile,
  * that tile reports the channel's frame stats and lateness and the preview's are not used; once the
  * channel is paged off the grid, the preview's stats keep the connection's status line current,
- * while lateness stays the grid tile's (R29).
+ * while lateness stays the grid tile's.
  *
  * Escape inside the panel and the close button ask the page to close it, which returns focus to the grid.
  */
@@ -409,7 +409,7 @@ export class ViewerInspector {
     };
   });
 
-  /** The late notice, while the channel's grid tile warns of late metadata (Inv §4g). */
+  /** The late notice, while the channel's grid tile warns of late metadata. */
   protected readonly lateDetails = computed(() => {
     const channel = this.channel();
     const connection = this.connection();
@@ -447,7 +447,7 @@ export class ViewerInspector {
   }
 
   /**
-   * The late notice's actions (Inv §4g): this channel's own buffer, or global raised without ever
+   * The late notice's actions: this channel's own buffer, or global raised without ever
    * lowering it. The grid tile sees the buffer change, resets its lateness window and drops the
    * warning, so the notice and the focused button go; focus moves to the Video sync buffer field,
    * which announces the new value.
@@ -482,7 +482,7 @@ export class ViewerInspector {
     this.store.resetAllChannels();
   }
 
-  /** The preview's stats, which stand in for the grid tile's while the channel has none (R29). */
+  /** The preview's stats, which stand in for the grid tile's while the channel has none. */
   protected onPreviewStats(stats: NeatFrameStats): void {
     const channel = this.previewChannel();
     if (channel !== null && this.lateness.of(channel)() === null) {

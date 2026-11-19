@@ -464,7 +464,7 @@ describe('SlotPreview', () => {
 
     host.slot.set(slot(1, { file: 'stills/a.jpg', codec: 'mjpeg' }));
     await fixture.whenStable();
-    // The streamer reads a JPEG as MJPEG, so it previews through the same route (#170).
+    // The streamer reads a JPEG as MJPEG, so it previews through the same route.
     expect(image()!.getAttribute('src')).toBe('/api/media/preview.mjpg?path=stills%2Fa.jpg');
 
     host.slot.set(slot(1, { file: 'stills/b.png', codec: 'unknown' }));

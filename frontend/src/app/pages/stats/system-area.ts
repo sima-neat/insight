@@ -8,8 +8,8 @@ const percent = (value: number): string => formatValue(value, '%');
 
 /**
  * The System area: CPU usage, the one-minute load average, Linux memory, MLA memory and the EV74's
- * CMA, then every CPU core's load as a heatmap with its one-minute average (Inv-S §2.8). A
- * percentage chart widens past 100 when a reading does (`scaleFor`, Inv-S §13.26), and whatever
+ * CMA, then every CPU core's load as a heatmap with its one-minute average. A
+ * percentage chart widens past 100 when a reading does (`scaleFor`), and whatever
  * the board does not report is left out.
  */
 @Component({

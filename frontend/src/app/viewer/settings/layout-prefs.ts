@@ -69,11 +69,10 @@ function parseLayout(raw: string | null): Layout {
 
 /**
  * The Viewer's layout choices, stored under one key as they change: tile bars, "Hide empty", the
- * inspector, and the tile size per displayed channel count (the spec's "remembered per displayed
- * channel count"), either a width from the slider or a tiles-per-page fit from "Fit". Provided
- * by the Viewer page like the settings store; the choices outlive the page through storage. Tiles
- * are always 16:9, so an `aspect` that plan 2a stored is not read and the next write leaves it
- * out.
+ * inspector, and the tile size per displayed channel count, either a width from the slider or a
+ * tiles-per-page fit from "Fit". Provided by the Viewer page like the settings store; the choices
+ * outlive the page through storage. Tiles are always 16:9, so an `aspect` that an earlier build
+ * stored is not read and the next write leaves it out.
  */
 @Injectable()
 export class LayoutPrefs {

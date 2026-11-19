@@ -397,7 +397,7 @@ describe('ImportDialog', () => {
     expect(opener.result).toBe('clips');
   });
 
-  it('a clash whose slots could not be checked says so (Q16)', async () => {
+  it('a clash whose slots could not be checked says so', async () => {
     slots.refresh.mockRejectedValueOnce(new Error('MediaMTX is down'));
     await open();
     await drop('a.mp4');
@@ -518,7 +518,7 @@ describe('ImportDialog', () => {
     expect(await headingsAt(300, 'name', 'Catalog variants')).toEqual(['Resolution & FPS', 'Size']);
   });
 
-  it('by asset type, assets are checked and imported one after the other (Q17)', async () => {
+  it('by asset type, assets are checked and imported one after the other', async () => {
     library.catalog.mockResolvedValue(CATALOG);
     await open('catalog');
     const assets = list('Catalog assets');
@@ -533,7 +533,7 @@ describe('ImportDialog', () => {
     expect(button('Clear')!.disabled).toBe(true);
     expect(button('Import Selected')!.disabled).toBe(true);
 
-    // A click on a box, or anywhere on the row as on #170's checkbox labels, checks the asset.
+    // A click on a box, or anywhere on the row, checks the asset.
     await click(box(0));
     await click(options('Catalog assets')[2]);
     expect(checked()).toEqual([true, false, true]);
@@ -543,7 +543,7 @@ describe('ImportDialog', () => {
     await click(options('Catalog assets')[2]);
     expect(checked()).toEqual([true, false, false]);
 
-    // As #170: a check the filter hides is dropped, and widening the filter does not restore it.
+    // A check the filter hides is dropped, and widening the filter does not restore it.
     const codec = filters.querySelectorAll('neat-select')[1];
     await pick(codec, 'H.265');
     expect(text()).toContain('2 matching assets / 0 selected');

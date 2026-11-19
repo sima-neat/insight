@@ -3,7 +3,7 @@ import { NeatNote } from '@sima/neat-ui';
 import { SlotsService } from './slots.service';
 
 /**
- * What a page that shows the slots says while their status could not be refreshed (ruling Q8):
+ * What a page that shows the slots says while their status could not be refreshed:
  * the page then shows the last answer, which may be out of date. Streaming and Media put it above
  * their lists. The paragraph is always in the DOM, so a screen reader hears the text appear.
  */

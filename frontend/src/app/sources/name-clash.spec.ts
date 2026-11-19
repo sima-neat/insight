@@ -54,7 +54,7 @@ describe('nameClash', () => {
     });
   });
 
-  it('says when the slots could not be checked, under the last known ones (Q16)', () => {
+  it('says when the slots could not be checked, under the last known ones', () => {
     expect(nameClash(CONFLICT, [fileSlot(3, 'clip.mp4')], false)).toEqual({
       question: 'clip.mp4 already exists.',
       notes: ['In use on src3', 'Could not check which slots use these files.'],

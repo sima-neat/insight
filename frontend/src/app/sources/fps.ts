@@ -1,5 +1,5 @@
 /**
- * The rules for a slot's output frame rate (#170's `fps.js`, issue #111). A file streams at its
+ * The rules for a slot's output frame rate (sima-neat/insight#111). A file streams at its
  * own rate unless the slot sets another, which the server serves from a rendition: a copy of the
  * file re-encoded at that rate, made on start (the slot is `preparing` meanwhile).
  *

@@ -254,8 +254,6 @@ describe('mergeTelemetry', () => {
 });
 
 describe('what the page derives from the window', () => {
-  // #170's "every live metric lands in exactly one of Power, Thermal and System, by the
-  // dashboard's rules", with the four areas of the side panel.
   it('every live metric lands in exactly one area, by the dashboard’s rules', () => {
     const window = live(2);
     const byArea = Object.fromEntries(AREAS.map((area) => [area, areaMetrics(window, area)]));
@@ -297,7 +295,6 @@ describe('what the page derives from the window', () => {
     ]);
   });
 
-  // #170's "the live board: thermal groups in Sentinel order, cores and rails by key".
   it('the live board: thermal groups in Sentinel order, cores and rails by key', () => {
     const window = live(2);
     expect(thermalGroups(window).map((group) => [group.name, group.metrics.length])).toEqual([
@@ -328,8 +325,6 @@ describe('what the page derives from the window', () => {
     ]);
   });
 
-  // The derived-series half of #170's "a missing sample breaks the line instead of dropping to
-  // zero; stacked areas and derived series".
   it('a missing sample breaks the line instead of dropping to zero in the derived series', () => {
     const window = windowOf(
       [
@@ -377,8 +372,6 @@ describe('what the page derives from the window', () => {
     expect(unmeasured?.values).toEqual([null]);
   });
 
-  // The one-minute half of #170's "the per-core minute and heatmap columns follow board time
-  // when polling is uneven".
   it('the per-core minute follows board time when polling is uneven', () => {
     const core = metric({
       key: 'cpu_core_0_usage_pct',
@@ -449,7 +442,7 @@ describe('what the page derives from the window', () => {
 });
 
 describe('the overview cards', () => {
-  it('lists the six cards in #170’s order with their areas and keys', () => {
+  it('lists the six cards in order with their areas and keys', () => {
     expect(OVERVIEW_CARDS.map((card) => [card.id, card.heading, card.area, card.keys])).toEqual([
       ['thermal-max', 'Thermal max', 'thermal', []],
       ['board-power', 'Board power', 'power', ['power_current_watts']],
@@ -665,7 +658,6 @@ describe('the chart inputs, continued', () => {
 });
 
 describe('the session as CSV', () => {
-  // #170's "a CSV field is quoted and escaped only when it has to be".
   it('a CSV field is quoted and escaped only when it has to be', () => {
     const cases: [string | number | null, string][] = [
       ['plain', 'plain'],
@@ -683,8 +675,6 @@ describe('the session as CSV', () => {
     for (const [value, field] of cases) expect(csvField(value), String(value)).toBe(field);
   });
 
-  // #170's "the session exports as CSV: a row per sample, a column per metric, empty where the
-  // board took no reading".
   it('the session exports as CSV: a row per sample, a column per metric, empty where the board took no reading', () => {
     const window = windowOf(
       [

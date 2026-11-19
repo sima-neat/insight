@@ -15,7 +15,7 @@ import { StatsChart } from './stats-chart';
 /**
  * The Thermal area: the hottest sensor's line over time, then Sentinel's sensor groups as tabs
  * (each with its sensor count and alerts), then the open group's sensors as compact lines with
- * their readings (Inv-S §2.6). The open group is kept in `StatsSession`, so it is still open when
+ * their readings. The open group is kept in `StatsSession`, so it is still open when
  * the user comes back; until one is chosen, and when the remembered one is gone, the first opens.
  */
 @Component({

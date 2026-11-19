@@ -3,8 +3,8 @@ import type { MediaEntry } from '../api.generated';
 
 /**
  * What the media library's `neat-file-browser` says, wherever it shows: Streaming's picker and the
- * Media page. #170's browser counted "videos" and named the root "Media Root"; the kit's defaults
- * say "files", so the app gives its own words, here, once.
+ * Media page: it counts "videos" and names the root "Media Root", where the kit's defaults say
+ * "files", so the app gives its own words, here, once.
  */
 
 export const MEDIA_ROOT_LABEL = 'Media Root';
@@ -50,7 +50,7 @@ export function hiddenFileCount(tree: readonly MediaEntry[], folder: string): nu
   return entries.filter((entry) => !entry.folder && !entry.streamable).length;
 }
 
-/** #170's note under a picker's listing, or null when it leaves nothing out. */
+/** The note under a picker's listing, or null when it leaves nothing out. */
 export function hiddenFilesNote(count: number): string | null {
   if (count === 0) return null;
   return `${plural(count, 'file', 'files')} hidden because Insight cannot stream ${count === 1 ? 'it' : 'them'}.`;

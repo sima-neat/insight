@@ -84,7 +84,7 @@ describe('createPlaybackLevel', () => {
     expect(level.read()).toBeCloseTo(20 * Math.log10(0.5), 6);
     analyser.signal = (index) => (index % 2 ? 1 : -1);
     expect(level.read()).toBeCloseTo(0, 6);
-    // The peak, not the RMS (ruling Q19): a full-scale sine reads 0 dBFS, not -3.
+    // The peak, not the RMS: a full-scale sine reads 0 dBFS, not -3.
     analyser.signal = (index) => Math.sin((2 * Math.PI * index) / 64);
     expect(level.read()).toBeCloseTo(0, 6);
     // A negative peak counts as much as a positive one: -0.25 is -12 dBFS.

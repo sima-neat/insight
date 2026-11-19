@@ -40,7 +40,7 @@ const source = (id: string, title: string, description = ''): CatalogSource => (
 });
 
 describe('catalogAssetLabel', () => {
-  it("joins profile, rate, codec and size, as #170's labels did", () => {
+  it('joins profile, rate, codec and size', () => {
     expect(catalogAssetLabel(asset({ codec: 'hevc' }))).toBe('720p30 / 30 fps / H.265 / 1280x720');
     expect(catalogAssetLabel(asset({ width: null, height: null, fps: 0 }))).toBe('720p30 / H.264');
   });
@@ -119,7 +119,7 @@ describe('a source’s assets', () => {
     expect(assetsOfSource(assets, 'street').map((one) => one.path)).toEqual(['a', 'p1', 'p2', 'b']);
   });
 
-  it('previews with the H.264 preview clip first, as #170 did, else any preview clip', () => {
+  it('previews with the H.264 preview clip first, else any preview clip', () => {
     expect(previewOf(assets)?.path).toBe('p1');
     expect(previewOf(assets.filter((one) => one.path !== 'p1'))?.path).toBe('p2');
     expect(previewOf([asset({})])).toBeNull();

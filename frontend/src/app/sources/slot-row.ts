@@ -63,7 +63,7 @@ const PULL_STATES: Record<SlotPull['status'], SlotStateView> = {
   stopped: { label: 'Stopped', tone: 'neutral' },
 };
 
-/** The codecs Insight streams (#170's `STREAMING_CODECS`); any other on the wire reads in capitals. */
+/** The codecs Insight streams; any other on the wire reads in capitals. */
 const CODEC_LABELS: Readonly<Record<string, string>> = {
   h264: 'H.264',
   h265: 'H.265',
@@ -73,7 +73,7 @@ const CODEC_LABELS: Readonly<Record<string, string>> = {
   unknown: 'Unknown',
 };
 
-/** #170's names for the protocols MediaMTX reports a publisher by; others read in capitals. */
+/** Names for the protocols MediaMTX reports a publisher by; others read in capitals. */
 const PROTOCOL_LABELS: Readonly<Record<string, string>> = {
   rtsp: 'RTSP',
   rtsps: 'RTSPS',
@@ -85,12 +85,12 @@ const PROTOCOL_LABELS: Readonly<Record<string, string>> = {
 
 /**
  * What a warning about the slots using some files adds when the slots could not be fetched again
- * before it (ruling Q16): the slots it names are the last known ones. Media's delete and the
+ * before it: the slots it names are the last known ones. Media's delete and the
  * import dialog's name clash say it alike.
  */
 export const SLOTS_NOT_CHECKED = 'Could not check which slots use these files.';
 
-/** What a cell shows for a value there is none of, as #170 does. */
+/** What a cell shows for a value there is none of. */
 const NONE = '-';
 
 /** A file, a camera to pull or a webcam is assigned; an external publisher may sit over it. */
@@ -155,7 +155,7 @@ export function slotSource(slot: Slot, camera?: Camera): string {
 }
 
 /**
- * The chips below are #170's (`externalSource.js`) word for word. An external publisher:
+ * An external publisher:
  * `⇢ RTSP · 192.168.1.20 · 1280×720 · 30 fps`, leaving out the address and the video while they
  * are not known.
  */
@@ -237,7 +237,7 @@ export function codecLabel(codec: string | undefined): string {
   return CODEC_LABELS[codec] ?? codec.toUpperCase();
 }
 
-/** The codec on the wire or of the assigned file; "-" while there is none to name, as in #170. */
+/** The codec on the wire or of the assigned file; "-" while there is none to name. */
 export function slotCodec(slot: Slot): string {
   if (slot.state === 'external') return codecLabel(slot.codec);
   if (slot.kind === 'pull') return slot.pull?.status === 'live' ? codecLabel(slot.codec) : NONE;
@@ -245,7 +245,7 @@ export function slotCodec(slot: Slot): string {
 }
 
 /**
- * #170's warning for a stream Neat pipelines cannot decode, or null. Only an external publisher,
+ * The warning for a stream Neat pipelines cannot decode, or null. Only an external publisher,
  * or a pull while live, can carry one.
  */
 export function codecWarning(slot: Slot): string | null {
@@ -279,7 +279,7 @@ export function isRunning(slot: Slot): boolean {
 }
 
 /**
- * What a slot puts out (#170's "Output" line): `RTSP / H.264 · 25 fps`, the rate being the one set,
+ * What a slot puts out: `RTSP / H.264 · 25 fps`, the rate being the one set,
  * else the file's own; an MJPEG stream also goes out over HTTP. A webcam always goes out at the
  * normalizer's rate, which the server does not report.
  */
@@ -291,7 +291,7 @@ export function slotOutput(slot: Slot): string {
 }
 
 /**
- * The rest are #170's (`externalSource.js`) as well. The preview of a live slot: `token` makes a
+ * The preview of a live slot: `token` makes a
  * new request (another slot, a retry), and `since` changes with the publisher's session, so a
  * publisher that reconnected between two polls gets a new image rather than the ended one.
  */

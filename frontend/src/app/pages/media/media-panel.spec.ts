@@ -324,7 +324,7 @@ describe('MediaPanel', () => {
     expect(library.delete).not.toHaveBeenCalled();
   });
 
-  it('asks when the slots cannot be fetched again, and says so (Q16): the server has the last word', async () => {
+  it('asks when the slots cannot be fetched again, and says so: the server has the last word', async () => {
     slots.slots.set([fileSlot(4, 'a.mp4')]);
     slots.refresh.mockRejectedValueOnce(
       new ApiRequestError(500, 'MediaMTX is not answering', null),

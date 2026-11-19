@@ -12,7 +12,7 @@ import { StatsChart } from './stats-chart';
 
 /**
  * The Storage & Network area: eMMC and NVMe use, eMMC reads and writes, network in and out, then a
- * table of every storage and network metric (Inv-S §2.9). Whatever the board does not report is
+ * table of every storage and network metric. Whatever the board does not report is
  * left out; the NVMe chart is the first percentage metric whose key names an NVMe drive, since
  * Sentinel's key for it depends on the board.
  */

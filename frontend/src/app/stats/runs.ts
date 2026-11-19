@@ -41,8 +41,8 @@ export const isObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * Whether a body has a full run's parts (`metadata`, `metrics`, `samples`), which every view of a
- * run reads; a body without them is not shown as a run (spec, "the fallbacks for unknown body
- * shapes"). Only the parts are checked, not every field in them: cheap, and enough to tell a
+ * run reads; a body without them is not shown as a run.
+ * Only the parts are checked, not every field in them: cheap, and enough to tell a
  * Sentinel build that answers in another shape.
  */
 export function isSavedRun(body: unknown): body is SavedRun {

@@ -1033,7 +1033,7 @@ describe('ViewerPage', () => {
     expect(toolbar().textContent).not.toMatch(/16:9|1:1/);
   });
 
-  it('a 1:1 that plan 2a stored fits 16:9 tiles', async () => {
+  it('a 1:1 that an earlier build stored fits 16:9 tiles', async () => {
     storage.seed({ layout: { aspect: '1:1' } });
     await open('/viewer');
 

@@ -39,9 +39,10 @@ export interface OverviewCardView {
 }
 
 /**
- * The overview cards the board can fill, in #170's order: a card shows while its area has metrics
- * (`cardShown`), and says "Not reported" while its own are not (`cardReported`). The charts are the
- * side panel's builders, so a card and its area never disagree about scale or thresholds.
+ * The overview cards the board can fill, in `OVERVIEW_CARDS`' order: a card shows while its area
+ * has metrics (`cardShown`), and says "Not reported" while its own are not (`cardReported`). The
+ * charts are the side panel's builders, so a card and its area never disagree about scale or
+ * thresholds.
  */
 export function overviewCards(window: TelemetryWindow): OverviewCardView[] {
   return OVERVIEW_CARDS.filter((card) => cardShown(window, card)).map((card) =>

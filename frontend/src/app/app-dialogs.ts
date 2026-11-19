@@ -27,7 +27,7 @@ export const APP_DIALOG_MODULES = new InjectionToken<AppDialogModules>('APP_DIAL
 
 type DialogName = keyof AppDialogModules;
 
-/** What the toast says when a dialog's module could not be loaded (ruling Q11). */
+/** What the toast says when a dialog's module could not be loaded. */
 const LOAD_FAILED: Record<DialogName, string> = {
   board: 'Could not open the board dialog. Reload the page to try again.',
   systemInfo: 'Could not open the System information dialog. Reload the page to try again.',

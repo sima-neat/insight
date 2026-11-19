@@ -2,7 +2,7 @@ import type { Catalog } from '../api.generated';
 import { codecLabel } from './slot-row';
 
 /**
- * The media catalog as the import dialog's Catalog tab shows it (Inv-SM §1.1): labels, order,
+ * The media catalog as the import dialog's Catalog tab shows it: labels, order,
  * search and the Resolution & FPS / Codec filter both browsing modes share. Pure functions over
  * the index `GET /api/catalog` returns.
  */
@@ -74,8 +74,8 @@ export function catalogAssetLabel(asset: CatalogAsset): string {
 }
 
 /**
- * By source, then height and frame rate, then codec and path. #170 compared one joined string, so
- * 1080 sorted before 480; heights and rates compare as numbers here.
+ * By source, then height and frame rate, then codec and path. Heights and rates compare as numbers,
+ * so 480 sorts before 1080.
  */
 export function sortCatalogAssets(assets: readonly CatalogAsset[]): CatalogAsset[] {
   const title = (asset: CatalogAsset) => asset.source_title || asset.source_id || '';
@@ -140,7 +140,7 @@ export function assetsOfSource(assets: readonly CatalogAsset[], sourceId: string
   return sortCatalogAssets(assets.filter((asset) => asset.source_id === sourceId));
 }
 
-/** The clip a source's detail plays: its H.264 preview if it has one, as #170 chose. */
+/** The clip a source's detail plays: its H.264 preview if it has one. */
 export function previewOf(assets: readonly CatalogAsset[]): CatalogAsset | null {
   return (
     assets.find((asset) => asset.preview && asset.codec === 'h264') ??

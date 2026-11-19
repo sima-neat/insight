@@ -41,7 +41,7 @@ export class ImportDialogs {
 }
 
 /**
- * The import dialog (spec, Media import; Inv-SM §1.1): Local files and Catalog, each a tab of
+ * The import dialog: Local files and Catalog, each a tab of
  * its own, and under them the work `ImportRunner` runs: its progress, a name clash waiting
  * for an answer (Replace / Keep both / Skip), and why it failed. The dialog holds the runner while
  * it is open, so the work reports here; when the dialog goes while work runs (leaving the page),

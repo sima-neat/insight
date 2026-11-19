@@ -6,9 +6,9 @@ import { codecLabel } from './slot-row';
 const ANY: NeatSelectOption<string> = { value: '', label: 'Any' };
 
 /**
- * The catalog's Resolution & FPS and Codec filter, one component for both browsing modes (#170
- * wrote the two selects out twice). It offers the values `assets` have: every asset's when
- * browsing by type, the selected source's when browsing by name.
+ * The catalog's Resolution & FPS and Codec filter, one component for both browsing modes. It
+ * offers the values `assets` have: every asset's when browsing by type, the selected source's when
+ * browsing by name.
  */
 @Component({
   selector: 'app-catalog-filters',

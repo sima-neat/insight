@@ -294,7 +294,7 @@ describe('StreamingPage', () => {
     await click(menuItem(label));
   }
 
-  it('shows 48 rows with kind, source, state, rate and codec per Inv-SM §1.2 for file, webcam, external and pulled slots', async () => {
+  it('shows 48 rows with kind, source, state, rate and codec for file, webcam, external and pulled slots', async () => {
     cameras.assignments.set(new Map([[3, { deviceId: 'd1', label: 'Desk camera' }]]));
     await open();
 
@@ -472,7 +472,7 @@ describe('StreamingPage', () => {
     const slider = dialog.querySelector<HTMLElement>('[role="slider"]')!;
     expect(slider.getAttribute('aria-valuemin')).toBe('1');
     expect(slider.getAttribute('aria-valuemax')).toBe('48');
-    // Ruling Q10: it opens at 1, as #170's did.
+    // It opens at 1.
     expect(slider.getAttribute('aria-valuenow')).toBe('1');
     await press(slider, 'ArrowRight');
     expect(dialog.querySelector('output')?.textContent?.trim()).toBe('2');
@@ -492,7 +492,7 @@ describe('StreamingPage', () => {
     await answer(bulkDialog()!, 'Cancel');
   });
 
-  it('Start… waits for the frame rates the side panel is committing, and starts nothing when one was refused (M6)', async () => {
+  it('Start… waits for the frame rates the side panel is committing, and starts nothing when one was refused', async () => {
     await open();
     slots.startBulk.mockResolvedValue({
       started: [7],
@@ -608,7 +608,7 @@ describe('StreamingPage', () => {
     await answer(bulkDialog()!, 'Cancel');
   });
 
-  it('a slot that began changing while the dialog or the menu was open is reported, and nothing is sent (Q9)', async () => {
+  it('a slot that began changing while the dialog or the menu was open is reported, and nothing is sent', async () => {
     await open();
     await choose('Start…');
     cameras.anyChanging.set(true);
@@ -619,7 +619,7 @@ describe('StreamingPage', () => {
       'Waiting for a source change to finish before starting sources.',
     );
     expect(slots.startBulk).not.toHaveBeenCalled();
-    // As in #170 the dialog stays, so Start can be pressed again once the change is done.
+    // The dialog stays, so Start can be pressed again once the change is done.
     expect(bulkDialog()).not.toBeNull();
     await answer(bulkDialog()!, 'Cancel');
 
@@ -742,7 +742,7 @@ describe('StreamingPage', () => {
     expect(toasts.status).toHaveBeenLastCalledWith(
       'Reset all source assignments. External stream(s) left running: src4.',
     );
-    // The action is done; the menu with it. Every slot is unassigned, and the first shows (#170).
+    // The action is done; the menu with it. Every slot is unassigned, and the first shows.
     expect(morePanel()).toBeNull();
     expect(asideHeading()).toBe('src1');
 
@@ -835,7 +835,7 @@ describe('StreamingPage', () => {
     );
     await answer(confirmDialog()!, 'Cancel');
 
-    // Another tab cleared them meanwhile: it still asks, with what is there now, as #170 did.
+    // Another tab cleared them meanwhile: it still asks, with what is there now.
     slots.refreshRenditions.mockImplementation(async () => {
       slots.renditions.set({ count: 0, bytes: 0, in_use: 0 });
     });
@@ -851,7 +851,7 @@ describe('StreamingPage', () => {
 
   it('arrow keys move the selection and the side panel follows', async () => {
     await open();
-    // As #170: the page opens on src1.
+    // The page opens on src1.
     expect(rowOf('src1').getAttribute('aria-selected')).toBe('true');
     expect(asideHeading()).toBe('src1');
 
@@ -942,7 +942,7 @@ describe('StreamingPage', () => {
     await settleOverlay();
 
     expect(toasts.error).not.toHaveBeenCalled();
-    // Without the library Start… stays disabled, as in #170.
+    // Without the library Start… stays disabled.
     await openMore();
     expect(menuItem('Start…').disabled).toBe(true);
   });

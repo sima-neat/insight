@@ -21,7 +21,7 @@ describe('SystemArea', () => {
   const heatmap = (): NeatHeatmap | undefined =>
     fixture.debugElement.query(By.directive(NeatHeatmap))?.componentInstance;
 
-  it('shows CPU usage, the load average, Linux memory, MLA memory and the EV74’s CMA, each worded as #170 worded it', async () => {
+  it('shows CPU usage, the load average, Linux memory, MLA memory and the EV74’s CMA, each with its reading', async () => {
     await show();
     expect(charts().map((c) => [c.label(), c.headline()])).toEqual([
       ['CPU usage', '37.5%'],

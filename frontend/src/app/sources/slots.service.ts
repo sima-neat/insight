@@ -129,8 +129,8 @@ export class SlotsService {
 
   /**
    * Fetches the slots again before a destructive question (a delete, a replace), so the question
-   * names the slots as they are now (spec, "In use"). Resolves whether that worked: on a failure
-   * the question goes on with the last known slots and says so (ruling Q16). Never rejects.
+   * names the slots as they are now. Resolves whether that worked: on a failure
+   * the question goes on with the last known slots and says so. Never rejects.
    */
   recheck(): Promise<boolean> {
     return this.refresh().then(

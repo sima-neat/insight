@@ -37,7 +37,7 @@ import type { Slot } from '../../api.generated';
 import { EndsStream, filePreview, PreviewFrame } from '../../sources/preview-frame';
 import { isLive, previewSrc } from '../../sources/slot-row';
 
-/** How often the live image is checked for its first frame (#170). */
+/** How often the live image is checked for its first frame. */
 const FRAME_CHECK_MS = 100;
 /** How long the check of a failed preview waits for the server before calling it unavailable. */
 const PROBE_TIMEOUT_MS = 3000;
@@ -64,7 +64,7 @@ export type PreviewFailure = 'busy' | 'failed';
 /**
  * Calls `onFrame` once the image shows its first frame, checking every 100 ms; returns the stop.
  * A multipart MJPEG `<img>` fires `load` unreliably (Chrome only once the stream ends), so the
- * frame is noticed by the image gaining a width (#170). The checks are a plain timer: the app has
+ * frame is noticed by the image gaining a width. The checks are a plain timer: the app has
  * no zone, so they cause no change detection; only `onFrame` changes what is shown.
  */
 export function watchFirstFrame(
@@ -104,7 +104,7 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
 }
 
 /**
- * What the selected slot shows (spec, "Live preview"): the stream for every kind while it is live,
+ * What the selected slot shows: the stream for every kind while it is live,
  * through the server's MJPEG preview route; the file itself, labelled so, for a file slot that is
  * not; and the local camera of a webcam this browser publishes until its stream is live. There is
  * no on/off switch: one preview per panel, so at most one per browser tab.
@@ -114,8 +114,8 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
  * previews, is asked for again by itself a few times before it is reported (`PREVIEW_RETRIES`),
  * while "Connecting…" stays up.
  *
- * A badge in the frame's top left says what the picture is (spec, "Top bar, rail and preview
- * badge"): "Live" whenever the slot is live, whatever its source and however its preview is doing
+ * A badge in the frame's top left says what the picture is: "Live" whenever the slot is live,
+ * whatever its source and however its preview is doing
  * (connecting, retrying or failed: the slot is live, and the message says the rest), and otherwise
  * what is shown instead: "File preview", "Camera preview", or "Not live" for a pull that waits or
  * fails. A frame that shows nothing else has none. The badge text is the frame's accessible

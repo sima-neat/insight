@@ -1,8 +1,9 @@
 /**
- * WHIP publishing helpers for browser webcam sources (#120), ported from #170's
- * `webcamPublishing.js`. They are plain functions over narrow structural types, so the negotiation
- * and the teardown can be tested without a DOM, a real `RTCPeerConnection` or a camera;
- * `CamerasService` is what wires them to the browser and to the slots.
+ * WHIP publishing helpers for browser webcam sources (sima-neat/insight#120), ported from
+ * `webcamPublishing.js` in sima-neat/insight#170. They are plain functions over narrow structural
+ * types, so the negotiation and the teardown can be tested without a DOM, a real
+ * `RTCPeerConnection` or a camera; `CamerasService` is what wires them to the browser and to the
+ * slots.
  *
  * The HTTP here is `fetch`, not Angular's `HttpClient`: WHIP is a different origin from Insight's
  * API (MediaMTX's own TLS listener), so none of the app's HTTP configuration should apply to it;
@@ -136,8 +137,8 @@ export function resolveDeleteUrl(
 
 /**
  * Chrome's default offer prefers VP8. The rest of Insight (codec badges, what a Core application
- * expects on the RTSP side) assumes h264/h265/mjpeg, and #120 calls for H.264, so the transceiver
- * is pinned rather than left to negotiate.
+ * expects on the RTSP side) assumes h264/h265/mjpeg, and sima-neat/insight#120 calls for H.264,
+ * so the transceiver is pinned rather than left to negotiate.
  */
 export function selectH264Codecs<C extends { mimeType: string }>(
   capabilities: { codecs?: readonly C[] } | null | undefined,
@@ -189,7 +190,7 @@ export async function publishWebcamOffer(
     // (the common one here) the browser rejecting the WHIP endpoint's certificate. That listener
     // is a separate https origin from the main UI (its own host:port), so it has to be trusted on
     // its own. The browser deliberately will not say which cause it was, so give one hint that
-    // covers both, per #120's ask for setup feedback the user can act on.
+    // covers both: sima-neat/insight#120 asks for setup feedback the user can act on.
     throw new WebcamPublishError(
       'Could not reach the webcam publish endpoint. Check that its certificate is trusted — ' +
         'open the publish URL once in this browser to accept it — and that the endpoint is reachable.',

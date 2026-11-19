@@ -21,8 +21,8 @@ const OTHER_GROUP = 'Other';
 
 /**
  * Whether a body has a raw comparison's parts: full runs (`isSavedRun`), the summaries and the
- * changes, which the view reads; a body without them is not laid out (spec, "the fallbacks for
- * unknown body shapes"). Only the parts are checked, not every field in them.
+ * changes, which the view reads; a body without them is not laid out.
+ * Only the parts are checked, not every field in them.
  */
 export function isCompareExport(body: unknown): body is CompareExport {
   return (

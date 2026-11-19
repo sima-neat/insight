@@ -137,7 +137,7 @@
       >
         <app-cell-text>
           @if (row.codecWarning; as warning) {
-            <!-- As #170: the codec in warning colours, the glyph naming the problem. -->
+            <!-- The codec in warning colours, the glyph naming the problem. -->
             <neat-status-chip tone="warning">
               {{ row.codec }}
               <span role="img" [attr.aria-label]="warning" [neatTooltip]="warning">⚠</span>

@@ -9,7 +9,7 @@ import {
 } from '../../stats/telemetry';
 import { StatsChart } from './stats-chart';
 
-/** The tiles, with the metric each reads (Inv-S §2.7). */
+/** The tiles, with the metric each reads. */
 const TILES = [
   { key: 'power_current_watts', heading: 'Current' },
   { key: 'power_average_watts', heading: 'Session average' },
@@ -19,7 +19,7 @@ const TILES = [
 /**
  * The Power area: Current, Session average and Session peak as tiles, the board power chart with
  * the session average as its reference line, and the power rails as one stack with a legend of
- * each rail's watts and share (Inv-S §2.7). Whatever the board does not report is left out.
+ * each rail's watts and share. Whatever the board does not report is left out.
  */
 @Component({
   selector: 'app-power-area',

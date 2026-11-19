@@ -8,9 +8,8 @@ import {
   stepFps,
 } from './fps';
 
-// #170's `fps.test.js`, ported with its assertions unchanged where the rule is still the app's.
-// The server now decides when a start needs a rendition (the slot is `preparing`), so #170's
-// `needsRendition` and `withCommittedFps` and their tests are gone.
+// The tests of `fps.test.js` in sima-neat/insight#170 whose rule is still the app's. The server
+// decides when a start needs a rendition (the slot is `preparing`), so that has no test here.
 describe('fps', () => {
   it('constants match the backend minimum', () => {
     expect(FPS_MIN).toBe(1);
@@ -26,7 +25,7 @@ describe('fps', () => {
   });
 
   it('parseFps accepts any whole number from 1', () => {
-    // Owner review (O5): a 300 fps file must be able to go back to 300.
+    // A 300 fps file must be able to go back to 300.
     expect(parseFps('30')).toBe(30);
     expect(parseFps(' 15 ')).toBe(15);
     expect(parseFps('300')).toBe(300);

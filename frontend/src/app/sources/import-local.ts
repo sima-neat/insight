@@ -8,7 +8,7 @@ import { ImportSession } from './import-session';
 /**
  * What the drop zone takes: the files Insight streams, and the archives the server extracts
  * (the server's `streamableExtensions` in `internal/media` and `archiveSuffixes` in
- * `internal/library`). #170 took any file; a file Insight cannot stream would only sit in the
+ * `internal/library`). Any other file would only sit in the
  * library greyed out.
  */
 const ACCEPT = '.mp4,.mov,.avi,.mkv,.webm,.mjpeg,.mjpg,.jpg,.jpeg,.zip,.tar,.gz';
