@@ -292,7 +292,9 @@ class MediamtxClient:
                 if self._snapshot_at is None or now >= self._snapshot_at:
                     self._snapshot, self._snapshot_at = built, now
                     self._update_rates(now)
-                return self._snapshot
+                # A fresh check judges what it saw itself: the shared snapshot can come from a
+                # refresh that started later but read the API before this one did.
+                return built if fresh else self._snapshot
         return built
 
     def _fetch_failed(self, now: float, exc: Exception) -> Optional[dict]:

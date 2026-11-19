@@ -201,6 +201,29 @@ class ClientTests(unittest.TestCase):
         self.assertTrue(client.snapshot()["src5"].ready)  # polls see the fresh answer too
         self.assertEqual(len(calls), first * 2)
 
+    def test_fresh_snapshot_returns_its_own_answer_when_a_later_refresh_owns_the_cache(self):
+        # A poll that starts after the fresh check but reads the API before it sets a newer
+        # _snapshot_at. The fresh check must still return the publisher it saw, not that poll's
+        # older view, or a pull could replace a publisher that joined during the probe.
+        clock = FakeClock()
+        idle = [dict(PATHS[4])]  # src5, no publisher
+        published = [dict(PATHS[1], name="src5", confName="src5")]
+        base = _fake_request(paths=idle, sessions={})
+        polled = []
+        client = None
+
+        def request(method, url):
+            if url.split("?", 1)[0].endswith("/v3/paths/list") and not polled:
+                polled.append(True)
+                clock.now += 2.0  # the poll starts later, after the cache TTL ...
+                self.assertFalse(client.snapshot()["src5"].ready)  # ... and reads the API first
+                return 200, json.dumps({"items": published}).encode()
+            return base(method, url)
+
+        client = mediamtx.MediamtxClient(request=request, clock=clock)
+        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)
+        self.assertFalse(client.snapshot()["src5"].ready)  # the newer-started poll keeps the cache
+
     def test_fresh_snapshot_asks_during_the_backoff_and_never_returns_stale_data(self):
         client, calls, clock, state = self._flaky_client()
         self.assertIsNotNone(client.snapshot())
