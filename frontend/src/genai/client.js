@@ -111,6 +111,15 @@ export const stopSetup = (generation) => setupRequest(forBoard('/stop', generati
 // Stops GenAI Studio however it was started; its start step then waits to run again.
 export const stopStudio = (generation) => setupRequest(forBoard('/stop-studio', generation), 'POST')
 
+// Insight's board selection counter (GET /api/board `generation`): it changes on every
+// switch, also one made in another tab and back again, so equal readings around a
+// request mean one board answered it.
+export async function getBoardGeneration() {
+  const response = await fetch('/api/board')
+  const body = await readJson(response)
+  return body?.generation ?? null
+}
+
 export async function getSettings() {
   const response = await fetch(`${RELAY}/settings`)
   return readJson(response)

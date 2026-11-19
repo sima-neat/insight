@@ -9,7 +9,9 @@ import { modelKind, modelRow } from './settingsCards.js'
 
 export const CATALOG_KEY = 'neat-insight:genai-model-catalog'
 
-export const EMPTY_CATALOG = { syncedAt: null, models: [] }
+// board: the address of the GenAI Studio the list was read from (what answers
+// Sync catalog), so a list saved against one board is not trusted for another.
+export const EMPTY_CATALOG = { syncedAt: null, board: null, models: [] }
 
 export function loadCatalog(storage) {
   try {
@@ -17,6 +19,7 @@ export function loadCatalog(storage) {
     if (saved && Array.isArray(saved.models)) {
       return {
         syncedAt: Number.isFinite(saved.syncedAt) ? saved.syncedAt : null,
+        board: typeof saved.board === 'string' && saved.board ? saved.board : null,
         models: saved.models.filter((m) => m && typeof m.repoId === 'string' && m.repoId)
       }
     }
@@ -24,6 +27,29 @@ export function loadCatalog(storage) {
     // Unreadable or refused storage: the next sync saves it again.
   }
   return EMPTY_CATALOG
+}
+
+// True when the saved list was read from another board, or from one nobody
+// recorded (saved before boards were noted). Unknown current board: no claim.
+export function savedForOtherBoard(catalog, board) {
+  return Boolean(board) && catalog.board !== board
+}
+
+// Whether opening the model list should sync the catalog. `board` must be the
+// address read when the list opens: another browser tab can switch the shared
+// board while this view keeps the settings it loaded earlier. `autoSyncedFor`
+// is the board it last synced for on its own (undefined: none yet), so that
+// board is not synced again, while every later board is.
+export function catalogNeedsSync(catalog, board, { fromOtherBoard = false, autoSyncedFor } = {}) {
+  if (autoSyncedFor !== undefined && autoSyncedFor === board) return false
+  return !catalog.syncedAt || fromOtherBoard || savedForOtherBoard(catalog, board)
+}
+
+// A sync's rows belong to one board only when no switch happened while it ran: the
+// board generation read before and after must match. Unknown readings prove nothing,
+// so the address read with the rows labels them then.
+export function sameBoardThroughout(before, after) {
+  return before == null || after == null || before === after
 }
 
 export function saveCatalog(storage, catalog) {
@@ -36,10 +62,12 @@ export function saveCatalog(storage, catalog) {
 
 // results: GET models/hub/search's list. Hugging Face's listing has no sizes or
 // descriptions, so what the cards already read said stays.
-export function catalogFromSearch(results, previous = EMPTY_CATALOG, syncedAt = Date.now()) {
+// board: the address the list was read from, see EMPTY_CATALOG.
+export function catalogFromSearch(results, previous = EMPTY_CATALOG, syncedAt = Date.now(), board = null) {
   const known = new Map(previous.models.map((m) => [m.repoId, m]))
   return {
     syncedAt,
+    board,
     models: (results || []).filter((r) => r && r.repoId).map((r) => {
       const before = known.get(r.repoId) || {}
       return {

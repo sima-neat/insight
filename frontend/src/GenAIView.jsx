@@ -24,6 +24,7 @@ import {
   uploadDocument,
   downloadModel,
   followLoadProgress,
+  getBoardGeneration,
   getJson,
   getSettings,
   getSetup,
@@ -89,12 +90,14 @@ import {
   cardNote,
   cardSummary,
   catalogFromSearch,
+  catalogNeedsSync,
   catalogRows,
   filterRows,
   loadCatalog,
   residencyNote,
   resultsLine,
   saveCatalog,
+  sameBoardThroughout,
   storageSummary,
   syncedLabel,
   withCard
@@ -487,7 +490,8 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   const settingsDialog = useRef(null)
   const settingsBox = useRef(null)
   const settingsClose = useRef(null)
-  const catalogAutoSynced = useRef(false)
+  // The board the catalog last synced for on its own; undefined until it has.
+  const catalogAutoSyncedFor = useRef(undefined)
   const catalogFromOtherBoard = useRef(false)
   const catalogNow = useRef(modelCatalog)
   const lastStatus = useRef(null)
@@ -827,7 +831,7 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setVoice('')
     setCatalogSync(false)
     lastStatus.current = null
-    catalogAutoSynced.current = false
+    catalogAutoSyncedFor.current = undefined
     // Boards can allow other accounts: what was saved may not apply to this one.
     catalogFromOtherBoard.current = true
     cardsAsked.current.clear()
@@ -1011,14 +1015,28 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     const current = () => id === catalogSyncId.current && board.live()
     setCatalogSync(true)
     try {
-      const results = await getJson('models/hub/search', { signal: board.signal })
+      // The rows are saved under the address read now: another tab can switch the
+      // shared board while this view still holds the settings it loaded earlier. The
+      // board generation around both reads shows that one board answered them.
+      const generation = () => getBoardGeneration().catch(() => null)
+      const before = await generation()
+      const [results, source] = await Promise.all([
+        getJson('models/hub/search', { signal: board.signal }),
+        getSettings().then((s) => s.url || null, () => settingsNow.current?.url || null)
+      ])
+      const after = await generation()
       if (!current()) return
+      if (!sameBoardThroughout(before, after)) {
+        // The board changed during the search: keep no rows, and sync again for the new one.
+        catalogAutoSyncedFor.current = undefined
+        return
+      }
       setHubReach((prev) => hubReachOf(results) || prev)
       if (results.enabled === false) return
       // Every organization failing still answers 200: the saved catalog stays.
       if (results.error) throw new Error(results.error)
       cardsAsked.current.clear()
-      rememberCatalog(catalogFromSearch(results.results, catalogNow.current))
+      rememberCatalog(catalogFromSearch(results.results, catalogNow.current, Date.now(), source))
     } catch (error) {
       if (current() && !isAbort(error)) onError?.(`Sync failed: ${error.message}`)
     } finally {
@@ -1128,14 +1146,33 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
   }, [settingsTab])
 
   // The first look at the catalog fills it; after that, Sync catalog refreshes it.
+  // A list saved for another board (the board changed while this page was
+  // closed or in another tab) is refreshed once too; a failure keeps its rows.
+  // The address is read again here: another tab can switch the shared board
+  // while this view still holds the settings it loaded earlier. Only the
+  // comparison uses it, so the board-switch handling above still sees the move.
   useEffect(() => {
-    if (!settingsOpen || settingsTab !== 'models') return
-    if (modelCatalog.syncedAt && !catalogFromOtherBoard.current) return
-    if (downloads.state !== 'available' || !allowed.searchModels || catalogAutoSynced.current) return
-    catalogAutoSynced.current = true
-    catalogFromOtherBoard.current = false
-    syncCatalog()
-  }, [settingsOpen, settingsTab, modelCatalog.syncedAt, downloads.state, allowed.searchModels])
+    if (!settingsOpen || settingsTab !== 'models') return undefined
+    if (downloads.state !== 'available' || !allowed.searchModels) return undefined
+    let cancelled = false
+    const decide = (board) => {
+      if (cancelled) return
+      const options = { fromOtherBoard: catalogFromOtherBoard.current, autoSyncedFor: catalogAutoSyncedFor.current }
+      if (!catalogNeedsSync(modelCatalog, board, options)) return
+      catalogAutoSyncedFor.current = board
+      catalogFromOtherBoard.current = false
+      syncCatalog()
+    }
+    const check = () => getSettings().then((s) => decide(s.url || null), () => decide(settings?.url || null))
+    check()
+    // The list can stay open while another tab switches the board: look again on return.
+    const onVisible = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [settingsOpen, settingsTab, modelCatalog.syncedAt, modelCatalog.board, settings?.url, downloads.state, allowed.searchModels])
 
   // The offer says how big the download is, and finds out early whether the
   // board can reach Hugging Face. Once per board; the size is only a nicety,

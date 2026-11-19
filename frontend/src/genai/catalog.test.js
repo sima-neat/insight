@@ -7,12 +7,15 @@ import {
   cardNote,
   cardSummary,
   catalogFromSearch,
+  catalogNeedsSync,
   catalogRows,
   filterRows,
   loadCatalog,
   residencyNote,
   resultsLine,
+  sameBoardThroughout,
   saveCatalog,
+  savedForOtherBoard,
   storageSummary,
   syncedLabel,
   withCard
@@ -29,6 +32,7 @@ const STATUS = {
 }
 const CATALOG = {
   syncedAt: 1000,
+  board: null,
   models: [
     { repoId: 'simaai/Qwen3-VL-4B-Instruct-Autoround-a16w4', org: 'simaai', type: 'vlm', sizeBytes: 4_200_000_000, summary: 'Sees images.' },
     { repoId: 'simaai/Qwen3-0.6B-Autoround-a16w4', org: 'simaai', type: 'llm', sizeBytes: null, summary: 'A compact chat model.' },
@@ -176,4 +180,62 @@ test('the last sync reads in everyday words', () => {
   assert.equal(syncedLabel(noon - 5000, noon), 'Last synced just now')
   assert.match(syncedLabel(noon - 3_600_000, noon), /^Last synced today at 11:00/)
   assert.match(syncedLabel(noon - 2 * 86_400_000, noon), /^Last synced Nov 3 at 12:00/)
+})
+
+test('a catalog remembers the board it was read from', () => {
+  const synced = catalogFromSearch([{ repoId: 'simaai/a', type: 'llm' }], EMPTY_CATALOG, 5, 'https://192.168.2.3:5000')
+  assert.equal(synced.board, 'https://192.168.2.3:5000')
+  const storage = memoryStorage()
+  saveCatalog(storage, synced)
+  assert.equal(loadCatalog(storage).board, 'https://192.168.2.3:5000')
+  assert.equal(withCard(synced, { repoId: 'simaai/a', sizeBytes: 1 }).board, 'https://192.168.2.3:5000')
+})
+
+test('a catalog saved before boards were noted loads without one', () => {
+  const storage = memoryStorage({ [CATALOG_KEY]: JSON.stringify({ syncedAt: 1000, models: CATALOG.models }) })
+  assert.equal(loadCatalog(storage).board, null)
+})
+
+test('opening the model list syncs a catalog saved for the board another tab left', () => {
+  // Another tab switched the shared board. This view still holds the old address,
+  // so only the address read when the list opens shows the saved list is stale.
+  const oldBoard = 'https://192.168.2.3:5000'
+  const newBoard = 'https://192.168.2.9:5000'
+  const saved = { ...CATALOG, syncedAt: 1_000, board: oldBoard }
+  assert.equal(catalogNeedsSync(saved, oldBoard), false)  // the stale address hides it
+  assert.equal(catalogNeedsSync(saved, newBoard), true)   // the fresh one does not
+  assert.equal(catalogNeedsSync({ ...saved, syncedAt: null }, oldBoard), true)  // never synced
+  assert.equal(catalogNeedsSync(saved, oldBoard, { fromOtherBoard: true }), true)
+  assert.equal(catalogNeedsSync(saved, null), false)  // address unknown: no claim
+})
+
+test('auto-sync runs once per board, again after every later switch', () => {
+  const b = 'https://192.168.2.9:5000'
+  const c = 'https://192.168.2.11:5000'
+  // Synced for B after a switch A -> B made in another tab: B is not synced again.
+  const forB = { ...CATALOG, syncedAt: 2_000, board: b }
+  assert.equal(catalogNeedsSync(forB, b, { autoSyncedFor: b }), false)
+  // A second switch B -> C, also in another tab, syncs once more.
+  assert.equal(catalogNeedsSync(forB, c, { autoSyncedFor: b }), true)
+  // A failed sync for C keeps B's rows, and is not retried on its own.
+  assert.equal(catalogNeedsSync(forB, c, { autoSyncedFor: c }), false)
+  // Nothing synced yet, with the board unknown: the first look still fills it.
+  assert.equal(catalogNeedsSync({ ...CATALOG, syncedAt: null }, null), true)
+  assert.equal(catalogNeedsSync({ ...CATALOG, syncedAt: null }, null, { autoSyncedFor: null }), false)
+})
+
+test('a sync keeps its rows only when no board switch happened while it ran', () => {
+  assert.equal(sameBoardThroughout(7, 7), true)
+  assert.equal(sameBoardThroughout(7, 8), false)  // switched, maybe A -> B -> A: the rows may be mixed
+  assert.equal(sameBoardThroughout(null, 8), true)  // unknown: the address labels the rows
+  assert.equal(sameBoardThroughout(7, null), true)
+})
+
+test('a saved catalog is for another board unless it names the current one', () => {
+  const here = 'https://192.168.2.3:5000'
+  assert.equal(savedForOtherBoard({ ...CATALOG, board: here }, here), false)
+  assert.equal(savedForOtherBoard({ ...CATALOG, board: 'https://192.168.2.9:5000' }, here), true)
+  assert.equal(savedForOtherBoard({ ...CATALOG, board: null }, here), true)
+  // The board is not known yet: nothing to compare, so no sync is asked for.
+  assert.equal(savedForOtherBoard({ ...CATALOG, board: null }, null), false)
 })
