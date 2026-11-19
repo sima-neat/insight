@@ -24,6 +24,7 @@ import {
   uploadDocument,
   downloadModel,
   followLoadProgress,
+  getBoardGeneration,
   getJson,
   getSettings,
   getSetup,
@@ -96,6 +97,7 @@ import {
   residencyNote,
   resultsLine,
   saveCatalog,
+  sameBoardThroughout,
   storageSummary,
   syncedLabel,
   withCard
@@ -1014,12 +1016,21 @@ export default function GenAIView({ onError, onStatus, selectedBoardGeneration =
     setCatalogSync(true)
     try {
       // The rows are saved under the address read now: another tab can switch the
-      // shared board while this view still holds the settings it loaded earlier.
+      // shared board while this view still holds the settings it loaded earlier. The
+      // board generation around both reads shows that one board answered them.
+      const generation = () => getBoardGeneration().catch(() => null)
+      const before = await generation()
       const [results, source] = await Promise.all([
         getJson('models/hub/search', { signal: board.signal }),
         getSettings().then((s) => s.url || null, () => settingsNow.current?.url || null)
       ])
+      const after = await generation()
       if (!current()) return
+      if (!sameBoardThroughout(before, after)) {
+        // The board changed during the search: keep no rows, and sync again for the new one.
+        catalogAutoSyncedFor.current = undefined
+        return
+      }
       setHubReach((prev) => hubReachOf(results) || prev)
       if (results.enabled === false) return
       // Every organization failing still answers 200: the saved catalog stays.

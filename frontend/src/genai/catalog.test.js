@@ -13,6 +13,7 @@ import {
   loadCatalog,
   residencyNote,
   resultsLine,
+  sameBoardThroughout,
   saveCatalog,
   savedForOtherBoard,
   storageSummary,
@@ -221,6 +222,13 @@ test('auto-sync runs once per board, again after every later switch', () => {
   // Nothing synced yet, with the board unknown: the first look still fills it.
   assert.equal(catalogNeedsSync({ ...CATALOG, syncedAt: null }, null), true)
   assert.equal(catalogNeedsSync({ ...CATALOG, syncedAt: null }, null, { autoSyncedFor: null }), false)
+})
+
+test('a sync keeps its rows only when no board switch happened while it ran', () => {
+  assert.equal(sameBoardThroughout(7, 7), true)
+  assert.equal(sameBoardThroughout(7, 8), false)  // switched, maybe A -> B -> A: the rows may be mixed
+  assert.equal(sameBoardThroughout(null, 8), true)  // unknown: the address labels the rows
+  assert.equal(sameBoardThroughout(7, null), true)
 })
 
 test('a saved catalog is for another board unless it names the current one', () => {

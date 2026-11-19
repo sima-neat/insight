@@ -45,6 +45,13 @@ export function catalogNeedsSync(catalog, board, { fromOtherBoard = false, autoS
   return !catalog.syncedAt || fromOtherBoard || savedForOtherBoard(catalog, board)
 }
 
+// A sync's rows belong to one board only when no switch happened while it ran: the
+// board generation read before and after must match. Unknown readings prove nothing,
+// so the address read with the rows labels them then.
+export function sameBoardThroughout(before, after) {
+  return before == null || after == null || before === after
+}
+
 export function saveCatalog(storage, catalog) {
   try {
     storage.setItem(CATALOG_KEY, JSON.stringify(catalog))
