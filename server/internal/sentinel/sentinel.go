@@ -96,8 +96,10 @@ func Call(ctx context.Context, b *board.Board, method, path string, body any) (B
 		return nil, &apierr.Error{Status: http.StatusBadGateway, Code: CodeFailed,
 			Message: "Sentinel answered with something that is not a JSON object.", Hint: statusHint}
 	}
+	// Health, metrics, the cache and runs say their schema; the peripheral catalog says none (it
+	// has a revision), so an answer is checked when it carries one.
 	var schema int
-	if json.Unmarshal(parsed["schema"], &schema) != nil || schema != Schema {
+	if raw, ok := parsed["schema"]; ok && (json.Unmarshal(raw, &schema) != nil || schema != Schema) {
 		return nil, &apierr.Error{Status: http.StatusBadGateway, Code: CodeSchema,
 			Message: fmt.Sprintf("Sentinel on the board speaks API schema %s and Insight understands schema %d.",
 				strings.TrimSpace(string(parsed["schema"])), Schema),

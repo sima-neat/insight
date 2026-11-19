@@ -95,6 +95,11 @@ func TestCallDropsTheSchemaAndRefusesAnother(t *testing.T) {
 	if _, err := Metrics(ctx(t), f.Board); codeOf(err) != CodeSchema {
 		t.Errorf("another schema: %v", err)
 	}
+	// The peripheral catalog carries no schema (Sentinel 3.0 on a DevKit): it passes.
+	fake.answer("GET /v1/metrics", 200, `{"revision":3,"metrics":[]}`)
+	if _, err := Metrics(ctx(t), f.Board); err != nil {
+		t.Errorf("no schema: %v", err)
+	}
 	fake.answer("GET /v1/metrics", 200, `[1]`)
 	if _, err := Metrics(ctx(t), f.Board); codeOf(err) != CodeFailed {
 		t.Errorf("not an object: %v", err)
