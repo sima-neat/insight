@@ -22,17 +22,17 @@ address as `insight.webUiUrl` ([Ports and network](ports-network.md)).
 
 ## On a DevKit
 
-Install Insight with `sima-cli`, then start it from the virtual environment the installer creates:
+Insight needs two programs on the DevKit: [mkcert](https://github.com/FiloSottile/mkcert), for its
+HTTPS certificate (without it, Insight does not start and says so), and `ffmpeg`, for its sources
+and media library. Install them once, then install Insight with `sima-cli` and start it from the
+virtual environment the installer creates:
 
 ```bash
+sudo apt install mkcert ffmpeg
 sima-cli neat install insight
 source ~/.simaai/neat-insight/venv/bin/activate
 neat-insight                # serves https://<devkit-ip>:9900; --port picks another port
 ```
-
-Insight serves HTTPS with a certificate it makes with [mkcert](https://github.com/FiloSottile/mkcert),
-which must be installed on the DevKit (`sudo apt install mkcert`); without it, Insight does not
-start and says so.
 
 ## The certificate
 
