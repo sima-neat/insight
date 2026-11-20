@@ -878,7 +878,9 @@ export default function App() {
         setBoardError(null)
       },
       onError: (err) => setBoardError(normalizeBoardError(err)),
-      onLoading: setBoardLoading
+      onLoading: setBoardLoading,
+      // A board picked in another tab changes the shell target too, as a change made here does.
+      onChanged: () => loadDevkitShellInfo()
     })
   }
   // A board change reloads the shell details; an older read must not overwrite the newer board's.
@@ -1134,6 +1136,24 @@ export default function App() {
 
   useEffect(() => {
     loadBoard()
+  }, [])
+
+  // The selected board is server-wide, so another tab can change it. Re-read it while this tab is
+  // visible, and when it becomes visible again. 5 s: a change shows up within a few seconds, and
+  // it is one small GET against a local server.
+  useEffect(() => {
+    let busy = false
+    const tick = () => {
+      if (document.visibilityState !== 'visible' || busy) return
+      busy = true
+      boardSyncRef.current.load({ quiet: true }).finally(() => { busy = false })
+    }
+    const timer = setInterval(tick, 5000)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', tick)
+    }
   }, [])
 
   useEffect(() => {

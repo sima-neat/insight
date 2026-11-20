@@ -659,6 +659,157 @@ test('a board read sent after a change applies normally', async () => {
   assert.equal(state.loading, false)
 })
 
+test('a quiet board read updates the board without raising loading or an error', async () => {
+  const requests = []
+  const events = []
+  const sync = createBoardSync({
+    fetchBoard: () => queued(requests),
+    onBoard: (data) => events.push(['board', data]),
+    onError: () => events.push(['error']),
+    onLoading: (value) => events.push(['loading', value]),
+    onChanged: (data) => events.push(['changed', data])
+  })
+  sync.apply(boardA)
+  events.length = 0
+  const load = sync.load({ quiet: true })
+  requests[0].resolve(boardB)
+  await load
+  assert.deepEqual(events, [['board', boardB], ['changed', boardB]])
+})
+
+test('a quiet read of an unchanged board does nothing, and a failed one stays silent', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  sync.apply(boardA)
+  const same = sync.load({ quiet: true })
+  requests[0].resolve({ ...boardA })
+  await same
+  const failed = sync.load({ quiet: true })
+  requests[1].reject(new Error('network'))
+  assert.equal(await failed, null)
+  assert.equal(state.board, boardA)
+  assert.equal(state.errors, 0)
+  assert.equal(state.loading, false)
+})
+
+test('a quiet read sent before a board change cannot undo it', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  sync.apply(boardA)
+  const poll = sync.load({ quiet: true })
+  sync.apply(boardB)
+  requests[0].resolve(boardA)
+  assert.equal(await poll, boardB)
+  assert.equal(state.board, boardB)
+})
+
+test('a quiet read that supersedes a loading read still ends the loading state', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  const visible = sync.load()
+  assert.equal(state.loading, true)
+  const poll = sync.load({ quiet: true })
+  requests[1].resolve(boardB)
+  requests[0].resolve(boardA)
+  assert.equal(await visible, boardB)
+  assert.equal(await poll, boardB)
+  assert.equal(state.board, boardB)
+  assert.equal(state.loading, false)
+})
+
+test('a failed quiet read that supersedes a loading read reports the error', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  const visible = sync.load()
+  const poll = sync.load({ quiet: true })
+  requests[1].reject(new Error('network'))
+  requests[0].resolve(boardA)
+  assert.equal(await poll, null)
+  assert.equal(await visible, null)
+  assert.equal(state.errors, 1)
+  assert.equal(state.loading, false)
+})
+
+test('a normal read that finds a board changed elsewhere reports the change', async () => {
+  const requests = []
+  const changes = []
+  const sync = createBoardSync({
+    fetchBoard: () => queued(requests),
+    onBoard: () => {},
+    onError: () => {},
+    onLoading: () => {},
+    onChanged: (data) => changes.push(data)
+  })
+  const first = sync.load()
+  requests[0].resolve(boardA)
+  await first
+  assert.deepEqual(changes, [], 'the first read is not a change')
+  const opened = sync.load() // e.g. Stats mounting before the next poll
+  requests[1].resolve(boardB)
+  await opened
+  const poll = sync.load({ quiet: true })
+  requests[2].resolve(boardB)
+  await poll
+  assert.deepEqual(changes, [boardB])
+})
+
+test('a read that only moves the status time re-renders but is not a board change', async () => {
+  const requests = []
+  const boards = []
+  const changes = []
+  const sync = createBoardSync({
+    fetchBoard: () => queued(requests),
+    onBoard: (data) => boards.push(data),
+    onError: () => {},
+    onLoading: () => {},
+    onChanged: (data) => changes.push(data)
+  })
+  const checkedEarlier = { ...boardA, status: { state: 'connected', checked_at: '2026-11-20T10:00:00Z' } }
+  const checkedLater = { ...boardA, status: { state: 'connected', checked_at: '2026-11-20T10:00:30Z' } }
+  const first = sync.load()
+  requests[0].resolve(checkedEarlier)
+  await first
+  const poll = sync.load({ quiet: true })
+  requests[1].resolve(checkedLater)
+  await poll
+  assert.deepEqual(boards, [checkedEarlier, checkedLater], 'the newer status still reaches the header')
+  assert.deepEqual(changes, [], 'the same generation and target is not a board change')
+})
+
+test('a read that finds a new generation or target reports a board change', async () => {
+  const requests = []
+  const changes = []
+  const sync = createBoardSync({
+    fetchBoard: () => queued(requests),
+    onBoard: () => {},
+    onError: () => {},
+    onLoading: () => {},
+    onChanged: (data) => changes.push(data)
+  })
+  sync.apply(boardA)
+  const newGeneration = { ...boardA, generation: 7 }
+  const first = sync.load({ quiet: true })
+  requests[0].resolve(newGeneration)
+  await first
+  const newTarget = { ...newGeneration, target: { label: 'sima@192.168.2.40' } }
+  const second = sync.load({ quiet: true })
+  requests[1].resolve(newTarget)
+  await second
+  assert.deepEqual(changes, [newGeneration, newTarget])
+})
+
+test('a quiet read clears an error a failed normal read left shown', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  const first = sync.load()
+  requests[0].resolve(boardA)
+  await first
+  const failed = sync.load()
+  requests[1].reject(new Error('network'))
+  await failed
+  assert.ok(state.error)
+  const poll = sync.load({ quiet: true })
+  requests[2].resolve({ ...boardA })
+  await poll
+  assert.equal(state.error, null)
+  assert.equal(state.loading, false)
+})
+
 function fakeControl(name, { disabled = false, connected = true } = {}) {
   return { name, disabled, isConnected: connected, focused: 0, focus() { this.focused += 1 } }
 }

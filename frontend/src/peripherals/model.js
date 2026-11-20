@@ -675,13 +675,32 @@ export function validateBoardForm(values) {
 // change the board and answer with the new state. Their answers can arrive out of order, so a
 // read only applies while nothing newer has been sent or applied; a superseded read resolves to
 // whatever state won instead of its own out-of-date answer.
-export function createBoardSync({ fetchBoard, onBoard, onError, onLoading }) {
+// A quiet read is for polling: it never raises the loading state or an error (the next tick
+// retries), and it only calls onBoard when the answer differs from what this tab already shows
+// or clears a shown error, so an unchanged board causes no re-render. A quiet read sent while a
+// normal read is still loading supersedes it, so it answers as a normal read: otherwise the
+// loading state would stay raised and that read's error would be lost. Any read that finds a
+// different board than the one this tab last had calls onChanged, so what follows the board
+// (the shell details) is reloaded whichever read noticed it first. A different board means a new
+// generation or target: the rest of the answer, such as status.checked_at, moves on every
+// connection check, which Stats and Peripherals run often, and must not reload the shell.
+export function createBoardSync({ fetchBoard, onBoard, onError, onLoading, onChanged }) {
   let latest = 0
   let newest = Promise.resolve(null)
+  let current = null
+  let currentBoard = null
+  let loading = false
+  let errorShown = false
 
-  function load() {
+  function setLoading(value) {
+    loading = value
+    onLoading(value)
+  }
+
+  function load({ quiet: requestedQuiet = false } = {}) {
     const seq = ++latest
-    onLoading(true)
+    const quiet = requestedQuiet && !loading
+    if (!quiet) setLoading(true)
     let request
     try {
       request = Promise.resolve(fetchBoard())
@@ -691,14 +710,24 @@ export function createBoardSync({ fetchBoard, onBoard, onError, onLoading }) {
     const promise = request.then(
       (data) => {
         if (seq !== latest) return newest
-        onBoard(data)
-        onLoading(false)
+        const json = JSON.stringify(data)
+        const board = boardIdentity(data)
+        const changed = currentBoard !== null && board !== currentBoard
+        const same = json === current
+        current = json
+        currentBoard = board
+        if (!quiet || !same || errorShown) onBoard(data)
+        errorShown = false
+        if (!quiet) setLoading(false)
+        if (changed) onChanged?.(data)
         return data
       },
       (err) => {
         if (seq !== latest) return newest
+        if (quiet) return null
         onError(err)
-        onLoading(false)
+        errorShown = true
+        setLoading(false)
         return null
       }
     )
@@ -709,12 +738,21 @@ export function createBoardSync({ fetchBoard, onBoard, onError, onLoading }) {
   function apply(data) {
     latest += 1
     newest = Promise.resolve(data)
+    current = JSON.stringify(data)
+    currentBoard = boardIdentity(data)
     onBoard(data)
-    onLoading(false)
+    errorShown = false
+    setLoading(false)
     return data
   }
 
   return { load, apply }
+}
+
+// Which board an /api/board answer points at: its generation and target, nothing that changes
+// while the same board stays selected.
+function boardIdentity(data) {
+  return JSON.stringify({ generation: data?.generation ?? null, target: data?.target ?? null })
 }
 
 // When a disclosure collapses, the control that had focus is removed, and focus would fall to the
