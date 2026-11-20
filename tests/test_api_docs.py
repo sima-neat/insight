@@ -150,6 +150,11 @@ class ApiDocumentationTests(unittest.TestCase):
             responses["504"]["$ref"], "#/components/responses/GatewayTimeout"
         )
 
+    def test_pull_documents_the_unavailable_post_probe_check(self):
+        responses = self.spec["paths"]["/api/mediasrc/pull"]["post"]["responses"]
+        self.assertIn("503", responses)
+        self.assertIn("No pull was configured", responses["503"]["description"])
+
     def test_board_change_and_preview_operations_document_propagated_errors(self):
         expected = {
             ("/api/board/select", "post"): {"400", "409", "502", "504"},

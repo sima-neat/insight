@@ -3936,7 +3936,11 @@ def pull_source():
     record = pull_sources.PullRecord(index=index, url=target.url, scheme=target.scheme, host=target.host, path=target.path,
                                      started_at=now, status=pull_sources.status_from_probe(result), error=result.error, probed_at=now,
                                      changing=True)
-    snapshot = _path_snapshot()
+    # The cached snapshot can predate the probe: ask MediaMTX afresh, so a publisher that
+    # connected during the probe is seen and gets the Take over prompt instead of being replaced.
+    snapshot = mediamtx_client.snapshot(fresh=True)
+    if snapshot is None:
+        return _json_error(f"Could not check whether src{index} is still free: the MediaMTX API did not answer. Try again.", 503)
     with _sources_lock:
         became_webcam = any(s.get("index") == index and s.get("type") == SOURCE_TYPE_WEBCAM for s in load_sources())
         moved_on = _slot_generation(index) != generation

@@ -185,6 +185,114 @@ class ClientTests(unittest.TestCase):
         client.snapshot()
         self.assertEqual(len(calls), first * 2)
 
+    def test_fresh_snapshot_skips_the_cache_and_refreshes_it(self):
+        # Issue #217: a check that needs current ownership cannot accept a cached answer.
+        calls, clock = [], FakeClock()
+        paths = [dict(PATHS[4])]  # src5, no publisher
+        client = mediamtx.MediamtxClient(request=_fake_request(paths=paths, sessions={}, calls=calls), clock=clock)
+        self.assertFalse(client.snapshot()["src5"].ready)
+        first = len(calls)
+        paths[0] = dict(PATHS[1], name="src5", confName="src5")  # a publisher arrives within the TTL
+        clock.now += 0.2
+        self.assertFalse(client.snapshot()["src5"].ready)  # the cached answer
+        self.assertEqual(len(calls), first)
+        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)
+        self.assertEqual(len(calls), first * 2)
+        self.assertTrue(client.snapshot()["src5"].ready)  # polls see the fresh answer too
+        self.assertEqual(len(calls), first * 2)
+
+    def test_fresh_snapshot_returns_its_own_answer_when_a_later_refresh_owns_the_cache(self):
+        # A poll that starts after the fresh check but reads the API before it sets a newer
+        # _snapshot_at. The fresh check must still return the publisher it saw, not that poll's
+        # older view, or a pull could replace a publisher that joined during the probe.
+        clock = FakeClock()
+        idle = [dict(PATHS[4])]  # src5, no publisher
+        published = [dict(PATHS[1], name="src5", confName="src5")]
+        base = _fake_request(paths=idle, sessions={})
+        polled = []
+        client = None
+
+        def request(method, url):
+            if url.split("?", 1)[0].endswith("/v3/paths/list") and not polled:
+                polled.append(True)
+                clock.now += 2.0  # the poll starts later, after the cache TTL ...
+                self.assertFalse(client.snapshot()["src5"].ready)  # ... and reads the API first
+                return 200, json.dumps({"items": published}).encode()
+            return base(method, url)
+
+        client = mediamtx.MediamtxClient(request=request, clock=clock)
+        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)
+        self.assertTrue(client.snapshot()["src5"].ready)  # polls get the later reading too
+
+    def test_fresh_snapshot_returns_its_own_reading_while_a_later_poll_updates_the_cache(self):
+        # The fresh check reads paths/list while src5 is free, then waits on a session list. A
+        # poll that starts meanwhile sees a publisher that just connected. The check only needs a
+        # reading that started after the probe ended, and its own is one, so it answers with that;
+        # the later reading still reaches the cache for polls.
+        clock = FakeClock()
+        current = {"paths": [dict(PATHS[4])]}  # src5, no publisher
+        polled = []
+        client = None
+
+        def request(method, url):
+            endpoint = url.split("/v3/", 1)[1].split("?", 1)[0]
+            if endpoint == "paths/list":
+                return 200, json.dumps({"items": current["paths"]}).encode()
+            if not polled:  # the fresh check's first session list
+                polled.append(True)
+                current["paths"] = [dict(PATHS[1], name="src5", confName="src5")]
+                clock.now += 2.0
+                self.assertTrue(client.snapshot()["src5"].ready)  # the later poll sees it
+            return 200, json.dumps({"items": []}).encode()
+
+        client = mediamtx.MediamtxClient(request=request, clock=clock)
+        self.assertFalse(client.snapshot(fresh=True)["src5"].ready)
+        self.assertTrue(client.snapshot()["src5"].ready)  # polls keep the later reading
+
+    def test_fresh_snapshot_answers_when_an_overlapping_poll_fails_to_finish(self):
+        # A poll that starts during the fresh check reads paths/list after it, then fails on a
+        # session list. The fresh check's own reading is complete and started after the probe,
+        # so it answers with it instead of no answer (which the pull would turn into a 503).
+        clock = FakeClock()
+        current = {"paths": [dict(PATHS[4])]}  # src5, no publisher
+        state = {"polled": False, "in_poll": False}
+        client = None
+
+        def request(method, url):
+            endpoint = url.split("/v3/", 1)[1].split("?", 1)[0]
+            if endpoint == "paths/list":
+                return 200, json.dumps({"items": current["paths"]}).encode()
+            if state["in_poll"]:
+                raise OSError("session list failed")
+            if not state["polled"]:  # the fresh check's first session list
+                state["polled"] = True
+                current["paths"] = [dict(PATHS[1], name="src5", confName="src5")]
+                clock.now += 2.0
+                state["in_poll"] = True
+                with self.assertLogs(level=logging.WARNING):
+                    self.assertIsNone(client.snapshot())  # the poll fails after paths/list
+                state["in_poll"] = False
+            return 200, json.dumps({"items": []}).encode()
+
+        client = mediamtx.MediamtxClient(request=request, clock=clock)
+        answer = client.snapshot(fresh=True)
+        self.assertIsNotNone(answer)
+        self.assertFalse(answer["src5"].ready)
+        clock.now += 2.0
+        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)  # the next check sees it
+
+    def test_fresh_snapshot_asks_during_the_backoff_and_never_returns_stale_data(self):
+        client, calls, clock, state = self._flaky_client()
+        self.assertIsNotNone(client.snapshot())
+        state["fail"] = True
+        clock.now += 1.5
+        self.assertIsNotNone(client.snapshot())  # one failed refresh keeps the last snapshot for polls
+        before = len(calls)
+        self.assertIsNone(client.snapshot(fresh=True))  # but it is not fresh evidence
+        self.assertGreater(len(calls), before)  # asked despite the backoff
+        state["fail"] = False
+        self.assertIsNotNone(client.snapshot(fresh=True))
+
     def test_snapshot_makes_one_call_per_session_kind(self):
         calls = []
         mediamtx.MediamtxClient(request=_fake_request(calls=calls), clock=FakeClock()).snapshot()

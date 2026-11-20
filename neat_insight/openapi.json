@@ -812,7 +812,8 @@
           "400": {"description": "Invalid index or URL, or the camera rejected the credentials (`reason: \"auth_failed\"`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"description": "The slot is streaming, held by an external publisher, a webcam source (clear it first), or already pulling.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "502": {"description": "mediamtx refused the path configuration or could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+          "502": {"description": "mediamtx refused the path configuration or could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "503": {"description": "The MediaMTX API did not answer the check, made after the probe, that the slot is still free. No pull was configured; try again.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
     },
