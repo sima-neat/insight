@@ -749,6 +749,51 @@ test('a normal read that finds a board changed elsewhere reports the change', as
   assert.deepEqual(changes, [boardB])
 })
 
+test('a read that only moves the status time re-renders but is not a board change', async () => {
+  const requests = []
+  const boards = []
+  const changes = []
+  const sync = createBoardSync({
+    fetchBoard: () => queued(requests),
+    onBoard: (data) => boards.push(data),
+    onError: () => {},
+    onLoading: () => {},
+    onChanged: (data) => changes.push(data)
+  })
+  const checkedEarlier = { ...boardA, status: { state: 'connected', checked_at: '2026-11-20T10:00:00Z' } }
+  const checkedLater = { ...boardA, status: { state: 'connected', checked_at: '2026-11-20T10:00:30Z' } }
+  const first = sync.load()
+  requests[0].resolve(checkedEarlier)
+  await first
+  const poll = sync.load({ quiet: true })
+  requests[1].resolve(checkedLater)
+  await poll
+  assert.deepEqual(boards, [checkedEarlier, checkedLater], 'the newer status still reaches the header')
+  assert.deepEqual(changes, [], 'the same generation and target is not a board change')
+})
+
+test('a read that finds a new generation or target reports a board change', async () => {
+  const requests = []
+  const changes = []
+  const sync = createBoardSync({
+    fetchBoard: () => queued(requests),
+    onBoard: () => {},
+    onError: () => {},
+    onLoading: () => {},
+    onChanged: (data) => changes.push(data)
+  })
+  sync.apply(boardA)
+  const newGeneration = { ...boardA, generation: 7 }
+  const first = sync.load({ quiet: true })
+  requests[0].resolve(newGeneration)
+  await first
+  const newTarget = { ...newGeneration, target: { label: 'sima@192.168.2.40' } }
+  const second = sync.load({ quiet: true })
+  requests[1].resolve(newTarget)
+  await second
+  assert.deepEqual(changes, [newGeneration, newTarget])
+})
+
 test('a quiet read clears an error a failed normal read left shown', async () => {
   const { sync, requests, state } = boardSyncHarness()
   const first = sync.load()
