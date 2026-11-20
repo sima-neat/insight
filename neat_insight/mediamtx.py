@@ -239,8 +239,6 @@ class MediamtxClient:
         self._lock = threading.Lock()
         self._snapshot: Optional[dict] = None
         self._snapshot_at: Optional[float] = None
-        # The latest paths/list reading, also from a refresh that failed after it.
-        self._paths_seen_at: Optional[float] = None
         self._unavailable_until = 0.0
         self._warned = False
         self._ever_succeeded = False
@@ -264,7 +262,9 @@ class MediamtxClient:
         """The paths and their publishers; cached for SNAPSHOT_TTL_SECONDS for polling.
 
         fresh=True is for a check that needs the current state: it always asks the API (also
-        during a backoff) and returns None when the API fails, never an older snapshot."""
+        during a backoff) and returns this call's own reading, or None when the API fails, never
+        an older snapshot. Its paths/list read starts after the call does, which is all a check
+        made after a probe needs, whatever other calls read meanwhile."""
         # The lock protects cache state only; the HTTP calls run unlocked so a slow/hung
         # API doesn't block other callers.
         now = self._clock()
@@ -280,9 +280,6 @@ class MediamtxClient:
                 paths = self._get_items("paths/list")
                 # Publishers come from paths/list: this is when this answer saw them.
                 observed = self._clock()
-                with self._lock:
-                    if generation == self._generation and (self._paths_seen_at is None or observed > self._paths_seen_at):
-                        self._paths_seen_at = observed
                 sessions = {endpoint: self._get_items(f"{endpoint}/list", missing_ok=True) for endpoint, _ in SESSION_KINDS.values()}
                 built = build_snapshot(paths, sessions)
             except Exception as exc:  # any unusable answer means "API unavailable", never a 500
@@ -296,17 +293,15 @@ class MediamtxClient:
                 self._failing_since = None
                 self._unavailable_until = 0.0
                 # Concurrent fetches can finish out of order. The snapshot whose paths were
-                # read last is the newest, whichever call started first, and every caller,
-                # a fresh check too, gets it: no later sighting of a publisher is dropped.
+                # read last is the newest, whichever call started first, and polls get it.
                 if self._snapshot_at is None or observed >= self._snapshot_at:
                     self._snapshot, self._snapshot_at = built, observed
                     self._update_rates(observed)
-                # A later paths/list reading that never became a snapshot (its session lists
-                # failed, or it is still running) may have seen a publisher this one lacks:
-                # a fresh check gets no answer then, and the caller asks again.
-                if fresh and self._paths_seen_at is not None and self._paths_seen_at > self._snapshot_at:
-                    return None
-                return self._snapshot
+                # A fresh check gets its own reading: it began after the check did, so a
+                # publisher that connected before then is in it. A reading by another call
+                # adds nothing the check needs, and waiting on one that failed or is still
+                # running would turn an overlapping page poll into a 503.
+                return built if fresh else self._snapshot
         return built
 
     def _fetch_failed(self, now: float, exc: Exception) -> Optional[dict]:
@@ -433,7 +428,6 @@ class MediamtxClient:
     def _invalidate(self) -> None:
         with self._lock:
             self._snapshot_at = None
-            self._paths_seen_at = None
             # Also drop a back-off from an earlier failed refresh: the next snapshot must
             # be fetched, never the cached one that still holds the kicked publisher.
             self._unavailable_until = 0.0

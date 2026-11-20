@@ -224,10 +224,11 @@ class ClientTests(unittest.TestCase):
         self.assertTrue(client.snapshot(fresh=True)["src5"].ready)
         self.assertTrue(client.snapshot()["src5"].ready)  # polls get the later reading too
 
-    def test_fresh_snapshot_keeps_a_publisher_that_a_later_poll_saw(self):
+    def test_fresh_snapshot_returns_its_own_reading_while_a_later_poll_updates_the_cache(self):
         # The fresh check reads paths/list while src5 is free, then waits on a session list. A
-        # poll that starts meanwhile sees a publisher that just connected. That later reading
-        # must win, or a pull could replace the publisher.
+        # poll that starts meanwhile sees a publisher that just connected. The check only needs a
+        # reading that started after the probe ended, and its own is one, so it answers with that;
+        # the later reading still reaches the cache for polls.
         clock = FakeClock()
         current = {"paths": [dict(PATHS[4])]}  # src5, no publisher
         polled = []
@@ -245,12 +246,13 @@ class ClientTests(unittest.TestCase):
             return 200, json.dumps({"items": []}).encode()
 
         client = mediamtx.MediamtxClient(request=request, clock=clock)
-        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)
+        self.assertFalse(client.snapshot(fresh=True)["src5"].ready)
+        self.assertTrue(client.snapshot()["src5"].ready)  # polls keep the later reading
 
-    def test_fresh_snapshot_gives_no_answer_when_a_later_reading_failed_to_finish(self):
-        # A poll that starts during the fresh check reads paths/list after it and sees a new
-        # publisher, then fails on a session list. Its reading never becomes a snapshot, so the
-        # fresh check's older "free" answer must not be returned as current.
+    def test_fresh_snapshot_answers_when_an_overlapping_poll_fails_to_finish(self):
+        # A poll that starts during the fresh check reads paths/list after it, then fails on a
+        # session list. The fresh check's own reading is complete and started after the probe,
+        # so it answers with it instead of no answer (which the pull would turn into a 503).
         clock = FakeClock()
         current = {"paths": [dict(PATHS[4])]}  # src5, no publisher
         state = {"polled": False, "in_poll": False}
@@ -273,9 +275,11 @@ class ClientTests(unittest.TestCase):
             return 200, json.dumps({"items": []}).encode()
 
         client = mediamtx.MediamtxClient(request=request, clock=clock)
-        self.assertIsNone(client.snapshot(fresh=True))  # unknown, so the pull asks again
+        answer = client.snapshot(fresh=True)
+        self.assertIsNotNone(answer)
+        self.assertFalse(answer["src5"].ready)
         clock.now += 2.0
-        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)  # a full reading sees it
+        self.assertTrue(client.snapshot(fresh=True)["src5"].ready)  # the next check sees it
 
     def test_fresh_snapshot_asks_during_the_backoff_and_never_returns_stale_data(self):
         client, calls, clock, state = self._flaky_client()
