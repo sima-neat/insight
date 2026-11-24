@@ -381,8 +381,8 @@ export class CamerasService {
       this.sessions.set(slot, session);
       built.registered = true;
       await peer.setRemoteDescription({ type: 'answer', sdp: withWebcamBitrate(answerSdp, kbps) });
-      if (superseded()) throw new StartSuperseded();
       await keepWebcamResolution(sender, kbps);
+      if (superseded()) throw new StartSuperseded();
       this.setStream(slot, stream);
 
       // The slot is live only once MediaMTX has the normalized stream, which lags the WHIP

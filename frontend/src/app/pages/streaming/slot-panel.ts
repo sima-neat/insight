@@ -362,7 +362,7 @@ export class SlotPanel {
       value: bitrate.id,
       label: bitrate.kbps
         ? bitrate.label
-        : `${bitrate.label}, ${(webcamBitrateKbps(bitrate.id, this.shownMode()) / 1000).toFixed(1)} Mbps`,
+        : `${bitrate.label}, ${formatBitrate(webcamBitrateKbps(bitrate.id, this.shownMode()) * 1000)}`,
     })),
   );
   protected readonly cameraKey = (camera: Camera): string => camera.deviceId;

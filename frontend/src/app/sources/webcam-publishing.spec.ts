@@ -14,9 +14,7 @@ import {
   type DeviceInfo,
   type WhipResponse,
 } from './webcam-publishing';
-
-/** Every capture mode: what a camera that reports no limits is offered. */
-const ALL_MODES = ['2160p30', '1440p30', '1080p30', '720p30', '480p30', 'camera'];
+import { ALL_MODE_IDS } from './cameras.testing';
 
 // The tests of `webcamPublishing.test.js` in sima-neat/insight#170, with their assertions
 // unchanged. A stop disconnects whatever publishes, so the exit stop names only the slot.
@@ -607,8 +605,8 @@ describe('webcam publishing', () => {
       { kind: 'videoinput', deviceId: 'rapoo', label: 'Rapoo Camera: Rapoo Camera' },
     ];
     expect(camerasFromDevices(devices)).toEqual([
-      { deviceId: 'hp', label: 'HP 5MP Camera: HP 5MP Camera', captureModeIds: ALL_MODES },
-      { deviceId: 'rapoo', label: 'Rapoo Camera: Rapoo Camera', captureModeIds: ALL_MODES },
+      { deviceId: 'hp', label: 'HP 5MP Camera: HP 5MP Camera', captureModeIds: ALL_MODE_IDS },
+      { deviceId: 'rapoo', label: 'Rapoo Camera: Rapoo Camera', captureModeIds: ALL_MODE_IDS },
     ]);
   });
 
@@ -619,8 +617,8 @@ describe('webcam publishing', () => {
       { kind: 'videoinput', deviceId: 'b', label: '' },
     ];
     expect(camerasFromDevices(devices)).toEqual([
-      { deviceId: 'a', label: 'Camera 1', captureModeIds: ALL_MODES },
-      { deviceId: 'b', label: 'Camera 2', captureModeIds: ALL_MODES },
+      { deviceId: 'a', label: 'Camera 1', captureModeIds: ALL_MODE_IDS },
+      { deviceId: 'b', label: 'Camera 2', captureModeIds: ALL_MODE_IDS },
     ]);
     expect(camerasFromDevices(undefined)).toEqual([]);
   });

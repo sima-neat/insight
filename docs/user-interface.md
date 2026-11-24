@@ -58,12 +58,12 @@ output frame rate, and its details with the URL to **Copy**. The **Source** is o
 - **File**: **Change…** picks a file from the library, **Clear** removes it.
 - **Camera**: a webcam on the computer running your browser. **Enable camera access**, then pick a
   camera in the list; the browser publishes it while the tab stays open. **Resolution** asks the
-  camera for 1920x1080 at 30 fps unless you choose another size, from 3840x2160 down to 640x480,
+  camera for 1920×1080 at 30 fps unless you choose another size, from 3840×2160 down to 640×480,
   or **Camera default**. The list shows the sizes within the largest the camera reports, where the
-  browser reports it (Chrome does), and a camera without the chosen mode sends its nearest. The
-  stream is always 30 fps, whatever the camera sends. **Bitrate** sets the highest rate the
-  browser sends the camera at: **Auto** scales with the size, 8.1 Mbps at 1920x1080, or 2 to
-  32 Mbps. Insight re-encodes the camera for the stream URL, so the stream's own bitrate differs.
+  browser reports it (Chrome does), and a camera without the chosen mode sends its nearest. Under load the browser keeps the size and
+  lowers the frame rate. The stream is always 30 fps, whatever the camera sends. **Bitrate** sets the highest rate the
+  browser sends the camera at: **Auto** scales with the size, 8.1 Mbit/s at 1920×1080, or 2 to
+  32 Mbit/s. Insight re-encodes the camera for the stream URL, so the stream's own bitrate differs.
   Like the camera, the choice lives in this tab and is forgotten on reload. Changing either on a
   live camera restarts it in the new mode.
 - **Stream URL**: an RTSP or RTSPS camera Insight pulls, with its username and password. Insight

@@ -46,8 +46,8 @@ import {
   isCompareExport,
   orderedIds,
   readCompareParams,
-  tableGroups,
   summarisesEveryRun,
+  tableGroups,
   tableStatus,
 } from '../../stats/compare';
 import { downloadCsv } from '../../stats/csv-download';

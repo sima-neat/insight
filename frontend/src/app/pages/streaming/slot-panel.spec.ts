@@ -761,28 +761,28 @@ describe('SlotPanel', () => {
       );
     }
 
-    it('offers a Resolution that is 1920x1080 at 30 fps and a Bitrate that is Auto, with its rate, until chosen', async () => {
+    it('offers a Resolution that is 1920×1080 at 30 fps and a Bitrate that is Auto, with its rate, until chosen', async () => {
       slots.slots.set([webcamSlot(3)]);
       cameras.cameras.set(CAMERAS);
       await open(3);
 
-      expect(shown('Resolution')).toContain('1920x1080 at 30 fps');
-      expect(shown('Bitrate')).toContain('Auto, 8.1 Mbps');
+      expect(shown('Resolution')).toContain('1920×1080 at 30 fps');
+      expect(shown('Bitrate')).toContain('Auto, 8.1 Mbit/s');
       expect(await offered('Resolution')).toEqual([
-        '3840x2160 at 30 fps',
-        '2560x1440 at 30 fps',
-        '1920x1080 at 30 fps',
-        '1280x720 at 30 fps',
-        '640x480 at 30 fps',
+        '3840×2160 at 30 fps',
+        '2560×1440 at 30 fps',
+        '1920×1080 at 30 fps',
+        '1280×720 at 30 fps',
+        '640×480 at 30 fps',
         'Camera default',
       ]);
       expect(await offered('Bitrate')).toEqual([
-        'Auto, 8.1 Mbps',
-        '2 Mbps',
-        '4 Mbps',
-        '8 Mbps',
-        '16 Mbps',
-        '32 Mbps',
+        'Auto, 8.1 Mbit/s',
+        '2 Mbit/s',
+        '4 Mbit/s',
+        '8 Mbit/s',
+        '16 Mbit/s',
+        '32 Mbit/s',
       ]);
     });
 
@@ -798,13 +798,13 @@ describe('SlotPanel', () => {
       await open(3);
 
       expect(await offered('Resolution')).toEqual([
-        '1280x720 at 30 fps',
-        '640x480 at 30 fps',
+        '1280×720 at 30 fps',
+        '640×480 at 30 fps',
         'Camera default',
       ]);
-      expect(shown('Resolution')).toContain('1280x720 at 30 fps');
+      expect(shown('Resolution')).toContain('1280×720 at 30 fps');
       // Auto follows the mode shown.
-      expect(shown('Bitrate')).toContain('Auto, 3.6 Mbps');
+      expect(shown('Bitrate')).toContain('Auto, 3.6 Mbit/s');
     });
 
     it('sets the choice for a stopped slot, to apply when it starts', async () => {
@@ -813,8 +813,8 @@ describe('SlotPanel', () => {
       cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
       await open(3);
 
-      await pick('Resolution', '1280x720 at 30 fps');
-      await pick('Bitrate', '4 Mbps');
+      await pick('Resolution', '1280×720 at 30 fps');
+      await pick('Bitrate', '4 Mbit/s');
 
       expect(cameras.setCapture).toHaveBeenNthCalledWith(1, 3, { mode: '720p30', bitrate: 'auto' });
       expect(cameras.setCapture).toHaveBeenNthCalledWith(2, 3, {
@@ -823,7 +823,7 @@ describe('SlotPanel', () => {
       });
       expect(cameras.assign).not.toHaveBeenCalled();
       expect(cameras.publish).not.toHaveBeenCalled();
-      expect(shown('Resolution')).toContain('1280x720 at 30 fps');
+      expect(shown('Resolution')).toContain('1280×720 at 30 fps');
     });
 
     it('keeps a live webcam live in the new mode: the publish ends, the camera is assigned again and published', async () => {
@@ -832,7 +832,7 @@ describe('SlotPanel', () => {
       cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
       await open(3);
 
-      await pick('Resolution', '640x480 at 30 fps');
+      await pick('Resolution', '640×480 at 30 fps');
 
       expect(cameras.setCapture).toHaveBeenCalledExactlyOnceWith(3, {
         mode: '480p30',
@@ -852,7 +852,7 @@ describe('SlotPanel', () => {
       cameras.assign.mockRejectedValueOnce(new Error('src3 is in use by an external publisher.'));
       await open(3);
 
-      await pick('Bitrate', '2 Mbps');
+      await pick('Bitrate', '2 Mbit/s');
 
       expect(toasts.error).toHaveBeenCalledWith('src3 is in use by an external publisher.');
     });

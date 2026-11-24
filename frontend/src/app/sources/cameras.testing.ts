@@ -1,6 +1,9 @@
 import type { CameraMedia, PublishPeer } from './camera-media';
 import type { DeviceInfo } from './webcam-publishing';
 
+/** Every capture mode's id: what a camera that reports no limits is offered. */
+export const ALL_MODE_IDS = ['2160p30', '1440p30', '1080p30', '720p30', '480p30', 'camera'];
+
 /** A camera stream whose tracks record that they were stopped. */
 export class FakeCameraStream {
   readonly tracks = [
@@ -33,6 +36,8 @@ export class FakePeer {
   closed = false;
   /** Set to make `setRemoteDescription` wait for the test. */
   remoteGate: Promise<void> | null = null;
+  /** Set to make the sender's `setParameters` wait for the test. */
+  parametersGate: Promise<void> | null = null;
   /** The codecs the transceiver was pinned to; null while it was left to negotiate. */
   pinnedCodecs: { mimeType: string }[] | null = null;
   private readonly listeners: (() => void)[] = [];
@@ -41,6 +46,7 @@ export class FakePeer {
   private readonly sender = {
     getParameters: () => ({ encodings: [{}] }) as RTCRtpSendParameters,
     setParameters: async (parameters: RTCRtpSendParameters) => {
+      if (this.parametersGate) await this.parametersGate;
       this.appliedParameters = parameters;
     },
   };
@@ -104,6 +110,8 @@ export class FakeCameraMedia implements CameraMedia {
   openFailure: unknown = null;
   /** Set to make the next peer's `setRemoteDescription` wait for the test. */
   remoteGate: Promise<void> | null = null;
+  /** Set to make the next peer's sender `setParameters` wait for the test. */
+  parametersGate: Promise<void> | null = null;
   /** Set to make the next `getUserMedia` wait for the test (resolve it to hand out the stream). */
   gate: Promise<void> | null = null;
   private deviceChangeListener: (() => void) | null = null;
@@ -142,6 +150,8 @@ export class FakeCameraMedia implements CameraMedia {
     const peer = new FakePeer();
     peer.remoteGate = this.remoteGate;
     this.remoteGate = null;
+    peer.parametersGate = this.parametersGate;
+    this.parametersGate = null;
     this.peers.push(peer);
     return peer as unknown as PublishPeer;
   }

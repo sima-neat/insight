@@ -8,12 +8,10 @@ import {
   webcamCaptureConstraints,
   withWebcamBitrate,
 } from './webcam-capture';
+import { ALL_MODE_IDS } from './cameras.testing';
 
 // The tests of `webcamPublishing.test.js` in sima-neat/insight#248, over the modes this port
 // offers: Insight's normalizer publishes every webcam at 30 fps, so no mode asks for more.
-
-/** Every mode, largest first: what a camera that reports no limits is offered. */
-const ALL_MODES = ['2160p30', '1440p30', '1080p30', '720p30', '480p30', 'camera'];
 
 const limits = (width: number, height: number, frameRate: number) => ({
   width: { min: 1, max: width },
@@ -23,15 +21,15 @@ const limits = (width: number, height: number, frameRate: number) => ({
 
 describe('the capture modes', () => {
   it('are listed largest first, every one at 30 fps, with the camera default last', () => {
-    expect(CAPTURE_MODES.map((mode) => mode.id)).toEqual(ALL_MODES);
-    expect(CAPTURE_MODES.find((mode) => mode.id === '1080p30')?.label).toBe('1920x1080 at 30 fps');
+    expect(CAPTURE_MODES.map((mode) => mode.id)).toEqual(ALL_MODE_IDS);
+    expect(CAPTURE_MODES.find((mode) => mode.id === '1080p30')?.label).toBe('1920×1080 at 30 fps');
     expect(CAPTURE_MODES.filter((mode) => mode.frameRate).every((m) => m.frameRate === 30)).toBe(
       true,
     );
   });
 
   it('a camera is offered only the modes within its largest reported size and rate', () => {
-    expect(captureModeIdsWithin(limits(3840, 2160, 60))).toEqual(ALL_MODES);
+    expect(captureModeIdsWithin(limits(3840, 2160, 60))).toEqual(ALL_MODE_IDS);
     expect(captureModeIdsWithin(limits(1920, 1080, 30))).toEqual([
       '1080p30',
       '720p30',
@@ -52,8 +50,8 @@ describe('the capture modes', () => {
   });
 
   it('are all offered when the browser reports no limits (Firefox, Safari, Chrome before permission)', () => {
-    expect(captureModeIdsWithin(undefined)).toEqual(ALL_MODES);
-    expect(captureModeIdsWithin({})).toEqual(ALL_MODES);
+    expect(captureModeIdsWithin(undefined)).toEqual(ALL_MODE_IDS);
+    expect(captureModeIdsWithin({})).toEqual(ALL_MODE_IDS);
   });
 
   it('are offered as the modes of the ids a camera reaches, all of them for a camera with none given', () => {
@@ -61,7 +59,7 @@ describe('the capture modes', () => {
       '720p30',
       'camera',
     ]);
-    expect(offeredCaptureModes(undefined).map((mode) => mode.id)).toEqual(ALL_MODES);
+    expect(offeredCaptureModes(undefined).map((mode) => mode.id)).toEqual(ALL_MODE_IDS);
   });
 
   it('show the chosen mode when the camera reaches it, else the largest it does', () => {

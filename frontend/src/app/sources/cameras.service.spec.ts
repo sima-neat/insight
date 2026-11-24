@@ -4,7 +4,7 @@ import { NeatToasts } from '@sima/neat-ui/toast';
 import type { Slot } from '../api.generated';
 import { CAMERA_MEDIA } from './camera-media';
 import { CamerasService } from './cameras.service';
-import { FakeCameraMedia, FakeCameraStream, FakePeer } from './cameras.testing';
+import { ALL_MODE_IDS, FakeCameraMedia, FakeCameraStream, FakePeer } from './cameras.testing';
 import { SlotsService } from './slots.service';
 import { fileSlot, webcamSlot } from './slots.testing';
 import { ApiRequestError } from './api-errors';
@@ -18,9 +18,6 @@ const HD = {
   label: 'HD camera',
   getCapabilities: () => ({ width: { max: 1280 }, height: { max: 720 }, frameRate: { max: 30 } }),
 };
-
-/** The modes a camera that reports no limits is offered. */
-const ALL_MODES = ['2160p30', '1440p30', '1080p30', '720p30', '480p30', 'camera'];
 
 /** Where `webcamSlot` says a browser publishes slot `n`. */
 const whipUrl = (n: number) => `https://10.0.0.2:8889/cam${n}/whip`;
@@ -156,7 +153,7 @@ describe('CamerasService', () => {
       const service = await create();
 
       expect(service.cameras()).toEqual([
-        { deviceId: 'a', label: 'Camera 1', captureModeIds: ALL_MODES },
+        { deviceId: 'a', label: 'Camera 1', captureModeIds: ALL_MODE_IDS },
       ]);
       expect(service.state()).toBe('unknown');
       expect(media.opened).toEqual([]);
@@ -182,8 +179,8 @@ describe('CamerasService', () => {
       expect(service.state()).toBe('granted');
       expect(service.error()).toBe(null);
       expect(service.cameras()).toEqual([
-        { deviceId: 'cam-desk', label: 'Desk camera', captureModeIds: ALL_MODES },
-        { deviceId: 'cam-laptop', label: 'Laptop camera', captureModeIds: ALL_MODES },
+        { deviceId: 'cam-desk', label: 'Desk camera', captureModeIds: ALL_MODE_IDS },
+        { deviceId: 'cam-laptop', label: 'Laptop camera', captureModeIds: ALL_MODE_IDS },
       ]);
     });
 
@@ -278,7 +275,7 @@ describe('CamerasService', () => {
       expect(service.assignments().get(2)).toEqual({
         deviceId: 'cam-laptop',
         label: 'Laptop camera',
-        captureModeIds: ALL_MODES,
+        captureModeIds: ALL_MODE_IDS,
       });
     });
 
@@ -770,6 +767,22 @@ describe('CamerasService', () => {
 
       expect(peerOf().remoteDescription?.sdp).toContain('x-google-start-bitrate=16000');
       expect(peerOf().appliedParameters?.encodings).toEqual([{ maxBitrate: 16000000 }]);
+    });
+
+    it('a start whose slot is released while the sender is tuned leaves no preview stream behind', async () => {
+      const gate = deferred();
+      media.parametersGate = gate.promise;
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      const publishing = service.publish(1);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const releasing = service.release(1);
+      gate.resolve();
+      await Promise.all([publishing, releasing]);
+
+      expect(service.localStreams().get(1)).toBeUndefined();
+      expect(streamOf().stopped).toBe(true);
     });
 
     it("is forgotten with the slot's camera when a bulk action rewrites the slots, and when a file takes the slot", async () => {

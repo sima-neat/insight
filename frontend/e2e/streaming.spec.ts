@@ -307,6 +307,9 @@ test('the side panel of each kind of slot fits its column at 1366×768, 1920×10
     for (const name of ['src1', 'src2', 'src3', 'src4', 'src5']) {
       await row(page, name).click();
       await expect(panel(page).getByRole('heading', { level: 2 })).toHaveText(name);
+      if (name === 'src3') {
+        await expect(panel(page).getByRole('combobox', { name: 'Resolution' })).toBeVisible();
+      }
       await expect.poll(panelOverflow).toBe(0);
       await expect
         .poll(() => pageOverflow(page))

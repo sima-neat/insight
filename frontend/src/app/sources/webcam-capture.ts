@@ -24,7 +24,7 @@ export interface CaptureMode {
 
 const mode = (width: number, height: number, frameRate: number): CaptureMode => ({
   id: `${height}p${frameRate}`,
-  label: `${width}x${height} at ${frameRate} fps`,
+  label: `${width}×${height} at ${frameRate} fps`,
   width,
   height,
   frameRate,
@@ -118,7 +118,7 @@ export const WEBCAM_BITRATES: readonly WebcamBitrate[] = [
   { id: 'auto', label: 'Auto' },
   ...[2, 4, 8, 16, 32].map((mbps) => ({
     id: `${mbps}mbps`,
-    label: `${mbps} Mbps`,
+    label: `${mbps} Mbit/s`,
     kbps: mbps * 1000,
   })),
 ];

@@ -111,8 +111,7 @@ export function describeWebcamError(error: unknown): string {
  * deviceId, and Chrome on Linux reports one id for every sensor of a multi-sensor USB camera
  * (e.g. "HP 5MP Camera" and "HP IR Camera"): whichever entry is picked, the same device opens. So
  * each id is listed once, under the first name it was reported with, with the modes its limits
- * reach. Entries without an id (no
- * permission yet) are skipped.
+ * reach. Entries without an id (no permission yet) are skipped.
  */
 export function camerasFromDevices(devices: readonly DeviceInfo[] | null | undefined): Camera[] {
   const cameras: Camera[] = [];
