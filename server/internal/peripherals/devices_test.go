@@ -217,6 +217,7 @@ func checkedUSBCamera(t *testing.T) map[string]any {
 	t.Helper()
 	webcam := fixtureDevice(t, devkitFixture(t), 1)
 	webcam["identity"].(map[string]any)["driver"] = "uvcvideo"
+	webcam["identity"].(map[string]any)["camera_name"] = "usb-046d:08e5-0"
 	for _, m := range webcam["modes"].([]any) {
 		m := m.(map[string]any)
 		if m["format"] == "MJPG" {
@@ -232,6 +233,8 @@ func TestAUSBCameraSentinelChecksIsAvailableInMJPG(t *testing.T) {
 	c := camera(t, scanned(t, withDevices(devkitFixture(t), checkedUSBCamera(t))).items()[0])
 	equal(t, "the camera's support", c.Support, Support{Tier: "available"})
 	equal(t, "MJPG", formatNamed(t, c, "MJPG").Support, Support{Tier: "available"})
+	// The name Neat's USB camera input opens it by, the way a MIPI camera's is its libcamera name.
+	equal(t, "the camera's name", c.Device.CameraName, "usb-046d:08e5-0")
 	equal(t, "YUYV", formatNamed(t, c, "YUYV").Support, Support{"unsupported", "Neat's USB camera input reads MJPEG only."})
 	if c.DefaultSelection == nil || c.DefaultSelection.Format != "MJPG" {
 		t.Errorf("the preselected mode: %+v", c.DefaultSelection)

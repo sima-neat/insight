@@ -97,7 +97,9 @@ type UsbFacts struct {
 }
 
 // CameraDevice is how a camera's device is reached: a MIPI camera's libcamera facts, a USB
-// camera's V4L2 nodes and USB facts.
+// camera's V4L2 nodes and USB facts. CameraName is the ID a Neat application opens the camera by:
+// a MIPI camera's libcamera name (CameraInput), the name a Sentinel that checks USB cameras gives
+// a USB camera (UsbCameraInput).
 type CameraDevice struct {
 	CameraName  string    `json:"camera_name,omitempty"`
 	MediaDevice string    `json:"media_device,omitempty"`
@@ -252,7 +254,7 @@ func cameraItem(d device, stale bool) CameraItem {
 		item.Model = &d.Model
 	}
 	if item.Connection == "usb" {
-		item.Device = CameraDevice{VideoNode: d.DevicePath, ByID: d.ByIDPath, USB: &UsbFacts{
+		item.Device = CameraDevice{CameraName: d.Identity.CameraName, VideoNode: d.DevicePath, ByID: d.ByIDPath, USB: &UsbFacts{
 			VendorID: d.Identity.VendorID, ProductID: d.Identity.ProductID, Manufacturer: d.Identity.Manufacturer,
 			Serial: d.Identity.Serial, Product: d.Model, BusPath: d.Identity.Topology, SpeedMbps: float64(d.Identity.Speed),
 		}}

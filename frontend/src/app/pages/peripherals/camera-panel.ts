@@ -43,6 +43,7 @@ import {
 } from '../../peripherals/preview-state';
 import { formatElapsed } from '../../duration';
 import { PreviewFrame, type PreviewStream } from '../../sources/preview-frame';
+import { CameraId } from './camera-id';
 import { DeviceDetails } from './device-details';
 import { DeviceErrors } from './device-errors';
 
@@ -79,6 +80,7 @@ let nextId = 0;
   imports: [
     Announcement,
     BoardSettingsAction,
+    CameraId,
     DeviceDetails,
     DeviceErrors,
     NeatAsideActions,

@@ -2331,7 +2331,10 @@ components:
       properties:
         camera_name:
           type: string
-          description: libcamera's name for the camera; the stable way to name a MIPI camera.
+          description: >-
+            The ID a Neat application opens the camera by: libcamera's name for a MIPI camera
+            (`CameraInput`), and for a USB camera the name Sentinel gives it (`UsbCameraInput`),
+            which only a Sentinel that checks USB cameras reports.
         media_device:
           type: string
         bus_info:

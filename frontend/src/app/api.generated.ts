@@ -1673,7 +1673,7 @@ export interface components {
         };
         /** @description How the camera's device is reached: a MIPI camera's libcamera facts, a USB camera's V4L2 nodes and USB facts. A fact the board does not report is absent. */
         readonly CameraDevice: {
-            /** @description libcamera's name for the camera; the stable way to name a MIPI camera. */
+            /** @description The ID a Neat application opens the camera by: libcamera's name for a MIPI camera (`CameraInput`), and for a USB camera the name Sentinel gives it (`UsbCameraInput`), which only a Sentinel that checks USB cameras reports. */
             readonly camera_name?: string;
             readonly media_device?: string;
             readonly bus_info?: string;

@@ -107,7 +107,8 @@ never opens a device, so your apps keep them.
   in MJPEG on the `uvcvideo` driver, which Neat's USB camera input reads; a Sentinel too old to
   check USB cameras leaves every USB mode Unsupported and says to update it. **Start preview** shows what the camera sees, at a low frame
   rate. While it runs, the preview holds the camera, and your app cannot open it; leaving the page
-  stops it.
+  stops it. **Camera ID**, under the camera's name, shows the ID a Neat application opens the
+  camera by (`CameraInput` for MIPI, `UsbCameraInput` for USB) with a **Copy** button.
 - **A microphone** shows what it captures. **Test microphone** records with a level meter, then
   plays the recording back.
 
