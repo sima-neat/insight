@@ -123,3 +123,62 @@ func TestAGroupThatDidNotStartIsNone(t *testing.T) {
 		t.Fatal("a missing program started")
 	}
 }
+
+// Where the wait without reaping fails, the child is reaped and its group left alone: a kill
+// after the reap could reach another process's group.
+func TestAFailedWaitWithoutReapingKillsNothing(t *testing.T) {
+	if !canWaitUnreaped {
+		t.Skip("only Linux waits without reaping")
+	}
+	real := waitExited
+	waitExited = func(int) bool { return false }
+	t.Cleanup(func() { waitExited = real })
+	g, r := startRecorded(t, exec.Command("true"))
+	if err := g.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if calls := r.recorded(); len(calls) != 0 {
+		t.Fatalf("signals after the reap: %+v", calls)
+	}
+}
+
+// Signals sent while Wait runs reach the group only while its child is there (running, or a
+// zombie); none lands after the reap. Run with -race.
+func TestSignalRacingWaitNeverFollowsTheReap(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the process states come from /proc")
+	}
+	cmd := exec.Command("cat")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, r := startRecorded(t, cmd)
+	done := make(chan struct{})
+	var signaling sync.WaitGroup
+	for range 4 {
+		signaling.Add(1)
+		go func() {
+			defer signaling.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					_ = g.Signal(syscall.SIGTERM)
+				}
+			}
+		}()
+	}
+	stdin.Close()
+	if err := g.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	close(done)
+	signaling.Wait()
+	for _, c := range r.recorded() {
+		if c.state == 0 {
+			t.Fatalf("a %v reached pid %d after its child was reaped", c.sig, c.pid)
+		}
+	}
+}

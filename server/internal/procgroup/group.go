@@ -42,11 +42,12 @@ func (g *Group) Signal(sig syscall.Signal) error {
 
 // Wait waits for the child to exit, kills what is left of its group (what the child started),
 // then reaps the child and returns what exec.Cmd's Wait does. The kill comes while the child is
-// a zombie, whose pid no other process can take. Where the system cannot wait without reaping
-// (waitExited), the kill comes after, as close to the reap as it can. Call Wait once.
+// a zombie, whose pid no other process can take. Should that wait fail, the child is reaped and
+// its group left alone. Where the system cannot wait without reaping at all
+// (canWaitUnreaped), the kill comes right after the reap. Call Wait once.
 func (g *Group) Wait() error {
 	pid := g.cmd.Process.Pid
-	if waitExited(pid) {
+	if canWaitUnreaped && waitExited(pid) {
 		g.mu.Lock()
 		_ = g.send(pid, syscall.SIGKILL)
 		g.reaped = true
@@ -55,7 +56,9 @@ func (g *Group) Wait() error {
 	}
 	err := g.cmd.Wait()
 	g.mu.Lock()
-	_ = g.send(pid, syscall.SIGKILL)
+	if !canWaitUnreaped {
+		_ = g.send(pid, syscall.SIGKILL)
+	}
 	g.reaped = true
 	g.mu.Unlock()
 	return err
