@@ -28,6 +28,30 @@ type CameraProber func(ctx context.Context, url string) error
 // maxRTSPResponse bounds what DescribeCamera reads of one answer: its head and its body.
 const maxRTSPResponse = 64 << 10
 
+var (
+	errAnswerTooLarge = errors.New("the answer is too large")
+	errNotRTSP        = errors.New("not an RTSP answer")
+)
+
+// cappedReader reads at most left bytes, then fails with errAnswerTooLarge rather than end, so
+// that an answer cut by the cap is not taken for a closed connection.
+type cappedReader struct {
+	r    io.Reader
+	left int64
+}
+
+func (c *cappedReader) Read(p []byte) (int, error) {
+	if c.left <= 0 {
+		return 0, errAnswerTooLarge
+	}
+	if int64(len(p)) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.r.Read(p)
+	c.left -= int64(n)
+	return n, err
+}
+
 // DescribeCamera is the CameraProber Insight uses: an RTSP DESCRIBE, and a second one answering
 // the camera's challenge (MD5 Digest, else Basic), from this process, so the credentials reach
 // no command line (a process's arguments are any local user's to read). It asks for nothing
@@ -43,6 +67,9 @@ func DescribeCamera(ctx context.Context, rawURL string) error {
 	user := target.User.Username()
 	password, _ := target.User.Password()
 	target.User = nil
+	if target.Path == "" {
+		target.Path = "/" // as a camera expects the root asked for
+	}
 	uri := target.String()
 
 	port := target.Port()
@@ -72,7 +99,7 @@ func DescribeCamera(ctx context.Context, rawURL string) error {
 		conn = secure
 	}
 
-	reader := textproto.NewReader(bufio.NewReader(io.LimitReader(conn, 2*maxRTSPResponse)))
+	reader := textproto.NewReader(bufio.NewReader(&cappedReader{r: conn, left: 2 * maxRTSPResponse}))
 	status, reason, header, err := describe(conn, reader, uri, 1, "")
 	if err == nil && status == 401 && len(header.Values("WWW-Authenticate")) > 0 {
 		if user == "" {
@@ -90,6 +117,10 @@ func DescribeCamera(ctx context.Context, rawURL string) error {
 			return &ProbeError{Detail: fmt.Sprintf("Timed out after %s", streamProbeTimeout)}
 		}
 		return ctx.Err()
+	case errors.Is(err, errAnswerTooLarge):
+		return &ProbeError{Detail: "The camera's answer is too large"}
+	case errors.Is(err, errNotRTSP):
+		return &ProbeError{Detail: "The camera's answer is not RTSP"}
 	case err != nil:
 		return &ProbeError{Detail: "The camera closed the connection"}
 	case status >= 200 && status < 300:
@@ -135,7 +166,7 @@ func describe(conn net.Conn, reader *textproto.Reader, uri string, cseq int, aut
 	code, reason, _ := strings.Cut(rest, " ")
 	status, err := strconv.Atoi(code)
 	if !strings.HasPrefix(version, "RTSP/") || err != nil {
-		return 0, "", nil, errors.New("not an RTSP answer")
+		return 0, "", nil, errNotRTSP
 	}
 	header, err := reader.ReadMIMEHeader()
 	if err != nil {
@@ -143,7 +174,7 @@ func describe(conn net.Conn, reader *textproto.Reader, uri string, cseq int, aut
 	}
 	if length, err := strconv.Atoi(header.Get("Content-Length")); err == nil && length > 0 {
 		if length > maxRTSPResponse {
-			return 0, "", nil, errors.New("the answer is too large")
+			return 0, "", nil, errAnswerTooLarge
 		}
 		if _, err := io.CopyN(io.Discard, reader.R, int64(length)); err != nil {
 			return 0, "", nil, err

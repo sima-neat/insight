@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // camera is an RTSP server in the test that answers DESCRIBE: open, or behind Digest or Basic
@@ -228,5 +229,102 @@ func TestFFprobeNeverTakesCredentials(t *testing.T) {
 	}
 	if _, err := os.Stat(ran); err == nil {
 		t.Fatal("ffprobe ran with the credentials on its command line")
+	}
+}
+
+// rawCamera answers each connection with answer, whatever was asked.
+func rawCamera(t *testing.T, answer func(net.Conn)) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				answer(conn)
+			}()
+		}
+	}()
+	return listener.Addr().String()
+}
+
+// readRequest reads one request's head off conn.
+func readRequest(conn net.Conn) (string, error) {
+	reader := textproto.NewReader(bufio.NewReader(conn))
+	line, err := reader.ReadLine()
+	if err == nil {
+		_, err = reader.ReadMIMEHeader()
+	}
+	return line, err
+}
+
+func TestDescribeCameraOfMalformedAnswers(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		answer func(net.Conn)
+		want   string // the start of the detail
+	}{
+		{"an endless header", func(conn net.Conn) {
+			_, _ = readRequest(conn)
+			fmt.Fprint(conn, "RTSP/1.0 200 OK\r\nCSeq: 1\r\n")
+			for {
+				if _, err := fmt.Fprint(conn, "X-Filler: "+strings.Repeat("x", 1000)+"\r\n"); err != nil {
+					return
+				}
+			}
+		}, "The camera's answer is too large"},
+		{"a huge body", func(conn net.Conn) {
+			_, _ = readRequest(conn)
+			fmt.Fprint(conn, "RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Length: 999999999999\r\n\r\n")
+		}, "The camera's answer is too large"},
+		{"not RTSP", func(conn net.Conn) {
+			_, _ = readRequest(conn)
+			fmt.Fprint(conn, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+		}, "The camera's answer is not RTSP"},
+		{"garbage", func(conn net.Conn) {
+			_, _ = readRequest(conn)
+			fmt.Fprint(conn, "\x00\x01\x02 nonsense\r\n\r\n")
+		}, "The camera's answer is not RTSP"},
+		{"silent", func(conn net.Conn) {
+			_, _ = readRequest(conn)
+			time.Sleep(time.Second)
+		}, "Timed out"},
+		{"a challenge, then gone", func(conn net.Conn) {
+			_, _ = readRequest(conn)
+			fmt.Fprint(conn, "RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\nWWW-Authenticate: Basic realm=\"cam\"\r\n\r\n")
+		}, "The camera closed the connection"},
+		{"closed at once", func(net.Conn) {}, "The camera closed the connection"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			address := rawCamera(t, test.answer)
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			err := DescribeCamera(ctx, "rtsp://admin:s3cret@"+address+"/live")
+			if probe := probeErrorOf(t, err); probe.Auth || !strings.HasPrefix(probe.Detail, test.want) {
+				t.Fatalf("%+v, want %q", probe, test.want)
+			}
+		})
+	}
+}
+
+func TestDescribeCameraAsksForSlashWithoutAPath(t *testing.T) {
+	lines := make(chan string, 1)
+	address := rawCamera(t, func(conn net.Conn) {
+		line, _ := readRequest(conn)
+		lines <- line
+		fmt.Fprint(conn, "RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n")
+	})
+	if err := DescribeCamera(context.Background(), "rtsp://"+address); err != nil {
+		t.Fatal(err)
+	}
+	if line := <-lines; line != "DESCRIBE rtsp://"+address+"/ RTSP/1.0" {
+		t.Fatalf("asked %q", line)
 	}
 }
