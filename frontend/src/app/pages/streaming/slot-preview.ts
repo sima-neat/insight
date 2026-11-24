@@ -20,8 +20,9 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { NeatButton, NeatLiveDot } from '@sima/neat-ui';
+import { NeatButton } from '@sima/neat-ui';
 import { NeatProgress } from '@sima/neat-ui/progress';
+import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import {
   catchError,
   filter,
@@ -35,7 +36,7 @@ import {
 } from 'rxjs';
 import type { Slot } from '../../api.generated';
 import { EndsStream, filePreview, PreviewFrame } from '../../sources/preview-frame';
-import { isLive, previewSrc } from '../../sources/slot-row';
+import { isLive, LIVE, previewSrc, type SlotStateView } from '../../sources/slot-row';
 
 /** How often the live image is checked for its first frame. */
 const FRAME_CHECK_MS = 100;
@@ -114,16 +115,16 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
  * previews, is asked for again by itself a few times before it is reported (`PREVIEW_RETRIES`),
  * while "Connecting…" stays up.
  *
- * A badge in the frame's top left says what the picture is: "Live" whenever the slot is live,
- * whatever its source and however its preview is doing
- * (connecting, retrying or failed: the slot is live, and the message says the rest), and otherwise
+ * A badge in the frame's top left, a status chip, says what the picture is: "Live" whenever the
+ * slot is live, whatever its source and however its preview is doing (connecting, retrying or
+ * failed: the slot is live, and the message says the rest), and otherwise
  * what is shown instead: "File preview", "Camera preview", or "Not live" for a pull that waits or
  * fails. A frame that shows nothing else has none. The badge text is the frame's accessible
  * description, and the badge is hidden from readers so that its text is not read twice.
  */
 @Component({
   selector: 'app-slot-preview',
-  imports: [EndsStream, NeatButton, NeatLiveDot, NeatProgress, PreviewFrame],
+  imports: [EndsStream, NeatButton, NeatProgress, NeatStatusChip, PreviewFrame],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './slot-preview.html',
   styleUrl: './slot-preview.css',
@@ -224,25 +225,17 @@ export class SlotPreview {
   /**
    * What the picture is, from the slot and not from the preview: `isLive` is the one rule for
    * "Live" (a stream that is connecting or failing is the slot's problem to show, not a reason
-   * to stop calling the slot live), so the badge can never claim it for a slot that is not.
+   * to stop calling the slot live), so the badge can never claim it for a slot that is not. Live
+   * is the slot's state as its chip in the panel's title says it; anything else is neutral.
    */
-  protected readonly badge = computed(
-    (): { readonly label: string; readonly live: boolean } | null => {
-      const slot = this.slot();
-      if (isLive(slot)) return { label: 'Live', live: true };
-      if (this.file()) return { label: 'File preview', live: false };
-      if (this.camera()) return { label: 'Camera preview', live: false };
-      if (slot.kind === 'pull') return { label: 'Not live', live: false };
-      return null;
-    },
-  );
-  /** Whether the frame shows a picture behind the badge, which then reads on a dark pill. */
-  protected readonly onPicture = computed(
-    () =>
-      this.file() !== null ||
-      this.camera() !== null ||
-      (this.liveImages().length > 0 && !this.connecting()),
-  );
+  protected readonly badge = computed((): SlotStateView | null => {
+    const slot = this.slot();
+    if (isLive(slot)) return LIVE;
+    if (this.file()) return { label: 'File preview', tone: 'neutral' };
+    if (this.camera()) return { label: 'Camera preview', tone: 'neutral' };
+    if (slot.kind === 'pull') return { label: 'Not live', tone: 'neutral' };
+    return null;
+  });
   protected readonly badgeId = `slot-preview-badge-${badgeIds++}`;
 
   private readonly liveImage = viewChild<ElementRef<HTMLImageElement>>('live');
