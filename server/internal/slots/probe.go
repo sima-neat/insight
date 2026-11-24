@@ -56,16 +56,7 @@ func FFprobeStream(ffprobePath string) StreamProber {
 		}
 		ctx, cancel := context.WithTimeout(ctx, streamProbeTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, ffprobePath,
-			"-v", "error",
-			"-rtsp_transport", "tcp",
-			"-timeout", "5000000",
-			"-analyzeduration", "2000000",
-			"-select_streams", "v:0",
-			"-show_entries", "stream=codec_name,width,height,avg_frame_rate,r_frame_rate",
-			"-of", "json",
-			"-i", url,
-		)
+		cmd := exec.CommandContext(ctx, ffprobePath, streamProbeArgs(url)...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		cmd.WaitDelay = time.Second
@@ -81,6 +72,17 @@ func FFprobeStream(ffprobePath string) StreamProber {
 		}
 		return parseStreamProbe(stdout.Bytes())
 	}
+}
+
+func streamProbeArgs(url string) []string {
+	return append([]string{
+		"-v", "error",
+		"-timeout", "5000000",
+		"-analyzeduration", "2000000",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=codec_name,width,height,avg_frame_rate,r_frame_rate",
+		"-of", "json",
+	}, media.RTSPInput(url)...)
 }
 
 var (

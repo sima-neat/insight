@@ -30,7 +30,7 @@ func TestAFileSlotStreamsWhileStarted(t *testing.T) {
 	h.settle()
 	p := h.publisher(3)
 	args := strings.Join(p.spec.Args, " ")
-	for _, want := range []string{"-re -stream_loop -1 -i file:" + abs, "-c:v copy", "-f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src3?" + testPublisherQuery} {
+	for _, want := range []string{"-re -stream_loop -1 -protocol_whitelist file -i file:" + abs, "-c:v copy", "-f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src3?" + testPublisherQuery} {
 		if !strings.Contains(args, want) {
 			t.Errorf("the publisher's arguments %q lack %q", args, want)
 		}

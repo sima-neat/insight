@@ -74,13 +74,8 @@ func (e Encode) Args(in, out, format string) []string {
 		}
 		tickRate = ":tick_rate=" + strconv.Itoa(ticks) + "/1"
 	}
-	// "file:" so that no part of a file's name is read as a protocol.
-	args := []string{
-		"-y", "-nostdin", "-hide_banner", "-loglevel", "error",
-		"-i", "file:" + in,
-		"-map", "0:v:0", "-an",
-		"-vf", filter,
-	}
+	args := append([]string{"-y", "-nostdin", "-hide_banner", "-loglevel", "error"}, FileInput(in)...)
+	args = append(args, "-map", "0:v:0", "-an", "-vf", filter)
 	if e.Resample {
 		args = append(args, "-fps_mode", "cfr")
 	}

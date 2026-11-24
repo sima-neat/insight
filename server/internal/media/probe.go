@@ -98,15 +98,7 @@ func ProbeFile(ctx context.Context, ffprobePath, abs string) (Info, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	// abs starts with "/", so ffprobe takes it for a file, never for an option or a protocol.
-	cmd := exec.CommandContext(ctx, ffprobePath,
-		"-v", "error",
-		"-select_streams", "v:0",
-		"-show_entries", "stream=codec_name,profile,pix_fmt,has_b_frames,width,height,avg_frame_rate,r_frame_rate,duration",
-		"-show_entries", "format=format_name,duration",
-		"-of", "json",
-		abs,
-	)
+	cmd := exec.CommandContext(ctx, ffprobePath, probeFileArgs(abs)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.WaitDelay = time.Second
@@ -129,6 +121,27 @@ func ProbeFile(ctx context.Context, ffprobePath, abs string) (Info, error) {
 	}
 	info.Size = stat.Size()
 	return info, nil
+}
+
+func probeFileArgs(abs string) []string {
+	return append([]string{
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=codec_name,profile,pix_fmt,has_b_frames,width,height,avg_frame_rate,r_frame_rate,duration",
+		"-show_entries", "format=format_name,duration",
+		"-of", "json",
+	}, FileInput(abs)...)
+}
+
+// namesOtherFiles says whether ffprobe read the file with a demuxer that opens the files it
+// names: an HLS or DASH playlist, a concat list. FileInput keeps them off the network, yet they
+// could still stream any media file of the machine, so the library takes none of them.
+func namesOtherFiles(formatName string) bool {
+	switch formatName {
+	case "hls", "dash", "concat":
+		return true
+	}
+	return false
 }
 
 // probeOutput is the part of ffprobe's JSON that ProbeFile asks for.
@@ -154,6 +167,9 @@ func parseProbe(out []byte) (Info, error) {
 	var probe probeOutput
 	if err := json.Unmarshal(out, &probe); err != nil {
 		return Info{}, fmt.Errorf("ffprobe wrote no JSON: %w", err)
+	}
+	if namesOtherFiles(probe.Format.FormatName) {
+		return Info{}, fmt.Errorf("it is a playlist (%s) and names other files, which Insight does not open", probe.Format.FormatName)
 	}
 	if len(probe.Streams) == 0 {
 		return Info{Kind: KindUnknown}, nil

@@ -100,11 +100,11 @@ func (l *Library) PreviewCommand(source string) (*exec.Cmd, error) {
 }
 
 func previewArgs(abs string, copyMJPEG bool) []string {
-	args := []string{
+	args := append([]string{
 		"-nostdin", "-hide_banner", "-loglevel", "error",
 		"-fflags", "+genpts+igndts", "-re", "-stream_loop", "-1",
-		"-i", abs, "-map", "0:v:0", "-an",
-	}
+	}, media.FileInput(abs)...)
+	args = append(args, "-map", "0:v:0", "-an")
 	if copyMJPEG {
 		args = append(args, "-c:v", "copy")
 	} else {

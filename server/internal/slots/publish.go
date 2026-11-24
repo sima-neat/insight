@@ -16,14 +16,12 @@ import (
 // copied; MJPEG is encoded again with the JPEG settings RTP can carry (RFC 2435: the default
 // Huffman tables, a quantization matrix per component), one live encoder per such slot.
 func publishArgs(abs, codec, target string) []string {
-	args := []string{
+	args := append([]string{
 		"-nostdin", "-hide_banner", "-loglevel", "error",
 		"-fflags", "+genpts+igndts",
 		"-re", "-stream_loop", "-1",
-		// "file:" so that no part of a library file's name is read as a protocol.
-		"-i", "file:" + abs,
-		"-map", "0:v:0", "-an",
-	}
+	}, media.FileInput(abs)...)
+	args = append(args, "-map", "0:v:0", "-an")
 	if codec == media.CodecMJPEG {
 		args = append(args, "-c:v", "mjpeg", "-q:v", "5", "-huffman", "default", "-force_duplicated_matrix", "1")
 	} else {
@@ -47,11 +45,11 @@ func relayArgs(key, source string) (args []string, ok bool) {
 	// The SDP carries the codec's parameters, so probing the stream only delays the first
 	// picture; without it the rate is unknown, hence passthrough timing (ffmpeg would
 	// otherwise take H.264 for twice its rate and repeat every picture).
-	input := []string{
-		"-nostdin", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp",
+	input := append([]string{
+		"-nostdin", "-hide_banner", "-loglevel", "error",
 		"-analyzeduration", "0", "-probesize", "32",
-		"-i", source, "-fps_mode", "passthrough", "-an",
-	}
+	}, media.RTSPInput(source)...)
+	input = append(input, "-fps_mode", "passthrough", "-an")
 	output := []string{"-f", "mpjpeg", "-boundary_tag", "frame", "pipe:1"}
 	switch {
 	case strings.HasPrefix(key, previewKeyPrefix):

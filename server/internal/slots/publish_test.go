@@ -39,3 +39,28 @@ func preloadValue(env []string) string {
 	}
 	return ""
 }
+
+func TestFFmpegOpensOnlyWhatEachInputNeeds(t *testing.T) {
+	for name, test := range map[string]struct {
+		args             []string
+		whitelist, input string
+	}{
+		"a library file": {publishArgs("/m/a.m3u8", "h264", "rtsp://127.0.0.1:8554/src1"), "file", "file:/m/a.m3u8"},
+		"a relay":        {mustRelay(t, previewKey(1), "rtsp://127.0.0.1:8554/src1"), "tcp,tls", "rtsp://127.0.0.1:8554/src1"},
+		"a stream probe": {streamProbeArgs("rtsp://cam/stream"), "tcp,tls", "rtsp://cam/stream"},
+	} {
+		joined := strings.Join(test.args, " ") + " "
+		if !strings.Contains(joined, "-protocol_whitelist "+test.whitelist+" ") || !strings.Contains(joined, "-i "+test.input+" ") {
+			t.Errorf("%s: %s", name, joined)
+		}
+	}
+}
+
+func mustRelay(t *testing.T, key, source string) []string {
+	t.Helper()
+	args, ok := relayArgs(key, source)
+	if !ok {
+		t.Fatalf("no relay for %s", key)
+	}
+	return args
+}

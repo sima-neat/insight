@@ -241,6 +241,23 @@ func TestProbeFileOfAnAudioFile(t *testing.T) {
 	}
 }
 
+// An uploaded playlist names its segments, and ffmpeg would open them: any media file on the
+// machine (ffmpeg keeps a local playlist off the network by itself, and FileInput again).
+func playlist(t *testing.T, dir, segment string) string {
+	t.Helper()
+	return writeFile(t, dir, "list.m3u8", "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\n"+segment+"\n#EXT-X-ENDLIST\n")
+}
+
+func TestProbeFileRefusesAPlaylistOfAFile(t *testing.T) {
+	ffprobe, ffmpeg := tools(t)
+	elsewhere := encode(t, ffmpeg, t.TempDir(), "private.ts", "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p")
+	path := playlist(t, t.TempDir(), elsewhere)
+	_, err := ProbeFile(context.Background(), ffprobe, path)
+	if err == nil || !strings.Contains(err.Error(), "names other files") {
+		t.Fatalf("error = %v, want a playlist refused", err)
+	}
+}
+
 func TestProbeFileOfAFileThatIsNoMedia(t *testing.T) {
 	ffprobe, _ := tools(t)
 	path := writeFile(t, t.TempDir(), "notes.mp4", "not a video\n")

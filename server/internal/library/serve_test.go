@@ -76,7 +76,7 @@ func TestPreviewCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(cmd.Args[1:], " ")
-	if !strings.Contains(args, "-re -stream_loop -1 -i "+abs+" -map 0:v:0 -an -c:v mjpeg -q:v 5 -f mpjpeg") {
+	if !strings.Contains(args, "-re -stream_loop -1 -protocol_whitelist file -i file:"+abs+" -map 0:v:0 -an -c:v mjpeg -q:v 5 -f mpjpeg") {
 		t.Fatalf("a preview of an H.264 file: %s", args)
 	}
 	f.probes.set("clip.avi", media.Info{Kind: media.KindVideo, Codec: media.CodecMJPEG})
