@@ -2,17 +2,67 @@ openapi: 3.0.3
 info:
   title: Neat Insight
   description: >-
-    The API of the Neat Insight server, which its web UI uses. This document is the source: the
-    server's Go types and the frontend's TypeScript types are generated from it. Routes marked
-    "Frozen" are used outside Insight (the Neat SDK, sima-cli) and keep their paths and fields.
+    The HTTP API of the Neat Insight server: the one its web UI uses, open to scripts and tools as
+    well. Routes marked "Frozen" are used outside Insight (the Neat SDK, sima-cli) and keep their
+    paths and fields.
     One more is Frozen and served beside them: `GET /stream/http/srcN.mjpg`, a slot's HTTP MJPEG
     output (docs/contracts.md, "Sources"), the same as `urls.http_mjpeg`. A request that changes
     something (any method but GET, HEAD and OPTIONS) sent by a page of another origin is refused
     with 403 `cross_origin`; the UI's own, and tools that send no Origin (curl, scripts), are not.
   version: "1"
+tags:
+  - name: Service and system
+    description: >-
+      Whether Insight is up; its version, build, ports and addresses; what `neat --json` says
+      about this machine; and this computer's CPU, memory and disk.
+  - name: Diagnostics
+    description: >-
+      What arrives on each Viewer channel and what Insight sends on, in the shape the Neat SDK's
+      network tests read.
+  - name: Viewer
+    description: >-
+      The Viewer's channels: which receive video, the WebRTC offer a browser makes to watch one with
+      its metadata, and a link to the Viewer.
+  - name: Media library
+    description: >-
+      The video files in Insight's media library: list, inspect, preview, download and delete them.
+      Paths are relative to the top of the library.
+  - name: Media imports
+    description: >-
+      Filling the library: uploads of files or archives, SiMa's published sample clips from the
+      catalog, and the jobs that bring them in, followed as events.
+  - name: Media sources
+    description: >-
+      The source slots Insight publishes over RTSP and HTTP MJPEG, numbered from 1: assign media, a
+      webcam or a camera to pull, start and stop them, one at a time or all, and the frame-rate
+      renditions they publish from.
+  - name: Board
+    description: >-
+      The board that board-facing features use: this machine, or a DevKit over SSH, chosen, checked
+      and trusted here.
+  - name: Peripherals
+    description: >-
+      The cameras and microphones SiMa Sentinel reports on the selected board: list them, preview a
+      camera, and record and play back a short microphone test.
+  - name: Sentinel
+    description: >-
+      SiMa Sentinel's telemetry from the selected board: its health, the live cache of metrics, its
+      traces, and recorded runs to read and compare.
+  - name: API documentation
+    description: This document, as the server was built with it.
+x-tagGroups:
+  - name: Observe Insight
+    tags: [Service and system, Diagnostics, Viewer]
+  - name: Board and peripherals
+    tags: [Board, Peripherals, Sentinel]
+  - name: Automate Insight
+    tags: [Media library, Media imports, Media sources]
+  - name: API resources
+    tags: [API documentation]
 paths:
   /api/health:
     get:
+      tags: ["Service and system"]
       operationId: getHealth
       summary: Whether Insight is up
       description: >-
@@ -27,6 +77,7 @@ paths:
                 $ref: "#/components/schemas/Health"
   /api/openapi.yaml:
     get:
+      tags: ["API documentation"]
       operationId: getOpenAPIDocument
       summary: This document
       description: >-
@@ -42,6 +93,7 @@ paths:
                 format: binary
   /api/channels:
     get:
+      tags: ["Viewer"]
       operationId: listChannels
       summary: Which of the Viewer's channels receive video
       description: >-
@@ -56,6 +108,7 @@ paths:
                 $ref: "#/components/schemas/ChannelList"
   /api/channels/{channel}/offer:
     post:
+      tags: ["Viewer"]
       operationId: offerChannel
       summary: Watch a channel over WebRTC
       description: >-
@@ -88,6 +141,7 @@ paths:
         "503": { $ref: "#/components/responses/Error" }
   /api/ingest/stats:
     get:
+      tags: ["Diagnostics"]
       operationId: getIngestStats
       summary: What arrives on each channel, in the old shape
       description: >-
@@ -111,6 +165,7 @@ paths:
                 $ref: "#/components/schemas/IngestStats"
   /api/viewer-url:
     get:
+      tags: ["Viewer"]
       operationId: getViewerUrl
       summary: A link to the Viewer
       description: >-
@@ -137,6 +192,7 @@ paths:
                 $ref: "#/components/schemas/ViewerUrl"
   /api/slots:
     get:
+      tags: ["Media sources"]
       operationId: listSlots
       summary: The sources src1 to src48 and how each stands
       description: >-
@@ -155,6 +211,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/SlotNumber"
     put:
+      tags: ["Media sources"]
       operationId: assignSlot
       summary: Assign a file, a camera to pull or a webcam to a slot
       description: >-
@@ -188,6 +245,7 @@ paths:
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
     delete:
+      tags: ["Media sources"]
       operationId: clearSlot
       summary: Leave a slot with nothing assigned, and stopped
       description: An external publisher on the slot is left alone.
@@ -204,6 +262,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/SlotNumber"
     post:
+      tags: ["Media sources"]
       operationId: startSlot
       summary: Make a slot run
       description: >-
@@ -225,6 +284,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/SlotNumber"
     post:
+      tags: ["Media sources"]
       operationId: stopSlot
       summary: Make a slot stop
       description: >-
@@ -243,6 +303,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/SlotNumber"
     post:
+      tags: ["Media sources"]
       operationId: takeOverSlot
       summary: Disconnect the external publisher that holds a slot
       description: >-
@@ -265,6 +326,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/SlotNumber"
     get:
+      tags: ["Media sources"]
       operationId: previewSlot
       summary: A slot's live picture as MJPEG
       description: >-
@@ -288,6 +350,7 @@ paths:
         "504": { $ref: "#/components/responses/Error" }
   /api/slots/start:
     post:
+      tags: ["Media sources"]
       operationId: startSlots
       summary: Start the first file slots
       description: >-
@@ -311,6 +374,7 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
   /api/slots/stop:
     post:
+      tags: ["Media sources"]
       operationId: stopSlots
       summary: Stop every slot
       description: As each slot's stop does; external publishers go on.
@@ -323,6 +387,7 @@ paths:
                 $ref: "#/components/schemas/SlotStopResult"
   /api/slots/reset:
     post:
+      tags: ["Media sources"]
       operationId: resetSlots
       summary: Stop every slot and leave each with nothing assigned
       description: External publishers go on.
@@ -335,6 +400,7 @@ paths:
                 $ref: "#/components/schemas/SlotStopResult"
   /api/slots/auto-assign:
     post:
+      tags: ["Media sources"]
       operationId: autoAssignSlots
       summary: Give the library's files to the slots, one each
       description: >-
@@ -352,6 +418,7 @@ paths:
         "500": { $ref: "#/components/responses/LibraryError" }
   /api/renditions:
     get:
+      tags: ["Media sources"]
       operationId: getRenditionUsage
       summary: What the frame-rate renditions take on the disk
       responses:
@@ -363,6 +430,7 @@ paths:
                 $ref: "#/components/schemas/RenditionUsage"
         "500": { $ref: "#/components/responses/Error" }
     delete:
+      tags: ["Media sources"]
       operationId: clearRenditions
       summary: Remove the renditions no slot streams
       description: Renditions a slot streams, or is about to, are kept.
@@ -376,6 +444,7 @@ paths:
         "500": { $ref: "#/components/responses/Error" }
   /api/media:
     get:
+      tags: ["Media library"]
       operationId: getMediaTree
       summary: The media library as a tree, with each file's probe
       description: >-
@@ -392,6 +461,7 @@ paths:
         "500": { $ref: "#/components/responses/LibraryError" }
   /api/media/info:
     get:
+      tags: ["Media library"]
       operationId: getMediaInfo
       summary: The full probe of one file
       parameters:
@@ -408,6 +478,7 @@ paths:
         "500": { $ref: "#/components/responses/LibraryError" }
   /api/media/delete:
     post:
+      tags: ["Media library"]
       operationId: deleteMedia
       summary: Delete files and folders of the library
       description: >-
@@ -433,6 +504,7 @@ paths:
         "500": { $ref: "#/components/responses/LibraryError" }
   /api/media/uploads:
     post:
+      tags: ["Media imports"]
       operationId: uploadMedia
       summary: Upload a file or an archive into the library
       description: >-
@@ -469,6 +541,7 @@ paths:
         "507": { $ref: "#/components/responses/LibraryError" }
   /api/media/file:
     get:
+      tags: ["Media library"]
       operationId: getMediaFile
       summary: One file of the library
       description: >-
@@ -498,6 +571,7 @@ paths:
         "404": { $ref: "#/components/responses/LibraryError" }
   /api/media/preview.mjpg:
     get:
+      tags: ["Media library"]
       operationId: previewMedia
       summary: A library file as a moving MJPEG picture
       description: >-
@@ -521,6 +595,7 @@ paths:
         "504": { $ref: "#/components/responses/Error" }
   /api/catalog:
     get:
+      tags: ["Media imports"]
       operationId: getCatalog
       summary: SiMa's published sample clips
       description: >-
@@ -537,6 +612,7 @@ paths:
         "502": { $ref: "#/components/responses/LibraryError" }
   /api/catalog/imports:
     post:
+      tags: ["Media imports"]
       operationId: importCatalogAsset
       summary: Download a catalog asset into the library
       description: >-
@@ -563,6 +639,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/JobID"
     get:
+      tags: ["Media imports"]
       operationId: followJob
       summary: A job's changes as Server-Sent Events
       description: >-
@@ -580,6 +657,7 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
   /api/boards:
     get:
+      tags: ["Board"]
       operationId: listBoards
       summary: The boards Insight knows and the selected one
       description: >-
@@ -597,6 +675,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/BoardList"
     post:
+      tags: ["Board"]
       operationId: selectBoard
       summary: Enter a board and select it
       description: >-
@@ -623,6 +702,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     delete:
+      tags: ["Board"]
       operationId: forgetBoard
       summary: Forget the board entered by hand
       description: >-
@@ -643,6 +723,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     post:
+      tags: ["Board"]
       operationId: checkBoard
       summary: Connect to the selected board and read its identity
       description: >-
@@ -664,6 +745,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     post:
+      tags: ["Board"]
       operationId: trustBoardHostKey
       summary: Trust the new host key of a reflashed board
       description: >-
@@ -691,6 +773,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     get:
+      tags: ["Peripherals"]
       operationId: getPeripherals
       summary: The board's last peripheral scan
       description: From memory; `scan` is null before the first Refresh. Never contacts the board.
@@ -707,6 +790,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     post:
+      tags: ["Peripherals"]
       operationId: refreshPeripherals
       summary: Scan the board's cameras and microphones
       description: >-
@@ -732,6 +816,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     get:
+      tags: ["Peripherals"]
       operationId: getCameraPreview
       summary: The camera preview running on the board
       description: From memory; null when none runs. One preview runs on a board at a time.
@@ -749,6 +834,7 @@ paths:
       - $ref: "#/components/parameters/BoardID"
       - $ref: "#/components/parameters/CameraID"
     post:
+      tags: ["Peripherals"]
       operationId: startCameraPreview
       summary: Start a camera's live preview
       description: >-
@@ -787,6 +873,7 @@ paths:
       - $ref: "#/components/parameters/CameraID"
       - $ref: "#/components/parameters/PreviewID"
     get:
+      tags: ["Peripherals"]
       operationId: streamCameraPreview
       summary: The running preview's pictures as MJPEG
       description: >-
@@ -810,6 +897,7 @@ paths:
       - $ref: "#/components/parameters/CameraID"
       - $ref: "#/components/parameters/PreviewID"
     post:
+      tags: ["Peripherals"]
       operationId: stopCameraPreview
       summary: Stop a camera's preview
       description: >-
@@ -829,6 +917,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     get:
+      tags: ["Peripherals"]
       operationId: getMicrophoneTest
       summary: The board's microphone test
       description: >-
@@ -848,6 +937,7 @@ paths:
       - $ref: "#/components/parameters/BoardID"
       - $ref: "#/components/parameters/MicrophoneID"
     post:
+      tags: ["Peripherals"]
       operationId: startMicrophoneTest
       summary: Record from a microphone
       description: >-
@@ -881,6 +971,7 @@ paths:
       - $ref: "#/components/parameters/MicrophoneID"
       - $ref: "#/components/parameters/MicTestID"
     post:
+      tags: ["Peripherals"]
       operationId: stopMicrophoneTest
       summary: End a microphone test now
       description: >-
@@ -902,6 +993,7 @@ paths:
       - $ref: "#/components/parameters/MicrophoneID"
       - $ref: "#/components/parameters/MicTestID"
     get:
+      tags: ["Peripherals"]
       operationId: getMicrophoneTestAudio
       summary: A finished test's recording as WAV
       description: With range requests, which an audio element sends. 404 once another test replaced it.
@@ -927,6 +1019,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     get:
+      tags: ["Sentinel"]
       operationId: getSentinelHealth
       summary: Whether Sentinel runs on the board
       description: >-
@@ -956,6 +1049,7 @@ paths:
         schema:
           type: string
     get:
+      tags: ["Sentinel"]
       operationId: getSentinelCache
       summary: Sentinel's cache, the Live view's source
       description: >-
@@ -980,6 +1074,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     get:
+      tags: ["Sentinel"]
       operationId: getSentinelActiveTrace
       summary: The trace being recorded
       description: '`/v1/traces/active`: `{trace, summary}`, both null when nothing records.'
@@ -993,6 +1088,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     post:
+      tags: ["Sentinel"]
       operationId: startSentinelTrace
       summary: Start recording a named trace
       description: >-
@@ -1024,6 +1120,7 @@ paths:
         schema:
           type: string
     post:
+      tags: ["Sentinel"]
       operationId: stopSentinelTrace
       summary: Stop and save the active trace
       description: Sentinel answers the finished trace and its run's summary, `{trace, summary}`.
@@ -1037,6 +1134,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/BoardID"
     get:
+      tags: ["Sentinel"]
       operationId: listSentinelRuns
       summary: The runs Sentinel holds
       description: >-
@@ -1059,6 +1157,7 @@ paths:
         schema:
           type: string
     get:
+      tags: ["Sentinel"]
       operationId: getSentinelRun
       summary: One run in full
       description: '`/v1/runs/{run}`: `{metadata, metrics, samples}`; 404 `not_found` for a run Sentinel does not hold.'
@@ -1069,6 +1168,7 @@ paths:
         "502": { $ref: "#/components/responses/BoardError" }
         "504": { $ref: "#/components/responses/BoardError" }
     delete:
+      tags: ["Sentinel"]
       operationId: deleteSentinelRun
       summary: Delete a finished run
       description: >-
@@ -1099,6 +1199,7 @@ paths:
         schema:
           type: string
     get:
+      tags: ["Sentinel"]
       operationId: compareSentinelRuns
       summary: Compare runs against a baseline
       description: >-
@@ -1113,6 +1214,7 @@ paths:
         "504": { $ref: "#/components/responses/BoardError" }
   /api/system:
     get:
+      tags: ["Service and system"]
       operationId: getSystem
       summary: System Info
       description: >-
@@ -1138,6 +1240,7 @@ paths:
                 $ref: "#/components/schemas/SystemInfo"
   /api/system/host:
     get:
+      tags: ["Service and system"]
       operationId: getSystemHost
       summary: This computer's CPU, memory and disk
       description: >-
