@@ -36,6 +36,9 @@ import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { Slot } from '../../api.generated';
 import { copyText } from '../../clipboard';
+import { formatElapsed } from '../../duration';
+import { formatBitrate } from '../../format-bitrate';
+import { NO_VALUE } from '../../no-value';
 import { PanelTitle } from '../../panel-title';
 import { CamerasService } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
@@ -50,10 +53,8 @@ import {
   codecWarning,
   dimensionsText,
   externalChip,
-  formatBitrate,
   isLive,
   isRunning,
-  liveFor,
   protocolLabel,
   pullSourceText,
   pullStatusLabel,
@@ -387,18 +388,18 @@ export class SlotPanel {
     const publisher = slot.publisher;
     const dimensions = publisher ? dimensionsText(publisher) : '';
     return {
-      // A pull names no codec until it is live: "-", as the list says.
+      // A pull names no codec until it is live: `NO_VALUE`, as the list says.
       video: `${slotCodec(slot)}${dimensions ? ` · ${dimensions}` : ''}`,
       warning: codecWarning(slot),
       // Recomputed with each poll answer, every 2 s.
-      liveFor: liveFor(publisher?.since, Date.now()),
+      liveFor: formatElapsed(Date.parse(publisher?.since ?? ''), Date.now()),
       bitrate: formatBitrate(publisher?.bitrate_bps),
     };
   });
   protected readonly publisher = computed(() => {
     const publisher = this.slot().publisher;
     return this.held() && publisher
-      ? `${protocolLabel(publisher.protocol)} · ${publisher.address || '-'}`
+      ? `${protocolLabel(publisher.protocol)} · ${publisher.address || NO_VALUE}`
       : null;
   });
   protected readonly pullSource = computed(() => {

@@ -25,6 +25,8 @@ import { firstValueFrom, map } from 'rxjs';
 import { boardUrl } from '../../board/api';
 import { BOARD_GONE_CODES } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
+import { formatDuration } from '../../duration';
+import { NO_VALUE } from '../../no-value';
 import { LatestOnly } from '../../polling';
 import { Announcement } from '../../announcement';
 import { withRequestErrors } from '../../sources/api-errors';
@@ -47,7 +49,7 @@ import {
   tableStatus,
 } from '../../stats/compare';
 import { downloadCsv } from '../../stats/csv-download';
-import { formatDuration, formatEnergy, formatValue } from '../../stats/format';
+import { formatEnergy, formatValue } from '../../stats/format';
 import { failureOf, type SentinelFailure, unexpectedAnswer } from '../../stats/sentinel-failure';
 import { SentinelRuns } from '../../stats/sentinel-runs';
 import { StatsSession } from '../../stats/stats-session';
@@ -166,7 +168,7 @@ export class CompareView {
     return { options, baseline: gate.ids[0] };
   });
 
-  /** "2 runs · common window 6.0 s"; the window once the shown series has one. */
+  /** "2 runs · common window 6 s"; the window once the shown series has one. */
   protected readonly facts = computed(() => {
     const gate = this.gate();
     if (gate.kind !== 'open') return '';
@@ -203,7 +205,7 @@ export class CompareView {
       })) ?? [],
   );
 
-  /** A run Sentinel did not summarise has only "—" in the per-metric table, which is said. */
+  /** A run Sentinel did not summarise has no values in the per-metric table, which is said. */
   protected readonly partial = computed(() => {
     const answer = this.answer();
     return answer !== null && !summarisesEveryRun(answer);
@@ -263,7 +265,7 @@ export class CompareView {
       median: value(row.median),
       p95: value(row.p95),
       maximum: value(row.maximum),
-      change: row.baseline ? 'Baseline' : formatChange(row.change) || '—',
+      change: row.baseline ? 'Baseline' : formatChange(row.change) || NO_VALUE,
       energy: formatEnergy(row.energy),
     }));
   });

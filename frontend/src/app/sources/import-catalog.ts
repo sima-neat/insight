@@ -31,6 +31,7 @@ import {
 } from './catalog';
 import { CatalogFilters } from './catalog-filters';
 import { formatBytes } from '../format-bytes';
+import { NO_VALUE } from '../no-value';
 import { ImportRunner } from './import-runner';
 import { ImportSession } from './import-session';
 import { MediaLibraryService } from './media-library.service';
@@ -60,9 +61,6 @@ interface SourceRow {
   /** Its importable variants, whatever the filter. */
   readonly variants: number;
 }
-
-/** A cell with nothing to show, as Streaming's and Media's lists say it. */
-const NONE = '-';
 
 const byAssetPath = (row: AssetRow) => row.asset.path;
 const bySourceId = (row: SourceRow) => row.source.id;
@@ -304,9 +302,9 @@ export class ImportCatalog {
       asset,
       source: sources.get(asset.source_id)?.title || asset.source_title || asset.source_id,
       label: catalogAssetLabel(asset),
-      profile: asset.profile || NONE,
-      codec: asset.codec ? codecLabel(asset.codec) : NONE,
-      dimensions: assetDimensions(asset) || NONE,
+      profile: asset.profile || NO_VALUE,
+      codec: asset.codec ? codecLabel(asset.codec) : NO_VALUE,
+      dimensions: assetDimensions(asset) || NO_VALUE,
       size: formatBytes(asset.bytes || 0),
     }));
   }

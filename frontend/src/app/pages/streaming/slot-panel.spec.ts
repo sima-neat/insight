@@ -1196,7 +1196,7 @@ describe('SlotPanel', () => {
       Status: 'Live',
       Video: 'H.264 · 1280×720 · 30 fps',
       URL: 'rtsp://10.0.0.2:8554/src5 Copy',
-      'Live for': '12m 04s',
+      'Live for': '12 min 04 s',
       Bitrate: '850 kbit/s',
       Readers: '0',
     });
@@ -1206,10 +1206,10 @@ describe('SlotPanel', () => {
     expect(details()).toEqual({
       Source: 'rtsp://10.0.0.7:554/stream1',
       Status: 'Unreachable · connection refused',
-      Video: '-',
+      Video: '–',
       URL: 'rtsp://10.0.0.2:8554/src6 Copy',
-      'Live for': '-',
-      Bitrate: '-',
+      'Live for': '–',
+      Bitrate: '–',
       Readers: '0',
     });
   });

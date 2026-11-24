@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { NeatButton } from '@sima/neat-ui';
 import { NeatInput } from '@sima/neat-ui/input';
+import { NO_VALUE } from '../../no-value';
 import { parseFps, stepFps } from '../../sources/fps';
 
 /**
@@ -44,6 +45,7 @@ export class FpsStepper {
 
   protected readonly effective = computed(() => this.value() ?? this.nativeFps());
   protected readonly inert = computed(() => this.disabled() || this.locked());
+  protected readonly noValue = NO_VALUE;
   protected readonly draft = signal('');
   protected readonly invalid = signal(false);
   /** Typed in since the field last showed the rate or committed. */

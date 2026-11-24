@@ -38,21 +38,6 @@ export function customRate(slot: Pick<Slot, 'fps' | 'native_fps'>): number | nul
   return slot.fps !== undefined && slot.fps !== slot.native_fps ? slot.fps : null;
 }
 
-/**
- * A time as `m:ss`, or `h:mm:ss` from an hour on, cut to whole seconds: the app's one clock (a
- * file's duration, a recording's length).
- */
-export function clock(seconds: number): string {
-  const total = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const secs = total % 60;
-  const mmss = `${minutes}:${String(secs).padStart(2, '0')}`;
-  return hours
-    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-    : mmss;
-}
-
 /** How a frame-rate commit ended: the server took the rate, or refused it (already reported). */
 export interface CommitResult {
   readonly ok: boolean;

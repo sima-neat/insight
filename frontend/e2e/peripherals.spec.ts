@@ -138,7 +138,7 @@ test('the devices are listed by kind, a camera previews and restarts on a new mo
   const button = panel(page).getByRole('button', { name: /Test microphone|Stop recording/ });
   await button.click();
   await expect(button).toHaveText('Stop recording');
-  await expect(panel(page)).toContainText(/Recording · 0:0\d/);
+  await expect(panel(page)).toContainText(/Recording · \d s/);
   await expect(device(page, YETI.name)).toContainText('Testing');
   // `seconds` is left to the server's default of 30.
   await expect.poll(() => backend.posted(MIC_TEST_URL)).toEqual([{}]);

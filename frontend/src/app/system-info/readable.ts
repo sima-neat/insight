@@ -1,4 +1,5 @@
 import type { NeatTone } from '@sima/neat-ui';
+import { NO_VALUE } from '../no-value';
 import type { ExposedPort, NeatComponent, SystemInsight, SystemNeat } from './api';
 
 /** Words that keep their own spelling in a key, by their lowercase form. */
@@ -45,9 +46,9 @@ export function readableKey(key: string): string {
  * it would be wrong, since `offline: true` would read as good news.
  */
 export function displayValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '-';
+  if (value === null || value === undefined || value === '') return NO_VALUE;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (Array.isArray(value)) return value.length ? value.join(', ') : '-';
+  if (Array.isArray(value)) return value.length ? value.join(', ') : NO_VALUE;
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
 }
@@ -139,20 +140,23 @@ export function componentStatus(component: Partial<NeatComponent>): ComponentSta
   return null;
 }
 
-/** A component's version line: `1.2.0 / tag v1.2.0 / channel stable`, or "-" when it has none. */
+/**
+ * A component's version line: `1.2.0 / tag v1.2.0 / channel stable`, or `NO_VALUE` when it has
+ * none.
+ */
 export function componentVersion(component: Partial<NeatComponent>): string {
   const parts = [
     component.version,
     component.tag && `tag ${component.tag}`,
     component.channel && `channel ${component.channel}`,
   ].filter(Boolean);
-  return parts.join(' / ') || '-';
+  return parts.join(' / ') || NO_VALUE;
 }
 
-/** An exposed port as `TCP 9900`, or `UDP 9000–9079` for a range; "-" when it has no port. */
+/** An exposed port as `TCP 9900`, or `UDP 9000–9079` for a range; `NO_VALUE` without a port. */
 export function portSummary(port: ExposedPort): string {
   const { hostPortStart: start, hostPortEnd: end } = port;
-  if (start === null || start === undefined) return '-';
+  if (start === null || start === undefined) return NO_VALUE;
   const ports = end === null || end === undefined ? `${start}` : range(start, end);
   return port.protocol ? `${port.protocol.toUpperCase()} ${ports}` : ports;
 }

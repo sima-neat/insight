@@ -1,12 +1,4 @@
-import {
-  allCommitsSucceeded,
-  clock,
-  customRate,
-  FPS_MIN,
-  FPS_STEP,
-  parseFps,
-  stepFps,
-} from './fps';
+import { allCommitsSucceeded, customRate, FPS_MIN, FPS_STEP, parseFps, stepFps } from './fps';
 
 // The tests of `fps.test.js` in sima-neat/insight#170 whose rule is still the app's. The server
 // decides when a start needs a rendition (the slot is `preparing`), so that has no test here.
@@ -46,13 +38,6 @@ describe('fps', () => {
     for (const text of ['', '0', '-3', 'abc', '29.97', '1e2', null, undefined]) {
       expect(parseFps(text), `expected ${JSON.stringify(text)} to be rejected`).toBeNull();
     }
-  });
-
-  it('clock is m:ss, h:mm:ss from an hour on, cut to whole seconds', () => {
-    expect(clock(9.9)).toBe('0:09');
-    expect(clock(134)).toBe('2:14');
-    expect(clock(3725)).toBe('1:02:05');
-    expect(clock(-3)).toBe('0:00');
   });
 
   it('allCommitsSucceeded is false as soon as one pending commit failed', () => {

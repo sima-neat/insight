@@ -1102,7 +1102,7 @@ describe('StatsPage', () => {
       await flush(runsRead(), runsAnswer());
 
       expect(text(toolbar().querySelector('.recording'))).toMatch(
-        /^Recording · compiler-v2-bench · \d+:\d{2}(:\d{2})?$/,
+        /^Recording · compiler-v2-bench · \d+ (s|min \d{2} s|h \d{2} min)$/,
       );
       expect(toolbarButton('Stop the trace')).toBeDefined();
       expect(toolbarButton('Record')).toBeUndefined();

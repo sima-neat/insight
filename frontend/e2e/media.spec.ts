@@ -245,7 +245,7 @@ test('rows show the slots each file is in use on, a file’s panel its preview a
       ['Codec', 'H.264'],
       ['Width', '1280'],
       ['Height', '720'],
-      ['Duration', '2:14'],
+      ['Duration', '2 min 14 s'],
       ['Frame rate', '29.97 fps'],
     ]);
 

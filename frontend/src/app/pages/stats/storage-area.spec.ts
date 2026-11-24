@@ -113,7 +113,7 @@ describe('StorageArea', () => {
         .series()
         .map((s) => s.label),
     ).toEqual(['Write']);
-    expect(chart('eMMC I/O')!.headline()).toBe('—');
+    expect(chart('eMMC I/O')!.headline()).toBe('–');
   });
 
   it('shows nothing, not an empty table, when the board has no storage or network metrics', async () => {

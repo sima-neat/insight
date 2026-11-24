@@ -62,7 +62,7 @@ export class MicTest {
 
   private readonly elapsedValue = signal(0);
   /**
-   * Whole seconds recorded, for the caption's clock. Whole seconds, so that the 100 ms poll
+   * Whole seconds recorded, for the caption. Whole seconds, so that the 100 ms poll
    * changes it (and the panel's text) once a second.
    */
   readonly elapsed = this.elapsedValue.asReadonly();

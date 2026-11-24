@@ -1,4 +1,5 @@
 import type { NeatTone } from '@sima/neat-ui';
+import { NO_VALUE } from '../../no-value';
 import {
   alertLabel,
   formatNumber,
@@ -27,7 +28,7 @@ import type { StatsChartInputs } from './stats-chart';
 /** One overview card as the page shows it. */
 export interface OverviewCardView {
   readonly card: OverviewCard;
-  /** The current reading, worded: "37.5", "—" for one not taken, "Not reported". */
+  /** The current reading, worded: "37.5", `NO_VALUE` for one not taken, "Not reported". */
   readonly value: string;
   /** The reading's unit after it; '' when there is no reading. */
   readonly unit: string;
@@ -92,9 +93,9 @@ function chartOf(window: TelemetryWindow, card: OverviewCard): StatsChartInputs 
   }
 }
 
-/** A reading as a card's value and unit; an em dash and no unit for one not taken. */
+/** A reading as a card's value and unit; `NO_VALUE` and no unit for one not taken. */
 function reading(value: number | null, unit: string | null): { value: string; unit: string } {
   return isNumber(value)
     ? { value: formatNumber(value), unit: unitSuffix(unit) }
-    : { value: '—', unit: '' };
+    : { value: NO_VALUE, unit: '' };
 }

@@ -7,9 +7,9 @@
  * one test per board.
  */
 
+import { neatDuration } from '@sima/neat-ui';
 import { boardUrl } from '../board/api';
 import { BoardProblem } from '../board/board-error';
-import { clock } from '../sources/fps';
 import type { MicLevel, MicrophoneItem, MicTestStatus } from './api';
 
 export type MicTestPhase = 'idle' | 'recording' | 'playing' | 'done' | 'error';
@@ -153,9 +153,9 @@ export function micTestAction(status: MicTestPhase, stopping: boolean): MicTestA
   return { label: 'Test microphone', action: 'record', disabled: false };
 }
 
-/** The caption beside the meter: the recording's clock, or that it plays; '' otherwise. */
+/** The caption beside the meter: how long it has recorded, or that it plays; '' otherwise. */
 export function micTestCaption(status: MicTestPhase, seconds: number): string {
-  if (status === 'recording') return `Recording · ${clock(seconds)}`;
+  if (status === 'recording') return `Recording · ${neatDuration(seconds)}`;
   return status === 'playing' ? 'Recording playing' : '';
 }
 

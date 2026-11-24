@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { NeatChartCard, NeatStackedChart } from '@sima/neat-ui/charts';
+import { NO_VALUE } from '../../no-value';
 import { fixedValue, isNumber } from '../../stats/format';
 import {
   boardPowerChart,
@@ -64,7 +65,7 @@ export class PowerArea {
       if (!metric) return [];
       return isNumber(metric.value)
         ? [{ heading, value: metric.value.toFixed(1), unit: 'W' }]
-        : [{ heading, value: '—', unit: '' }];
+        : [{ heading, value: NO_VALUE, unit: '' }];
     }),
   );
 

@@ -117,14 +117,14 @@ describe('displayValue', () => {
   it('displayValue writes booleans as Yes/No text and empty values as -', () => {
     expect(displayValue(true)).toBe('Yes');
     expect(displayValue(false)).toBe('No');
-    expect(displayValue(null)).toBe('-');
-    expect(displayValue(undefined)).toBe('-');
-    expect(displayValue('')).toBe('-');
+    expect(displayValue(null)).toBe('–');
+    expect(displayValue(undefined)).toBe('–');
+    expect(displayValue('')).toBe('–');
   });
 
   it('joins arrays, writes objects as JSON and everything else as text', () => {
     expect(displayValue(['a', 'b'])).toBe('a, b');
-    expect(displayValue([])).toBe('-');
+    expect(displayValue([])).toBe('–');
     expect(displayValue({ a: 1 })).toBe('{"a":1}');
     expect(displayValue(0)).toBe('0');
     expect(displayValue('9.1')).toBe('9.1');
@@ -168,7 +168,7 @@ describe('componentVersion', () => {
       '1.4.0 / tag v1.4.0 / channel stable',
     );
     expect(componentVersion({ tag: 'v1.4.0' })).toBe('tag v1.4.0');
-    expect(componentVersion({ version: null, tag: '' })).toBe('-');
+    expect(componentVersion({ version: null, tag: '' })).toBe('–');
   });
 });
 
@@ -186,7 +186,7 @@ describe('portSummary', () => {
     expect(portSummary({ name: 'x', hostPortStart: 80, hostPortEnd: null })).toBe('80');
     expect(
       portSummary({ name: 'x', protocol: 'tcp', hostPortStart: null, hostPortEnd: null }),
-    ).toBe('-');
+    ).toBe('–');
   });
 });
 
