@@ -134,12 +134,17 @@ describe('SettingRow', () => {
 
   /** The disclosure that folds the channels overriding this setting open. */
   const overrideNote = (): HTMLButtonElement | null =>
-    root().querySelector<HTMLButtonElement>('button[aria-expanded]');
-  /** The open list's lines, each as the text it shows. */
+    root().querySelector<HTMLButtonElement>('neat-collapsible button[aria-expanded]');
+  /** The kit's collapsible content: it stays in the DOM while closed, hidden and inert. */
+  const overrideContent = () =>
+    root().querySelector<HTMLElement>('neat-collapsible [data-slot="collapsible-content"]');
+  /** The open list's lines, each as the text it shows; none while the note is closed. */
   const overrideLines = () =>
-    [...root().querySelectorAll('.overrides li')].map((line) =>
-      [...line.children].map((part) => part.textContent?.trim()).join(' '),
-    );
+    overrideContent()?.hasAttribute('inert') === false
+      ? [...overrideContent()!.querySelectorAll('li')].map((line) =>
+          [...line.children].map((part) => part.textContent?.trim()).join(' '),
+        )
+      : [];
   const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
   /** The dialog's title, message and buttons, in order. */
   const dialogText = () =>
@@ -270,10 +275,14 @@ describe('SettingRow', () => {
     const note = overrideNote()!;
     expect(note.textContent?.trim()).toBe('Overridden on 2 channels');
     expect(note.getAttribute('aria-expanded')).toBe('false');
-    expect(note.hasAttribute('aria-controls')).toBe(false);
     expect(overrideLines()).toEqual([]);
-    expect(text()).not.toContain('Channel 1');
-    expect(button('Reset on 2 channels…')).toBeUndefined();
+    expect(overrideContent()!.hasAttribute('inert')).toBe(true);
+
+    // The kit's note: a collapsible with an amber dot, whose trigger the control is described by.
+    const collapsible = root().querySelector('neat-collapsible')!;
+    expect(collapsible.querySelector('[data-slot="collapsible-dot"]')).not.toBeNull();
+    expect(note.id).toBe('setting-note-general.lineWidth');
+    expect(description(slider())).toBe('Overridden on 2 channels');
 
     await click(note);
 

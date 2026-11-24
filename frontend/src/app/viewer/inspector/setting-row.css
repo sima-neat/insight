@@ -52,46 +52,6 @@
   font-weight: 500;
 }
 
-/* On "All channels": the note that unfolds into the channels overriding the setting. */
-.overrides {
-  display: flex;
-  flex-direction: column;
-  gap: var(--neat-space-2);
-}
-
-/* The amber of a notice: the setting differs on some channels. */
-.dot {
-  flex: none;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: var(--warning);
-}
-
-/* Turned as the kit's collapsible turns its chevron, in the kit's transition time. */
-.chevron {
-  display: flex;
-  transition: transform var(--neat-transition-duration);
-}
-
-.chevron.open {
-  transform: rotate(90deg);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chevron {
-    transition: none;
-  }
-}
-
-/*
- * The channels' rule (the kit's line list) starts below the note's dot: the dot is 0.5rem wide, the
- * rule 2px, so their centres line up.
- */
-.channels {
-  margin-inline-start: calc(0.25rem - 1px);
-}
-
 .value {
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
