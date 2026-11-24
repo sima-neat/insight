@@ -52,15 +52,24 @@ func newMedia(codec Codec) (*media, error) {
 		peers: map[*webrtc.PeerConnection]struct{}{}}, nil
 }
 
-// add registers a viewer's connection; false once the generation is retired.
-func (m *media) add(peer *webrtc.PeerConnection) bool {
+// maxViewers bounds the connections of one channel, the ones still negotiating or waiting for ICE
+// to fail included: each holds a Pion connection, its goroutines and its share of the WebRTC port
+// range, and an offer is all it takes to open one. Eight covers a team watching one board's
+// channel at once.
+const maxViewers = 8
+
+// add registers a viewer's connection, or says why not: the generation is retired, or full.
+func (m *media) add(peer *webrtc.PeerConnection) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.retired {
-		return false
+	switch {
+	case m.retired:
+		return errCodecChanged
+	case len(m.peers) >= maxViewers:
+		return errTooManyViewers
 	}
 	m.peers[peer] = struct{}{}
-	return true
+	return nil
 }
 
 func (m *media) remove(peer *webrtc.PeerConnection) {
