@@ -100,6 +100,9 @@ func (n *negotiator) answer(ctx context.Context, c *Channel, offer Description) 
 		return Description{}, errUnsupported
 	}
 
+	if err := m.admits(); err != nil {
+		return Description{}, err // no connection made only to be closed
+	}
 	pc, err := n.apis[m.codec].NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		return Description{}, errNegotiation

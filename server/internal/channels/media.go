@@ -62,13 +62,28 @@ const maxViewers = 8
 func (m *media) add(peer *webrtc.PeerConnection) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.refusalLocked(); err != nil {
+		return err
+	}
+	m.peers[peer] = struct{}{}
+	return nil
+}
+
+// admits says why a new viewer would be refused now, before a connection is made for it; add
+// decides, once the connection exists.
+func (m *media) admits() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.refusalLocked()
+}
+
+func (m *media) refusalLocked() error {
 	switch {
 	case m.retired:
 		return errCodecChanged
 	case len(m.peers) >= maxViewers:
 		return errTooManyViewers
 	}
-	m.peers[peer] = struct{}{}
 	return nil
 }
 
