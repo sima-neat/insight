@@ -134,11 +134,19 @@ func (b *Board) Run(ctx context.Context, argv []string) (Result, error) {
 	return result, nil
 }
 
+// streamStartTimeout bounds the start of a Stream, which a caller's context may not: a preview
+// outlives its request. A board that takes the connection but answers no session leaves the
+// start waiting otherwise.
+const streamStartTimeout = 15 * time.Second
+
 // Stream starts argv on the board and gives its stdout as it comes, for output that does not
-// end by itself (a camera preview, a microphone recording). Closing the stream, or the end of
-// ctx, kills the command.
+// end by itself (a camera preview, a microphone recording). The start fails after
+// streamStartTimeout, or when ctx ends first; closing the stream, or the end of ctx, kills the
+// command.
 func (b *Board) Stream(ctx context.Context, argv []string) (*Stream, error) {
-	p, err := b.start(ctx, argv)
+	start, cancel := context.WithTimeout(ctx, streamStartTimeout)
+	defer cancel()
+	p, err := b.start(start, argv)
 	if err != nil {
 		return nil, err
 	}
