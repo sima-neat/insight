@@ -32,15 +32,15 @@ const iso = (...parts: [number, number, number, number, number, number]): string
 
 describe('run lines', () => {
   it('a finished run reads state, duration, energy and samples', () => {
-    expect(runLine(COMPLETE)).toBe('Complete · 34 s · 275 J · 17 samples');
+    expect(runLine(COMPLETE)).toBe('Complete · 34.3 s · 275 J · 17 samples');
   });
 
   it('the recording run says so, and an unmeasured energy is a dash', () => {
     expect(isRecording(RECORDING_RUN)).toBe(true);
     expect(isRecording(COMPLETE)).toBe(false);
-    expect(runLine(RECORDING_RUN)).toBe('Recording · 12 s · 96 J · 7 samples');
+    expect(runLine(RECORDING_RUN)).toBe('Recording · 12.0 s · 96 J · 7 samples');
     expect(runLine(summary({ energy_joules: null, samples: 1 }))).toBe(
-      'Complete · 34 s · – · 1 sample',
+      'Complete · 34.3 s · – · 1 sample',
     );
   });
 });

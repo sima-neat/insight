@@ -243,7 +243,7 @@ describe('RunPanel', () => {
     expect(title()).toBe('compiler-v2-bench');
     expect(text(root().querySelector('app-panel-title neat-status-chip'))).toBe('Recording');
     expect(details(root()).slice(1)).toEqual([
-      ['Duration', '20 s'],
+      ['Duration', '20.4 s'],
       ['Samples', '11'],
       ['Energy', '150 J'],
     ]);
@@ -259,7 +259,7 @@ describe('RunPanel', () => {
     await render(RECORDING_RUN);
 
     expect(details(root()).slice(1)).toEqual([
-      ['Duration', '12 s'],
+      ['Duration', '12.0 s'],
       ['Samples', '7'],
       ['Energy', '96 J'],
     ]);

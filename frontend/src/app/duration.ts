@@ -6,7 +6,15 @@ import { neatDuration } from '@sima/neat-ui';
  * units as a clock shows them. `NO_VALUE` for a length that is missing or not a number.
  */
 export function formatDuration(ms: number | null | undefined): string {
-  return neatDuration(ms == null ? null : ms / 1000);
+  return neatDuration(seconds(ms));
+}
+
+/**
+ * A run's length, read closely, as Stats shows it: tenths of a second under a minute ("34.4 s",
+ * "0.8 s"), and as `formatDuration` from a minute on. `NO_VALUE` as for `formatDuration`.
+ */
+export function formatRunDuration(ms: number | null | undefined): string {
+  return neatDuration(seconds(ms), { tenths: true });
 }
 
 /**
@@ -17,4 +25,8 @@ export function formatDuration(ms: number | null | undefined): string {
  */
 export function formatElapsed(since: number, now: number): string {
   return formatDuration(Math.max(0, now - since));
+}
+
+function seconds(ms: number | null | undefined): number | null {
+  return ms == null ? null : ms / 1000;
 }

@@ -26,7 +26,7 @@ import { firstValueFrom, map } from 'rxjs';
 import { boardUrl } from '../../board/api';
 import { BOARD_GONE_CODES } from '../../board/board-error';
 import { BoardService } from '../../board/board.service';
-import { formatDuration } from '../../duration';
+import { formatRunDuration } from '../../duration';
 import { NO_VALUE } from '../../no-value';
 import { LatestOnly } from '../../polling';
 import { Announcement } from '../../announcement';
@@ -176,7 +176,7 @@ export class CompareView {
     if (gate.kind !== 'open') return '';
     const window = this.overlay()?.windowMs;
     const runs = `${gate.ids.length} runs`;
-    return window === undefined ? runs : `${runs} · common window ${formatDuration(window)}`;
+    return window === undefined ? runs : `${runs} · common window ${formatRunDuration(window)}`;
   });
 
   private readonly reads = new LatestOnly();
