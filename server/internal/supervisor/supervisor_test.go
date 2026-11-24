@@ -39,9 +39,23 @@ func eventually(t *testing.T, within time.Duration, what string, ok func() bool)
 	t.Fatalf("not within %v: %s", within, what)
 }
 
+// alive says whether pid is a process that has not exited, by its state in /proc/<pid>/stat: a
+// zombie (Z) or a dead process (X) has exited, and so has one /proc no longer lists. The state,
+// unlike the command line, reads the same while the process is in the middle of an exec, and
+// nothing is signaled to find it out.
 func alive(pid int) bool {
-	_, ok := processRuns(pid)
-	return ok
+	stat, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return false
+	}
+	// "<pid> (<comm>) <state> ...", where comm may hold spaces and parentheses.
+	line := string(stat)
+	end := strings.LastIndexByte(line, ')')
+	if end < 0 || end+2 >= len(line) {
+		return false
+	}
+	state := line[end+2]
+	return state != 'Z' && state != 'X'
 }
 
 // waitForExec waits until /proc shows cmd's child running its program. Start returns once the
