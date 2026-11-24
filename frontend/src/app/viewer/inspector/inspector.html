@@ -19,7 +19,8 @@
 @if (preview(); as preview) {
   <div class="preview">
     <neat-video-tile
-      [source]="preview.connection"
+      [source]="preview.connection.source"
+      [notice]="preview.connection.source.notice()"
       [settings]="preview.settings"
       [retentionMs]="preview.retentionMs"
       [channel]="preview.channel"

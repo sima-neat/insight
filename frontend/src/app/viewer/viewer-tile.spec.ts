@@ -5,11 +5,11 @@ import { NeatStatusChipButton } from '@sima/neat-ui/status-chip';
 import { bufferSettleMs, type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
 import { ChannelLateness } from './channel-lateness';
 import { ChannelPlayback } from './channel-playback';
-import { FakeConnections } from './fake-connections.testing';
+import { FakeChannels } from './fake-channels.testing';
 import { FakeLocalStorage } from '../fake-storage.testing';
 import { RoiStore } from './settings/roi-store';
 import { ViewerSettingsStore } from './settings/viewer-settings.store';
-import { VfConnections } from './vf/vf-connections';
+import { ViewerChannels } from './viewer-channels';
 import { ViewerTile } from './viewer-tile';
 
 class NoopResizeObserver {
@@ -67,7 +67,7 @@ class Host {
 }
 
 describe('ViewerTile', () => {
-  let fake: FakeConnections;
+  let fake: FakeChannels;
   let fixture: ComponentFixture<Host>;
   let now: number;
 
@@ -76,10 +76,10 @@ describe('ViewerTile', () => {
     vi.stubGlobal('ResizeObserver', NoopResizeObserver);
     now = 1000;
     vi.spyOn(performance, 'now').mockImplementation(() => now);
-    fake = new FakeConnections();
+    fake = new FakeChannels();
     TestBed.configureTestingModule({
       providers: [
-        { provide: VfConnections, useValue: fake.asVfConnections() },
+        { provide: ViewerChannels, useValue: fake.asViewerChannels() },
         RoiStore,
         ViewerSettingsStore,
         ChannelLateness,
@@ -96,7 +96,7 @@ describe('ViewerTile', () => {
   });
 
   const host = () => fixture.componentInstance;
-  const connection = () => fake.connections.get(2)!;
+  const connection = () => fake.channels.get(2)!;
   const kitTile = (): NeatVideoTile =>
     fixture.debugElement.query(By.directive(NeatVideoTile)).componentInstance;
   const text = (selector: string) =>
@@ -125,7 +125,7 @@ describe('ViewerTile', () => {
 
   it('holds its channel’s connection while it exists and releases it when removed', async () => {
     expect(fake.held()).toEqual([2]);
-    expect(kitTile().source()).toBe(connection());
+    expect(kitTile().source()).toBe(connection().source);
 
     host().shown.set(false);
     await fixture.whenStable();
@@ -137,44 +137,41 @@ describe('ViewerTile', () => {
   it('labels the tile with its channel number and the connection’s status line', async () => {
     expect(text('.label')).toBe('2');
 
-    connection().status.set({
-      phase: 'connected',
-      codec: 'H.264',
+    connection().source.stats.set({
+      codec: 'H264',
       width: 640,
       height: 480,
-      fps: 15,
-      kbps: 812.4,
-      messagesPerSecond: 15,
+      framesPerSecond: 15,
+      bitsPerSecond: 812_400,
     });
+    connection().messagesPerSecond.set(15);
     await fixture.whenStable();
 
     expect(text('.status')).toBe('H.264 · 640×480 · 15.0 fps · 812 kbit/s · 15 msg/s');
   });
 
-  it('applies the channel’s sync buffer to the connection and its retention to the tile, each only when it changes', async () => {
-    expect(connection().syncBuffers).toEqual([300]);
+  it('shows what keeps the channel from showing as the tile’s notice', async () => {
+    expect(kitTile().notice()).toBeNull();
+
+    connection().source.waiting.set('Waiting for video');
+    await fixture.whenStable();
+    expect(kitTile().notice()).toBe('Waiting for video');
+  });
+
+  it('applies the channel’s retention and overlay settings to the tile', async () => {
     expect(kitTile().retentionMs()).toBe(0);
 
-    host().store.set(2, 'general.videoSyncBufferMs', 500);
-    await fixture.whenStable();
-    expect(connection().syncBuffers).toEqual([300, 500]);
-
     host().store.set('global', 'general.metadataRetentionMs', 2000);
-    await fixture.whenStable();
-    expect(connection().syncBuffers).toEqual([300, 500]);
-    expect(kitTile().retentionMs()).toBe(2000);
-
-    // An overlay setting changes the tile's settings, not the connection.
     host().store.set(2, 'general.lineWidth', 4);
     await fixture.whenStable();
-    expect(connection().syncBuffers).toEqual([300, 500]);
+    expect(kitTile().retentionMs()).toBe(2000);
     expect(kitTile().settings().general.lineWidth).toBe(4);
   });
 
-  it('hands the tile’s frame stats to the connection', async () => {
+  it('hands the tile’s message rate to the channel, for the status line', async () => {
     await tick();
 
-    expect(connection().frameStats).toEqual([FRAME_STATS]);
+    expect(connection().messagesPerSecond()).toBe(FRAME_STATS.metadataMessagesPerSecond);
   });
 
   it('shows "Metadata late" while lateness is on and the tile plays; the chip asks for the notice', async () => {

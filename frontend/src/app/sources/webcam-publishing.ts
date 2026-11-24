@@ -162,8 +162,8 @@ export class WebcamPublishError extends Error {
 }
 
 /**
- * The offer is posted before ICE gathering completes, deliberately, for the reason the viewer's
- * signalling documents (`viewer/vf/signaling.ts`): gathering cannot report complete until every
+ * The offer is posted before ICE gathering completes, deliberately, as the Viewer's connections
+ * (the kit's `neatInsightChannel`) post theirs: gathering cannot report complete until every
  * configured STUN server has answered or exhausted its RFC 5389 retransmission schedule, which
  * measured 120 ms when the server answered and 3.9-25 s when its packets were dropped. Waiting
  * would put that in front of a connection between a browser and MediaMTX on the same host or LAN,

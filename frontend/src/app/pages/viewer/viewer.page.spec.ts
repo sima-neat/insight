@@ -7,9 +7,9 @@ import { provideRouter, Router } from '@angular/router';
 import { NeatPage, NeatViewport } from '@sima/neat-ui';
 import { NeatNumberField } from '@sima/neat-ui/number-field';
 import { type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
-import { FakeConnections } from '../../viewer/fake-connections.testing';
+import { FakeChannels } from '../../viewer/fake-channels.testing';
 import { FakeLocalStorage } from '../../fake-storage.testing';
-import { VfConnections } from '../../viewer/vf/vf-connections';
+import { ViewerChannels } from '../../viewer/viewer-channels';
 import { ViewerTile } from '../../viewer/viewer-tile';
 import { FakeResizeObserver, ViewerShell as Shell } from './viewer-page.testing';
 import { ViewerPage } from './viewer.page';
@@ -26,7 +26,7 @@ class Elsewhere {}
 
 describe('ViewerPage', () => {
   let storage: FakeLocalStorage;
-  let fake: FakeConnections;
+  let fake: FakeChannels;
   let http: HttpTestingController;
   let fixture: ComponentFixture<Shell>;
   /** Whether the screen is narrow, as the kit reports it; wide unless a test says otherwise. */
@@ -38,7 +38,7 @@ describe('ViewerPage', () => {
     vi.stubGlobal('localStorage', storage);
     FakeResizeObserver.instances = [];
     vi.stubGlobal('ResizeObserver', FakeResizeObserver);
-    fake = new FakeConnections();
+    fake = new FakeChannels();
     TestBed.configureTestingModule({
       providers: [
         provideRouter([
@@ -51,8 +51,8 @@ describe('ViewerPage', () => {
       ],
     });
     TestBed.overrideComponent(ViewerPage, {
-      remove: { providers: [VfConnections] },
-      add: { providers: [{ provide: VfConnections, useValue: fake.asVfConnections() }] },
+      remove: { providers: [ViewerChannels] },
+      add: { providers: [{ provide: ViewerChannels, useValue: fake.asViewerChannels() }] },
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -1061,7 +1061,7 @@ describe('ViewerPage', () => {
     expect(fake.debug).toBe(true);
   });
 
-  it('leaving the page releases off-page connections; destroying it closes all', async () => {
+  it('paging releases off-page channels; destroying the page releases them all', async () => {
     sixPerPage();
     await open('/viewer');
     expect(fake.held()).toEqual(range(6));
@@ -1071,7 +1071,7 @@ describe('ViewerPage', () => {
     expect([...fake.released].sort((a, b) => a - b)).toEqual(range(6));
 
     fixture.destroy();
-    expect(fake.closedAll).toBeGreaterThan(0);
+    expect(fake.held()).toEqual([]);
   });
 
   it('page, selection and inspector tab survive leaving the Viewer and coming back', async () => {
@@ -1088,8 +1088,8 @@ describe('ViewerPage', () => {
 
     await leaveAndReturn('/viewer');
 
-    // Leaving closed the connections, as it must; the position came back.
-    expect(fake.closedAll).toBeGreaterThan(0);
+    // Leaving released the channels, as it must; the position came back.
+    expect(fake.released.length).toBeGreaterThan(0);
     expect(shown()).toEqual(range(6, 6));
     expect(pageInput().value).toBe('2');
     expect(page().selectedChannel()).toBe(10);

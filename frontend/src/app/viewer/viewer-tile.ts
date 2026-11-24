@@ -19,21 +19,18 @@ import {
 } from '@sima/neat-ui/video';
 import { ChannelLateness } from './channel-lateness';
 import { ChannelPlayback } from './channel-playback';
-import { followSyncSettings } from './connection-sync';
+import { formatChannelStats } from './channel-status';
 import { LateChip } from './late-chip';
 import { ViewerSettingsStore } from './settings/viewer-settings.store';
-import { formatChannelStatus } from './vf/channel-status';
-import type { VfConnection } from './vf/vf-connection';
-import { VfConnections } from './vf/vf-connections';
+import { type ViewerChannel, ViewerChannels } from './viewer-channels';
 
 /**
  * One channel of the Viewer grid: the kit's video tile fed by the channel's connection and its
- * resolved settings. It holds the connection for as long as it exists, so a tile paged away
- * releases it, and it is where the connection meets the tile: the sync buffer is applied to the
- * connection and the retention to the tile when they change, the tile's frame stats go back to the
- * connection for its status line, and each stats tick decides the "Metadata late" chip, which it
- * also publishes for the inspector (`ChannelLateness`), as it does whether its video plays
- * (`ChannelPlayback`).
+ * resolved settings. It holds the channel for as long as it exists, so a tile paged away releases
+ * it, and it is where the connection meets the tile: the tile shows the connection's notice and
+ * stats, its own message rate goes back to the channel for the status line, and each stats tick
+ * decides the "Metadata late" chip, which it also publishes for the inspector (`ChannelLateness`),
+ * as it does whether its video plays (`ChannelPlayback`).
  *
  * The page owns selection; the tile only shows it.
  */
@@ -48,7 +45,8 @@ import { VfConnections } from './vf/vf-connections';
   },
   template: `
     <neat-video-tile
-      [source]="connection()"
+      [source]="connection()?.source ?? null"
+      [notice]="connection()?.source?.notice() ?? null"
       [settings]="settings()"
       [retentionMs]="retentionMs()"
       [channel]="channel()"
@@ -81,13 +79,13 @@ export class ViewerTile {
   /** The "Metadata late" chip was pressed: the page shows the channel's late notice. */
   readonly lateNotice = output<void>();
 
-  private readonly connections = inject(VfConnections);
+  private readonly viewerChannels = inject(ViewerChannels);
   private readonly store = inject(ViewerSettingsStore);
   private readonly lateness = inject(ChannelLateness);
   private readonly playback = inject(ChannelPlayback);
   private readonly tile = viewChild.required(NeatVideoTile);
 
-  protected readonly connection = signal<VfConnection | null>(null);
+  protected readonly connection = signal<ViewerChannel | null>(null);
   protected readonly settings = computed(() => this.store.resolved(this.channel())());
   private readonly sync = computed(() => this.store.general(this.channel())());
   protected readonly retentionMs = computed(() => this.sync().metadataRetentionMs);
@@ -95,7 +93,9 @@ export class ViewerTile {
   protected readonly label = computed(() => String(this.channel()));
   protected readonly status = computed(() => {
     const connection = this.connection();
-    return connection === null ? null : formatChannelStatus(connection.status());
+    return connection === null
+      ? null
+      : formatChannelStats(connection.source.stats(), connection.messagesPerSecond());
   });
 
   private readonly lateChip = new LateChip();
@@ -109,11 +109,9 @@ export class ViewerTile {
   constructor() {
     effect((onCleanup) => {
       const channel = this.channel();
-      this.connection.set(this.connections.get(channel));
-      onCleanup(() => this.connections.release(channel));
+      this.connection.set(this.viewerChannels.get(channel));
+      onCleanup(() => this.viewerChannels.release(channel));
     });
-
-    followSyncSettings(this.connection, this.sync);
 
     // A new buffer makes the lateness measured with the old one meaningless.
     let previousBufferMs: number | null = null;
@@ -156,7 +154,7 @@ export class ViewerTile {
 
   /** The tile's once-a-second stats: the status line gets them, and the late chip is judged. */
   protected onFrameStats(stats: NeatFrameStats): void {
-    this.connection()?.reportFrameStats(stats);
+    this.connection()?.messagesPerSecond.set(stats.metadataMessagesPerSecond);
     this.lateActive.set(this.lateChip.tick(this.tile(), performance.now()));
     // After the tick, which resets the window while a new buffer settles.
     this.latenessSnapshot.set(this.tile().snapshot());

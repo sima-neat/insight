@@ -51,7 +51,7 @@ import type { SettingTab } from '../../viewer/settings/schema';
 import { RoiStore } from '../../viewer/settings/roi-store';
 import { ViewerStorage } from '../../viewer/settings/storage';
 import { ViewerSettingsStore } from '../../viewer/settings/viewer-settings.store';
-import { VfConnections } from '../../viewer/vf/vf-connections';
+import { ViewerChannels } from '../../viewer/viewer-channels';
 import { ViewerSession } from '../../viewer/viewer-session';
 import {
   MAX_CHANNELS,
@@ -136,7 +136,7 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
     ViewerTile,
   ],
   providers: [
-    VfConnections,
+    ViewerChannels,
     RoiStore,
     ViewerSettingsStore,
     LayoutPrefs,
@@ -158,7 +158,7 @@ export class ViewerPage {
   protected readonly inspector = neatAsideOpen(this.prefs.inspector, (open) =>
     this.prefs.setInspector(open),
   );
-  private readonly connections = inject(VfConnections);
+  private readonly viewerChannels = inject(ViewerChannels);
   private readonly liveness = inject(ChannelLiveness);
   private readonly storage = inject(ViewerStorage);
   private readonly session = inject(ViewerSession);
@@ -356,7 +356,7 @@ export class ViewerPage {
     });
     effect(() => {
       const debug = this.params().debug || this.storage.get(DEBUG_FLAG) === '1';
-      untracked(() => this.connections.setDebug(debug));
+      untracked(() => this.viewerChannels.setDebug(debug));
     });
     effect(() => {
       const hideEmpty = this.prefs.hideEmpty();
@@ -374,7 +374,6 @@ export class ViewerPage {
       });
     });
     // Every connection ends with the page, whichever tiles still hold one.
-    this.destroyRef.onDestroy(() => this.connections.closeAll());
     this.destroyRef.onDestroy(() => this.rememberVisit());
   }
 

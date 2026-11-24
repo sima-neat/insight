@@ -17,11 +17,12 @@ import {
 } from '@sima/neat-ui/video';
 import { FakeResizeObserver, ViewerShell } from '../../pages/viewer/viewer-page.testing';
 import { ViewerPage } from '../../pages/viewer/viewer.page';
-import { FakeConnections } from '../fake-connections.testing';
+import { ViewerSettingsStore } from '../settings/viewer-settings.store';
+import { FakeChannels } from '../fake-channels.testing';
 import { FakeLocalStorage } from '../../fake-storage.testing';
 import { LayoutPrefs } from '../settings/layout-prefs';
 import { RoiStore } from '../settings/roi-store';
-import { VfConnections } from '../vf/vf-connections';
+import { ViewerChannels } from '../viewer-channels';
 import { radioLabel } from '../../radio-label.testing';
 import { ViewerTile } from '../viewer-tile';
 import { ViewerInspector } from './inspector';
@@ -35,7 +36,7 @@ const LATE: Partial<NeatMetadataSnapshot> = {
 
 describe('ViewerInspector', () => {
   let storage: FakeLocalStorage;
-  let fake: FakeConnections;
+  let fake: FakeChannels;
   let fixture: ComponentFixture<ViewerShell>;
 
   beforeEach(() => {
@@ -43,7 +44,7 @@ describe('ViewerInspector', () => {
     vi.stubGlobal('localStorage', storage);
     FakeResizeObserver.instances = [];
     vi.stubGlobal('ResizeObserver', FakeResizeObserver);
-    fake = new FakeConnections();
+    fake = new FakeChannels();
     TestBed.configureTestingModule({
       providers: [
         provideRouter([{ path: 'viewer', component: ViewerPage }]),
@@ -52,8 +53,8 @@ describe('ViewerInspector', () => {
       ],
     });
     TestBed.overrideComponent(ViewerPage, {
-      remove: { providers: [VfConnections] },
-      add: { providers: [{ provide: VfConnections, useValue: fake.asVfConnections() }] },
+      remove: { providers: [ViewerChannels] },
+      add: { providers: [{ provide: ViewerChannels, useValue: fake.asViewerChannels() }] },
     });
   });
 
@@ -66,6 +67,12 @@ describe('ViewerInspector', () => {
   const root = (): HTMLElement => fixture.nativeElement;
   const page = (): ViewerPage =>
     fixture.debugElement.query(By.directive(ViewerPage)).componentInstance;
+  /** The video sync buffer a channel's connection follows: its resolved setting. */
+  const bufferOf = (channel: number): number =>
+    fixture.debugElement
+      .query(By.directive(ViewerPage))
+      .injector.get(ViewerSettingsStore)
+      .general(channel)().videoSyncBufferMs;
   /** The side-panel toggle, which the kit draws at the top bar's right edge. */
   const sidePanelToggle = (): HTMLButtonElement =>
     root().querySelector('header button[aria-label="Side panel"]')!;
@@ -271,8 +278,8 @@ describe('ViewerInspector', () => {
     expect(headings()).toEqual([]);
     expect(rowLabels()).toEqual(['Video sync buffer', 'Metadata retention', 'Line width']);
     await type(field('Video sync buffer'), '600');
-    expect(fake.connections.get(0)!.syncBuffers.at(-1)).toBe(600);
-    expect(fake.connections.get(7)!.syncBuffers.at(-1)).toBe(600);
+    expect(bufferOf(0)).toBe(600);
+    expect(bufferOf(7)).toBe(600);
   });
 
   it('with channel 2 selected a change writes an override marked "overrides global"; reset restores global', async () => {
@@ -290,15 +297,15 @@ describe('ViewerInspector', () => {
     });
     expect(storage.readStored('settings:global')).toBeNull();
     expect(flat(row('Video sync buffer'))).toContain('overrides global');
-    expect(fake.connections.get(2)!.syncBuffers.at(-1)).toBe(800);
-    expect(fake.connections.get(3)!.syncBuffers).toEqual([300]);
+    expect(bufferOf(2)).toBe(800);
+    expect(bufferOf(3)).toBe(300);
 
     await click(buttonIn(row('Video sync buffer'), 'Reset'));
 
     expect(storage.readStored('settings:channel:2')).toBeNull();
     expect(flat(row('Video sync buffer'))).not.toContain('overrides global');
     expect(field('Video sync buffer').value).toBe('300');
-    expect(fake.connections.get(2)!.syncBuffers.at(-1)).toBe(300);
+    expect(bufferOf(2)).toBe(300);
 
     // The Metadata tab's switches override too, for this channel's tiles only.
     await click(tab('Metadata'));
@@ -478,33 +485,33 @@ describe('ViewerInspector', () => {
     expect(gridTile(1).settings().roi).toStrictEqual(regions.regions);
   });
 
-  it('the preview shares the tile’s MediaStream: no second VfConnection is created', async () => {
+  it('the preview shares the tile’s MediaStream: no second connection is made', async () => {
     await open();
-    const connections = fake.connections.size;
+    const connections = fake.channels.size;
 
     await inspect(2);
 
     const preview = previewTile()!;
-    expect(preview.source()).toBe(fake.connections.get(2));
-    expect(gridTile(2).source()).toBe(fake.connections.get(2));
-    expect(fake.connections.size).toBe(connections);
+    expect(preview.source()).toBe(fake.channels.get(2)!.source);
+    expect(gridTile(2).source()).toBe(fake.channels.get(2)!.source);
+    expect(fake.channels.size).toBe(connections);
     expect(fake.holders.get(2)).toBe(2);
     expect(preview.bars()).toBe(false);
     expect(inspector().querySelector('neat-video-tile .bar')).toBeNull();
 
-    // Only the grid tile reports to the connection and judges lateness.
+    // Only the grid tile reports to the channel and judges lateness.
     await makeLate(preview);
-    expect(fake.connections.get(2)!.frameStats).toEqual([]);
+    expect(fake.channels.get(2)!.messagesPerSecond()).toBe(0);
     expect(notice()).toBeNull();
 
     await click(tileElement(3));
-    expect(previewTile()!.source()).toBe(fake.connections.get(3));
+    expect(previewTile()!.source()).toBe(fake.channels.get(3)!.source);
     expect(fake.holders.get(2)).toBe(1);
     expect(fake.holders.get(3)).toBe(2);
 
     await click(sidePanelToggle());
     expect(fake.holders.get(3)).toBe(1);
-    expect(fake.connections.size).toBe(connections);
+    expect(fake.channels.size).toBe(connections);
   });
 
   it('a channel paged off the grid keeps its preview, which keeps the connection in step', async () => {
@@ -516,28 +523,25 @@ describe('ViewerInspector', () => {
     expect(tiles()).toHaveLength(2);
 
     expect(fake.holders.get(2)).toBe(1);
-    expect(previewTile()!.source()).toBe(fake.connections.get(2));
+    expect(previewTile()!.source()).toBe(fake.channels.get(2)!.source);
     expect(status()).toContainEqual(['Late metadata', 'Not measured while off the grid']);
 
-    // With no grid tile the preview's stats are the only ones: they feed the connection's status
-    // line (vf-connection.spec covers what the connection makes of them).
-    const previewStats = { metadataMessagesPerSecond: 12 } as NeatFrameStats;
-    previewTile()!.frameStats.emit(previewStats);
-    expect(fake.connections.get(2)!.frameStats).toEqual([previewStats]);
+    // With no grid tile the preview's message rate is the only one: it feeds the status line.
+    previewTile()!.frameStats.emit({ metadataMessagesPerSecond: 12 } as NeatFrameStats);
+    expect(fake.channels.get(2)!.messagesPerSecond()).toBe(12);
 
     await click(tab('General'));
     await type(field('Video sync buffer'), '900');
     await type(field('Metadata retention'), '2000');
-    expect(fake.connections.get(2)!.syncBuffers.at(-1)).toBe(900);
+    expect(bufferOf(2)).toBe(900);
     expect(previewTile()!.retentionMs()).toBe(2000);
 
     // Back on the grid, only the grid tile reports again.
     await press('ArrowLeft');
     previewTile()!.frameStats.emit({ metadataMessagesPerSecond: 3 } as NeatFrameStats);
-    const gridStats = { metadataMessagesPerSecond: 15 } as NeatFrameStats;
-    gridTile(2).frameStats.emit(gridStats);
+    gridTile(2).frameStats.emit({ metadataMessagesPerSecond: 15 } as NeatFrameStats);
     await settle();
-    expect(fake.connections.get(2)!.frameStats).toEqual([previewStats, gridStats]);
+    expect(fake.channels.get(2)!.messagesPerSecond()).toBe(15);
     expect(status()).toContainEqual(['Late metadata', 'Not measured yet']);
   });
 
@@ -550,17 +554,19 @@ describe('ViewerInspector', () => {
       ['Late metadata', 'Not measured yet'],
     ]);
 
-    fake.connections.get(2)!.status.set({
-      phase: 'connected',
-      codec: 'H.264',
+    const channel = fake.channels.get(2)!;
+    channel.source.stats.set({
+      codec: 'H264',
       width: 640,
       height: 480,
-      fps: 15,
-      kbps: 812.4,
-      messagesPerSecond: 15,
+      framesPerSecond: 15,
+      bitsPerSecond: 812_400,
     });
-    fake.connections.get(2)!.syncBuffer.set({ supported: false, applied: false, targetMs: 0 });
+    channel.source.videoBufferSupported = false;
     await makeLate(gridTile(2));
+    // After the stats tick that made it late, which carries no message rate here.
+    channel.messagesPerSecond.set(15);
+    await settle();
 
     expect(status()).toEqual([
       ['Stream', 'H.264 · 640×480 · 15.0 fps · 812 kbit/s · 15 msg/s'],
@@ -590,7 +596,7 @@ describe('ViewerInspector', () => {
       version: 10,
       general: { videoSyncBufferMs: 1000 },
     });
-    expect(fake.connections.get(2)!.syncBuffers.at(-1)).toBe(1000);
+    expect(bufferOf(2)).toBe(1000);
     // The new buffer is still settling: the notice is gone, and focus is on the changed value.
     expect(notice()).toBeNull();
     expect(document.activeElement).toBe(field('Video sync buffer'));
@@ -622,7 +628,7 @@ describe('ViewerInspector', () => {
       types: {},
     });
     expect(storage.readStored('settings:channel:4')).toBeNull();
-    expect(fake.connections.get(5)!.syncBuffers.at(-1)).toBe(1150);
+    expect(bufferOf(5)).toBe(1150);
     expect(notice()).toBeNull();
     expect(document.activeElement).toBe(field('Video sync buffer'));
   });
@@ -707,7 +713,7 @@ describe('ViewerInspector', () => {
       // No grid tile plays: the first displayed channel.
       await click(tab('ROI'));
       expect(title()).toBe('All channels');
-      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(previewTile()!.source()).toBe(fake.channels.get(0)!.source);
       expect(fake.holders.get(0)).toBe(2);
       expect(backdropField().value).toBe('0');
       // The backdrop is no selection: the panel has no channel status.
@@ -727,7 +733,7 @@ describe('ViewerInspector', () => {
         });
       await settle();
 
-      expect(previewTile()!.source()).toBe(fake.connections.get(3));
+      expect(previewTile()!.source()).toBe(fake.channels.get(3)!.source);
       expect(backdropField().value).toBe('3');
       expect(fake.holders.get(0)).toBeUndefined();
       expect(fake.holders.get(3)).toBe(2);
@@ -745,19 +751,19 @@ describe('ViewerInspector', () => {
       await setPlaying(2, true);
 
       await click(tab('ROI'));
-      expect(previewTile()!.source()).toBe(fake.connections.get(2));
+      expect(previewTile()!.source()).toBe(fake.channels.get(2)!.source);
       expect(backdropField().value).toBe('2');
 
       // An earlier channel starting to play does not move a backdrop that still plays.
       await setPlaying(1, true);
-      expect(previewTile()!.source()).toBe(fake.connections.get(2));
+      expect(previewTile()!.source()).toBe(fake.channels.get(2)!.source);
 
       // Once it stops, the first displayed channel that plays takes over, else the first displayed.
       await setPlaying(2, false);
-      expect(previewTile()!.source()).toBe(fake.connections.get(1));
+      expect(previewTile()!.source()).toBe(fake.channels.get(1)!.source);
       expect(fake.holders.get(2)).toBe(1);
       await setPlaying(1, false);
-      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(previewTile()!.source()).toBe(fake.channels.get(0)!.source);
     });
 
     it('a channel picked in Draw on channel stays while it is displayed, whether it plays or not', async () => {
@@ -767,11 +773,11 @@ describe('ViewerInspector', () => {
       await click(tab('ROI'));
 
       await enter(backdropField(), '0');
-      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(previewTile()!.source()).toBe(fake.channels.get(0)!.source);
 
       await setPlaying(3, true);
       await setPlaying(2, false);
-      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(previewTile()!.source()).toBe(fake.channels.get(0)!.source);
       expect(backdropField().value).toBe('0');
     });
 
@@ -785,7 +791,7 @@ describe('ViewerInspector', () => {
       await enter(backdropField(), '2');
       await setPlaying(1, true);
       await setPlaying(2, false);
-      expect(previewTile()!.source()).toBe(fake.connections.get(2));
+      expect(previewTile()!.source()).toBe(fake.channels.get(2)!.source);
       expect(backdropField().value).toBe('2');
     });
 
@@ -794,11 +800,11 @@ describe('ViewerInspector', () => {
       await click(sidePanelToggle());
       await click(tab('ROI'));
       await enter(backdropField(), '4');
-      expect(previewTile()!.source()).toBe(fake.connections.get(4));
+      expect(previewTile()!.source()).toBe(fake.channels.get(4)!.source);
 
       await click(tab('Metadata'));
       await click(tab('ROI'));
-      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(previewTile()!.source()).toBe(fake.channels.get(0)!.source);
       expect(backdropField().value).toBe('0');
 
       // The same while channel 5 plays: the default, not the old pick.
@@ -806,7 +812,7 @@ describe('ViewerInspector', () => {
       await click(tab('General'));
       await setPlaying(5, true);
       await click(tab('ROI'));
-      expect(previewTile()!.source()).toBe(fake.connections.get(5));
+      expect(previewTile()!.source()).toBe(fake.channels.get(5)!.source);
       expect(fake.holders.get(4)).toBe(1);
     });
 
@@ -816,19 +822,19 @@ describe('ViewerInspector', () => {
       await click(tab('ROI'));
 
       await enter(backdropField(), '4');
-      expect(previewTile()!.source()).toBe(fake.connections.get(4));
+      expect(previewTile()!.source()).toBe(fake.channels.get(4)!.source);
       expect(fake.holders.get(0)).toBe(1);
       expect(fake.holders.get(4)).toBe(2);
 
       // Channel 12 is beyond the link's eight channels.
       await enter(backdropField(), '12');
-      expect(previewTile()!.source()).toBe(fake.connections.get(4));
+      expect(previewTile()!.source()).toBe(fake.channels.get(4)!.source);
       expect(backdropField().value).toBe('4');
-      expect(fake.connections.has(12)).toBe(false);
+      expect(fake.channels.has(12)).toBe(false);
 
       // A selected channel is previewed instead; the backdrop is back when the selection goes.
       await click(tileElement(6));
-      expect(previewTile()!.source()).toBe(fake.connections.get(6));
+      expect(previewTile()!.source()).toBe(fake.channels.get(6)!.source);
       expect(fake.holders.get(4)).toBe(1);
       expect(inspector().querySelector('input[aria-label="Draw on channel"]')).toBeNull();
     });
@@ -884,7 +890,7 @@ describe('ViewerInspector', () => {
       await click(tab('ROI'));
 
       // All channels, drawn on channel 0, which has a list of its own: the editor shows the global one.
-      expect(previewTile()!.source()).toBe(fake.connections.get(0));
+      expect(previewTile()!.source()).toBe(fake.channels.get(0)!.source);
       expect(editor()!.regions()).toStrictEqual(global);
       expect(previewTile()!.settings().roi).toStrictEqual(global);
       // The grid tile of that channel still filters by its own regions.
@@ -1193,6 +1199,7 @@ describe('ViewerInspector', () => {
 })
 class StandInTile {
   readonly source = input<unknown>();
+  readonly notice = input<string | null>();
   readonly settings = input<NeatOverlaySettings>();
   readonly retentionMs = input<number>();
   readonly channel = input<number>();

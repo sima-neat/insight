@@ -188,13 +188,14 @@ test.describe('the Viewer without video', () => {
     await expect(tiles(page)).toHaveCount(SLOTS);
   });
 
-  test('tiles show "Waiting for stream" while the offer returns 503', async ({ page }) => {
+  test('tiles show "Waiting for video" while the offer returns 503', async ({ page }) => {
     const offers = await withoutVideo(page);
     await page.goto('/viewer');
 
     await expect(tiles(page)).toHaveCount(SLOTS);
-    await expect(tiles(page)).toContainText(Array(SLOTS).fill('Waiting for stream'));
-    // The server has no stream yet, which may change any moment: each channel asks again every 2 s.
+    await expect(tiles(page)).toContainText(Array(SLOTS).fill('Waiting for video'));
+    // The server has no stream yet, which may change any moment: each channel asks again, after
+    // 1 s, then 2 s and longer.
     await expect
       .poll(() => offers.filter((channel) => channel === 0).length, { timeout: 5000 })
       .toBeGreaterThanOrEqual(2);
