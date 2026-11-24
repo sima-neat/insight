@@ -137,7 +137,8 @@
   <neat-series-swatch [index]="run.index" />
   <span class="name">{{ run.name }}</span>
   @if (run.baseline) {
-    <span class="mark" aria-hidden="true">B</span><span class="visually-hidden">, baseline</span>
+    <neat-status-chip aria-hidden="true">B</neat-status-chip
+    ><span class="visually-hidden">, baseline</span>
   }
 </ng-template>
 

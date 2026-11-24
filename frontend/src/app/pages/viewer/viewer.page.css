@@ -40,15 +40,6 @@
   gap: var(--neat-space-2);
 }
 
-/* A label beside a switch that qualifies it, as small as a hint with the outline of a chip. */
-.tag {
-  padding: 0 var(--neat-space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
-}
-
 /*
  * Grid. Full-bleed in the page, inset by one tile gap so the outer tiles keep off the edges. A
  * notice above it takes its height from the grid, which measures its own box and repacks.

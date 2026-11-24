@@ -32,6 +32,7 @@ import { NeatInput } from '@sima/neat-ui/input';
 import { NeatNumberField } from '@sima/neat-ui/number-field';
 import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-ui/popover';
 import { NeatSlider } from '@sima/neat-ui/slider';
+import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatSwitch } from '@sima/neat-ui/switch';
 import {
   fitAllTileWidth,
@@ -125,6 +126,7 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
     NeatPopoverContent,
     NeatPopoverTrigger,
     NeatSlider,
+    NeatStatusChip,
     NeatSwitch,
     NeatTileGrid,
     NeatTooltip,
