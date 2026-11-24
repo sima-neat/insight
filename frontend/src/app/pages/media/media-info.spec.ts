@@ -1,6 +1,6 @@
 import type { MediaFileInfo } from '../../api.generated';
 import { videoInfo } from '../../sources/media.testing';
-import { formatDuration, formatFrameRate, mediaInfoRows } from './media-info';
+import { formatFrameRate, mediaInfoRows } from './media-info';
 
 describe('formatFrameRate', () => {
   it('reads ffprobe’s rational rate as frames per second', () => {
@@ -11,30 +11,10 @@ describe('formatFrameRate', () => {
   });
 
   it('says "-" for a rate that is missing or not a rate', () => {
-    expect(formatFrameRate(undefined)).toBe('-');
-    expect(formatFrameRate('0/0')).toBe('-');
-    expect(formatFrameRate('n/a')).toBe('-');
-    expect(formatFrameRate('')).toBe('-');
-  });
-});
-
-describe('formatDuration', () => {
-  it('reads milliseconds as m:ss, or h:mm:ss from an hour, to the nearest second', () => {
-    expect(formatDuration(134_000)).toBe('2:14');
-    expect(formatDuration(9_400)).toBe('0:09');
-    expect(formatDuration(59_600)).toBe('1:00');
-    expect(formatDuration(3_725_000)).toBe('1:02:05');
-    expect(formatDuration(0)).toBe('0:00');
-  });
-
-  it('rounds a duration that is not whole seconds', () => {
-    expect(formatDuration(134_033)).toBe('2:14');
-    expect(formatDuration(3_725_500)).toBe('1:02:06');
-  });
-
-  it('says "-" for a duration that is unknown', () => {
-    expect(formatDuration(undefined)).toBe('-');
-    expect(formatDuration(Number.NaN)).toBe('-');
+    expect(formatFrameRate(undefined)).toBe('–');
+    expect(formatFrameRate('0/0')).toBe('–');
+    expect(formatFrameRate('n/a')).toBe('–');
+    expect(formatFrameRate('')).toBe('–');
   });
 });
 
@@ -48,7 +28,7 @@ describe('mediaInfoRows', () => {
       { label: 'Codec', value: 'H.264' },
       { label: 'Width', value: '1280' },
       { label: 'Height', value: '720' },
-      { label: 'Duration', value: '2:14' },
+      { label: 'Duration', value: '2 min 14 s' },
       { label: 'Frame rate', value: '30 fps' },
     ]);
   });
@@ -64,10 +44,10 @@ describe('mediaInfoRows', () => {
       { label: 'Size', value: '512 B' },
       { label: 'Type', value: 'Video' },
       { label: 'Codec', value: 'VP9' },
-      { label: 'Width', value: '-' },
-      { label: 'Height', value: '-' },
-      { label: 'Duration', value: '-' },
-      { label: 'Frame rate', value: '-' },
+      { label: 'Width', value: '–' },
+      { label: 'Height', value: '–' },
+      { label: 'Duration', value: '–' },
+      { label: 'Frame rate', value: '–' },
     ]);
   });
 

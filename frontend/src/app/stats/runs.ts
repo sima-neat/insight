@@ -1,6 +1,8 @@
+import { formatDuration } from '../duration';
+import { NO_VALUE } from '../no-value';
 import { formatRelativeTime } from '../relative-time';
 import type { MetricStatus, RunMetadata, RunSample, RunSummary, SavedRun } from './api';
-import { formatDuration, formatEnergy, isNumber } from './format';
+import { formatEnergy, isNumber } from './format';
 
 /** How many runs can be compared at once; the backend refuses more. */
 export const MAX_CHECKED_RUNS = 8;
@@ -59,7 +61,7 @@ export function isRecording(run: RunSummary): boolean {
   return run.ended_at === null;
 }
 
-/** A run in one line: "Complete · 34.4 s · 275 J · 17 samples". */
+/** A run in one line: "Complete · 34 s · 275 J · 17 samples". */
 export function runLine(run: RunSummary): string {
   return [
     isRecording(run) ? 'Recording' : 'Complete',
@@ -248,13 +250,15 @@ export function runMetadataRows(metadata: RunMetadata): RunFact[] {
   const interval = metadata.sample_interval_ms;
   const rows: RunFact[] = [
     { label: 'Id', value: metadata.id },
-    { label: 'Started', value: formatRunTime(metadata.started_at) || '—' },
+    { label: 'Started', value: formatRunTime(metadata.started_at) || NO_VALUE },
     {
       label: 'Ended',
       value:
-        metadata.ended_at === null ? 'Still recording' : formatRunTime(metadata.ended_at) || '—',
+        metadata.ended_at === null
+          ? 'Still recording'
+          : formatRunTime(metadata.ended_at) || NO_VALUE,
     },
-    { label: 'Sample interval', value: isNumber(interval) ? `${interval} ms` : '—' },
+    { label: 'Sample interval', value: isNumber(interval) ? `${interval} ms` : NO_VALUE },
     { label: 'Sentinel version', value: metadata.sentinel_version },
   ];
   for (const [key, value] of Object.entries(metadata.system)) {

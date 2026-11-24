@@ -101,7 +101,7 @@ describe('PowerArea', () => {
     );
     expect(tiles().map((tile) => [tile.heading(), tile.value(), tile.unit()])[2]).toEqual([
       'Session peak',
-      '—',
+      '–',
       '',
     ]);
 

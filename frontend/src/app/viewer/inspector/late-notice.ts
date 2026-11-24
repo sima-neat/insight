@@ -3,6 +3,7 @@ import { NeatButton } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatDetails } from '@sima/neat-ui/details';
 import type { NeatLateNoticeBlocker, NeatLateNoticeDetails } from '@sima/neat-ui/video';
+import { NO_VALUE } from '../../no-value';
 
 /** Which of the notice's actions was taken: this channel's own buffer, or the global one. */
 export type RaiseTarget = 'channel' | 'global';
@@ -47,7 +48,7 @@ const BLOCKED_TEXT: Readonly<Record<NeatLateNoticeBlocker, string>> = {
           <dt>Video sync buffer</dt>
           <dd>{{ notice.bufferMs }} ms</dd>
           <dt>Late messages</dt>
-          <dd>{{ notice.latePercent === null ? '—' : notice.latePercent + ' %' }}</dd>
+          <dd>{{ notice.latePercent === null ? noValue : notice.latePercent + ' %' }}</dd>
         </dl>
         @if (notice.blockedBy !== null) {
           <p class="text">{{ blockedText[notice.blockedBy] }}</p>
@@ -99,4 +100,5 @@ export class LateNotice {
   readonly raise = output<RaiseTarget>();
 
   protected readonly blockedText = BLOCKED_TEXT;
+  protected readonly noValue = NO_VALUE;
 }

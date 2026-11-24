@@ -1,6 +1,7 @@
 import type { MediaFileInfo, MediaProbe } from '../../api.generated';
+import { formatDuration } from '../../duration';
 import { formatBytes } from '../../format-bytes';
-import { clock } from '../../sources/fps';
+import { NO_VALUE } from '../../no-value';
 import { codecLabel } from '../../sources/slot-row';
 
 /** One row of the side panel's info table. */
@@ -8,9 +9,6 @@ export interface InfoRow {
   readonly label: string;
   readonly value: string;
 }
-
-/** What a row shows for a value the probe did not find. */
-const NONE = '-';
 
 const KIND_LABELS: Record<MediaProbe['kind'], string> = {
   video: 'Video',
@@ -20,26 +18,21 @@ const KIND_LABELS: Record<MediaProbe['kind'], string> = {
 
 /**
  * ffprobe's frame rate, often rational (`30/1`, `30000/1001`), as `30 fps` or `29.97 fps`: at most
- * two decimals, none when whole. "-" for a rate that is missing or zero (`0/0`).
+ * two decimals, none when whole. `NO_VALUE` for a rate that is missing or zero (`0/0`).
  */
 export function formatFrameRate(rate: string | undefined): string {
   const [numerator, denominator = '1'] = (rate ?? '').split('/');
   const fps = Number(numerator) / Number(denominator);
-  if (!numerator || !Number.isFinite(fps) || fps <= 0) return NONE;
+  if (!numerator || !Number.isFinite(fps) || fps <= 0) return NO_VALUE;
   return `${Number(fps.toFixed(2))} fps`;
 }
 
-/** A duration in milliseconds as `2:14`, or `1:02:05` from an hour on, to the nearest second. */
-export function formatDuration(ms: number | undefined): string {
-  if (ms === undefined || !Number.isFinite(ms)) return NONE;
-  return clock(Math.round(ms / 1000));
-}
-
-const count = (value: number | undefined) => (value === undefined ? NONE : String(value));
+const count = (value: number | undefined) => (value === undefined ? NO_VALUE : String(value));
 
 /**
  * `/api/media/info` as the side panel lists it, in readable values (the size in KB/MB/GB, the
- * duration as `2:14` rather than "134.00 sec", the frame rate as `30 fps` rather than `30/1`).
+ * duration as "2 min 14 s" rather than "134.00 sec", the frame rate as `30 fps` rather than
+ * `30/1`).
  * There is no "Normalized Codec" row: for the codecs Insight streams it would read the same as
  * the codec row, and a file it cannot stream is tagged in the list.
  * Why ffprobe could not read a file, when it could not, is the last row.

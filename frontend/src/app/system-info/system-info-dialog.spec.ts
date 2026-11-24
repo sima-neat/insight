@@ -243,7 +243,7 @@ describe('SystemInfoDialog', () => {
       'Label: SDK 2.1 on a DevKit',
       'Mode: elxr-sdk',
       'SDK version: 2.1.0',
-      'Sysroot: -',
+      'Sysroot: –',
     ]);
     expect(rows('Insight')).toEqual([
       'Version: 0.12.0',
@@ -280,7 +280,7 @@ describe('SystemInfoDialog', () => {
     // The latest version equal to the installed one repeats it: the line is the venv instead.
     expect(line('SDK tools')).toBe('2.1.0 Current /opt/sdk');
     // Not installed: no update status.
-    expect(line('Model compiler')).toBe('- Not installed');
+    expect(line('Model compiler')).toBe('– Not installed');
     expect(components.querySelectorAll('neat-status-chip')).toHaveLength(2);
   });
 

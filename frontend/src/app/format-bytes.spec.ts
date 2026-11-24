@@ -28,7 +28,7 @@ describe('formatBytes', () => {
   });
 
   it('shows "-" for a count that is not a number', () => {
-    expect(formatBytes(Number.NaN)).toBe('-');
-    expect(formatBytes(Number.POSITIVE_INFINITY)).toBe('-');
+    expect(formatBytes(Number.NaN)).toBe('–');
+    expect(formatBytes(Number.POSITIVE_INFINITY)).toBe('–');
   });
 });

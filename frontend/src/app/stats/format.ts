@@ -1,6 +1,7 @@
 import type { NeatTone } from '@sima/neat-ui';
 // Types only, so that System Info, which uses `formatBytes`, does not load the charts entry.
 import type { NeatChartTone, NeatThreshold } from '@sima/neat-ui/charts';
+import { NO_VALUE } from '../no-value';
 import type { MetricStatus, SentinelMetric } from './api';
 
 /** The parts of a metric these helpers read; a partial one, as a spec or a caller may hold. */
@@ -39,12 +40,15 @@ export function unitAfter(unit: string | null | undefined): string {
   return suffix === '%' ? '%' : ` ${suffix}`;
 }
 
-/** A value with its unit and as many digits as it needs. A reading not taken is an em dash, never zero. */
+/**
+ * A value with its unit and as many digits as it needs. A reading not taken is `NO_VALUE`, never
+ * zero.
+ */
 export function formatValue(
   value: number | null | undefined,
   unit: string | null | undefined,
 ): string {
-  if (!isNumber(value)) return '—';
+  if (!isNumber(value)) return NO_VALUE;
   return `${formatNumber(value)}${unitAfter(unit)}`;
 }
 
@@ -54,7 +58,7 @@ export function fixedValue(
   unit: string | null | undefined,
   digits: number,
 ): string {
-  if (!isNumber(value)) return '—';
+  if (!isNumber(value)) return NO_VALUE;
   return `${value.toFixed(digits)}${unitAfter(unit)}`;
 }
 
@@ -166,31 +170,11 @@ export function thresholdsOf(metric: SentinelMetric): NeatThreshold[] {
 }
 
 /**
- * How long a run took: seconds with one decimal under a minute ("34.4 s"), whole seconds to the
- * hour ("20 min 5 s"), then hours and minutes ("1 h 2 min").
+ * The energy of a run: whole joules ("275 J"), kilojoules from 1000 J ("1.02 kJ"), `NO_VALUE` for
+ * none.
  */
-export function formatDuration(ms: number): string {
-  if (Math.round(ms / 100) < 600) return `${(ms / 1000).toFixed(1)} s`;
-  const seconds = Math.round(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  if (seconds < 3600) return `${minutes} min ${seconds % 60} s`;
-  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
-}
-
-/** The energy of a run: whole joules ("275 J"), kilojoules from 1000 J ("1.02 kJ"), a dash for none. */
 export function formatEnergy(joules: number | null): string {
-  if (!isNumber(joules)) return '—';
+  if (!isNumber(joules)) return NO_VALUE;
   const whole = Math.round(joules);
   return whole < 1000 ? `${whole} J` : `${(joules / 1000).toFixed(2)} kJ`;
-}
-
-/** The time a trace has been recording, as a clock: "0:34", "12:05", "1:02:05". */
-export function formatElapsed(ms: number): string {
-  const total = Math.floor(Math.max(0, ms) / 1000);
-  const seconds = String(total % 60).padStart(2, '0');
-  const minutes = Math.floor(total / 60) % 60;
-  const hours = Math.floor(total / 3600);
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
-    : `${minutes}:${seconds}`;
 }

@@ -148,7 +148,7 @@ describe('ViewerTile', () => {
     });
     await fixture.whenStable();
 
-    expect(text('.status')).toBe('H.264 · 640×480 · 15.0 fps · 812.4 kb/s · 15 msg/s');
+    expect(text('.status')).toBe('H.264 · 640×480 · 15.0 fps · 812 kbit/s · 15 msg/s');
   });
 
   it('applies the channel’s sync buffer to the connection and its retention to the tile, each only when it changes', async () => {

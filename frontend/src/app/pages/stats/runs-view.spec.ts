@@ -142,11 +142,11 @@ describe('RunsView', () => {
 
     expect(root().querySelector('[role="listbox"]')?.getAttribute('aria-label')).toBe('Runs');
     expect(options().map(rowText)).toEqual([
-      'compiler-v2-bench Recording · 12.0 s · 96 J · 7 samples 5 min ago',
-      'tes3 Complete · 8.1 s · 54 J · 4 samples 15 h ago',
-      'insight-hw-1790177227 Complete · 6.7 s · 52 J · 4 samples Sep 23',
-      'insight-hw-1790177178 Complete · 34.4 s · 275 J · 17 samples Sep 23',
-      'baseline-idle Complete · 42.1 s · 306 J · 22 samples Sep 22',
+      'compiler-v2-bench Recording · 12 s · 96 J · 7 samples 5 min ago',
+      'tes3 Complete · 8 s · 54 J · 4 samples 15 h ago',
+      'insight-hw-1790177227 Complete · 6 s · 52 J · 4 samples Sep 23',
+      'insight-hw-1790177178 Complete · 34 s · 275 J · 17 samples Sep 23',
+      'baseline-idle Complete · 42 s · 306 J · 22 samples Sep 22',
     ]);
     // Nothing is ticked yet, so there is no selection bar.
     expect(bar()).toBeNull();

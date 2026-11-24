@@ -2,8 +2,6 @@ import type { MetricStatus, SentinelMetric } from './api';
 import {
   alertLabel,
   fixedValue,
-  formatDuration,
-  formatElapsed,
   formatEnergy,
   formatNumber,
   formatValue,
@@ -103,9 +101,9 @@ describe('values and units', () => {
       '95.5%',
       '7.13 W',
       '1235 MB',
-      '—',
-      '—',
-      '—',
+      '–',
+      '–',
+      '–',
       '800',
       '6.01',
     ]);
@@ -140,7 +138,7 @@ describe('values and units', () => {
       fixedValue(null, 'W', 1),
       fixedValue(55.12, 'C', 1),
       fixedValue(41.234, '%', 0),
-    ]).toEqual(['12.0 W', '13.7 W', '0.56 W', '—', '55.1 °C', '41%']);
+    ]).toEqual(['12.0 W', '13.7 W', '0.56 W', '–', '55.1 °C', '41%']);
     expect(['C', '%', 'W', 'load', null].map(unitAfter)).toEqual([' °C', '%', ' W', '', '']);
   });
 
@@ -198,28 +196,10 @@ describe('how a status is worded and drawn', () => {
     expect(thresholdsOf(metric({ warn: null, critical: null, unit: 'W' }))).toEqual([]);
   });
 
-  it('formatDuration reads tenths under a minute, whole seconds to the hour, then hours', () => {
-    expect(formatDuration(34_379)).toBe('34.4 s');
-    expect(formatDuration(0)).toBe('0.0 s');
-    expect(formatDuration(59_940)).toBe('59.9 s');
-    expect(formatDuration(59_960)).toBe('1 min 0 s');
-    expect(formatDuration(120_000)).toBe('2 min 0 s');
-    expect(formatDuration(1_205_000)).toBe('20 min 5 s');
-    expect(formatDuration(3_599_600)).toBe('1 h 0 min');
-    expect(formatDuration(3_720_000)).toBe('1 h 2 min');
-    expect(formatDuration(3_600_000)).toBe('1 h 0 min');
-  });
-
-  it('formatEnergy words joules, kilojoules from 1000 J and an unmeasured run as a dash', () => {
+  it('formatEnergy words joules, kilojoules from 1000 J and an unmeasured run as none', () => {
     expect(formatEnergy(274.9)).toBe('275 J');
     expect(formatEnergy(1024)).toBe('1.02 kJ');
     expect(formatEnergy(999.6)).toBe('1.00 kJ');
-    expect(formatEnergy(null)).toBe('—');
-  });
-
-  it('formatElapsed is a clock: m:ss, and h:mm:ss from an hour', () => {
-    expect(formatElapsed(34_000)).toBe('0:34');
-    expect(formatElapsed(725_900)).toBe('12:05');
-    expect(formatElapsed(3_725_000)).toBe('1:02:05');
+    expect(formatEnergy(null)).toBe('–');
   });
 });

@@ -60,13 +60,13 @@ describe('resolveCodecLabel', () => {
 describe('formatChannelStatus', () => {
   it('shows the codec first, then size, frame rate, bitrate and message rate', () => {
     expect(formatChannelStatus(CONNECTED)).toBe(
-      'H.265 · 1280×720 · 30.0 fps · 4200.0 kb/s · 30 msg/s',
+      'H.265 · 1280×720 · 30.0 fps · 4.2 Mbit/s · 30 msg/s',
     );
   });
 
   it('omits the codec segment while the codec is unknown', () => {
     expect(formatChannelStatus({ ...CONNECTED, codec: null })).toBe(
-      '1280×720 · 30.0 fps · 4200.0 kb/s · 30 msg/s',
+      '1280×720 · 30.0 fps · 4.2 Mbit/s · 30 msg/s',
     );
   });
 
@@ -83,7 +83,7 @@ describe('formatChannelStatus', () => {
   it('marks a size and frame rate the browser has not reported yet', () => {
     expect(
       formatChannelStatus({ ...CONNECTED, width: null, height: null, fps: null, kbps: 0 }),
-    ).toBe('H.265 · ?×? · N/A fps · 0.0 kb/s · 30 msg/s');
+    ).toBe('H.265 · ?×? · N/A fps · 0 kbit/s · 30 msg/s');
   });
 
   it('says "Waiting for stream" while the server has nothing to send, and nothing while connecting', () => {

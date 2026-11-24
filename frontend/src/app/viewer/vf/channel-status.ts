@@ -1,3 +1,5 @@
+import { formatBitrate } from '../../format-bitrate';
+
 /** What a channel's connection is doing, for its status line. */
 export interface VfStatus {
   /**
@@ -52,7 +54,7 @@ export function offerFailureText(httpStatus: number): string {
 }
 
 /**
- * The tile's status text: `<codec> · <W>×<H> · <fps> fps · <kbps> kb/s · <n> msg/s` while
+ * The tile's status text: `<codec> · <W>×<H> · <fps> fps · <bitrate> · <n> msg/s` while
  * connected, or what keeps the channel from playing. The channel number is the tile's label, so it
  * is not repeated here; while connecting the label is all there is to show.
  */
@@ -68,7 +70,7 @@ export function formatChannelStatus(status: VfStatus): string {
     case 'connected': {
       const size = `${status.width ?? '?'}×${status.height ?? '?'}`;
       const fps = status.fps === null ? 'N/A' : status.fps.toFixed(1);
-      return `${codec}${size} · ${fps} fps · ${status.kbps.toFixed(1)} kb/s · ${status.messagesPerSecond} msg/s`;
+      return `${codec}${size} · ${fps} fps · ${formatBitrate(status.kbps * 1000)} · ${status.messagesPerSecond} msg/s`;
     }
   }
 }

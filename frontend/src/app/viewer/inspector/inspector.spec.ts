@@ -563,7 +563,7 @@ describe('ViewerInspector', () => {
     await makeLate(gridTile(2));
 
     expect(status()).toEqual([
-      ['Stream', 'H.264 · 640×480 · 15.0 fps · 812.4 kb/s · 15 msg/s'],
+      ['Stream', 'H.264 · 640×480 · 15.0 fps · 812 kbit/s · 15 msg/s'],
       ['Sync buffer', '300 ms (this browser cannot delay video)'],
       ['Late metadata', '90 % late, ~80 ms after its frame'],
     ]);

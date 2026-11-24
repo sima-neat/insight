@@ -53,9 +53,10 @@ import {
 import { MicTest } from '../../peripherals/mic-test';
 import { PeripheralsSession, type PreviewResume } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
+import { formatElapsed } from '../../duration';
 import { ListColumn } from '../../list-column';
 import { PanelTitle } from '../../panel-title';
-import { elapsedSeconds, formatRelativeTime } from '../../relative-time';
+import { formatRelativeTime } from '../../relative-time';
 import { CameraPanel } from './camera-panel';
 import { DeviceDetails } from './device-details';
 import { MicrophonePanel } from './microphone-panel';
@@ -251,7 +252,7 @@ export class PeripheralsPage {
   protected readonly refreshLabel = computed(() => {
     const since = this.peripherals.scanning();
     if (since === null) return 'Refresh';
-    return `Scanning… ${elapsedSeconds(since, this.now())} s`;
+    return `Scanning… ${formatElapsed(since, this.now())}`;
   });
   /** The status line for screen readers: a scan running, or a stale snapshot. */
   protected readonly scanStatus = computed(() => {
