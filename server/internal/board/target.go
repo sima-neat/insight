@@ -69,12 +69,27 @@ func (t Target) Label() string {
 // address is host:port as a dialer takes it.
 func (t Target) address() string { return net.JoinHostPort(t.Host, strconv.Itoa(t.Port)) }
 
+// SSHCommand is the ssh command that signs in to an SSH target, as a person runs it in a shell:
+// "ssh sima@192.168.2.2", with "-p" off port 22.
+func (t Target) SSHCommand() string {
+	if t.Port == DefaultPort {
+		return "ssh " + t.login()
+	}
+	return "ssh -p " + strconv.Itoa(t.Port) + " " + t.login()
+}
+
+// login is user@host as a shell command takes it, each quoted.
+func (t Target) login() string { return shellQuote(t.User) + "@" + shellQuote(t.Host) }
+
 // LocalTarget is the board Insight runs on.
 func LocalTarget() Target { return Target{Mode: ModeLocal, Source: SourceOnBoard} }
 
 var (
 	hostPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$`)
 	userPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$`)
+	// zonePattern is an IPv6 zone: a network interface's name (at most 15 characters on Linux)
+	// or its index.
+	zonePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
 )
 
 // SSHTarget checks an SSH address and makes its target. A port of 0 is DefaultPort and an
@@ -103,9 +118,11 @@ func validHost(host string) bool {
 	if hostPattern.MatchString(host) {
 		return true
 	}
-	// An IPv6 address with a zone ("fe80::1%eth0") has a % the pattern refuses.
-	_, err := netip.ParseAddr(host)
-	return err == nil
+	// An IP address the pattern refuses: one that starts with a colon ("::1"), or an IPv6 address
+	// with a zone ("fe80::1%eth0"). netip takes any text as a zone, so a zone is held to an
+	// interface's name.
+	addr, err := netip.ParseAddr(host)
+	return err == nil && (addr.Zone() == "" || zonePattern.MatchString(addr.Zone()))
 }
 
 // sdkTarget is the DevKit the SDK is paired with: sima-cli's SDK setup exports

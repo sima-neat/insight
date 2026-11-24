@@ -47,6 +47,9 @@ func TestSSHTarget(t *testing.T) {
 		{"", 22, "sima"}, {"-oProxyCommand=x", 22, "sima"}, {"a b", 22, "sima"},
 		{"devkit", 70000, "sima"}, {"devkit", -1, "sima"},
 		{"devkit", 22, "-l"}, {"devkit", 22, "a b"},
+		// netip takes any text as a zone; a shell command in it is no interface's name.
+		{"fe80::1%$(touch${IFS}/tmp/x)", 22, "sima"}, {"fe80::1%eth0;id", 22, "sima"},
+		{"fe80::1%", 22, "sima"}, {"fe80::1%a-name-over-15-chars", 22, "sima"},
 	} {
 		if _, err := SSHTarget(bad.host, bad.port, bad.user, SourceManual); codeOf(err) != CodeInvalidRequest {
 			t.Errorf("%+v accepted: %v", bad, err)
@@ -74,6 +77,22 @@ func TestSDKTarget(t *testing.T) {
 	} {
 		if target, ok := sdkTarget(env(values)); ok {
 			t.Errorf("%v gave %+v", values, target)
+		}
+	}
+}
+
+func TestSSHCommand(t *testing.T) {
+	for _, c := range []struct {
+		target Target
+		want   string
+	}{
+		{Target{Mode: ModeSSH, Host: "192.168.2.2", Port: 22, User: "sima"}, "ssh sima@192.168.2.2"},
+		{Target{Mode: ModeSSH, Host: "fe80::1%eth0", Port: 2222, User: "dev"}, "ssh -p 2222 dev@fe80::1%eth0"},
+		// SSHTarget refuses such a host; the command quotes it all the same.
+		{Target{Mode: ModeSSH, Host: "a$(id)", Port: 22, User: "sima"}, "ssh sima@'a$(id)'"},
+	} {
+		if got := c.target.SSHCommand(); got != c.want {
+			t.Errorf("%+v: %s, want %s", c.target, got, c.want)
 		}
 	}
 }

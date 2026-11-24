@@ -125,7 +125,7 @@ func (s *sshTransport) use(ctx context.Context, f func(*ssh.Client) error) error
 		}
 		if alive(ctx, c) {
 			return boardError(CodeCommandFailed, fmt.Sprintf("%s refused to run the command over SSH.", s.target.Host),
-				fmt.Sprintf("Check that `ssh -p %d %s true` runs a command on the board.", s.target.Port, s.login()), err)
+				fmt.Sprintf("Check that `ssh -p %d %s true` runs a command on the board.", s.target.Port, s.target.login()), err)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -363,12 +363,12 @@ func (s *sshTransport) connectFailed(ctx context.Context, err error) error {
 func (s *sshTransport) unreachable(message string, err error) *apierr.Error {
 	return boardError(CodeUnreachable, message,
 		fmt.Sprintf("Check that the board is powered on and on the network, and that `ssh -p %d %s` works from this machine.",
-			s.target.Port, s.login()), err)
+			s.target.Port, s.target.login()), err)
 }
 
 func (s *sshTransport) authFailed(err error) *apierr.Error {
 	account := localAccount()
-	command := fmt.Sprintf("ssh-copy-id -p %d %s", s.target.Port, s.login())
+	command := fmt.Sprintf("ssh-copy-id -p %d %s", s.target.Port, s.target.login())
 	if account == "root" {
 		command = "sudo -H " + command
 	}
@@ -387,18 +387,13 @@ func (s *sshTransport) noKey() *apierr.Error {
 	}
 	key := shellQuote(filepath.Join(s.sshDir, "id_ed25519"))
 	command := fmt.Sprintf(`%sssh-keygen -t ed25519 -N "" -f %s && %sssh-copy-id -p %d %s`,
-		sudo, key, sudo, s.target.Port, s.login())
+		sudo, key, sudo, s.target.Port, s.target.login())
 	missing := boardError(CodeAuthFailed,
 		fmt.Sprintf("The '%s' account on this machine has no SSH key to sign in to %s with.", account, s.target.Host),
 		fmt.Sprintf("Insight signs in with the SSH keys of the '%s' account, and it has none. "+
 			"Create one and authorize it on the board, then retry: %s", account, command), nil)
 	missing.Command = command
 	return missing
-}
-
-// login is user@host as a shell command takes it.
-func (s *sshTransport) login() string {
-	return shellQuote(s.target.User) + "@" + shellQuote(s.target.Host)
 }
 
 func localAccount() string {
