@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"path"
@@ -17,6 +18,7 @@ import (
 	"syscall"
 
 	"insight/internal/apierr"
+	"insight/internal/media"
 )
 
 // The archives an upload may be: unpacked into a folder named after the archive. A .gz is a
@@ -47,18 +49,21 @@ const maxArchiveEntries = 10_000
 type unpacker struct {
 	dest     string
 	maxBytes int64
+	free     int64 // free on the disk when unpacking began; math.MaxInt64 when unknown
 	written  int64
 	entries  int
 }
 
 // unpack unpacks the archive at archive into dest, which it creates. Links, devices and pipes
 // are refused, as are entries that would land outside dest; hidden entries (a leading dot) and
-// macOS metadata (__MACOSX) are skipped, since the library leaves them out anyway.
-func unpack(archive, dest string, isZip bool, maxBytes int64) error {
+// macOS metadata (__MACOSX) are skipped, since the library leaves them out anyway. What the
+// archive says it holds must fit in free with media.FreeSpaceMargin to spare: a ZIP's whole
+// directory before anything is written, a tar's entries one by one as their headers come.
+func unpack(archive, dest string, isZip bool, maxBytes, free int64) error {
 	if err := os.Mkdir(dest, 0o755); err != nil {
 		return saveError("unpacking the archive", err)
 	}
-	u := &unpacker{dest: dest, maxBytes: maxBytes}
+	u := &unpacker{dest: dest, maxBytes: maxBytes, free: free}
 	if isZip {
 		return u.zip(archive)
 	}
@@ -71,13 +76,22 @@ func (u *unpacker) zip(archive string) error {
 		return invalidArchive("The archive cannot be read as a ZIP file: %v.", err)
 	}
 	defer r.Close()
+	var declared uint64
+	for _, f := range r.File {
+		if f.Mode().IsRegular() {
+			declared += f.UncompressedSize64
+		}
+	}
+	if err := u.room(clampInt64(declared)); err != nil {
+		return err
+	}
 	for _, f := range r.File {
 		mode := f.Mode()
 		switch {
 		case mode.IsDir():
 			err = u.folder(f.Name)
 		case mode.IsRegular():
-			err = u.file(f.Name, f.Open)
+			err = u.file(f.Name, clampInt64(f.UncompressedSize64), f.Open)
 		default:
 			err = refusedEntry(f.Name, mode)
 		}
@@ -117,7 +131,7 @@ func (u *unpacker) tar(archive string) error {
 		case tar.TypeDir:
 			err = u.folder(header.Name)
 		case tar.TypeReg, tar.TypeRegA: // TypeRegA is deprecated, but old tars write it
-			err = u.file(header.Name, func() (io.ReadCloser, error) { return io.NopCloser(r), nil })
+			err = u.file(header.Name, header.Size, func() (io.ReadCloser, error) { return io.NopCloser(r), nil })
 		case tar.TypeLink, tar.TypeSymlink:
 			err = refusedEntry(header.Name, fs.ModeSymlink)
 		default:
@@ -176,9 +190,25 @@ func (u *unpacker) folder(name string) error {
 	return nil
 }
 
-func (u *unpacker) file(name string, open func() (io.ReadCloser, error)) error {
+// room refuses an archive whose content so far and the next bytes it says it holds would not
+// fit on the disk with media.FreeSpaceMargin to spare.
+func (u *unpacker) room(bytes int64) error {
+	need := u.written + max(bytes, 0)
+	if u.free-media.FreeSpaceMargin >= need {
+		return nil
+	}
+	return noRoom("The archive's content", need, u.free)
+}
+
+func clampInt64(n uint64) int64 { return int64(min(n, math.MaxInt64)) }
+
+// file writes the entry name, which says it holds declared bytes.
+func (u *unpacker) file(name string, declared int64, open func() (io.ReadCloser, error)) error {
 	target, skip, err := u.entryPath(name)
 	if err != nil || skip {
+		return err
+	}
+	if err := u.room(declared); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -98,10 +99,16 @@ func (l *Library) checkRoom(length int64) error {
 	if !known || free >= length+media.FreeSpaceMargin {
 		return nil
 	}
+	return noRoom("The upload", length, free)
+}
+
+// noRoom refuses what needs bytes on the media folder's disk, beside media.FreeSpaceMargin, when
+// only free is free.
+func noRoom(what string, bytes, free int64) error {
 	return &apierr.Error{
 		Status: http.StatusInsufficientStorage, Code: CodeNoSpace,
-		Message: fmt.Sprintf("The upload needs about %s free on the media folder's disk (%s for it and %s to spare), and %s is free.",
-			sizeText(length+media.FreeSpaceMargin), sizeText(length), sizeText(media.FreeSpaceMargin), sizeText(free)),
+		Message: fmt.Sprintf("%s needs about %s free on the media folder's disk (%s for it and %s to spare), and %s is free.",
+			what, sizeText(bytes+media.FreeSpaceMargin), sizeText(bytes), sizeText(media.FreeSpaceMargin), sizeText(free)),
 		Hint: "Delete media you no longer need, then try again.",
 	}
 }
@@ -256,7 +263,11 @@ func (l *Library) uploadArchive(ctx context.Context, up received, folder string,
 		return UploadResult{}, err
 	}
 	unpacked := filepath.Join(stage, "unpacked")
-	if err := unpack(up.staged, unpacked, isZip, l.maxUpload); err != nil {
+	free, known := l.freeSpace(l.root)
+	if !known {
+		free = math.MaxInt64
+	}
+	if err := unpack(up.staged, unpacked, isZip, l.maxUpload, free); err != nil {
 		return UploadResult{}, err
 	}
 	_ = os.Remove(up.staged) // the archive itself, in the stage; its room is better free

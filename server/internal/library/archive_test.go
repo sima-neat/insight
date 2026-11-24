@@ -186,6 +186,33 @@ func TestUploadRefusesAnArchiveWithAPlaylist(t *testing.T) {
 	}
 }
 
+// An archive is checked for room for what it says it unpacks to, before anything of it is
+// written: a ZIP by its directory, a tar by each entry's header.
+func TestAnArchiveThatWouldNotFitUnpackedIsRefused(t *testing.T) {
+	content := string(make([]byte, 256<<10)) // zeros: the archive is small, its content is not
+	for name, archive := range map[string][]byte{
+		"set.zip": zipOf(t, entry{name: "a.mp4", content: content}, entry{name: "b.mp4", content: content}),
+		"set.tgz": tarOf(t, true, entry{name: "a.mp4", content: content}, entry{name: "b.mp4", content: content}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, nil)
+			// Room for the request (the archive and the form around it) and one entry, with the
+			// margin, but not for both entries.
+			f.lib.freeSpace = func(string) (int64, bool) {
+				return int64(len(archive)) + 4096 + int64(len(content)) + media.FreeSpaceMargin, true
+			}
+			_, err := f.upload(t, name, archive, "")
+			if code(err) != CodeNoSpace {
+				t.Fatalf("%v, want no_space", err)
+			}
+			f.noStages(t)
+			if entries, _ := os.ReadDir(f.root); len(entries) != 0 {
+				t.Fatalf("a refused archive left %v", entries)
+			}
+		})
+	}
+}
+
 func TestUploadLimitsWhatAnArchiveUnpacksTo(t *testing.T) {
 	f := newFixture(t, func(o *Options) { o.MaxUploadBytes = 64 << 10 })
 	// Zeros compress to almost nothing: the archive is small, its content is not.
