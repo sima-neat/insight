@@ -268,7 +268,7 @@ describe('MicrophonePanel', () => {
     await nextPoll();
     await answerRead(micTestStatus({ elapsed_ms: 4200, level_dbfs: -30 }));
     expect(button().textContent!.trim()).toBe('Stop recording');
-    expect(caption()).toBe('Recording · 0:04');
+    expect(caption()).toBe('Recording · 4 s');
     expect(announced()).toBe('Recording. Speak now, then press Stop recording.');
     expect(meterReads()).toBe(-30);
 
@@ -335,7 +335,7 @@ describe('MicrophonePanel', () => {
     // Opening reads the board's test (`resume`): the Yeti is recording, started on another visit.
     await answerRead(micTestStatus({ id: 'other', elapsed_ms: 12_300, level_dbfs: -20 }));
     expect(button().textContent!.trim()).toBe('Stop recording');
-    expect(caption()).toBe('Recording · 0:12');
+    expect(caption()).toBe('Recording · 12 s');
     expect(meterReads()).toBe(-20);
 
     // Stop names the recording taken up.
@@ -445,7 +445,7 @@ describe('MicrophonePanel', () => {
     await settle();
     expect(button().textContent!.trim()).toBe('Stop recording');
     expect(button().hasAttribute('aria-disabled')).toBe(false);
-    expect(caption()).toBe('Recording · 0:04');
+    expect(caption()).toBe('Recording · 4 s');
     // The stop's answer was lost on the way: the network words.
     expect(callouts()).toEqual([
       {

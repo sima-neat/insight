@@ -22,14 +22,6 @@
   min-width: 5.5rem;
 }
 
-.separator {
-  flex: none;
-  align-self: stretch;
-  width: 1px;
-  margin-block: var(--neat-space-3);
-  background: var(--border);
-}
-
 /*
  * Popovers. Their content sits in the kit's panel, which stacks it with a gap and an inset; only
  * what the panel does not lay out is set here.
@@ -40,23 +32,16 @@
   gap: var(--neat-space-2);
 }
 
-/* A label beside a switch that qualifies it, as small as a hint with the outline of a chip. */
-.tag {
-  padding: 0 var(--neat-space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
-}
-
 /*
  * Grid. Full-bleed in the page, inset by one tile gap so the outer tiles keep off the edges. A
- * notice above it takes its height from the grid, which measures its own box and repacks.
+ * notice above it, one tile gap away, takes its height from the grid, which measures its own box
+ * and repacks.
  */
 .grid-area {
   position: relative;
   display: flex;
   flex-direction: column;
+  gap: var(--neat-space-2);
   box-sizing: border-box;
   height: 100%;
   padding: var(--neat-space-2);
@@ -64,21 +49,6 @@
 
 neat-tile-grid {
   flex: 1 1 0;
-}
-
-/* Always in the DOM, so screen readers hear the text when it appears; empty, it takes no room. */
-.notice {
-  flex: none;
-  margin: 0;
-  font-size: var(--neat-text-sm);
-}
-
-.notice:not(:empty) {
-  margin-block-end: var(--neat-space-2);
-  padding: var(--neat-space-2) var(--neat-space-3);
-  border-radius: var(--radius);
-  background: var(--muted);
-  color: var(--muted-foreground);
 }
 
 .empty {

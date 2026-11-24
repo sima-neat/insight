@@ -19,30 +19,32 @@ import {
   NeatButton,
   NeatCode,
   NeatIcon,
-  NeatInlineButton,
   NeatNote,
   NeatTooltip,
   type NeatButtonVariant,
   type NeatIconName,
 } from '@sima/neat-ui';
+import { NeatCopyButton } from '@sima/neat-ui/code-block';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatDialog, type NeatDialogRef } from '@sima/neat-ui/dialog';
 import { NeatErrorNote, NeatField } from '@sima/neat-ui/field';
 import { NeatInput } from '@sima/neat-ui/input';
+import { NeatNumberField } from '@sima/neat-ui/number-field';
 import { NeatProgress } from '@sima/neat-ui/progress';
 import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { Slot } from '../../api.generated';
-import { copyText } from '../../clipboard';
+import { formatElapsed } from '../../duration';
+import { formatBitrate } from '../../format-bitrate';
+import { NO_VALUE } from '../../no-value';
 import { PanelTitle } from '../../panel-title';
 import { CamerasService } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
-import { customRate } from '../../sources/fps';
+import { customRate, FPS_MIN, FPS_STEP } from '../../sources/fps';
 import { SlotsService } from '../../sources/slots.service';
 import type { Camera } from '../../sources/webcam-publishing';
-import { FpsStepper } from './fps-stepper';
 import { MediaPicker } from './media-picker';
 import { SlotControl } from './slot-control';
 import { SlotPreview } from './slot-preview';
@@ -50,10 +52,8 @@ import {
   codecWarning,
   dimensionsText,
   externalChip,
-  formatBitrate,
   isLive,
   isRunning,
-  liveFor,
   protocolLabel,
   pullSourceText,
   pullStatusLabel,
@@ -77,8 +77,6 @@ const SOURCE_FORMS: NeatSegmentedOption<SourceForm>[] = [
 /** A pull accepts RTSP and RTSPS URLs only. */
 const STREAM_URL = /^rtsps?:\/\//i;
 
-const COPY_REFUSED = 'Could not copy the URL: the browser refused access to the clipboard.';
-
 /** The slot's main action, one button whatever it is (see the template). */
 interface PrimaryAction {
   readonly kind: 'start' | 'stop' | 'cancel' | 'takeOver';
@@ -100,8 +98,8 @@ interface PrimaryAction {
 interface StreamUrl {
   readonly label: string;
   readonly url: string;
-  /** The Copy button's accessible name. */
-  readonly copyLabel: string;
+  /** What the URL is, for its Copy button's name: "Copy stream URL for src3". */
+  readonly what: string;
 }
 
 let nextPanelId = 0;
@@ -144,23 +142,24 @@ function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
  * the services fetch the slots again either way.
  *
  * The page builds the panel afresh for each slot, so the form, the typed URL and password and the
- * stepper's draft never carry over to another slot; it reacts to its slot changing all the same.
+ * frame rate field's draft never carry over to another slot; it reacts to its slot changing all
+ * the same.
  */
 @Component({
   selector: 'app-slot-panel',
   imports: [
-    FpsStepper,
+    NeatNumberField,
     MediaPicker,
     NeatAsideActions,
     NeatAsideHeading,
     NeatButton,
     NeatCode,
     NeatColumn,
+    NeatCopyButton,
     NeatDetails,
     NeatErrorNote,
     NeatField,
     NeatIcon,
-    NeatInlineButton,
     NeatInput,
     NeatNote,
     NeatProgress,
@@ -189,12 +188,14 @@ export class SlotPanel {
   private readonly injector = inject(Injector);
 
   private readonly pickerTemplate = viewChild.required<TemplateRef<unknown>>('picker');
-  private readonly stepper = viewChild(FpsStepper);
+  private readonly fpsField = viewChild(NeatNumberField);
   private readonly primaryButton = viewChild.required<ElementRef<HTMLButtonElement>>('primary');
   private readonly changeButton = viewChild<ElementRef<HTMLButtonElement>>('change');
   private readonly sourceSwitch = viewChild<NeatSegmented<SourceForm>>(NeatSegmented);
   private readonly cameraList = viewChild<NeatSelectList<Camera, string>>(NeatSelectList);
 
+  protected readonly fpsStep = FPS_STEP;
+  protected readonly fpsMin = FPS_MIN;
   protected readonly fpsReasonId = `slot-panel-${nextPanelId++}-fps-reason`;
 
   protected readonly slot = computed(() => this.row().slot);
@@ -220,7 +221,6 @@ export class SlotPanel {
     source: this.n,
     computation: () => null,
   });
-  private readonly fpsInvalid = linkedSignal({ source: this.n, computation: () => false });
   /** The camera assigned to this slot, by id: it changes only with this slot's assignment. */
   private readonly assignedCameraId = computed(
     () => this.cameras.assignments().get(this.n())?.deviceId ?? null,
@@ -259,7 +259,7 @@ export class SlotPanel {
       case 'pull':
         return this.needsUrl() ? 'Enter the stream URL again first' : null;
       default:
-        return this.fpsInvalid() ? 'FPS must be a whole number of at least 1' : null;
+        return null;
     }
   });
   protected readonly startTooltip = computed(() => {
@@ -306,7 +306,7 @@ export class SlotPanel {
   protected readonly fpsLocked = computed(
     () => this.running() || this.encode() !== null || this.busy(),
   );
-  /** Why the rate cannot be changed, said under the stepper. */
+  /** Why the rate cannot be changed, said under the frame rate field. */
   protected readonly fpsReason = computed(() => {
     const slot = this.slot();
     if (!slot.file) return 'Assign media before choosing a frame rate';
@@ -314,6 +314,8 @@ export class SlotPanel {
     if (this.running()) return 'Stop the source to change its frame rate';
     return null;
   });
+  /** The frame rate the field shows: the chosen one, else the file's own, null if unknown. */
+  protected readonly shownFps = computed(() => this.slot().fps ?? this.slot().native_fps ?? null);
   protected readonly nativeRate = computed(() => customRate(this.slot()) === null);
   protected readonly nativeLabel = computed(() => {
     const native = this.slot().native_fps;
@@ -373,10 +375,10 @@ export class SlotPanel {
     const rtsp: StreamUrl = {
       label: 'URL',
       url: urls.rtsp,
-      copyLabel: `Copy stream URL for src${n}`,
+      what: `stream URL for src${n}`,
     };
     return urls.http_mjpeg
-      ? [rtsp, { label: 'HTTP', url: urls.http_mjpeg, copyLabel: `Copy HTTP URL for src${n}` }]
+      ? [rtsp, { label: 'HTTP', url: urls.http_mjpeg, what: `HTTP URL for src${n}` }]
       : [rtsp];
   });
   protected readonly readers = computed(() => readersText(this.slot().readers));
@@ -387,18 +389,18 @@ export class SlotPanel {
     const publisher = slot.publisher;
     const dimensions = publisher ? dimensionsText(publisher) : '';
     return {
-      // A pull names no codec until it is live: "-", as the list says.
+      // A pull names no codec until it is live: `NO_VALUE`, as the list says.
       video: `${slotCodec(slot)}${dimensions ? ` · ${dimensions}` : ''}`,
       warning: codecWarning(slot),
       // Recomputed with each poll answer, every 2 s.
-      liveFor: liveFor(publisher?.since, Date.now()),
+      liveFor: formatElapsed(Date.parse(publisher?.since ?? ''), Date.now()),
       bitrate: formatBitrate(publisher?.bitrate_bps),
     };
   });
   protected readonly publisher = computed(() => {
     const publisher = this.slot().publisher;
     return this.held() && publisher
-      ? `${protocolLabel(publisher.protocol)} · ${publisher.address || '-'}`
+      ? `${protocolLabel(publisher.protocol)} · ${publisher.address || NO_VALUE}`
       : null;
   });
   protected readonly pullSource = computed(() => {
@@ -656,23 +658,14 @@ export class SlotPanel {
     }
   }
 
-  protected async commitFps(fps: number | null): Promise<void> {
+  /**
+   * Commits a frame rate (null: the file's own). A rate equal to the one shown is no change. A
+   * refused one (already reported) is put back in the field.
+   */
+  protected async onFpsCommit(fps: number | null): Promise<void> {
+    if (fps !== null && fps === this.shownFps()) return;
     const result = await this.control.commitFps(this.slot(), fps);
-    // Refused (and reported): the field shows the rate the slot still has.
-    if (!result.ok) this.stepper()?.reset();
-  }
-
-  protected setFpsInvalid(invalid: boolean): void {
-    this.fpsInvalid.set(invalid);
-  }
-
-  protected async copyUrl(url: string): Promise<void> {
-    try {
-      await copyText(url);
-      this.toasts.status(`Copied: ${url}`);
-    } catch {
-      this.toasts.error(COPY_REFUSED);
-    }
+    if (!result.ok) this.fpsField()?.reset();
   }
 
   /**

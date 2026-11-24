@@ -35,13 +35,11 @@ import {
 } from '@sima/neat-ui/video';
 import { ChannelLateness, type LatenessReading } from '../channel-lateness';
 import { ChannelPlayback } from '../channel-playback';
-import { followSyncSettings } from '../connection-sync';
+import { formatChannelStats } from '../channel-status';
 import { RoiStore } from '../settings/roi-store';
 import type { NumericSettingId, SettingTab } from '../settings/schema';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
-import { formatChannelStatus } from '../vf/channel-status';
-import type { VfConnection } from '../vf/vf-connection';
-import { VfConnections } from '../vf/vf-connections';
+import { type ViewerChannel, ViewerChannels } from '../viewer-channels';
 import { LateNotice, type RaiseTarget } from './late-notice';
 import { RoiTab } from './roi-tab';
 import { channelCount, type SettingControl, SettingRow, settingCount } from './setting-row';
@@ -208,9 +206,9 @@ function describeLateness(reading: LatenessReading | null): string {
  *
  * The preview is a second kit tile on the channel's one connection, held like the grid tile holds
  * it, so selecting a channel opens no second peer connection. While the channel has a grid tile,
- * that tile reports the channel's frame stats and lateness and the preview's are not used; once the
- * channel is paged off the grid, the preview's stats keep the connection's status line current,
- * while lateness stays the grid tile's.
+ * that tile reports the channel's message rate and lateness and the preview's are not used; once
+ * the channel is paged off the grid, the preview's rate keeps the status line current, while
+ * lateness stays the grid tile's.
  *
  * Escape inside the panel and the close button ask the page to close it, which returns focus to the grid.
  */
@@ -253,7 +251,7 @@ export class ViewerInspector {
   /** Escape or the close button: the page closes the panel. */
   readonly dismiss = output<void>();
 
-  private readonly connections = inject(VfConnections);
+  private readonly viewerChannels = inject(ViewerChannels);
   private readonly store = inject(ViewerSettingsStore);
   private readonly roi = inject(RoiStore);
   private readonly lateness = inject(ChannelLateness);
@@ -356,7 +354,7 @@ export class ViewerInspector {
     () => this.channel() ?? (this.roiOpen() ? this.backdrop() : null),
   );
 
-  private readonly connection = signal<VfConnection | null>(null);
+  private readonly connection = signal<ViewerChannel | null>(null);
   private readonly sync = computed(() => {
     const channel = this.previewChannel();
     return channel === null ? null : this.store.general(channel)();
@@ -398,12 +396,14 @@ export class ViewerInspector {
     const connection = this.connection();
     const sync = this.sync();
     if (channel === null || connection === null || sync === null) return null;
-    const buffer = connection.syncBuffer().supported
+    const { source } = connection;
+    const buffer = source.videoBufferSupported
       ? `${sync.videoSyncBufferMs} ms`
       : `${sync.videoSyncBufferMs} ms (this browser cannot delay video)`;
     return {
-      // While connecting the status line is empty; on a tile the label stands in for it.
-      stream: formatChannelStatus(connection.status()) || 'Connecting',
+      stream:
+        source.notice() ??
+        (formatChannelStats(source.stats(), connection.messagesPerSecond()) || 'Connecting'),
       buffer,
       lateness: describeLateness(this.lateness.of(channel)()),
     };
@@ -420,7 +420,7 @@ export class ViewerInspector {
     return lateNoticeDetails(
       reading.snapshot,
       sync.videoSyncBufferMs,
-      connection.syncBuffer().supported,
+      connection.source.videoBufferSupported,
       this.store.value('global', 'general.videoSyncBufferMs'),
     );
   });
@@ -432,13 +432,9 @@ export class ViewerInspector {
         this.connection.set(null);
         return;
       }
-      this.connection.set(this.connections.get(channel));
-      onCleanup(() => this.connections.release(channel));
+      this.connection.set(this.viewerChannels.get(channel));
+      onCleanup(() => this.viewerChannels.release(channel));
     });
-
-    // Either holder of the connection may be its only one: the grid tile is gone while the
-    // channel is paged off the grid.
-    followSyncSettings(this.connection, this.sync);
   }
 
   protected selectTab(value: string | undefined): void {
@@ -486,7 +482,7 @@ export class ViewerInspector {
   protected onPreviewStats(stats: NeatFrameStats): void {
     const channel = this.previewChannel();
     if (channel !== null && this.lateness.of(channel)() === null) {
-      this.connection()?.reportFrameStats(stats);
+      this.connection()?.messagesPerSecond.set(stats.metadataMessagesPerSecond);
     }
   }
 

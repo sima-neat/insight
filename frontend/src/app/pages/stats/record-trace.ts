@@ -17,8 +17,8 @@ import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { Announcement } from '../../announcement';
 import { ticking } from '../../clock';
+import { formatDuration } from '../../duration';
 import { holdFocus } from '../../hold-focus';
-import { formatElapsed } from '../../stats/format';
 import { parseTags, traceName, validateTrace } from '../../stats/runs';
 import type { SentinelFailure } from '../../stats/sentinel-failure';
 import { SentinelRuns } from '../../stats/sentinel-runs';
@@ -111,7 +111,7 @@ export class RecordTrace {
     // While the trace cannot be read, whether it still records is not known: no clock runs on.
     if (readAt === null || this.runs.traceFailure() !== null) return '';
     const recorded = this.runs.traceSummary()?.duration_ms ?? 0;
-    return formatElapsed(recorded + Math.max(0, this.now() - readAt));
+    return formatDuration(recorded + Math.max(0, this.now() - readAt));
   });
 
   constructor() {

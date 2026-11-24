@@ -8,9 +8,8 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { NeatButton, NeatNote } from '@sima/neat-ui';
+import { NeatButton, NeatNote, NeatSearch } from '@sima/neat-ui';
 import { NeatErrorNote } from '@sima/neat-ui/field';
-import { NeatInput } from '@sima/neat-ui/input';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import { CellText } from '../cell-text';
@@ -31,6 +30,7 @@ import {
 } from './catalog';
 import { CatalogFilters } from './catalog-filters';
 import { formatBytes } from '../format-bytes';
+import { NO_VALUE } from '../no-value';
 import { ImportRunner } from './import-runner';
 import { ImportSession } from './import-session';
 import { MediaLibraryService } from './media-library.service';
@@ -60,9 +60,6 @@ interface SourceRow {
   /** Its importable variants, whatever the filter. */
   readonly variants: number;
 }
-
-/** A cell with nothing to show, as Streaming's and Media's lists say it. */
-const NONE = '-';
 
 const byAssetPath = (row: AssetRow) => row.asset.path;
 const bySourceId = (row: SourceRow) => row.source.id;
@@ -103,8 +100,8 @@ export class CatalogTabState {
     NeatButton,
     NeatColumn,
     NeatErrorNote,
-    NeatInput,
     NeatNote,
+    NeatSearch,
     NeatSelectList,
     NeatTab,
     NeatTabs,
@@ -254,10 +251,6 @@ export class ImportCatalog {
     }
   }
 
-  protected setSearch(value: string): void {
-    this.state.search.set(value);
-  }
-
   /** A different source starts from its own variants, unfiltered. */
   protected pickSource(row: SourceRow | null): void {
     if (!row || row.source.id === this.selectedSource()?.id) return;
@@ -304,9 +297,9 @@ export class ImportCatalog {
       asset,
       source: sources.get(asset.source_id)?.title || asset.source_title || asset.source_id,
       label: catalogAssetLabel(asset),
-      profile: asset.profile || NONE,
-      codec: asset.codec ? codecLabel(asset.codec) : NONE,
-      dimensions: assetDimensions(asset) || NONE,
+      profile: asset.profile || NO_VALUE,
+      codec: asset.codec ? codecLabel(asset.codec) : NO_VALUE,
+      dimensions: assetDimensions(asset) || NO_VALUE,
       size: formatBytes(asset.bytes || 0),
     }));
   }

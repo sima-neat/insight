@@ -192,13 +192,15 @@
         aria-label="Output frame rate"
         [attr.aria-describedby]="fpsReason() ? fpsReasonId : null"
       >
-        <app-fps-stepper
-          [value]="slot().fps ?? null"
-          [nativeFps]="slot().native_fps ?? null"
-          [disabled]="fpsDisabled()"
-          [locked]="fpsLocked()"
-          (commit)="commitFps($event)"
-          (invalidChange)="setFpsInvalid($event)"
+        <neat-number-field
+          label="Frames per second"
+          [showLabel]="false"
+          [value]="shownFps()"
+          [step]="fpsStep"
+          [min]="fpsMin"
+          unit="fps"
+          [disabled]="fpsDisabled() || fpsLocked()"
+          (commit)="onFpsCommit($event)"
         />
         <button
           neatButton
@@ -211,7 +213,7 @@
               : 'Stream at the source frame rate again'
           "
           [disabled]="fpsDisabled() || fpsLocked() || nativeRate()"
-          (click)="commitFps(null)"
+          (click)="onFpsCommit(null)"
         >
           {{ nativeLabel() }}
         </button>
@@ -267,14 +269,7 @@
     <dt>{{ stream.label }}</dt>
     <dd class="url">
       <code neatCode>{{ stream.url }}</code>
-      <button
-        neatInlineButton
-        type="button"
-        [attr.aria-label]="stream.copyLabel"
-        (click)="copyUrl(stream.url)"
-      >
-        Copy
-      </button>
+      <neat-copy-button inline [text]="stream.url" [what]="stream.what" />
     </dd>
   }
   @if (holder(); as holder) {

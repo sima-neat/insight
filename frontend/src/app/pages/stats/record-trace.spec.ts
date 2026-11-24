@@ -295,11 +295,11 @@ describe('RecordTrace', () => {
     // A summary of 34 s, read 5 s ago.
     await recording({ ...RECORDING_RUN, duration_ms: 34_000 }, 5000);
 
-    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:39');
+    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 39 s');
     expect(button(root(), 'Record')).toBeUndefined();
     vi.advanceTimersByTime(1000);
     await settle();
-    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:40');
+    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 40 s');
 
     await click(button(root(), 'Stop')!);
     expect(runs.stopTrace).toHaveBeenCalledOnce();
@@ -313,7 +313,7 @@ describe('RecordTrace', () => {
         started_at: startedAt,
       });
 
-      expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:39');
+      expect(recordingLine()).toBe('Recording · compiler-v2-bench · 39 s');
     },
   );
 
@@ -325,7 +325,7 @@ describe('RecordTrace', () => {
 
     runs.traceFailure.set(null);
     await settle();
-    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:39');
+    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 39 s');
   });
 
   it('a still live dot marks the Record button, before its word', async () => {
@@ -367,7 +367,7 @@ describe('RecordTrace', () => {
   it('right after a start, with no summary yet, counts from the start’s answer', async () => {
     await recording(null, 3000);
 
-    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 0:03');
+    expect(recordingLine()).toBe('Recording · compiler-v2-bench · 3 s');
   });
 
   it('Stop waits while a start or stop is out, and keeps the focus', async () => {

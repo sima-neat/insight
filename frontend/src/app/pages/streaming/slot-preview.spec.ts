@@ -4,8 +4,9 @@ import {
   provideHttpClientTesting,
   type TestRequest,
 } from '@angular/common/http/testing';
-import { Component, signal } from '@angular/core';
+import { Component, getDebugNode, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import type { NeatLiveBadge } from '@sima/neat-ui';
 import type { Slot, SlotPull } from '../../api.generated';
 import { publisher, pull, slot as unassigned } from '../../sources/slots.testing';
 import {
@@ -15,6 +16,11 @@ import {
   previewFailure,
   SlotPreview,
 } from './slot-preview';
+
+/** The kit's live badge a preview shows, as the preview set it; null without one. */
+function liveBadge(badge: HTMLElement | null): NeatLiveBadge | null {
+  return badge === null ? null : (getDebugNode(badge)!.componentInstance as NeatLiveBadge);
+}
 
 /** A slot as the server lists it; one given a file is a file slot. */
 function slot(n: number, overrides: Partial<Slot> = {}): Slot {
@@ -569,20 +575,17 @@ describe('SlotPreview', () => {
   describe('badge', () => {
     const badge = () => root().querySelector<HTMLElement>('.badge');
     const badgeText = () => badge()?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
-    /** A live badge has the kit's pulsing dot; any other has the grey one. */
-    const liveDot = () => badge()?.querySelector('neat-live-dot .beat') ?? null;
-    const greyDot = () => badge()?.querySelector('.idle') ?? null;
+    /** A live badge has the kit's pulsing dot; any other has the gray one. */
+    const live = () => liveBadge(badge())?.live() ?? null;
 
     function expectLive(): void {
       expect(badgeText()).toBe('Live');
-      expect(liveDot()).not.toBeNull();
-      expect(greyDot()).toBeNull();
+      expect(live()).toBe(true);
     }
 
     function expectNotLive(label: string): void {
       expect(badgeText()).toBe(label);
-      expect(liveDot()).toBeNull();
-      expect(greyDot()).not.toBeNull();
+      expect(live()).toBe(false);
     }
 
     it('says File preview with a grey dot for a stopped file slot, in place of a caption', async () => {
@@ -719,7 +722,7 @@ describe('SlotPreview', () => {
     });
 
     it('is a dark pill over a picture and a muted one over an empty frame', async () => {
-      const onPicture = () => badge()!.classList.contains('on-picture');
+      const onPicture = () => liveBadge(badge())!.onPicture();
 
       await show(slot(1, { file: 'cars.mp4', codec: 'h264' }));
       expect(onPicture()).toBe(true);
@@ -786,7 +789,7 @@ describe('SlotPreview', () => {
     const state = () => ({
       badge: badgeText(),
       description: description(),
-      onPicture: badge()?.classList.contains('on-picture') ?? null,
+      onPicture: liveBadge(badge())?.onPicture() ?? null,
       image: image()?.getAttribute('src') ?? null,
       video: video() !== null,
       message: message() ?? null,

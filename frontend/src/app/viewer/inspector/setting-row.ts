@@ -8,7 +8,8 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { NeatButton, NeatIcon, NeatInlineButton, NeatNote, NeatTooltip } from '@sima/neat-ui';
+import { NeatButton, NeatInlineButton, NeatNote, NeatTooltip } from '@sima/neat-ui';
+import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatLine, NeatLineEnd, NeatLineList } from '@sima/neat-ui/line-list';
@@ -75,7 +76,7 @@ export function settingCount(count: number): string {
   selector: 'app-setting-row',
   imports: [
     NeatButton,
-    NeatIcon,
+    NeatCollapsible,
     NeatInlineButton,
     NeatInput,
     NeatLine,
@@ -168,53 +169,43 @@ export function settingCount(count: number): string {
       </div>
     }
     @if (overriddenOn().length > 0) {
-      <div class="overrides">
-        <p neatNote>
-          <button
-            neatInlineButton
-            type="button"
-            [id]="noteId()"
-            [attr.aria-expanded]="open()"
-            [attr.aria-controls]="open() ? listId() : null"
-            (click)="open.set(!open())"
-          >
-            <span class="dot" aria-hidden="true"></span>
-            {{ overriddenText() }}
-            <neat-icon class="chevron" [class.open]="open()" name="next" [size]="16" />
-          </button>
-        </p>
-        @if (open()) {
-          <ul neatLineList class="channels" [id]="listId()">
-            @for (line of lines(); track line.channel) {
-              <li neatLine>
-                <span>Channel {{ line.channel }}</span>
-                <span class="value">{{ line.value }}</span>
-                <!-- "use-global" carries no styles: useGlobal() finds the buttons by it. -->
-                <button
-                  neatInlineButton
-                  neatLineEnd
-                  class="use-global"
-                  type="button"
-                  [attr.aria-label]="useGlobalLabel(line.channel)"
-                  (click)="useGlobal(line.channel)"
-                >
-                  Use global
-                </button>
-              </li>
-            }
+      <neat-collapsible
+        variant="note"
+        tone="warning"
+        [triggerId]="noteId()"
+        [label]="overriddenText()"
+        [(open)]="open"
+      >
+        <ul neatLineList>
+          @for (line of lines(); track line.channel) {
             <li neatLine>
+              <span>Channel {{ line.channel }}</span>
+              <span class="value">{{ line.value }}</span>
+              <!-- "use-global" carries no styles: useGlobal() finds the buttons by it. -->
               <button
                 neatInlineButton
+                neatLineEnd
+                class="use-global"
                 type="button"
-                [attr.aria-label]="resetOverridesLabel()"
-                (click)="resetOverrides()"
+                [attr.aria-label]="useGlobalLabel(line.channel)"
+                (click)="useGlobal(line.channel)"
               >
-                {{ resetOverridesText() }}
+                Use global
               </button>
             </li>
-          </ul>
-        }
-      </div>
+          }
+          <li neatLine>
+            <button
+              neatInlineButton
+              type="button"
+              [attr.aria-label]="resetOverridesLabel()"
+              (click)="resetOverrides()"
+            >
+              {{ resetOverridesText() }}
+            </button>
+          </li>
+        </ul>
+      </neat-collapsible>
     }
   `,
   styleUrl: './setting-row.css',
@@ -259,7 +250,6 @@ export class SettingRow {
   protected readonly fieldId = computed(() => `setting-${this.setting().id}`);
   protected readonly hintId = computed(() => `setting-hint-${this.setting().id}`);
   protected readonly noteId = computed(() => `setting-note-${this.setting().id}`);
-  protected readonly listId = computed(() => `setting-overrides-${this.setting().id}`);
 
   /** This channel holds its own value. */
   protected readonly overrides = computed(() => {

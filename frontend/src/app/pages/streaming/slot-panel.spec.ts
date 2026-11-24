@@ -837,7 +837,7 @@ describe('SlotPanel', () => {
       expect(sourceKind('Stream URL').getAttribute('aria-checked')).toBe('true');
       expect(text()).toContain('Camera: rtsp://10.0.0.7:554/stream1');
       // A pull has no frame rate of its own.
-      expect(root().querySelector('app-fps-stepper')).toBeNull();
+      expect(root().querySelector('neat-number-field')).toBeNull();
 
       await click(button('Stop'));
       expect(slots.stop).toHaveBeenCalledExactlyOnceWith(5);
@@ -998,22 +998,93 @@ describe('SlotPanel', () => {
     expect(slots.assignFile).toHaveBeenLastCalledWith(2, 'people/walk.mp4', null);
   });
 
-  it('an invalid frame rate draft holds Start; MJPEG has no frame rate to set, an unassigned slot no stepper and no Start', async () => {
-    await open();
-    await type(field('Frames per second'), '0');
-    expect(button('Start')!.disabled).toBe(true);
-    await type(field('Frames per second'), '25');
-    expect(button('Start')!.disabled).toBe(false);
+  describe('the frame rate field', () => {
+    const decrease = () => button('Decrease Frames per second')!;
+    const increase = () => button('Increase Frames per second')!;
+    const fps = () => field('Frames per second');
 
-    slots.update(2, { file: 'cam.mjpeg', codec: 'mjpeg' });
-    await fixture.whenStable();
-    expect(field('Frames per second').disabled).toBe(true);
-    expect(button('Native (30 fps)')!.disabled).toBe(true);
+    async function typeAndEnter(text: string): Promise<void> {
+      await type(fps(), text);
+      fps().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await settle();
+    }
 
-    slots.slots.set([slot(2)]);
-    await fixture.whenStable();
-    expect(root().querySelector('app-fps-stepper')).toBeNull();
-    expect(button('Start')!.disabled).toBe(true);
+    it('shows the native rate until the slot sets another, and "–" before either is known', async () => {
+      await open();
+      expect(fps().value).toBe('30');
+      slots.update(2, { fps: 15 });
+      await fixture.whenStable();
+      expect(fps().value).toBe('15');
+
+      slots.slots.set([walk(2, { fps: undefined, native_fps: undefined })]);
+      await fixture.whenStable();
+      expect(fps().value).toBe('');
+      expect(fps().getAttribute('placeholder')).toBe('–');
+    });
+
+    it('+ commits the shown rate plus 5 and − on 3 commits 1', async () => {
+      await open();
+      await click(increase());
+      expect(slots.assignFile).toHaveBeenLastCalledWith(2, 'people/walk.mp4', 35);
+
+      slots.update(2, { fps: 3 });
+      await fixture.whenStable();
+      await click(decrease());
+      expect(slots.assignFile).toHaveBeenLastCalledWith(2, 'people/walk.mp4', 1);
+    });
+
+    it('− at 1 is disabled and commits nothing', async () => {
+      slots.slots.set([walk(2, { fps: 1 })]);
+      await open();
+      expect(decrease().getAttribute('aria-disabled')).toBe('true');
+      await click(decrease());
+      expect(slots.assignFile).not.toHaveBeenCalled();
+    });
+
+    it('a typed 24 and Enter commits 24; a typed rate equal to the shown one sends nothing', async () => {
+      await open();
+      await typeAndEnter('24');
+      expect(slots.assignFile).toHaveBeenCalledExactlyOnceWith(2, 'people/walk.mp4', 24);
+
+      slots.assignFile.mockClear();
+      await typeAndEnter('30');
+      expect(slots.assignFile).not.toHaveBeenCalled();
+    });
+
+    it('a refused rate is put back in the field', async () => {
+      await open();
+      slots.assignFile.mockRejectedValueOnce(new Error('No codec level covers 500 fps'));
+      await typeAndEnter('500');
+      expect(slots.assignFile).toHaveBeenCalledExactlyOnceWith(2, 'people/walk.mp4', 500);
+      expect(fps().value).toBe('30');
+    });
+
+    it('a locked or disabled slot disables the field and its steps', async () => {
+      slots.slots.set([walk(2, { run: true, state: 'live' })]);
+      await open();
+      expect(fps().disabled).toBe(true);
+      expect(increase().disabled).toBe(true);
+
+      slots.update(2, { file: 'cam.mjpeg', codec: 'mjpeg', run: false, state: 'idle' });
+      await fixture.whenStable();
+      expect(fps().disabled).toBe(true);
+      expect(button('Native (30 fps)')!.disabled).toBe(true);
+    });
+
+    it('a typed rate the field refuses does not hold Start', async () => {
+      await open();
+      await type(fps(), '0');
+      expect(fps().getAttribute('aria-invalid')).toBe('true');
+      expect(button('Start')!.disabled).toBe(false);
+    });
+
+    it('an unassigned slot has no frame rate field and no Start', async () => {
+      await open();
+      slots.slots.set([slot(2)]);
+      await fixture.whenStable();
+      expect(root().querySelector('neat-number-field')).toBeNull();
+      expect(button('Start')!.disabled).toBe(true);
+    });
   });
 
   it('an MJPEG stream also goes out over HTTP, with its URL and Copy, and there is no transport to choose', async () => {
@@ -1196,7 +1267,7 @@ describe('SlotPanel', () => {
       Status: 'Live',
       Video: 'H.264 · 1280×720 · 30 fps',
       URL: 'rtsp://10.0.0.2:8554/src5 Copy',
-      'Live for': '12m 04s',
+      'Live for': '12 min 04 s',
       Bitrate: '850 kbit/s',
       Readers: '0',
     });
@@ -1206,10 +1277,10 @@ describe('SlotPanel', () => {
     expect(details()).toEqual({
       Source: 'rtsp://10.0.0.7:554/stream1',
       Status: 'Unreachable · connection refused',
-      Video: '-',
+      Video: '–',
       URL: 'rtsp://10.0.0.2:8554/src6 Copy',
-      'Live for': '-',
-      Bitrate: '-',
+      'Live for': '–',
+      Bitrate: '–',
       Readers: '0',
     });
   });
@@ -1219,7 +1290,7 @@ describe('SlotPanel', () => {
     await open(4);
     const actions = [...root().querySelectorAll('button')].map((b) => b.textContent?.trim());
     expect(actions).toEqual(['Take over…', 'Copy']);
-    expect(root().querySelector('neat-segmented, app-fps-stepper, neat-select')).toBeNull();
+    expect(root().querySelector('neat-segmented, neat-number-field, neat-select')).toBeNull();
     expect(root().querySelector('app-slot-preview')).not.toBeNull();
     expect(root().querySelector('dl')).not.toBeNull();
   });
@@ -1244,7 +1315,7 @@ describe('SlotPanel', () => {
     expect(cameras.clear).toHaveBeenCalledExactlyOnceWith(2);
     expect(field('Frames per second').disabled).toBe(false);
 
-    // The changing slot holds the stepper too.
+    // The changing slot holds the frame rate field too.
     cameras.changingSlots.set(new Set([2]));
     await fixture.whenStable();
     expect(field('Frames per second').disabled).toBe(true);
@@ -1279,7 +1350,7 @@ describe('SlotPanel', () => {
     expect(document.activeElement).toBe(button('Change…'));
   });
 
-  it('says why the frame rate cannot change, in words the stepper is described by', async () => {
+  it('says why the frame rate cannot change, in words the field is described by', async () => {
     slots.slots.set([walk(2, { file: 'cam.mjpeg', codec: 'mjpeg' })]);
     await open();
     const group = root().querySelector<HTMLElement>(
@@ -1297,16 +1368,19 @@ describe('SlotPanel', () => {
     expect(group.hasAttribute('aria-describedby')).toBe(false);
   });
 
-  it('Copy copies the URL, and reports a refused clipboard', async () => {
+  it('Copy copies the URL and says so on its button, a refused clipboard too, with no toast', async () => {
+    const copy = () => root().querySelector<HTMLButtonElement>('dd neat-copy-button button')!;
     await open();
     await click(button('Copy stream URL for src2'));
     expect(writeText).toHaveBeenCalledWith('rtsp://10.0.0.2:8554/src2');
-    expect(toasts.status).toHaveBeenCalledWith('Copied: rtsp://10.0.0.2:8554/src2');
+    expect(text(copy())).toBe('Copied');
 
+    fixture.destroy();
     writeText.mockRejectedValueOnce(new DOMException('Denied', 'NotAllowedError'));
+    await open();
     await click(button('Copy stream URL for src2'));
-    expect(toasts.error).toHaveBeenCalledWith(
-      'Could not copy the URL: the browser refused access to the clipboard.',
-    );
+    expect(text(copy())).toBe('Could not copy');
+    expect(toasts.status).not.toHaveBeenCalled();
+    expect(toasts.error).not.toHaveBeenCalled();
   });
 });

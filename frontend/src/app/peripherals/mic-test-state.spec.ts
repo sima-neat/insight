@@ -1,5 +1,4 @@
 import { BoardProblem } from '../board/board-error';
-import { clock } from '../sources/fps';
 import type { MicrophoneItem, MicTestStatus } from './api';
 import { deviceRow } from './devices';
 import {
@@ -208,14 +207,6 @@ describe('mic-test-state', () => {
     );
     expect(micLevelNotice({ silent: false, peak_dbfs: -9, rms_dbfs: -20 })).toBe('');
     expect(micLevelNotice(null)).toBe('');
-    // The caption's clock is the app's one clock, `clock()` from `sources/fps.ts`.
-    for (const [seconds, text] of [
-      [0, '0:00'],
-      [4.9, '0:04'],
-      [75, '1:15'],
-    ] as const) {
-      expect(clock(seconds)).toBe(text);
-    }
   });
 
   it('microphone test: one button records, stops the recording, then stops the playback', () => {
@@ -244,9 +235,10 @@ describe('mic-test-state', () => {
     expect(micTestAction('error', false).action).toBe('record');
   });
 
-  it('the caption counts the recording on the one clock and says when it plays', () => {
-    expect(micTestCaption('recording', 0)).toBe('Recording · 0:00');
-    expect(micTestCaption('recording', 75)).toBe('Recording · 1:15');
+  it('the caption says how long it has recorded and when it plays', () => {
+    expect(micTestCaption('recording', 0)).toBe('Recording · 0 s');
+    expect(micTestCaption('recording', 4.9)).toBe('Recording · 4 s');
+    expect(micTestCaption('recording', 75)).toBe('Recording · 1 min 15 s');
     expect(micTestCaption('playing', 12)).toBe('Recording playing');
     for (const status of ['idle', 'done', 'error'] as const) {
       expect(micTestCaption(status, 12)).toBe('');

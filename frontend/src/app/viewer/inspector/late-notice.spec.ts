@@ -79,7 +79,7 @@ describe('LateNotice', () => {
     expect(values()).toEqual([
       ['Arrives after its frame', 'not measured'],
       ['Video sync buffer', '300 ms'],
-      ['Late messages', '—'],
+      ['Late messages', '–'],
     ]);
   });
 

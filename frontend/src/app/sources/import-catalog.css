@@ -9,13 +9,18 @@
   gap: var(--neat-space-2);
 }
 
+/* The search takes the row; Refresh keeps its width at the end. */
+.search {
+  flex: 1 1 auto;
+}
+
 .mode {
   display: flex;
   flex-direction: column;
   gap: var(--neat-space-3);
 }
 
-/* The count, with Select All and Clear at the row's end. */
+/* The count, with Select all and Clear at the row's end. */
 .bulk {
   display: flex;
   flex-wrap: wrap;

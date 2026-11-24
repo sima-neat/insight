@@ -321,11 +321,11 @@ The envelope alone: [envelope](schemas/metadata/envelope.schema.json).
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `bbox` | yes | `[x, y, width, height]` in video pixels. |
+| `bbox` | yes | `[x, y, width, height]` in video pixels. It places the caption, unless `oriented_bbox` is drawn. |
 | `label` | no | The class name, in the caption. It picks the color, so a class has one color in every tile. |
 | `confidence` | no | 0 to 1, in the caption and compared with the threshold. |
 | `id` | no | Your identity for the detection. Not drawn. |
-| `oriented_bbox` | no | **Planned.** A rotated box `[cx, cy, width, height, angle]`: its center and size in video pixels and its rotation in radians, a positive angle turning it clockwise on screen. The Viewer then draws it instead of `bbox`. Keep `bbox` as the rotated box's upright extent: it places the caption, drives the region-of-interest filter, and is what a viewer without rotated boxes draws. A value other than five finite numbers falls back to `bbox`. |
+| `oriented_bbox` | no | A rotated box `[cx, cy, width, height, angle]`: its center and size in video pixels and its rotation in radians, a positive angle turning it clockwise on screen. The Viewer then draws it instead of `bbox`, with the caption, upright, at the rotated box's topmost corner. Keep `bbox` as the rotated box's upright extent: it drives the region-of-interest filter and is what a viewer without rotated boxes draws. A value other than five finite numbers falls back to `bbox`. |
 
 #### classification
 

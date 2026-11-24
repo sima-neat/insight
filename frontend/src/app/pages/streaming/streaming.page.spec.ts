@@ -303,7 +303,7 @@ describe('StreamingPage', () => {
       ['src1', 'VID', 'people/walk.mp4', 'Live', '30 fps', 'H.264'],
       ['src2', 'VID', 'cars.mp4', 'Idle', '15 fps · rendition', 'H.265'],
       // A webcam's codec is the stream's, which there is none of until a browser publishes.
-      ['src3', 'CAM', 'Desk camera', 'Idle', '', '-'],
+      ['src3', 'CAM', 'Desk camera', 'Idle', '', '–'],
       ['src4', 'EXT', '⇢ RTSP · 192.168.1.20 · 1280×720 · 30 fps', 'External', '30 fps', 'AV1'],
       ['src5', 'URL', '⇠ RTSP · 10.0.0.7:554 · 1920×1080 · 25 fps', 'Live', '25 fps', 'H.264'],
       [
@@ -312,12 +312,12 @@ describe('StreamingPage', () => {
         '⇠ RTSP · 10.0.0.8:554 · retrying… (connection refused)',
         'Unreachable',
         'retrying…',
-        '-',
+        '–',
       ],
       ['src7', 'VID', 'idle.mp4', 'Idle', '30 fps', 'H.264'],
-      ['src8', '', 'Not assigned', 'Idle', '', '-'],
+      ['src8', '', 'Not assigned', 'Idle', '', '–'],
     ]);
-    expect(cells(rowOf('src48'))).toEqual(['src48', '', 'Not assigned', 'Idle', '', '-']);
+    expect(cells(rowOf('src48'))).toEqual(['src48', '', 'Not assigned', 'Idle', '', '–']);
     // The chips carry the state's tone for the theme's status colours.
     const tone = (name: string) => toneOf(rowOf(name).querySelector('neat-status-chip')!);
     expect(['src1', 'src2', 'src4', 'src5', 'src6'].map(tone)).toEqual([

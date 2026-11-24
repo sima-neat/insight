@@ -1,5 +1,6 @@
 import type { NeatTone } from '@sima/neat-ui';
 import type { Slot, SlotPublisher, SlotPull, SlotReader } from '../api.generated';
+import { NO_VALUE } from '../no-value';
 import { customRate } from './fps';
 import type { Progress } from './jobs';
 import type { Camera } from './webcam-publishing';
@@ -90,9 +91,6 @@ const PROTOCOL_LABELS: Readonly<Record<string, string>> = {
  */
 export const SLOTS_NOT_CHECKED = 'Could not check which slots use these files.';
 
-/** What a cell shows for a value there is none of. */
-const NONE = '-';
-
 /** A file, a camera to pull or a webcam is assigned; an external publisher may sit over it. */
 export function isAssigned(slot: Slot): boolean {
   return slot.kind !== 'none';
@@ -172,7 +170,7 @@ export function externalChip(publisher: SlotPublisher): string {
  * `⇠ RTSP · 10.0.0.7:554 · ` and then the video while live, or what the pull is doing about it.
  */
 export function pullChip(pull: SlotPull, publisher?: SlotPublisher): string {
-  const parts = [protocolLabel(pull.scheme), pull.host || NONE];
+  const parts = [protocolLabel(pull.scheme), pull.host || NO_VALUE];
   switch (pull.status) {
     case 'live': {
       const video = publisher ? dimensionsText(publisher) : '';
@@ -199,7 +197,7 @@ export function pullChip(pull: SlotPull, publisher?: SlotPublisher): string {
 }
 
 export function protocolLabel(protocol: string): string {
-  if (!protocol) return NONE;
+  if (!protocol) return NO_VALUE;
   return PROTOCOL_LABELS[protocol] ?? protocol.toUpperCase();
 }
 
@@ -233,15 +231,15 @@ export function slotRate(slot: Slot, encode?: Progress): string {
 }
 
 export function codecLabel(codec: string | undefined): string {
-  if (!codec) return NONE;
+  if (!codec) return NO_VALUE;
   return CODEC_LABELS[codec] ?? codec.toUpperCase();
 }
 
 /** The codec on the wire or of the assigned file; "-" while there is none to name. */
 export function slotCodec(slot: Slot): string {
   if (slot.state === 'external') return codecLabel(slot.codec);
-  if (slot.kind === 'pull') return slot.pull?.status === 'live' ? codecLabel(slot.codec) : NONE;
-  return isAssigned(slot) ? codecLabel(slot.codec) : NONE;
+  if (slot.kind === 'pull') return slot.pull?.status === 'live' ? codecLabel(slot.codec) : NO_VALUE;
+  return isAssigned(slot) ? codecLabel(slot.codec) : NO_VALUE;
 }
 
 /**
@@ -297,24 +295,6 @@ export function slotOutput(slot: Slot): string {
  */
 export function previewSrc(n: number, token: number, since?: string | null): string {
   return `/api/slots/${n}/preview.mjpg?t=${token}${since ? `&s=${encodeURIComponent(since)}` : ''}`;
-}
-
-/** How long a stream has been live, `12m 04s` or `1h 02m`; "-" while unknown. */
-export function liveFor(sinceIso: string | null | undefined, nowMs: number): string {
-  const since = sinceIso ? Date.parse(sinceIso) : NaN;
-  if (!Number.isFinite(since)) return NONE;
-  const total = Math.max(0, Math.floor((nowMs - since) / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
-  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
-}
-
-export function formatBitrate(bps: number | null | undefined): string {
-  if (bps == null || !Number.isFinite(bps) || bps <= 0) return NONE;
-  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mbit/s`;
-  return `${Math.round(bps / 1000)} kbit/s`;
 }
 
 /** `2 · 10.42.0.79, insight preview`: the count, then each reader by label, address or protocol. */

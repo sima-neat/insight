@@ -1,11 +1,9 @@
 import type { Slot, SlotPull } from '../api.generated';
 import {
   codecLabel,
-  formatBitrate,
   isInUse,
   isLive,
   isRunning,
-  liveFor,
   previewSrc,
   pullSourceText,
   pullStatusLabel,
@@ -62,7 +60,7 @@ describe('slotRow', () => {
       'Not assigned',
       'Idle (neutral)',
       '',
-      '-',
+      '–',
     ]);
   });
 
@@ -109,7 +107,7 @@ describe('slotRow', () => {
       '15 fps · rendition',
     );
     expect(slotRow(fileSlot(3, 'a.mp4', { codec: 'unknown' })).codec).toBe('Unknown');
-    expect(slotRow(fileSlot(3, 'a.mp4', { codec: undefined })).codec).toBe('-');
+    expect(slotRow(fileSlot(3, 'a.mp4', { codec: undefined })).codec).toBe('–');
   });
 
   it('a preparing slot: Encoding, and the percent of its encode as its rate', () => {
@@ -159,7 +157,7 @@ describe('slotRow', () => {
       'Desk camera',
       'Idle (neutral)',
       '',
-      '-',
+      '–',
     ]);
     const live = { ...webcam, state: 'live' as const, codec: 'h264', publisher: publisher() };
     expect(slotRow(live).source).toBe('Select a camera');
@@ -199,7 +197,7 @@ describe('slotRow', () => {
       '⇢ SRT · 1280×720 · 30 fps',
       '⇢ RTMP · 1280×720 · 30 fps',
       '⇢ MPEGTS · 1280×720 · 30 fps',
-      '⇢ - · 1280×720 · 30 fps',
+      '⇢ – · 1280×720 · 30 fps',
     ]);
   });
 
@@ -243,7 +241,7 @@ describe('slotRow', () => {
       '⇠ RTSP · 10.0.0.7:554 · connecting…',
       'Connecting… (info)',
       '',
-      '-',
+      '–',
     ]);
     expect(row({ status: 'unreachable', error: 'connection refused' })).toEqual([
       'src9',
@@ -251,7 +249,7 @@ describe('slotRow', () => {
       '⇠ RTSP · 10.0.0.7:554 · retrying… (connection refused)',
       'Unreachable (warning)',
       'retrying…',
-      '-',
+      '–',
     ]);
     expect(
       row({ status: 'auth_failed', error: 'The camera rejected the username or password' }),
@@ -261,7 +259,7 @@ describe('slotRow', () => {
       '⇠ RTSP · 10.0.0.7:554 · The camera rejected the username or password',
       'Auth failed (danger)',
       '',
-      '-',
+      '–',
     ]);
     // Stopped, it keeps its camera; after a restart it needs its URL again.
     expect(row({ status: 'stopped' })).toEqual([
@@ -270,7 +268,7 @@ describe('slotRow', () => {
       '⇠ RTSP · 10.0.0.7:554 · stopped',
       'Idle (neutral)',
       '',
-      '-',
+      '–',
     ]);
     expect(row({ status: 'needs_credentials' })).toEqual([
       'src9',
@@ -278,12 +276,12 @@ describe('slotRow', () => {
       '⇠ RTSP · 10.0.0.7:554 · stream URL needed again',
       'Needs URL (warning)',
       '',
-      '-',
+      '–',
     ]);
     expect(
       slotRow(pulled(9, { status: 'auth_failed', scheme: 'rtsps', host: '', error: undefined }))
         .source,
-    ).toBe('⇠ RTSPS · - · Auth failed');
+    ).toBe('⇠ RTSPS · – · Auth failed');
     expect(slotRow(pulled(9, { status: 'unreachable' })).source).toBe(
       '⇠ RTSP · 10.0.0.7:554 · retrying…',
     );
@@ -331,14 +329,7 @@ describe('preview, live-for, bitrate, readers and pull source', () => {
     expect(first).not.toBe(second);
   });
 
-  it('live-for, bitrate and readers formatting', () => {
-    const t0 = Date.parse('2026-09-16T13:09:59Z');
-    expect(liveFor('2026-09-16T13:09:59Z', t0 + 724000)).toBe('12m 04s');
-    expect(liveFor('2026-09-16T13:09:59Z', t0 + 3720000)).toBe('1h 02m');
-    expect(liveFor(null, t0)).toBe('-');
-    expect(formatBitrate(1800000)).toBe('1.8 Mbit/s');
-    expect(formatBitrate(850000)).toBe('850 kbit/s');
-    expect(formatBitrate(null)).toBe('-');
+  it('readers formatting', () => {
     expect(
       readersText([
         { protocol: 'rtsp', address: '10.42.0.79' },
@@ -420,8 +411,8 @@ describe('codecLabel', () => {
       'H.265',
       'MJPEG',
       'AV1',
-      '-',
-      '-',
+      '–',
+      '–',
     ]);
   });
 });

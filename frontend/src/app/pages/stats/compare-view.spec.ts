@@ -194,7 +194,7 @@ describe('CompareView', () => {
     const back = root().querySelector<HTMLAnchorElement>('a[href="/stats/runs"]');
     expect(text(back)).toBe('Runs');
     expect(text(root().querySelector('h2'))).toBe('Comparison');
-    expect(text(root().querySelector('.facts'))).toBe('2 runs · common window 6.0 s');
+    expect(text(root().querySelector('.facts'))).toBe('2 runs · common window 6 s');
     expect(baselineSelect().label()).toBe('Baseline');
     expect(baselineSelect().labelPosition()).toBe('inline');
     expect(baselineSelect().value()).toBe(BASELINE);
@@ -213,13 +213,13 @@ describe('CompareView', () => {
       'tes3',
       'insight-hw-1790177227',
     ]);
-    expect(chips().map((chip) => text(chip.querySelector('.mark')))).toEqual(['B', '']);
+    expect(chips().map((chip) => text(chip.querySelector('neat-status-chip')))).toEqual(['B', '']);
     // B is for the eye; a screen reader hears ", baseline".
     expect(chips().map((chip) => text(chip.querySelector('.visually-hidden')))).toEqual([
       ', baseline',
       '',
     ]);
-    expect(chips()[0].querySelector('.mark')!.getAttribute('aria-hidden')).toBe('true');
+    expect(chips()[0].querySelector('neat-status-chip')!.getAttribute('aria-hidden')).toBe('true');
     // The kit's swatch, by the run's place: the colour the chart draws its line in.
     expect(chips().map(swatchIndexes)).toEqual([[0], [1]]);
   });
@@ -235,7 +235,7 @@ describe('CompareView', () => {
     const request = compareRequest();
     expect(request.request.params.get('runs')).toBe(`${OTHER},${BASELINE}`);
     await flush(request, answer(SWAPPED));
-    expect(chips().map((chip) => text(chip.querySelector('.mark')))).toEqual(['B', '']);
+    expect(chips().map((chip) => text(chip.querySelector('neat-status-chip')))).toEqual(['B', '']);
     expect(text(chips()[0].querySelector('.name'))).toBe('insight-hw-1790177227');
   });
 
@@ -330,7 +330,7 @@ describe('CompareView', () => {
     ]);
     // Where Samples gives way to the width (`.wide`), the Mean cell says it instead (`.narrow`).
     const means = meanCells();
-    expect(means.map((cell) => text(cell.querySelector('.wide')))).toEqual(['—', '—']);
+    expect(means.map((cell) => text(cell.querySelector('.wide')))).toEqual(['–', '–']);
     expect(means.map((cell) => text(cell.querySelector('.narrow')))).toEqual([
       'No samples',
       'No samples',
@@ -365,7 +365,7 @@ describe('CompareView', () => {
       'tes3',
       'insight-hw-1790177227',
     ]);
-    expect(columns.map((th) => text(th.querySelector('.mark')))).toEqual(['B', '']);
+    expect(columns.map((th) => text(th.querySelector('neat-status-chip')))).toEqual(['B', '']);
     expect(text(columns[0].querySelector('.visually-hidden'))).toBe(', baseline');
     expect(columns.map(swatchIndexes)).toEqual([[0], [1]]);
     expect(columns.map((th) => text(th.querySelector('.note')))).toEqual([
@@ -377,7 +377,7 @@ describe('CompareView', () => {
       ['Duration', '8.13 s', '6.67 s −18%'],
       ['Energy', '54.2 J', '51.5 J −4.9%'],
       ['Samples', '4', '4 ±0%'],
-      ['CPU usage', '—', '—'],
+      ['CPU usage', '–', '–'],
       ['Current board power', '9.03 W', '8.62 W −4.58%'],
       ['LM96163 temp2', '54.8 °C', '40.7 °C −25.8%'],
       ['MLA RTSN-0', '52.2 °C', '38.5 °C −26.3%'],
@@ -601,7 +601,7 @@ describe('CompareView', () => {
     expect(text(root().querySelector('.partial'))).toBe(
       'Sentinel summarised only some of these runs.',
     );
-    expect(rows(metricTable()).every((row) => row[2] === '—')).toBe(true);
+    expect(rows(metricTable()).every((row) => row[2] === '–')).toBe(true);
   });
 
   it('drops an answer that lands after the board changed, and asks the new board', async () => {

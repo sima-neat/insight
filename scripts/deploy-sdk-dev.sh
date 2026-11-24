@@ -9,15 +9,14 @@ DEV=$HOME/workspace/.insight-dev            # == /workspace/.insight-dev inside 
 C=${INSIGHT_SDK_CONTAINER:-$(docker ps --format '{{.Names}}' | grep -m1 'sima-neat-sdk' || true)}
 [[ -n "$C" ]] || { echo "SDK container not running (set INSIGHT_SDK_CONTAINER to pick one)"; exit 1; }
 
-# The server (bin/neat-insight) stops MediaMTX, its child, when it stops. A dev copy deployed
-# before the server existed ran the Python backend from .venv/bin/neat-insight.
+# The server (bin/neat-insight) stops MediaMTX, its child, when it stops.
 stop_dev() {
   docker exec "$C" bash -c '
-    for p in $(pgrep -f "^/workspace/.insight-dev/(neat_insight/bin/neat-insight|.venv/bin/python3 .*neat-insight) "); do kill $p; done
+    for p in $(pgrep -f "^/workspace/.insight-dev/neat_insight/bin/neat-insight "); do kill $p; done
     for i in $(seq 1 60); do
-      pgrep -f "^/workspace/.insight-dev/(neat_insight/bin/|.venv/bin/python3 )" >/dev/null || break; sleep 0.5
+      pgrep -f "^/workspace/.insight-dev/neat_insight/bin/" >/dev/null || break; sleep 0.5
     done
-    pgrep -fa "^/workspace/.insight-dev/(neat_insight/bin/|.venv/bin/python3 )" || true'
+    pgrep -fa "^/workspace/.insight-dev/neat_insight/bin/" || true'
 }
 
 if [[ "${1:-}" == "--restore" ]]; then
@@ -34,10 +33,9 @@ if [[ "${1:-}" != "--no-frontend" ]]; then
   echo "frontend built"
 fi
 # __pycache__ stays out: the container writes its own as root, which rsync could not replace.
-rsync -a --delete --exclude .venv --exclude node_modules --exclude .git --exclude .superpowers --exclude __pycache__ \
+rsync -a --delete --exclude .venv --exclude node_modules --exclude .git --exclude __pycache__ \
   --exclude 'neat_insight/bin' --exclude dev-insight.log --exclude DEPLOYED_COMMIT "$REPO/" "$DEV/"
 cp "$REPO/webrtc/mediamtx.yml" "$DEV/neat_insight/bin/mediamtx.yml"     # build.sh does this; the launcher reads bin/
-# An earlier deploy's bin/vf and bin/static stay: a deploy from main still runs them.
 case "$(docker exec "$C" uname -m)" in
   x86_64) ARCH=amd64 ;;
   aarch64) ARCH=arm64 ;;

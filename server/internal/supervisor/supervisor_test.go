@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"insight/internal/procgroup"
 )
 
 // Every child in these tests is a small shell script started here; no test signals anything
@@ -240,6 +242,21 @@ func TestStopLeftovers(t *testing.T) {
 	})
 
 	t.Run("dangerous and broken files signal nothing", func(t *testing.T) {
+		// These PIDs name init, every process, and the test itself: a recorder takes the
+		// signal's place before any of them is read, so not even a broken guard signals them.
+		var signaled []int
+		real := signalGroup
+		signalGroup = func(pid int, _ syscall.Signal) error {
+			signaled = append(signaled, pid)
+			return nil
+		}
+		t.Cleanup(func() { signalGroup = real })
+
+		for _, pid := range []int{-1, 0, 1, os.Getpid()} {
+			if err := stopLeftover(pid, os.Args[0], 0); !errors.Is(err, procgroup.ErrUnsafeTarget) {
+				t.Errorf("pid %d: %v", pid, err)
+			}
+		}
 		for name, content := range map[string]string{
 			"zero.pid":   "1 0 /bin/sh\n",
 			"init.pid":   "1 1 /sbin/init\n",
@@ -252,7 +269,10 @@ func TestStopLeftovers(t *testing.T) {
 			}
 		}
 		s, _ := New(stateDir)
-		s.StopLeftovers(100 * time.Millisecond) // the test process surviving this is the check
+		s.StopLeftovers(100 * time.Millisecond)
+		if len(signaled) != 0 {
+			t.Fatalf("signaled %v", signaled)
+		}
 		left, _ := filepath.Glob(filepath.Join(stateDir, "*.pid"))
 		if len(left) != 0 {
 			t.Fatalf("files kept: %v", left)

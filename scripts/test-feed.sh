@@ -9,7 +9,7 @@
 #   scripts/test-feed.sh <channel> [<option>...]               runs until Ctrl-C
 #   scripts/test-feed.sh stop [<channel>]                       stops that channel's feed, or all
 #
-# The container is the first running sima-neat-sdk* one, as for the sima-insight-dev-deploy skill;
+# The container is the first running sima-neat-sdk* one, as for scripts/deploy-sdk-dev.sh;
 # INSIGHT_SDK_CONTAINER=<name> picks another. It needs ffmpeg and python3, which the SDK image has.
 set -euo pipefail
 

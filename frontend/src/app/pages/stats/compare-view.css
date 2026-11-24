@@ -74,15 +74,6 @@
   overflow-wrap: anywhere;
 }
 
-.mark {
-  padding-inline: var(--neat-space-2);
-  border-radius: calc(var(--radius) / 2);
-  background: var(--foreground);
-  color: var(--background);
-  font-size: var(--neat-text-xs);
-  font-weight: 600;
-}
-
 /*
  * A run column's note, muted under its name. It wraps (the heading's figures keep to one line)
  * within a width, so a long note does not widen the column.

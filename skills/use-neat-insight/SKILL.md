@@ -1,13 +1,13 @@
 ---
 name: sima-use-neat-insight
-description: Use when working with the neat-insight API, frontend, media sources, streaming source controls, viewer URLs, the Viewer's channels (an app's RTP video on UDP 9000+N and JSON metadata on 9100+N, matched and sent to browsers over WebRTC), metrics endpoints, health checks, or coding-agent API documentation for neat-insight. This skill helps agents inspect service state, upload/delete/inspect media, assign and control media-source streams, debug why an app's video or boxes do not show, build viewer links, and understand endpoint request/response contracts.
+description: Use when working with the neat-insight API, frontend, media sources, streaming source controls, viewer URLs, the Viewer's channels (an app's RTP video on UDP 9000+N and JSON metadata on 9100+N, matched and sent to browsers over WebRTC), boards with their peripherals and Sentinel telemetry, health checks, or coding-agent API documentation for neat-insight. This skill helps agents inspect service state, upload/delete/inspect media, assign and control media-source streams, debug why an app's video or boxes do not show, build viewer links, and understand endpoint request/response contracts.
 ---
 
 # Use Neat Insight
 
 ## Overview
 
-Use the neat-insight HTTP API as the control plane for media management, streaming source playback, runtime metrics, environment metadata, and frontend serving. Prefer these APIs over editing persisted state files directly unless the user explicitly asks for low-level debugging.
+Use the neat-insight HTTP API as the control plane for media management, streaming source playback, the Viewer's channels, boards and their telemetry, and system info. Prefer these APIs over editing persisted state files directly unless the user explicitly asks for low-level debugging.
 
 Default local backend URL is `https://127.0.0.1:9900`. The service uses a local mkcert certificate in normal development, so local API clients may need to trust mkcert or pass an insecure TLS option for diagnostics.
 
@@ -101,11 +101,11 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - **Panel Transparency** in the 3D Pose tab adds transparency to auxiliary-panel surfaces without fading the visualization or controls. A global save applies the value to every channel.
 - Open the Viewer on a channel before reading its counters. While no browser watches, metadata is neither matched nor sent on, so `metadata.messages_forwarded` stays flat.
 - Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond (`docs/contracts.md`), so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
-- Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
+- Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behavior; value justifications belong in the pull request body.
 - A slot with `state: "external"` is held by a publisher Insight did not start. Assigning or starting it is 409 `slot_busy`; call `/api/slots/{n}/take-over` only when the user explicitly wants that stream disconnected. Bulk routes leave the external stream alone and report such slots in `skipped_external`; reset still clears the assignment of every slot.
 - A slot of `kind: "pull"` is a camera MediaMTX pulls. Stop keeps the camera and Start pulls again; delete the slot to forget it. Auto-assign leaves it alone (`skipped_pulled`). Never echo the URL a user gave for a pull with its credentials; the API never returns them.
 
-## Health And Metrics
+## Health And Channels
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -199,7 +199,7 @@ Reading the metadata counters while a browser watches:
 
 ## Synthetic Metadata Testing
 
-For viewer and metadata-path testing, use the bundled test feed instead of building ad hoc UDP emitters. `neat-insight-metadata-test <channel>` sends one Viewer channel an H.264 test pattern (640x480 at 15 fps, a white square sweeping across it) on UDP `9000+channel` and, for every frame, one message of each type asked for on `9100+channel`, drawn on the square. Every message follows the metadata contract: its `timestamp` names its frame, so the overlays follow the square, and one that leaves it on screen shows a frame-matching problem. It needs ffmpeg with libx264 and runs until Ctrl-C.
+For viewer and metadata-path testing, use the bundled test feed instead of building ad hoc UDP emitters. `neat-insight-metadata-test <channel>` sends one Viewer channel an H.264 test pattern (640x480 at 15 fps, a white square sweeping across it) on UDP `9000+channel` and, for every frame, one message of each type asked for on `9100+channel`, drawn on the square (object-detection also sends a `ship` that stays put and turns slowly, with `oriented_bbox`). Every message follows the metadata contract: its `timestamp` names its frame, so the overlays follow the square, and one that leaves it on screen shows a frame-matching problem. It needs ffmpeg with libx264 and runs until Ctrl-C.
 
 ```bash
 neat-insight-metadata-test 0
@@ -213,6 +213,7 @@ neat-insight-metadata-test 2 --host 192.168.1.30 --metadata-delay-ms 300
 
 The message envelope, the five types (`object-detection`, `classification`, `tracking`, `pose-estimation`, `segmentation`), their fields and coordinates are in `docs/contracts.md#metadata`, with a JSON Schema per type in `docs/schemas/metadata/`. Validate a message against them before debugging the Viewer. Send one message per type per frame, each with the frame's `timestamp`.
 
+- An object-detection box may also carry `oriented_bbox: [cx, cy, width, height, angle]` (video pixels, radians, clockwise on screen); keep `bbox` as its upright extent, which the region filter reads and older viewers draw.
 - An RLE segmentation mask covers its `bbox`, not the frame, runs column-major starting with background, and `counts` is a JSON array of integers, not the compressed string `pycocotools.mask.encode()` returns. Only `show_rectangle: true` outlines a segment's `bbox`.
 - `auxiliary-visualization` is not a type of the contract; the Viewer ignores it like any unknown type.
 - Dropped segments and unknown types warn once per channel in the browser console. Check there first when an overlay does not render.

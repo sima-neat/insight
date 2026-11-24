@@ -57,6 +57,11 @@ var processRuns = func(pid int) (string, bool) {
 	return string(program), true
 }
 
+// signalGroup signals a leftover's process group. It is procgroup.Signal; the test of dangerous
+// PID files puts a recorder in its place, so those PIDs never reach a real signal, whatever the
+// guard does.
+var signalGroup = procgroup.Signal
+
 // StopLeftovers stops the children a previous run of Insight left running (it crashed, or was
 // killed), named by the PID files in the state folder. A PID is signaled only while it still
 // runs the program its file names and leads its own process group; any other file is removed
@@ -90,7 +95,7 @@ func stopLeftover(pid int, program string, grace time.Duration) error {
 		return nil // not a group leader: not a child Insight started
 	}
 	slog.Info("stopping a child a previous run left behind", "pid", pid, "program", program)
-	if err := procgroup.Signal(pid, syscall.SIGTERM); err != nil {
+	if err := signalGroup(pid, syscall.SIGTERM); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(grace)
@@ -100,5 +105,5 @@ func stopLeftover(pid int, program string, grace time.Duration) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return procgroup.Signal(pid, syscall.SIGKILL)
+	return signalGroup(pid, syscall.SIGKILL)
 }

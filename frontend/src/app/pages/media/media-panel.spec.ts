@@ -136,7 +136,7 @@ describe('MediaPanel', () => {
       ['Codec', 'H.264'],
       ['Width', '1280'],
       ['Height', '720'],
-      ['Duration', '2:14'],
+      ['Duration', '2 min 14 s'],
       ['Frame rate', '30 fps'],
     ]);
     expect(panel().querySelector('video')!.getAttribute('src')).toBe(

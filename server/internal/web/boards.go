@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"time"
 
 	"insight/api"
@@ -44,10 +43,7 @@ func (h *handlers) boards() api.BoardList {
 		selected.Identity = &api.BoardIdentity{Hostname: id.Hostname, Machine: id.Machine, Build: id.Build, HostKey: id.HostKey}
 	}
 	if target.Mode == board.ModeSSH {
-		ssh := "ssh " + target.User + "@" + target.Host
-		if target.Port != board.DefaultPort {
-			ssh = "ssh -p " + strconv.Itoa(target.Port) + " " + target.User + "@" + target.Host
-		}
+		ssh := target.SSHCommand()
 		selected.Ssh = &ssh
 	}
 	list.Selected = selected

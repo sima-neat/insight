@@ -4,6 +4,7 @@
  * every chart and the CSV export. Pure functions over plain data.
  */
 import type { NeatChartTone, NeatReference, NeatSeries, NeatThreshold } from '@sima/neat-ui/charts';
+import { NO_VALUE } from '../no-value';
 import type { SentinelCache, SentinelMetric, SentinelSample } from './api';
 import { definitionsOf, joinMetrics, metricStatus } from './metrics';
 import {
@@ -463,7 +464,7 @@ export function powerRailsChart(
   return {
     series,
     domain: scaleFor('W', [totals]),
-    headline: `${isNumber(total) ? fixedValue(total, 'W', 2) : '—'} across ${rails.length} ${rails.length === 1 ? 'rail' : 'rails'}`,
+    headline: `${isNumber(total) ? fixedValue(total, 'W', 2) : NO_VALUE} across ${rails.length} ${rails.length === 1 ? 'rail' : 'rails'}`,
   };
 }
 

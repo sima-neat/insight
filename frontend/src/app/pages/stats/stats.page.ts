@@ -25,6 +25,7 @@ import {
 } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatChartCard } from '@sima/neat-ui/charts';
+import { NeatCodeBlock } from '@sima/neat-ui/code-block';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import {
   NeatPopover,
@@ -41,7 +42,6 @@ import { BoardProblemNotice } from '../../board/board-problem-notice';
 import { BoardSettingsAction } from '../../board/board-settings-action';
 import { BoardService } from '../../board/board.service';
 import { ticking } from '../../clock';
-import { CopyCommand } from '../../copy-command';
 import { formatRelativeTime } from '../../relative-time';
 import { downloadCsv } from '../../stats/csv-download';
 import { daemonView, healthProblems, type DaemonView } from '../../stats/daemon-view';
@@ -137,13 +137,13 @@ function notReadyHeading(
     BoardProblemNotice,
     BoardSettingsAction,
     CompareView,
-    CopyCommand,
     MetricsTable,
     NeatAsidePanel,
     NeatAsideToggle,
     NeatButton,
     NeatCallout,
     NeatChartCard,
+    NeatCodeBlock,
     NeatCollapsible,
     NeatIcon,
     NeatNote,

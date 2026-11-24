@@ -89,7 +89,7 @@ describe('MetricsTable', () => {
       ['Normal', 'neutral'],
     ]);
     // A reading the board did not take is a dash, never zero.
-    expect(rows()[2].children[2].textContent!.trim()).toBe('—');
+    expect(rows()[2].children[2].textContent!.trim()).toBe('–');
   });
 
   it('names a metric by its short name, and says what it is and where it warns when hovered', async () => {

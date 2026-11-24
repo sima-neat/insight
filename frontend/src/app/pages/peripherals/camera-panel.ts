@@ -41,7 +41,7 @@ import {
   previewStatus,
   previewStreamUrl,
 } from '../../peripherals/preview-state';
-import { elapsedSeconds } from '../../relative-time';
+import { formatElapsed } from '../../duration';
 import { PreviewFrame, type PreviewStream } from '../../sources/preview-frame';
 import { DeviceDetails } from './device-details';
 import { DeviceErrors } from './device-errors';
@@ -202,7 +202,7 @@ export class CameraPanel {
       }
       case 'starting': {
         const since = this.startedAt() ?? this.now();
-        return `Starting the camera on the board… ${elapsedSeconds(since, this.now())} s`;
+        return `Starting the camera on the board… ${formatElapsed(since, this.now())}`;
       }
       case 'stopping':
         return 'Stopping the preview…';

@@ -540,7 +540,7 @@ describe('the chart inputs', () => {
     const window = without(live(5), (m) => m.key === 'net_rx_mbps');
     const network = pairChart(window, ['net_rx_mbps', 'net_tx_mbps'], ['Receive', 'Transmit']);
     expect(network?.series.map((s) => s.label)).toEqual(['Transmit']);
-    expect(network?.headline).toBe('—');
+    expect(network?.headline).toBe('–');
     expect(pairChart(window, ['net_rx_mbps', 'nothing'], ['Receive', 'Other'])).toBeNull();
   });
 
@@ -571,7 +571,7 @@ describe('the chart inputs', () => {
     expect(chart?.headline).toBe('78 °C (B)');
 
     const none = thermalMaxChart(windowOf([metric({ key: 'a', value: null })], { a: [null] }));
-    expect([none?.tone, none?.headline]).toEqual(['default', '—']);
+    expect([none?.tone, none?.headline]).toEqual(['default', '–']);
     expect(thermalMaxChart(without(live(2), (m) => m.unit === 'C'))).toBeNull();
   });
 
@@ -649,7 +649,7 @@ describe('the chart inputs, continued', () => {
     );
     // Only the first sample is complete: 4 + 3 = 7 W, so the scale reaches past 7.
     expect(chart?.domain).toEqual([0, 8]);
-    expect(chart?.headline).toBe('— across 2 rails');
+    expect(chart?.headline).toBe('– across 2 rails');
     expect(
       powerRailsChart(windowOf(rails.slice(0, 1), { power_rail_a_watts: [1] }))?.headline,
     ).toBe('1.00 W across 1 rail');
