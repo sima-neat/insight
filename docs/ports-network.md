@@ -14,6 +14,8 @@ taken.
 | --- | --- | --- | --- |
 | `mainUI` | 9900 | HTTPS (TCP) | The web UI, the Viewer, the API, and HTTP MJPEG sources. |
 | `rtsp.tcp` | 8554 | RTSP (TCP) | The sources `src1` to `src48`, which apps read and other programs may publish into. |
+| none | 8000, 8001 | RTP and RTCP (UDP) | The same over RTSP with UDP transport. |
+| none | 8890 | SRT (UDP) | The sources again, over SRT: MediaMTX's SRT listener, on by default. |
 | `videoUDP` | 9000 + N | UDP | Channel `N`'s video (RTP). |
 | `metadataUDP` | 9100 + N | UDP | Channel `N`'s metadata (JSON). |
 | `webRTC` | a range, 40000–40200 outside the SDK | UDP | The Viewer's video, from Insight to the browser. |
@@ -21,7 +23,8 @@ taken.
 | `webrtcWhipIce` | 8189 | UDP | That webcam's video. |
 
 Channels run from 0 to one below the channel count: 80 on a DevKit, in the SDK the number it
-publishes (`insightVideoChannels`, 4 by default). Insight also runs MediaMTX's control API on
+publishes (`insightVideoChannels`, 4 by default). The ports without a port-map name are
+MediaMTX's too, open as its others are. Insight also runs MediaMTX's control API on
 `127.0.0.1:9901`, reachable from the same machine only.
 
 Insight is a developer tool for a trusted network: its sources, channels and API take no
@@ -33,9 +36,9 @@ Insight protects a page you open from other websites, and nothing more. Anyone w
 ports can use it:
 
 - **No sign-in.** The web UI and the API answer anyone who reaches `mainUI`.
-- **MediaMTX takes any publisher and any reader.** Anyone who reaches `rtsp.tcp` or `webrtcWhip`
-  can watch every source and publish into any that has no publisher; its WebRTC endpoint answers
-  pages of any origin (`webrtcAllowOrigin: '*'`).
+- **MediaMTX takes any publisher and any reader.** Anyone who reaches `rtsp.tcp`, SRT's 8890 or
+  `webrtcWhip` can watch every source and publish into any that has no publisher; its WebRTC
+  endpoint answers pages of any origin (`webrtcAllowOrigin: '*'`).
 - **The channels take any sender.** Whatever arrives on a channel's UDP ports is shown in the
   Viewer.
 - **Pages of other sites may frame Insight**: it sends no `X-Frame-Options` or
@@ -43,15 +46,16 @@ ports can use it:
 
 What it does refuse: a request that changes something (any method but `GET`, `HEAD` and
 `OPTIONS`) sent by a page of another origin, answered 403 `cross_origin`. So another website you
-visit cannot start, stop, delete or upload anything through your browser. Reading is not covered:
-such a page can load Insight's MJPEG streams and previews (`/stream/http/srcN.mjpg`,
-`/api/slots/{n}/preview.mjpg`, `/api/media/preview.mjpg`), each of which runs an FFmpeg process
-while it is watched, up to Insight's limit of relayed streams. Requests that send no origin
+visit cannot start, stop, delete or upload anything through your browser. GETs are not checked:
+such a page cannot read Insight's answers (the browser keeps them from it), but it can make
+requests that do something, such as loading Insight's MJPEG streams and previews
+(`/stream/http/srcN.mjpg`, `/api/slots/{n}/preview.mjpg`, `/api/media/preview.mjpg`), each of
+which runs an FFmpeg process while it is watched, up to Insight's limit of relayed streams. Requests that send no origin
 (curl, scripts) pass.
 
 To use Insight beyond a network you trust, do not publish its ports. Reach it through an SSH
 tunnel or a VPN instead, or put `mainUI` behind a reverse proxy that signs users in, and close the
-other ports (RTSP, WHIP, the UDP ranges) to everyone who should not publish or watch.
+other ports (RTSP, SRT, WHIP, the UDP ranges) to everyone who should not publish or watch.
 
 ## The SDK's port map
 
