@@ -63,9 +63,12 @@ jobs:
         run: |
           set -euo pipefail
           version=$(sed -n 's/^MTX_VERSION="\(.*\)"$/\1/p' build.sh)
+          sha256=$(sed -n 's/^MTX_SHA256_linux_amd64="\(.*\)"$/\1/p' build.sh)
           mkdir -p "$RUNNER_TEMP/mediamtx"
           curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${version}/mediamtx_v${version}_linux_amd64.tar.gz" \
-            | tar -xz -C "$RUNNER_TEMP/mediamtx" mediamtx
+            -o "$RUNNER_TEMP/mediamtx.tar.gz"
+          scripts/sha256-verify.sh "$RUNNER_TEMP/mediamtx.tar.gz" "$sha256"
+          tar -xzf "$RUNNER_TEMP/mediamtx.tar.gz" -C "$RUNNER_TEMP/mediamtx" mediamtx
           echo "NEAT_INSIGHT_MEDIAMTX=$RUNNER_TEMP/mediamtx/mediamtx" >> "$GITHUB_ENV"
 
       - name: Formatting
