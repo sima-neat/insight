@@ -267,7 +267,7 @@
     <dt>{{ stream.label }}</dt>
     <dd class="url">
       <code neatCode>{{ stream.url }}</code>
-      <neat-copy-button [text]="stream.url" [what]="stream.what" />
+      <neat-copy-button inline [text]="stream.url" [what]="stream.what" />
     </dd>
   }
   @if (holder(); as holder) {
