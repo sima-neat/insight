@@ -20,7 +20,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { NeatButton, NeatLiveDot } from '@sima/neat-ui';
+import { NeatButton, NeatLiveBadge } from '@sima/neat-ui';
 import { NeatProgress } from '@sima/neat-ui/progress';
 import {
   catchError,
@@ -123,7 +123,7 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
  */
 @Component({
   selector: 'app-slot-preview',
-  imports: [EndsStream, NeatButton, NeatLiveDot, NeatProgress, PreviewFrame],
+  imports: [EndsStream, NeatButton, NeatLiveBadge, NeatProgress, PreviewFrame],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './slot-preview.html',
   styleUrl: './slot-preview.css',
@@ -236,7 +236,7 @@ export class SlotPreview {
       return null;
     },
   );
-  /** Whether the frame shows a picture behind the badge, which then reads on a dark pill. */
+  /** Whether the frame shows a picture behind the badge, which then sits on the video scrim. */
   protected readonly onPicture = computed(
     () =>
       this.file() !== null ||
