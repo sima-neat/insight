@@ -81,7 +81,7 @@ export const COMPARE_SERIES: readonly { key: string; label: string }[] = [
   { key: 'cpu_load_1', label: 'CPU load' },
   { key: 'linux_mem_used_mb', label: 'RAM used' },
   { key: 'mla_mem_allocated_mb', label: 'MLA memory' },
-  { key: 'ev74_cma_used_mb', label: 'EV74 CMA' },
+  { key: 'ev74_mem_allocated_mb', label: 'EV74 memory' },
 ];
 
 /** A series the compared runs can share, with its unit as Sentinel spells it (null for none). */

@@ -8,7 +8,7 @@ const percent = (value: number): string => formatValue(value, '%');
 
 /**
  * The System area: CPU usage, the one-minute load average, Linux memory, MLA memory and the EV74's
- * CMA, then every CPU core's load as a heatmap with its one-minute average. A
+ * memory, then every CPU core's load as a heatmap with its one-minute average. A
  * percentage chart widens past 100 when a reading does (`scaleFor`), and whatever
  * the board does not report is left out.
  */
@@ -21,7 +21,7 @@ const percent = (value: number): string => formatValue(value, '%');
     <app-stats-chart label="Load average (1 minute)" [chart]="load()" [times]="window().times" />
     <app-stats-chart label="Linux memory" [chart]="linuxMemory()" [times]="window().times" />
     <app-stats-chart label="MLA memory" [chart]="mlaMemory()" [times]="window().times" />
-    <app-stats-chart label="EV74 CMA used" [chart]="ev74Cma()" [times]="window().times" />
+    <app-stats-chart label="EV74 memory" [chart]="ev74Memory()" [times]="window().times" />
     @if (cores(); as cores) {
       <neat-heatmap
         label="Per-core CPU"
@@ -71,13 +71,8 @@ export class SystemArea {
 
   protected readonly mlaMemory = computed(() => metricChart(this.window(), 'mla_mem_allocated_mb'));
 
-  /** On the CMA's own size, so the line shows how full it is. */
-  protected readonly ev74Cma = computed(() =>
-    metricChart(
-      this.window(),
-      'ev74_cma_used_mb',
-      metricByKey(this.window(), 'ev74_cma_total_mb')?.value ?? null,
-    ),
+  protected readonly ev74Memory = computed(() =>
+    metricChart(this.window(), 'ev74_mem_allocated_mb'),
   );
 
   /** The heatmap's rows and its headline, which leads with the cores' average; null without cores. */

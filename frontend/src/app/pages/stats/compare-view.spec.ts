@@ -267,7 +267,7 @@ describe('CompareView', () => {
     await flush(compareRequest(), answer());
     expect(chart()!.label()).toBe('Thermal max');
 
-    session.compareSeries.set('ev74_cma_used_mb');
+    session.compareSeries.set('ev74_mem_allocated_mb');
     await settle();
     expect(chart()!.label()).toBe('Total power');
   });

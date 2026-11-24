@@ -517,7 +517,7 @@ describe('the chart inputs', () => {
 
   it('metricChart takes a known capacity as its ceiling and keeps the current value in its scale', () => {
     const window = live(5);
-    expect(metricChart(window, 'ev74_cma_used_mb', 1788)?.domain).toEqual([0, 1788]);
+    expect(metricChart(window, 'linux_mem_used_mb', 1788)?.domain).toEqual([0, 1788]);
     // MLA memory reads 742 MB now: the scale is a round number above it, not above the samples.
     expect(metricChart(window, 'mla_mem_allocated_mb')?.domain).toEqual([0, 1000]);
   });

@@ -2,13 +2,13 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NeatHeatmap, NeatTimeChart } from '@sima/neat-ui/charts';
 import type { TelemetryWindow } from '../../stats/telemetry';
-import { liveWindow, withMetrics, withSeries, without } from './area.testing';
+import { liveWindow, withEv74Memory, withMetrics, withSeries, without } from './area.testing';
 import { SystemArea } from './system-area';
 
 describe('SystemArea', () => {
   let fixture: ComponentFixture<SystemArea>;
 
-  async function show(window: TelemetryWindow = liveWindow(12)) {
+  async function show(window: TelemetryWindow = withEv74Memory(liveWindow(12))) {
     fixture = TestBed.createComponent(SystemArea);
     fixture.componentRef.setInput('window', window);
     await fixture.whenStable();
@@ -21,14 +21,14 @@ describe('SystemArea', () => {
   const heatmap = (): NeatHeatmap | undefined =>
     fixture.debugElement.query(By.directive(NeatHeatmap))?.componentInstance;
 
-  it('shows CPU usage, the load average, Linux memory, MLA memory and the EV74’s CMA, each with its reading', async () => {
+  it('shows CPU usage, the load average, Linux memory, MLA memory and the EV74’s memory, each with its reading', async () => {
     await show();
     expect(charts().map((c) => [c.label(), c.headline()])).toEqual([
       ['CPU usage', '37.5%'],
       ['Load average (1 minute)', '6 (37.5%)'],
       ['Linux memory', '21.3% (1256 MB)'],
       ['MLA memory', '742 MB'],
-      ['EV74 CMA used', '521 MB'],
+      ['EV74 memory', '96 MB'],
     ]);
     expect(
       chart('Load average (1 minute)')!
@@ -40,8 +40,6 @@ describe('SystemArea', () => {
         .thresholds()
         .map((line) => line.label),
     ).toEqual(['Warning 80%', 'Critical 95%']);
-    // The CMA is drawn against its own size, so the line says how full it is.
-    expect(chart('EV74 CMA used')!.domain()).toEqual([0, 1788]);
   });
 
   it('draws the cores as a heatmap with each one’s one-minute average, and the cores’ average first in its headline', async () => {
@@ -96,7 +94,10 @@ describe('SystemArea', () => {
 
   it('leaves out a chart whose metric the board does not report, and the heatmap without cores', async () => {
     await show(
-      without(liveWindow(12), (m) => m.key === 'ev74_cma_used_mb' || /^cpu_core_/.test(m.key)),
+      without(
+        withEv74Memory(liveWindow(12)),
+        (m) => m.key === 'ev74_mem_allocated_mb' || /^cpu_core_/.test(m.key),
+      ),
     );
     expect(charts().map((c) => c.label())).toEqual([
       'CPU usage',
@@ -107,16 +108,17 @@ describe('SystemArea', () => {
     expect(heatmap()).toBeUndefined();
   });
 
+  it('shows no EV74 chart for a Sentinel that predates the field, and never the CMA pool in its place', async () => {
+    await show(liveWindow(12));
+    expect(chart('EV74 memory')).toBeUndefined();
+    expect(chart('EV74 CMA used')).toBeUndefined();
+  });
+
   it('falls back to the plain value when the load or the memory has only one of its two readings', async () => {
     await show(
       without(liveWindow(12), (m) => m.key === 'cpu_load_1' || m.key === 'linux_mem_used_mb'),
     );
     expect(chart('Load average (1 minute)')!.headline()).toBe('37.5%');
     expect(chart('Linux memory')!.headline()).toBe('21.3%');
-  });
-
-  it('draws the CMA on a scale of its own when the board does not say how big it is', async () => {
-    await show(without(liveWindow(12), (m) => m.key === 'ev74_cma_total_mb'));
-    expect(chart('EV74 CMA used')!.domain()).toEqual([0, 600]);
   });
 });

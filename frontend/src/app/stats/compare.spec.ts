@@ -97,7 +97,7 @@ describe('compare series', () => {
       'cpu_load_1',
       'linux_mem_used_mb',
       'mla_mem_allocated_mb',
-      'ev74_cma_used_mb',
+      'ev74_mem_allocated_mb',
     ]);
     expect(COMPARE_SERIES[1].label).toBe('Thermal max');
   });
