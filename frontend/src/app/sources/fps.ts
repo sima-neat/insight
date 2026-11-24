@@ -12,22 +12,6 @@ import type { Slot } from '../api.generated';
 export const FPS_MIN = 1;
 export const FPS_STEP = 5;
 
-/** The rate one step of the stepper's − (`direction < 0`) or + gives, never below the minimum. */
-export function stepFps(value: number, direction: number): number {
-  const next = Number(value) + (direction < 0 ? -FPS_STEP : FPS_STEP);
-  return Math.max(FPS_MIN, next);
-}
-
-/** A typed rate: whole digits, at least the minimum; null for anything else. */
-export function parseFps(text: string | null | undefined): number | null {
-  if (text == null) return null;
-  const trimmed = String(text).trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  const value = Number(trimmed);
-  if (value < FPS_MIN || !Number.isSafeInteger(value)) return null;
-  return value;
-}
-
 /**
  * The rate a slot streams at when it is not the file's own: its override when it differs from the
  * native rate, else null. The app's one rule for "a custom rate" (the row's "· rendition", the

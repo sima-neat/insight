@@ -30,6 +30,7 @@ import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatDialog, type NeatDialogRef } from '@sima/neat-ui/dialog';
 import { NeatErrorNote, NeatField } from '@sima/neat-ui/field';
 import { NeatInput } from '@sima/neat-ui/input';
+import { NeatNumberField } from '@sima/neat-ui/number-field';
 import { NeatProgress } from '@sima/neat-ui/progress';
 import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
@@ -41,10 +42,9 @@ import { NO_VALUE } from '../../no-value';
 import { PanelTitle } from '../../panel-title';
 import { CamerasService } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
-import { customRate } from '../../sources/fps';
+import { customRate, FPS_MIN, FPS_STEP } from '../../sources/fps';
 import { SlotsService } from '../../sources/slots.service';
 import type { Camera } from '../../sources/webcam-publishing';
-import { FpsStepper } from './fps-stepper';
 import { MediaPicker } from './media-picker';
 import { SlotControl } from './slot-control';
 import { SlotPreview } from './slot-preview';
@@ -142,12 +142,12 @@ function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
  * the services fetch the slots again either way.
  *
  * The page builds the panel afresh for each slot, so the form, the typed URL and password and the
- * stepper's draft never carry over to another slot; it reacts to its slot changing all the same.
+ * frame rate field's draft never carry over to another slot; it reacts to its slot changing all the same.
  */
 @Component({
   selector: 'app-slot-panel',
   imports: [
-    FpsStepper,
+    NeatNumberField,
     MediaPicker,
     NeatAsideActions,
     NeatAsideHeading,
@@ -187,12 +187,13 @@ export class SlotPanel {
   private readonly injector = inject(Injector);
 
   private readonly pickerTemplate = viewChild.required<TemplateRef<unknown>>('picker');
-  private readonly stepper = viewChild(FpsStepper);
   private readonly primaryButton = viewChild.required<ElementRef<HTMLButtonElement>>('primary');
   private readonly changeButton = viewChild<ElementRef<HTMLButtonElement>>('change');
   private readonly sourceSwitch = viewChild<NeatSegmented<SourceForm>>(NeatSegmented);
   private readonly cameraList = viewChild<NeatSelectList<Camera, string>>(NeatSelectList);
 
+  protected readonly fpsStep = FPS_STEP;
+  protected readonly fpsMin = FPS_MIN;
   protected readonly fpsReasonId = `slot-panel-${nextPanelId++}-fps-reason`;
 
   protected readonly slot = computed(() => this.row().slot);
@@ -218,7 +219,6 @@ export class SlotPanel {
     source: this.n,
     computation: () => null,
   });
-  private readonly fpsInvalid = linkedSignal({ source: this.n, computation: () => false });
   /** The camera assigned to this slot, by id: it changes only with this slot's assignment. */
   private readonly assignedCameraId = computed(
     () => this.cameras.assignments().get(this.n())?.deviceId ?? null,
@@ -257,7 +257,7 @@ export class SlotPanel {
       case 'pull':
         return this.needsUrl() ? 'Enter the stream URL again first' : null;
       default:
-        return this.fpsInvalid() ? 'FPS must be a whole number of at least 1' : null;
+        return null;
     }
   });
   protected readonly startTooltip = computed(() => {
@@ -304,7 +304,7 @@ export class SlotPanel {
   protected readonly fpsLocked = computed(
     () => this.running() || this.encode() !== null || this.busy(),
   );
-  /** Why the rate cannot be changed, said under the stepper. */
+  /** Why the rate cannot be changed, said under the frame rate field. */
   protected readonly fpsReason = computed(() => {
     const slot = this.slot();
     if (!slot.file) return 'Assign media before choosing a frame rate';
@@ -655,13 +655,13 @@ export class SlotPanel {
   }
 
   protected async commitFps(fps: number | null): Promise<void> {
-    const result = await this.control.commitFps(this.slot(), fps);
-    // Refused (and reported): the field shows the rate the slot still has.
-    if (!result.ok) this.stepper()?.reset();
+    await this.control.commitFps(this.slot(), fps);
   }
 
-  protected setFpsInvalid(invalid: boolean): void {
-    this.fpsInvalid.set(invalid);
+  /** The field's commit: a rate equal to the one shown is no change. */
+  protected async onFpsCommit(fps: number): Promise<void> {
+    if (fps === (this.slot().fps ?? this.slot().native_fps)) return;
+    await this.commitFps(fps);
   }
 
   /**

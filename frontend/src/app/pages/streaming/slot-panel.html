@@ -192,13 +192,15 @@
         aria-label="Output frame rate"
         [attr.aria-describedby]="fpsReason() ? fpsReasonId : null"
       >
-        <app-fps-stepper
-          [value]="slot().fps ?? null"
-          [nativeFps]="slot().native_fps ?? null"
-          [disabled]="fpsDisabled()"
-          [locked]="fpsLocked()"
-          (commit)="commitFps($event)"
-          (invalidChange)="setFpsInvalid($event)"
+        <neat-number-field
+          label="Frames per second"
+          [showLabel]="false"
+          [value]="slot().fps ?? slot().native_fps ?? null"
+          [step]="fpsStep"
+          [min]="fpsMin"
+          unit="fps"
+          [disabled]="fpsDisabled() || fpsLocked()"
+          (commit)="onFpsCommit($event)"
         />
         <button
           neatButton

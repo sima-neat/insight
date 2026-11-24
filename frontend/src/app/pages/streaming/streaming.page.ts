@@ -271,7 +271,7 @@ export class StreamingPage {
    * when the request was refused, or when a slot began changing meanwhile, so it can be tried again.
    *
    * Like a slot's own Start it first waits for the frame rates the side panel is committing (the
-   * stepper commits as it loses focus, which opening the dialog makes it do), so the server starts
+   * frame rate field commits as it loses focus, which opening the dialog makes it do), so the server starts
    * the rates just chosen; when one was refused (and reported) it starts nothing.
    */
   protected async startBulk(dialog: NeatDialogRef): Promise<void> {
