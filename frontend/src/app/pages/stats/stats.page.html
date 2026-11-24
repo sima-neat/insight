@@ -170,6 +170,7 @@
                   <!-- The card's plot is small: its lines and time axis, without the values. -->
                   @if (view.stack; as stack) {
                     <neat-stacked-chart
+                      size="medium"
                       headless
                       [valueLabels]="false"
                       [label]="view.card.heading"

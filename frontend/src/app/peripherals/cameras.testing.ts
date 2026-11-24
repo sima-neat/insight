@@ -15,7 +15,7 @@ import type {
 // preview.
 
 export const NOT_IN_OVERLAYS = "IMX568 is not in this board's camera overlays.";
-export const USB_REASON = 'USB cameras have no camera overlay on this board.';
+export const USB_REASON = 'Update SiMa Sentinel on the board to check USB cameras.';
 
 export const support = (tier: SupportTier, reason = ''): DeviceSupport => ({ tier, reason });
 
@@ -40,12 +40,7 @@ export const format = (
   range: CameraFormatRange | null = null,
 ): CameraFormat => ({ format: name, label, support: formatSupport, range, sizes });
 
-export const sel = (
-  format: string,
-  width: number,
-  height: number,
-  fps: number,
-): PreviewMode => ({
+export const sel = (format: string, width: number, height: number, fps: number): PreviewMode => ({
   format,
   width,
   height,

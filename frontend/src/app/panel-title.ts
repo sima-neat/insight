@@ -11,7 +11,7 @@ export interface PanelChip {
 /**
  * A side panel's first line: what the panel is about, as its heading (`neatAsideTitle`), with its
  * state as a chip beside it: `<app-panel-title [chip]="row.state">src3</app-panel-title>`. The
- * chip sits outside the heading, so the heading names the subject only, and it is left out while the
+ * chip sits outside the heading, and an element marked `panelTitleEnd` follows the chip, so the heading names the subject only, and it is left out while the
  * chip is null. Streaming's slot panel, Peripherals' device panels and Stats' areas open with it.
  */
 @Component({
@@ -23,6 +23,7 @@ export interface PanelChip {
     @if (chip(); as chip) {
       <neat-status-chip [tone]="chip.tone">{{ chip.label }}</neat-status-chip>
     }
+    <span class="end"><ng-content select="[panelTitleEnd]" /></span>
   `,
   styleUrl: './panel-title.css',
 })

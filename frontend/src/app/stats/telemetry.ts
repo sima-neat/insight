@@ -9,6 +9,7 @@ import type { SentinelCache, SentinelMetric, SentinelSample } from './api';
 import { definitionsOf, joinMetrics, metricStatus } from './metrics';
 import {
   fixedValue,
+  estimated,
   formatValue,
   isNumber,
   isThermalMetric,
@@ -310,12 +311,15 @@ const ACCELERATORS = [
 ] as const;
 const ACCELERATOR_KEYS: readonly string[] = ACCELERATORS.map((accelerator) => accelerator.key);
 
+/** The board power's name wherever it is shown: Sentinel's sum of the rails is an estimate. */
+export const BOARD_POWER_LABEL = estimated('Board power');
+
 /** The cards, in the order the page shows them. */
 export const OVERVIEW_CARDS: readonly OverviewCard[] = [
   { id: 'thermal-max', heading: 'Thermal max', area: 'thermal', keys: [] },
   {
     id: 'board-power',
-    heading: 'Board power (Estimated)',
+    heading: BOARD_POWER_LABEL,
     area: 'power',
     keys: ['power_current_watts'],
   },

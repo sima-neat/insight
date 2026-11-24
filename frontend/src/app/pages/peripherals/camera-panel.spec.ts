@@ -205,7 +205,6 @@ describe('CameraPanel', () => {
       .map((child) => child.tagName.toLowerCase() + (child.className ? `.${child.className}` : ''));
     expect(parts).toEqual([
       'app-panel-title',
-      'app-camera-id',
       'app-preview-frame',
       'div.status',
       'app-device-errors',
@@ -573,7 +572,11 @@ describe('CameraPanel', () => {
 
   it('offers the camera ID where the camera has one, and nothing where it has none', async () => {
     await show(imx477);
-    expect(panel().querySelector('app-camera-id')?.textContent?.trim()).toBe('Camera ID');
+    // On the title row, after the chip, as the title's end slot.
+    expect(panel().querySelector('app-panel-title app-camera-id')?.textContent?.trim()).toBe(
+      'Camera ID',
+    );
+    expect(panel().querySelector('h2 app-camera-id')).toBeNull();
     await show({ ...usb, device: { ...usb.device, camera_name: 'usb-046d:0825-0' } });
     expect(panel().querySelector('app-camera-id')).not.toBeNull();
     await show(usb);
@@ -583,7 +586,7 @@ describe('CameraPanel', () => {
   it('the panel shows one explanation line, chosen by priority', async () => {
     await show(imx568);
     expect(notes()).toEqual([NOT_IN_OVERLAYS]);
-    expect(panel().querySelector('app-camera-id + p[neatNote]')?.textContent?.trim()).toBe(
+    expect(panel().querySelector('app-panel-title + p[neatNote]')?.textContent?.trim()).toBe(
       NOT_IN_OVERLAYS,
     );
     // An Available camera says nothing there; an Unsupported USB camera says why.

@@ -46,6 +46,7 @@ describe('SystemArea', () => {
     await show();
     const stack = fixture.debugElement.query(By.directive(NeatStackedChart)).componentInstance;
     expect(stack.label()).toBe('Accelerator memory');
+    expect(stack.size()).toBe('medium');
     expect(stack.headline()).toBe('838 MB');
     expect(stack.series().map((band: { label: string }) => band.label)).toEqual(['MLA', 'EV74']);
   });

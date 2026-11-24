@@ -18,3 +18,12 @@ h2 {
 neat-status-chip {
   flex: none;
 }
+
+/* What follows the chip keeps its width too, and takes no room (nor a gap) while nothing is there. */
+.end {
+  flex: none;
+}
+
+.end:empty {
+  display: none;
+}

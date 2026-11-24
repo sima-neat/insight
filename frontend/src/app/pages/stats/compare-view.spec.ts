@@ -243,7 +243,11 @@ describe('CompareView', () => {
     await openPair();
     await flush(compareRequest(), answer());
 
-    expect(tabs('Series to compare')).toEqual(['Total power (Estimated)', 'Thermal max', 'CPU usage']);
+    expect(tabs('Series to compare')).toEqual([
+      'Total power (Estimated)',
+      'Thermal max',
+      'CPU usage',
+    ]);
     expect(chart()!.axis()).toBe('elapsed');
     expect(chart()!.size()).toBe('large');
     expect(chart()!.label()).toBe('Total power (Estimated)');

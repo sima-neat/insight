@@ -31,6 +31,7 @@ const percent = (value: number): string => formatValue(value, '%');
     @if (accelerators(); as stack) {
       <neat-stacked-chart
         label="Accelerator memory"
+        size="medium"
         [headline]="stack.headline"
         [series]="stack.series"
         [times]="window().times"

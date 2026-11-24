@@ -3,6 +3,7 @@ import { NeatChartCard, NeatStackedChart } from '@sima/neat-ui/charts';
 import { NO_VALUE } from '../../no-value';
 import { fixedValue, isNumber } from '../../stats/format';
 import {
+  BOARD_POWER_LABEL,
   boardPowerChart,
   metricByKey,
   powerRailsChart,
@@ -35,7 +36,7 @@ const TILES = [
       </div>
     }
     <app-stats-chart
-      label="Board power (Estimated)"
+      [label]="boardPowerLabel"
       size="large"
       [chart]="boardPower()"
       [times]="window().times"
@@ -58,6 +59,8 @@ export class PowerArea {
 
   /** Rails are small figures: two decimals tell a 0.09 W rail from a 0.59 W one. */
   protected readonly watts = (value: number): string => fixedValue(value, 'W', 2);
+
+  protected readonly boardPowerLabel = BOARD_POWER_LABEL;
 
   protected readonly tiles = computed(() =>
     TILES.flatMap(({ key, heading }) => {

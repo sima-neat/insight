@@ -48,6 +48,7 @@ import {
   tableGroups,
   summarisesEveryRun,
   tableStatus,
+  ENERGY_LABEL,
 } from '../../stats/compare';
 import { downloadCsv } from '../../stats/csv-download';
 import { formatEnergy, formatValue } from '../../stats/format';
@@ -122,6 +123,7 @@ export class CompareView {
   private readonly board = inject(BoardService);
   private readonly router = inject(Router);
   private readonly document = inject(DOCUMENT);
+  protected readonly energyLabel = ENERGY_LABEL;
   protected readonly runs = inject(SentinelRuns);
   protected readonly session = inject(StatsSession);
 

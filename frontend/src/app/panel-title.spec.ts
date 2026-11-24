@@ -6,7 +6,9 @@ import { PanelTitle, type PanelChip } from './panel-title';
 
 @Component({
   imports: [PanelTitle],
-  template: `<app-panel-title [chip]="chip()">src3</app-panel-title>`,
+  template: `<app-panel-title [chip]="chip()"
+    >src3<button panelTitleEnd type="button">Extra</button></app-panel-title
+  >`,
 })
 class Host {
   readonly chip = signal<PanelChip | null>({ label: 'Live', tone: 'success' });
@@ -30,6 +32,19 @@ describe('PanelTitle', () => {
     await fixture.whenStable();
     expect(chip.nativeElement.textContent.trim()).toBe('Idle');
     expect(chip.componentInstance.tone()).toBe('neutral');
+  });
+
+  it('puts an element marked panelTitleEnd after the chip, outside the heading', async () => {
+    const fixture = TestBed.createComponent(Host);
+    await fixture.whenStable();
+    const title: HTMLElement = fixture.nativeElement.querySelector('app-panel-title');
+    const extra = title.querySelector('button[panelTitleEnd]')!;
+    expect(title.querySelector('h2')!.contains(extra)).toBe(false);
+    expect(
+      title.querySelector('neat-status-chip')!.compareDocumentPosition(extra) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(title.querySelector('h2')!.textContent!.trim()).toBe('src3');
   });
 
   it('shows no chip while there is none, and shows it again when one comes', async () => {

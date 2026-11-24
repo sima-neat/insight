@@ -5,7 +5,7 @@ import type { CameraItem, MicrophoneItem, PeripheralItem, Peripherals } from './
 // a Yeti Nano microphone on the same USB port. Plain data with no Angular, so the end-to-end tests
 // can import it too. The server's own tests hold its answers to real Sentinel catalogs.
 
-const USB_REASON = 'USB cameras have no camera overlay on this board.';
+const USB_REASON = 'Update SiMa Sentinel on the board to check USB cameras.';
 
 /** The IMX477: NV12 1920×1080 at 60 and 30 fps and 1280×720 at 60, all Available. */
 export const IMX477: CameraItem = {
@@ -145,7 +145,10 @@ export const YETI: MicrophoneItem = {
 export type ScanOptions = Partial<Omit<NonNullable<Peripherals['scan']>, 'items'>>;
 
 /** The peripherals answer of a scan that found `items`. */
-export function scanAnswer(items: readonly PeripheralItem[], options: ScanOptions = {}): Peripherals {
+export function scanAnswer(
+  items: readonly PeripheralItem[],
+  options: ScanOptions = {},
+): Peripherals {
   return {
     scan: {
       scanned_at: '2026-10-25T10:00:00Z',

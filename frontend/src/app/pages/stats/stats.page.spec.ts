@@ -370,6 +370,7 @@ describe('StatsPage', () => {
     const stack = stackOf(cardNamed('Accelerator memory'))!;
     expect(stack.label()).toBe('Accelerator memory');
     expect(stack.headless()).toBe(true);
+    expect(stack.size()).toBe('medium');
     expect(stack.valueLabels()).toBe(false);
     expect(stack.series().map((band) => band.label)).toEqual(['MLA']);
     expect(chartOf(cardNamed('Accelerator memory'))).toBeUndefined();
