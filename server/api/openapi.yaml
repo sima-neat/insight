@@ -220,8 +220,10 @@ paths:
         streamed a file keeps running with the new one, any other slot is stopped.
         `{kind: "pull", url, username?, password?}` has MediaMTX pull a camera (rtsp:// or
         rtsps://), after probing it: a camera that refuses the credentials is 422
-        `pull_auth_failed`, one that does not answer 502 `pull_unreachable`. The credentials
-        are kept in memory only. The slot starts pulling at once.
+        `pull_auth_failed`, one that does not answer 502 `pull_unreachable`. A publisher that
+        took the slot during the probe is 409 `slot_busy`, and a MediaMTX that does not answer
+        the check made after it 503 `mediamtx_unavailable`, with nothing assigned. The
+        credentials are kept in memory only. The slot starts pulling at once.
         `{kind: "webcam"}` makes it a browser's webcam: the answer's `urls.whip` is where the
         browser publishes. A slot an external publisher holds is 409 `slot_busy`. The body is
         sent as application/json.

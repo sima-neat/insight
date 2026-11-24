@@ -325,9 +325,14 @@ type fakeStreams struct {
 	mu      sync.Mutex
 	answers map[string]error
 	probed  []string
+	// onProbe runs while a probe is under way, as the world changing meanwhile.
+	onProbe func()
 }
 
 func (f *fakeStreams) probe(_ context.Context, url string) (StreamInfo, error) {
+	if f.onProbe != nil {
+		f.onProbe()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.probed = append(f.probed, url)

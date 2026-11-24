@@ -26,12 +26,17 @@ func (m *Manager) loop() {
 	}
 }
 
-func (m *Manager) tick() {
+func (m *Manager) tick() { _ = m.refreshSnapshot() }
+
+// refreshSnapshot asks MediaMTX for the paths now, makes the answer the Manager's view and
+// wakes every slot. It returns why MediaMTX did not answer, and the Manager's end as an error
+// too, with the view left as it was.
+func (m *Manager) refreshSnapshot() error {
 	ctx, cancel := context.WithTimeout(m.ctx, 2*time.Second)
 	snap, err := m.opts.MediaMTX.Snapshot(ctx)
 	cancel()
 	if m.ctx.Err() != nil {
-		return
+		return m.ctx.Err()
 	}
 	m.mu.Lock()
 	if err != nil {
@@ -52,6 +57,7 @@ func (m *Manager) tick() {
 	m.scheduleProbesLocked()
 	m.mu.Unlock()
 	m.wakeAll()
+	return err
 }
 
 // scheduleProbesLocked starts the probes the snapshot calls for: of a pull that is not live,

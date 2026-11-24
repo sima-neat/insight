@@ -311,6 +311,38 @@ func TestAPublisherOfTheSlotsOwnIsNeverExternal(t *testing.T) {
 	h.publisher(1)
 }
 
+func TestAPullChecksTheSlotAgainAfterItsProbe(t *testing.T) {
+	h := newHarness(t)
+	h.settle() // the slot is free in the snapshot the Manager holds
+	h.mtx.takeCalls()
+	h.streams.onProbe = func() { h.mtx.setPath(publishing(1, "h264", false)) }
+
+	err := h.m.AssignPull(context.Background(), 1, "rtsp://cam.local/live", "", "")
+	wantCode(t, err, CodeSlotBusy)
+	if calls := h.mtx.takeCalls(); len(calls) != 0 {
+		t.Errorf("a pull was configured over the publisher that connected during the probe: %v", calls)
+	}
+	if d := h.m.store.get(1); d.Kind != KindNone {
+		t.Errorf("the slot was assigned: %+v", d)
+	}
+}
+
+func TestAPullIsRefusedWhenMediaMTXDoesNotAnswerAfterItsProbe(t *testing.T) {
+	h := newHarness(t)
+	h.settle()
+	h.mtx.takeCalls()
+	h.streams.onProbe = func() { h.mtx.setDown(true) }
+
+	err := h.m.AssignPull(context.Background(), 1, "rtsp://cam.local/live", "", "")
+	wantCode(t, err, CodeMediaMTXDown)
+	if !strings.Contains(err.Error(), "src1") {
+		t.Errorf("the refusal does not name the slot: %v", err)
+	}
+	if d := h.m.store.get(1); d.Kind != KindNone {
+		t.Errorf("the slot was assigned: %+v", d)
+	}
+}
+
 func TestAPullIsProbedSetAndForgottenAcrossARestart(t *testing.T) {
 	h := newHarness(t)
 	h.streams.answer("rtsp://admin:wrong@", &ProbeError{Auth: true})
