@@ -83,6 +83,9 @@ jobs:
       - name: Tests
         run: go test -race ./...
 
+      - name: Third-party notices match go.mod
+        run: python3 ../scripts/third-party-notices.py --check
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
