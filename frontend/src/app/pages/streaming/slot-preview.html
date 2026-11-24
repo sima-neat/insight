@@ -45,11 +45,13 @@
     element too, so hiding it keeps the frame's content from saying it a second time.
   -->
   @if (badge(); as badge) {
-    <span class="badge" aria-hidden="true" [id]="badgeId">
-      @if (badge === live) {
+    <span class="badge" aria-hidden="true" [id]="badgeId" [class.on-picture]="onPicture()">
+      @if (badge.live) {
         <neat-live-dot pulse />
+      } @else {
+        <span class="idle"></span>
       }
-      <neat-status-chip [tone]="badge.tone">{{ badge.label }}</neat-status-chip>
+      {{ badge.label }}
     </span>
   }
 </app-preview-frame>

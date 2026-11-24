@@ -4,10 +4,8 @@ import {
   provideHttpClientTesting,
   type TestRequest,
 } from '@angular/common/http/testing';
-import { Component, getDebugNode, signal } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import type { NeatTone } from '@sima/neat-ui';
-import type { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import type { Slot, SlotPull } from '../../api.generated';
 import { publisher, pull, slot as unassigned } from '../../sources/slots.testing';
 import {
@@ -17,12 +15,6 @@ import {
   previewFailure,
   SlotPreview,
 } from './slot-preview';
-
-/** The tone of a badge's status chip; null without a badge. */
-function toneOf(badge: HTMLElement | null): NeatTone | null {
-  const chip = badge?.querySelector('neat-status-chip') ?? null;
-  return chip === null ? null : (getDebugNode(chip)!.componentInstance as NeatStatusChip).tone();
-}
 
 /** A slot as the server lists it; one given a file is a file slot. */
 function slot(n: number, overrides: Partial<Slot> = {}): Slot {
@@ -577,24 +569,23 @@ describe('SlotPreview', () => {
   describe('badge', () => {
     const badge = () => root().querySelector<HTMLElement>('.badge');
     const badgeText = () => badge()?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
-    const liveDot = () => badge()?.querySelector('neat-live-dot') ?? null;
-    /**
-     * A live badge says so in the slot's live tone, as the panel's state chip does, led by the
-     * kit's pulsing live dot.
-     */
+    /** A live badge has the kit's pulsing dot; any other has the grey one. */
+    const liveDot = () => badge()?.querySelector('neat-live-dot .beat') ?? null;
+    const greyDot = () => badge()?.querySelector('.idle') ?? null;
+
     function expectLive(): void {
       expect(badgeText()).toBe('Live');
-      expect(toneOf(badge())).toBe('success');
       expect(liveDot()).not.toBeNull();
+      expect(greyDot()).toBeNull();
     }
 
     function expectNotLive(label: string): void {
       expect(badgeText()).toBe(label);
-      expect(toneOf(badge())).toBe('neutral');
       expect(liveDot()).toBeNull();
+      expect(greyDot()).not.toBeNull();
     }
 
-    it('says File preview, neutral, for a stopped file slot, in place of a caption', async () => {
+    it('says File preview with a grey dot for a stopped file slot, in place of a caption', async () => {
       await show(slot(1, { file: 'people/walk 1.mp4', codec: 'h264' }));
       expectNotLive('File preview');
       expect(root().querySelector('.caption')).toBeNull();
@@ -727,6 +718,31 @@ describe('SlotPreview', () => {
       expectLive();
     });
 
+    it('is a dark pill over a picture and a muted one over an empty frame', async () => {
+      const onPicture = () => badge()!.classList.contains('on-picture');
+
+      await show(slot(1, { file: 'cars.mp4', codec: 'h264' }));
+      expect(onPicture()).toBe(true);
+
+      // A live slot has no picture until its first frame.
+      host.slot.set(slot(1, { run: true, state: 'live', file: 'cars.mp4', codec: 'h264' }));
+      await fixture.whenStable();
+      expect(onPicture()).toBe(false);
+      decodeFirstFrame(image()!);
+      vi.advanceTimersByTime(100);
+      await fixture.whenStable();
+      expect(onPicture()).toBe(true);
+
+      host.slot.set(pulled(2, { status: 'unreachable', since: null }));
+      await fixture.whenStable();
+      expect(onPicture()).toBe(false);
+
+      host.slot.set(slot(3, { kind: 'webcam' }));
+      host.stream.set({} as MediaStream);
+      await fixture.whenStable();
+      expect(onPicture()).toBe(true);
+    });
+
     it('is part of the frame’s accessible description, which a changed badge keeps up with', async () => {
       await show(slot(1, { file: 'cars.mp4', codec: 'h264' }));
       const frame = root().querySelector('app-preview-frame')!;
@@ -770,7 +786,7 @@ describe('SlotPreview', () => {
     const state = () => ({
       badge: badgeText(),
       description: description(),
-      tone: toneOf(badge()),
+      onPicture: badge()?.classList.contains('on-picture') ?? null,
       image: image()?.getAttribute('src') ?? null,
       video: video() !== null,
       message: message() ?? null,
@@ -794,11 +810,11 @@ describe('SlotPreview', () => {
         }),
         {} as MediaStream,
       );
-      // Connecting: the slot is live, with no picture yet.
+      // Connecting: the slot is live, there is no picture yet to put the badge on.
       expect(state()).toEqual({
         badge: 'Live',
         description: 'Live',
-        tone: 'success',
+        onPicture: false,
         image: `/api/slots/2/preview.mjpg?t=1737000000000&s=${encodeURIComponent(since)}`,
         video: false,
         message: null,
@@ -808,6 +824,7 @@ describe('SlotPreview', () => {
 
       await showFirstFrame();
       expect(text()).not.toContain('Connecting');
+      expect(state().onPicture).toBe(true);
       expect(state().description).toBe('Live');
     });
 
@@ -819,7 +836,7 @@ describe('SlotPreview', () => {
       expect(state()).toMatchObject({
         badge: 'Live',
         description: 'Live',
-        tone: 'success',
+        onPicture: false,
         image: null,
         message: 'Preview unavailable: too many previews open Retry',
       });
@@ -830,7 +847,7 @@ describe('SlotPreview', () => {
       expect(state()).toEqual({
         badge: 'Not live',
         description: 'Not live',
-        tone: 'neutral',
+        onPicture: false,
         image: null,
         video: false,
         message: 'Waiting for the camera…',
@@ -873,16 +890,18 @@ describe('SlotPreview', () => {
       expect(state()).toMatchObject({
         badge: 'Live',
         description: 'Live',
-        tone: 'success',
+        onPicture: false,
         image: `/api/slots/3/preview.mjpg?t=1737000000000&s=${encodeURIComponent('2026-10-26T09:00:00Z')}`,
         message: null,
       });
       await showFirstFrame();
+      expect(state().onPicture).toBe(true);
 
       vi.setSystemTime(1_737_000_100_000);
       host.slot.set(pulled(3, { since: '2026-10-26T10:00:00Z' }));
       await fixture.whenStable();
       expect(state().image).toContain('s=2026-10-26T10%3A00%3A00Z');
+      expect(state().onPicture).toBe(false);
     });
   });
 });
