@@ -13,7 +13,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"insight/internal/apierr"
 	"insight/internal/jobs"
+	"insight/internal/media"
 )
 
 // UploadResult is how an upload ended: in the library already (Saved, 201), or re-encoded first
@@ -49,6 +51,9 @@ func (l *Library) Upload(w http.ResponseWriter, r *http.Request) (UploadResult, 
 	if r.ContentLength > l.maxUpload+formSlack {
 		return UploadResult{}, tooLarge(l.maxUpload)
 	}
+	if err := l.checkRoom(r.ContentLength); err != nil {
+		return UploadResult{}, err
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, l.maxUpload+formSlack)
 	form, err := r.MultipartReader()
 	if err != nil {
@@ -79,6 +84,26 @@ func (l *Library) upload(ctx context.Context, form *multipart.Reader, stage stri
 		return l.uploadArchive(ctx, up, folder, isZip, stage)
 	}
 	return l.uploadFile(ctx, up, stage)
+}
+
+// checkRoom refuses an upload whose request of length bytes (-1 when it does not say: up to the
+// limit) would not fit on the media folder's disk with media.FreeSpaceMargin to spare, before
+// anything of it is written. A disk that fills meanwhile is still answered by the write
+// (saveError).
+func (l *Library) checkRoom(length int64) error {
+	if length < 0 {
+		length = l.maxUpload
+	}
+	free, known := l.freeSpace(l.root)
+	if !known || free >= length+media.FreeSpaceMargin {
+		return nil
+	}
+	return &apierr.Error{
+		Status: http.StatusInsufficientStorage, Code: CodeNoSpace,
+		Message: fmt.Sprintf("The upload needs about %s free on the media folder's disk (%s for it and %s to spare), and %s is free.",
+			sizeText(length+media.FreeSpaceMargin), sizeText(length), sizeText(media.FreeSpaceMargin), sizeText(free)),
+		Hint: "Delete media you no longer need, then try again.",
+	}
 }
 
 // receive reads the request's fields, streaming the file into stage.

@@ -58,6 +58,44 @@ func TestUploadRefusals(t *testing.T) {
 	}
 }
 
+func TestAnUploadThatWouldNotFitIsRefusedBeforeItIsWritten(t *testing.T) {
+	f := newFixture(t, nil)
+	var free int64
+	known := true
+	asked := ""
+	f.lib.freeSpace = func(dir string) (int64, bool) { asked = dir; return free, known }
+
+	req := uploadRequest(t, "clip.mp4", []byte("video"))
+	free = req.ContentLength + media.FreeSpaceMargin - 1
+	_, err := f.lib.Upload(httptest.NewRecorder(), req)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != CodeNoSpace || refusal.Status != http.StatusInsufficientStorage {
+		t.Fatalf("one byte short: %v", err)
+	}
+	if asked != f.root {
+		t.Errorf("asked about %q, want the media folder %q", asked, f.root)
+	}
+	if entries, _ := os.ReadDir(f.root); len(entries) != 0 {
+		t.Fatalf("the refused upload left %v", entries)
+	}
+
+	req = uploadRequest(t, "clip.mp4", []byte("video"))
+	free = req.ContentLength + media.FreeSpaceMargin
+	f.save(t, "clip.mp4", []byte("video"), "")
+
+	// A request that does not say its length may be as long as the limit.
+	chunked := uploadRequest(t, "chunked.mp4", []byte("video"))
+	chunked.ContentLength = -1
+	free = f.lib.maxUpload + media.FreeSpaceMargin - 1
+	if _, err := f.lib.Upload(httptest.NewRecorder(), chunked); code(err) != CodeNoSpace {
+		t.Fatalf("a request of unknown length: %v", err)
+	}
+
+	known = false // a file system that does not say: the write itself answers a full disk
+	free = 0
+	f.save(t, "other.mp4", []byte("video"), "")
+}
+
 func twoFiles(t *testing.T) *http.Request {
 	t.Helper()
 	req := uploadRequest(t, "a.mp4", []byte("x"))

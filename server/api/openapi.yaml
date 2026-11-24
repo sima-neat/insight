@@ -514,7 +514,9 @@ paths:
         or profile, keyframes far apart) is re-encoded by a job first (202 with the job, whose
         result is what was saved). An archive (ZIP, tar, gzipped tar) is unpacked into a folder
         named after it. A taken name with `ask` is 409 `name_taken` with the `conflict`, before
-        any work. Replacing a file restarts the slots that streamed it.
+        any work. Replacing a file restarts the slots that streamed it. An upload whose request
+        would not fit on the media folder's disk with 1 GiB to spare is 507 `no_space` before
+        anything is written (a request without a Content-Length counts as the 8 GiB limit).
       requestBody:
         required: true
         content:
