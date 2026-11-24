@@ -2,7 +2,9 @@ Third-party software in neat-insight
 
 The server (neat_insight/bin/neat-insight) is built with Go and the Go modules below; each one's
 license follows. MediaMTX (neat_insight/bin/mediamtx) is MIT licensed: its license is
-neat_insight/bin/mediamtx.LICENSE. The licenses of the web UI's packages are built into the
+neat_insight/bin/mediamtx.LICENSE. Its binary links Go modules of its own (gortsplib,
+mediacommon, pion and others, which `go version -m neat_insight/bin/mediamtx` lists); MediaMTX's
+release ships its LICENSE only, with no notices of those modules. The licenses of the web UI's packages are built into the
 server, which serves them at /3rdpartylicenses.txt.
 
 Written by scripts/third-party-notices.py from server/go.mod; do not edit.
