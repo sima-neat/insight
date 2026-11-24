@@ -41,8 +41,7 @@ type Info struct {
 	CodecName string
 	// Profile is ffprobe's name of the codec profile ("High", "Constrained Baseline"), or "".
 	Profile string
-	// PixelFormat is ffprobe's name of the pixel format ("yuv420p", "rgb24"); for a picture it
-	// takes the place of Pillow's mode the old backend showed.
+	// PixelFormat is ffprobe's name of the pixel format ("yuv420p", "rgb24"), for a picture too.
 	PixelFormat   string
 	Width, Height int
 	// FPS is the stream's frame rate: the average when ffprobe knows it, else the base rate. 0 for
@@ -75,7 +74,7 @@ func (i Info) Streamable() bool {
 }
 
 // probeTimeout bounds one ffprobe run. Probes run in the background, so a generous bound costs
-// no request anything; a short one (the old backend had 10 s) timed out on a busy board.
+// no request anything; a short one (10 s) timed out on a busy board.
 const probeTimeout = 30 * time.Second
 
 // ProbeFile runs ffprobe once on the regular file at abs and reads its first video stream. A

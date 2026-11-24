@@ -107,8 +107,8 @@ imported from the wrong entry point.
   only. Insight installs and starts nothing on the board: where Sentinel is missing or stopped,
   the page shows the command the error's hint names.
 - **The Viewer.** The kit's video entry (`neat-video-tile`, `neat-tile-grid`) draws and knows
-  nothing of the server. The app connects it in `src/app/viewer/` (`vf/`, named after the old
-  viewer, holds a channel's WebRTC connection), and the page, `src/app/pages/viewer/`, owns the
+  nothing of the server. The app connects it in `src/app/viewer/` (a channel's WebRTC connection
+  is the kit's `neatInsightChannel`), and the page, `src/app/pages/viewer/`, owns the
   connections while it is shown. Regions of interest are display-only and never leave the browser.
 - **The initial bundle** carries whatever the app root imports statically, on every page. So the
   Viewer's video code, the Streaming, Media, Peripherals and Stats pages, the kit entries only they

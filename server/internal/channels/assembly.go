@@ -32,7 +32,7 @@ type accessUnit struct {
 //
 // For H.265 a loss also closes a gate that withholds every unit until the next random-access
 // picture (an IRAP), since the units in between reference what was lost. H.264's decoders in
-// browsers conceal such losses well enough that vf never gated them, nor does this.
+// browsers conceal such losses well enough that this does not gate them.
 type assembler struct {
 	packets      [][]byte
 	size         int // the bytes of packets

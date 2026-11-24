@@ -7,9 +7,6 @@ import (
 	"time"
 )
 
-// Carried over from vf's tests (webrtc/metadata_sync_test.go), with whole-number timestamps and a
-// producer's own "_insight" added.
-
 func timedMessage(t *testing.T, ms int64) message {
 	t.Helper()
 	m, err := parseMessage([]byte(fmt.Sprintf(`{"type":"object-detection","timestamp":%d,"data":{"objects":[]}}`, ms)))

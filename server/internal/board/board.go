@@ -197,7 +197,7 @@ func (b *Board) Sentinel(ctx context.Context, method, path string, body io.Reade
 	if !strings.HasPrefix(path, "/") {
 		return nil, boardError(CodeInvalidRequest, fmt.Sprintf("Sentinel path %q does not start with /.", path), "", nil)
 	}
-	// Sentinel's own client (the old backend's) sends Host: localhost.
+	// Sentinel's own client sends Host: localhost.
 	request, err := http.NewRequestWithContext(ctx, method, "http://localhost"+path, body)
 	if err != nil {
 		return nil, boardError(CodeInvalidRequest, "Not a Sentinel request.", "", err)

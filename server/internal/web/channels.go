@@ -104,8 +104,8 @@ func (h *handlers) GetIngestStats(w http.ResponseWriter, r *http.Request, params
 	writeJSON(w, http.StatusOK, stats)
 }
 
-// GetViewerUrl builds the link as the old backend did, parameters in the same order: mode (when
-// light or dark), src, max_channels.
+// GetViewerUrl builds the link (Frozen), its parameters in this order: mode (when light or dark),
+// src, max_channels.
 func (h *handlers) GetViewerUrl(w http.ResponseWriter, r *http.Request, params api.GetViewerUrlParams) {
 	channelsInfo := h.deps.Config.Channels
 	count := channelsInfo.Count
@@ -147,7 +147,7 @@ func (h *handlers) GetViewerUrl(w http.ResponseWriter, r *http.Request, params a
 	})
 }
 
-// truthy reads a query flag as the old backend did: 1, true, yes or on, in any case.
+// truthy reads a query flag: 1, true, yes or on, in any case.
 func truthy(value *string) bool {
 	if value == nil {
 		return false

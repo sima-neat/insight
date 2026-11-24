@@ -6,8 +6,7 @@ import (
 	"insight/internal/apierr"
 )
 
-// The codes of a board's failures (apierr.Error's Code), stable words the UI may branch on. They
-// are the old backend's where they still apply.
+// The codes of a board's failures (apierr.Error's Code), stable words the UI may branch on.
 const (
 	// CodeInvalidRequest: a target, a fingerprint or a path that cannot be right.
 	CodeInvalidRequest = "invalid_request"

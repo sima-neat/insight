@@ -7,8 +7,6 @@ import (
 	"github.com/pion/rtp"
 )
 
-// Carried over from vf's tests (webrtc/viewer_test.go), which are this code's specification.
-
 type testPacket struct {
 	packet *rtp.Packet
 	raw    []byte

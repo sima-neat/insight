@@ -85,8 +85,7 @@ func (l *Library) Preview(w http.ResponseWriter, r *http.Request, rel string) {
 }
 
 // PreviewCommand makes the producer of a file preview for the relays: source is the absolute
-// path Preview passed. The old backend's arguments: the first video stream at real time, looped,
-// as MJPEG (copied when the file is MJPEG already, as its probe says).
+// path Preview passed: the first video stream at real time, looped, as MJPEG (copied when the file is MJPEG already, as its probe says).
 func (l *Library) PreviewCommand(source string) (*exec.Cmd, error) {
 	if l.ffmpeg == "" {
 		return nil, errors.New("FFmpeg is not installed")

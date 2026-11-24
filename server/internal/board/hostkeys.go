@@ -19,8 +19,8 @@ import (
 // knownHosts is Insight's own known_hosts file, not the user's: the first key a board presents
 // is trusted and saved (accept-new), a different one later is refused until the user trusts it.
 //
-// Insight writes it with plain host names, one per line, as the old backend (paramiko) did, so
-// its file carries over. Hashed names, patterns and markers, which Insight never writes, match
+// Insight writes it with plain host names, one per line, as earlier Insight releases did, so
+// their file carries over. Hashed names, patterns and markers, which Insight never writes, match
 // nothing here.
 type knownHosts struct {
 	path string

@@ -20,7 +20,7 @@ import (
 )
 
 // The archives an upload may be: unpacked into a folder named after the archive. A .gz is a
-// gzipped tar, as the old backend took it.
+// gzipped tar.
 var archiveSuffixes = []struct {
 	suffix string
 	zip    bool

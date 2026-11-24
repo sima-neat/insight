@@ -59,7 +59,7 @@ func newNegotiator(portStart, portEnd uint16, iceAddress string) (*negotiator, e
 			return nil, err
 		}
 		// A NACK responder resends what a browser lost, and sender reports keep its clock
-		// mapping fresh; vf had neither. No PLI: a keyframe is the app's to send (docs/contracts.md).
+		// mapping fresh. No PLI: a keyframe is the app's to send (docs/contracts.md).
 		registry := &interceptor.Registry{}
 		if err := webrtc.ConfigureNack(engine, registry); err != nil {
 			return nil, err
