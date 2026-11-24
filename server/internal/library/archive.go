@@ -76,13 +76,13 @@ func (u *unpacker) zip(archive string) error {
 		return invalidArchive("The archive cannot be read as a ZIP file: %v.", err)
 	}
 	defer r.Close()
-	var declared uint64
+	var sizes []uint64
 	for _, f := range r.File {
 		if f.Mode().IsRegular() {
-			declared += f.UncompressedSize64
+			sizes = append(sizes, f.UncompressedSize64)
 		}
 	}
-	if err := u.room(clampInt64(declared)); err != nil {
+	if err := u.room(saturatingSum(sizes)); err != nil {
 		return err
 	}
 	for _, f := range r.File {
@@ -192,15 +192,33 @@ func (u *unpacker) folder(name string) error {
 
 // room refuses an archive whose content so far and the next bytes it says it holds would not
 // fit on the disk with media.FreeSpaceMargin to spare.
+// It compares with the room left rather than add, so a declared size near the top of int64
+// cannot wrap past the check.
 func (u *unpacker) room(bytes int64) error {
-	need := u.written + max(bytes, 0)
-	if u.free-media.FreeSpaceMargin >= need {
+	bytes = max(bytes, 0)
+	if bytes <= u.free-media.FreeSpaceMargin-u.written {
 		return nil
+	}
+	need := u.written + bytes
+	if need < 0 {
+		need = math.MaxInt64
 	}
 	return noRoom("The archive's content", need, u.free)
 }
 
 func clampInt64(n uint64) int64 { return int64(min(n, math.MaxInt64)) }
+
+// saturatingSum is the sum of a ZIP's declared sizes, math.MaxInt64 where it would be more.
+func saturatingSum(sizes []uint64) int64 {
+	var sum uint64
+	for _, size := range sizes {
+		if size > math.MaxInt64-sum {
+			return math.MaxInt64
+		}
+		sum += size
+	}
+	return int64(sum)
+}
 
 // file writes the entry name, which says it holds declared bytes.
 func (u *unpacker) file(name string, declared int64, open func() (io.ReadCloser, error)) error {

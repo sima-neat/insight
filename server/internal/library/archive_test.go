@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -290,5 +291,21 @@ func TestArchiveOf(t *testing.T) {
 		if folder != want || ok != (want != "") {
 			t.Errorf("archiveOf(%q) = %q, %v", name, folder, ok)
 		}
+	}
+}
+
+// A declared size near the top of int64 must not wrap the sum past the check.
+func TestRoomRefusesAHugeDeclaredSize(t *testing.T) {
+	u := &unpacker{free: media.FreeSpaceMargin + 100, written: 50}
+	for _, declared := range []int64{51, math.MaxInt64, math.MaxInt64 - 49} {
+		if err := u.room(declared); code(err) != CodeNoSpace {
+			t.Errorf("room(%d) after 50 bytes with 100 free: %v", declared, err)
+		}
+	}
+	if err := u.room(50); err != nil {
+		t.Errorf("room(50) after 50 bytes with 100 free: %v", err)
+	}
+	if got := saturatingSum([]uint64{math.MaxUint64 - 1, 5}); got != math.MaxInt64 {
+		t.Errorf("a ZIP's declared sizes summed to %d", got)
 	}
 }
