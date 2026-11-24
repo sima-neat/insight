@@ -41,6 +41,7 @@ import {
   compareOverlay,
   compareSummary,
   compareTable,
+  ENERGY_LABEL,
   formatChange,
   isCompareExport,
   orderedIds,
@@ -48,7 +49,6 @@ import {
   tableGroups,
   summarisesEveryRun,
   tableStatus,
-  ENERGY_LABEL,
 } from '../../stats/compare';
 import { downloadCsv } from '../../stats/csv-download';
 import { formatEnergy, formatValue } from '../../stats/format';

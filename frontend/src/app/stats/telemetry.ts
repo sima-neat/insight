@@ -8,8 +8,8 @@ import { NO_VALUE } from '../no-value';
 import type { SentinelCache, SentinelMetric, SentinelSample } from './api';
 import { definitionsOf, joinMetrics, metricStatus } from './metrics';
 import {
-  fixedValue,
   estimated,
+  fixedValue,
   formatValue,
   isNumber,
   isThermalMetric,

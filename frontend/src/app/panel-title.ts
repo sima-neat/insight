@@ -11,8 +11,9 @@ export interface PanelChip {
 /**
  * A side panel's first line: what the panel is about, as its heading (`neatAsideTitle`), with its
  * state as a chip beside it: `<app-panel-title [chip]="row.state">src3</app-panel-title>`. The
- * chip sits outside the heading, and an element marked `panelTitleEnd` follows the chip, so the heading names the subject only, and it is left out while the
- * chip is null. Streaming's slot panel, Peripherals' device panels and Stats' areas open with it.
+ * chip sits outside the heading, so the heading names the subject only, and is left out while
+ * null; an element marked `panelTitleEnd` follows it. Streaming's slot panel, Peripherals' device
+ * panels and Stats' areas open with it.
  */
 @Component({
   selector: 'app-panel-title',
