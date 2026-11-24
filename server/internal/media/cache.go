@@ -44,6 +44,16 @@ type Cache struct {
 	pending map[string]bool // queued or being probed
 	queue   []string
 	workers int
+	flights map[string]*flight // the probe running for each file, which every asker waits for
+}
+
+// flight is one probe of a version of a file, which Probe's callers and the workers share: a
+// burst of requests for a file not probed yet runs one ffprobe.
+type flight struct {
+	stamp stamp
+	done  chan struct{}
+	info  Info  // as Get gives it, once done
+	err   error // the cache's context ended; set before done is closed
 }
 
 // stamp identifies a version of a file's content.
@@ -66,6 +76,7 @@ func NewCache(ctx context.Context, probe Prober) *Cache {
 		now:     time.Now,
 		entries: map[string]entry{},
 		pending: map[string]bool{},
+		flights: map[string]*flight{},
 	}
 }
 
@@ -121,30 +132,24 @@ func (c *Cache) work() {
 			return
 		}
 		st, exists := statOf(abs)
-		var info Info
-		var err error
 		if exists {
-			info, err = c.probe(c.ctx, abs)
+			<-c.join(abs, st).done
 		}
 		c.mu.Lock()
 		delete(c.pending, abs)
-		switch {
-		case !exists:
+		if !exists {
 			delete(c.entries, abs)
-		case c.ctx.Err() != nil:
-			// Stopped, not failed: nothing to remember.
-		default:
-			c.storeLocked(abs, st, info, err)
 		}
 		c.mu.Unlock()
 	}
 }
 
 // Probe returns what probing the file at abs says: the cached answer while the file has not
-// changed since (a failure too, as Get gives it), else the answer of a probe it runs at once, in
-// the calling goroutine and with its ctx, and keeps for Get. A failed probe is an Info of
-// KindUnknown whose Problem says why; the error is for a file that cannot be read at all, and
-// for ctx ending.
+// changed since (a failure too, as Get gives it), else the answer of a probe it starts at once,
+// or of the one already running for that version of the file, and keeps for Get. The probe runs
+// under the cache's context, so a caller that stops waiting (its ctx ended) leaves it to the
+// others. A failed probe is an Info of KindUnknown whose Problem says why; the error is for a
+// file that cannot be read at all, and for ctx or the cache's context ending.
 func (c *Cache) Probe(ctx context.Context, abs string) (Info, error) {
 	if info, ok := c.Get(abs); ok {
 		return info, nil
@@ -153,13 +158,39 @@ func (c *Cache) Probe(ctx context.Context, abs string) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	info, err := c.probe(ctx, abs)
-	if ctx.Err() != nil {
+	f := c.join(abs, st)
+	select {
+	case <-f.done:
+		return f.info, f.err
+	case <-ctx.Done():
 		return Info{}, ctx.Err()
 	}
+}
+
+// join returns the probe of the file at abs as it is at st: the running one, or a new one.
+func (c *Cache) join(abs string, st stamp) *flight {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.storeLocked(abs, st, info, err), nil
+	if f := c.flights[abs]; f != nil && f.stamp == st {
+		return f
+	}
+	f := &flight{stamp: st, done: make(chan struct{})}
+	c.flights[abs] = f
+	go func() {
+		info, err := c.probe(c.ctx, abs)
+		c.mu.Lock()
+		if c.ctx.Err() != nil {
+			f.err = c.ctx.Err() // stopped, not failed: nothing to remember
+		} else {
+			f.info = c.storeLocked(abs, st, info, err)
+		}
+		if c.flights[abs] == f {
+			delete(c.flights, abs)
+		}
+		c.mu.Unlock()
+		close(f.done)
+	}()
+	return f
 }
 
 // storeLocked keeps what a probe of the file at abs, as it was at st, said, and returns it as
