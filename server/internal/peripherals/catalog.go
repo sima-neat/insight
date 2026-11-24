@@ -89,6 +89,10 @@ type identity struct {
 	Serial       string    `json:"serial"`
 	Topology     string    `json:"topology"`
 	Speed        linkSpeed `json:"speed"`
+	// Driver is the kernel driver of a USB camera, which only a Sentinel that checks USB cameras
+	// reports (sentinel#46, #52, #53); CameraName is the name Neat's USB camera input opens it by.
+	Driver     string `json:"driver"`
+	CameraName string `json:"camera_name"`
 	// A microphone's.
 	CardIndex  *int   `json:"card_index"`
 	CardID     string `json:"card_id"`

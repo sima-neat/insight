@@ -70,6 +70,12 @@ func (s *fakeSentinel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, s.catalog)
 }
 
+func (s *fakeSentinel) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.refreshes
+}
+
 type fixture struct {
 	*boardtest.Fixture
 	sentinel *fakeSentinel
@@ -256,6 +262,69 @@ const pictures = `while :; do
 	printf -- '--frame\r\nContent-Type: image/jpeg\r\nContent-Length: 4\r\n\r\n\377\330\377\331\r\n' || exit
 	sleep 0.02
 done`
+
+// usbNoByID is the USB camera without a by-id link, as the scan lists it; replaced is the camera
+// a rescan finds at the same /dev/video1 after a replug.
+const usbNoByID = `{"id":"camera:v4l2:cafe","type":"camera","backend":"v4l2","model":"HD Pro Webcam C920",
+	"device_path":"/dev/video1","identity":{"vendor_id":"046d","product_id":"08e5","serial":"AAA","driver":"uvcvideo"},
+	"modes":[{"format":"MJPG","width":640,"height":480,"available":true,
+	"frame_intervals":[{"width":640,"height":480,"intervals":[{"type":"discrete","numerator":1,"denominator":30}]}]}]}`
+
+func TestAUSBPreviewWithoutAByIDLinkConfirmsTheCameraWithARescan(t *testing.T) {
+	f := newFixture(t, Timing{Unclaimed: time.Minute})
+	f.program(t, "gst-launch-1.0", pictures)
+	f.sentinel.set(catalogOf(usbNoByID))
+	f.refresh(t)
+	camera, mode := "camera:v4l2:cafe", Mode{"MJPG", 640, 480, 30}
+	start := func() error {
+		answer, err := f.manager.StartPreview(ctx(t), f.Board, camera, mode)
+		if err == nil {
+			f.manager.StopPreview(f.Board, camera, answer.Preview.ID)
+		}
+		return err
+	}
+
+	before := f.sentinel.count()
+	if err := start(); err != nil {
+		t.Fatalf("the same camera: %v", err)
+	}
+	if got := f.sentinel.count() - before; got != 1 {
+		t.Errorf("a rescan before the start: %d", got)
+	}
+	replaced := strings.Replace(usbNoByID, `"serial":"AAA"`, `"serial":"BBB"`, 1)
+	moved := strings.Replace(usbNoByID, `/dev/video1`, `/dev/video2`, 1)
+	for name, catalog := range map[string]string{"replaced": catalogOf(replaced), "moved": catalogOf(moved), "gone": catalogOf()} {
+		f.sentinel.set(catalog)
+		f.Program(t, "gst-launch-1.0", `echo started > '`+f.calls+`'; `+pictures)
+		os.Remove(f.calls)
+		if err := start(); codeOf(err) != "stale_scan" {
+			t.Errorf("%s: %v", name, err)
+		}
+		if _, err := os.Stat(f.calls); err == nil {
+			t.Errorf("%s: the pipeline ran", name)
+		}
+	}
+	failed := strings.Replace(catalogOf(usbNoByID), `"errors":[]`, `"errors":[{"provider":"camera.v4l2","code":"x","reason":"y"}]`, 1)
+	f.sentinel.set(failed)
+	if err := start(); codeOf(err) != "stale_scan" {
+		t.Errorf("a failed provider: %v", err)
+	}
+}
+
+func TestAUSBPreviewWithAByIDLinkIsNotRescanned(t *testing.T) {
+	f := newFixture(t, Timing{Unclaimed: time.Minute})
+	f.program(t, "gst-launch-1.0", pictures)
+	f.refresh(t)
+	before := f.sentinel.count()
+	answer, err := f.manager.StartPreview(ctx(t), f.Board, "camera:v4l2:421bbe426738013b", Mode{"MJPG", 640, 480, 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.manager.StopPreview(f.Board, "camera:v4l2:421bbe426738013b", answer.Preview.ID)
+	if got := f.sentinel.count() - before; got != 0 {
+		t.Errorf("rescans: %d", got)
+	}
+}
 
 func TestPreview(t *testing.T) {
 	f := newFixture(t, Timing{Unclaimed: time.Minute})

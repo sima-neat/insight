@@ -22,6 +22,7 @@ import {
   size,
   support,
   usb,
+  USB_REASON,
 } from '../../peripherals/cameras.testing';
 import { PeripheralsSession } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
@@ -575,11 +576,11 @@ describe('CameraPanel', () => {
     expect(panel().querySelector('app-panel-title + p[neatNote]')?.textContent?.trim()).toBe(
       NOT_IN_OVERLAYS,
     );
-    // An Available camera and a USB camera say nothing there.
+    // An Available camera says nothing there; an Unsupported USB camera says why.
     await show(imx477);
     expect(notes()).toEqual([]);
     await show(usb);
-    expect(notes()).toEqual([]);
+    expect(notes()).toEqual([USB_REASON]);
   });
 
   it('a mode that vanished says so, and a camera without a usable mode says why', async () => {

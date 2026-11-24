@@ -103,7 +103,9 @@ reports them. Insight scans the board when you open the page; **Refresh** scans 
 never opens a device, so your apps keep them.
 
 - **A camera** shows its pixel formats and resolutions, each **Available** to Neat's camera input
-  or **Unsupported** with the reason. **Start preview** shows what the camera sees, at a low frame
+  or **Unsupported** with the reason. For a USB camera, Available means Sentinel reports the mode
+  in MJPEG on the `uvcvideo` driver, which Neat's USB camera input reads; a Sentinel too old to
+  check USB cameras leaves every USB mode Unsupported and says to update it. **Start preview** shows what the camera sees, at a low frame
   rate. While it runs, the preview holds the camera, and your app cannot open it; leaving the page
   stops it.
 - **A microphone** shows what it captures. **Test microphone** records with a level meter, then
