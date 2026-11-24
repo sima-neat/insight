@@ -324,7 +324,8 @@ func (f *fakeEncoder) run(i int) encodeRun {
 type fakeStreams struct {
 	mu      sync.Mutex
 	answers map[string]error
-	probed  []string
+	probed  []string // the stream probes, of MediaMTX's paths
+	cameras []string // the camera probes
 }
 
 func (f *fakeStreams) probe(_ context.Context, url string) (StreamInfo, error) {
@@ -337,6 +338,19 @@ func (f *fakeStreams) probe(_ context.Context, url string) (StreamInfo, error) {
 		}
 	}
 	return StreamInfo{Codec: "h264", Width: 640, Height: 480, FPS: 30}, nil
+}
+
+// camera answers a pull's camera probe by the same prefixes, and records it apart.
+func (f *fakeStreams) camera(_ context.Context, url string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cameras = append(f.cameras, url)
+	for prefix, err := range f.answers {
+		if strings.HasPrefix(url, prefix) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *fakeStreams) answer(prefix string, err error) {
@@ -398,6 +412,7 @@ func (h *harness) open() {
 		URLs:           URLOptions{RTSPPort: 18554, WHIPPort: 18889},
 		snapshotEvery:  time.Hour, // the tests take snapshots themselves
 		probeStream:    h.streams.probe,
+		probeCamera:    h.streams.camera,
 		encode:         h.encoder.encode,
 	})
 	if err != nil {

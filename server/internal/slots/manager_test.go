@@ -357,6 +357,19 @@ func TestAPullIsProbedSetAndForgottenAcrossARestart(t *testing.T) {
 	if strings.Contains(string(content), "s3cret") || strings.Contains(string(content), "admin") || strings.Contains(string(content), "abc") {
 		t.Errorf("the store holds credentials:\n%s", content)
 	}
+	// The camera was probed in Insight's own process, never by ffprobe, whose command line any
+	// local user can read.
+	h.streams.mu.Lock()
+	cameras, streams := slices.Clone(h.streams.cameras), slices.Clone(h.streams.probed)
+	h.streams.mu.Unlock()
+	if !slices.Contains(cameras, full) {
+		t.Errorf("the camera probes: %v", cameras)
+	}
+	for _, url := range streams {
+		if strings.Contains(url, "s3cret") || strings.Contains(url, "admin") {
+			t.Errorf("a stream probe of %s", url)
+		}
+	}
 
 	// A camera without secrets is kept whole.
 	must(t, h.m.AssignPull(ctx, 2, "rtsp://10.0.0.8/stream", "", ""))
