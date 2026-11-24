@@ -5,12 +5,16 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"insight/internal/media"
 )
 
 // entry is one member of a test archive: a file with content, a folder (a name ending in "/"),
@@ -166,6 +170,19 @@ func TestUploadRefusesUnsafeArchives(t *testing.T) {
 				t.Fatal("an entry landed outside the media folder")
 			}
 		})
+	}
+}
+
+func TestUploadRefusesAnArchiveWithAPlaylist(t *testing.T) {
+	f := newFixture(t, nil)
+	f.probes.fail("list.m3u8", fmt.Errorf("probing list.m3u8: %w", media.ErrPlaylist))
+	archive := zipOf(t, entry{name: "a.mp4", content: "a"}, entry{name: "list.m3u8", content: "#EXTM3U"})
+	_, err := f.upload(t, "set.zip", archive, "")
+	if code(err) != CodeInvalidArchive || !strings.Contains(err.Error(), "list.m3u8") {
+		t.Fatalf("%v, want invalid_archive naming the playlist", err)
+	}
+	if entries, _ := os.ReadDir(f.root); len(entries) != 0 {
+		t.Fatalf("a refused archive left %v", entries)
 	}
 }
 

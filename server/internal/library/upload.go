@@ -191,7 +191,10 @@ func readError(err error, limit int64) error {
 
 // uploadFile saves an uploaded file, at once or after a re-encode.
 func (l *Library) uploadFile(ctx context.Context, up received, stage string) (UploadResult, error) {
-	plan, encode := l.planEncode(ctx, up.staged)
+	plan, encode, err := l.planEncode(ctx, up.staged)
+	if err != nil {
+		return UploadResult{}, invalidRequest("%s is a playlist, which names other files; the media library takes none.", up.name)
+	}
 	var warnings []string
 	if encode && l.ffmpeg == "" {
 		encode = false
@@ -263,14 +266,25 @@ func (l *Library) uploadArchive(ctx context.Context, up received, folder string,
 		plan encodePlan
 	}
 	var work []pending
+	var refused error
 	_ = filepath.WalkDir(unpacked, func(p string, entry fs.DirEntry, err error) error {
-		if err == nil && entry.Type().IsRegular() {
-			if plan, encode := l.planEncode(ctx, p); encode {
-				work = append(work, pending{p, plan})
-			}
+		if err != nil || !entry.Type().IsRegular() {
+			return nil
+		}
+		plan, encode, err := l.planEncode(ctx, p)
+		if err != nil {
+			below, _ := filepath.Rel(unpacked, p)
+			refused = invalidArchive("The archive holds %s, a playlist, which names other files; the media library takes none.", filepath.ToSlash(below))
+			return filepath.SkipAll
+		}
+		if encode {
+			work = append(work, pending{p, plan})
 		}
 		return nil
 	})
+	if refused != nil {
+		return UploadResult{}, refused
+	}
 	var warnings []string
 	if len(work) > 0 && l.ffmpeg == "" {
 		warnings = append(warnings, fmt.Sprintf(

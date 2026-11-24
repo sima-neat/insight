@@ -22,6 +22,7 @@ const (
 	CodeNoSpace            = "no_space"            // 507: the media folder's disk is full
 	CodeCatalogUnavailable = "catalog_unavailable" // 502: the catalog could not be fetched or read
 	CodeFFmpegMissing      = "ffmpeg_missing"      // 503: the work needs FFmpeg, which is not installed
+	CodeNotPreviewable     = "not_previewable"     // 415: the probe read no video or picture in the file
 )
 
 func invalidRequest(format string, args ...any) *apierr.Error {

@@ -513,8 +513,9 @@ paths:
         streams well is saved at once (201); one it would stream badly (B-frames, another codec
         or profile, keyframes far apart) is re-encoded by a job first (202 with the job, whose
         result is what was saved). An archive (ZIP, tar, gzipped tar) is unpacked into a folder
-        named after it. A taken name with `ask` is 409 `name_taken` with the `conflict`, before
-        any work. Replacing a file restarts the slots that streamed it. An upload whose request
+        named after it. A playlist (HLS, DASH, a concat list), on its own or in an archive, is
+        refused (400 `invalid_request` or `invalid_archive`): it names other files. A taken name
+        with `ask` is 409 `name_taken` with the `conflict`, before any work. Replacing a file restarts the slots that streamed it. An upload whose request
         would not fit on the media folder's disk with 1 GiB to spare is 507 `no_space` before
         anything is written (a request without a Content-Length counts as the 8 GiB limit).
       requestBody:
@@ -578,8 +579,10 @@ paths:
       operationId: previewMedia
       summary: A library file as a moving MJPEG picture
       description: >-
-        Looped at its own rate, from one shared relay however many browsers watch it. 503
-        `ffmpeg_missing` without FFmpeg; 429 when Insight relays as many streams as it may.
+        Looped at its own rate, from one shared relay however many browsers watch it. 415
+        `not_previewable` for a file whose probe found no video or picture (a playlist among
+        them); 503 `ffmpeg_missing` without FFmpeg; 429 when Insight relays as many streams as it
+        may.
       parameters:
         - $ref: "#/components/parameters/MediaPath"
       responses:
@@ -592,6 +595,7 @@ paths:
                 format: binary
         "400": { $ref: "#/components/responses/LibraryError" }
         "404": { $ref: "#/components/responses/LibraryError" }
+        "415": { $ref: "#/components/responses/LibraryError" }
         "429": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }

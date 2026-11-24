@@ -50,10 +50,16 @@ type encodePlan struct {
 
 // planEncode says whether the upload at abs, a file outside the library still, is re-encoded,
 // and how. A file ffprobe cannot read, a picture, or one without video is kept as it is.
-func (l *Library) planEncode(ctx context.Context, abs string) (encodePlan, bool) {
+//
+// Its error is the one probe answer that keeps the file out of the library: a playlist
+// (media.ErrPlaylist), which would have ffmpeg open the files it names.
+func (l *Library) planEncode(ctx context.Context, abs string) (encodePlan, bool, error) {
 	info, err := l.probe(ctx, abs)
+	if errors.Is(err, media.ErrPlaylist) {
+		return encodePlan{}, false, err
+	}
 	if err != nil || info.Kind != media.KindVideo {
-		return encodePlan{}, false
+		return encodePlan{}, false, nil
 	}
 	reasons := encodeReasons(info)
 	if len(reasons) == 0 && (info.Codec == media.CodecH264 || info.Codec == media.CodecH265) {
@@ -63,7 +69,7 @@ func (l *Library) planEncode(ctx context.Context, abs string) (encodePlan, bool)
 		}
 	}
 	if len(reasons) == 0 {
-		return encodePlan{}, false
+		return encodePlan{}, false, nil
 	}
 	codec := media.CodecH264
 	if info.Codec == media.CodecH265 {
@@ -73,7 +79,7 @@ func (l *Library) planEncode(ctx context.Context, abs string) (encodePlan, bool)
 		encode:   media.Encode{Codec: codec, Width: info.Width, Height: info.Height, FPS: info.FPS},
 		reasons:  reasons,
 		duration: info.Duration,
-	}, true
+	}, true, nil
 }
 
 // encodeReasons are what in the probe makes a video stream badly; none for one kept. MJPEG is

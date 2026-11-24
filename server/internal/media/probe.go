@@ -132,6 +132,10 @@ func probeFileArgs(abs string) []string {
 	}, FileInput(abs)...)
 }
 
+// ErrPlaylist is a probe's refusal of a playlist (namesOtherFiles): the library takes none, and
+// ffmpeg is never run on one.
+var ErrPlaylist = errors.New("it is a playlist and names other files, which Insight does not open")
+
 // namesOtherFiles says whether ffprobe read the file with a demuxer that opens the files it
 // names: an HLS or DASH playlist, a concat list. FileInput keeps them off the network, yet they
 // could still stream any media file of the machine, so the library takes none of them.
@@ -168,7 +172,7 @@ func parseProbe(out []byte) (Info, error) {
 		return Info{}, fmt.Errorf("ffprobe wrote no JSON: %w", err)
 	}
 	if namesOtherFiles(probe.Format.FormatName) {
-		return Info{}, fmt.Errorf("it is a playlist (%s) and names other files, which Insight does not open", probe.Format.FormatName)
+		return Info{}, fmt.Errorf("%w (%s)", ErrPlaylist, probe.Format.FormatName)
 	}
 	if len(probe.Streams) == 0 {
 		return Info{Kind: KindUnknown}, nil

@@ -2,6 +2,7 @@ package library
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,6 +56,18 @@ func TestUploadRefusals(t *testing.T) {
 	entries, _ := os.ReadDir(f.root)
 	if len(entries) != 0 {
 		t.Fatalf("refused uploads left %v", entries)
+	}
+}
+
+func TestUploadRefusesAPlaylist(t *testing.T) {
+	f := newFixture(t, nil)
+	f.probes.fail("list.m3u8", fmt.Errorf("probing list.m3u8: %w", media.ErrPlaylist))
+	_, err := f.upload(t, "list.m3u8", []byte("#EXTM3U"), "")
+	if code(err) != CodeInvalidRequest || !strings.Contains(err.Error(), "playlist") {
+		t.Fatalf("%v, want invalid_request about the playlist", err)
+	}
+	if entries, _ := os.ReadDir(f.root); len(entries) != 0 {
+		t.Fatalf("the refused upload left %v", entries)
 	}
 }
 
