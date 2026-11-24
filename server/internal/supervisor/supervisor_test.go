@@ -202,6 +202,9 @@ func TestStopLeftovers(t *testing.T) {
 		}
 		exited := make(chan struct{})
 		go func() { cmd.Wait(); close(exited) }()
+		// A failed step leaves the child running: kill it, through the Process, which names
+		// this child even once it has been reaped and its PID reused.
+		t.Cleanup(func() { cmd.Process.Kill(); <-exited })
 		waitForExec(t, cmd)
 		if err := writePIDFile(filepath.Join(stateDir, "left.pid"), cmd.Process.Pid, sh(t)); err != nil {
 			t.Fatal(err)
@@ -211,7 +214,6 @@ func TestStopLeftovers(t *testing.T) {
 		select {
 		case <-exited:
 		case <-time.After(2 * time.Second):
-			cmd.Process.Kill()
 			t.Fatal("the leftover still runs")
 		}
 	})

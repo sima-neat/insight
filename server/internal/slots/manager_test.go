@@ -275,7 +275,10 @@ func TestAnExternalPublisherHoldsTheSlot(t *testing.T) {
 		t.Fatalf("an external slot: %+v %+v", s, s.Publisher)
 	}
 	// The probe runs on a goroutine of its own.
-	eventually(t, "the external stream is probed", func() bool { return h.slot(5).Publisher.Width == 640 })
+	eventually(t, "the external stream is probed", func() bool {
+		p := h.slot(5).Publisher
+		return p != nil && p.Width == 640
+	})
 	wantCode(t, h.m.AssignFile(5, "a.mp4", 0), CodeSlotBusy)
 	wantCode(t, h.m.Start(5), CodeSlotBusy)
 	result, err := h.m.StartFirst(10)

@@ -47,7 +47,8 @@ func readPIDFile(path string) (int, string, error) {
 	return pid, fields[2], nil
 }
 
-// processRuns reads the program a running process was started with, from /proc.
+// processRuns reads the program a running process was started with, from /proc. An empty
+// cmdline reads as not running: a zombie's, and a process's not yet through its exec.
 var processRuns = func(pid int) (string, bool) {
 	cmdline, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
 	if err != nil || len(cmdline) == 0 {
