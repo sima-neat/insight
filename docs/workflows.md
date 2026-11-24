@@ -31,7 +31,8 @@ camera without copying anything to the board.
 1. Open Insight in a browser that trusts its certificate: browsers allow camera access only on a
    secure page ([The certificate](install-upgrade.md#the-certificate)).
 2. In **Streaming**, select a slot and set its **Source** to **Camera**. Select **Enable camera
-   access**, allow it, and pick your camera.
+   access**, allow it, and pick your camera. Choose its **Resolution** (1920x1080 by default) to
+   test your app at another size.
 3. Select **Start**. The browser publishes the camera to Insight, and the slot goes **Live**. Your
    app reads the slot's RTSP URL as it would a file's, as H.264.
 
