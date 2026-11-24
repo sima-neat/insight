@@ -358,7 +358,12 @@ func (m *Manager) followRendition(n int, t target) {
 // publisher of the slot's own is never taken for one, the file slot's or the normalizer of the
 // webcam it takes: MediaMTX may show its session before the query that marks it as Insight's.
 func (m *Manager) externalLocked(n int) *mediamtx.Path {
-	path, ok := m.snap.Paths[pathName(n)]
+	return m.externalIn(m.snap, n)
+}
+
+// externalIn is externalLocked on the reading snap; m.mu is held.
+func (m *Manager) externalIn(snap mediamtx.Snapshot, n int) *mediamtx.Path {
+	path, ok := snap.Paths[pathName(n)]
 	if !ok || !path.External() {
 		return nil
 	}
@@ -366,7 +371,7 @@ func (m *Manager) externalLocked(n int) *mediamtx.Path {
 		return nil
 	}
 	if d := m.store.get(n); d.Kind == KindWebcam && d.Run {
-		if cam, ok := m.snap.Paths[camName(n)]; ok && cam.Source != nil && cam.Source.ID != "" {
+		if cam, ok := snap.Paths[camName(n)]; ok && cam.Source != nil && cam.Source.ID != "" {
 			return nil
 		}
 	}

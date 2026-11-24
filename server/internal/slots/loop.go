@@ -26,17 +26,22 @@ func (m *Manager) loop() {
 	}
 }
 
-func (m *Manager) tick() { _ = m.refreshSnapshot() }
-
-// refreshSnapshot asks MediaMTX for the paths now, makes the answer the Manager's view and
-// wakes every slot. It returns why MediaMTX did not answer, and the Manager's end as an error
-// too, with the view left as it was.
-func (m *Manager) refreshSnapshot() error {
+// takeSnapshot asks MediaMTX for the paths now, without making the answer the Manager's view:
+// only the loop installs one, so a view never goes back to an older reading.
+func (m *Manager) takeSnapshot() (mediamtx.Snapshot, error) {
 	ctx, cancel := context.WithTimeout(m.ctx, 2*time.Second)
+	defer cancel()
 	snap, err := m.opts.MediaMTX.Snapshot(ctx)
-	cancel()
 	if m.ctx.Err() != nil {
-		return m.ctx.Err()
+		return mediamtx.Snapshot{}, m.ctx.Err()
+	}
+	return snap, err
+}
+
+func (m *Manager) tick() {
+	snap, err := m.takeSnapshot()
+	if m.ctx.Err() != nil {
+		return
 	}
 	m.mu.Lock()
 	if err != nil {
@@ -44,6 +49,10 @@ func (m *Manager) refreshSnapshot() error {
 			slog.Warn("MediaMTX's API does not answer; the sources' streams are unknown", "error", err)
 		}
 		m.mtxUp, m.snap, m.prev = false, mediamtx.Snapshot{}, mediamtx.Snapshot{}
+	} else if snap.At.Before(m.snap.At) {
+		// A reading that began earlier and answered later than the one installed.
+		m.mu.Unlock()
+		return
 	} else {
 		if !m.mtxUp {
 			// MediaMTX (re)started, or the API answers again: what it was told before may be
@@ -57,7 +66,6 @@ func (m *Manager) refreshSnapshot() error {
 	m.scheduleProbesLocked()
 	m.mu.Unlock()
 	m.wakeAll()
-	return err
 }
 
 // scheduleProbesLocked starts the probes the snapshot calls for: of a pull that is not live,

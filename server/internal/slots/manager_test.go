@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"insight/internal/jobs"
 	"insight/internal/media"
@@ -325,6 +326,41 @@ func TestAPullChecksTheSlotAgainAfterItsProbe(t *testing.T) {
 	if d := h.m.store.get(1); d.Kind != KindNone {
 		t.Errorf("the slot was assigned: %+v", d)
 	}
+}
+
+func TestAPullIsRefusedAfterAStaleSnapshotLandsLate(t *testing.T) {
+	h := newHarness(t)
+	h.settle()
+	h.mtx.takeCalls()
+	// A tick starts while the slot is free and answers last; the publisher connects after it.
+	release := make(chan struct{})
+	h.mtx.hold = release
+	stale := make(chan struct{})
+	go func() { h.m.tick(); close(stale) }()
+	for h.mtx.holding() {
+		time.Sleep(time.Millisecond)
+	}
+	h.streams.onProbe = func() { h.mtx.setPath(publishing(1, "h264", false)) }
+
+	wantCode(t, h.m.AssignPull(context.Background(), 1, "rtsp://cam.local/live", "", ""), CodeSlotBusy)
+	h.m.tick() // the view now shows the publisher
+	close(release)
+	<-stale
+	h.m.mu.Lock()
+	external := h.m.externalLocked(1)
+	h.m.mu.Unlock()
+	if external == nil {
+		t.Error("the view went back to a reading from before the publisher connected")
+	}
+	if calls := h.mtx.takeCalls(); len(calls) != 0 {
+		t.Errorf("a pull was configured: %v", calls)
+	}
+}
+
+func TestAPullDuringShutdownSaysSo(t *testing.T) {
+	h := newHarness(t)
+	h.streams.onProbe = func() { h.m.cancel() }
+	wantCode(t, h.m.AssignPull(context.Background(), 1, "rtsp://cam.local/live", "", ""), CodeShuttingDown)
 }
 
 func TestAPullIsRefusedWhenMediaMTXDoesNotAnswerAfterItsProbe(t *testing.T) {
