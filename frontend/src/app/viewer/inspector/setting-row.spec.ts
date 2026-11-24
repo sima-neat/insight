@@ -139,12 +139,13 @@ describe('SettingRow', () => {
   const overrideContent = () =>
     root().querySelector<HTMLElement>('neat-collapsible [data-slot="collapsible-content"]');
   /** The open list's lines, each as the text it shows; none while the note is closed. */
-  const overrideLines = () =>
-    overrideContent()?.hasAttribute('inert') === false
-      ? [...overrideContent()!.querySelectorAll('li')].map((line) =>
-          [...line.children].map((part) => part.textContent?.trim()).join(' '),
-        )
-      : [];
+  const overrideLines = () => {
+    const content = overrideContent();
+    if (content === null || content.hasAttribute('inert')) return [];
+    return [...content.querySelectorAll('li')].map((line) =>
+      [...line.children].map((part) => part.textContent?.trim()).join(' '),
+    );
+  };
   const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
   /** The dialog's title, message and buttons, in order. */
   const dialogText = () =>

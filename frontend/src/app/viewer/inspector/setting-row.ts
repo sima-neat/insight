@@ -176,7 +176,7 @@ export function settingCount(count: number): string {
         [label]="overriddenText()"
         [(open)]="open"
       >
-        <ul neatLineList class="channels" [id]="listId()">
+        <ul neatLineList>
           @for (line of lines(); track line.channel) {
             <li neatLine>
               <span>Channel {{ line.channel }}</span>
@@ -250,7 +250,6 @@ export class SettingRow {
   protected readonly fieldId = computed(() => `setting-${this.setting().id}`);
   protected readonly hintId = computed(() => `setting-hint-${this.setting().id}`);
   protected readonly noteId = computed(() => `setting-note-${this.setting().id}`);
-  protected readonly listId = computed(() => `setting-overrides-${this.setting().id}`);
 
   /** This channel holds its own value. */
   protected readonly overrides = computed(() => {
