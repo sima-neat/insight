@@ -156,10 +156,7 @@ func FFprobeKeyframes(ffprobePath string) KeyframeProber {
 		}
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		// abs starts with "/", so ffprobe takes it for a file, never an option or a protocol.
-		cmd := exec.CommandContext(ctx, ffprobePath, "-v", "error", "-select_streams", "v:0",
-			"-read_intervals", fmt.Sprintf("%%+%d", int(keyframeScan.Seconds())),
-			"-show_entries", "packet=pts_time,flags", "-of", "json", abs)
+		cmd := exec.CommandContext(ctx, ffprobePath, keyframeArgs(abs)...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		if err := cmd.Run(); err != nil {
@@ -167,6 +164,12 @@ func FFprobeKeyframes(ffprobePath string) KeyframeProber {
 		}
 		return longestKeyframeGap(stdout.Bytes())
 	}
+}
+
+func keyframeArgs(abs string) []string {
+	return append([]string{"-v", "error", "-select_streams", "v:0",
+		"-read_intervals", fmt.Sprintf("%%+%d", int(keyframeScan.Seconds())),
+		"-show_entries", "packet=pts_time,flags", "-of", "json"}, media.FileInput(abs)...)
 }
 
 // longestKeyframeGap reads ffprobe's packets and returns the longest time between two keyframes,

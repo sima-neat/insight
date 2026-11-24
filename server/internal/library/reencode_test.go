@@ -177,3 +177,10 @@ func TestUploadReencodesWithFFmpeg(t *testing.T) {
 		t.Fatalf("the job: %+v", snapshot)
 	}
 }
+
+func TestKeyframeArgsReadTheFileOnly(t *testing.T) {
+	args := strings.Join(keyframeArgs("/m/a.mp4"), " ")
+	if !strings.HasSuffix(args, " -protocol_whitelist file -i file:/m/a.mp4") {
+		t.Fatalf("the keyframe probe's arguments: %s", args)
+	}
+}
