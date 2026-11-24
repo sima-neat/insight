@@ -35,7 +35,6 @@ const waitDelay = 2 * time.Second
 
 func (l *localTransport) start(_ context.Context, argv []string) (process, error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
-	procgroup.Own(cmd)
 	cmd.WaitDelay = waitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -50,13 +49,14 @@ func (l *localTransport) start(_ context.Context, argv []string) (process, error
 	if l.closed {
 		return nil, boardChanged()
 	}
-	if err := cmd.Start(); err != nil {
+	group, err := procgroup.Start(cmd)
+	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return exited{status: 127, reason: argv[0] + ": command not found"}, nil
 		}
 		return exited{status: 126, reason: fmt.Sprintf("%s: %v", argv[0], err)}, nil
 	}
-	p := &localProcess{cmd: cmd, out: stdout, errs: stderr, owner: l}
+	p := &localProcess{group: group, out: stdout, errs: stderr, owner: l}
 	l.active[p] = struct{}{}
 	return p, nil
 }
@@ -85,23 +85,19 @@ func (l *localTransport) close() {
 }
 
 type localProcess struct {
-	cmd   *exec.Cmd
+	group *procgroup.Group
 	out   io.Reader
 	errs  io.Reader
 	owner *localTransport
-
-	mu     sync.Mutex
-	waited bool
 }
 
 func (p *localProcess) stdout() io.Reader { return p.out }
 func (p *localProcess) stderr() io.Reader { return p.errs }
 
+// wait waits for the command and reaps it; what it started and left running is killed with its
+// group.
 func (p *localProcess) wait() (int, error) {
-	err := p.cmd.Wait()
-	p.mu.Lock()
-	p.waited = true
-	p.mu.Unlock()
+	err := p.group.Wait()
 	p.owner.mu.Lock()
 	delete(p.owner.active, p)
 	p.owner.mu.Unlock()
@@ -119,12 +115,5 @@ func (p *localProcess) wait() (int, error) {
 	}
 }
 
-// kill ends the command's process group. Never after wait: the group's id may then be
-// another process's.
-func (p *localProcess) kill() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.waited {
-		_ = procgroup.Signal(p.cmd.Process.Pid, syscall.SIGKILL)
-	}
-}
+// kill ends the command's process group; nothing once it was reaped (procgroup.Group.Signal).
+func (p *localProcess) kill() { _ = p.group.Signal(syscall.SIGKILL) }

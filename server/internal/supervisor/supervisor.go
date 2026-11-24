@@ -84,7 +84,7 @@ type Process struct {
 	pidFile string
 
 	mu       sync.Mutex
-	cmd      *exec.Cmd
+	group    *procgroup.Group // the current run's, or the last one's
 	status   Status
 	tail     []string
 	stopping bool
@@ -191,12 +191,12 @@ func (p *Process) Stop(ctx context.Context) error {
 		p.stopping = true
 		close(p.stop)
 	}
-	cmd := p.cmd
+	group := p.group
 	running := p.status.Running
 	p.mu.Unlock()
 
-	if running && cmd != nil {
-		if err := procgroup.Signal(cmd.Process.Pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if running && group != nil {
+		if err := group.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
 	}
@@ -206,8 +206,8 @@ func (p *Process) Stop(ctx context.Context) error {
 	case <-time.After(p.spec.Grace):
 	case <-ctx.Done():
 	}
-	if running && cmd != nil {
-		if err := procgroup.Signal(cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if running && group != nil {
+		if err := group.Signal(syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
 	}
@@ -224,13 +224,13 @@ func (p *Process) Stop(ctx context.Context) error {
 func (p *Process) launchLocked() (<-chan error, error) {
 	cmd := exec.Command(p.spec.Path, p.spec.Args...)
 	cmd.Env, cmd.Dir = p.spec.Env, p.spec.Dir
-	procgroup.Own(cmd)
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
 	cmd.Stdout, cmd.Stderr = writer, writer
-	if err := cmd.Start(); err != nil {
+	group, err := procgroup.Start(cmd)
+	if err != nil {
 		reader.Close()
 		writer.Close()
 		return nil, fmt.Errorf("starting %s: %w", p.spec.Name, err)
@@ -241,11 +241,12 @@ func (p *Process) launchLocked() (<-chan error, error) {
 	if err := writePIDFile(p.pidFile, cmd.Process.Pid, p.spec.Path); err != nil {
 		slog.Warn("writing a PID file", "child", p.spec.Name, "error", err)
 	}
-	p.cmd = cmd
+	p.group = group
 	p.status.Running, p.status.PID = true, cmd.Process.Pid
 
 	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	// The group may still hold the child's own children; Wait kills them with it.
+	go func() { exited <- group.Wait() }()
 	return exited, nil
 }
 
@@ -257,15 +258,10 @@ func (p *Process) watch(exited <-chan error) {
 		started := time.Now()
 		err := <-exited
 		p.mu.Lock()
-		cmd := p.cmd
 		p.status.Running, p.status.PID = false, 0
 		p.status.LastExit = exitText(err)
 		stopping := p.stopping
 		p.mu.Unlock()
-		// The group may still hold the child's own children; they go with it.
-		if cmd != nil {
-			_ = procgroup.Signal(cmd.Process.Pid, syscall.SIGKILL)
-		}
 		removePIDFile(p.pidFile)
 
 		if stopping || !p.spec.Restart {

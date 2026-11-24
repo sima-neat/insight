@@ -31,7 +31,7 @@ const (
 
 // producer is one running producer process.
 type producer struct {
-	pid    int
+	group  *procgroup.Group
 	stdout *os.File
 	stderr *tail
 	exited chan struct{} // closed once the process is reaped and its group killed
@@ -46,7 +46,6 @@ func startProducer(cmd *exec.Cmd) (*producer, error) {
 	if cmd.Stdout != nil || cmd.Stderr != nil {
 		return nil, errors.New("the producer's stdout and stderr are the relay's: leave them unset")
 	}
-	procgroup.Own(cmd)
 	stderr := &tail{}
 	// Wait returns once stderr is read to its end, so the tail is whole; a child of the
 	// producer that holds it open is waited for this long, then killed with the group.
@@ -57,18 +56,17 @@ func startProducer(cmd *exec.Cmd) (*producer, error) {
 		return nil, err
 	}
 	cmd.Stdout = stdoutW
-	err = cmd.Start()
+	group, err := procgroup.Start(cmd)
 	stdoutW.Close() // the child holds its own copy
 	if err != nil {
 		stdout.Close()
 		return nil, fmt.Errorf("starting %s: %w", cmd.Path, err)
 	}
 
-	p := &producer{pid: cmd.Process.Pid, stdout: stdout, stderr: stderr, exited: make(chan struct{})}
+	p := &producer{group: group, stdout: stdout, stderr: stderr, exited: make(chan struct{})}
 	go func() {
-		p.waitErr = cmd.Wait()
-		// The group may still hold the producer's own children; they go with it.
-		_ = procgroup.Signal(p.pid, syscall.SIGKILL)
+		// The group may still hold the producer's own children; Wait kills them with it.
+		p.waitErr = group.Wait()
 		// A child that left the group could keep the pipe open; the stream is over either way.
 		stdout.Close()
 		close(p.exited)
@@ -85,12 +83,12 @@ func (p *producer) stop() {
 			return
 		default:
 		}
-		_ = procgroup.Signal(p.pid, syscall.SIGTERM)
+		_ = p.group.Signal(syscall.SIGTERM)
 		go func() {
 			select {
 			case <-p.exited:
 			case <-time.After(stopGrace):
-				_ = procgroup.Signal(p.pid, syscall.SIGKILL)
+				_ = p.group.Signal(syscall.SIGKILL)
 			}
 		}()
 	})
