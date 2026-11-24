@@ -6,6 +6,15 @@ import { CAMERA_MEDIA, type PublishPeer } from './camera-media';
 import { type PullRequest, SlotsService } from './slots.service';
 import { messageOf } from './api-errors';
 import {
+  DEFAULT_WEBCAM_CAPTURE,
+  effectiveCaptureMode,
+  keepWebcamResolution,
+  webcamBitrateKbps,
+  webcamCaptureConstraints,
+  withWebcamBitrate,
+  type WebcamCapture,
+} from './webcam-capture';
+import {
   camerasFromDevices,
   closeAllWebcamSessions,
   closeWebcamSession,
@@ -110,6 +119,14 @@ export class CamerasService {
   readonly assignments = this.assignmentsState.asReadonly();
 
   private readonly streamsState = signal<ReadonlyMap<number, MediaStream>>(new Map());
+  private readonly capturesState = signal<ReadonlyMap<number, WebcamCapture>>(new Map());
+  /**
+   * The capture (mode and bitrate) each slot's webcam is set to publish with, for the slots that
+   * were given one with `setCapture`. Like the camera, only this tab knows it, and it takes effect
+   * at the next start.
+   */
+  readonly captures = this.capturesState.asReadonly();
+
   /** The local camera stream of each slot this tab publishes, for the slot's preview until it is live. */
   readonly localStreams = this.streamsState.asReadonly();
 
@@ -188,6 +205,19 @@ export class CamerasService {
     }
   }
 
+  /** The capture the slot's webcam publishes with: what was set, else 1920x1080 at 30 fps, Auto. */
+  captureOf(slot: number): WebcamCapture {
+    return this.captures().get(slot) ?? DEFAULT_WEBCAM_CAPTURE;
+  }
+
+  /**
+   * Sets how the slot's webcam is captured and sent. It changes nothing on a session that
+   * publishes: the next start uses it, so a live slot is started again to apply it.
+   */
+  setCapture(slot: number, capture: WebcamCapture): void {
+    this.capturesState.update((all) => new Map(all).set(slot, capture));
+  }
+
   /**
    * Makes the slot a webcam on the server and remembers `deviceId` as its camera; nothing is
    * published until `publish`. With no `deviceId` the slot is a webcam with no camera yet (the
@@ -199,11 +229,10 @@ export class CamerasService {
     const camera: Camera | null =
       deviceId === null
         ? null
-        : {
+        : (this.cameras().find((c) => c.deviceId === deviceId) ?? {
             deviceId,
-            label:
-              this.cameras().find((c) => c.deviceId === deviceId)?.label ?? UNKNOWN_CAMERA_LABEL,
-          };
+            label: UNKNOWN_CAMERA_LABEL,
+          });
     return this.whileChanging(slot, async () => {
       // The slot is invalidated by this, so the generation is the one this assignment belongs to;
       // if it has moved by the time the server answers, a stop or bulk action got there first.
@@ -281,7 +310,10 @@ export class CamerasService {
     // every slot that has ever started one: a stale generation is harmless, a missed one is not.
     for (const slot of this.generations.keys()) this.invalidate(slot);
     this.closeAllSessions();
-    if (clearAssignments) this.assignmentsState.set(new Map());
+    if (clearAssignments) {
+      this.assignmentsState.set(new Map());
+      this.capturesState.set(new Map());
+    }
   }
 
   private async start(slot: number, camera: Camera, whipUrl: string): Promise<void> {
@@ -307,10 +339,12 @@ export class CamerasService {
       if (started.kind !== 'webcam') throw new NoLongerWebcam(slot);
       if (superseded()) throw new StartSuperseded();
 
-      // Video only: the ticket's initial scope.
-      const stream = await this.media.getUserMedia({
-        video: { deviceId: { exact: camera.deviceId } },
-      });
+      // Video only: the ticket's initial scope. The mode is the one the camera's list shows for
+      // the choice, and the bitrate follows it.
+      const capture = this.captureOf(slot);
+      const mode = effectiveCaptureMode(capture.mode, camera.captureModeIds);
+      const kbps = webcamBitrateKbps(capture.bitrate, mode);
+      const stream = await this.media.getUserMedia(webcamCaptureConstraints(camera.deviceId, mode));
       built.stream = stream;
       if (superseded()) throw new StartSuperseded();
 
@@ -346,8 +380,9 @@ export class CamerasService {
       if (superseded()) throw new StartSuperseded();
       this.sessions.set(slot, session);
       built.registered = true;
-      await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+      await peer.setRemoteDescription({ type: 'answer', sdp: withWebcamBitrate(answerSdp, kbps) });
       if (superseded()) throw new StartSuperseded();
+      await keepWebcamResolution(sender, kbps);
       this.setStream(slot, stream);
 
       // The slot is live only once MediaMTX has the normalized stream, which lags the WHIP
@@ -393,6 +428,7 @@ export class CamerasService {
     return this.whileChanging(slot, () => {
       this.teardown(slot);
       this.setCamera(slot, null);
+      this.forgetCapture(slot);
       return change();
     });
   }
@@ -474,6 +510,15 @@ export class CamerasService {
       const next = new Map(all);
       if (camera) next.set(slot, camera);
       else next.delete(slot);
+      return next;
+    });
+  }
+
+  private forgetCapture(slot: number): void {
+    this.capturesState.update((all) => {
+      if (!all.has(slot)) return all;
+      const next = new Map(all);
+      next.delete(slot);
       return next;
     });
   }

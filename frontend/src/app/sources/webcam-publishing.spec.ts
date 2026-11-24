@@ -15,6 +15,9 @@ import {
   type WhipResponse,
 } from './webcam-publishing';
 
+/** Every capture mode: what a camera that reports no limits is offered. */
+const ALL_MODES = ['2160p30', '1440p30', '1080p30', '720p30', '480p30', 'camera'];
+
 // The tests of `webcamPublishing.test.js` in sima-neat/insight#170, with their assertions
 // unchanged. A stop disconnects whatever publishes, so the exit stop names only the slot.
 
@@ -604,8 +607,8 @@ describe('webcam publishing', () => {
       { kind: 'videoinput', deviceId: 'rapoo', label: 'Rapoo Camera: Rapoo Camera' },
     ];
     expect(camerasFromDevices(devices)).toEqual([
-      { deviceId: 'hp', label: 'HP 5MP Camera: HP 5MP Camera' },
-      { deviceId: 'rapoo', label: 'Rapoo Camera: Rapoo Camera' },
+      { deviceId: 'hp', label: 'HP 5MP Camera: HP 5MP Camera', captureModeIds: ALL_MODES },
+      { deviceId: 'rapoo', label: 'Rapoo Camera: Rapoo Camera', captureModeIds: ALL_MODES },
     ]);
   });
 
@@ -616,9 +619,27 @@ describe('webcam publishing', () => {
       { kind: 'videoinput', deviceId: 'b', label: '' },
     ];
     expect(camerasFromDevices(devices)).toEqual([
-      { deviceId: 'a', label: 'Camera 1' },
-      { deviceId: 'b', label: 'Camera 2' },
+      { deviceId: 'a', label: 'Camera 1', captureModeIds: ALL_MODES },
+      { deviceId: 'b', label: 'Camera 2', captureModeIds: ALL_MODES },
     ]);
     expect(camerasFromDevices(undefined)).toEqual([]);
+  });
+
+  it("camerasFromDevices reads each camera's modes from its reported limits", () => {
+    const devices: DeviceInfo[] = [
+      {
+        kind: 'videoinput',
+        deviceId: 'hd',
+        label: 'HD',
+        getCapabilities: () => ({
+          width: { max: 1280 },
+          height: { max: 720 },
+          frameRate: { max: 30 },
+        }),
+      },
+    ];
+    expect(camerasFromDevices(devices)).toEqual([
+      { deviceId: 'hd', label: 'HD', captureModeIds: ['720p30', '480p30', 'camera'] },
+    ]);
   });
 });

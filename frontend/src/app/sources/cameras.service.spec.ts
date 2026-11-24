@@ -11,6 +11,16 @@ import { ApiRequestError } from './api-errors';
 
 const DESK = { kind: 'videoinput', deviceId: 'cam-desk', label: 'Desk camera' };
 const LAPTOP = { kind: 'videoinput', deviceId: 'cam-laptop', label: 'Laptop camera' };
+/** A camera that reports its largest size and rate, as Chrome's `getCapabilities()` does. */
+const HD = {
+  kind: 'videoinput',
+  deviceId: 'cam-hd',
+  label: 'HD camera',
+  getCapabilities: () => ({ width: { max: 1280 }, height: { max: 720 }, frameRate: { max: 30 } }),
+};
+
+/** The modes a camera that reports no limits is offered. */
+const ALL_MODES = ['2160p30', '1440p30', '1080p30', '720p30', '480p30', 'camera'];
 
 /** Where `webcamSlot` says a browser publishes slot `n`. */
 const whipUrl = (n: number) => `https://10.0.0.2:8889/cam${n}/whip`;
@@ -50,6 +60,8 @@ describe('CamerasService', () => {
   let fetched: { url: string; init: RequestInit }[];
   /** How the WHIP endpoint answers; `'unreachable'` makes the request itself fail. */
   let whip: { status: number } | 'unreachable';
+  /** The SDP the WHIP endpoint answers with. */
+  let whipAnswer: string;
   /** The next WHIP offers wait for these, one each, in the order they are sent. */
   let whipGates: Promise<void>[];
 
@@ -76,6 +88,7 @@ describe('CamerasService', () => {
 
     fetched = [];
     whip = { status: 201 };
+    whipAnswer = 'v=0\r\nanswer';
     whipGates = [];
     let offersSent = 0;
     vi.stubGlobal(
@@ -88,7 +101,7 @@ describe('CamerasService', () => {
         const gate = whipGates.shift();
         if (gate) await gate;
         if (whip === 'unreachable') throw new TypeError('Failed to fetch');
-        return new Response('v=0\r\nanswer', {
+        return new Response(whipAnswer, {
           status: whip.status,
           headers: { Location: `${new URL(url).pathname}/resource-${offer}` },
         });
@@ -142,7 +155,9 @@ describe('CamerasService', () => {
       ];
       const service = await create();
 
-      expect(service.cameras()).toEqual([{ deviceId: 'a', label: 'Camera 1' }]);
+      expect(service.cameras()).toEqual([
+        { deviceId: 'a', label: 'Camera 1', captureModeIds: ALL_MODES },
+      ]);
       expect(service.state()).toBe('unknown');
       expect(media.opened).toEqual([]);
     });
@@ -167,8 +182,8 @@ describe('CamerasService', () => {
       expect(service.state()).toBe('granted');
       expect(service.error()).toBe(null);
       expect(service.cameras()).toEqual([
-        { deviceId: 'cam-desk', label: 'Desk camera' },
-        { deviceId: 'cam-laptop', label: 'Laptop camera' },
+        { deviceId: 'cam-desk', label: 'Desk camera', captureModeIds: ALL_MODES },
+        { deviceId: 'cam-laptop', label: 'Laptop camera', captureModeIds: ALL_MODES },
       ]);
     });
 
@@ -263,6 +278,7 @@ describe('CamerasService', () => {
       expect(service.assignments().get(2)).toEqual({
         deviceId: 'cam-laptop',
         label: 'Laptop camera',
+        captureModeIds: ALL_MODES,
       });
     });
 
@@ -364,7 +380,14 @@ describe('CamerasService', () => {
       await service.publish(1);
 
       expect(slotsFake.start).toHaveBeenCalledWith(1);
-      expect(media.opened[0].constraints).toEqual({ video: { deviceId: { exact: 'cam-desk' } } });
+      expect(media.opened[0].constraints).toEqual({
+        video: {
+          deviceId: { exact: 'cam-desk' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 },
+        },
+      });
       expect(peerOf().pinnedCodecs?.map((codec) => codec.mimeType)).toEqual(['video/H264']);
       const offers = posts('/whip');
       expect(offers.map((call) => call.url)).toEqual([whipUrl(1)]);
@@ -646,6 +669,127 @@ describe('CamerasService', () => {
 
       expect(slotsFake.refresh).toHaveBeenCalledTimes(2);
       expect(peerOf().closed).toBe(true);
+    });
+  });
+
+  describe('the capture of a webcam', () => {
+    const H264_ANSWER = [
+      'm=video 9 UDP/TLS/RTP/SAVPF 96',
+      'a=rtpmap:96 H264/90000',
+      'a=fmtp:96 packetization-mode=1',
+      '',
+    ].join('\r\n');
+
+    it('is 1920x1080 at 30 fps with Auto bitrate until it is chosen, for any slot', async () => {
+      const service = await create();
+
+      expect(service.captures().get(1)).toBeUndefined();
+      expect(service.captureOf(1)).toEqual({ mode: '1080p30', bitrate: 'auto' });
+    });
+
+    it('opens the camera in the chosen mode', async () => {
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      service.setCapture(1, { mode: '720p30', bitrate: 'auto' });
+
+      await service.publish(1);
+
+      expect(media.opened[0].constraints).toEqual({
+        video: {
+          deviceId: { exact: 'cam-desk' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
+      });
+    });
+
+    it('opens the camera with no size for the camera default', async () => {
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      service.setCapture(1, { mode: 'camera', bitrate: 'auto' });
+
+      await service.publish(1);
+
+      expect(media.opened[0].constraints).toEqual({ video: { deviceId: { exact: 'cam-desk' } } });
+    });
+
+    it('is held per slot and kept when the slot takes another camera', async () => {
+      const service = await create();
+      service.setCapture(1, { mode: '720p30', bitrate: '4mbps' });
+
+      await service.assign(1, 'cam-laptop');
+
+      expect(service.captureOf(1)).toEqual({ mode: '720p30', bitrate: '4mbps' });
+      expect(service.captureOf(2)).toEqual({ mode: '1080p30', bitrate: 'auto' });
+    });
+
+    it('lists only the modes a camera reports it can reach, and publishes in the largest of them when the chosen one is out of reach', async () => {
+      media.devices = [DESK, HD];
+      const service = await create();
+      await service.assign(1, 'cam-hd');
+      expect(service.assignments().get(1)?.captureModeIds).toEqual(['720p30', '480p30', 'camera']);
+
+      await service.publish(1);
+
+      // The default 1080p30 is beyond this camera.
+      expect(media.opened[0].constraints).toEqual({
+        video: {
+          deviceId: { exact: 'cam-hd' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
+      });
+    });
+
+    it("starts the answer's H.264 stream at the bitrate of the mode, and lets the sender reach it", async () => {
+      whipAnswer = H264_ANSWER;
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      service.setCapture(1, { mode: '720p30', bitrate: 'auto' });
+
+      await service.publish(1);
+
+      expect(peerOf().remoteDescription?.sdp).toContain(
+        'a=fmtp:96 packetization-mode=1;x-google-start-bitrate=3594;x-google-min-bitrate=1797',
+      );
+      expect(peerOf().appliedParameters).toEqual({
+        degradationPreference: 'maintain-resolution',
+        encodings: [{ maxBitrate: 3594000 }],
+      });
+    });
+
+    it('sends a fixed bitrate at its rate', async () => {
+      whipAnswer = H264_ANSWER;
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      service.setCapture(1, { mode: '1080p30', bitrate: '16mbps' });
+
+      await service.publish(1);
+
+      expect(peerOf().remoteDescription?.sdp).toContain('x-google-start-bitrate=16000');
+      expect(peerOf().appliedParameters?.encodings).toEqual([{ maxBitrate: 16000000 }]);
+    });
+
+    it("is forgotten with the slot's camera when a bulk action rewrites the slots, and when a file takes the slot", async () => {
+      const service = await create();
+      service.setCapture(1, { mode: '720p30', bitrate: '4mbps' });
+      service.setCapture(2, { mode: '480p30', bitrate: '2mbps' });
+
+      service.releaseAll({ clearAssignments: true });
+      expect(service.captures().size).toBe(0);
+
+      service.setCapture(3, { mode: '720p30', bitrate: '4mbps' });
+      await service.assignFile(3, 'people/walk.mp4');
+      expect(service.captureOf(3)).toEqual({ mode: '1080p30', bitrate: 'auto' });
+    });
+
+    it('is kept by a stop, which keeps the camera', async () => {
+      const service = await create();
+      service.setCapture(1, { mode: '720p30', bitrate: '4mbps' });
+      service.releaseAll();
+      expect(service.captureOf(1)).toEqual({ mode: '720p30', bitrate: '4mbps' });
     });
   });
 

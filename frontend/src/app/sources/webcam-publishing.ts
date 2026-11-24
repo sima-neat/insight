@@ -12,6 +12,8 @@
  * defaulting to the global one.
  */
 
+import { captureModeIdsWithin, type CaptureLimits } from './webcam-capture';
+
 /** The reason a connection was given up on, as the disconnect watcher reports it. */
 export type ConnectionLoss = 'failed' | 'closed' | 'disconnected';
 
@@ -19,6 +21,11 @@ export type ConnectionLoss = 'failed' | 'closed' | 'disconnected';
 export interface Camera {
   deviceId: string;
   label: string;
+  /**
+   * The ids of the capture modes within the camera's reported limits; absent while they are not
+   * known (a camera that is no longer listed), when every mode is offered.
+   */
+  captureModeIds?: readonly string[];
 }
 
 /** The part of a `MediaDeviceInfo` the camera list reads. */
@@ -26,6 +33,8 @@ export interface DeviceInfo {
   kind: string;
   deviceId: string;
   label: string;
+  /** Chrome's `InputDeviceInfo.getCapabilities()`: the camera's largest size and rate. */
+  getCapabilities?(): CaptureLimits;
 }
 
 /** The part of a `fetch` response the offer reads. */
@@ -101,7 +110,8 @@ export function describeWebcamError(error: unknown): string {
  * The cameras a user can pick, from enumerateDevices(). A browser can only open a camera by
  * deviceId, and Chrome on Linux reports one id for every sensor of a multi-sensor USB camera
  * (e.g. "HP 5MP Camera" and "HP IR Camera"): whichever entry is picked, the same device opens. So
- * each id is listed once, under the first name it was reported with. Entries without an id (no
+ * each id is listed once, under the first name it was reported with, with the modes its limits
+ * reach. Entries without an id (no
  * permission yet) are skipped.
  */
 export function camerasFromDevices(devices: readonly DeviceInfo[] | null | undefined): Camera[] {
@@ -113,6 +123,7 @@ export function camerasFromDevices(devices: readonly DeviceInfo[] | null | undef
     cameras.push({
       deviceId: device.deviceId,
       label: device.label || `Camera ${cameras.length + 1}`,
+      captureModeIds: captureModeIdsWithin(device.getCapabilities?.()),
     });
   }
   return cameras;

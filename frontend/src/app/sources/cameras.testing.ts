@@ -36,7 +36,14 @@ export class FakePeer {
   /** The codecs the transceiver was pinned to; null while it was left to negotiate. */
   pinnedCodecs: { mimeType: string }[] | null = null;
   private readonly listeners: (() => void)[] = [];
-  private readonly sender = {};
+  /** What `setParameters` of the sender was last given; null while it was never called. */
+  appliedParameters: RTCRtpSendParameters | null = null;
+  private readonly sender = {
+    getParameters: () => ({ encodings: [{}] }) as RTCRtpSendParameters,
+    setParameters: async (parameters: RTCRtpSendParameters) => {
+      this.appliedParameters = parameters;
+    },
+  };
   private readonly transceiver = {
     sender: this.sender,
     setCodecPreferences: (codecs: { mimeType: string }[]) => {
