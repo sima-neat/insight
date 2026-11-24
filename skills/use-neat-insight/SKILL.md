@@ -85,8 +85,8 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
 - Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
-- Use `neat-insight-metadata-test` or `neat_insight/tools/multisrc-harness.sh` when vf metadata/DataChannel behavior needs reproducible synthetic traffic.
-- Overlay colors are assigned per identity from one palette (`webrtc/static/js/metadata-colors.js`): class label for detection, segmentation and classification, `id` for tracking and pose. See `docs/user-interface.md#metadata-colors` before judging colors in a screenshot.
+- Use `neat-insight-metadata-test` or the bundled multi-source harness (see Synthetic Metadata Testing) when vf metadata/DataChannel behavior needs reproducible synthetic traffic.
+- Overlay colors are assigned per identity from one palette (`/static/js/metadata-colors.js` on `videoUI`): class label for detection, segmentation and classification, `id` for tracking and pose. See `https://developer.sima.ai/software/tools/insight/user-interface/#metadata-colors` before judging colors in a screenshot.
 - Use the SDK port map before instructing DevKit-side apps or external tools to connect to Insight. Default ports only apply when the SDK was able to publish the defaults.
 - For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
 - Test overlay rendering on `videoUI`, not `mainUI`. Only the vf viewer loads `/static/drawing.js`; the console's Video Viewer bundles no overlay renderer and draws only what a browser cached from an older install.
@@ -321,8 +321,11 @@ Examples:
 ```bash
 neat-insight-metadata-test --count 1 --types object-detection
 neat-insight-metadata-test --count 4 --types object-detection,classification --fps 30
-neat_insight/tools/multisrc-harness.sh start --count 16 --meta-types object-detection,segmentation
+HARNESS="$(/opt/neat-insight/venv/bin/python -c 'import os, neat_insight.tools as t; print(os.path.dirname(t.__file__))')/multisrc-harness.sh"
+bash "$HARNESS" start --count 16 --video-dir <dir-with-16-clips> --meta-types object-detection,segmentation
 ```
+
+The multi-source harness ships inside the Insight package, so the example finds it with the Insight venv's Python (`insight.venv` from `neat --json`; `/opt/neat-insight/venv` in the SDK). It also streams video with `ffmpeg`, one file per channel from `--video-dir`.
 
 The metadata sender targets UDP `9100+channel` by default and emits JSON compatible with Insight's metadata overlays. It supports `object-detection`, `classification`, `pose-estimation`, `segmentation`, and `tracking`, and sends several identities per type so color assignment can be checked.
 
