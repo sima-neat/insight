@@ -2,8 +2,10 @@ package channels
 
 import "github.com/pion/rtp"
 
-// maxUnitBytes caps the RTP bytes one access unit may collect, since its packets are held until
-// its marker and a sender decides how many come before it. 16 MiB is above the uncompressed size
+// maxUnitBytes caps the bytes of the RTP packets one access unit may collect, counted as they
+// arrived (each datagram whole, its RTP header included), since its packets are held until its
+// marker and a sender decides how many come before it. It bounds that count, not the memory
+// that holds it (a slice per packet beside it). 16 MiB is above the uncompressed size
 // of the largest picture H.264 level 5.2 and H.265 level 5.x allow (4096 × 2304 and 8,912,896
 // luma samples in 4:2:0, about 14 MB), which an encoded picture of those levels never needs.
 const maxUnitBytes = 16 << 20
