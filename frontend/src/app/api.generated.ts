@@ -75,7 +75,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Watch a channel over WebRTC
-         * @description The browser's SDP offer in, Insight's answer out. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec, `codec_changed` when it changes); a 4xx is final (415 `codec_unsupported`: this browser cannot decode the channel's codec).
+         * @description The browser's SDP offer in, Insight's answer out. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec, `codec_changed` when it changes, `too_many_viewers` while 8 connections to the channel are open or opening, until one leaves); a 4xx is final (415 `codec_unsupported`: this browser cannot decode the channel's codec).
          */
         readonly post: operations["offerChannel"];
         readonly delete?: never;
@@ -432,7 +432,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Upload a file or an archive into the library
-         * @description multipart/form-data with one `file` and an optional `on_conflict`. A file the board streams well is saved at once (201); one it would stream badly (B-frames, another codec or profile, keyframes far apart) is re-encoded by a job first (202 with the job, whose result is what was saved). An archive (ZIP, tar, gzipped tar) is unpacked into a folder named after it. A taken name with `ask` is 409 `name_taken` with the `conflict`, before any work. Replacing a file restarts the slots that streamed it.
+         * @description multipart/form-data with one `file` and an optional `on_conflict`. A file the board streams well is saved at once (201); one it would stream badly (B-frames, another codec or profile, keyframes far apart) is re-encoded by a job first (202 with the job, whose result is what was saved). An archive (ZIP, tar, gzipped tar) is unpacked into a folder named after it. A playlist (HLS, DASH, a concat list), on its own or in an archive, is refused (400 `invalid_request` or `invalid_archive`): it names other files. A taken name with `ask` is 409 `name_taken` with the `conflict`, before any work. Replacing a file restarts the slots that streamed it. An upload whose request would not fit on the media folder's disk with 1 GiB to spare is 507 `no_space` before anything is written (a request without a Content-Length counts as the 8 GiB limit).
          */
         readonly post: operations["uploadMedia"];
         readonly delete?: never;
@@ -470,7 +470,7 @@ export interface paths {
         };
         /**
          * A library file as a moving MJPEG picture
-         * @description Looped at its own rate, from one shared relay however many browsers watch it. 503 `ffmpeg_missing` without FFmpeg; 429 when Insight relays as many streams as it may.
+         * @description Looped at its own rate, from one shared relay however many browsers watch it. 415 `not_previewable` for a file whose probe found no video or picture (a playlist among them); 503 `ffmpeg_missing` without FFmpeg; 429 when Insight relays as many streams as it may.
          */
         readonly get: operations["previewMedia"];
         readonly put?: never;
@@ -1200,6 +1200,8 @@ export interface components {
             readonly diagnostics?: {
                 readonly malformed_packets?: number;
                 readonly unsupported_packets?: number;
+                /** @description Frames dropped because their RTP packets came to over 16 MiB, more than any picture of H.264 level 5.2 or H.265 level 5.x needs. */
+                readonly oversized_frames?: number;
                 readonly recent_errors?: readonly string[];
             };
         };
@@ -2791,6 +2793,7 @@ export interface operations {
             };
             readonly 400: components["responses"]["LibraryError"];
             readonly 404: components["responses"]["LibraryError"];
+            readonly 415: components["responses"]["LibraryError"];
             readonly 429: components["responses"]["Error"];
             readonly 502: components["responses"]["Error"];
             readonly 503: components["responses"]["Error"];
