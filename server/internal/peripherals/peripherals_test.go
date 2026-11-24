@@ -51,6 +51,8 @@ type fakeSentinel struct {
 	mu        sync.Mutex
 	catalog   string
 	refreshes int
+	// status, when not 0, is what the refresh answers with, in place of the catalog.
+	status int
 }
 
 func (s *fakeSentinel) set(catalog string) {
@@ -67,7 +69,17 @@ func (s *fakeSentinel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.refreshes++
+	if s.status != 0 {
+		http.Error(w, "Sentinel is busy", s.status)
+		return
+	}
 	_, _ = io.WriteString(w, s.catalog)
+}
+
+func (s *fakeSentinel) failWith(status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status = status
 }
 
 func (s *fakeSentinel) count() int {
@@ -304,6 +316,12 @@ func TestAUSBPreviewWithoutAByIDLinkConfirmsTheCameraWithARescan(t *testing.T) {
 			t.Errorf("%s: the pipeline ran", name)
 		}
 	}
+	f.sentinel.failWith(http.StatusInternalServerError)
+	err := start()
+	if err == nil || !strings.Contains(err.Error(), "has no /dev/v4l/by-id link, and Sentinel could not confirm it is still the camera at /dev/video1") {
+		t.Errorf("a rescan that fails: %v", err)
+	}
+	f.sentinel.failWith(0)
 	failed := strings.Replace(catalogOf(usbNoByID), `"errors":[]`, `"errors":[{"provider":"camera.v4l2","code":"x","reason":"y"}]`, 1)
 	f.sentinel.set(failed)
 	if err := start(); codeOf(err) != "stale_scan" {

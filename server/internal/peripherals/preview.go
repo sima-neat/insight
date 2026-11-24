@@ -259,13 +259,25 @@ func confirmNode(ctx context.Context, b *board.Board, d device) error {
 	ctx, cancel := context.WithTimeout(ctx, confirmTimeout)
 	defer cancel()
 	body, err := sentinel.Call(ctx, b, http.MethodPost, "/v1/peripherals/refresh", nil)
-	if err != nil {
-		return err
+	if err == nil {
+		var now catalog
+		if now, err = parseCatalog(body); err == nil {
+			return confirmedIn(now, d)
+		}
 	}
-	now, err := parseCatalog(body)
-	if err != nil {
-		return err
+	// Sentinel's own refusal or failure, with what it was asked for.
+	var refused *apierr.Error
+	if errors.As(err, &refused) {
+		wrapped := *refused
+		wrapped.Message = fmt.Sprintf("%s has no /dev/v4l/by-id link, and Sentinel could not confirm it is still the camera at %s: %s",
+			d.name(), d.DevicePath, refused.Message)
+		return &wrapped
 	}
+	return err
+}
+
+// confirmedIn is nil when the rescan now finds camera d at its scanned node.
+func confirmedIn(now catalog, d device) error {
 	current, ok := now.device(d.ID)
 	if now.stale(d) {
 		return apierr.Errorf(http.StatusConflict, "stale_scan",
