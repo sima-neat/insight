@@ -44,8 +44,70 @@ var (
 
 func accepts(t *testing.T, a *assembler, p testPacket) bool {
 	t.Helper()
-	_, ready := a.accept(p.packet, p.raw)
+	_, ready, _ := a.accept(p.packet, p.raw)
 	return ready
+}
+
+// fragments sends one unit of FU fragments, each a full datagram, until it holds more than
+// maxUnitBytes, then its marker. first and rest are the payload's first bytes for the fragment
+// with the unit's start and for the ones after it; it says how often a packet was reported as
+// making the unit too large, and the sequence number after the unit.
+func fragments(t *testing.T, a *assembler, payloadType uint8, sequence uint16, timestamp uint32, first, rest, end []byte) (reported int, next uint16) {
+	t.Helper()
+	fragment := make([]byte, 1400)
+	copy(fragment, first)
+	for sent := 0; sent <= maxUnitBytes; sequence++ {
+		p := packetOf(t, payloadType, sequence, timestamp, false, fragment)
+		_, ready, oversized := a.accept(p.packet, p.raw)
+		if ready {
+			t.Fatal("ready before the marker")
+		}
+		if oversized {
+			reported++
+		}
+		if a.size > maxUnitBytes {
+			t.Fatalf("the unit holds %d bytes, over the cap of %d", a.size, maxUnitBytes)
+		}
+		sent += len(p.raw)
+		copy(fragment, rest)
+	}
+	if accepts(t, a, packetOf(t, payloadType, sequence, timestamp, true, end)) {
+		t.Fatal("a unit over the cap was passed on")
+	}
+	return reported, sequence + 1
+}
+
+func TestAUnitOverTheCapIsDroppedAndTheNextPasses(t *testing.T) {
+	a := newAssembler()
+	// FU-A of an IDR: its start (S bit 0x80), the middle, its end (E bit 0x40).
+	reported, next := fragments(t, a, payloadTypeH264, 10, 9000, []byte{0x7c, 0x85}, []byte{0x7c, 0x05}, []byte{0x7c, 0x45})
+	if reported != 1 {
+		t.Fatalf("reported %d times, want once", reported)
+	}
+	if len(a.packets) != 0 || a.size != 0 {
+		t.Fatalf("%d packets, %d bytes kept after the unit", len(a.packets), a.size)
+	}
+	if !accepts(t, a, h264(t, next, 12000, true, h264IDR)) {
+		t.Fatal("the unit after it was withheld")
+	}
+}
+
+func TestAnH265UnitOverTheCapClosesTheGate(t *testing.T) {
+	a := newAssembler()
+	if !accepts(t, a, h265(t, 9, 6000, true, h265IRAP)) {
+		t.Fatal("the first random-access unit was withheld")
+	}
+	// FU (type 49) of an IDR_W_RADL (19): its start (0x80|19), the middle, its end (0x40|19).
+	reported, next := fragments(t, a, payloadTypeH265, 10, 9000, []byte{0x62, 0x01, 0x93}, []byte{0x62, 0x01, 0x13}, []byte{0x62, 0x01, 0x53})
+	if reported != 1 {
+		t.Fatalf("reported %d times, want once", reported)
+	}
+	if accepts(t, a, h265(t, next, 12000, true, h265Delta)) {
+		t.Fatal("a delta unit passed the gate after the dropped one")
+	}
+	if !accepts(t, a, h265(t, next+1, 15000, true, h265IRAP)) {
+		t.Fatal("the next random-access unit was withheld")
+	}
 }
 
 func TestASequenceGapInsideAUnitWithholdsIt(t *testing.T) {

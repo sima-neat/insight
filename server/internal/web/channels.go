@@ -91,11 +91,13 @@ func (h *handlers) GetIngestStats(w http.ResponseWriter, r *http.Request, params
 		c.Webrtc.PeerCount = s.Viewers
 		if verbose {
 			malformed, unsupported, errs := int(s.Video.Malformed), int(s.Video.Unsupported), nonNil(s.Errors)
+			oversized := int(s.Video.Oversized)
 			c.Diagnostics = &struct {
 				MalformedPackets   *int      `json:"malformed_packets,omitempty"`
+				OversizedFrames    *int      `json:"oversized_frames,omitempty"`
 				RecentErrors       *[]string `json:"recent_errors,omitempty"`
 				UnsupportedPackets *int      `json:"unsupported_packets,omitempty"`
-			}{&malformed, &errs, &unsupported}
+			}{&malformed, &oversized, &errs, &unsupported}
 		}
 		stats.Channels = append(stats.Channels, c)
 	}

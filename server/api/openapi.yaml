@@ -1473,6 +1473,11 @@ components:
               type: integer
             unsupported_packets:
               type: integer
+            oversized_frames:
+              type: integer
+              description: >-
+                Frames dropped because their RTP packets came to over 16 MiB, more than any
+                picture of H.264 level 5.2 or H.265 level 5.x needs.
             recent_errors:
               type: array
               items:

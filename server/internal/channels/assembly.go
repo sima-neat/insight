@@ -2,6 +2,12 @@ package channels
 
 import "github.com/pion/rtp"
 
+// maxUnitBytes caps the RTP bytes one access unit may collect, since its packets are held until
+// its marker and a sender decides how many come before it. 16 MiB is above the uncompressed size
+// of the largest picture H.264 level 5.2 and H.265 level 5.x allow (4096 × 2304 and 8,912,896
+// luma samples in 4:2:0, about 14 MB), which an encoded picture of those levels never needs.
+const maxUnitBytes = 16 << 20
+
 // An accessUnit is one picture's RTP packets, complete and in order, ready to be sent on.
 type accessUnit struct {
 	packets   [][]byte // the raw packets, which the forwarder may rewrite in place
@@ -21,17 +27,22 @@ type accessUnit struct {
 // damaged picture would corrupt every picture decoded from it, and the outgoing sequence is
 // renumbered (see sequencer), so the browser could not see the gap itself.
 //
+// A unit that grows over maxUnitBytes is dropped as a damaged one is: its packets are let go at
+// once and the rest of it, up to its marker, is not kept.
+//
 // For H.265 a loss also closes a gate that withholds every unit until the next random-access
 // picture (an IRAP), since the units in between reference what was lost. H.264's decoders in
 // browsers conceal such losses well enough that vf never gated them, nor does this.
 type assembler struct {
 	packets      [][]byte
+	size         int // the bytes of packets
 	ssrc         uint32
 	timestamp    uint32
 	codec        Codec
 	active       bool // a unit is being collected
 	complete     bool // its first packet began a NAL unit
 	damaged      bool // a sequence gap fell inside it, or between it and the unit before
+	oversized    bool // it grew over maxUnitBytes
 	randomAccess bool
 
 	nextSequence  uint16
@@ -48,11 +59,11 @@ func newAssembler() *assembler { return &assembler{waitingForRandomAccess: true}
 func (a *assembler) rearm() { a.waitingForRandomAccess = true }
 
 // accept takes one packet (parsed, and its raw bytes) and returns the unit it completes, if a
-// whole one.
-func (a *assembler) accept(packet *rtp.Packet, raw []byte) (accessUnit, bool) {
+// whole one. oversized is true for the packet that took its unit over maxUnitBytes, once a unit.
+func (a *assembler) accept(packet *rtp.Packet, raw []byte) (unit accessUnit, ready, oversized bool) {
 	codec := codecOf(packet.PayloadType)
 	if codec == CodecNone {
-		return accessUnit{}, false
+		return accessUnit{}, false, false
 	}
 	units := nalsOf(codec, packet.Payload)
 	starts := len(units) > 0 && units[0].Start
@@ -73,34 +84,41 @@ func (a *assembler) accept(packet *rtp.Packet, raw []byte) (accessUnit, bool) {
 	if !a.active || packet.SSRC != a.ssrc || packet.Timestamp != a.timestamp {
 		// A unit left unfinished by the same source lost its end.
 		abandoned := a.active && sameSource
-		a.packets = a.packets[:0]
+		a.packets, a.size = a.packets[:0], 0
 		a.ssrc, a.timestamp, a.codec = packet.SSRC, packet.Timestamp, codec
 		a.complete, a.damaged, a.randomAccess, a.active = starts, abandoned || gap, randomAccess, true
+		a.oversized = false
 	} else if gap {
 		a.complete, a.damaged = false, true
 	}
-	a.packets = append(a.packets, raw)
+	switch {
+	case a.oversized:
+	case a.size+len(raw) > maxUnitBytes:
+		a.packets, a.size, a.oversized, a.damaged, oversized = nil, 0, true, true, true
+	default:
+		a.packets, a.size = append(a.packets, raw), a.size+len(raw)
+	}
 	a.randomAccess = a.randomAccess || randomAccess
 	if !packet.Marker {
-		return accessUnit{}, false
+		return accessUnit{}, false, oversized
 	}
 
-	unit := accessUnit{packets: a.packets, ssrc: a.ssrc, timestamp: a.timestamp}
+	unit = accessUnit{packets: a.packets, ssrc: a.ssrc, timestamp: a.timestamp}
 	whole := a.complete && !a.damaged
-	a.packets, a.active = nil, false
+	a.packets, a.size, a.active = nil, 0, false
 	if a.codec == CodecH265 && !whole {
 		a.waitingForRandomAccess = true
 	}
 	if !whole {
-		return accessUnit{}, false
+		return accessUnit{}, false, oversized
 	}
 	if a.randomAccess {
 		a.waitingForRandomAccess = false
 	}
 	if a.codec == CodecH265 && a.waitingForRandomAccess {
-		return accessUnit{}, false
+		return accessUnit{}, false, false
 	}
 	unit.afterSequenceBreak = a.sequenceBreak
 	a.sequenceBreak = false
-	return unit, true
+	return unit, true, false
 }
