@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -278,4 +279,47 @@ func TestStopLeftovers(t *testing.T) {
 			t.Fatalf("files kept: %v", left)
 		}
 	})
+}
+
+// A child that writes its last line and exits at once: the line is read before the child counts
+// as done, so a caller reading its output after Done (an ffmpeg run's error) always has it.
+func TestAChildsLastLineIsReadBeforeItIsDone(t *testing.T) {
+	s, _ := New(t.TempDir())
+	writer := &lockedWriter{w: &strings.Builder{}}
+	p, err := s.Start(Spec{Name: "last", Path: sh(t), Args: []string{"-c", "echo 'the reason' >&2; exit 3"}, Output: writer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the child did not finish")
+	}
+	if tail := p.Tail(); len(tail) != 1 || tail[0] != "the reason" {
+		t.Fatalf("the tail when done: %q", tail)
+	}
+	if got := writer.String(); got != "[last] the reason\n" {
+		t.Fatalf("the output when done: %q", got)
+	}
+	if exit := p.Status().LastExit; exit != "exit status 3" {
+		t.Fatalf("the exit: %q", exit)
+	}
+}
+
+// lockedWriter is a writer the child's reader and the test may share.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  *strings.Builder
+}
+
+func (l *lockedWriter) Write(b []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(b)
+}
+
+func (l *lockedWriter) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.String()
 }
