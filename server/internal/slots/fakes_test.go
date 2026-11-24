@@ -396,7 +396,7 @@ func (h *harness) open() {
 		Relays:         h.relay,
 		FFmpeg:         "/usr/bin/ffmpeg",
 		URLs:           URLOptions{RTSPPort: 18554, WHIPPort: 18889},
-		snapshotEvery:  time.Hour, // the tests take snapshots themselves
+		driven:         true, // settle runs the loop's and the workers' steps
 		probeStream:    h.streams.probe,
 		encode:         h.encoder.encode,
 	})

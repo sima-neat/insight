@@ -274,9 +274,8 @@ func TestAnExternalPublisherHoldsTheSlot(t *testing.T) {
 	if s.State != External || s.Publisher == nil || s.Publisher.Address != "10.0.0.9" || s.Publisher.CodecSupported || s.Codec != "vp8" {
 		t.Fatalf("an external slot: %+v %+v", s, s.Publisher)
 	}
-	if s.Publisher.Width != 640 {
-		t.Errorf("the external stream was not probed: %+v", s.Publisher)
-	}
+	// The probe runs on a goroutine of its own.
+	eventually(t, "the external stream is probed", func() bool { return h.slot(5).Publisher.Width == 640 })
 	wantCode(t, h.m.AssignFile(5, "a.mp4", 0), CodeSlotBusy)
 	wantCode(t, h.m.Start(5), CodeSlotBusy)
 	result, err := h.m.StartFirst(10)
@@ -432,8 +431,9 @@ func TestAPullThatLaterRefusesItsCredentialsIsPaused(t *testing.T) {
 	h.m.mu.Lock()
 	h.m.rt[0].pullProbe.at = h.m.rt[0].pullProbe.at.Add(-pullProbeEvery) // due again
 	h.m.mu.Unlock()
-	h.settle()
-	eventually(t, "the pull is paused", func() bool { h.settle(); return h.slot(1).State == Failed })
+	h.settle() // the snapshot starts the probe, on a goroutine of its own
+	eventually(t, "the probe finds the credentials refused", func() bool { return h.slot(1).State == Failed })
+	h.settle() // the reconcile the probe asks for pauses the pull
 	s := h.slot(1)
 	if s.Pull.Status != PullAuthFailed || !strings.Contains(s.Error, "rejected") {
 		t.Errorf("a pull whose credentials were refused: %+v %+v", s, s.Pull)
