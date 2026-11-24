@@ -721,7 +721,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Start a camera's live preview
-         * @description Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode must be one the last scan says is `previewable`: for MIPI an NV12 mode Sentinel does not mark unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format, at a rate it advertises. 409 `preview_active` while one runs, `camera_in_use` when another process holds the camera (Insight never stops it), `no_scan` before a scan; 422 `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing` without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
+         * @description Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode must be one the last scan says is `previewable`: for MIPI an NV12 mode Sentinel does not mark unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format, at a rate it advertises. A USB camera without a `/dev/v4l/by-id` link is opened by its `/dev/videoN` node, so a Sentinel rescan first has to find the scanned camera still there (node, vendor, product and serial), else 409 `stale_scan` (also while Sentinel's USB provider fails): refresh, then start again. 409 `preview_active` while one runs, `camera_in_use` when another process holds the camera (Insight never stops it), `no_scan` before a scan; 422 `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing` without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
          */
         readonly post: operations["startCameraPreview"];
         readonly delete?: never;
@@ -1702,7 +1702,7 @@ export interface components {
              */
             readonly speed_mbps?: number;
         };
-        /** @description Sentinel's verdict on a camera, format or mode: available when Neat's CameraInput can use it. USB cameras are unsupported, yet previewable. */
+        /** @description Sentinel's verdict on a camera, format or mode: available when Neat's camera input can use it (`CameraInput` for MIPI, `UsbCameraInput` for USB). A USB camera's modes are available when Sentinel reports them in MJPEG on the `uvcvideo` driver, and unsupported with Sentinel's reason otherwise. Only a Sentinel that reports a USB camera's driver checks USB cameras: with an older one, every USB mode is unsupported with a reason to update it. Unsupported modes can still be previewable. */
         readonly DeviceSupport: {
             /** @enum {string} */
             readonly tier: "available" | "unsupported";

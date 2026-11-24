@@ -105,10 +105,13 @@ never opens a device, so your apps keep them.
 - **A camera** shows its pixel formats and resolutions, each **Available** to Neat's camera input
   or **Unsupported** with the reason. For a USB camera, Available means Sentinel reports the mode
   in MJPEG on the `uvcvideo` driver, which Neat's USB camera input reads; a Sentinel too old to
-  check USB cameras leaves every USB mode Unsupported and says to update it. **Start preview** shows what the camera sees, at a low frame
-  rate. While it runs, the preview holds the camera, and your app cannot open it; leaving the page
-  stops it. **Camera ID**, under the camera's name, shows the ID a Neat application opens the
-  camera by (`CameraInput` for MIPI, `UsbCameraInput` for USB) with a **Copy** button.
+  check USB cameras leaves every USB mode Unsupported and says to update it. **Start preview**
+  shows what the camera sees, at a low frame rate. While it runs, the preview holds the camera,
+  and your app cannot open it; leaving the page stops it. A USB camera without a `/dev/v4l/by-id`
+  link is opened by its `/dev/videoN` node, so Insight first asks Sentinel to rescan and asks you
+  to **Refresh** when that node is no longer the same camera. **Camera ID**, on the camera's
+  title row, shows the ID a Neat application opens the camera by (`CameraInput` for MIPI,
+  `UsbCameraInput` for USB) with a **Copy** button.
 - **A microphone** shows what it captures. **Test microphone** records with a level meter, then
   plays the recording back.
 
