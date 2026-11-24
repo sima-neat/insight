@@ -61,10 +61,10 @@ Example `neat --json` shape:
 }
 ```
 
-Endpoint selection rules:
+Endpoint selection rules (`<sdk-host-ip>` is the SDK host's address as another machine sees it: `network.browser_ice_address` from `/api/health`, else the host of `insight.webUiUrl`; if neither is a non-loopback address, ask the user):
 
 - Browser or external device opening Insight UI: use `insight.webUiUrl` or `mainUI`.
-- Browser opening Video Viewer: prefer `/api/viewer-url`, because it uses the mapped `videoUI` port.
+- Browser opening Video Viewer: prefer `/api/viewer-url`, because it uses the mapped `videoUI` port. Its link uses the host you called the API at, so a call to `127.0.0.1` returns a link only a browser on the SDK host can open. For a browser on another machine, keep the link's port, path and query and replace the host with `<sdk-host-ip>`. When `network.public_origin` is set, the link already uses it; give it unchanged. If you do not know where the browser runs, give both links and say which is which.
 - Application inside the SDK container consuming RTSP sources: use `rtsp://127.0.0.1:8554/srcN`.
 - Application on a DevKit or another external machine consuming RTSP sources from SDK Insight: use `rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/srcN`.
 - Application inside the SDK container sending video or metadata to the viewer: use UDP `9000 + channel` and `9100 + channel`.
@@ -82,7 +82,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Peripherals never captures video: SiMa Sentinel on the board discovers the cameras and microphones (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog; only an explicit camera preview captures video and only an explicit microphone test records audio. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
 - Preview is the only Peripherals operation that touches the sensor, and only while it runs: over the board connection Insight runs `gst-launch-1.0` (`libcamerasrc` for MIPI, `v4l2src` on the `/dev/v4l/by-id` path for USB, or on `/dev/videoN` only after a Sentinel rescan still reports the scanned camera id there with the same vendor, product and serial; otherwise `409 stale_snapshot`) that writes multipart JPEG (at most 640 px wide, up to 15 fps) to stdout, and relays it at the session's `stream_url` as `multipart/x-mixed-replace`. It uses no vf channel, UDP port, or PyNeat. Discovery never captures. A failed start carries the pipeline's stderr in `detail`. The session's `camera_fps` is the rate the camera runs at: a USB mode's own rate; for MIPI, Sentinel's `max_fps` from one Sentinel rescan after the first frame (no Insight scan is recorded and the preview keeps running), `null` until then or when Sentinel cannot report it.
 - Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; remote Stats still reads its original `cfg.json` target.
-- Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
+- Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host. For a browser on another machine, swap a loopback host for `<sdk-host-ip>` as in the endpoint selection rules.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
 - Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
 - Use `neat-insight-metadata-test` or `neat_insight/tools/multisrc-harness.sh` when vf metadata/DataChannel behavior needs reproducible synthetic traffic.
