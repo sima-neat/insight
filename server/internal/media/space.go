@@ -13,5 +13,5 @@ func FreeBytes(dir string) (int64, bool) {
 	if err := syscall.Statfs(dir, &fs); err != nil {
 		return 0, false
 	}
-	return int64(fs.Bavail) * fs.Bsize, true
+	return int64(fs.Bavail) * int64(fs.Bsize), true // Bsize is int64 on Linux, uint32 on macOS
 }
