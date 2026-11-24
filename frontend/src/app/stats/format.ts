@@ -178,3 +178,6 @@ export function formatEnergy(joules: number | null): string {
   const whole = Math.round(joules);
   return whole < 1000 ? `${whole} J` : `${(joules / 1000).toFixed(2)} kJ`;
 }
+
+/** A value in megabytes as a stacked chart words it. */
+export const megabytes = (value: number): string => formatValue(value, 'MB');

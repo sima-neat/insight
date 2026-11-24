@@ -10,6 +10,7 @@ import {
   unitSuffix,
 } from '../../stats/format';
 import {
+  acceleratorMemoryChart,
   boardPowerChart,
   cardReported,
   cardShown,
@@ -21,6 +22,7 @@ import {
   thermalMax,
   thermalMaxChart,
   type OverviewCard,
+  type StackInputs,
   type TelemetryWindow,
 } from '../../stats/telemetry';
 import type { StatsChartInputs } from './stats-chart';
@@ -37,6 +39,8 @@ export interface OverviewCardView {
   readonly chip: { label: string; tone: NeatTone } | null;
   /** Null while the card's metric is not reported: "Not reported" stands in for the chart. */
   readonly chart: StatsChartInputs | null;
+  /** The stacked chart of a card that stacks its metrics (Accelerator memory), in place of `chart`. */
+  readonly stack: StackInputs | null;
 }
 
 /**
@@ -49,7 +53,15 @@ export function overviewCards(window: TelemetryWindow): OverviewCardView[] {
   return OVERVIEW_CARDS.filter((card) => cardShown(window, card)).map((card) =>
     cardReported(window, card)
       ? reportedCard(window, card)
-      : { card, value: 'Not reported', unit: '', caption: '', chip: null, chart: null },
+      : {
+          card,
+          value: 'Not reported',
+          unit: '',
+          caption: '',
+          chip: null,
+          chart: null,
+          stack: null,
+        },
   );
 }
 
@@ -64,6 +76,7 @@ function reportedCard(window: TelemetryWindow, card: OverviewCard): OverviewCard
       caption: hottest ? `Hottest sensor: ${hottest.group} ${hottest.short || hottest.label}` : '',
       chip: alert && alertLabel(alert),
       chart: thermalMaxChart(window),
+      stack: null,
     };
   }
   const metrics = card.keys.flatMap((key) => metricByKey(window, key) ?? []);
@@ -72,13 +85,16 @@ function reportedCard(window: TelemetryWindow, card: OverviewCard): OverviewCard
   const value =
     card.id === 'network'
       ? currentTotal(card.keys.map((key) => metricByKey(window, key)?.value ?? null))
-      : metrics[0].value;
+      : card.id === 'accelerator-memory'
+        ? currentTotal(metrics.map((metric) => metric.value))
+        : metrics[0].value;
   return {
     card,
     ...reading(value, metrics[0].unit),
     caption: '',
     chip: alert && statusLabel(alert.tone),
     chart: chartOf(window, card),
+    stack: card.id === 'accelerator-memory' ? acceleratorMemoryChart(window) : null,
   };
 }
 
@@ -88,6 +104,8 @@ function chartOf(window: TelemetryWindow, card: OverviewCard): StatsChartInputs 
       return boardPowerChart(window);
     case 'network':
       return networkChart(window);
+    case 'accelerator-memory':
+      return null;
     default:
       return metricChart(window, card.keys[0]);
   }

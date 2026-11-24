@@ -4,6 +4,7 @@ import {
   AREA_LABELS,
   HISTORY_SAMPLES,
   OVERVIEW_CARDS,
+  acceleratorMemoryChart,
   areaMetrics,
   boardPowerChart,
   cacheAfter,
@@ -254,15 +255,18 @@ describe('mergeTelemetry', () => {
 });
 
 describe('what the page derives from the window', () => {
-  it('every live metric lands in exactly one area, by the dashboard’s rules', () => {
+  it('every live metric but the CMA pool lands in exactly one area, by the dashboard’s rules', () => {
     const window = live(2);
     const byArea = Object.fromEntries(AREAS.map((area) => [area, areaMetrics(window, area)]));
     const all = window.metrics.map((m) => m.key);
     expect(all).toHaveLength(59);
+    // The CMA pool is the board's, not the EV74's: it is in All metrics only.
+    const cma = all.filter((key) => key.startsWith('ev74_cma_'));
+    expect(cma).toHaveLength(3);
     const placed = AREAS.flatMap((area) => byArea[area].map((m) => m.key));
-    expect([...placed].sort()).toEqual([...all].sort());
+    expect([...placed].sort()).toEqual(all.filter((key) => !cma.includes(key)).sort());
     expect(new Set(placed).size).toBe(placed.length);
-    expect(AREAS.map((area) => byArea[area].length)).toEqual([17, 11, 25, 6]);
+    expect(AREAS.map((area) => byArea[area].length)).toEqual([17, 11, 22, 6]);
 
     const groupsOf = (metrics: readonly SentinelMetric[]) =>
       [...new Set(metrics.map((m) => m.group))].sort();
@@ -448,7 +452,12 @@ describe('the overview cards', () => {
       ['board-power', 'Board power (Estimated)', 'power', ['power_current_watts']],
       ['cpu', 'CPU usage', 'system', ['cpu_usage_pct']],
       ['linux-memory', 'Linux memory', 'system', ['linux_mem_used_pct']],
-      ['mla-memory', 'MLA memory', 'system', ['mla_mem_allocated_mb']],
+      [
+        'accelerator-memory',
+        'Accelerator memory',
+        'system',
+        ['mla_mem_allocated_mb', 'ev74_mem_allocated_mb'],
+      ],
       ['network', 'Network', 'storage', ['net_rx_mbps', 'net_tx_mbps']],
     ]);
   });
@@ -654,6 +663,44 @@ describe('the chart inputs, continued', () => {
       powerRailsChart(windowOf(rails.slice(0, 1), { power_rail_a_watts: [1] }))?.headline,
     ).toBe('1.00 W across 1 rail');
     expect(powerRailsChart(without(live(2), (m) => m.key.startsWith('power_rail_')))).toBeNull();
+  });
+});
+
+describe('accelerator memory', () => {
+  const mla = metric({ key: 'mla_mem_allocated_mb', short: 'MLA', unit: 'MB', value: 700 });
+  const ev74 = metric({ key: 'ev74_mem_allocated_mb', short: 'EV74', unit: 'MB', value: 50 });
+  const values = { mla_mem_allocated_mb: [600, 700], ev74_mem_allocated_mb: [40, 50] };
+
+  it('stacks MLA under EV74 with their sum as the headline and a scale that holds the stack', () => {
+    const chart = acceleratorMemoryChart(windowOf([mla, ev74], values));
+    expect(chart?.series.map((s) => [s.key, s.label])).toEqual([
+      ['mla_mem_allocated_mb', 'MLA'],
+      ['ev74_mem_allocated_mb', 'EV74'],
+    ]);
+    expect(chart?.headline).toBe('750 MB');
+    expect(chart?.domain[1]).toBeGreaterThanOrEqual(750);
+  });
+
+  it('stacks the one the board reports, shows no total while a reading is missing, and is null with neither', () => {
+    expect(acceleratorMemoryChart(windowOf([mla], values))?.series.map((s) => s.label)).toEqual([
+      'MLA',
+    ]);
+    expect(acceleratorMemoryChart(windowOf([mla], values))?.headline).toBe('700 MB');
+    expect(
+      acceleratorMemoryChart(windowOf([mla, { ...ev74, value: null }], values))?.headline,
+    ).toBe('–');
+    expect(
+      acceleratorMemoryChart(without(live(2), (m) => /^(mla|ev74)_mem/.test(m.key))),
+    ).toBeNull();
+  });
+
+  it('keeps the CMA pool out of the System area, so its warnings do not light the area’s badge', () => {
+    const cma = metric({ key: 'ev74_cma_used_mb', short: 'CMAUsed', unit: 'MB', group: 'EV74' });
+    const window = windowOf([mla, ev74, cma], { ...values, ev74_cma_used_mb: [1, 2] });
+    expect(areaMetrics(window, 'system').map((m) => m.key)).toEqual([
+      'mla_mem_allocated_mb',
+      'ev74_mem_allocated_mb',
+    ]);
   });
 });
 

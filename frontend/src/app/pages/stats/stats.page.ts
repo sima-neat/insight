@@ -24,8 +24,9 @@ import {
   NeatTooltip,
 } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
-import { NeatChartCard } from '@sima/neat-ui/charts';
+import { NeatChartCard, NeatStackedChart } from '@sima/neat-ui/charts';
 import { NeatCodeBlock } from '@sima/neat-ui/code-block';
+import { megabytes } from '../../stats/format';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import {
   NeatPopover,
@@ -143,6 +144,7 @@ function notReadyHeading(
     NeatButton,
     NeatCallout,
     NeatChartCard,
+    NeatStackedChart,
     NeatCodeBlock,
     NeatCollapsible,
     NeatIcon,
@@ -169,6 +171,7 @@ function notReadyHeading(
   styleUrl: './stats.page.css',
 })
 export class StatsPage {
+  protected readonly megabytes = megabytes;
   protected readonly board = inject(BoardService);
   protected readonly telemetry = inject(SentinelTelemetry);
   private readonly runs = inject(SentinelRuns);

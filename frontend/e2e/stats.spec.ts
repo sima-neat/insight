@@ -142,7 +142,7 @@ test('Live polls the board’s readings, Runs and Compare read its runs, and lea
     'Board power (Estimated)',
     'CPU usage',
     'Linux memory',
-    'MLA memory',
+    'Accelerator memory',
     'Network',
   ]);
   await expect(card(page, 'Thermal max')).toContainText(/66\.3\s*°C/);

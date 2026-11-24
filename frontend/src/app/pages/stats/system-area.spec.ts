@@ -1,6 +1,6 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { NeatHeatmap, NeatTimeChart } from '@sima/neat-ui/charts';
+import { NeatHeatmap, NeatStackedChart, NeatTimeChart } from '@sima/neat-ui/charts';
 import type { TelemetryWindow } from '../../stats/telemetry';
 import { liveWindow, withEv74Memory, withMetrics, withSeries, without } from './area.testing';
 import { SystemArea } from './system-area';
@@ -40,6 +40,19 @@ describe('SystemArea', () => {
         .thresholds()
         .map((line) => line.label),
     ).toEqual(['Warning 80%', 'Critical 95%']);
+  });
+
+  it('stacks MLA and EV74 memory as accelerator memory beside their own charts', async () => {
+    await show();
+    const stack = fixture.debugElement.query(By.directive(NeatStackedChart)).componentInstance;
+    expect(stack.label()).toBe('Accelerator memory');
+    expect(stack.headline()).toBe('838 MB');
+    expect(stack.series().map((band: { label: string }) => band.label)).toEqual(['MLA', 'EV74']);
+  });
+
+  it('leaves the stack out for a board that reports neither accelerator memory', async () => {
+    await show(without(liveWindow(12), (m) => /^(mla|ev74)_mem/.test(m.key)));
+    expect(fixture.debugElement.query(By.directive(NeatStackedChart))).toBeNull();
   });
 
   it('draws the cores as a heatmap with each one’s one-minute average, and the cores’ average first in its headline', async () => {

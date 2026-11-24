@@ -120,8 +120,9 @@ the board.
 
 ![Stats Live: cards for temperature, power, CPU, memory and network, and the Thermal area in the side panel](images/ui-stats-live.webp)
 
-- **Live** shows cards for the hottest temperature, board power, CPU and memory use and network
-  traffic, and **All metrics** below them. Select a card for its area (**Thermal**, **Power**,
+- **Live** shows cards for the hottest temperature, board power, CPU and memory use, accelerator
+  memory (MLA and EV74 stacked, which Sentinel counts once each, so the top edge is their sum) and
+  network traffic, and **All metrics** below them. Select a card for its area (**Thermal**, **Power**,
   **System**, **Storage & Network**) in the side panel. **Pause** stops the updates, and **Export
   CSV** in the ⋯ menu saves the samples Sentinel holds.
   Board power and energy are labeled **Estimated**: they are the sum of the SoM's regulator rail
