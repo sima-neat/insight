@@ -18,9 +18,10 @@ import {
   SlotPreview,
 } from './slot-preview';
 
-/** The tone of a badge, the kit's status chip; null without one. */
+/** The tone of a badge's status chip; null without a badge. */
 function toneOf(badge: HTMLElement | null): NeatTone | null {
-  return badge === null ? null : (getDebugNode(badge)!.componentInstance as NeatStatusChip).tone();
+  const chip = badge?.querySelector('neat-status-chip') ?? null;
+  return chip === null ? null : (getDebugNode(chip)!.componentInstance as NeatStatusChip).tone();
 }
 
 /** A slot as the server lists it; one given a file is a file slot. */
@@ -576,15 +577,21 @@ describe('SlotPreview', () => {
   describe('badge', () => {
     const badge = () => root().querySelector<HTMLElement>('.badge');
     const badgeText = () => badge()?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
-    /** A live badge says so in the slot's live tone, as the panel's state chip does. */
+    const liveDot = () => badge()?.querySelector('neat-live-dot') ?? null;
+    /**
+     * A live badge says so in the slot's live tone, as the panel's state chip does, led by the
+     * kit's pulsing live dot.
+     */
     function expectLive(): void {
       expect(badgeText()).toBe('Live');
       expect(toneOf(badge())).toBe('success');
+      expect(liveDot()).not.toBeNull();
     }
 
     function expectNotLive(label: string): void {
       expect(badgeText()).toBe(label);
       expect(toneOf(badge())).toBe('neutral');
+      expect(liveDot()).toBeNull();
     }
 
     it('says File preview, neutral, for a stopped file slot, in place of a caption', async () => {

@@ -48,5 +48,8 @@ img.waiting {
   position: absolute;
   inset-block-start: var(--neat-space-2);
   inset-inline-start: var(--neat-space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
   pointer-events: none;
 }

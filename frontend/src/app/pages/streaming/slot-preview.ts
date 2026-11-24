@@ -20,7 +20,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { NeatButton } from '@sima/neat-ui';
+import { NeatButton, NeatLiveDot } from '@sima/neat-ui';
 import { NeatProgress } from '@sima/neat-ui/progress';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import {
@@ -124,7 +124,7 @@ export function previewFailure(http: HttpClient, url: string): Observable<Previe
  */
 @Component({
   selector: 'app-slot-preview',
-  imports: [EndsStream, NeatButton, NeatProgress, NeatStatusChip, PreviewFrame],
+  imports: [EndsStream, NeatButton, NeatLiveDot, NeatProgress, NeatStatusChip, PreviewFrame],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './slot-preview.html',
   styleUrl: './slot-preview.css',
@@ -237,6 +237,8 @@ export class SlotPreview {
     return null;
   });
   protected readonly badgeId = `slot-preview-badge-${badgeIds++}`;
+  /** A live stream's badge, which the kit's live dot leads. */
+  protected readonly live = LIVE;
 
   private readonly liveImage = viewChild<ElementRef<HTMLImageElement>>('live');
   private readonly cameraVideo = viewChild<ElementRef<HTMLVideoElement>>('camera');
