@@ -345,14 +345,14 @@ describe('StatsPage', () => {
         caption: 'Hottest sensor: Board LM96-2',
         chip: '',
       },
-      { heading: 'Board power', value: '11.6 W', caption: '', chip: '' },
+      { heading: 'Board power (Estimated)', value: '11.6 W', caption: '', chip: '' },
       { heading: 'CPU usage', value: '37.5 %', caption: '', chip: '' },
       { heading: 'Linux memory', value: '21.3 %', caption: '', chip: '' },
       { heading: 'MLA memory', value: '742 MB', caption: '', chip: '' },
       { heading: 'Network', value: '2.82 MB/s', caption: '', chip: '' },
     ]);
     // The unit is the card's own part, after the value.
-    expect(text(cardNamed('Board power').querySelector('.unit'))).toBe('W');
+    expect(text(cardNamed('Board power (Estimated)').querySelector('.unit'))).toBe('W');
 
     // Each card draws its chart headless and medium, built as the side panel builds it.
     const window = mergeTelemetry(null, live(), DEVKIT.id);
@@ -369,7 +369,7 @@ describe('StatsPage', () => {
     expect(thermal.series()).toEqual(thermalMaxChart(window)!.series);
     expect(thermal.thresholds().map((line) => line.value)).toEqual([70, 85]);
     expect(thermal.domain()).toEqual([40, 90]);
-    const power = chartOf(cardNamed('Board power'))!;
+    const power = chartOf(cardNamed('Board power (Estimated)'))!;
     expect(power.domain()).toEqual(boardPowerChart(window)!.domain);
     expect(power.reference()).toEqual(boardPowerChart(window)!.reference);
     const cpu = chartOf(cardNamed('CPU usage'))!;
@@ -431,7 +431,7 @@ describe('StatsPage', () => {
     const chips = cards().map((card) => [cardText(card).heading, cardText(card).chip]);
     expect(chips).toEqual([
       ['Thermal max', '2 warnings'],
-      ['Board power', ''],
+      ['Board power (Estimated)', ''],
       ['CPU usage', 'Warning'],
       ['Linux memory', 'Critical'],
       ['MLA memory', ''],
@@ -461,9 +461,9 @@ describe('StatsPage', () => {
     expect(asideTitle()).toBe('Thermal');
     expect(marked()).toEqual([]);
 
-    await click(cardNamed('Board power').querySelector<HTMLButtonElement>('button.activator')!);
+    await click(cardNamed('Board power (Estimated)').querySelector<HTMLButtonElement>('button.activator')!);
     expect(asideTitle()).toBe('Power');
-    expect(marked()).toEqual(['Board power']);
+    expect(marked()).toEqual(['Board power (Estimated)']);
 
     // Closed, the panel marks no card; a click on the card itself opens it on that card's area.
     await click(sidePanelToggle()!);
@@ -718,7 +718,7 @@ describe('StatsPage', () => {
 
   it('after a board switch the panel shows Thermal when the chosen card is not on the new board', async () => {
     await visit();
-    await click(cardNamed('Board power').querySelector<HTMLButtonElement>('button.activator')!);
+    await click(cardNamed('Board power (Estimated)').querySelector<HTMLButtonElement>('button.activator')!);
     expect(asideTitle()).toBe('Power');
 
     board.state.set(boardWith(OTHER_BOARD));
@@ -727,7 +727,7 @@ describe('StatsPage', () => {
     const unpowered = dropping((key) => key.startsWith('power_'));
     await flush(metricsPoll(OTHER_BOARD), live(20, { metrics: unpowered }));
 
-    expect(cards().map((card) => cardText(card).heading)).not.toContain('Board power');
+    expect(cards().map((card) => cardText(card).heading)).not.toContain('Board power (Estimated)');
     expect(asideTitle()).toBe('Thermal');
   });
 

@@ -36,7 +36,7 @@ describe('PowerArea', () => {
 
   it('draws board power large on one ceiling, with the session average as its line and no headline', async () => {
     await show();
-    expect(board()!.label()).toBe('Board power');
+    expect(board()!.label()).toBe('Board power (Estimated)');
     expect(board()!.size()).toBe('large');
     expect(board()!.headless()).toBe(false);
     expect(board()!.headline()).toBe('');

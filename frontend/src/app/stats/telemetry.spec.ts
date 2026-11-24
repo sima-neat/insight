@@ -445,7 +445,7 @@ describe('the overview cards', () => {
   it('lists the six cards in order with their areas and keys', () => {
     expect(OVERVIEW_CARDS.map((card) => [card.id, card.heading, card.area, card.keys])).toEqual([
       ['thermal-max', 'Thermal max', 'thermal', []],
-      ['board-power', 'Board power', 'power', ['power_current_watts']],
+      ['board-power', 'Board power (Estimated)', 'power', ['power_current_watts']],
       ['cpu', 'CPU usage', 'system', ['cpu_usage_pct']],
       ['linux-memory', 'Linux memory', 'system', ['linux_mem_used_pct']],
       ['mla-memory', 'MLA memory', 'system', ['mla_mem_allocated_mb']],

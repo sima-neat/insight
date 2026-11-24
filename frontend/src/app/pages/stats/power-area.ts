@@ -35,7 +35,7 @@ const TILES = [
       </div>
     }
     <app-stats-chart
-      label="Board power"
+      label="Board power (Estimated)"
       size="large"
       [chart]="boardPower()"
       [times]="window().times"

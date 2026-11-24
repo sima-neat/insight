@@ -75,7 +75,7 @@ export function orderedIds(ids: readonly string[], baseline: string | null): str
 
 /** The series to compare; thermal max is derived per sample from each run's own sensors. */
 export const COMPARE_SERIES: readonly { key: string; label: string }[] = [
-  { key: POWER_KEY, label: 'Total power' },
+  { key: POWER_KEY, label: 'Total power (Estimated)' },
   { key: THERMAL_MAX, label: 'Thermal max' },
   { key: 'cpu_usage_pct', label: 'CPU usage' },
   { key: 'cpu_load_1', label: 'CPU load' },
@@ -387,7 +387,7 @@ const RUN_TOTALS: readonly {
     unit: 's',
     value: (totals) => totals.duration_ms / 1000,
   },
-  { key: 'energy_joules', label: 'Energy', unit: 'J', value: (totals) => totals.energy_joules },
+  { key: 'energy_joules', label: 'Energy (Estimated)', unit: 'J', value: (totals) => totals.energy_joules },
   { key: 'samples', label: 'Samples', unit: null, value: (totals) => totals.samples },
 ];
 

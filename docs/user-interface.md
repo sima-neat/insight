@@ -124,6 +124,8 @@ the board.
   traffic, and **All metrics** below them. Select a card for its area (**Thermal**, **Power**,
   **System**, **Storage & Network**) in the side panel. **Pause** stops the updates, and **Export
   CSV** in the ⋯ menu saves the samples Sentinel holds.
+  Board power and energy are labeled **Estimated**: they are the sum of the SoM's regulator rail
+  readings, which has not been calibrated against the SoM's input power.
 - **Record**, on every view, records a trace on the board until you **Stop** it; the trace is saved
   as a run.
 - **Runs** lists the saved runs. Select one for its metrics in the side panel. Tick two to eight

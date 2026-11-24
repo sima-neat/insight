@@ -104,7 +104,7 @@ describe('compare series', () => {
 
   it('keeps the series every run defines with one unit, thermal max in degrees', () => {
     expect(availableSeries(COMPARE_RAW.runs)).toEqual([
-      { key: 'power_current_watts', label: 'Total power', unit: 'W' },
+      { key: 'power_current_watts', label: 'Total power (Estimated)', unit: 'W' },
       { key: 'thermal_max', label: 'Thermal max', unit: 'C' },
       { key: 'cpu_usage_pct', label: 'CPU usage', unit: '%' },
     ]);
@@ -272,7 +272,7 @@ describe('compare table', () => {
   it('starts with the run totals, then the metrics by label', () => {
     expect(rows.map((row) => [row.label, row.group, row.unit])).toEqual([
       ['Duration', 'Run totals', 's'],
-      ['Energy', 'Run totals', 'J'],
+      ['Energy (Estimated)', 'Run totals', 'J'],
       ['Samples', 'Run totals', null],
       ['CPU usage', 'CPU', '%'],
       ['Current board power', 'Power', 'W'],

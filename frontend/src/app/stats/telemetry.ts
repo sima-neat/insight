@@ -305,7 +305,7 @@ const NETWORK_KEYS = ['net_rx_mbps', 'net_tx_mbps'] as const;
 /** The cards, in the order the page shows them. */
 export const OVERVIEW_CARDS: readonly OverviewCard[] = [
   { id: 'thermal-max', heading: 'Thermal max', area: 'thermal', keys: [] },
-  { id: 'board-power', heading: 'Board power', area: 'power', keys: ['power_current_watts'] },
+  { id: 'board-power', heading: 'Board power (Estimated)', area: 'power', keys: ['power_current_watts'] },
   { id: 'cpu', heading: 'CPU usage', area: 'system', keys: ['cpu_usage_pct'] },
   { id: 'linux-memory', heading: 'Linux memory', area: 'system', keys: ['linux_mem_used_pct'] },
   { id: 'mla-memory', heading: 'MLA memory', area: 'system', keys: ['mla_mem_allocated_mb'] },

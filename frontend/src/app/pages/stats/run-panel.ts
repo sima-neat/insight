@@ -154,7 +154,7 @@ export class RunPanel {
         { label: 'Started', value: formatRunTime(figures.started_at) || NO_VALUE },
         { label: 'Duration', value: formatDuration(figures.duration_ms) },
         { label: 'Samples', value: String(figures.samples) },
-        { label: 'Energy', value: formatEnergy(figures.energy_joules) },
+        { label: 'Energy (Estimated)', value: formatEnergy(figures.energy_joules) },
       ],
       note: own?.note ?? '',
       tags: own?.tags ?? [],
