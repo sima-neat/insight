@@ -93,12 +93,7 @@ describe('SystemArea', () => {
   });
 
   it('leaves out a chart whose metric the board does not report, and the heatmap without cores', async () => {
-    await show(
-      without(
-        withEv74Memory(liveWindow(12)),
-        (m) => m.key === 'ev74_mem_allocated_mb' || /^cpu_core_/.test(m.key),
-      ),
-    );
+    await show(without(liveWindow(12), (m) => /^cpu_core_/.test(m.key)));
     expect(charts().map((c) => c.label())).toEqual([
       'CPU usage',
       'Load average (1 minute)',
@@ -111,7 +106,9 @@ describe('SystemArea', () => {
   it('shows no EV74 chart for a Sentinel that predates the field, and never the CMA pool in its place', async () => {
     await show(liveWindow(12));
     expect(chart('EV74 memory')).toBeUndefined();
-    expect(chart('EV74 CMA used')).toBeUndefined();
+    expect(charts().flatMap((c) => c.series().map((series) => series.key))).not.toContain(
+      'ev74_cma_used_mb',
+    );
   });
 
   it('falls back to the plain value when the load or the memory has only one of its two readings', async () => {
