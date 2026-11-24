@@ -8,9 +8,8 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { NeatButton, NeatNote } from '@sima/neat-ui';
+import { NeatButton, NeatNote, NeatSearch } from '@sima/neat-ui';
 import { NeatErrorNote } from '@sima/neat-ui/field';
-import { NeatInput } from '@sima/neat-ui/input';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
 import { CellText } from '../cell-text';
@@ -103,8 +102,8 @@ export class CatalogTabState {
     NeatButton,
     NeatColumn,
     NeatErrorNote,
-    NeatInput,
     NeatNote,
+    NeatSearch,
     NeatSelectList,
     NeatTab,
     NeatTabs,
@@ -252,10 +251,6 @@ export class ImportCatalog {
     } finally {
       this.state.loading.set(false);
     }
-  }
-
-  protected setSearch(value: string): void {
-    this.state.search.set(value);
   }
 
   /** A different source starts from its own variants, unfiltered. */
