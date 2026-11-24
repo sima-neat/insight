@@ -195,7 +195,7 @@
         <neat-number-field
           label="Frames per second"
           [showLabel]="false"
-          [value]="slot().fps ?? slot().native_fps ?? null"
+          [value]="shownFps()"
           [step]="fpsStep"
           [min]="fpsMin"
           unit="fps"

@@ -7,7 +7,8 @@ ffmpeg encodes `testsrc2` (640x480 at 15 fps) with a white square sweeping acros
 as RTP (payload type 96) to a loopback socket of this program, which forwards every packet to
 Insight's video port 9000+N. For each frame (its RTP marker packet) it sends one message of each
 type asked for (`--types`, object-detection by default) to Insight's metadata port 9100+N, each
-drawn on the square: a box (and a rotated ship that stays put and turns), a track, a pose on its corners, an elliptic RLE mask, and two classes.
+drawn on the square: a box (and a rotated ship that stays put and turns), a track, a pose on its
+corners, an elliptic RLE mask, and two classes.
 
 Every message follows Insight's metadata contract (docs/contracts.md): its `timestamp` is the
 frame's RTP timestamp in whole milliseconds, and Insight matches a timestamp of T ms to the frame

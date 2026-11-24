@@ -314,6 +314,8 @@ export class SlotPanel {
     if (this.running()) return 'Stop the source to change its frame rate';
     return null;
   });
+  /** The frame rate the field shows: the chosen one, else the file's own, null if unknown. */
+  protected readonly shownFps = computed(() => this.slot().fps ?? this.slot().native_fps ?? null);
   protected readonly nativeRate = computed(() => customRate(this.slot()) === null);
   protected readonly nativeLabel = computed(() => {
     const native = this.slot().native_fps;
@@ -661,7 +663,7 @@ export class SlotPanel {
    * refused one (already reported) is put back in the field.
    */
   protected async onFpsCommit(fps: number | null): Promise<void> {
-    if (fps !== null && fps === (this.slot().fps ?? this.slot().native_fps)) return;
+    if (fps !== null && fps === this.shownFps()) return;
     const result = await this.control.commitFps(this.slot(), fps);
     if (!result.ok) this.fpsField()?.reset();
   }

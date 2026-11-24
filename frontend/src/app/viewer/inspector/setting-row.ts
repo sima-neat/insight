@@ -6,7 +6,7 @@ import {
   effect,
   inject,
   input,
-  model,
+  signal,
 } from '@angular/core';
 import { NeatButton, NeatInlineButton, NeatNote, NeatTooltip } from '@sima/neat-ui';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
@@ -277,7 +277,7 @@ export class SettingRow {
     }));
   });
   /** Whether the list is unfolded. */
-  protected readonly open = model(false);
+  protected readonly open = signal(false);
   protected readonly overriddenText = computed(
     () => `Overridden on ${channelCount(this.overriddenOn().length)}`,
   );
