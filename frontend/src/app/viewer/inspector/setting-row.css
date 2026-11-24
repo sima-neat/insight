@@ -68,9 +68,10 @@
   background: var(--warning);
 }
 
+/* Turned as the kit's collapsible turns its chevron, in the kit's transition time. */
 .chevron {
   display: flex;
-  transition: transform 100ms;
+  transition: transform var(--neat-transition-duration);
 }
 
 .chevron.open {

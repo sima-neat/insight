@@ -404,7 +404,7 @@ describe('ImportDialog', () => {
     ]);
   });
 
-  it('catalog filters are one component used by both modes; Import Selected imports the checked asset', async () => {
+  it('catalog filters are one component used by both modes; Import selected imports the checked asset', async () => {
     library.catalog.mockResolvedValue(CATALOG);
     await open();
     // Loaded only once the Catalog tab opens.
@@ -450,7 +450,7 @@ describe('ImportDialog', () => {
     await click(tab('Catalog by asset type'));
     await click(options('Catalog assets')[1]);
     expect(text()).toContain('1 asset(s) selected');
-    await click(button('Import Selected'));
+    await click(button('Import selected'));
     expect(library.calls.map((call) => call.body)).toEqual(['street/1080_hevc.mp4']);
     preparing(library.last, { kind: 'catalog_import' });
     saved(library.last, 'catalog/street/1080_hevc.mp4');
@@ -510,6 +510,24 @@ describe('ImportDialog', () => {
     expect(await headingsAt(300, 'name', 'Catalog variants')).toEqual(['Resolution & FPS', 'Size']);
   });
 
+  it('the search keeps the assets whose source it names, and its clear button shows them all again', async () => {
+    library.catalog.mockResolvedValue(CATALOG);
+    await open('catalog');
+    const search = dialog()!.querySelector<HTMLInputElement>('neat-search input[type="search"]')!;
+    expect(search.getAttribute('aria-label')).toBe('Search catalog');
+    expect(text()).toContain('3 matching assets / 0 selected');
+
+    // A source's description counts: "crossing" is the street's.
+    search.value = 'crossing';
+    search.dispatchEvent(new Event('input'));
+    await settle();
+    expect(text()).toContain('1 matching assets / 0 selected');
+
+    await click(button('Clear search'));
+    expect(search.value).toBe('');
+    expect(text()).toContain('3 matching assets / 0 selected');
+  });
+
   it('by asset type, assets are checked and imported one after the other', async () => {
     library.catalog.mockResolvedValue(CATALOG);
     await open('catalog');
@@ -521,9 +539,9 @@ describe('ImportDialog', () => {
     const filters = dialog()!.querySelector('app-catalog-filters')!;
 
     expect(assets.getAttribute('aria-multiselectable')).toBe('true');
-    expect(button('Select All')!.disabled).toBe(false);
+    expect(button('Select all')!.disabled).toBe(false);
     expect(button('Clear')!.disabled).toBe(true);
-    expect(button('Import Selected')!.disabled).toBe(true);
+    expect(button('Import selected')!.disabled).toBe(true);
 
     // A click on a box, or anywhere on the row, checks the asset.
     await click(box(0));
@@ -544,9 +562,9 @@ describe('ImportDialog', () => {
     expect(text()).toContain('3 matching assets / 0 selected');
     expect(button('Clear')!.disabled).toBe(true);
 
-    // Select All checks exactly the assets the filter shows.
+    // Select all checks exactly the assets the filter shows.
     await pick(codec, 'H.265');
-    await click(button('Select All'));
+    await click(button('Select all'));
     expect(checked()).toEqual([true, true]);
     expect(text()).toContain('2 matching assets / 2 selected');
 
@@ -554,8 +572,8 @@ describe('ImportDialog', () => {
     expect(checked()).toEqual([false, false]);
     expect(button('Clear')!.disabled).toBe(true);
 
-    await click(button('Select All'));
-    await click(button('Import Selected'));
+    await click(button('Select all'));
+    await click(button('Import selected'));
     expect(library.calls.map((call) => call.body)).toEqual(['alley/720_hevc.mp4']);
     expect(progress()!.title).toBe('Importing catalog asset 1/2');
     saved(library.last, 'catalog/alley/720_hevc.mp4');

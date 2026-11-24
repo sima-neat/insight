@@ -19,12 +19,12 @@ import {
   NeatButton,
   NeatCode,
   NeatIcon,
-  NeatInlineButton,
   NeatNote,
   NeatTooltip,
   type NeatButtonVariant,
   type NeatIconName,
 } from '@sima/neat-ui';
+import { NeatCopyButton } from '@sima/neat-ui/code-block';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatDialog, type NeatDialogRef } from '@sima/neat-ui/dialog';
@@ -35,7 +35,6 @@ import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { Slot } from '../../api.generated';
-import { copyText } from '../../clipboard';
 import { formatElapsed } from '../../duration';
 import { formatBitrate } from '../../format-bitrate';
 import { NO_VALUE } from '../../no-value';
@@ -78,8 +77,6 @@ const SOURCE_FORMS: NeatSegmentedOption<SourceForm>[] = [
 /** A pull accepts RTSP and RTSPS URLs only. */
 const STREAM_URL = /^rtsps?:\/\//i;
 
-const COPY_REFUSED = 'Could not copy the URL: the browser refused access to the clipboard.';
-
 /** The slot's main action, one button whatever it is (see the template). */
 interface PrimaryAction {
   readonly kind: 'start' | 'stop' | 'cancel' | 'takeOver';
@@ -101,8 +98,8 @@ interface PrimaryAction {
 interface StreamUrl {
   readonly label: string;
   readonly url: string;
-  /** The Copy button's accessible name. */
-  readonly copyLabel: string;
+  /** What the URL is, for its Copy button's name: "Copy stream URL for src3". */
+  readonly what: string;
 }
 
 let nextPanelId = 0;
@@ -157,11 +154,11 @@ function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
     NeatButton,
     NeatCode,
     NeatColumn,
+    NeatCopyButton,
     NeatDetails,
     NeatErrorNote,
     NeatField,
     NeatIcon,
-    NeatInlineButton,
     NeatInput,
     NeatNote,
     NeatProgress,
@@ -374,10 +371,10 @@ export class SlotPanel {
     const rtsp: StreamUrl = {
       label: 'URL',
       url: urls.rtsp,
-      copyLabel: `Copy stream URL for src${n}`,
+      what: `stream URL for src${n}`,
     };
     return urls.http_mjpeg
-      ? [rtsp, { label: 'HTTP', url: urls.http_mjpeg, copyLabel: `Copy HTTP URL for src${n}` }]
+      ? [rtsp, { label: 'HTTP', url: urls.http_mjpeg, what: `HTTP URL for src${n}` }]
       : [rtsp];
   });
   protected readonly readers = computed(() => readersText(this.slot().readers));
@@ -665,15 +662,6 @@ export class SlotPanel {
 
   protected setFpsInvalid(invalid: boolean): void {
     this.fpsInvalid.set(invalid);
-  }
-
-  protected async copyUrl(url: string): Promise<void> {
-    try {
-      await copyText(url);
-      this.toasts.status(`Copied: ${url}`);
-    } catch {
-      this.toasts.error(COPY_REFUSED);
-    }
   }
 
   /**

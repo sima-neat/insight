@@ -1,13 +1,10 @@
 <div class="toolbar">
-  <input
-    #search
-    neatInput
+  <neat-search
+    class="search"
     size="small"
-    type="search"
-    placeholder="Search catalog..."
-    aria-label="Search catalog"
-    [value]="state.search()"
-    (input)="setSearch(search.value)"
+    label="Search catalog"
+    placeholder="Search catalog"
+    [(value)]="state.search"
   />
   <button
     neatButton
@@ -17,7 +14,7 @@
     [disabled]="state.loading()"
     (click)="load()"
   >
-    {{ state.loading() ? 'Loading...' : 'Refresh' }}
+    {{ state.loading() ? 'Loading…' : 'Refresh' }}
   </button>
 </div>
 
@@ -25,7 +22,7 @@
   <neat-error-note>{{ error }}</neat-error-note>
 }
 @if (state.loading() && !state.index()) {
-  <p neatNote>Loading catalog...</p>
+  <p neatNote>Loading catalog…</p>
 }
 
 @if (state.index()) {
@@ -46,7 +43,7 @@
               [disabled]="typeRows().length === 0"
               (click)="checkAllTypes()"
             >
-              Select All
+              Select all
             </button>
             <button
               neatButton
@@ -113,7 +110,7 @@
               [disabled]="typeSelection().length === 0 || runner.busy()"
               (click)="importRows(typeSelection())"
             >
-              {{ importing() ? 'Importing...' : 'Import Selected' }}
+              {{ importing() ? 'Importing…' : 'Import selected' }}
             </button>
           </app-import-summary>
         </div>
@@ -208,7 +205,7 @@
                   [disabled]="!selectedVariant() || runner.busy()"
                   (click)="importVariant()"
                 >
-                  {{ importing() ? 'Importing...' : 'Import' }}
+                  {{ importing() ? 'Importing…' : 'Import' }}
                 </button>
               </app-import-summary>
             } @else {

@@ -213,13 +213,13 @@ describe('CompareView', () => {
       'tes3',
       'insight-hw-1790177227',
     ]);
-    expect(chips().map((chip) => text(chip.querySelector('.mark')))).toEqual(['B', '']);
+    expect(chips().map((chip) => text(chip.querySelector('neat-status-chip')))).toEqual(['B', '']);
     // B is for the eye; a screen reader hears ", baseline".
     expect(chips().map((chip) => text(chip.querySelector('.visually-hidden')))).toEqual([
       ', baseline',
       '',
     ]);
-    expect(chips()[0].querySelector('.mark')!.getAttribute('aria-hidden')).toBe('true');
+    expect(chips()[0].querySelector('neat-status-chip')!.getAttribute('aria-hidden')).toBe('true');
     // The kit's swatch, by the run's place: the colour the chart draws its line in.
     expect(chips().map(swatchIndexes)).toEqual([[0], [1]]);
   });
@@ -235,7 +235,7 @@ describe('CompareView', () => {
     const request = compareRequest();
     expect(request.request.params.get('runs')).toBe(`${OTHER},${BASELINE}`);
     await flush(request, answer(SWAPPED));
-    expect(chips().map((chip) => text(chip.querySelector('.mark')))).toEqual(['B', '']);
+    expect(chips().map((chip) => text(chip.querySelector('neat-status-chip')))).toEqual(['B', '']);
     expect(text(chips()[0].querySelector('.name'))).toBe('insight-hw-1790177227');
   });
 
@@ -365,7 +365,7 @@ describe('CompareView', () => {
       'tes3',
       'insight-hw-1790177227',
     ]);
-    expect(columns.map((th) => text(th.querySelector('.mark')))).toEqual(['B', '']);
+    expect(columns.map((th) => text(th.querySelector('neat-status-chip')))).toEqual(['B', '']);
     expect(text(columns[0].querySelector('.visually-hidden'))).toBe(', baseline');
     expect(columns.map(swatchIndexes)).toEqual([[0], [1]]);
     expect(columns.map((th) => text(th.querySelector('.note')))).toEqual([

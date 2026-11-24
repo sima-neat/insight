@@ -41,37 +41,12 @@ img.waiting {
 }
 
 /*
- * What the picture is, top left in the frame. Over a picture it is a dark translucent pill (the
- * kit's video scrim, which reads on any frame); over the empty frame, a muted one.
+ * What the picture is, a status chip top left in the frame, as a video tile's notice sits in its
+ * corner: opaque, so it reads on any picture and on the empty frame.
  */
 .badge {
   position: absolute;
   inset-block-start: var(--neat-space-2);
   inset-inline-start: var(--neat-space-2);
-  display: inline-flex;
-  align-items: center;
-  gap: var(--neat-space-2);
-  min-height: 1.375rem;
-  padding-inline: var(--neat-space-2);
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--muted-foreground);
-  font-size: var(--neat-text-xs);
-  font-weight: 500;
   pointer-events: none;
-}
-
-.badge.on-picture {
-  background: var(--neat-video-scrim);
-  color: var(--neat-video-scrim-foreground);
-}
-
-/* The dot of a slot that is not live, as large as the live one so the badge does not jump. */
-.idle {
-  flex: none;
-  width: 0.625rem;
-  height: 0.625rem;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.6;
 }

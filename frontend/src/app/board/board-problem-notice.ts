@@ -9,9 +9,9 @@ import {
 } from '@angular/core';
 import { NeatButton, NeatNote } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
+import { NeatCodeBlock } from '@sima/neat-ui/code-block';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatDetails } from '@sima/neat-ui/details';
-import { CopyCommand } from '../copy-command';
 import type { BoardProblem } from './board-error';
 
 /**
@@ -25,7 +25,7 @@ import type { BoardProblem } from './board-error';
  */
 @Component({
   selector: 'app-board-problem-notice',
-  imports: [CopyCommand, NeatButton, NeatCallout, NeatDetails, NeatNote],
+  imports: [NeatButton, NeatCallout, NeatCodeBlock, NeatDetails, NeatNote],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // One callout for every problem, so that the caller's actions have one place to project into
   // (a second `ng-content` with the same selector would never receive them).
@@ -48,7 +48,7 @@ import type { BoardProblem } from './board-error';
             <dd>{{ presented() || 'unknown' }}</dd>
           </dl>
         } @else if (command(); as command) {
-          <app-copy-command [command]="command" label="command that authorizes the key" />
+          <neat-code-block [code]="command" copy="command that authorizes the key" />
         }
       </div>
       @if (keyChanged()) {

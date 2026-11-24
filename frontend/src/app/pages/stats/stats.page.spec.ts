@@ -555,10 +555,10 @@ describe('StatsPage', () => {
     // The heading says what the server's message says: it is not repeated.
     expect(text(empty)).not.toContain('Sentinel is not installed on sima@192.168.1.20.');
     // Insight installs nothing: the command is the user's to run on the board.
-    const command = empty.querySelector('app-copy-command')!;
+    const command = empty.querySelector('neat-code-block')!;
     expect(text(command.querySelector('code'))).toBe('sima-cli neat install sentinel');
     expect(command.querySelector('button')?.getAttribute('aria-label')).toBe(
-      'Copy the command for the board',
+      'Copy command for the board',
     );
     expect(buttonNamed('Install Sentinel')).toBeUndefined();
     // Not ready: no update state, no cards, no side panel and no toggle for it.
@@ -589,7 +589,7 @@ describe('StatsPage', () => {
     expect(text(empty)).toContain(
       'Start it on the board with `sudo systemctl start simaai-sentinel`, then retry.',
     );
-    expect(text(empty.querySelector('app-copy-command code'))).toBe(
+    expect(text(empty.querySelector('neat-code-block code'))).toBe(
       'sudo systemctl start simaai-sentinel',
     );
     expect(buttonNamed('Check again')).toBeDefined();
@@ -610,7 +610,7 @@ describe('StatsPage', () => {
     )!;
     expect(text(empty).match(/speaks API schema 2/g)).toHaveLength(1);
     expect(text(empty)).toContain('Update Insight and Sentinel to matching versions');
-    expect(empty.querySelector('app-copy-command')).toBeNull();
+    expect(empty.querySelector('neat-code-block')).toBeNull();
     expect(buttonNamed('Check again')).toBeDefined();
   });
 

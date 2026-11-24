@@ -121,7 +121,7 @@
         >
           Hide empty slots
         </button>
-        <span id="hide-empty-experimental" class="tag">Experimental</span>
+        <neat-status-chip id="hide-empty-experimental">Experimental</neat-status-chip>
       </span>
     </ng-template>
   </neat-popover>
@@ -137,11 +137,11 @@
   (asideWidthChange)="prefs.setInspectorWidth($event)"
 >
   <div class="grid-area">
-    <p class="notice" role="status">
-      @if (liveUnknown()) {
+    @if (liveUnknown()) {
+      <neat-callout tone="warning" announce="status">
         Live channels unknown: the channel list is unavailable
-      }
-    </p>
+      </neat-callout>
+    }
     <neat-tile-grid
       [tileWidth]="tileWidth()"
       [count]="state.pageChannels().length"

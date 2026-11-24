@@ -271,14 +271,22 @@ test('the side panel of each kind of slot fits its column at 1366×768, 1920×10
       ),
     );
 
-  /** Whether the stream URL's Copy sits beside the URL rather than on a line of its own. */
-  const copyBesideUrl = () =>
+  /**
+   * Whether the stream URL keeps to one line, with its Copy beside it or, where there is no room
+   * beside it, under it: a URL that fits its column is never broken to make room for Copy.
+   */
+  const urlWhole = () =>
     panel(page)
       .locator('dd', { has: page.getByRole('button', { name: /^Copy stream URL/ }) })
       .evaluate((value) => {
-        const url = value.querySelector('code')!.getBoundingClientRect();
+        const code = value.querySelector('code')!;
+        const text = document.createRange();
+        text.selectNodeContents(code);
+        const lines = new Set([...text.getClientRects()].map((line) => Math.round(line.top))).size;
+        const url = code.getBoundingClientRect();
         const copy = value.querySelector('button')!.getBoundingClientRect();
-        return copy.left >= url.right && copy.top < url.bottom && copy.bottom > url.top;
+        const beside = copy.left >= url.right && copy.top < url.bottom && copy.bottom > url.top;
+        return lines === 1 && (beside || copy.top >= url.bottom);
       });
 
   /** Whether the main action fills the row it is alone on, the panel's width. */
@@ -305,7 +313,7 @@ test('the side panel of each kind of slot fits its column at 1366×768, 1920×10
           { horizontal: 0, vertical: 0 },
           { horizontal: 0, vertical: 0 },
         ]);
-      await expect.poll(copyBesideUrl).toBe(true);
+      await expect.poll(urlWhole).toBe(true);
       await expect.poll(mainActionFillsPanel).toBe(true);
     }
   }

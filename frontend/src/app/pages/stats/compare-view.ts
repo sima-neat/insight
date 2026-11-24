@@ -18,6 +18,7 @@ import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatSeriesSwatch } from '@sima/neat-ui/charts';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
+import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatSwitch } from '@sima/neat-ui/switch';
 import { NeatNumeric, NeatTable } from '@sima/neat-ui/table';
 import { NeatTab, NeatTabs } from '@sima/neat-ui/tabs';
@@ -102,6 +103,7 @@ type Comparison = { answer: CompareExport } | { failure: SentinelFailure } | nul
     NeatNumeric,
     NeatSelect,
     NeatSeriesSwatch,
+    NeatStatusChip,
     NeatSwitch,
     NeatTab,
     NeatTable,

@@ -31,7 +31,7 @@
         @if (selected.ssh) {
           <div class="shell">
             <p neatNote>Open a shell on the board from a terminal:</p>
-            <app-copy-command [command]="selected.ssh" label="ssh command" />
+            <neat-code-block [code]="selected.ssh" copy="ssh command" />
           </div>
         }
       }

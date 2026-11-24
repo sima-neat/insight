@@ -50,7 +50,7 @@ export interface SlotLocal {
  * tints the slot's row with the same one (an idle row, neutral, stays plain).
  */
 const IDLE: SlotStateView = { label: 'Idle', tone: 'neutral' };
-const LIVE: SlotStateView = { label: 'Live', tone: 'success' };
+export const LIVE: SlotStateView = { label: 'Live', tone: 'success' };
 const ENCODING: SlotStateView = { label: 'Encoding', tone: 'info' };
 const STARTING: SlotStateView = { label: 'Starting…', tone: 'info' };
 const FAILED: SlotStateView = { label: 'Failed', tone: 'danger' };

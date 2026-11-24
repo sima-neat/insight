@@ -267,14 +267,7 @@
     <dt>{{ stream.label }}</dt>
     <dd class="url">
       <code neatCode>{{ stream.url }}</code>
-      <button
-        neatInlineButton
-        type="button"
-        [attr.aria-label]="stream.copyLabel"
-        (click)="copyUrl(stream.url)"
-      >
-        Copy
-      </button>
+      <neat-copy-button [text]="stream.url" [what]="stream.what" />
     </dd>
   }
   @if (holder(); as holder) {
