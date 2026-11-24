@@ -141,11 +141,10 @@ describe('BoardDialog', () => {
       expect(text(shell()!.querySelector('p'))).toBe('Open a shell on the board from a terminal:');
       expect(text(shell()!.querySelector('code'))).toBe('ssh sima@192.168.1.20');
       const copy = shell()!.querySelector('button')!;
-      expect(copy.getAttribute('aria-label')).toBe('Copy the ssh command');
+      expect(copy.getAttribute('aria-label')).toBe('Copy ssh command');
       copy.click();
       await settle();
       expect(writeText).toHaveBeenCalledWith('ssh sima@192.168.1.20');
-      expect(toasts.status).toHaveBeenCalledWith('Copied: ssh sima@192.168.1.20');
 
       // No Open shell any more: Insight runs no shell of its own.
       expect(button('Open shell')).toBeUndefined();

@@ -34,21 +34,19 @@
 }
 
 /*
- * The URL and its Copy side by side: a long URL wraps within its own column, and Copy keeps its
- * place beside it rather than drop to a line of its own.
+ * The URL and its Copy wrap as one, as the kit lays out a URL with its copy button in a details
+ * list: Copy sits beside the URL where there is room and under it where there is not, so the URL
+ * breaks only where it is wider than the value's whole column.
  */
 .url {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--neat-space-2);
 }
 
 .url code {
   min-width: 0;
-}
-
-.url button {
-  flex: none;
 }
 
 .frame-rate {

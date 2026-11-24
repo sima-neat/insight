@@ -223,7 +223,7 @@
             }
             <!-- Insight runs nothing on the board for this: the command is the user's to run. -->
             @if (shown.command) {
-              <app-copy-command [command]="shown.command" label="command for the board" />
+              <neat-code-block [code]="shown.command" copy="command for the board" />
             }
             <ng-container ngProjectAs="[neatCalloutActions]" [ngTemplateOutlet]="checkAgain" />
           </neat-callout>

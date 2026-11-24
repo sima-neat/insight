@@ -3,7 +3,6 @@ import { deferred } from './board.testing';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
-import { NeatToasts } from '@sima/neat-ui/toast';
 import type { HostKeyChange } from './api';
 import { BoardProblem } from './board-error';
 import { BoardProblemNotice } from './board-problem-notice';
@@ -60,21 +59,16 @@ const HOST_KEY: HostKeyChange = { host: '192.168.1.20', expected: EXPECTED, pres
 
 describe('BoardProblemNotice', () => {
   let fixture: ComponentFixture<Host>;
-  let toasts: { status: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
   let confirm: { ask: ReturnType<typeof vi.fn> };
   let writeText: ReturnType<typeof vi.fn>;
   const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 
   beforeEach(() => {
-    toasts = { status: vi.fn(), error: vi.fn() };
     confirm = { ask: vi.fn(async () => false) };
     writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     TestBed.configureTestingModule({
-      providers: [
-        { provide: NeatToasts, useValue: toasts },
-        { provide: NeatConfirm, useValue: confirm },
-      ],
+      providers: [{ provide: NeatConfirm, useValue: confirm }],
     });
     fixture = TestBed.createComponent(Host);
   });
@@ -112,14 +106,13 @@ describe('BoardProblemNotice', () => {
     expect(tone(callout)).toBe('danger');
     expect(text(callout)).toContain('SSH key authentication as sima on 192.168.1.20 failed.');
     expect(text(callout)).toContain("Insight signs in with the SSH keys of the 'root' account");
-    expect(text(callout.querySelector('app-copy-command code[neatCode]'))).toBe(COMMAND);
+    expect(text(callout.querySelector('neat-code-block code'))).toBe(COMMAND);
 
     const copy = button(callout, 'Copy');
-    expect(copy.getAttribute('aria-label')).toBe('Copy the command that authorizes the key');
+    expect(copy.getAttribute('aria-label')).toBe('Copy command that authorizes the key');
     copy.click();
     await settle();
     expect(writeText).toHaveBeenCalledWith(COMMAND);
-    expect(toasts.status).toHaveBeenCalledWith(`Copied: ${COMMAND}`);
 
     // Without the command there is nothing to copy.
     const plain = await show(new BoardProblem(authFailed.message, 'auth_failed', ''));

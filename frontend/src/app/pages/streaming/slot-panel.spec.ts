@@ -1297,16 +1297,19 @@ describe('SlotPanel', () => {
     expect(group.hasAttribute('aria-describedby')).toBe(false);
   });
 
-  it('Copy copies the URL, and reports a refused clipboard', async () => {
+  it('Copy copies the URL and says so on its button, a refused clipboard too, with no toast', async () => {
+    const copy = () => root().querySelector<HTMLButtonElement>('dd neat-copy-button button')!;
     await open();
     await click(button('Copy stream URL for src2'));
     expect(writeText).toHaveBeenCalledWith('rtsp://10.0.0.2:8554/src2');
-    expect(toasts.status).toHaveBeenCalledWith('Copied: rtsp://10.0.0.2:8554/src2');
+    expect(text(copy())).toBe('Copied');
 
+    fixture.destroy();
     writeText.mockRejectedValueOnce(new DOMException('Denied', 'NotAllowedError'));
+    await open();
     await click(button('Copy stream URL for src2'));
-    expect(toasts.error).toHaveBeenCalledWith(
-      'Could not copy the URL: the browser refused access to the clipboard.',
-    );
+    expect(text(copy())).toBe('Could not copy');
+    expect(toasts.status).not.toHaveBeenCalled();
+    expect(toasts.error).not.toHaveBeenCalled();
   });
 });

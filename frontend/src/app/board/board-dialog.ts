@@ -13,12 +13,12 @@ import {
 } from '@angular/core';
 import { NeatButton, NeatCode, NeatNote } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
+import { NeatCodeBlock } from '@sima/neat-ui/code-block';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatDialog, NeatDialogBody, type NeatDialogRef } from '@sima/neat-ui/dialog';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
-import { CopyCommand } from '../copy-command';
 import { boardCameraSetup } from '../peripherals/devices';
 import { PeripheralsService } from '../peripherals/peripherals.service';
 import { formatRelativeTime } from '../relative-time';
@@ -53,10 +53,10 @@ export function openBoardDialog(injector: Injector): NeatDialogRef<void> {
   imports: [
     BoardForm,
     BoardProblemNotice,
-    CopyCommand,
     NeatButton,
     NeatCallout,
     NeatCode,
+    NeatCodeBlock,
     NeatCollapsible,
     NeatDetails,
     NeatDialogBody,
