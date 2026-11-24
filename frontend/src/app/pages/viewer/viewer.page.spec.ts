@@ -83,7 +83,13 @@ describe('ViewerPage', () => {
       ...(dialog('View options')?.querySelectorAll<HTMLButtonElement>('button[role="switch"]') ??
         []),
     ].find((element) => element.textContent?.trim() === text)!;
-  const notice = () => root().querySelector('[role="status"]')?.textContent?.trim() ?? '';
+  /** The notice over the grid, a callout said politely as it appears; '' while there is none. */
+  const notice = () => {
+    const callout = root().querySelector('neat-callout');
+    if (callout === null) return '';
+    expect(callout.getAttribute('role')).toBe('status');
+    return callout.textContent!.trim();
+  };
   const pageInput = (): HTMLInputElement => toolbar().querySelector('input[aria-label="Page"]')!;
   /** The channel field, while the "Go to channel" popover is open. */
   const channelField = (): HTMLInputElement | null =>

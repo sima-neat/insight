@@ -28,6 +28,7 @@ import {
   NeatTooltip,
   ThemeService,
 } from '@sima/neat-ui';
+import { NeatCallout } from '@sima/neat-ui/callout';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatNumberField } from '@sima/neat-ui/number-field';
 import { NeatPopover, NeatPopoverContent, NeatPopoverTrigger } from '@sima/neat-ui/popover';
@@ -116,6 +117,7 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
   imports: [
     NeatAsideToggle,
     NeatButton,
+    NeatCallout,
     NeatIcon,
     NeatInput,
     NeatNote,
