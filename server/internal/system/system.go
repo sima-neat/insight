@@ -9,6 +9,7 @@
 package system
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -269,27 +270,37 @@ func (r *Reader) read(ctx context.Context) Neat {
 	return neat
 }
 
-// runNeat runs the neat on PATH, a shell script: at ctx's end its whole group is killed, its
-// update check's downloads with it, which would otherwise hold its output open.
+// runNeat runs the neat on PATH, a shell script, in a process group of its own: at ctx's end the
+// whole group is killed, and what neat started (its update check's downloads) goes with it when
+// neat exits, rather than hold its output open.
 func runNeat(ctx context.Context) ([]byte, error) {
 	path, err := exec.LookPath("neat")
 	if err != nil {
 		return nil, exec.ErrNotFound
 	}
-	cmd := exec.CommandContext(ctx, path, "--json")
-	procgroup.Own(cmd)
-	cmd.Cancel = func() error { return procgroup.Signal(cmd.Process.Pid, syscall.SIGKILL) }
+	cmd := exec.Command(path, "--json")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.WaitDelay = time.Second
-	output, err := cmd.Output()
+	group, err := procgroup.Start(cmd)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = group.Signal(syscall.SIGKILL) })
+	err = group.Wait()
+	stop()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
-		detail := string(exit.Stderr)
+		detail := stderr.String()
 		if len(detail) > 500 {
 			detail = detail[len(detail)-500:]
 		}
 		return nil, fmt.Errorf("%w: %s", err, detail)
 	}
-	return output, err
+	if err != nil {
+		return nil, err
+	}
+	return stdout.Bytes(), nil
 }
 
 func portMapPorts(ports []config.ExposedPort) []ExposedPort {
