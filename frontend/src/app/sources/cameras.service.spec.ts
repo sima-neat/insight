@@ -776,6 +776,9 @@ describe('CamerasService', () => {
       await service.assign(1, 'cam-desk');
       const publishing = service.publish(1);
       await vi.advanceTimersByTimeAsync(0);
+      // The start waits at the gate, with the peer made and the sender not yet tuned.
+      expect(media.peers).toHaveLength(1);
+      expect(peerOf().appliedParameters).toBeNull();
 
       const releasing = service.release(1);
       gate.resolve();
