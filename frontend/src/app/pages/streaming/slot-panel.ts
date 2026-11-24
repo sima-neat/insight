@@ -142,7 +142,8 @@ function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
  * the services fetch the slots again either way.
  *
  * The page builds the panel afresh for each slot, so the form, the typed URL and password and the
- * frame rate field's draft never carry over to another slot; it reacts to its slot changing all the same.
+ * frame rate field's draft never carry over to another slot; it reacts to its slot changing all
+ * the same.
  */
 @Component({
   selector: 'app-slot-panel',
@@ -187,6 +188,7 @@ export class SlotPanel {
   private readonly injector = inject(Injector);
 
   private readonly pickerTemplate = viewChild.required<TemplateRef<unknown>>('picker');
+  private readonly fpsField = viewChild(NeatNumberField);
   private readonly primaryButton = viewChild.required<ElementRef<HTMLButtonElement>>('primary');
   private readonly changeButton = viewChild<ElementRef<HTMLButtonElement>>('change');
   private readonly sourceSwitch = viewChild<NeatSegmented<SourceForm>>(NeatSegmented);
@@ -654,14 +656,14 @@ export class SlotPanel {
     }
   }
 
-  protected async commitFps(fps: number | null): Promise<void> {
-    await this.control.commitFps(this.slot(), fps);
-  }
-
-  /** The field's commit: a rate equal to the one shown is no change. */
-  protected async onFpsCommit(fps: number): Promise<void> {
-    if (fps === (this.slot().fps ?? this.slot().native_fps)) return;
-    await this.commitFps(fps);
+  /**
+   * Commits a frame rate (null: the file's own). A rate equal to the one shown is no change. A
+   * refused one (already reported) is put back in the field.
+   */
+  protected async onFpsCommit(fps: number | null): Promise<void> {
+    if (fps !== null && fps === (this.slot().fps ?? this.slot().native_fps)) return;
+    const result = await this.control.commitFps(this.slot(), fps);
+    if (!result.ok) this.fpsField()?.reset();
   }
 
   /**

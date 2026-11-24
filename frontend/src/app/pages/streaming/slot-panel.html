@@ -213,7 +213,7 @@
               : 'Stream at the source frame rate again'
           "
           [disabled]="fpsDisabled() || fpsLocked() || nativeRate()"
-          (click)="commitFps(null)"
+          (click)="onFpsCommit(null)"
         >
           {{ nativeLabel() }}
         </button>

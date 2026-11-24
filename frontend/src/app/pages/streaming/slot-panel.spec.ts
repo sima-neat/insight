@@ -1051,6 +1051,14 @@ describe('SlotPanel', () => {
       expect(slots.assignFile).not.toHaveBeenCalled();
     });
 
+    it('a refused rate is put back in the field', async () => {
+      await open();
+      slots.assignFile.mockRejectedValueOnce(new Error('No codec level covers 500 fps'));
+      await typeAndEnter('500');
+      expect(slots.assignFile).toHaveBeenCalledExactlyOnceWith(2, 'people/walk.mp4', 500);
+      expect(fps().value).toBe('30');
+    });
+
     it('a locked or disabled slot disables the field and its steps', async () => {
       slots.slots.set([walk(2, { run: true, state: 'live' })]);
       await open();

@@ -60,9 +60,9 @@ export class SlotControl {
    * Sets the file slot's output frame rate (null: the file's own), with the file it has.
    * Resolves with the outcome; a refusal is shown as an error toast.
    *
-   * Through `SlotsService.assignFile`, not `CamerasService.assignFile`: the frame rate field only shows for
-   * a slot with a file, never a webcam, and a commit must not count as a slot change, which would
-   * make a bulk start refuse ("Waiting for a source change…") rather than wait for it.
+   * Through `SlotsService.assignFile`, not `CamerasService.assignFile`: the frame rate field only
+   * shows for a slot with a file, never a webcam, and a commit must not count as a slot change,
+   * which would make a bulk start refuse ("Waiting for a source change…") rather than wait for it.
    */
   commitFps(slot: Slot, fps: number | null): Promise<CommitResult> {
     const n = slot.n;
