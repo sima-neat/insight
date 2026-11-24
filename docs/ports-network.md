@@ -50,8 +50,8 @@ visit cannot start, stop, delete or upload anything through your browser. GETs a
 such a page cannot read Insight's answers (the browser keeps them from it), but it can make
 requests that do something, such as loading Insight's MJPEG streams and previews
 (`/stream/http/srcN.mjpg`, `/api/slots/{n}/preview.mjpg`, `/api/media/preview.mjpg`), each of
-which runs an FFmpeg process while it is watched, up to Insight's limit of relayed streams. Requests that send no origin
-(curl, scripts) pass.
+which runs an FFmpeg process while it is watched, up to Insight's limit of relayed streams.
+Requests that send no origin (curl, scripts) pass.
 
 To use Insight beyond a network you trust, do not publish its ports. Reach it through an SSH
 tunnel or a VPN instead, or put `mainUI` behind a reverse proxy that signs users in, and close the
