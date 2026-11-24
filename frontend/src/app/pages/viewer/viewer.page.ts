@@ -25,6 +25,7 @@ import {
   NeatNote,
   NeatPage,
   NeatPageToolbar,
+  NeatPageToolbarDivider,
   NeatTooltip,
   ThemeService,
 } from '@sima/neat-ui';
@@ -124,6 +125,7 @@ function sameSpace(a: TileSpace | null, b: TileSpace | null): boolean {
     NeatNumberField,
     NeatPage,
     NeatPageToolbar,
+    NeatPageToolbarDivider,
     NeatPopover,
     NeatPopoverContent,
     NeatPopoverTrigger,

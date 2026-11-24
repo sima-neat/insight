@@ -22,14 +22,6 @@
   min-width: 5.5rem;
 }
 
-.separator {
-  flex: none;
-  align-self: stretch;
-  width: 1px;
-  margin-block: var(--neat-space-3);
-  background: var(--border);
-}
-
 /*
  * Popovers. Their content sits in the kit's panel, which stacks it with a gap and an inset; only
  * what the panel does not lay out is set here.
