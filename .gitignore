@@ -16,6 +16,3 @@ frontend/dist/
 # Angular build cache
 .angular/
 
-# Superpowers workspace and its docs (kept outside the repo)
-.superpowers/
-docs/superpowers/

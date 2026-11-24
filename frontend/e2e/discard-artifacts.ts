@@ -3,8 +3,8 @@ import { rm } from 'node:fs/promises';
 
 /**
  * Deletes the test output directories once a run against a deployed build is over. A failed
- * web-first assertion attaches a snapshot of the page it saw to `error-context.md`, and the
- * owner's rule is that their running Insight UI is never captured without explicit permission.
+ * web-first assertion attaches a snapshot of the page it saw to `error-context.md`, and a live
+ * Insight's pages, with their streams and boards, are not kept as test output.
  * The failure messages in the terminal stay; they carry only what the assertion compared.
  */
 export default async function discardArtifacts(config: FullConfig): Promise<void> {

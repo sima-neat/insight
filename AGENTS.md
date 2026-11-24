@@ -6,9 +6,8 @@ working around the rule.
 
 ## What this repo is
 
-`insight-next` is a prototype that rebuilds Neat Insight: an Angular frontend on SiMa.ai's UI kit,
-`@sima/neat-ui` (repo `justin-guth-sima/neat-ui`), and a Go server. Its design notes are kept
-outside the repo.
+Neat Insight is SiMa.ai's browser tool for developing Neat vision apps: an Angular frontend on
+SiMa.ai's UI kit, `@sima/neat-ui`, and a Go server.
 
 - `frontend/`: the Angular app. The server embeds its build (`frontend/dist`).
 - `server/`: the backend, one Go binary. It listens on `--port` and serves the web UI and the API.
@@ -33,7 +32,7 @@ outside the repo.
 The app follows the kit's rules for apps, which this file does not repeat: read them before
 writing UI. They are "Using the kit in an app" in the kit's package README
 (`frontend/node_modules/@sima/neat-ui/README.md`, after `npm ci`) and, for every component and with
-the reasons, the kit repo's own `AGENTS.md`. In short: UI only from the kit, each part from its own
+the reasons, the `AGENTS.md` of the kit's own repository. In short: UI only from the kit, each part from its own
 entry point, never a `ɵ` name, icons and easings from the kit's catalogs, navigation through the
 rail and its `children` (never route-linked tabs), styling only through theme tokens and component
 inputs, each page in `neat-page` owning at most one scroll context, and raw browser APIs (WebRTC,
@@ -60,7 +59,7 @@ before writing markup or a formatter again.
 **Component styles live in a `.css` file next to the component, referenced with `styleUrl`, and
 never `@import` anything.**
 Why: Stylelint reads only stylesheets, so a style written inline in the decorator (`styles:`) would
-escape its rule against colour literals (hex, `rgb()`, `hsl()`); ESLint rejects inline styles
+escape its rule against color literals (hex, `rgb()`, `hsl()`); ESLint rejects inline styles
 (templates may stay inline). The kit stylesheet reaches the app once, through `angular.json`; an
 `@import` in a component (of `tailwindcss`, `tw-animate-css` or the kit stylesheet) would pull a
 second copy of styles into it, so Stylelint rejects `@import`. Escape hatch: none; a component that
@@ -194,8 +193,7 @@ imported from the wrong entry point.
 
 `@sima/neat-ui` is never published to a registry. The app depends on a versioned tarball committed
 in `frontend/vendor/`, the same file the kit attaches to its GitHub release. Why: builds stay
-reproducible, and CI works without a registry or cross-repo credentials while both repos are
-private.
+reproducible, and CI works without a registry or cross-repo credentials.
 
 - **Commits always reference a vendored tarball**, never a path into a kit checkout, which CI and
   other machines do not have.
@@ -239,8 +237,8 @@ Nagle delay) and writes the wheel to `dist/`. It needs Python 3.10+ with setupto
 Node 24, Go (Go fetches the toolchain `server/go.mod` names unless `GOTOOLCHAIN=local`), and a C
 compiler per Linux target (`gcc`, or `gcc-aarch64-linux-gnu` and `gcc-x86-64-linux-gnu` to
 cross-build). Options: `--target-platform <host|all|linux-aarch64|linux-amd64|macos-arm64>`,
-`--skip-frontend`, `--skip-shim`, and `--install` into the active virtualenv. The release
-workflows call it per platform, so it never prompts.
+`--skip-frontend`, `--skip-shim`, and `--install` into the active virtualenv. It never prompts, so
+a workflow can call it per platform.
 
 **Trying a branch in the Neat SDK container** on `:9900`: `scripts/deploy-sdk-dev.sh`, run from
 this checkout with Node 24 and Go on `PATH`, builds the frontend and the server for the container,
@@ -258,8 +256,7 @@ docker exec "$C" bash -c 'cd /workspace/.insight-dev && python3 -m venv .venv &&
 ```
 
 A deploy restarts MediaMTX, so external publishers (a webcam, a test feed) start again; reload the
-browser tab. The `sima-insight-dev-deploy` skill's own `deploy.sh` does not build the server: use
-this script.
+browser tab.
 
 **The test feed.** `scripts/test-feed.sh <channel>` runs `neat_insight/tools/metadata_test.py` (the
 `neat-insight-metadata-test` command) in the SDK container: a test pattern on `9000+N` and metadata
@@ -275,6 +272,6 @@ libraries: `npx playwright install --with-deps chromium`.
 
 ## Quality bar
 
-This is a prototype held to production standards of cleanliness, structure and tests, without
+Insight is held to production standards of cleanliness, structure and tests, without
 overengineering: no abstraction without a second use or a stated reason, no speculative
 configurability. When a quick fix and a clean fix differ, take the clean one or stop and raise it.

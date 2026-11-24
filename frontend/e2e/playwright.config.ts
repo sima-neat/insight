@@ -29,9 +29,9 @@ export default defineConfig({
     baseURL: deployedUrl ?? devServerUrl,
     // A deployed build serves a certificate the test browser may not trust.
     ignoreHTTPSErrors: true,
-    // A deployed build is someone's running Insight, and capturing its UI needs the owner's
-    // explicit permission: record nothing there. Against the throwaway dev server a trace of a
-    // failed test is what makes the failure diagnosable.
+    // A deployed build is a live Insight whose pages show real streams and boards: record nothing
+    // there. Against the throwaway dev server a trace of a failed test is what makes the failure
+    // diagnosable.
     screenshot: 'off',
     video: 'off',
     trace: deployedUrl ? 'off' : 'retain-on-failure',
