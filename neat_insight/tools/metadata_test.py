@@ -7,7 +7,7 @@ ffmpeg encodes `testsrc2` (640x480 at 15 fps) with a white square sweeping acros
 as RTP (payload type 96) to a loopback socket of this program, which forwards every packet to
 Insight's video port 9000+N. For each frame (its RTP marker packet) it sends one message of each
 type asked for (`--types`, object-detection by default) to Insight's metadata port 9100+N, each
-drawn on the square: a box, a track, a pose on its corners, an elliptic RLE mask, and two classes.
+drawn on the square: a box (and a rotated ship that stays put and turns), a track, a pose on its corners, an elliptic RLE mask, and two classes.
 
 Every message follows Insight's metadata contract (docs/contracts.md): its `timestamp` is the
 frame's RTP timestamp in whole milliseconds, and Insight matches a timestamp of T ms to the frame
@@ -24,6 +24,7 @@ there.
 
 import argparse
 import json
+import math
 import signal
 import socket
 import subprocess
@@ -103,13 +104,46 @@ def _ellipse_rle(height: int, width: int) -> dict:
 
 _ELLIPSE = _ellipse_rle(32, 32)
 
+# The rotated ship of the object-detection feed: fixed above the square's lane, turning once
+# every SHIP_TURN_SECONDS. Its upright extent never exceeds the half diagonal around its center.
+SHIP_CENTER = (WIDTH // 2, 100)
+SHIP_SIZE = (160, 50)
+SHIP_TURN_SECONDS = 8
 
-def overlay_data(kind: str, box: list) -> dict:
-    """The `data` of a message of this type, drawn on the square inside `box` ([x, y, w, h])."""
+
+def ship_angle(seconds: float) -> float:
+    """The ship's angle in radians, clockwise on screen, a full turn every SHIP_TURN_SECONDS."""
+    return (seconds / SHIP_TURN_SECONDS * 2 * math.pi) % (2 * math.pi)
+
+
+def ship(seconds: float) -> dict:
+    """The ship at this time: its `oriented_bbox` and `bbox`, the upright extent of its corners."""
+    (cx, cy), (width, height) = SHIP_CENTER, SHIP_SIZE
+    angle = round(ship_angle(seconds), 4)  # the sent value, so the extent is of the box as sent
+    cos, sin = math.cos(angle), math.sin(angle)
+    # Half the extent of a rotated rectangle along each axis.
+    half_x = (width * abs(cos) + height * abs(sin)) / 2
+    half_y = (width * abs(sin) + height * abs(cos)) / 2
+    # Rounded outward, so the whole-pixel box still contains the corners.
+    left, top = math.floor(cx - half_x), math.floor(cy - half_y)
+    right, bottom = math.ceil(cx + half_x), math.ceil(cy + half_y)
+    return {
+        "label": "ship",
+        "confidence": 0.91,
+        "bbox": [left, top, right - left, bottom - top],
+        "oriented_bbox": [cx, cy, width, height, angle],
+    }
+
+
+def overlay_data(kind: str, box: list, seconds: float = 0.0) -> dict:
+    """The `data` of a message of this type, drawn on the square inside `box` ([x, y, w, h]).
+
+    `seconds` is the frame's time in the video; the object-detection ship turns with it.
+    """
     left, top, width, height = box
     right, bottom = left + width, top + height
     if kind == "object-detection":
-        return {"objects": [{"label": "square", "confidence": 0.99, "bbox": box}]}
+        return {"objects": [{"label": "square", "confidence": 0.99, "bbox": box}, ship(seconds)]}
     if kind == "tracking":
         return {"tracks": [{"id": "1", "label": "square", "confidence": 0.99, "bbox": box}]}
     if kind == "pose-estimation":
@@ -153,7 +187,7 @@ def frame_messages(rtp_timestamp: int, first_timestamp: int, types=("object-dete
             # Whole ms rounded down: T*90 lands at most 89 ticks below the frame's RTP timestamp.
             "timestamp": rtp_timestamp // (RTP_CLOCK_RATE // 1000),
             "frame_id": round(seconds * FPS),
-            "data": overlay_data(kind, box),
+            "data": overlay_data(kind, box, seconds),
         }
         for kind in types
     ]

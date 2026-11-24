@@ -199,7 +199,7 @@ Reading the metadata counters while a browser watches:
 
 ## Synthetic Metadata Testing
 
-For viewer and metadata-path testing, use the bundled test feed instead of building ad hoc UDP emitters. `neat-insight-metadata-test <channel>` sends one Viewer channel an H.264 test pattern (640x480 at 15 fps, a white square sweeping across it) on UDP `9000+channel` and, for every frame, one message of each type asked for on `9100+channel`, drawn on the square. Every message follows the metadata contract: its `timestamp` names its frame, so the overlays follow the square, and one that leaves it on screen shows a frame-matching problem. It needs ffmpeg with libx264 and runs until Ctrl-C.
+For viewer and metadata-path testing, use the bundled test feed instead of building ad hoc UDP emitters. `neat-insight-metadata-test <channel>` sends one Viewer channel an H.264 test pattern (640x480 at 15 fps, a white square sweeping across it) on UDP `9000+channel` and, for every frame, one message of each type asked for on `9100+channel`, drawn on the square (object-detection also sends a `ship` that stays put and turns slowly, with `oriented_bbox`). Every message follows the metadata contract: its `timestamp` names its frame, so the overlays follow the square, and one that leaves it on screen shows a frame-matching problem. It needs ffmpeg with libx264 and runs until Ctrl-C.
 
 ```bash
 neat-insight-metadata-test 0
@@ -213,6 +213,7 @@ neat-insight-metadata-test 2 --host 192.168.1.30 --metadata-delay-ms 300
 
 The message envelope, the five types (`object-detection`, `classification`, `tracking`, `pose-estimation`, `segmentation`), their fields and coordinates are in `docs/contracts.md#metadata`, with a JSON Schema per type in `docs/schemas/metadata/`. Validate a message against them before debugging the Viewer. Send one message per type per frame, each with the frame's `timestamp`.
 
+- An object-detection box may also carry `oriented_bbox: [cx, cy, width, height, angle]` (video pixels, radians, clockwise on screen); keep `bbox` as its upright extent, which the region filter reads and older viewers draw.
 - An RLE segmentation mask covers its `bbox`, not the frame, runs column-major starting with background, and `counts` is a JSON array of integers, not the compressed string `pycocotools.mask.encode()` returns. Only `show_rectangle: true` outlines a segment's `bbox`.
 - `auxiliary-visualization` is not a type of the contract; the Viewer ignores it like any unknown type.
 - Dropped segments and unknown types warn once per channel in the browser console. Check there first when an overlay does not render.

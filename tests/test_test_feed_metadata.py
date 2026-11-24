@@ -2,6 +2,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import math
 import os
 import select
 import shutil
@@ -65,6 +66,26 @@ def detection_message(rtp_timestamp, first_timestamp):
     return message
 
 
+def square_of(message):
+    [square] = [o for o in message["data"]["objects"] if o["label"] == "square"]
+    return square
+
+
+def ship_of(message):
+    [ship] = [o for o in message["data"]["objects"] if o["label"] == "ship"]
+    return ship
+
+
+def corners(oriented_bbox):
+    """The four corners of a rotated box, the angle turning clockwise on screen (y points down)."""
+    cx, cy, width, height, angle = oriented_bbox
+    cos, sin = math.cos(angle), math.sin(angle)
+    return [
+        (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
+        for dx, dy in ((-width / 2, -height / 2), (width / 2, -height / 2), (width / 2, height / 2), (-width / 2, height / 2))
+    ]
+
+
 class DetectionMessageTests(unittest.TestCase):
     def test_timestamp_is_whole_ms_that_insight_matches_to_the_frame(self):
         for rtp_timestamp in (0, 89, 90, 6000, 1_234_567_891, 0xFFFFFFFF - 89, 0xFFFFFFFF):
@@ -86,14 +107,40 @@ class DetectionMessageTests(unittest.TestCase):
             with self.subTest(seconds=seconds):
                 message = detection_message(seconds * 90_000, first_timestamp=0)
                 self.assertEqual(message["type"], "object-detection")
-                [box] = message["data"]["objects"]
-                x, y, width, height = box["bbox"]
+                x, y, width, height = square_of(message)["bbox"]
                 # The square is 96 px, vertically centred in the 640×480 frame.
                 self.assertLessEqual(x, square_x)
                 self.assertGreaterEqual(x + width, square_x + 96)
                 self.assertLessEqual(y, 192)
                 self.assertGreaterEqual(y + height, 192 + 96)
                 self.assertTrue(0 <= x and x + width <= 640 and 0 <= y and y + height <= 480)
+
+    def test_a_ship_turns_with_time_and_its_bbox_is_the_upright_extent_of_its_corners(self):
+        angles = set()
+        for seconds in (0, 0.5, 1, 2, 3.7):
+            with self.subTest(seconds=seconds):
+                ship = ship_of(detection_message(round(seconds * 90_000), first_timestamp=0))
+                oriented = ship["oriented_bbox"]
+                self.assertEqual(len(oriented), 5)
+                self.assertTrue(all(isinstance(v, (int, float)) and math.isfinite(v) for v in oriented))
+                angles.add(oriented[4])
+                x, y, width, height = ship["bbox"]
+                for cx, cy in corners(oriented):
+                    self.assertGreaterEqual(cx, x - 1e-6)
+                    self.assertLessEqual(cx, x + width + 1e-6)
+                    self.assertGreaterEqual(cy, y - 1e-6)
+                    self.assertLessEqual(cy, y + height + 1e-6)
+                # Tight: the extent touches the corners, so a viewer without rotated boxes draws it well.
+                self.assertAlmostEqual(min(c[0] for c in corners(oriented)), x, delta=1)
+                self.assertAlmostEqual(max(c[1] for c in corners(oriented)), y + height, delta=1)
+        self.assertEqual(len(angles), 5)
+
+    def test_the_ship_stays_in_the_frame_and_clear_of_the_square(self):
+        for seconds in (0, 0.7, 1.3, 2.1, 5):
+            ship = ship_of(detection_message(round(seconds * 90_000), 0))
+            x, y, width, height = ship["bbox"]
+            self.assertTrue(0 <= x and x + width <= 640 and 0 <= y and y + height <= 480)
+            self.assertLess(y + height, 192 - feed.BOX_MARGIN)
 
     def test_fits_one_legacy_metadata_datagram(self):
         # The server takes a datagram that does not start with the chunk magic as a whole JSON message.
@@ -114,7 +161,7 @@ class FrameMessagesTests(unittest.TestCase):
 
     def test_every_type_is_drawn_inside_the_square_s_box(self):
         by_type = {m["type"]: m["data"] for m in feed.frame_messages(0, 0, feed.TYPES)}
-        [box] = [o["bbox"] for o in by_type["object-detection"]["objects"]]
+        box = square_of({"data": by_type["object-detection"]})["bbox"]
         left, top, width, height = box
         self.assertEqual(by_type["tracking"]["tracks"][0]["bbox"], box)
         self.assertEqual(by_type["segmentation"]["segments"][0]["bbox"], box)
