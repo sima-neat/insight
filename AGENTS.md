@@ -240,9 +240,11 @@ compiler per Linux target (`gcc`, or `gcc-aarch64-linux-gnu` and `gcc-x86-64-lin
 cross-build). Options: `--target-platform <host|all|linux-aarch64|linux-amd64|macos-arm64>`,
 `--skip-frontend`, `--skip-shim`, and `--install` into the active virtualenv. It never prompts, so
 a workflow can call it per platform. The wheel carries `THIRD_PARTY_NOTICES` (the licenses of the
-Go modules linked into the server) and MediaMTX's own license: after a change to `server/go.mod`,
-`scripts/third-party-notices.py` writes the file again, and CI fails while it is stale. A new
-MediaMTX version takes its archives' SHA-256 beside `MTX_VERSION` in `build.sh`.
+Go modules linked into the server, and in a second part those of the MediaMTX binary, resolved
+through the Go module proxy at `MTX_VERSION`) and MediaMTX's own license: after a change to
+`server/go.mod` or to `MTX_VERSION`, `scripts/third-party-notices.py` writes the file again, and CI
+fails while it is stale. A new MediaMTX version takes its archives' SHA-256 beside `MTX_VERSION` in
+`build.sh`.
 
 **Trying a branch in the Neat SDK container** on `:9900`: `scripts/deploy-sdk-dev.sh`, run from
 this checkout with Node 24 and Go on `PATH`, builds the frontend and the server for the container,

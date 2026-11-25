@@ -319,7 +319,7 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     echo "📦 Extracting $MTX_ARCHIVE"
     tar -xzf "$BUILD_DIR/$MTX_ARCHIVE" -C "$BUILD_DIR"
     cp "$BUILD_DIR/$MTX_BIN_NAME" "$INSIGHT_BIN/$MTX_BIN_NAME"
-    # MediaMTX's own license, which THIRD_PARTY_NOTICES points to.
+    # MediaMTX's own license, which THIRD_PARTY_NOTICES points to (its modules are listed there).
     cp "$BUILD_DIR/LICENSE" "$INSIGHT_BIN/mediamtx.LICENSE"
     chmod +x "$INSIGHT_BIN/$MTX_BIN_NAME" || true
     rm "$BUILD_DIR/$MTX_ARCHIVE"

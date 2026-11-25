@@ -83,7 +83,7 @@ jobs:
       - name: Tests
         run: go test -race ./...
 
-      - name: Third-party notices match go.mod
+      - name: Third-party notices match go.mod and MTX_VERSION
         run: python3 ../scripts/third-party-notices.py --check
 
   frontend:
