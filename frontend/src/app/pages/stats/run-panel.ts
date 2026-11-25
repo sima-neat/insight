@@ -12,7 +12,7 @@ import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatDetails } from '@sima/neat-ui/details';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatFigure, NeatTable } from '@sima/neat-ui/table';
-import { formatDuration } from '../../duration';
+import { formatRunDuration } from '../../duration';
 import { NO_VALUE } from '../../no-value';
 import { type PanelChip, PanelTitle } from '../../panel-title';
 import type { RunSummary, SavedRun } from '../../stats/api';
@@ -153,7 +153,7 @@ export class RunPanel {
     return {
       facts: [
         { label: 'Started', value: formatRunTime(figures.started_at) || NO_VALUE },
-        { label: 'Duration', value: formatDuration(figures.duration_ms) },
+        { label: 'Duration', value: formatRunDuration(figures.duration_ms) },
         { label: 'Samples', value: String(figures.samples) },
         { label: ENERGY_LABEL, value: formatEnergy(figures.energy_joules) },
       ],

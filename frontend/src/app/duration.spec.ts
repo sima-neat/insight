@@ -1,4 +1,4 @@
-import { formatDuration, formatElapsed } from './duration';
+import { formatDuration, formatElapsed, formatRunDuration } from './duration';
 import { NO_VALUE } from './no-value';
 
 describe('formatDuration', () => {
@@ -16,6 +16,20 @@ describe('formatDuration', () => {
     expect(formatDuration(null)).toBe(NO_VALUE);
     expect(formatDuration(Number.NaN)).toBe(NO_VALUE);
     expect(formatDuration(-1)).toBe(NO_VALUE);
+  });
+});
+
+describe('formatRunDuration', () => {
+  it('reads a run closely: tenths of a second under a minute, as formatDuration from one', () => {
+    expect(formatRunDuration(850)).toBe('0.8 s');
+    expect(formatRunDuration(34_400)).toBe('34.4 s');
+    expect(formatRunDuration(59_999)).toBe('59.9 s');
+    expect(formatRunDuration(134_000)).toBe('2 min 14 s');
+  });
+
+  it('is NO_VALUE for a length that is missing or not a number', () => {
+    expect(formatRunDuration(null)).toBe(NO_VALUE);
+    expect(formatRunDuration(Number.NaN)).toBe(NO_VALUE);
   });
 });
 

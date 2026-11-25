@@ -194,7 +194,7 @@ describe('CompareView', () => {
     const back = root().querySelector<HTMLAnchorElement>('a[href="/stats/runs"]');
     expect(text(back)).toBe('Runs');
     expect(text(root().querySelector('h2'))).toBe('Comparison');
-    expect(text(root().querySelector('.facts'))).toBe('2 runs · common window 6 s');
+    expect(text(root().querySelector('.facts'))).toBe('2 runs · common window 6.0 s');
     expect(baselineSelect().label()).toBe('Baseline');
     expect(baselineSelect().labelPosition()).toBe('inline');
     expect(baselineSelect().value()).toBe(BASELINE);
