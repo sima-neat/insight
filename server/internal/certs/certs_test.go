@@ -208,3 +208,44 @@ func TestSubjects(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+// script writes an executable shell script into a fresh folder and returns its path.
+func script(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-mkcert")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestRunSucceeds(t *testing.T) {
+	if err := run(script(t, "echo fine"), 5*time.Second, "-install"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunKeepsTheOutputOfAFailure(t *testing.T) {
+	err := run(script(t, "echo no trust store >&2; exit 3"), 5*time.Second, "-install")
+	if err == nil || !strings.Contains(err.Error(), "no trust store") || !strings.Contains(err.Error(), "mkcert -install") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+// The child is a script this test wrote: it prints, then sleeps in a process of its own, which
+// the group kill has to reach for run to return and for the output pipe to close.
+func TestRunStopsAChildThatOutstaysTheTimeout(t *testing.T) {
+	start := time.Now()
+	err := run(script(t, "echo still waiting for sudo\nsleep 30"), 300*time.Millisecond, "-install")
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("took %v", took)
+	}
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{"mkcert -install", "did not finish within", "by hand", "still waiting for sudo"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+}

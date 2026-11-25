@@ -26,8 +26,8 @@ neat-insight
 ```
 
 On a DevKit, Insight makes its HTTPS certificate with [mkcert](https://github.com/FiloSottile/mkcert),
-which must be installed there. [Install and upgrade](docs/install-upgrade.md) has the details and
-how to upgrade.
+which must be installed there (Insight stops an mkcert that has not finished in 5 minutes and says
+so). [Install and upgrade](docs/install-upgrade.md) has the details and how to upgrade.
 
 ## Open it
 

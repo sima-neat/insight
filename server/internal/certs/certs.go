@@ -5,6 +5,7 @@
 package certs
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -17,7 +18,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
+
+	"insight/internal/procgroup"
 )
 
 // Pair is a certificate file and its private key file.
@@ -48,6 +53,39 @@ const SDKCertName = "neat-sdk.pem"
 // SDKKeyNames are where the SDK's private key may be, in order.
 var SDKKeyNames = []string{"neat-sdk-key.pem", "neat-sdk.key", "key.pem", SDKCertName}
 
+// mkcertTimeout bounds each mkcert call. `mkcert -install` writes the system trust store and may
+// wait for sudo, which no one sees when Insight runs as a service.
+const mkcertTimeout = 300 * time.Second
+
+// run runs the mkcert at path with args, and kills it and what it started (sudo, certutil) when
+// it has not finished within timeout. What it wrote so far is part of the error.
+func run(path string, timeout time.Duration, args ...string) error {
+	command := "mkcert " + strings.Join(args, " ")
+	var out bytes.Buffer
+	cmd := exec.Command(path, args...)
+	cmd.Stdout, cmd.Stderr = &out, &out
+	group, err := procgroup.Start(cmd)
+	if err != nil {
+		return fmt.Errorf("%s: %w", command, err)
+	}
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(timeout, func() {
+		timedOut.Store(true)
+		_ = group.Signal(syscall.SIGKILL)
+	})
+	err = group.Wait()
+	timer.Stop()
+	if timedOut.Load() {
+		return fmt.Errorf("`%s` did not finish within %d minutes and was stopped: run it by hand in a "+
+			"terminal (`mkcert -install` first, if it is the one that waited), then start Insight again\n%s",
+			command, int(timeout.Minutes()), out.String())
+	}
+	if err != nil {
+		return fmt.Errorf("%s: %w\n%s", command, err, out.String())
+	}
+	return nil
+}
+
 // Resolve finds or makes the pair.
 func Resolve(opts Options) (Pair, error) {
 	if opts.Now == nil {
@@ -77,13 +115,7 @@ func Resolve(opts Options) (Pair, error) {
 				"HTTPS certificate. Install it (https://github.com/FiloSottile/mkcert#installation, " +
 				"or `sudo apt install mkcert` on Ubuntu) and start Insight again")
 		}
-		mkcert = func(args ...string) error {
-			out, err := exec.Command(path, args...).CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("mkcert %s: %w\n%s", strings.Join(args, " "), err, out)
-			}
-			return nil
-		}
+		mkcert = func(args ...string) error { return run(path, mkcertTimeout, args...) }
 	}
 	if err := makePair(pair, subjects, mkcert); err != nil {
 		return Pair{}, err

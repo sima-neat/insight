@@ -151,8 +151,9 @@ imported from the wrong entry point.
   own.
 - **Startup** (`cmd/neat-insight`) resolves the configuration once (`internal/config`), then the
   certificate (`internal/certs`: the SDK's, a valid earlier one, or a new one from mkcert, which
-  Insight never installs), then starts the channels, MediaMTX, the sources and the board registry;
-  the server listens only once they have started, so `/api/health` always answers `ok`. Shutdown
+  Insight never installs and gives 300 s per call, killing its process group after that), then
+  starts the channels, MediaMTX, the sources and the board registry; the server listens only once
+  they have started, so `/api/health` always answers `ok`. Shutdown
   runs the other way. The programs Insight ships (`mediamtx`, its `mediamtx.yml`,
   `ffmpeg_nodelay.so`) are found beside the server's binary; ffmpeg and ffprobe on `PATH`.
 - **Children** run under `internal/supervisor`: each in its own process group, stopped as a group,
