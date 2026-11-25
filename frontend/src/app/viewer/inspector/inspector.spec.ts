@@ -24,6 +24,7 @@ import { LayoutPrefs } from '../settings/layout-prefs';
 import { RoiStore } from '../settings/roi-store';
 import { ViewerChannels } from '../viewer-channels';
 import { radioLabel } from '../../radio-label.testing';
+import { stubScrollIntoView } from '../../scroll-into-view.testing';
 import { ViewerTile } from '../viewer-tile';
 import { ViewerInspector } from './inspector';
 
@@ -39,11 +40,11 @@ describe('ViewerInspector', () => {
   let fake: FakeChannels;
   let fixture: ComponentFixture<ViewerShell>;
 
+  stubScrollIntoView();
+
   beforeEach(() => {
     storage = new FakeLocalStorage();
     vi.stubGlobal('localStorage', storage);
-    // jsdom has no scrollIntoView, which the kit's select calls on its active option.
-    Element.prototype.scrollIntoView = vi.fn();
     FakeResizeObserver.instances = [];
     vi.stubGlobal('ResizeObserver', FakeResizeObserver);
     fake = new FakeChannels();
@@ -609,11 +610,11 @@ describe('ViewerInspector', () => {
     ]);
   });
 
-  it('offers the late notice’s buffer suggestion while the channel plays frames in a browser without jitterBufferTarget', async () => {
+  it('offers the late notice’s buffer suggestion while the source’s videoBufferSupported() is true', async () => {
     await open();
     await inspect(2);
-    // The channel plays frames: the source says the buffer is supported although the browser has
-    // no jitterBufferTarget.
+    // The notice follows the signal, which kit 0.41 sets where the browser has jitterBufferTarget
+    // and while the channel plays frames; the browser's own support is not consulted.
     fake.channels.get(2)!.source.videoBufferSupported.set(true);
     await makeLate(gridTile(2));
     await click(tileElement(2).querySelector<HTMLElement>('button[neatTileChip]')!);

@@ -57,13 +57,16 @@ export interface NumberSetting extends SettingBase {
 
 /**
  * A setting that is one of a few values, shown as a select with its label before it. Each option
- * is a value the store keeps for the setting, with the words the select shows for it.
+ * is a value the store keeps for the setting, typed by the setting's id (so a value the setting
+ * cannot hold does not compile), with the words the select shows for it.
  */
-export interface ChoiceSetting extends SettingBase {
-  readonly control: 'select';
-  readonly id: ChoiceSettingId;
-  readonly options: readonly { readonly value: string; readonly label: string }[];
-}
+export type ChoiceSetting = {
+  [Id in ChoiceSettingId]: SettingBase & {
+    readonly control: 'select';
+    readonly id: Id;
+    readonly options: readonly { readonly value: SettingValues[Id]; readonly label: string }[];
+  };
+}[ChoiceSettingId];
 
 export type SettingControl = SwitchSetting | NumberSetting | ChoiceSetting;
 
@@ -86,7 +89,8 @@ export function settingCount(count: number): string {
  *
  * The control is named by `name`, which says where the setting belongs when its label alone does
  * not (the Metadata tab has a "Show overlay" per type), and it is described by the override note,
- * so the override state is heard on focus. A select shows the name it is given as its label.
+ * so the override state is heard on focus. Every row shows its label in one look, the row's own
+ * `.label` (the switch carries its label itself), and the control keeps the name.
  */
 @Component({
   selector: 'app-setting-row',
@@ -168,16 +172,21 @@ export function settingCount(count: number): string {
       }
     }
     @if (choiceSetting(); as setting) {
-      <neat-select
-        labelPosition="inline"
-        size="small"
-        [label]="fullName()"
-        [options]="setting.options"
-        [describedBy]="describedBy()"
-        [disabled]="disabled()"
-        [value]="choiceValue()"
-        (valueChange)="choose(setting, $event)"
-      />
+      <div class="head">
+        <!-- The row's label, as the others show it; the select's own label only names it. -->
+        <span class="label" aria-hidden="true">{{ setting.label }}</span>
+        <span class="select">
+          <neat-select
+            size="small"
+            [label]="fullName()"
+            [options]="setting.options"
+            [describedBy]="describedBy()"
+            [disabled]="disabled()"
+            [value]="choiceValue()"
+            (valueChange)="choose(setting, $event)"
+          />
+        </span>
+      </div>
     }
     @if (overrides()) {
       <div class="scope-row">
@@ -380,13 +389,13 @@ export class SettingRow {
     field.value = String(this.numberValue());
   }
 
-  /** A choice from the select, stored as the scope's own value. */
-  protected choose(setting: ChoiceSetting, value: string | null): void {
-    // The select emits only its options' values, and the store keeps only the setting's own: the
-    // cast claims nothing the store does not check. Null is the select's "none picked".
-    if (value !== null) {
-      this.store.set(this.scope(), setting.id, value as SettingValues[ChoiceSettingId]);
-    }
+  /**
+   * A choice from the select, stored as the scope's own value. The select emits only its options'
+   * values, which the setting's type holds to the values the store keeps; null is its "none
+   * picked".
+   */
+  protected choose(setting: ChoiceSetting, value: SettingValues[ChoiceSettingId] | null): void {
+    if (value !== null) this.store.set(this.scope(), setting.id, value);
   }
 
   protected useGlobalLabel(channel: number): string {

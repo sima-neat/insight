@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { FakeLocalStorage } from '../../fake-storage.testing';
+import { stubScrollIntoView } from '../../scroll-into-view.testing';
 import { RoiStore } from '../settings/roi-store';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
 import { type SettingControl, SettingRow } from './setting-row';
@@ -87,11 +88,11 @@ describe('SettingRow', () => {
   let storage: FakeLocalStorage;
   let fixture: ComponentFixture<Host>;
 
+  stubScrollIntoView();
+
   beforeEach(() => {
     storage = new FakeLocalStorage();
     vi.stubGlobal('localStorage', storage);
-    // jsdom has no scrollIntoView, which the kit's select calls on its active option.
-    Element.prototype.scrollIntoView = vi.fn();
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -293,6 +294,11 @@ describe('SettingRow', () => {
     expect(combobox().getAttribute('aria-label')).toBe('Orientation');
     expect(combobox().hasAttribute('aria-describedby')).toBe(false);
     expect(combobox().textContent?.trim()).toBe('None');
+    // Its visible label is the row's own, in the other rows' look, not the kit select's label.
+    const label = root().querySelector<HTMLElement>('.label')!;
+    expect(label.textContent?.trim()).toBe('Orientation');
+    expect(label.getAttribute('aria-hidden')).toBe('true');
+    expect(root().querySelector('neat-select label')).toBeNull();
 
     await choose('Mirror');
 

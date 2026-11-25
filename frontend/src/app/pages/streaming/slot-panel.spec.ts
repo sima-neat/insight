@@ -21,6 +21,7 @@ import { ApiRequestError } from '../../sources/api-errors';
 import { DEFAULT_WEBCAM_CAPTURE, type WebcamCapture } from '../../sources/webcam-capture';
 import type { Camera } from '../../sources/webcam-publishing';
 import { radioLabel } from '../../radio-label.testing';
+import { stubScrollIntoView } from '../../scroll-into-view.testing';
 import { SourcesSession } from '../sources-session';
 import { SlotControl } from './slot-control';
 import { SlotPanel } from './slot-panel';
@@ -187,6 +188,8 @@ describe('SlotPanel', () => {
   let writeText: ReturnType<typeof vi.fn>;
   const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 
+  stubScrollIntoView();
+
   beforeEach(() => {
     slots = new FakeSlots();
     cameras = new FakeCameras(slots);
@@ -195,8 +198,6 @@ describe('SlotPanel', () => {
     imports = { open: vi.fn<() => Promise<string | null>>() };
     writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    // Nor scrollIntoView, which the kit's select calls on its active option.
-    Element.prototype.scrollIntoView = vi.fn();
     // jsdom has no ResizeObserver, which some of the kit's controls measure themselves with.
     vi.stubGlobal(
       'ResizeObserver',
@@ -231,7 +232,6 @@ describe('SlotPanel', () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
-    delete (Element.prototype as Partial<Element>).scrollIntoView;
     if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
     else Reflect.deleteProperty(navigator, 'clipboard');
   });
