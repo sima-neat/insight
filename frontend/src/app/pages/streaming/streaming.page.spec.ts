@@ -26,6 +26,7 @@ import type { SlotRow } from '../../sources/slot-row';
 import { SlotsService } from '../../sources/slots.service';
 import { fileSlot, publisher, pull, slot, webcamSlot } from '../../sources/slots.testing';
 import { ApiRequestError } from '../../sources/api-errors';
+import { DEFAULT_WEBCAM_CAPTURE, type WebcamCapture } from '../../sources/webcam-capture';
 import type { Camera } from '../../sources/webcam-publishing';
 import { radioLabel } from '../../radio-label.testing';
 import { FakeLocalStorage } from '../../fake-storage.testing';
@@ -118,6 +119,8 @@ class FakeCameras {
   readonly error = signal<string | null>(null);
   readonly localStreams = signal<ReadonlyMap<number, MediaStream>>(new Map());
   readonly changingSlots = computed<ReadonlySet<number>>(() => new Set());
+  /** What the side panel's camera form reads of a slot's capture. */
+  readonly captureOf = (): WebcamCapture => DEFAULT_WEBCAM_CAPTURE;
   readonly releaseAll = vi.fn((options?: { clearAssignments?: boolean }) => {
     void options;
   });

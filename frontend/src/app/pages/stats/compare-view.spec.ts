@@ -243,10 +243,14 @@ describe('CompareView', () => {
     await openPair();
     await flush(compareRequest(), answer());
 
-    expect(tabs('Series to compare')).toEqual(['Total power', 'Thermal max', 'CPU usage']);
+    expect(tabs('Series to compare')).toEqual([
+      'Total power (Estimated)',
+      'Thermal max',
+      'CPU usage',
+    ]);
     expect(chart()!.axis()).toBe('elapsed');
     expect(chart()!.size()).toBe('large');
-    expect(chart()!.label()).toBe('Total power');
+    expect(chart()!.label()).toBe('Total power (Estimated)');
     expect(
       chart()!
         .series()
@@ -267,9 +271,9 @@ describe('CompareView', () => {
     await flush(compareRequest(), answer());
     expect(chart()!.label()).toBe('Thermal max');
 
-    session.compareSeries.set('ev74_cma_used_mb');
+    session.compareSeries.set('ev74_mem_allocated_mb');
     await settle();
-    expect(chart()!.label()).toBe('Total power');
+    expect(chart()!.label()).toBe('Total power (Estimated)');
   });
 
   it('summarises the series per run over the common window, with the baseline and a signed change', async () => {
@@ -285,7 +289,7 @@ describe('CompareView', () => {
       'P95',
       'Max',
       'vs. baseline',
-      'Energy',
+      'Energy (Estimated)',
     ]);
     // Each summary row names its run by the swatch of its place too.
     const summaryRows = [...summaryTable()!.querySelectorAll('tbody tr')];
@@ -375,7 +379,7 @@ describe('CompareView', () => {
     expect(root().querySelector('.partial')).toBeNull();
     expect(rows(metricTable())).toEqual([
       ['Duration', '8.13 s', '6.67 s −18%'],
-      ['Energy', '54.2 J', '51.5 J −4.9%'],
+      ['Energy (Estimated)', '54.2 J', '51.5 J −4.9%'],
       ['Samples', '4', '4 ±0%'],
       ['CPU usage', '–', '–'],
       ['Current board power', '9.03 W', '8.62 W −4.58%'],
@@ -392,7 +396,7 @@ describe('CompareView', () => {
     await click(changesOnly);
     expect(rows(metricTable()).map((row) => row[0])).toEqual([
       'Duration',
-      'Energy',
+      'Energy (Estimated)',
       'Current board power',
       'LM96163 temp2',
       'MLA RTSN-0',

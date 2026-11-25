@@ -57,8 +57,14 @@ const (
 	noModesReason   = "SiMa Sentinel reported no modes for this camera."
 	noVerdictReason = "This board's SiMa Sentinel does not say whether this mode can be used; update Sentinel."
 	refusedReason   = "SiMa Sentinel marks this mode unavailable."
-	noByIDNote      = "No /dev/v4l/by-id link was found; /dev/videoN numbering can change across reboots and replugs."
-	noCaptureNote   = "Capture formats cannot be read without opening the device."
+	// A USB camera's modes follow Sentinel's verdict (MJPEG on the uvcvideo driver, which Neat's
+	// USB camera input reads). A Sentinel that checks USB cameras names the camera's driver; an
+	// older one's USB verdicts, if any, apply the MIPI overlay rule and say nothing about it.
+	usbUpdateReason  = "Update SiMa Sentinel on the board to check USB cameras."
+	usbUnknownReason = "SiMa Sentinel could not tell whether Neat's USB camera input opens this camera."
+	usbRefusedReason = "SiMa Sentinel reports Neat's USB camera input cannot use this mode."
+	noByIDNote       = "No /dev/v4l/by-id link was found; /dev/videoN numbering can change across reboots and replugs."
+	noCaptureNote    = "Capture formats cannot be read without opening the device."
 	// capabilitiesIssue is Sentinel's issue for a microphone without read-only formats, which
 	// noCaptureNote says.
 	capabilitiesIssue = "peripherals.capabilities_unavailable"
@@ -91,7 +97,9 @@ type UsbFacts struct {
 }
 
 // CameraDevice is how a camera's device is reached: a MIPI camera's libcamera facts, a USB
-// camera's V4L2 nodes and USB facts.
+// camera's V4L2 nodes and USB facts. CameraName is the ID a Neat application opens the camera by:
+// a MIPI camera's libcamera name (CameraInput), the name a Sentinel that checks USB cameras gives
+// a USB camera (UsbCameraInput).
 type CameraDevice struct {
 	CameraName  string    `json:"camera_name,omitempty"`
 	MediaDevice string    `json:"media_device,omitempty"`
@@ -241,12 +249,12 @@ func (c catalog) items() []Item {
 // cameraItem is camera d's item; stale when its provider failed in this scan.
 func cameraItem(d device, stale bool) CameraItem {
 	item := CameraItem{ID: d.ID, Kind: kindCamera, Connection: d.connection(), Name: d.name(),
-		Support: verdictOf(d.Modes), ModesSource: "live", Formats: formatsOf(d), Notes: []string{}, Errors: []DeviceError{}}
+		Support: verdictOf(d, d.Modes), ModesSource: "live", Formats: formatsOf(d), Notes: []string{}, Errors: []DeviceError{}}
 	if d.Model != "" {
 		item.Model = &d.Model
 	}
 	if item.Connection == "usb" {
-		item.Device = CameraDevice{VideoNode: d.DevicePath, ByID: d.ByIDPath, USB: &UsbFacts{
+		item.Device = CameraDevice{CameraName: d.Identity.CameraName, VideoNode: d.DevicePath, ByID: d.ByIDPath, USB: &UsbFacts{
 			VendorID: d.Identity.VendorID, ProductID: d.Identity.ProductID, Manufacturer: d.Identity.Manufacturer,
 			Serial: d.Identity.Serial, Product: d.Model, BusPath: d.Identity.Topology, SpeedMbps: float64(d.Identity.Speed),
 		}}
@@ -272,39 +280,53 @@ func cameraItem(d device, stale bool) CameraItem {
 	return item
 }
 
-// verdict is a camera mode's verdict as Sentinel gave it: available, and why not.
-func (m mode) verdict() Support {
+// verdict is mode m of camera d as Sentinel judged it: available, and why not. A USB camera's
+// verdicts count only from a Sentinel that checks USB cameras (it names the driver); an older
+// one's apply the MIPI overlay rule, so every USB mode asks for an update.
+func (d device) verdict(m mode) Support {
+	usb := d.connection() == "usb"
+	refused, unknown := refusedReason, noVerdictReason
+	if usb {
+		if d.Identity.Driver == "" {
+			return Support{Tier: tierUnsupported, Reason: usbUpdateReason}
+		}
+		refused, unknown = usbRefusedReason, usbUnknownReason
+	}
 	switch {
 	case m.Available != nil && *m.Available:
 		return Support{Tier: tierAvailable}
 	case m.Reason != "":
 		return Support{Tier: tierUnsupported, Reason: m.Reason}
 	case m.Available != nil:
-		return Support{Tier: tierUnsupported, Reason: refusedReason}
+		return Support{Tier: tierUnsupported, Reason: refused}
 	}
-	return Support{Tier: tierUnsupported, Reason: noVerdictReason}
+	return Support{Tier: tierUnsupported, Reason: unknown}
 }
 
 // verdictOf is a camera's or format's verdict: Available when any of its modes is; otherwise the
-// reason Sentinel gave most often for its NV12 modes (CameraInput's format), else for all of
-// them.
-func verdictOf(modes []mode) Support {
+// reason Sentinel gave most often for the modes in the format Neat's input reads (NV12 for
+// CameraInput, MJPG for a USB camera), else for all of them.
+func verdictOf(d device, modes []mode) Support {
+	wanted := mipiFormat
+	if d.connection() == "usb" {
+		wanted = "MJPG"
+	}
 	if len(modes) == 0 {
 		return Support{Tier: tierUnsupported, Reason: noModesReason}
 	}
-	var nv12, all []string
+	var preferred, all []string
 	for _, m := range modes {
-		v := m.verdict()
+		v := d.verdict(m)
 		if v.Tier == tierAvailable {
 			return v
 		}
 		all = append(all, v.Reason)
-		if m.Format == mipiFormat {
-			nv12 = append(nv12, v.Reason)
+		if m.Format == wanted {
+			preferred = append(preferred, v.Reason)
 		}
 	}
-	if len(nv12) > 0 {
-		all = nv12
+	if len(preferred) > 0 {
+		all = preferred
 	}
 	return Support{Tier: tierUnsupported, Reason: mostCommon(all)}
 }
@@ -337,7 +359,7 @@ func formatsOf(d device) []CameraFormat {
 	formats := []CameraFormat{}
 	for _, name := range order {
 		modes := byFormat[name]
-		format := CameraFormat{Format: name, Label: formatLabel(d, modes), Support: verdictOf(modes), Sizes: []CameraSize{}}
+		format := CameraFormat{Format: name, Label: formatLabel(d, modes), Support: verdictOf(d, modes), Sizes: []CameraSize{}}
 		type size struct{ width, height int }
 		var sizes []size
 		bySize := map[size][]mode{}
@@ -393,7 +415,7 @@ func ratesOf(d device, modes []mode) []CameraMode {
 			}
 			values = []float64{fps}
 		}
-		verdict := m.verdict()
+		verdict := d.verdict(m)
 		for _, value := range values {
 			_, refused := previewMode(d, Mode{Format: m.Format, Width: m.Width, Height: m.Height, FPS: value})
 			offered := CameraMode{Value: value, Tier: verdict.Tier, Reason: verdict.Reason, Previewable: refused == nil}

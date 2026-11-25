@@ -42,7 +42,8 @@ export type {
 
 /**
  * SiMa Sentinel's verdict on a camera, format or mode: Available when Neat's CameraInput can use
- * it, Unsupported otherwise. USB cameras are Unsupported, yet previewable.
+ * it, Unsupported otherwise (a USB camera's MJPEG modes are Available on a Sentinel that checks
+ * USB cameras). An Unsupported mode can still be previewable.
  */
 export type SupportTier = DeviceSupport['tier'];
 

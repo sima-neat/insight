@@ -161,9 +161,21 @@ func (m *Manager) AssignPull(ctx context.Context, n int, url, user, password str
 		}
 		return newError(http.StatusBadGateway, CodePullUnreachable, "The camera at %s could not be reached: %s.", pull.target.Host, detail)
 	}
+	// The view the check above used predates the probe, which can take seconds: a publisher
+	// that connected meanwhile is in a fresh one, and a MediaMTX that does not answer means
+	// nobody can say the slot is still free.
+	fresh, err := m.takeSnapshot()
+	switch {
+	case m.ctx.Err() != nil:
+		return newError(http.StatusServiceUnavailable, CodeShuttingDown, "Insight is shutting down.")
+	case err != nil:
+		return newError(http.StatusServiceUnavailable, CodeMediaMTXDown,
+			"src%d cannot be checked as still free: MediaMTX does not answer. Try again.", n)
+	}
+	defer m.requestSnapshot() // the loop catches up with what this reading showed
 	return m.change(n, func(d *Desired, rt *slotRuntime) error {
-		if err := m.refuseExternalLocked(n); err != nil {
-			return err
+		if path := m.externalIn(fresh, n); path != nil {
+			return slotBusy(n, path.Source.Protocol, path.Source.Address)
 		}
 		target := pull.target
 		*d = Desired{Kind: KindPull, Pull: &target, Run: true}

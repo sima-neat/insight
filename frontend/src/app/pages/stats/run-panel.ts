@@ -16,6 +16,7 @@ import { formatDuration } from '../../duration';
 import { NO_VALUE } from '../../no-value';
 import { type PanelChip, PanelTitle } from '../../panel-title';
 import type { RunSummary, SavedRun } from '../../stats/api';
+import { ENERGY_LABEL } from '../../stats/compare';
 import { formatEnergy, formatValue, statusLabel } from '../../stats/format';
 import {
   formatRunTime,
@@ -154,7 +155,7 @@ export class RunPanel {
         { label: 'Started', value: formatRunTime(figures.started_at) || NO_VALUE },
         { label: 'Duration', value: formatDuration(figures.duration_ms) },
         { label: 'Samples', value: String(figures.samples) },
-        { label: 'Energy', value: formatEnergy(figures.energy_joules) },
+        { label: ENERGY_LABEL, value: formatEnergy(figures.energy_joules) },
       ],
       note: own?.note ?? '',
       tags: own?.tags ?? [],

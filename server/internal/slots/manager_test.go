@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"insight/internal/jobs"
 	"insight/internal/media"
@@ -309,6 +310,73 @@ func TestAPublisherOfTheSlotsOwnIsNeverExternal(t *testing.T) {
 		t.Errorf("the slot's own publisher is taken for %s", s.State)
 	}
 	h.publisher(1)
+}
+
+func TestAPullChecksTheSlotAgainAfterItsProbe(t *testing.T) {
+	h := newHarness(t)
+	h.settle() // the slot is free in the snapshot the Manager holds
+	h.mtx.takeCalls()
+	h.streams.onProbe = func() { h.mtx.setPath(publishing(1, "h264", false)) }
+
+	err := h.m.AssignPull(context.Background(), 1, "rtsp://cam.local/live", "", "")
+	wantCode(t, err, CodeSlotBusy)
+	if calls := h.mtx.takeCalls(); len(calls) != 0 {
+		t.Errorf("a pull was configured over the publisher that connected during the probe: %v", calls)
+	}
+	if d := h.m.store.get(1); d.Kind != KindNone {
+		t.Errorf("the slot was assigned: %+v", d)
+	}
+}
+
+func TestAPullIsRefusedAfterAStaleSnapshotLandsLate(t *testing.T) {
+	h := newHarness(t)
+	h.settle()
+	h.mtx.takeCalls()
+	// A tick starts while the slot is free and answers last; the publisher connects after it.
+	release := make(chan struct{})
+	h.mtx.hold = release
+	stale := make(chan struct{})
+	go func() { h.m.tick(); close(stale) }()
+	for h.mtx.holding() {
+		time.Sleep(time.Millisecond)
+	}
+	h.streams.onProbe = func() { h.mtx.setPath(publishing(1, "h264", false)) }
+
+	wantCode(t, h.m.AssignPull(context.Background(), 1, "rtsp://cam.local/live", "", ""), CodeSlotBusy)
+	h.m.tick() // the view now shows the publisher
+	close(release)
+	<-stale
+	h.m.mu.Lock()
+	external := h.m.externalLocked(1)
+	h.m.mu.Unlock()
+	if external == nil {
+		t.Error("the view went back to a reading from before the publisher connected")
+	}
+	if calls := h.mtx.takeCalls(); len(calls) != 0 {
+		t.Errorf("a pull was configured: %v", calls)
+	}
+}
+
+func TestAPullDuringShutdownSaysSo(t *testing.T) {
+	h := newHarness(t)
+	h.streams.onProbe = func() { h.m.cancel() }
+	wantCode(t, h.m.AssignPull(context.Background(), 1, "rtsp://cam.local/live", "", ""), CodeShuttingDown)
+}
+
+func TestAPullIsRefusedWhenMediaMTXDoesNotAnswerAfterItsProbe(t *testing.T) {
+	h := newHarness(t)
+	h.settle()
+	h.mtx.takeCalls()
+	h.streams.onProbe = func() { h.mtx.setDown(true) }
+
+	err := h.m.AssignPull(context.Background(), 1, "rtsp://cam.local/live", "", "")
+	wantCode(t, err, CodeMediaMTXDown)
+	if !strings.Contains(err.Error(), "src1") {
+		t.Errorf("the refusal does not name the slot: %v", err)
+	}
+	if d := h.m.store.get(1); d.Kind != KindNone {
+		t.Errorf("the slot was assigned: %+v", d)
+	}
 }
 
 func TestAPullIsProbedSetAndForgottenAcrossARestart(t *testing.T) {

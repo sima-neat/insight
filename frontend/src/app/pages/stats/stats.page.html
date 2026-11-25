@@ -168,13 +168,27 @@
                     </neat-status-chip>
                   }
                   <!-- The card's plot is small: its lines and time axis, without the values. -->
-                  <app-stats-chart
-                    headless
-                    [valueLabels]="false"
-                    [label]="view.card.heading"
-                    [chart]="view.chart"
-                    [times]="window.times"
-                  />
+                  @if (view.stack; as stack) {
+                    <neat-stacked-chart
+                      size="medium"
+                      headless
+                      [valueLabels]="false"
+                      [label]="view.card.heading"
+                      [headline]="stack.headline"
+                      [series]="stack.series"
+                      [times]="window.times"
+                      [domain]="stack.domain"
+                      [format]="megabytes"
+                    />
+                  } @else {
+                    <app-stats-chart
+                      headless
+                      [valueLabels]="false"
+                      [label]="view.card.heading"
+                      [chart]="view.chart"
+                      [times]="window.times"
+                    />
+                  }
                 </neat-chart-card>
               }
             </div>

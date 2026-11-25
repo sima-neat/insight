@@ -27,6 +27,9 @@ type fakeMTX struct {
 	paths map[string]mediamtx.Path
 	down  bool
 	calls []string
+	// hold, when set, makes the next Snapshot answer only once it is closed, with the paths it
+	// read when it was called: a slow answer that lands after later ones.
+	hold chan struct{}
 	// setErr is what SetPullSource answers.
 	setErr error
 }
@@ -40,16 +43,33 @@ func newFakeMTX() *fakeMTX {
 }
 
 func (f *fakeMTX) Snapshot(context.Context) (mediamtx.Snapshot, error) {
+	snap, hold, err := f.read()
+	if hold != nil {
+		<-hold
+	}
+	return snap, err
+}
+
+// holding is whether a held Snapshot has not been called yet.
+func (f *fakeMTX) holding() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.hold != nil
+}
+
+func (f *fakeMTX) read() (mediamtx.Snapshot, chan struct{}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	hold := f.hold
+	f.hold = nil
 	if f.down {
-		return mediamtx.Snapshot{}, &mediamtx.Error{Call: "list paths", Kind: mediamtx.ErrUnavailable}
+		return mediamtx.Snapshot{}, hold, &mediamtx.Error{Call: "list paths", Kind: mediamtx.ErrUnavailable}
 	}
 	snap := mediamtx.Snapshot{At: time.Now(), Paths: map[string]mediamtx.Path{}}
 	for name, path := range f.paths {
 		snap.Paths[name] = path
 	}
-	return snap, nil
+	return snap, hold, nil
 }
 
 func (f *fakeMTX) Kick(_ context.Context, sessionType, id string) error {
@@ -325,9 +345,14 @@ type fakeStreams struct {
 	mu      sync.Mutex
 	answers map[string]error
 	probed  []string
+	// onProbe runs while a probe is under way, as the world changing meanwhile.
+	onProbe func()
 }
 
 func (f *fakeStreams) probe(_ context.Context, url string) (StreamInfo, error) {
+	if f.onProbe != nil {
+		f.onProbe()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.probed = append(f.probed, url)

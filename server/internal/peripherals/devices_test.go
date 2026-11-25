@@ -16,8 +16,10 @@ import (
 // same board, which gives no verdicts.
 
 const (
-	nv12Only  = "Neat's CameraInput outputs NV12 only."
-	usbReason = "USB cameras have no camera overlay on this board."
+	nv12Only = "Neat's CameraInput outputs NV12 only."
+	// What a Sentinel that predates the USB check (it names no driver) leaves a USB camera with,
+	// whatever verdicts it gave.
+	usbReason = usbUpdateReason
 )
 
 // sentinelFixture is a catalog of tests/fixtures as plain JSON, for a test to change.
@@ -207,6 +209,86 @@ func TestAUSBCameraPreviewsItsModesAtTheRatesItAdvertises(t *testing.T) {
 		}
 	}
 	equal(t, "MJPG 1920x1080's rates", values, []float64{30, 24, 20, 15, 10, 7.5, 5})
+}
+
+// checkedUSBCamera is the catalog's USB camera as a Sentinel that checks USB cameras reports it:
+// it names the driver, judges MJPG available on uvcvideo and every other format not.
+func checkedUSBCamera(t *testing.T) map[string]any {
+	t.Helper()
+	webcam := fixtureDevice(t, devkitFixture(t), 1)
+	webcam["identity"].(map[string]any)["driver"] = "uvcvideo"
+	webcam["identity"].(map[string]any)["camera_name"] = "usb-046d:08e5-0"
+	for _, m := range webcam["modes"].([]any) {
+		m := m.(map[string]any)
+		if m["format"] == "MJPG" {
+			m["available"], m["reason"] = true, ""
+		} else {
+			m["available"], m["reason"] = false, "Neat's USB camera input reads MJPEG only."
+		}
+	}
+	return webcam
+}
+
+func TestAUSBCameraSentinelChecksIsAvailableInMJPG(t *testing.T) {
+	c := camera(t, scanned(t, withDevices(devkitFixture(t), checkedUSBCamera(t))).items()[0])
+	equal(t, "the camera's support", c.Support, Support{Tier: "available"})
+	equal(t, "MJPG", formatNamed(t, c, "MJPG").Support, Support{Tier: "available"})
+	// The name Neat's USB camera input opens it by, the way a MIPI camera's is its libcamera name.
+	equal(t, "the camera's name", c.Device.CameraName, "usb-046d:08e5-0")
+	equal(t, "YUYV", formatNamed(t, c, "YUYV").Support, Support{"unsupported", "Neat's USB camera input reads MJPEG only."})
+	if c.DefaultSelection == nil || c.DefaultSelection.Format != "MJPG" {
+		t.Errorf("the preselected mode: %+v", c.DefaultSelection)
+	}
+}
+
+func TestAUSBCameraWithoutAMJPGModeSaysWhyFromItsMJPGModes(t *testing.T) {
+	webcam := checkedUSBCamera(t)
+	var modes []any
+	for _, m := range webcam["modes"].([]any) {
+		m := m.(map[string]any)
+		switch {
+		case m["format"] == "MJPG":
+			m["available"], m["reason"] = false, "The camera is not on the uvcvideo driver."
+		case m["format"] == "YUYV":
+			m["reason"] = "The pixel format is not MJPEG."
+		}
+		modes = append(modes, m)
+	}
+	webcam["modes"] = modes
+	c := camera(t, scanned(t, withDevices(devkitFixture(t), webcam)).items()[0])
+	// YUYV modes outnumber MJPG ones in the capture, but Neat's USB input reads MJPG.
+	equal(t, "the camera's support", c.Support, Support{"unsupported", "The camera is not on the uvcvideo driver."})
+}
+
+func TestAUSBModeWithoutAVerdictFromACheckingSentinelSaysItCouldNotTell(t *testing.T) {
+	webcam := checkedUSBCamera(t)
+	for _, m := range webcam["modes"].([]any) {
+		delete(m.(map[string]any), "available")
+		delete(m.(map[string]any), "reason")
+	}
+	c := camera(t, scanned(t, withDevices(devkitFixture(t), webcam)).items()[0])
+	equal(t, "the camera's support", c.Support, Support{"unsupported", usbUnknownReason})
+	// A refusal without a reason names the mode, not an ISP.
+	webcam = checkedUSBCamera(t)
+	for _, m := range webcam["modes"].([]any) {
+		m.(map[string]any)["reason"] = ""
+		m.(map[string]any)["available"] = false
+	}
+	c = camera(t, scanned(t, withDevices(devkitFixture(t), webcam)).items()[0])
+	equal(t, "the camera's support", c.Support, Support{"unsupported", usbRefusedReason})
+}
+
+func TestAUSBCameraOfASentinelWithoutTheCheckIgnoresItsVerdicts(t *testing.T) {
+	// The driver is what says Sentinel checks USB cameras: without it, even an Available verdict
+	// is the MIPI overlay rule's, which says nothing about Neat's USB input.
+	webcam := checkedUSBCamera(t)
+	delete(webcam["identity"].(map[string]any), "driver")
+	c := camera(t, scanned(t, withDevices(devkitFixture(t), webcam)).items()[0])
+	equal(t, "the camera's support", c.Support, Support{"unsupported", usbUpdateReason})
+	equal(t, "MJPG", formatNamed(t, c, "MJPG").Support, Support{"unsupported", usbUpdateReason})
+	if c.DefaultSelection != nil {
+		t.Errorf("a preselected mode: %+v", c.DefaultSelection)
+	}
 }
 
 func TestAUSBCameraWithoutAByIDLinkSaysItsNodeMayChange(t *testing.T) {

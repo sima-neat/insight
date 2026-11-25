@@ -41,12 +41,13 @@ import {
   compareOverlay,
   compareSummary,
   compareTable,
+  ENERGY_LABEL,
   formatChange,
   isCompareExport,
   orderedIds,
   readCompareParams,
-  tableGroups,
   summarisesEveryRun,
+  tableGroups,
   tableStatus,
 } from '../../stats/compare';
 import { downloadCsv } from '../../stats/csv-download';
@@ -122,6 +123,7 @@ export class CompareView {
   private readonly board = inject(BoardService);
   private readonly router = inject(Router);
   private readonly document = inject(DOCUMENT);
+  protected readonly energyLabel = ENERGY_LABEL;
   protected readonly runs = inject(SentinelRuns);
   protected readonly session = inject(StatsSession);
 

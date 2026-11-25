@@ -9,7 +9,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { NeatIcon, NeatPage, NeatShell, type NeatTone } from '@sima/neat-ui';
-import { NeatChartCard, NeatTimeChart } from '@sima/neat-ui/charts';
+import { NeatChartCard, NeatStackedChart, NeatTimeChart } from '@sima/neat-ui/charts';
 import { NeatStatusChip } from '@sima/neat-ui/status-chip';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import { AppDialogs } from '../../app-dialogs';
@@ -299,6 +299,7 @@ describe('StatsPage', () => {
       .queryAll(By.directive(type))
       .find((debug) => host.contains(debug.nativeElement))?.componentInstance;
   const chartOf = (card: HTMLElement) => debugOf(NeatTimeChart, card);
+  const stackOf = (card: HTMLElement) => debugOf(NeatStackedChart, card);
   const chipToneOf = (host: Element): NeatTone | undefined => debugOf(NeatStatusChip, host)?.tone();
   const morePanel = () => document.querySelector('[role="dialog"][aria-label="More actions"]');
 
@@ -345,18 +346,18 @@ describe('StatsPage', () => {
         caption: 'Hottest sensor: Board LM96-2',
         chip: '',
       },
-      { heading: 'Board power', value: '11.6 W', caption: '', chip: '' },
+      { heading: 'Board power (Estimated)', value: '11.6 W', caption: '', chip: '' },
       { heading: 'CPU usage', value: '37.5 %', caption: '', chip: '' },
       { heading: 'Linux memory', value: '21.3 %', caption: '', chip: '' },
-      { heading: 'MLA memory', value: '742 MB', caption: '', chip: '' },
+      { heading: 'Accelerator memory', value: '742 MB', caption: '', chip: '' },
       { heading: 'Network', value: '2.82 MB/s', caption: '', chip: '' },
     ]);
     // The unit is the card's own part, after the value.
-    expect(text(cardNamed('Board power').querySelector('.unit'))).toBe('W');
+    expect(text(cardNamed('Board power (Estimated)').querySelector('.unit'))).toBe('W');
 
     // Each card draws its chart headless and medium, built as the side panel builds it.
     const window = mergeTelemetry(null, live(), DEVKIT.id);
-    for (const card of cards()) {
+    for (const card of cards().filter((card) => !stackOf(card))) {
       const chart = chartOf(card)!;
       expect(chart.label()).toBe(cardText(card).heading);
       expect(chart.headless()).toBe(true);
@@ -365,11 +366,19 @@ describe('StatsPage', () => {
       expect(chart.valueLabels()).toBe(false);
       expect(chart.times()).toEqual(window.times);
     }
+    // Accelerator memory stacks the accelerators the board reports: the live capture has no EV74's.
+    const stack = stackOf(cardNamed('Accelerator memory'))!;
+    expect(stack.label()).toBe('Accelerator memory');
+    expect(stack.headless()).toBe(true);
+    expect(stack.size()).toBe('medium');
+    expect(stack.valueLabels()).toBe(false);
+    expect(stack.series().map((band) => band.label)).toEqual(['MLA']);
+    expect(chartOf(cardNamed('Accelerator memory'))).toBeUndefined();
     const thermal = chartOf(cardNamed('Thermal max'))!;
     expect(thermal.series()).toEqual(thermalMaxChart(window)!.series);
     expect(thermal.thresholds().map((line) => line.value)).toEqual([70, 85]);
     expect(thermal.domain()).toEqual([40, 90]);
-    const power = chartOf(cardNamed('Board power'))!;
+    const power = chartOf(cardNamed('Board power (Estimated)'))!;
     expect(power.domain()).toEqual(boardPowerChart(window)!.domain);
     expect(power.reference()).toEqual(boardPowerChart(window)!.reference);
     const cpu = chartOf(cardNamed('CPU usage'))!;
@@ -396,10 +405,10 @@ describe('StatsPage', () => {
       'Thermal max',
       'CPU usage',
       'Linux memory',
-      'MLA memory',
+      'Accelerator memory',
       'Network',
     ]);
-    const mla = cardNamed('MLA memory');
+    const mla = cardNamed('Accelerator memory');
     expect(cardText(mla).value).toBe('Not reported');
     expect(mla.querySelector('.unit')).toBeNull();
     expect(chartOf(mla)).toBeUndefined();
@@ -431,10 +440,10 @@ describe('StatsPage', () => {
     const chips = cards().map((card) => [cardText(card).heading, cardText(card).chip]);
     expect(chips).toEqual([
       ['Thermal max', '2 warnings'],
-      ['Board power', ''],
+      ['Board power (Estimated)', ''],
       ['CPU usage', 'Warning'],
       ['Linux memory', 'Critical'],
-      ['MLA memory', ''],
+      ['Accelerator memory', ''],
       // Network takes the worse of its two.
       ['Network', 'Critical'],
     ]);
@@ -461,9 +470,11 @@ describe('StatsPage', () => {
     expect(asideTitle()).toBe('Thermal');
     expect(marked()).toEqual([]);
 
-    await click(cardNamed('Board power').querySelector<HTMLButtonElement>('button.activator')!);
+    await click(
+      cardNamed('Board power (Estimated)').querySelector<HTMLButtonElement>('button.activator')!,
+    );
     expect(asideTitle()).toBe('Power');
-    expect(marked()).toEqual(['Board power']);
+    expect(marked()).toEqual(['Board power (Estimated)']);
 
     // Closed, the panel marks no card; a click on the card itself opens it on that card's area.
     await click(sidePanelToggle()!);
@@ -718,7 +729,9 @@ describe('StatsPage', () => {
 
   it('after a board switch the panel shows Thermal when the chosen card is not on the new board', async () => {
     await visit();
-    await click(cardNamed('Board power').querySelector<HTMLButtonElement>('button.activator')!);
+    await click(
+      cardNamed('Board power (Estimated)').querySelector<HTMLButtonElement>('button.activator')!,
+    );
     expect(asideTitle()).toBe('Power');
 
     board.state.set(boardWith(OTHER_BOARD));
@@ -727,7 +740,7 @@ describe('StatsPage', () => {
     const unpowered = dropping((key) => key.startsWith('power_'));
     await flush(metricsPoll(OTHER_BOARD), live(20, { metrics: unpowered }));
 
-    expect(cards().map((card) => cardText(card).heading)).not.toContain('Board power');
+    expect(cards().map((card) => cardText(card).heading)).not.toContain('Board power (Estimated)');
     expect(asideTitle()).toBe('Thermal');
   });
 

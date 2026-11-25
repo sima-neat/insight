@@ -157,7 +157,7 @@ export interface paths {
         readonly get?: never;
         /**
          * Assign a file, a camera to pull or a webcam to a slot
-         * @description `{kind: "file", file, fps?}` streams a library file, at its own rate or at `fps` (a rendition is encoded first when the slot starts and none is cached); a slot that streamed a file keeps running with the new one, any other slot is stopped. `{kind: "pull", url, username?, password?}` has MediaMTX pull a camera (rtsp:// or rtsps://), after probing it: a camera that refuses the credentials is 422 `pull_auth_failed`, one that does not answer 502 `pull_unreachable`. The credentials are kept in memory only. The slot starts pulling at once. `{kind: "webcam"}` makes it a browser's webcam: the answer's `urls.whip` is where the browser publishes. A slot an external publisher holds is 409 `slot_busy`. The body is sent as application/json.
+         * @description `{kind: "file", file, fps?}` streams a library file, at its own rate or at `fps` (a rendition is encoded first when the slot starts and none is cached); a slot that streamed a file keeps running with the new one, any other slot is stopped. `{kind: "pull", url, username?, password?}` has MediaMTX pull a camera (rtsp:// or rtsps://), after probing it: a camera that refuses the credentials is 422 `pull_auth_failed`, one that does not answer 502 `pull_unreachable`. A publisher that took the slot during the probe is 409 `slot_busy`, and a MediaMTX that does not answer the check made after it 503 `mediamtx_unavailable`, with nothing assigned. The credentials are kept in memory only. The slot starts pulling at once. `{kind: "webcam"}` makes it a browser's webcam: the answer's `urls.whip` is where the browser publishes. A slot an external publisher holds is 409 `slot_busy`. The body is sent as application/json.
          */
         readonly put: operations["assignSlot"];
         readonly post?: never;
@@ -721,7 +721,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Start a camera's live preview
-         * @description Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode must be one the last scan says is `previewable`: for MIPI an NV12 mode Sentinel does not mark unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format, at a rate it advertises. 409 `preview_active` while one runs, `camera_in_use` when another process holds the camera (Insight never stops it), `no_scan` before a scan; 422 `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing` without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
+         * @description Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode must be one the last scan says is `previewable`: for MIPI an NV12 mode Sentinel does not mark unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format, at a rate it advertises. A USB camera without a `/dev/v4l/by-id` link is opened by its `/dev/videoN` node, so a Sentinel rescan first has to find the scanned camera still there (node, vendor, product and serial), else 409 `stale_scan` (also while Sentinel's USB provider fails): refresh, then start again. 409 `preview_active` while one runs, `camera_in_use` when another process holds the camera (Insight never stops it), `no_scan` before a scan; 422 `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing` without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
          */
         readonly post: operations["startCameraPreview"];
         readonly delete?: never;
@@ -1673,7 +1673,7 @@ export interface components {
         };
         /** @description How the camera's device is reached: a MIPI camera's libcamera facts, a USB camera's V4L2 nodes and USB facts. A fact the board does not report is absent. */
         readonly CameraDevice: {
-            /** @description libcamera's name for the camera; the stable way to name a MIPI camera. */
+            /** @description The ID a Neat application opens the camera by: libcamera's name for a MIPI camera (`CameraInput`), and for a USB camera the name Sentinel gives it (`UsbCameraInput`), which only a Sentinel that checks USB cameras reports. */
             readonly camera_name?: string;
             readonly media_device?: string;
             readonly bus_info?: string;
@@ -1702,7 +1702,7 @@ export interface components {
              */
             readonly speed_mbps?: number;
         };
-        /** @description Sentinel's verdict on a camera, format or mode: available when Neat's CameraInput can use it. USB cameras are unsupported, yet previewable. */
+        /** @description Sentinel's verdict on a camera, format or mode: available when Neat's camera input can use it (`CameraInput` for MIPI, `UsbCameraInput` for USB). A USB camera's modes are available when Sentinel reports them in MJPEG on the `uvcvideo` driver, and unsupported with Sentinel's reason otherwise. Only a Sentinel that reports a USB camera's driver checks USB cameras: with an older one, every USB mode is unsupported with a reason to update it. Unsupported modes can still be previewable. */
         readonly DeviceSupport: {
             /** @enum {string} */
             readonly tier: "available" | "unsupported";

@@ -1,4 +1,9 @@
-<app-panel-title [chip]="titleChip()">{{ camera().name }}</app-panel-title>
+<app-panel-title [chip]="titleChip()"
+  >{{ camera().name }}
+  @if (camera().device.camera_name; as cameraId) {
+    <app-camera-id panelTitleEnd [name]="cameraId" />
+  }
+</app-panel-title>
 @if (summary()) {
   <p neatNote>{{ summary() }}</p>
 }

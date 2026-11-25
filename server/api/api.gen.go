@@ -566,7 +566,7 @@ type CameraDevice struct {
 	// ById The `/dev/v4l/by-id/...` link, stable across reboots.
 	ById *string `json:"by_id,omitempty"`
 
-	// CameraName libcamera's name for the camera; the stable way to name a MIPI camera.
+	// CameraName The ID a Neat application opens the camera by: libcamera's name for a MIPI camera (`CameraInput`), and for a USB camera the name Sentinel gives it (`UsbCameraInput`), which only a Sentinel that checks USB cameras reports.
 	CameraName *string `json:"camera_name,omitempty"`
 
 	// Csi The CSI receiver the sensor is attached to.
@@ -590,7 +590,7 @@ type CameraFormat struct {
 	Range *CameraFormatRange `json:"range"`
 	Sizes []CameraSize       `json:"sizes"`
 
-	// Support Sentinel's verdict on a camera, format or mode: available when Neat's CameraInput can use it. USB cameras are unsupported, yet previewable.
+	// Support Sentinel's verdict on a camera, format or mode: available when Neat's camera input can use it (`CameraInput` for MIPI, `UsbCameraInput` for USB). A USB camera's modes are available when Sentinel reports them in MJPEG on the `uvcvideo` driver, and unsupported with Sentinel's reason otherwise. Only a Sentinel that reports a USB camera's driver checks USB cameras: with an older one, every USB mode is unsupported with a reason to update it. Unsupported modes can still be previewable.
 	Support DeviceSupport `json:"support"`
 }
 
@@ -738,7 +738,7 @@ type DeviceRef struct {
 	Name string `json:"name"`
 }
 
-// DeviceSupport Sentinel's verdict on a camera, format or mode: available when Neat's CameraInput can use it. USB cameras are unsupported, yet previewable.
+// DeviceSupport Sentinel's verdict on a camera, format or mode: available when Neat's camera input can use it (`CameraInput` for MIPI, `UsbCameraInput` for USB). A USB camera's modes are available when Sentinel reports them in MJPEG on the `uvcvideo` driver, and unsupported with Sentinel's reason otherwise. Only a Sentinel that reports a USB camera's driver checks USB cameras: with an older one, every USB mode is unsupported with a reason to update it. Unsupported modes can still be previewable.
 type DeviceSupport struct {
 	// Reason Why it is not available; empty when it is.
 	Reason string            `json:"reason"`

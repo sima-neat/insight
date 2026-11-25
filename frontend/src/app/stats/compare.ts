@@ -10,7 +10,7 @@ import type { ParamMap } from '@angular/router';
 // Types only: the charts entry loads with the Stats view that draws the overlay, not with this.
 import type { NeatSeries } from '@sima/neat-ui/charts';
 import type { CompareExport, RunSample, RunTotals, SavedRun } from './api';
-import { formatNumber, isNumber, isThermalMetric, unitSuffix } from './format';
+import { estimated, formatNumber, isNumber, isThermalMetric, unitSuffix } from './format';
 import { compareText, isObject, isSavedRun, localDay, percentile } from './runs';
 import { csvField } from './telemetry';
 
@@ -73,15 +73,18 @@ export function orderedIds(ids: readonly string[], baseline: string | null): str
   return [baseline, ...ids.filter((id) => id !== baseline)];
 }
 
+/** The energy's name wherever it is shown: it is the integral of the estimated board power. */
+export const ENERGY_LABEL = estimated('Energy');
+
 /** The series to compare; thermal max is derived per sample from each run's own sensors. */
 export const COMPARE_SERIES: readonly { key: string; label: string }[] = [
-  { key: POWER_KEY, label: 'Total power' },
+  { key: POWER_KEY, label: estimated('Total power') },
   { key: THERMAL_MAX, label: 'Thermal max' },
   { key: 'cpu_usage_pct', label: 'CPU usage' },
   { key: 'cpu_load_1', label: 'CPU load' },
   { key: 'linux_mem_used_mb', label: 'RAM used' },
   { key: 'mla_mem_allocated_mb', label: 'MLA memory' },
-  { key: 'ev74_cma_used_mb', label: 'EV74 CMA' },
+  { key: 'ev74_mem_allocated_mb', label: 'EV74 memory' },
 ];
 
 /** A series the compared runs can share, with its unit as Sentinel spells it (null for none). */
@@ -387,7 +390,7 @@ const RUN_TOTALS: readonly {
     unit: 's',
     value: (totals) => totals.duration_ms / 1000,
   },
-  { key: 'energy_joules', label: 'Energy', unit: 'J', value: (totals) => totals.energy_joules },
+  { key: 'energy_joules', label: ENERGY_LABEL, unit: 'J', value: (totals) => totals.energy_joules },
   { key: 'samples', label: 'Samples', unit: null, value: (totals) => totals.samples },
 ];
 

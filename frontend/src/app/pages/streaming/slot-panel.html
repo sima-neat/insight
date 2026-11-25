@@ -93,6 +93,29 @@
         @if (cameras.error(); as error) {
           <neat-error-note>{{ error }}</neat-error-note>
         }
+        <neat-select
+          label="Resolution"
+          showLabel
+          size="small"
+          [options]="modeOptions()"
+          [value]="shownMode()"
+          [disabled]="busy()"
+          (valueChange)="changeCapture({ mode: $event ?? shownMode() })"
+        />
+        <neat-select
+          label="Bitrate"
+          showLabel
+          size="small"
+          [options]="bitrateOptions()"
+          [value]="cameras.captureOf(n()).bitrate"
+          [disabled]="busy()"
+          (valueChange)="changeCapture({ bitrate: $event ?? cameras.captureOf(n()).bitrate })"
+        />
+        <p neatNote>
+          The camera is asked for the size and rate shown; one without that mode sends its nearest.
+          The stream is 30 fps whatever the camera sends. The bitrate is the highest rate the
+          browser sends the camera at; Insight re-encodes it for the stream URL.
+        </p>
       }
       <div neatAsideActions>
         <button

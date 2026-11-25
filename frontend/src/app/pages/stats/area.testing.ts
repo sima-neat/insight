@@ -53,3 +53,26 @@ export function withSeries(
 ): TelemetryWindow {
   return { ...window, series: { ...window.series, ...series } };
 }
+
+/**
+ * `window` with the EV74 memory Sentinel reports as `ev74_mem_allocated_mb` (the DevKit capture
+ * predates it), flat at `mb`.
+ */
+export function withEv74Memory(window: TelemetryWindow, mb = 96): TelemetryWindow {
+  return withExtra(
+    window,
+    {
+      key: 'ev74_mem_allocated_mb',
+      label: 'EV74 memory allocated',
+      short: 'EV74MB',
+      unit: 'MB',
+      description: null,
+      group: 'EV74',
+      value: mb,
+      status: 'ok',
+      warn: null,
+      critical: null,
+    },
+    window.times.map(() => mb),
+  );
+}

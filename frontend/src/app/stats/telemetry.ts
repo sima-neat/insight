@@ -8,6 +8,7 @@ import { NO_VALUE } from '../no-value';
 import type { SentinelCache, SentinelMetric, SentinelSample } from './api';
 import { definitionsOf, joinMetrics, metricStatus } from './metrics';
 import {
+  estimated,
   fixedValue,
   formatValue,
   isNumber,
@@ -267,7 +268,8 @@ export const AREA_LABELS: Readonly<Record<StatsArea, string>> = {
   storage: 'Storage & Network',
 };
 
-const SYSTEM_KEYS = /^(cpu_|linux_mem|mla_mem|ev74_)/;
+// The EV74's CMA pool (`ev74_cma_`) is the board-wide pool, not the EV74's: it stays in All metrics.
+const SYSTEM_KEYS = /^(cpu_|linux_mem|mla_mem|ev74_mem)/;
 const STORAGE_GROUPS = /^(disk|diskio|network|storage|nvme)$/i;
 const STORAGE_KEYS = /^(disk_|net_|nvme)/;
 
@@ -288,7 +290,7 @@ export function areaMetrics(window: TelemetryWindow, area: StatsArea): SentinelM
 }
 
 export type OverviewCardId =
-  'thermal-max' | 'board-power' | 'cpu' | 'linux-memory' | 'mla-memory' | 'network';
+  'thermal-max' | 'board-power' | 'cpu' | 'linux-memory' | 'accelerator-memory' | 'network';
 
 export interface OverviewCard {
   readonly id: OverviewCardId;
@@ -302,13 +304,33 @@ export interface OverviewCard {
 /** Network in and out, which the Network card and the Storage & Network area chart together. */
 const NETWORK_KEYS = ['net_rx_mbps', 'net_tx_mbps'] as const;
 
+/** The accelerators' DMA-BUF memory, MLA then EV74, which the Accelerator memory chart stacks. */
+const ACCELERATORS = [
+  { key: 'mla_mem_allocated_mb', label: 'MLA' },
+  { key: 'ev74_mem_allocated_mb', label: 'EV74' },
+] as const;
+const ACCELERATOR_KEYS: readonly string[] = ACCELERATORS.map((accelerator) => accelerator.key);
+
+/** The board power's name wherever it is shown: Sentinel's sum of the rails is an estimate. */
+export const BOARD_POWER_LABEL = estimated('Board power');
+
 /** The cards, in the order the page shows them. */
 export const OVERVIEW_CARDS: readonly OverviewCard[] = [
   { id: 'thermal-max', heading: 'Thermal max', area: 'thermal', keys: [] },
-  { id: 'board-power', heading: 'Board power', area: 'power', keys: ['power_current_watts'] },
+  {
+    id: 'board-power',
+    heading: BOARD_POWER_LABEL,
+    area: 'power',
+    keys: ['power_current_watts'],
+  },
   { id: 'cpu', heading: 'CPU usage', area: 'system', keys: ['cpu_usage_pct'] },
   { id: 'linux-memory', heading: 'Linux memory', area: 'system', keys: ['linux_mem_used_pct'] },
-  { id: 'mla-memory', heading: 'MLA memory', area: 'system', keys: ['mla_mem_allocated_mb'] },
+  {
+    id: 'accelerator-memory',
+    heading: 'Accelerator memory',
+    area: 'system',
+    keys: ACCELERATOR_KEYS,
+  },
   { id: 'network', heading: 'Network', area: 'storage', keys: NETWORK_KEYS },
 ];
 
@@ -441,15 +463,42 @@ export function boardPowerChart(
   };
 }
 
+/** What a stacked chart is given: the bands, a scale that holds the stack, and its headline. */
+export type StackInputs = Pick<ChartInputs, 'series' | 'domain' | 'headline'>;
+
+/**
+ * MLA and EV74 memory as the two bands of one stack: Sentinel counts each DMA-BUF once, so the
+ * top edge is their sum. The headline is the sum now, "–" while a reported band has no reading.
+ * A board that reports one of the two stacks that one; null when it reports neither.
+ */
+export function acceleratorMemoryChart(window: TelemetryWindow): StackInputs | null {
+  const parts = ACCELERATORS.flatMap(({ key, label }) => {
+    const metric = metricByKey(window, key);
+    return metric ? [{ metric, label }] : [];
+  });
+  if (!parts.length) return null;
+  const series = parts.map(({ metric, label }) => ({
+    key: metric.key,
+    label,
+    values: seriesOf(window, metric.key),
+  }));
+  const totals = window.timestamps.map((_, i) =>
+    currentTotal(series.map((band) => band.values[i])),
+  );
+  return {
+    series,
+    domain: scaleFor('MB', [totals]),
+    headline: formatValue(currentTotal(parts.map(({ metric }) => metric.value)), 'MB'),
+  };
+}
+
 /**
  * The power rails as the bands of one stack, each in Sentinel's order and under its short name,
  * on a scale that holds the largest total any sample reached. The headline is the rails' total now
  * with their count, "—" in place of the total while a rail has no reading (a partial sum was never
  * measured). Null when the board reports no rail.
  */
-export function powerRailsChart(
-  window: TelemetryWindow,
-): Pick<ChartInputs, 'series' | 'domain' | 'headline'> | null {
+export function powerRailsChart(window: TelemetryWindow): StackInputs | null {
   const rails = metricsMatching(window, /^power_rail_/);
   if (!rails.length) return null;
   const series = rails.map((rail) => ({

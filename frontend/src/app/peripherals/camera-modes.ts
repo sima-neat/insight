@@ -125,11 +125,9 @@ export function sizeOptions(camera: CameraItem, format: string): SizeOption[] {
 
 /**
  * One visible explanation line per camera state, chosen by priority, so the panel never stacks
- * near-identical sentences: why a MIPI camera is not Available; nothing otherwise.
+ * near-identical sentences: why a camera is not Available; nothing otherwise.
  */
 export function cameraSummaryLine(camera: CameraItem): string {
-  // A USB camera is always Unsupported (no camera overlay), so a sentence saying so adds nothing.
-  if (camera.connection === 'usb') return '';
   if (camera.support.tier !== 'available') return camera.support.reason || 'Unsupported.';
   // An Available camera's menus already label every entry, and whether another program holds the
   // camera is found out, and said, when a preview tries to start.

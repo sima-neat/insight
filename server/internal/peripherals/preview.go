@@ -27,6 +27,10 @@ const maxFrameWait = time.Minute
 // cameraRateTimeout bounds the rescan that reads a MIPI camera's rate once its preview runs.
 const cameraRateTimeout = 10 * time.Second
 
+// confirmTimeout bounds the rescan that confirms a USB camera without a by-id link before its
+// preview.
+const confirmTimeout = 10 * time.Second
+
 // Preview is a camera preview as the API shows it.
 type Preview struct {
 	// ID tells this preview from the next one of the same camera.
@@ -130,6 +134,9 @@ func (m *Manager) StartPreview(ctx context.Context, b *board.Board, camera strin
 	}
 	source, err := previewable(d, mode)
 	if err != nil {
+		return PreviewAnswer{}, err
+	}
+	if err := confirmNode(ctx, b, d); err != nil {
 		return PreviewAnswer{}, err
 	}
 	argv := pipeline(source)
@@ -238,6 +245,52 @@ func (s *boardState) previewEnded(p *preview) {
 	if s.preview == p {
 		s.preview = nil
 	}
+}
+
+// confirmNode refuses a preview of a USB camera that is opened by its /dev/videoN node, which it
+// has when the board gives it no by-id link, unless a rescan finds the same camera at that node:
+// Linux gives the number to whichever camera is plugged in next, so a camera replaced since the
+// scan would be captured under the scanned one's name. The scan is not recorded; the answer says
+// to Refresh. A MIPI camera and a USB camera with a link are not rescanned.
+func confirmNode(ctx context.Context, b *board.Board, d device) error {
+	if d.connection() != "usb" || d.ByIDPath != "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, confirmTimeout)
+	defer cancel()
+	body, err := sentinel.Call(ctx, b, http.MethodPost, "/v1/peripherals/refresh", nil)
+	if err == nil {
+		var now catalog
+		if now, err = parseCatalog(body); err == nil {
+			return confirmedIn(now, d)
+		}
+	}
+	// Sentinel's own refusal or failure, with what it was asked for.
+	var refused *apierr.Error
+	if errors.As(err, &refused) {
+		wrapped := *refused
+		wrapped.Message = fmt.Sprintf("%s has no /dev/v4l/by-id link, and Sentinel could not confirm it is still the camera at %s: %s",
+			d.name(), d.DevicePath, refused.Message)
+		return &wrapped
+	}
+	return err
+}
+
+// confirmedIn is nil when the rescan now finds camera d at its scanned node.
+func confirmedIn(now catalog, d device) error {
+	current, ok := now.device(d.ID)
+	if now.stale(d) {
+		return apierr.Errorf(http.StatusConflict, "stale_scan",
+			"Refresh again; if Sentinel's camera provider keeps failing, check Sentinel on the board.",
+			"%s has no /dev/v4l/by-id link, and Sentinel's %s provider failed while confirming it is still the camera at %s.",
+			d.name(), d.provider(), d.DevicePath)
+	}
+	if !ok || current.DevicePath != d.DevicePath || current.Identity.VendorID != d.Identity.VendorID ||
+		current.Identity.ProductID != d.Identity.ProductID || current.Identity.Serial != d.Identity.Serial {
+		return apierr.Errorf(http.StatusConflict, "stale_scan", "Refresh, then start the preview.",
+			"%s may no longer be %s: the camera was replugged or replaced since the scan.", d.DevicePath, d.name())
+	}
+	return nil
 }
 
 // readCameraRate sets a MIPI preview's camera rate from a rescan by Sentinel, which reads the

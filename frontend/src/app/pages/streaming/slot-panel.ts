@@ -33,6 +33,7 @@ import { NeatInput } from '@sima/neat-ui/input';
 import { NeatNumberField } from '@sima/neat-ui/number-field';
 import { NeatProgress } from '@sima/neat-ui/progress';
 import { NeatSegmented, type NeatSegmentedOption } from '@sima/neat-ui/segmented';
+import { NeatSelect, type NeatSelectOption } from '@sima/neat-ui/select';
 import { NeatColumn, NeatSelectList } from '@sima/neat-ui/select-list';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { Slot } from '../../api.generated';
@@ -44,6 +45,13 @@ import { CamerasService } from '../../sources/cameras.service';
 import { ImportDialogs } from '../../sources/import-dialog';
 import { customRate, FPS_MIN, FPS_STEP } from '../../sources/fps';
 import { SlotsService } from '../../sources/slots.service';
+import {
+  effectiveCaptureMode,
+  offeredCaptureModes,
+  WEBCAM_BITRATES,
+  webcamBitrateKbps,
+  type WebcamCapture,
+} from '../../sources/webcam-capture';
 import type { Camera } from '../../sources/webcam-publishing';
 import { MediaPicker } from './media-picker';
 import { SlotControl } from './slot-control';
@@ -148,6 +156,7 @@ function formFor(slot: Slot, left: EmptySourceForm | undefined): SourceForm {
 @Component({
   selector: 'app-slot-panel',
   imports: [
+    NeatSelect,
     NeatNumberField,
     MediaPicker,
     NeatAsideActions,
@@ -336,6 +345,26 @@ export class SlotPanel {
   });
 
   // The camera form.
+  /** The modes the assigned camera reaches, every mode while there is none. */
+  protected readonly modeOptions = computed<NeatSelectOption<string>[]>(() =>
+    offeredCaptureModes(this.camera()?.captureModeIds).map((mode) => ({
+      value: mode.id,
+      label: mode.label,
+    })),
+  );
+  /** The mode that is published: the chosen one, or the largest the camera reaches. */
+  protected readonly shownMode = computed(() =>
+    effectiveCaptureMode(this.cameras.captureOf(this.n()).mode, this.camera()?.captureModeIds),
+  );
+  /** Auto says the rate it comes to for the shown mode. */
+  protected readonly bitrateOptions = computed<NeatSelectOption<string>[]>(() =>
+    WEBCAM_BITRATES.map((bitrate) => ({
+      value: bitrate.id,
+      label: bitrate.kbps
+        ? bitrate.label
+        : `${bitrate.label}, ${formatBitrate(webcamBitrateKbps(bitrate.id, this.shownMode()) * 1000)}`,
+    })),
+  );
   protected readonly cameraKey = (camera: Camera): string => camera.deviceId;
   /** The list's selection is the assigned camera, when it is one the browser lists. */
   protected readonly assignedCamera = computed(
@@ -613,6 +642,29 @@ export class SlotPanel {
     this.cameraList()?.selected.set(this.assignedCamera());
     // What comes next for a camera picked is starting it (a live slot already runs).
     if (done) this.focusAfterRender(() => this.primaryButton());
+  }
+
+  /**
+   * Sets how the camera is captured and sent. A live webcam goes on in the new mode, as it does on
+   * a new camera: the publish ends with the assignment and the slot is started again; a stopped one
+   * takes it at its next start.
+   */
+  protected async changeCapture(change: Partial<WebcamCapture>): Promise<void> {
+    const n = this.n();
+    const camera = this.camera();
+    const live = this.isWebcam() && isLive(this.slot());
+    this.cameras.setCapture(n, {
+      ...this.cameras.captureOf(n),
+      mode: this.shownMode(),
+      ...change,
+    });
+    if (!live || !camera) return;
+    await this.act(() =>
+      this.control.run(n, async () => {
+        await this.cameras.assign(n, camera.deviceId);
+        await this.control.start(n);
+      }),
+    );
   }
 
   /** Arrowing moves the list's selection; leaving the list puts the assigned camera back. */

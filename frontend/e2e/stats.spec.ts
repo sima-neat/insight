@@ -139,17 +139,17 @@ test('Live polls the board’s readings, Runs and Compare read its runs, and lea
   // Live: the six cards with the readings of the captured Modalix answer, as the cards word them.
   await expect(cards(page).getByRole('button')).toHaveText([
     'Thermal max',
-    'Board power',
+    'Board power (Estimated)',
     'CPU usage',
     'Linux memory',
-    'MLA memory',
+    'Accelerator memory',
     'Network',
   ]);
   await expect(card(page, 'Thermal max')).toContainText(/66\.3\s*°C/);
-  await expect(card(page, 'Board power')).toContainText(/11\.6\s*W/);
+  await expect(card(page, 'Board power (Estimated)')).toContainText(/11\.6\s*W/);
   await expect(card(page, 'Network')).toContainText(/2\.82\s*MB\/s/);
   await expect(tools(page)).toContainText('Live');
-  await cardButton(page, 'Board power').click();
+  await cardButton(page, 'Board power (Estimated)').click();
   await expect(areaTitle(page)).toHaveText('Power');
   await expect(areaPanel(page).locator('neat-stacked-chart')).toContainText('SoC and DDR VDD');
 
@@ -196,7 +196,7 @@ test('Live polls the board’s readings, Runs and Compare read its runs, and lea
   await expect(cards(page)).toHaveCount(6);
   expect(backend.queries.at(-1)).toBeNull();
   await expect(areaTitle(page)).toHaveText('Power');
-  await expect(cardButton(page, 'Board power')).toHaveAttribute('aria-current', 'true');
+  await expect(cardButton(page, 'Board power (Estimated)')).toHaveAttribute('aria-current', 'true');
 });
 
 for (const { name, size } of VIEWPORTS) {

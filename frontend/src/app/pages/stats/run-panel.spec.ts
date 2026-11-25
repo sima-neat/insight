@@ -245,7 +245,7 @@ describe('RunPanel', () => {
     expect(details(root()).slice(1)).toEqual([
       ['Duration', '20 s'],
       ['Samples', '11'],
-      ['Energy', '150 J'],
+      ['Energy (Estimated)', '150 J'],
     ]);
     expect(details(root())[0][0]).toBe('Started');
     expect(text(root().querySelector('.note'))).toBe('Compiler v2 on the YOLO pipeline');
@@ -261,7 +261,7 @@ describe('RunPanel', () => {
     expect(details(root()).slice(1)).toEqual([
       ['Duration', '12 s'],
       ['Samples', '7'],
-      ['Energy', '96 J'],
+      ['Energy (Estimated)', '96 J'],
     ]);
     expect(root().querySelector('.note')).toBeNull();
   });

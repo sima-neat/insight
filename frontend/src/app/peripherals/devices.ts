@@ -1,7 +1,7 @@
 /**
  * The device model: what Peripherals' list, rows and Details say about a scan, as pure functions
- * of the snapshot. Unsupported is `neutral`, not red, since USB cameras are Unsupported and
- * preview fine; each row has one chip.
+ * of the snapshot. Unsupported is `neutral`, not red, since an Unsupported camera may still
+ * preview; each row has one chip.
  */
 
 import type { NeatIconName, NeatTone } from '@sima/neat-ui';

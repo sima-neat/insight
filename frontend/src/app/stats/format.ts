@@ -178,3 +178,12 @@ export function formatEnergy(joules: number | null): string {
   const whole = Math.round(joules);
   return whole < 1000 ? `${whole} J` : `${(joules / 1000).toFixed(2)} kJ`;
 }
+
+/**
+ * A label for a figure Sentinel estimates: the board power, which is the sum of the SoM's
+ * regulator rail readings (not calibrated against the SoM's input power), and the energy from it.
+ */
+export const estimated = (label: string): string => `${label} (Estimated)`;
+
+/** A value in megabytes as a stacked chart words it. */
+export const megabytes = (value: number): string => formatValue(value, 'MB');

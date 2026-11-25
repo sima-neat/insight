@@ -26,10 +26,20 @@ func (m *Manager) loop() {
 	}
 }
 
-func (m *Manager) tick() {
+// takeSnapshot asks MediaMTX for the paths now, without making the answer the Manager's view:
+// only the loop installs one, so a view never goes back to an older reading.
+func (m *Manager) takeSnapshot() (mediamtx.Snapshot, error) {
 	ctx, cancel := context.WithTimeout(m.ctx, 2*time.Second)
+	defer cancel()
 	snap, err := m.opts.MediaMTX.Snapshot(ctx)
-	cancel()
+	if m.ctx.Err() != nil {
+		return mediamtx.Snapshot{}, m.ctx.Err()
+	}
+	return snap, err
+}
+
+func (m *Manager) tick() {
+	snap, err := m.takeSnapshot()
 	if m.ctx.Err() != nil {
 		return
 	}
@@ -39,6 +49,10 @@ func (m *Manager) tick() {
 			slog.Warn("MediaMTX's API does not answer; the sources' streams are unknown", "error", err)
 		}
 		m.mtxUp, m.snap, m.prev = false, mediamtx.Snapshot{}, mediamtx.Snapshot{}
+	} else if snap.At.Before(m.snap.At) {
+		// A reading that began earlier and answered later than the one installed.
+		m.mu.Unlock()
+		return
 	} else {
 		if !m.mtxUp {
 			// MediaMTX (re)started, or the API answers again: what it was told before may be

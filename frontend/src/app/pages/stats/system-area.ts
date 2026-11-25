@@ -1,27 +1,44 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { NeatHeatmap, type NeatHeatmapRow } from '@sima/neat-ui/charts';
-import { formatValue } from '../../stats/format';
-import { coreSummary, metricByKey, metricChart, type TelemetryWindow } from '../../stats/telemetry';
+import { NeatHeatmap, type NeatHeatmapRow, NeatStackedChart } from '@sima/neat-ui/charts';
+import { formatValue, megabytes } from '../../stats/format';
+import {
+  acceleratorMemoryChart,
+  coreSummary,
+  metricByKey,
+  metricChart,
+  type TelemetryWindow,
+} from '../../stats/telemetry';
 import { StatsChart } from './stats-chart';
 
 const percent = (value: number): string => formatValue(value, '%');
 
 /**
- * The System area: CPU usage, the one-minute load average, Linux memory, MLA memory and the EV74's
- * CMA, then every CPU core's load as a heatmap with its one-minute average. A
+ * The System area: CPU usage, the one-minute load average, Linux memory, MLA memory, the EV74's
+ * memory and both stacked as accelerator memory, then every CPU core's load as a heatmap with its one-minute average. A
  * percentage chart widens past 100 when a reading does (`scaleFor`), and whatever
  * the board does not report is left out.
  */
 @Component({
   selector: 'app-system-area',
-  imports: [NeatHeatmap, StatsChart],
+  imports: [NeatHeatmap, NeatStackedChart, StatsChart],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-stats-chart label="CPU usage" [chart]="cpu()" [times]="window().times" />
     <app-stats-chart label="Load average (1 minute)" [chart]="load()" [times]="window().times" />
     <app-stats-chart label="Linux memory" [chart]="linuxMemory()" [times]="window().times" />
     <app-stats-chart label="MLA memory" [chart]="mlaMemory()" [times]="window().times" />
-    <app-stats-chart label="EV74 CMA used" [chart]="ev74Cma()" [times]="window().times" />
+    <app-stats-chart label="EV74 memory" [chart]="ev74Memory()" [times]="window().times" />
+    @if (accelerators(); as stack) {
+      <neat-stacked-chart
+        label="Accelerator memory"
+        size="medium"
+        [headline]="stack.headline"
+        [series]="stack.series"
+        [times]="window().times"
+        [domain]="stack.domain"
+        [format]="megabytes"
+      />
+    }
     @if (cores(); as cores) {
       <neat-heatmap
         label="Per-core CPU"
@@ -71,13 +88,11 @@ export class SystemArea {
 
   protected readonly mlaMemory = computed(() => metricChart(this.window(), 'mla_mem_allocated_mb'));
 
-  /** On the CMA's own size, so the line shows how full it is. */
-  protected readonly ev74Cma = computed(() =>
-    metricChart(
-      this.window(),
-      'ev74_cma_used_mb',
-      metricByKey(this.window(), 'ev74_cma_total_mb')?.value ?? null,
-    ),
+  protected readonly megabytes = megabytes;
+  protected readonly accelerators = computed(() => acceleratorMemoryChart(this.window()));
+
+  protected readonly ev74Memory = computed(() =>
+    metricChart(this.window(), 'ev74_mem_allocated_mb'),
   );
 
   /** The heatmap's rows and its headline, which leads with the cores' average; null without cores. */

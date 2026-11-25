@@ -5,6 +5,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NeatButton, NeatIcon, type NeatButtonVariant } from '@sima/neat-ui';
 import { NeatDetails } from '@sima/neat-ui/details';
+import { NeatSelect } from '@sima/neat-ui/select';
 import { NeatToasts } from '@sima/neat-ui/toast';
 import type { MediaEntry, Slot } from '../../api.generated';
 import { CamerasService, type CameraAccessState } from '../../sources/cameras.service';
@@ -17,6 +18,7 @@ import type { PullRequest } from '../../sources/slots.service';
 import { SlotsService } from '../../sources/slots.service';
 import { fileSlot, publisher, pull, slot, webcamSlot } from '../../sources/slots.testing';
 import { ApiRequestError } from '../../sources/api-errors';
+import { DEFAULT_WEBCAM_CAPTURE, type WebcamCapture } from '../../sources/webcam-capture';
 import type { Camera } from '../../sources/webcam-publishing';
 import { radioLabel } from '../../radio-label.testing';
 import { SourcesSession } from '../sources-session';
@@ -94,6 +96,7 @@ class FakeCameras {
   readonly state = signal<CameraAccessState>('unknown');
   readonly error = signal<string | null>(null);
   readonly assignments = signal<ReadonlyMap<number, Camera>>(new Map());
+  readonly captures = signal<ReadonlyMap<number, WebcamCapture>>(new Map());
   readonly localStreams = signal<ReadonlyMap<number, MediaStream>>(new Map());
   readonly changingSlots = signal<ReadonlySet<number>>(new Set());
   readonly anyChanging = computed(() => this.changingSlots().size > 0);
@@ -102,6 +105,9 @@ class FakeCameras {
       this.slots.replace(webcamSlot(n));
       this.remember(n, this.cameras().find((camera) => camera.deviceId === deviceId) ?? null);
     },
+  );
+  readonly setCapture = vi.fn<(n: number, capture: WebcamCapture) => void>((n, capture) =>
+    this.captures.set(new Map(this.captures()).set(n, capture)),
   );
   readonly assignFile = vi.fn<(n: number, file: string) => Promise<Slot>>(async (n) =>
     this.slots.of(n),
@@ -116,6 +122,10 @@ class FakeCameras {
   });
 
   constructor(private readonly slots: FakeSlots) {}
+
+  captureOf(n: number): WebcamCapture {
+    return this.captures().get(n) ?? DEFAULT_WEBCAM_CAPTURE;
+  }
 
   /**
    * Makes clearing and stopping show in the slots, as the server's answers do on the next read;
@@ -185,6 +195,8 @@ describe('SlotPanel', () => {
     imports = { open: vi.fn<() => Promise<string | null>>() };
     writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    // Nor scrollIntoView, which the kit's select calls on its active option.
+    Element.prototype.scrollIntoView = vi.fn();
     // jsdom has no ResizeObserver, which some of the kit's controls measure themselves with.
     vi.stubGlobal(
       'ResizeObserver',
@@ -219,6 +231,7 @@ describe('SlotPanel', () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    delete (Element.prototype as Partial<Element>).scrollIntoView;
     if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
     else Reflect.deleteProperty(navigator, 'clipboard');
   });
@@ -716,6 +729,154 @@ describe('SlotPanel', () => {
       expect(cameras.assign).not.toHaveBeenCalled();
       expect(options()[0].getAttribute('aria-selected')).toBe('true');
       expect(options()[1].getAttribute('aria-selected')).toBe('false');
+    });
+  });
+
+  describe('the capture of a camera', () => {
+    const select = (label: string) =>
+      [...root().querySelectorAll<HTMLElement>('neat-select')].find(
+        (one) =>
+          one.querySelector('[role="combobox"]')?.getAttribute('aria-label') === label ||
+          text(one).startsWith(label),
+      )!;
+    const shown = (label: string) => text(select(label).querySelector('[role="combobox"]')!);
+    /** The labels of the options a select offers, read by opening it. */
+    async function offered(label: string): Promise<string[]> {
+      await click(select(label).querySelector<HTMLElement>('[role="combobox"]')!);
+      const labels = [
+        ...document.querySelectorAll<HTMLElement>(
+          `[role="listbox"][aria-label="${label}"] [role="option"]`,
+        ),
+      ].map((one) => text(one));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await settle();
+      return labels;
+    }
+    async function pick(label: string, option: string): Promise<void> {
+      await click(select(label).querySelector<HTMLElement>('[role="combobox"]')!);
+      await click(
+        [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+          (one) => text(one) === option,
+        ),
+      );
+    }
+
+    it('offers a Resolution that is 1920×1080 at 30 fps and a Bitrate that is Auto, with its rate, until chosen', async () => {
+      slots.slots.set([webcamSlot(3)]);
+      cameras.cameras.set(CAMERAS);
+      await open(3);
+
+      expect(shown('Resolution')).toContain('1920×1080 at 30 fps');
+      expect(shown('Bitrate')).toContain('Auto, 8.1 Mbit/s');
+      expect(await offered('Resolution')).toEqual([
+        '3840×2160 at 30 fps',
+        '2560×1440 at 30 fps',
+        '1920×1080 at 30 fps',
+        '1280×720 at 30 fps',
+        '640×480 at 30 fps',
+        'Camera default',
+      ]);
+      expect(await offered('Bitrate')).toEqual([
+        'Auto, 8.1 Mbit/s',
+        '2 Mbit/s',
+        '4 Mbit/s',
+        '8 Mbit/s',
+        '16 Mbit/s',
+        '32 Mbit/s',
+      ]);
+    });
+
+    it('lists only the modes the assigned camera reaches, and shows the largest of them while the chosen one is out of reach', async () => {
+      const hd: Camera = {
+        deviceId: 'hd',
+        label: 'HD',
+        captureModeIds: ['720p30', '480p30', 'camera'],
+      };
+      slots.slots.set([webcamSlot(3)]);
+      cameras.cameras.set([hd]);
+      cameras.assignments.set(new Map([[3, hd]]));
+      await open(3);
+
+      expect(await offered('Resolution')).toEqual([
+        '1280×720 at 30 fps',
+        '640×480 at 30 fps',
+        'Camera default',
+      ]);
+      expect(shown('Resolution')).toContain('1280×720 at 30 fps');
+      // Auto follows the mode shown.
+      expect(shown('Bitrate')).toContain('Auto, 3.6 Mbit/s');
+    });
+
+    it('sets the choice for a stopped slot, to apply when it starts', async () => {
+      slots.slots.set([webcamSlot(3)]);
+      cameras.cameras.set(CAMERAS);
+      cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+      await open(3);
+
+      await pick('Resolution', '1280×720 at 30 fps');
+      await pick('Bitrate', '4 Mbit/s');
+
+      expect(cameras.setCapture).toHaveBeenNthCalledWith(1, 3, { mode: '720p30', bitrate: 'auto' });
+      expect(cameras.setCapture).toHaveBeenNthCalledWith(2, 3, {
+        mode: '720p30',
+        bitrate: '4mbps',
+      });
+      expect(cameras.assign).not.toHaveBeenCalled();
+      expect(cameras.publish).not.toHaveBeenCalled();
+      expect(shown('Resolution')).toContain('1280×720 at 30 fps');
+    });
+
+    it('keeps a live webcam live in the new mode: the publish ends, the camera is assigned again and published', async () => {
+      slots.slots.set([webcamSlot(3, { state: 'live' })]);
+      cameras.cameras.set(CAMERAS);
+      cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+      await open(3);
+
+      await pick('Resolution', '640×480 at 30 fps');
+
+      expect(cameras.setCapture).toHaveBeenCalledExactlyOnceWith(3, {
+        mode: '480p30',
+        bitrate: 'auto',
+      });
+      expect(cameras.assign).toHaveBeenCalledExactlyOnceWith(3, 'd1');
+      expect(cameras.publish).toHaveBeenCalledExactlyOnceWith(3);
+      expect(cameras.setCapture.mock.invocationCallOrder[0]).toBeLessThan(
+        cameras.assign.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('shows a refusal to start in the new mode as a toast', async () => {
+      slots.slots.set([webcamSlot(3, { state: 'live' })]);
+      cameras.cameras.set(CAMERAS);
+      cameras.assignments.set(new Map([[3, CAMERAS[0]]]));
+      cameras.assign.mockRejectedValueOnce(new Error('src3 is in use by an external publisher.'));
+      await open(3);
+
+      await pick('Bitrate', '2 Mbit/s');
+
+      expect(toasts.error).toHaveBeenCalledWith('src3 is in use by an external publisher.');
+    });
+
+    it('waits while the slot is changing', async () => {
+      slots.slots.set([webcamSlot(3)]);
+      cameras.cameras.set(CAMERAS);
+      await open(3);
+      const selects = () =>
+        fixture.debugElement.queryAll(By.directive(NeatSelect)).map((d) => d.componentInstance);
+      expect(selects().map((one) => one.disabled())).toEqual([false, false]);
+
+      cameras.changingSlots.set(new Set([3]));
+      await settle();
+
+      expect(selects().map((one) => one.disabled())).toEqual([true, true]);
+    });
+
+    it('is not shown for a browser that cannot access cameras', async () => {
+      slots.slots.set([webcamSlot(3)]);
+      cameras.state.set('unsupported');
+      await open(3);
+
+      expect(root().querySelector('neat-select')).toBeNull();
     });
   });
 

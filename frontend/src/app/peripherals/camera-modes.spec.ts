@@ -220,8 +220,9 @@ describe('camera modes', () => {
     // Whether another program holds the camera is not a scan fact: a preview that cannot open the
     // camera says so.
     expect(cameraSummaryLine(inUse)).toBe('');
-    // A USB camera is always Unsupported, so it gets no sentence.
-    expect(cameraSummaryLine(usb)).toBe('');
+    // A USB camera says why as a MIPI camera does, and nothing while it is Available.
+    expect(cameraSummaryLine(usb)).toBe(usb.support.reason);
+    expect(cameraSummaryLine({ ...usb, support: support('available') })).toBe('');
     expect(cameraSummaryLine({ ...imx477, support: support('unsupported') })).toBe('Unsupported.');
   });
 
@@ -243,8 +244,7 @@ describe('camera modes', () => {
       /last successful scan/,
     );
 
-    // A USB camera has no camera overlay, so its modes are Unsupported, and it previews any listed
-    // mode in a format the preview reads.
+    // A USB camera previews any listed mode in a format the preview reads, Available or not.
     expect(block(usb, sel('MJPG', 1280, 720, 30))).toEqual(open);
     expect(block(usb, null).reason).toMatch(/no mode Insight can start/);
 

@@ -57,7 +57,15 @@ output frame rate, and its details with the URL to **Copy**. The **Source** is o
 
 - **File**: **Change…** picks a file from the library, **Clear** removes it.
 - **Camera**: a webcam on the computer running your browser. **Enable camera access**, then pick a
-  camera in the list; the browser publishes it while the tab stays open.
+  camera in the list; the browser publishes it while the tab stays open. **Resolution** asks the
+  camera for 1920×1080 at 30 fps unless you choose another size, from 3840×2160 down to 640×480, or
+  **Camera default**. The list shows the sizes within the largest the camera reports, where the
+  browser reports it (Chrome does), and a camera without the chosen mode sends its nearest. Under
+  load the browser keeps the size and lowers the frame rate. The stream is always 30 fps, whatever
+  the camera sends. **Bitrate** sets the highest rate the browser sends the camera at: **Auto**
+  scales with the size, 8.1 Mbit/s at 1920×1080, or 2 to 32 Mbit/s. Insight re-encodes the camera
+  for the stream URL, so the stream's own bitrate differs. Like the camera, the choice lives in this
+  tab and is forgotten on reload. Changing either on a live camera restarts it in the new mode.
 - **Stream URL**: an RTSP or RTSPS camera Insight pulls, with its username and password. Insight
   keeps the password in memory only.
 
@@ -103,9 +111,15 @@ reports them. Insight scans the board when you open the page; **Refresh** scans 
 never opens a device, so your apps keep them.
 
 - **A camera** shows its pixel formats and resolutions, each **Available** to Neat's camera input
-  or **Unsupported** with the reason. **Start preview** shows what the camera sees, at a low frame
-  rate. While it runs, the preview holds the camera, and your app cannot open it; leaving the page
-  stops it.
+  or **Unsupported** with the reason. For a USB camera, Available means Sentinel reports the mode
+  in MJPEG on the `uvcvideo` driver, which Neat's USB camera input reads; a Sentinel too old to
+  check USB cameras leaves every USB mode Unsupported and says to update it. **Start preview**
+  shows what the camera sees, at a low frame rate. While it runs, the preview holds the camera,
+  and your app cannot open it; leaving the page stops it. A USB camera without a `/dev/v4l/by-id`
+  link is opened by its `/dev/videoN` node, so Insight first asks Sentinel to rescan and asks you
+  to **Refresh** when that node is no longer the same camera. **Camera ID**, on the camera's
+  title row, shows the ID a Neat application opens the camera by (`CameraInput` for MIPI,
+  `UsbCameraInput` for USB) with a **Copy** button.
 - **A microphone** shows what it captures. **Test microphone** records with a level meter, then
   plays the recording back.
 
@@ -118,10 +132,13 @@ the board.
 
 ![Stats Live: cards for temperature, power, CPU, memory and network, and the Thermal area in the side panel](images/ui-stats-live.webp)
 
-- **Live** shows cards for the hottest temperature, board power, CPU and memory use and network
-  traffic, and **All metrics** below them. Select a card for its area (**Thermal**, **Power**,
+- **Live** shows cards for the hottest temperature, board power, CPU and memory use, accelerator
+  memory (MLA and EV74 stacked, which Sentinel counts once each, so the top edge is their sum) and
+  network traffic, and **All metrics** below them. Select a card for its area (**Thermal**, **Power**,
   **System**, **Storage & Network**) in the side panel. **Pause** stops the updates, and **Export
   CSV** in the ⋯ menu saves the samples Sentinel holds.
+  Board power and energy are labeled **Estimated**: they are the sum of the SoM's regulator rail
+  readings, which has not been calibrated against the SoM's input power.
 - **Record**, on every view, records a trace on the board until you **Stop** it; the trace is saved
   as a run.
 - **Runs** lists the saved runs. Select one for its metrics in the side panel. Tick two to eight

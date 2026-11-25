@@ -24,7 +24,7 @@ import {
   NeatTooltip,
 } from '@sima/neat-ui';
 import { NeatCallout } from '@sima/neat-ui/callout';
-import { NeatChartCard } from '@sima/neat-ui/charts';
+import { NeatChartCard, NeatStackedChart } from '@sima/neat-ui/charts';
 import { NeatCodeBlock } from '@sima/neat-ui/code-block';
 import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import {
@@ -46,6 +46,7 @@ import { formatRelativeTime } from '../../relative-time';
 import { downloadCsv } from '../../stats/csv-download';
 import { daemonView, healthProblems, type DaemonView } from '../../stats/daemon-view';
 import type { SentinelFailure } from '../../stats/sentinel-failure';
+import { megabytes } from '../../stats/format';
 import { SentinelRuns } from '../../stats/sentinel-runs';
 import { SentinelTelemetry, type TelemetryUpdate } from '../../stats/sentinel-telemetry';
 import { StatsSession } from '../../stats/stats-session';
@@ -143,6 +144,7 @@ function notReadyHeading(
     NeatButton,
     NeatCallout,
     NeatChartCard,
+    NeatStackedChart,
     NeatCodeBlock,
     NeatCollapsible,
     NeatIcon,
@@ -169,6 +171,7 @@ function notReadyHeading(
   styleUrl: './stats.page.css',
 })
 export class StatsPage {
+  protected readonly megabytes = megabytes;
   protected readonly board = inject(BoardService);
   protected readonly telemetry = inject(SentinelTelemetry);
   private readonly runs = inject(SentinelRuns);

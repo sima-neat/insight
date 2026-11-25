@@ -22,6 +22,7 @@ import {
   size,
   support,
   usb,
+  USB_REASON,
 } from '../../peripherals/cameras.testing';
 import { PeripheralsSession } from '../../peripherals/peripherals-session';
 import { PeripheralsService } from '../../peripherals/peripherals.service';
@@ -569,17 +570,30 @@ describe('CameraPanel', () => {
     expect(statusLine()).toBe('Not running');
   });
 
+  it('offers the camera ID where the camera has one, and nothing where it has none', async () => {
+    await show(imx477);
+    // On the title row, after the chip, as the title's end slot.
+    expect(panel().querySelector('app-panel-title app-camera-id')?.textContent?.trim()).toBe(
+      'Camera ID',
+    );
+    expect(panel().querySelector('h2 app-camera-id')).toBeNull();
+    await show({ ...usb, device: { ...usb.device, camera_name: 'usb-046d:0825-0' } });
+    expect(panel().querySelector('app-camera-id')).not.toBeNull();
+    await show(usb);
+    expect(panel().querySelector('app-camera-id')).toBeNull();
+  });
+
   it('the panel shows one explanation line, chosen by priority', async () => {
     await show(imx568);
     expect(notes()).toEqual([NOT_IN_OVERLAYS]);
     expect(panel().querySelector('app-panel-title + p[neatNote]')?.textContent?.trim()).toBe(
       NOT_IN_OVERLAYS,
     );
-    // An Available camera and a USB camera say nothing there.
+    // An Available camera says nothing there; an Unsupported USB camera says why.
     await show(imx477);
     expect(notes()).toEqual([]);
     await show(usb);
-    expect(notes()).toEqual([]);
+    expect(notes()).toEqual([USB_REASON]);
   });
 
   it('a mode that vanished says so, and a camera without a usable mode says why', async () => {
