@@ -1,0 +1,4 @@
+# Host-side test deps (no camera / v4l2 / gstreamer needed).
+flask
+waitress
+pytest

@@ -1,0 +1,19 @@
+# Build artifacts
+build/
+dist/
+*.deb
+
+# Test artifacts
+.pytest_cache/
+tests/.test-token
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# macOS metadata
+.DS_Store
+
+# Editor artifacts
+.vscode/
+.idea/
