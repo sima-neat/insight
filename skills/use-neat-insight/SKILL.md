@@ -155,14 +155,14 @@ Insight serves channels `0` to `count - 1`: 80 on a DevKit, and in the SDK the n
 | `first_packet_at`, `last_packet_at`, `remote_addr` | When video first and last arrived, and from where. |
 | `rtp.ssrc`, `rtp.payload_type` | The sender's SSRC and the last payload type seen. |
 | `rtp.packets_received`, `rtp.bytes_received`, `rtp.bitrate_bps`, `rtp.packet_rate_pps` | Packets and bytes received, and their rates over the last second. |
-| `media.codec` | `H264` (payload type 96), `H265` (98), or `unknown` before video and for a payload type Insight does not play. |
-| `media.seen_sps`, `media.idr_count` | Whether a sequence parameter set arrived, and the keyframes seen: IDRs for H.264, IRAPs for H.265. |
+| `media.codec` | `H264` (payload type 96), `H265` (98), `JPEG` (26, RTP/JPEG), or `unknown` before video and for a payload type Insight does not play. |
+| `media.seen_sps`, `media.idr_count` | Whether a sequence parameter set arrived, and the keyframes seen: IDRs for H.264, IRAPs for H.265. Every JPEG frame stands alone, so a JPEG channel counts none. |
 | `metadata.udp_port`, `metadata.active`, `metadata.first_message_at`, `metadata.last_message_at`, `metadata.remote_addr` | The metadata port and the same facts for its messages. |
 | `metadata.messages_received`, `metadata.bytes_received`, `metadata.bitrate_bps`, `metadata.message_rate_mps` | Messages received, whole or joined from chunks, and their rates. |
 | `metadata.messages_forwarded` | Messages sent to at least one browser: an untimed one at once, a timed one once matched to the frame its `timestamp` names. A timed message that finds no frame within 5 s is dropped. |
 | `metadata.invalid_json` | Datagrams that were not a JSON object. |
 | `webrtc.peer_count` | Browsers connected to the channel's video, including connections still being set up. |
-| `diagnostics` (with `verbose=1`) | `malformed_packets`, `unsupported_packets` (a payload type Insight does not play; RTP/JPEG, 26, is planned) and `recent_errors`, the latest problems, oldest first, each starting with its time. |
+| `diagnostics` (with `verbose=1`) | `malformed_packets`; `unsupported_packets` (a payload type Insight does not play); `oversized_frames` (frames dropped because their RTP packets came to over 16 MiB); `incomplete_frames` (frames withheld because a packet was lost, the first one included, for every codec; the whole frames an H.265 channel then holds until its next IRAP are not counted); `unusable_frames` (whole JPEG frames Insight cannot rebuild into an image, counted, with the reason in `recent_errors`, only while a viewer has the channel open); `skipped_frames` (JPEG frames a viewer skipped because its connection's buffer was full, once per frame and viewer); and `recent_errors`, the latest problems, oldest first, each starting with its time. |
 
 | Query | Behavior |
 | --- | --- |
@@ -183,10 +183,10 @@ curl -k 'https://127.0.0.1:9900/api/ingest/stats?all=1&verbose=1' | jq '.channel
 | Step | Question | Field | Failing means |
 | --- | --- | --- | --- |
 | 1 | Does video reach Insight? | `rtp.packets_received` rising, `active` | Nothing arrived. Check the app's host and port against `neat --json` (`videoUDP` `hostPortStart + N`) and that `N` is below the channel count. |
-| 2 | Can Insight play it? | `media.codec` not `unknown` | `diagnostics.unsupported_packets` is rising: the app sends a payload type other than 96 or 98. `rtp.payload_type` names it; 26 is RTP/JPEG, which is not played yet. |
-| 3 | Are there keyframes? | `media.idr_count` growing | A viewer starts at the next keyframe, and Insight cannot ask the app for one. Send a keyframe at least every second, with the parameter sets in band. |
+| 2 | Can Insight play it? | `media.codec` not `unknown` | `diagnostics.unsupported_packets` is rising: the app sends a payload type other than 96, 98 or 26. `rtp.payload_type` names it. For JPEG, `diagnostics.unusable_frames` rising while a viewer watches means frames Insight cannot rebuild (a type other than 0, 1, 64 or 65, interlaced, tables out of band, a reserved Q, broken fragments): `recent_errors` names the reason. The rules are under Video in `docs/contracts.md`. |
+| 3 | Are there keyframes? | `media.idr_count` growing (H.264 and H.265) | A viewer starts at the next keyframe, and Insight cannot ask the app for one. Send a keyframe at least every second, with the parameter sets in band. JPEG has no keyframes: skip this step. |
 | 4 | Is a browser connected? | `webrtc.peer_count` at least 1 | The offer failed. Read its error code in the browser's network panel or the console with `debug=1` ([Error Handling](#error-handling)). |
-| 5 | Does the browser get and decode pictures? | In the browser | A viewer is listed but its tile shows nothing: the WebRTC connection is not up (the browser cannot reach the `webRTC` UDP range, or `network.browser_ice_address` in `/api/health` is wrong), or no keyframe has come yet. An H.265 tile in a browser without H.265 shows "Codec not supported by this browser"; otherwise look at `chrome://webrtc-internals` and the console with `debug=1`. |
+| 5 | Does the browser get and show pictures? | In the browser | A viewer is listed but its tile shows nothing: the WebRTC connection is not up (the browser cannot reach the `webRTC` UDP range, or `network.browser_ice_address` in `/api/health` is wrong), or no keyframe has come yet. The browser decodes H.264 and H.265; an H.265 tile in a browser without H.265 shows "Codec not supported by this browser". JPEG frames come over the connection's `jpeg` data channel and the page draws them, in any browser; `diagnostics.skipped_frames` rising means a viewer's connection is too slow to take every frame. Otherwise look at `chrome://webrtc-internals` and the console with `debug=1`. |
 | 6 | Does metadata reach Insight? | `metadata.messages_received` rising | Check the `metadataUDP` port for the same `N` as the video. `metadata.invalid_json` rising means the datagrams are not JSON objects. |
 | 7 | Is metadata sent on? | `metadata.messages_forwarded` rising | Read the cases below. |
 
@@ -199,12 +199,13 @@ Reading the metadata counters while a browser watches:
 
 ## Synthetic Metadata Testing
 
-For viewer and metadata-path testing, use the bundled test feed instead of building ad hoc UDP emitters. `neat-insight-metadata-test <channel>` sends one Viewer channel an H.264 test pattern (640x480 at 15 fps, a white square sweeping across it) on UDP `9000+channel` and, for every frame, one message of each type asked for on `9100+channel`, drawn on the square (object-detection also sends a `ship` that stays put and turns slowly, with `oriented_bbox`). Every message follows the metadata contract: its `timestamp` names its frame, so the overlays follow the square, and one that leaves it on screen shows a frame-matching problem. It needs ffmpeg with libx264 and runs until Ctrl-C.
+For viewer and metadata-path testing, use the bundled test feed instead of building ad hoc UDP emitters. `neat-insight-metadata-test <channel>` sends one Viewer channel an H.264 test pattern (640x480 at 15 fps, a white square sweeping across it; `--codec jpeg` sends it as RTP/JPEG, and `--size` and `--rate` change the picture) on UDP `9000+channel` and, for every frame, one message of each type asked for on `9100+channel`, drawn on the square (object-detection also sends a `ship` that stays put and turns slowly, with `oriented_bbox`). Every message follows the metadata contract: its `timestamp` names its frame, so the overlays follow the square, and one that leaves it on screen shows a frame-matching problem. It needs ffmpeg (with libx264 for H.264) and runs until Ctrl-C.
 
 ```bash
 neat-insight-metadata-test 0
 neat-insight-metadata-test 1 --types object-detection,tracking,pose-estimation,segmentation,classification
 neat-insight-metadata-test 2 --host 192.168.1.30 --metadata-delay-ms 300
+neat-insight-metadata-test 3 --codec jpeg --size 1280x720 --rate 30
 ```
 
 `--host` is the machine Insight runs on (`127.0.0.1` by default); `--types` takes `object-detection` (the default), `classification`, `tracking`, `pose-estimation` and `segmentation`, comma-separated; `--metadata-delay-ms` holds each message back after its frame, as a slow model would, to provoke the Viewer's **Metadata late** notice. Run one feed per channel.
@@ -411,10 +412,12 @@ Every API error answers `{"error": {"code", "message", "hint"}}` with an HTTP er
 - `500 internal_error` for local processing or stream startup failures; the message says what failed.
 - `502` for a board that cannot be reached or signed in to, or a Sentinel that cannot be used.
 - `POST /api/channels/{N}/offer` codes. A 5xx is worth retrying, a 4xx is final:
-  - `503 no_video`: no video of a codec Insight plays has reached the channel yet (payload type 96 or 98). Retry.
+  - `503 no_video`: no video of a codec Insight plays has reached the channel yet (payload type 96, 98 or 26). Retry.
   - `503 codec_changed`: the channel's codec changed while the offer was answered. Retry.
+  - `503 too_many_viewers`: 8 connections to the channel are open or opening. Retry once one leaves.
   - `500 negotiation_failed`: Insight could not set up the connection, or did not answer within 10 s. The cause is in Insight's server log, with the channel.
   - `415 codec_unsupported`: the browser's offer does not list the channel's codec, so it has no decoder for it. Final for that browser.
+  - `415 jpeg_needs_data_channel`: the channel carries JPEG, whose frames travel over a data channel, and the offer opens none (it has no application m-line). Final. What a viewer's connection carries is under "What a viewer's connection carries" in `docs/contracts.md`.
   - `413 offer_too_large`: the offer is larger than 64 KiB.
   - `400 invalid_offer`: the body is no JSON session description or no valid SDP offer. `400 no_such_channel`: `N` is not below the channel count (`400 invalid_request` when it is no integer).
 - `502 pull_unreachable` from `PUT /api/slots/{n}` when a camera does not answer; `502 mediamtx_failed` when MediaMTX refuses a call. Relayed MJPEG streams answer `429` at their cap, `502` when their ffmpeg fails, `504` when it sends no picture.

@@ -82,9 +82,10 @@ program. See [Common workflows](workflows.md) for webcams, IP cameras and extern
 ![The Viewer with four channels of the test feed: detection boxes with tracks, a segmentation mask, a pose and a classification](images/ui-viewer.webp)
 
 The Viewer shows the channels your apps send, as a grid of tiles, with their metadata drawn over
-the video. A tile's status line names the channel's codec: H.264, H.265 or JPEG. The toolbar sets the tile **Size**, fits all tiles or a number of them on a page
-(**Fit all**, **Fit N**), turns pages, and **Go to channel** jumps to one (`/`). The ⋯ menu shows or
-hides each tile's bar, and can hide channels without video.
+the video. A tile's status line names the channel's codec: H.264, H.265 or JPEG. The toolbar sets
+the tile **Size**, fits all tiles or a number of them on a page (**Fit all**, **Fit N**), turns
+pages, and **Go to channel** jumps to one (`/`). The ⋯ menu shows or hides each tile's bar, and can
+hide channels without video.
 
 Select a tile to show that channel in the side panel; with no tile selected, the panel's settings
 apply to **All channels**. A setting you change on one channel overrides the global value there

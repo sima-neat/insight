@@ -512,8 +512,8 @@ page draws them. This section is the rule for both ends.
   the first one.
 - **An offer for a JPEG channel without an application m-line** can never receive frames. Insight
   refuses it with 415 `jpeg_needs_data_channel`, which is final: the browser does not retry.
-- **For an H.264 or H.265 channel** Insight ignores the `jpeg` channel, as an Insight that does not
-  know it does.
+- **For an H.264 or H.265 channel** Insight ignores the `jpeg` channel, as Insight before JPEG
+  support did.
 
 #### The `jpeg` data channel
 
@@ -550,7 +550,7 @@ page draws them. This section is the rule for both ends.
 - **A failed send closes that viewer's `jpeg` channel.** The browser rebuilds its connection when
   its `jpeg` channel closes, rather than waiting on a silent channel.
 - **Versioning is the label.** The header has no version field. An incompatible change would take
-  a new label (`jpeg2`), which an Insight that does not know it ignores.
+  a new label (`jpeg2`), which Insight versions that do not know it ignore.
 
 JPEG viewers count toward the channel's viewer limit like any other viewer.
 
