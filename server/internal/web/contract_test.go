@@ -51,6 +51,22 @@ func init() {
 	openapi3filter.RegisterBodyDecoder("text/event-stream", openapi3filter.PlainBodyDecoder)
 }
 
+// The frame counters come through verbose, and the answer is checked against the document.
+func TestIngestStatsReportTheFrameCounters(t *testing.T) {
+	c := newContract(t)
+	var body struct {
+		Channels []struct{ Diagnostics map[string]any }
+	}
+	if err := json.Unmarshal([]byte(c.ok(c.get("/api/ingest/stats?all=1&verbose=1"))), &body); err != nil || len(body.Channels) != 2 {
+		t.Fatalf("%v %+v", err, body)
+	}
+	for key, want := range map[string]float64{"incomplete_frames": 3, "unusable_frames": 2, "skipped_frames": 1} {
+		if got := body.Channels[0].Diagnostics[key]; got != want {
+			t.Errorf("%s = %v, want %v", key, got, want)
+		}
+	}
+}
+
 func TestTheAPIAnswersAsItsDocumentSays(t *testing.T) {
 	c := newContract(t)
 
@@ -252,6 +268,7 @@ func newContract(t *testing.T) *contract {
 	must(t, err)
 
 	viewer := &fakeChannels{states: make([]channels.State, 2), answer: channels.Description{Type: "answer", SDP: "v=0"}}
+	viewer.states[0].Video = channels.VideoState{Codec: "JPEG", Incomplete: 3, Unusable: 2, Skipped: 1}
 	boards, devices, info, host := newBoards(t)
 	c.srv = httptest.NewServer(NewHandler(Deps{
 		Config: config.Config{

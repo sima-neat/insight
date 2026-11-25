@@ -141,23 +141,6 @@ func TestIngestStatsKeepsTheFieldsTheSDKReads(t *testing.T) {
 	}
 }
 
-func TestIngestStatsReportTheFrameCounters(t *testing.T) {
-	h := handlerWith(&fakeChannels{states: []channels.State{{Channel: 0,
-		Video: channels.VideoState{Active: true, Codec: "JPEG", Incomplete: 3, Unusable: 2, Skipped: 1}}}}, config.Config{})
-	w := serve(t, h, http.MethodGet, "/api/ingest/stats?verbose=1")
-	var body struct {
-		Channels []struct{ Diagnostics map[string]any }
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || len(body.Channels) != 1 {
-		t.Fatalf("%v %s", err, w.Body.String())
-	}
-	for key, want := range map[string]float64{"incomplete_frames": 3, "unusable_frames": 2, "skipped_frames": 1} {
-		if got := body.Channels[0].Diagnostics[key]; got != want {
-			t.Errorf("%s = %v, want %v", key, got, want)
-		}
-	}
-}
-
 func TestChannelList(t *testing.T) {
 	h := handlerWith(&fakeChannels{states: []channels.State{
 		{Channel: 0, Video: channels.VideoState{Active: true, Codec: "H265"}},
