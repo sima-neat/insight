@@ -97,9 +97,10 @@ describe('ViewerInspector', () => {
     const name = section === undefined ? label : `${section}: ${label}`;
     return inspector().querySelector(`[aria-label="${name}"]`)!.closest('app-setting-row')!;
   };
+  /** Each row's control name, in order: the control comes first in a row, its reset button after. */
   const rowLabels = () =>
-    [...inspector().querySelectorAll('app-setting-row .label')].map((label) =>
-      label.textContent?.trim(),
+    [...inspector().querySelectorAll('app-setting-row')].map((settingRow) =>
+      settingRow.querySelector('[aria-label]')?.getAttribute('aria-label'),
     );
   const buttonIn = (container: Element, label: string): HTMLButtonElement =>
     [...container.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
@@ -278,7 +279,12 @@ describe('ViewerInspector', () => {
 
     await click(tab('General'));
     expect(headings()).toEqual([]);
-    expect(rowLabels()).toEqual(['Video sync buffer', 'Metadata retention', 'Line width']);
+    expect(rowLabels()).toEqual([
+      'Video sync buffer',
+      'Metadata retention',
+      'Line width',
+      'Orientation',
+    ]);
     await type(field('Video sync buffer'), '600');
     expect(bufferOf(0)).toBe(600);
     expect(bufferOf(7)).toBe(600);
@@ -737,7 +743,7 @@ describe('ViewerInspector', () => {
 
       await click(tab('ROI'));
       expect(tab('ROI').getAttribute('aria-selected')).toBe('true');
-      expect(rowLabels()).toEqual([]);
+      expect(rowLabels()).toEqual(['Show regions', 'Filter by regions']);
       expect(inspector().querySelector('app-roi-tab')).not.toBeNull();
     });
 

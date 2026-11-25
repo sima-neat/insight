@@ -291,6 +291,7 @@ describe('SettingRow', () => {
   it('shows a choice setting as a select, and marks and resets a channel override', async () => {
     await render(ORIENTATION);
     expect(combobox().getAttribute('aria-label')).toBe('Orientation');
+    expect(combobox().hasAttribute('aria-describedby')).toBe(false);
     expect(combobox().textContent?.trim()).toBe('None');
 
     await choose('Mirror');
@@ -316,11 +317,13 @@ describe('SettingRow', () => {
     });
     expect(combobox().textContent?.trim()).toBe('Rotate 180°');
     expect(text()).toContain('overrides global · Global: Mirror');
+    expect(description(combobox())).toBe('overrides global · Global: Mirror');
     const reset = button('Reset')!;
     expect(reset.getAttribute('aria-label')).toBe('Reset Orientation to the global value (Mirror)');
 
     // "All channels" lists the channel with its choice as the select shows it.
     await render(ORIENTATION);
+    expect(description(combobox())).toBe('Overridden on 1 channel');
     await click(overrideNote()!);
     expect(overrideLines()).toEqual(['Channel 2 Rotate 180° Use global', 'Reset on 1 channel…']);
 
@@ -614,6 +617,7 @@ describe('SettingRow', () => {
     expect(document.activeElement).toBe(toggle());
 
     await render(ORIENTATION);
+    expect(description(combobox())).toBe('Overridden on 1 channel');
     await click(overrideNote()!);
     await click(button('Use global')!);
     expect(document.activeElement).toBe(combobox());

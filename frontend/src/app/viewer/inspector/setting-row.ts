@@ -86,9 +86,7 @@ export function settingCount(count: number): string {
  *
  * The control is named by `name`, which says where the setting belongs when its label alone does
  * not (the Metadata tab has a "Show overlay" per type), and it is described by the override note,
- * so the override state is heard on focus. A select is the exception on both counts: the kit's
- * select shows the name it is given as its label, and takes no description, so its note is only
- * read after it.
+ * so the override state is heard on focus. A select shows the name it is given as its label.
  */
 @Component({
   selector: 'app-setting-row',
@@ -175,6 +173,7 @@ export function settingCount(count: number): string {
         size="small"
         [label]="fullName()"
         [options]="setting.options"
+        [describedBy]="describedBy()"
         [disabled]="disabled()"
         [value]="choiceValue()"
         (valueChange)="choose(setting, $event)"
@@ -330,7 +329,7 @@ export class SettingRow {
 
   /**
    * What the control is described by: its hint and its override note, when it has them. Undefined
-   * without either, which both `aria-describedby` and the slider's `describedBy` leave off.
+   * without either, which `aria-describedby` and the kit's `describedBy` inputs leave off.
    */
   protected readonly describedBy = computed(() => {
     const ids: string[] = [];
