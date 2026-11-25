@@ -225,11 +225,11 @@ paths:
         the check made after it 503 `mediamtx_unavailable`, with nothing assigned. The
         credentials are kept in memory only. The slot starts pulling at once.
         `{kind: "webcam", fps?}` makes it a browser's webcam at `fps` frames per second, 30 or 60
-        (30 when absent; another rate is 400 `invalid_fps`): the answer's `urls.whip` is where
-        the browser publishes, a URL of its own per rate, and the stream on `srcN` is re-encoded
-        at that rate whatever the camera sends. Assigning a webcam again at another rate
-        disconnects what publishes at the old one. A slot an external publisher holds is 409
-        `slot_busy`. The body is sent as application/json.
+        (30 when absent; another rate, 0 included, is 400 `invalid_fps`): the answer's
+        `urls.whip` is where the browser publishes, a URL of its own per rate, and the stream on
+        `srcN` is re-encoded at that rate whatever the camera sends. Assigning a webcam again at
+        another rate disconnects what publishes at the old one. A slot an external publisher
+        holds is 409 `slot_busy`. The body is sent as application/json.
       requestBody:
         required: true
         content:

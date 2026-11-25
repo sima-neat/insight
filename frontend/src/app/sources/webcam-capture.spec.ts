@@ -103,15 +103,21 @@ describe('the capture modes', () => {
     expect(offeredCaptureModes(undefined).map((mode) => mode.id)).toEqual(ALL_MODE_IDS);
   });
 
-  it('show the chosen mode when the camera reaches it, else the largest it does', () => {
+  it('show the chosen mode when the camera reaches it, else its size at the other rate, else the largest it does', () => {
     expect(effectiveCaptureMode('720p30', undefined)).toBe('720p30');
     expect(effectiveCaptureMode('720p30', ['720p30', 'camera'])).toBe('720p30');
     expect(effectiveCaptureMode('1080p30', ['720p30', 'camera'])).toBe('720p30');
     expect(effectiveCaptureMode('unknown', ['480p30', 'camera'])).toBe('480p30');
-    // A 60 fps choice on a camera that reaches 30 only publishes at 30.
+    // A 60 fps choice on a camera that reaches 30 only keeps its size at 30, rather than taking
+    // the camera's largest mode.
+    const upTo4k30 = ['2160p30', '1440p30', '1080p30', '720p30', '480p30', 'camera'];
+    expect(effectiveCaptureMode('1080p60', upTo4k30)).toBe('1080p30');
+    expect(effectiveCaptureMode('720p60', upTo4k30)).toBe('720p30');
     expect(effectiveCaptureMode('1080p60', ['1080p30', '720p30', '480p30', 'camera'])).toBe(
       '1080p30',
     );
+    // A size the camera does not reach at either rate falls to its largest mode.
+    expect(effectiveCaptureMode('1080p60', ['720p30', '480p30', 'camera'])).toBe('720p30');
   });
 });
 

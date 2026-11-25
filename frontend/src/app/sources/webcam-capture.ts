@@ -99,12 +99,19 @@ export function offeredCaptureModes(ids: readonly string[] | undefined): Capture
 }
 
 /**
- * The mode a slot publishes in: the chosen one while the camera reaches it, else the largest the
- * camera does, which is what its list shows.
+ * The mode a slot publishes in, which is what the camera's list shows: the chosen one while the
+ * camera reaches it, else the chosen size at the other rate where the camera reaches that (a
+ * 1920x1080 at 60 fps choice on a camera that does 30 fps only is 1920x1080 at 30, not its
+ * largest size), else the largest mode the camera does.
  */
 export function effectiveCaptureMode(chosen: string, ids: readonly string[] | undefined): string {
   const offered = offeredCaptureModes(ids);
-  return offered.some((candidate) => candidate.id === chosen) ? chosen : offered[0].id;
+  if (offered.some((candidate) => candidate.id === chosen)) return chosen;
+  const size = CAPTURE_MODES.find((candidate) => candidate.id === chosen && candidate.width);
+  const sameSize =
+    size &&
+    offered.find((candidate) => candidate.width === size.width && candidate.height === size.height);
+  return (sameSize ?? offered[0]).id;
 }
 
 /** The `getUserMedia` constraints that open a camera in a mode; an unknown mode is the default. */

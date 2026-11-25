@@ -106,22 +106,20 @@ func pathName(n int) string { return fmt.Sprintf("src%d", n) }
 // The rates a webcam slot streams at, in frames per second. MediaMTX's normalizer
 // (webrtc/mediamtx.yml) has a path pattern of its own per rate, each with a fixed command line,
 // so a rate is the path a browser publishes to and never a value on a command line. An
-// assignment without a rate takes DefaultWebcamFPS, the one rate before there were two.
+// assignment without a rate, and a webcam saved before there were two, takes DefaultWebcamFPS,
+// the one rate there was.
 const DefaultWebcamFPS = 30
 
 var webcamRates = [...]int{DefaultWebcamFPS, 60}
 
-// webcamRate is an assignment's rate, DefaultWebcamFPS for 0; false for one no path encodes.
-func webcamRate(fps int) (int, bool) {
-	if fps == 0 {
-		return DefaultWebcamFPS, true
-	}
+// isWebcamRate says whether a normalizer path encodes at fps.
+func isWebcamRate(fps int) bool {
 	for _, rate := range webcamRates {
 		if fps == rate {
-			return fps, true
+			return true
 		}
 	}
-	return 0, false
+	return false
 }
 
 // camName is the path a browser publishes slot n's webcam to at a rate of webcamRates: camN at

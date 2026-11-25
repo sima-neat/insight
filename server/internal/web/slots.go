@@ -35,8 +35,13 @@ func (h *handlers) AssignSlot(w http.ResponseWriter, r *http.Request, n api.Slot
 	case api.SlotAssignmentKindPull:
 		err = h.deps.Slots.AssignPull(r.Context(), n, value(body.Url), value(body.Username), value(body.Password))
 	case api.SlotAssignmentKindWebcam:
-		// The answer's urls.whip says the same.
-		_, err = h.deps.Slots.AssignWebcam(n, r.Host, value(body.Fps))
+		// A webcam that names no rate is at the default one; a present 0 is refused as any
+		// rate other than 30 and 60 is. The answer's urls.whip says where to publish.
+		fps := slots.DefaultWebcamFPS
+		if body.Fps != nil {
+			fps = *body.Fps
+		}
+		_, err = h.deps.Slots.AssignWebcam(n, r.Host, fps)
 	default:
 		apierr.Write(w, http.StatusBadRequest, "invalid_request", "kind is file, pull or webcam.", "")
 		return

@@ -103,7 +103,7 @@ func TestAssigningAFileRestartsARunningSlotWithIt(t *testing.T) {
 	}
 
 	// A webcam slot that becomes a file slot does not start streaming by itself.
-	_, err := h.m.AssignWebcam(4, "", 0)
+	_, err := h.m.AssignWebcam(4, "", DefaultWebcamFPS)
 	must(t, err)
 	must(t, h.m.AssignFile(4, "a.mp4", 0))
 	if s := h.slot(4); s.Run {
@@ -516,7 +516,7 @@ func TestAPullThatLaterRefusesItsCredentialsIsPaused(t *testing.T) {
 
 func TestAWebcamSlotKicksWhatItNoLongerWants(t *testing.T) {
 	h := newHarness(t)
-	url, err := h.m.AssignWebcam(7, "[fd00::1]:9900", 0)
+	url, err := h.m.AssignWebcam(7, "[fd00::1]:9900", DefaultWebcamFPS)
 	must(t, err)
 	if url != "https://[fd00::1]:18889/cam7/whip" {
 		t.Errorf("the WHIP URL: %s", url)
@@ -559,7 +559,6 @@ func TestAssigningAWebcamChecksItsRate(t *testing.T) {
 		fps, rate int
 		whip      string
 	}{
-		{0, 30, ":18889/cam5/whip"}, // no rate: what every webcam had before
 		{30, 30, ":18889/cam5/whip"},
 		{60, 60, ":18889/cam5r60/whip"},
 	} {
@@ -571,7 +570,8 @@ func TestAssigningAWebcamChecksItsRate(t *testing.T) {
 		}
 	}
 	// A rate no normalizer path encodes is refused, and the slot keeps what it had.
-	for _, fps := range []int{-30, 1, 25, 29, 31, 59, 61, 120} {
+	// 0 too: an assignment without a rate passes DefaultWebcamFPS (the handler does).
+	for _, fps := range []int{-30, 0, 1, 25, 29, 31, 59, 61, 120} {
 		_, err := h.m.AssignWebcam(5, "", fps)
 		wantCode(t, err, CodeInvalidFPS)
 	}

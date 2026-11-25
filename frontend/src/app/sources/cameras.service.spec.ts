@@ -18,6 +18,13 @@ const HD = {
   label: 'HD camera',
   getCapabilities: () => ({ width: { max: 1280 }, height: { max: 720 }, frameRate: { max: 30 } }),
 };
+/** A camera that reports 3840x2160 at 30 fps at most: large, but no 60 fps. */
+const UHD30 = {
+  kind: 'videoinput',
+  deviceId: 'cam-uhd',
+  label: 'UHD camera',
+  getCapabilities: () => ({ width: { max: 3840 }, height: { max: 2160 }, frameRate: { max: 30 } }),
+};
 
 /** Where `webcamSlot` says a browser publishes slot `n`. */
 const whipUrl = (n: number) => `https://10.0.0.2:8889/cam${n}/whip`;
@@ -726,6 +733,27 @@ describe('CamerasService', () => {
       // A camera that reports no 60 fps publishes in its largest 30 fps mode, so at 30.
       await service.assign(2, 'cam-hd');
       expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(2, 30);
+    });
+
+    it('publishes a 60 fps choice the camera cannot reach at its size and 30 fps, not at the largest size', async () => {
+      media.devices = [DESK, UHD30];
+      const service = await create();
+      service.setCapture(1, { mode: '1080p60', bitrate: 'auto' });
+      await service.assign(1, 'cam-uhd');
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1, 30);
+
+      await service.publish(1);
+
+      expect(slotsFake.assignWebcam).toHaveBeenCalledTimes(1);
+      expect(media.opened[0].constraints).toEqual({
+        video: {
+          deviceId: { exact: 'cam-uhd' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 },
+        },
+      });
+      expect(posts('/whip').map((call) => call.url)).toEqual([whipUrl(1)]);
     });
 
     it('publishes a 60 fps mode at 60, to the publish URL of that rate', async () => {

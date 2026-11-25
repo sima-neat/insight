@@ -87,7 +87,8 @@ paths:
   # One pattern per rate, each with its own fixed command, so the rate is the
   # path the browser publishes to and never a value on the command line. The two
   # commands differ in the rate alone (-r, -g and -keyint_min, a keyframe every
-  # second at both); server/internal/mediamtx/config_test.go holds them to that.
+  # second at both); TestTheNormalizerHasAPathPerRate in
+  # server/internal/slots/publish_test.go holds them to that.
   #
   # The ?publisher= query on the output marks src{N} as Insight's own stream, not
   # an external publisher; Insight swaps in its per-run tag at launch

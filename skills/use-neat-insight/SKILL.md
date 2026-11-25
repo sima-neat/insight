@@ -295,14 +295,14 @@ A slot (`GET /api/slots` answers `{count, slots}`) is:
 | Field | Meaning |
 | --- | --- |
 | `n`, `kind` | Its number, and what feeds it: `none`, `file`, `webcam`, `pull`. |
-| `file`, `fps`, `native_fps` | A file slot's library path, its output rate when not the file's own, and the file's own rate once probed. |
+| `file`, `fps`, `native_fps` | A file slot's library path, its output rate when not the file's own, and the file's own rate once probed. A webcam slot's `fps` is its rate, 30 or 60. |
 | `codec` | The file's or the stream's codec (`h264`, `h265`, `mjpeg`, or another); absent while unknown. |
 | `pull` | A pull's `scheme`, `host`, `path` (never credentials), `status` (`live`, `connecting`, `unreachable`, `auth_failed`, `needs_credentials`, `stopped`) and `error`. |
 | `run` | The user's Start: the slot is to run. |
 | `state` | `idle`, `preparing` (a rendition is encoded, see `job`), `starting`, `live`, `failed` (see `error`) or `external` (a publisher Insight did not start holds it). |
 | `publisher` | While MediaMTX has the stream: `protocol`, `address`, `since`, `codec`, `codec_supported`, `width`, `height`, `fps`, `bitrate_bps`. |
 | `readers` | Who reads the stream (`protocol`, `address`, `label: "insight preview"` for Insight's own). |
-| `urls` | `rtsp`, plus `http_mjpeg` for an MJPEG stream and `whip` for a webcam slot, on the host the request used (the public origin for HTTP and WHIP when one is configured). |
+| `urls` | `rtsp`, plus `http_mjpeg` for an MJPEG stream and `whip` for a webcam slot (`/camN/whip` at 30 fps, `/camNr60/whip` at 60), on the host the request used (the public origin for HTTP and WHIP when one is configured). |
 | `active_file` | What the publisher streams: the file or its rendition (`.renditions/...`). |
 
 | Method | Path | Request | Behavior |
@@ -310,7 +310,7 @@ A slot (`GET /api/slots` answers `{count, slots}`) is:
 | `GET` | `/api/slots` | None | Every slot as it stands. |
 | `PUT` | `/api/slots/{n}` | JSON `{"kind": "file", "file": "video.mp4", "fps": 15}` | Assign a file, at its own rate without `fps`. A slot that streamed a file keeps running with the new one; any other is stopped. 400 `not_streamable` for a codec other than H.264, H.265 or MJPEG, `fps_not_supported` for an `fps` on an MJPEG file or one of unknown size. With an `fps` other than the file's own, Start encodes a rendition first (`state: "preparing"`, `job`) with the catalog's encoder settings, which needs its expected size plus 1 GB free. |
 | `PUT` | `/api/slots/{n}` | JSON `{"kind": "pull", "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` | Probe the camera, then have MediaMTX pull it (forwarded unchanged) and start. 422 `pull_auth_failed` when it refuses the credentials, 502 `pull_unreachable` when it does not answer. Credentials are kept in memory only. |
-| `PUT` | `/api/slots/{n}` | JSON `{"kind": "webcam"}` | A browser's webcam: the answer's `urls.whip` is where the browser publishes; MediaMTX re-encodes it onto `srcN`. |
+| `PUT` | `/api/slots/{n}` | JSON `{"kind": "webcam", "fps": 60}` | A browser's webcam at `fps`, 30 or 60 (30 without `fps`; any other value, 0 included, is 400 `invalid_fps`): the answer's `urls.whip` is where the browser publishes, `/camN/whip` at 30 and `/camNr60/whip` at 60, and MediaMTX re-encodes it onto `srcN` at that rate whatever the camera sends. Assigning again at the other rate disconnects what publishes at the old one. |
 | `DELETE` | `/api/slots/{n}` | None | Nothing assigned, stopped. |
 | `POST` | `/api/slots/{n}/start` | None | Make it run; answers before the stream is live. Starting a failed slot tries again. 409 `nothing_assigned`, `pull_needs_credentials`. |
 | `POST` | `/api/slots/{n}/stop` | None | Stop it (publisher, encode, pull, webcam publisher); the assignment stays. |

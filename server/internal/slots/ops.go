@@ -203,17 +203,16 @@ func (m *Manager) probeInfoCtx(ctx context.Context, url string) (StreamInfo, err
 	return m.opts.probeStream(ctx, url)
 }
 
-// AssignWebcam makes slot n a webcam's at fps frames per second (30 or 60, 0 for
-// DefaultWebcamFPS) and returns where the browser publishes it (WHIP) for a browser that reached
-// Insight at host. MediaMTX re-encodes what the browser publishes onto srcN at that rate, the
+// AssignWebcam makes slot n a webcam's at fps frames per second, 30 or 60 (an assignment that
+// names no rate passes DefaultWebcamFPS), and returns where the browser publishes it (WHIP) for a
+// browser that reached Insight at host. MediaMTX re-encodes what the browser publishes onto srcN at that rate, the
 // rate being the path the URL names. The slot is ready at once: Stop disconnects whatever
 // publishes on it, as a new assignment does what publishes at another rate.
 func (m *Manager) AssignWebcam(n int, host string, fps int) (string, error) {
 	if err := checkSlot(n); err != nil {
 		return "", err
 	}
-	rate, ok := webcamRate(fps)
-	if !ok {
+	if !isWebcamRate(fps) {
 		return "", newError(http.StatusBadRequest, CodeInvalidFPS,
 			"A webcam streams at %d or %d frames per second, not %d.", webcamRates[0], webcamRates[1], fps)
 	}
@@ -221,14 +220,14 @@ func (m *Manager) AssignWebcam(n int, host string, fps int) (string, error) {
 		if err := m.refuseExternalLocked(n); err != nil {
 			return err
 		}
-		*d = Desired{Kind: KindWebcam, FPS: rate, Run: true}
+		*d = Desired{Kind: KindWebcam, FPS: fps, Run: true}
 		rt.fullURL, rt.blocked = "", ""
 		return nil
 	})
 	if err != nil {
 		return "", err
 	}
-	return m.urls.whip(host, n, rate), nil
+	return m.urls.whip(host, n, fps), nil
 }
 
 // Clear leaves slot n with nothing assigned, and stopped. A foreign publisher on it is left

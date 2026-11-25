@@ -55,14 +55,14 @@ func TestWebcamPathsAreNamedByTheirRate(t *testing.T) {
 	if got := camNames(3); !slices.Equal(got, []string{"cam3", "cam3r60"}) {
 		t.Errorf("camNames(3) is %v", got)
 	}
-	for fps, want := range map[int]int{0: 30, 30: 30, 60: 60} {
-		if got, ok := webcamRate(fps); !ok || got != want {
-			t.Errorf("webcamRate(%d) is %d %v, want %d", fps, got, ok, want)
+	for _, fps := range []int{30, 60} {
+		if !isWebcamRate(fps) {
+			t.Errorf("%d fps is not a webcam rate", fps)
 		}
 	}
-	for _, fps := range []int{-60, 1, 15, 25, 29, 50, 59, 61, 120} {
-		if _, ok := webcamRate(fps); ok {
-			t.Errorf("webcamRate(%d) was taken", fps)
+	for _, fps := range []int{-60, 0, 1, 15, 25, 29, 50, 59, 61, 120} {
+		if isWebcamRate(fps) {
+			t.Errorf("%d fps is taken for a webcam rate", fps)
 		}
 	}
 }

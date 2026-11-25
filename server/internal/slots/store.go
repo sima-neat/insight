@@ -112,11 +112,13 @@ func (saved storedSlot) desired() (Desired, error) {
 	case KindNone:
 	case KindWebcam:
 		// A store from before there were two rates saves none: the one rate there was.
-		rate, ok := webcamRate(saved.FPS)
-		if !ok {
+		d.FPS = saved.FPS
+		if d.FPS == 0 {
+			d.FPS = DefaultWebcamFPS
+		}
+		if !isWebcamRate(d.FPS) {
 			return Desired{}, fmt.Errorf("saved source %d's webcam rate %d is not one Insight streams at, so it was left out", saved.N, saved.FPS)
 		}
-		d.FPS = rate
 	case KindFile:
 		if saved.File == "" || saved.FPS < 0 {
 			return Desired{}, fmt.Errorf("saved source %d's file was left out", saved.N)
