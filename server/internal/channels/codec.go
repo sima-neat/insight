@@ -8,12 +8,15 @@ const (
 	CodecNone Codec = iota
 	CodecH264
 	CodecH265
+	CodecJPEG
 )
 
 const (
 	payloadTypeH264 = 96
 	payloadTypeH265 = 98
-	// clockRate is the RTP clock of both codecs.
+	// payloadTypeJPEG is RFC 3551's static type for JPEG (RFC 2435).
+	payloadTypeJPEG = 26
+	// clockRate is the RTP clock of every codec.
 	clockRate = 90000
 )
 
@@ -23,6 +26,8 @@ func codecOf(payloadType uint8) Codec {
 		return CodecH264
 	case payloadTypeH265:
 		return CodecH265
+	case payloadTypeJPEG:
+		return CodecJPEG
 	}
 	return CodecNone
 }
@@ -34,8 +39,24 @@ func (c Codec) String() string {
 		return "H264"
 	case CodecH265:
 		return "H265"
+	case CodecJPEG:
+		return "JPEG"
 	}
 	return ""
+}
+
+// startsPicture says whether a payload of codec holds its picture's first bytes: the start of a
+// NAL unit for H.264 and H.265, a fragment at offset 0 for JPEG. A payload too short to say does
+// not.
+func startsPicture(codec Codec, payload []byte) bool {
+	switch codec {
+	case CodecH264, CodecH265:
+		units := nalsOf(codec, payload)
+		return len(units) > 0 && units[0].Start
+	case CodecJPEG:
+		return len(payload) >= 4 && jpegFragmentOffset(payload) == 0
+	}
+	return false
 }
 
 // nal is what one RTP payload says about a NAL unit it carries: its type, and whether the

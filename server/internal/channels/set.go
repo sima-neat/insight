@@ -161,7 +161,7 @@ type VideoState struct {
 	Remote                     string
 	SSRC                       uint32
 	PayloadType                uint8
-	Codec                      string // "H264", "H265", or "" before any or for another payload type
+	Codec                      string // "H264", "H265", "JPEG", or "" before any or for another payload type
 	Packets, Bytes             uint64
 	PacketsPerSecond, BitsPerS float64
 	Keyframes                  uint64
@@ -169,6 +169,8 @@ type VideoState struct {
 	Unsupported, Malformed     uint64
 	// Oversized are the frames dropped for growing over the cap of one frame's bytes.
 	Oversized uint64
+	// Incomplete are the frames withheld because a packet was lost, the first one included.
+	Incomplete uint64
 }
 
 // MetadataState is what arrived on a channel's metadata port and what became of it.
@@ -211,7 +213,7 @@ func (c *Channel) state(now time.Time) State {
 		SSRC: v.ssrc, PayloadType: v.payloadType, Codec: v.codec.String(),
 		Packets: v.packets, Bytes: v.bytes, PacketsPerSecond: packetRate, BitsPerS: bitRate,
 		Keyframes: v.keyframes, SeenSPS: v.seenSPS, Unsupported: v.unsupported, Malformed: v.malformed,
-		Oversized: v.oversized,
+		Oversized: v.oversized, Incomplete: v.incomplete,
 	}
 	metadataActive := !m.last.IsZero() && now.Sub(m.last) <= activeFor
 	messageRate, metadataBits := m.rate.at(metadataActive)

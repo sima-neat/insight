@@ -24,6 +24,12 @@ var (
 	errJPEGHeader       = errors.New("malformed jpeg header")
 )
 
+// jpegFragmentOffset reads the fragment offset of a payload of at least 4 bytes: bytes 1 to 3 of
+// its main header, 24 bits big-endian.
+func jpegFragmentOffset(payload []byte) uint32 {
+	return uint32(payload[1])<<16 | uint32(payload[2])<<8 | uint32(payload[3])
+}
+
 type jpegMainHeader struct {
 	offset          uint32
 	typ, q          uint8
@@ -42,7 +48,7 @@ func parseJPEGPayload(payload []byte) (jpegMainHeader, []byte, error) {
 		return jpegMainHeader{}, nil, fmt.Errorf("%w: interlaced (type-specific %d)", errJPEGType, payload[0])
 	}
 	h := jpegMainHeader{
-		offset: uint32(payload[1])<<16 | uint32(payload[2])<<8 | uint32(payload[3]),
+		offset: jpegFragmentOffset(payload),
 		typ:    payload[4],
 		q:      payload[5],
 		width:  int(payload[6]) * 8,

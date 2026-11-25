@@ -24,7 +24,7 @@ type Channel struct {
 	media atomic.Pointer[media]
 	corr  correlator
 	queue chan outbound
-	views viewers
+	views viewers[*webrtc.DataChannel]
 
 	// Owned by the video reader.
 	assembler      *assembler
@@ -60,26 +60,39 @@ func (c *Channel) video(raw []byte, from netip.AddrPort, now time.Time) {
 		return
 	}
 	if m != c.assemblerMedia {
-		c.assembler, c.assemblerMedia, c.assemblerIdle = newAssembler(), m, m.track.idle.Load()
-	} else if idle := m.track.idle.Load(); idle != c.assemblerIdle {
-		// Everyone left and someone came back between two packets: start them at a keyframe.
-		c.assembler.rearm()
-		c.assemblerIdle = idle
+		c.assembler, c.assemblerMedia, c.assemblerIdle = newAssembler(), m, 0
+		if m.track != nil {
+			c.assemblerIdle = m.track.idle.Load()
+		}
+	} else if m.track != nil {
+		// Everyone left and someone came back between two packets: start them at a keyframe. A
+		// trackless generation has no such epoch: every JPEG frame stands alone.
+		if idle := m.track.idle.Load(); idle != c.assemblerIdle {
+			c.assembler.rearm()
+			c.assemblerIdle = idle
+		}
 	}
-	unit, ready, oversized := c.assembler.accept(&packet, raw)
-	if oversized {
+	result := c.assembler.accept(&packet, raw)
+	if result.oversized {
 		c.stats.count(func(s *stats) { s.video.oversized++ })
 		c.stats.failed("dropped a frame over %d MiB from %s", maxUnitBytes>>20, from)
 	}
-	if m.track.bindings.Load() == 0 {
-		if ready {
+	if result.incomplete > 0 {
+		c.stats.count(func(s *stats) { s.video.incomplete += uint64(result.incomplete) })
+	}
+	if !m.watched() {
+		if result.ready {
 			c.assembler.rearm()
 		}
 		return
 	}
-	if !ready {
+	if !result.ready {
 		return
 	}
+	if m.codec == CodecJPEG {
+		return // no JPEG frame is rebuilt or sent yet
+	}
+	unit := result.unit
 	outgoing := c.line.frame(unit.timestamp, unit.ssrc, unit.afterSequenceBreak, now)
 	sent := false
 	for _, raw := range unit.packets {
@@ -192,37 +205,38 @@ func (c *Channel) send(out outbound) {
 	}
 }
 
-// viewers are the metadata DataChannels open to the channel's browsers.
-type viewers struct {
+// viewers are the data channels of one kind open to browsers: a channel's metadata channels, a
+// JPEG generation's jpeg channels.
+type viewers[C comparable] struct {
 	mu  sync.Mutex
-	dcs map[*webrtc.DataChannel]struct{}
+	dcs map[C]struct{}
 }
 
-func (v *viewers) add(dc *webrtc.DataChannel) {
+func (v *viewers[C]) add(dc C) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.dcs == nil {
-		v.dcs = map[*webrtc.DataChannel]struct{}{}
+		v.dcs = map[C]struct{}{}
 	}
 	v.dcs[dc] = struct{}{}
 }
 
-func (v *viewers) remove(dc *webrtc.DataChannel) {
+func (v *viewers[C]) remove(dc C) {
 	v.mu.Lock()
 	delete(v.dcs, dc)
 	v.mu.Unlock()
 }
 
-func (v *viewers) count() int {
+func (v *viewers[C]) count() int {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return len(v.dcs)
 }
 
-func (v *viewers) list() []*webrtc.DataChannel {
+func (v *viewers[C]) list() []C {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	list := make([]*webrtc.DataChannel, 0, len(v.dcs))
+	list := make([]C, 0, len(v.dcs))
 	for dc := range v.dcs {
 		list = append(list, dc)
 	}
