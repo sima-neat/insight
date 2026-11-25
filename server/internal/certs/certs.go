@@ -75,7 +75,8 @@ func run(path string, timeout time.Duration, args ...string) error {
 	})
 	err = group.Wait()
 	timer.Stop()
-	if timedOut.Load() {
+	// A child that finished as the timer fired was not stopped by it: only a failed run counts.
+	if timedOut.Load() && err != nil {
 		return fmt.Errorf("`%s` did not finish within %d minutes and was stopped: run it by hand in a "+
 			"terminal (`mkcert -install` first, if it is the one that waited), then start Insight again\n%s",
 			command, int(timeout.Minutes()), out.String())

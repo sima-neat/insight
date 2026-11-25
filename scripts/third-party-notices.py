@@ -41,12 +41,13 @@ HEADER = """\
 Third-party software in neat-insight
 
 The server (neat_insight/bin/neat-insight) is built with Go and the Go modules of the first part
-below, and MediaMTX (neat_insight/bin/mediamtx, version {mtx_version}) with the Go modules of the
-second; each module's license follows. MediaMTX's own license, which covers its module
-({mediamtx}), is neat_insight/bin/mediamtx.LICENSE, so that module is not repeated here. Each part
-is complete by itself: a module both link (pion, golang.org/x/crypto and others) appears in both,
-in the version each links. The Go standard library appears in both parts too. The licenses of the
-web UI's packages are built into the server, which serves them at /3rdpartylicenses.txt.
+below, and MediaMTX (neat_insight/bin/mediamtx, version {mtx_version}) with the Go modules of
+the second; each module's license follows. MediaMTX's own license, which covers its module
+({mediamtx}), is neat_insight/bin/mediamtx.LICENSE, so that module is not
+repeated here. Each part is complete by itself: a module both link (pion, golang.org/x/crypto
+and others) appears in both, in the version each links. The Go standard library appears in
+both parts too. The licenses of the web UI's packages are built into the server, which serves
+them at /3rdpartylicenses.txt.
 
 Written by scripts/third-party-notices.py from server/go.mod and MTX_VERSION in build.sh; do not
 edit.
