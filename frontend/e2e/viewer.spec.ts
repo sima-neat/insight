@@ -232,10 +232,11 @@ async function startFeed(log: string): Promise<void> {
 /**
  * How many pixels of the tile's overlay canvas are drawn on. The canvas holds only what the kit
  * draws over the video (boxes and their captions, never the video itself), and only the count
- * leaves the page: this is no capture of the UI.
+ * leaves the page: this is no capture of the UI. The tile's other canvas, `canvas.frames`, holds a
+ * JPEG channel's pictures.
  */
 const overlayInk = (channelTile: Locator) =>
-  channelTile.locator('canvas').evaluate((canvas: HTMLCanvasElement) => {
+  channelTile.locator('canvas.overlay').evaluate((canvas: HTMLCanvasElement) => {
     const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
     let inked = 0;
     for (let alpha = 3; alpha < data.length; alpha += 4) if (data[alpha] > 0) inked++;
