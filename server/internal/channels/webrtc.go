@@ -63,7 +63,8 @@ func newNegotiator(portStart, portEnd uint16, iceAddress string) (*negotiator, e
 		if err != nil {
 			return nil, err
 		}
-		// WithSettingEngine takes a copy, so the APIs share no settings.
+		// WithSettingEngine copies the struct but not what its slices hold (the NAT 1:1 address),
+		// so the APIs share those; nothing changes them once set above.
 		n.apis[codec] = webrtc.NewAPI(webrtc.WithMediaEngine(engine),
 			webrtc.WithInterceptorRegistry(registry), webrtc.WithSettingEngine(settings))
 	}
@@ -199,7 +200,11 @@ func (n *negotiator) answer(ctx context.Context, c *Channel, offer Description) 
 	if jpeg {
 		// Pion answers the browser's recvonly video sendonly, even with no track to send; a
 		// stopped transceiver is answered inactive, its codecs kept, so the m-line is neither
-		// rejected nor promises a track the browser would wait for.
+		// rejected nor promises a track the browser would wait for. That is Pion's behavior, not
+		// JSEP's: JSEP answers a stopped transceiver's m-section rejected, with port 0, and a
+		// browser would then ignore the ICE candidates Pion writes into it. A Pion upgrade may
+		// follow JSEP; TestAJPEGOfferIsAnsweredWithAnInactiveVideoLine pins the inactive line
+		// with a live port and its candidates.
 		for _, transceiver := range pc.GetTransceivers() {
 			if transceiver.Kind() != webrtc.RTPCodecTypeVideo {
 				continue
@@ -259,10 +264,10 @@ func offersCodec(media []*sdp.MediaDescription, mimeType string) bool {
 }
 
 // offersDataChannels says whether an offer has an application m-line, which carries its data
-// channels.
+// channels, that is not rejected: one with port 0 carries none.
 func offersDataChannels(media []*sdp.MediaDescription) bool {
 	for _, description := range media {
-		if description.MediaName.Media == "application" {
+		if description.MediaName.Media == "application" && description.MediaName.Port.Value != 0 {
 			return true
 		}
 	}

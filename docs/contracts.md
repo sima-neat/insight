@@ -510,8 +510,9 @@ page draws them. This section is the rule for both ends.
 - **For a JPEG channel** the answer adds no track and answers the video m-line inactive, not
   rejected: a browser ignores the ICE candidates of a rejected m-line, and Insight writes them into
   the first one.
-- **An offer for a JPEG channel without an application m-line** can never receive frames. Insight
-  refuses it with 415 `jpeg_needs_data_channel`, which is final: the browser does not retry.
+- **An offer for a JPEG channel without an application m-line**, or with a rejected one (port 0),
+  can never receive frames. Insight refuses it with 415 `jpeg_needs_data_channel`, which is final:
+  the browser does not retry.
 - **For an H.264 or H.265 channel** Insight ignores the `jpeg` channel, as Insight before JPEG
   support did.
 

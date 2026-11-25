@@ -417,7 +417,7 @@ Every API error answers `{"error": {"code", "message", "hint"}}` with an HTTP er
   - `503 too_many_viewers`: 8 connections to the channel are open or opening. Retry once one leaves.
   - `500 negotiation_failed`: Insight could not set up the connection, or did not answer within 10 s. The cause is in Insight's server log, with the channel.
   - `415 codec_unsupported`: the browser's offer does not list the channel's codec, so it has no decoder for it. Final for that browser.
-  - `415 jpeg_needs_data_channel`: the channel carries JPEG, whose frames travel over a data channel, and the offer opens none (it has no application m-line). Final. What a viewer's connection carries is under "What a viewer's connection carries" in `docs/contracts.md`.
+  - `415 jpeg_needs_data_channel`: the channel carries JPEG, whose frames travel over a data channel, and the offer opens none (it has no application m-line, or a rejected one with port 0). Final. What a viewer's connection carries is under "What a viewer's connection carries" in `docs/contracts.md`.
   - `413 offer_too_large`: the offer is larger than 64 KiB.
   - `400 invalid_offer`: the body is no JSON session description or no valid SDP offer. `400 no_such_channel`: `N` is not below the channel count (`400 invalid_request` when it is no integer).
 - `502 pull_unreachable` from `PUT /api/slots/{n}` when a camera does not answer; `502 mediamtx_failed` when MediaMTX refuses a call. Relayed MJPEG streams answer `429` at their cap, `502` when their ffmpeg fails, `504` when it sends no picture.

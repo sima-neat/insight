@@ -10,13 +10,14 @@ import (
 
 // RTP/JPEG depacketization (RFC 2435), ported from upstream Insight's webrtc/jpeg_rtp.go. It takes
 // the raw RTP packets of one access unit of payload type 26 (docs/contracts.md, "Video"): types 0
-// and 1 (4:2:2 and 4:2:0) and, with a restart header, 64 and 65, progressive scan only. A sender
-// such as the board's rtpjpegpay strips the JPEG headers and sends the scan data plus a compact
-// header, so a complete baseline JFIF image is rebuilt here from the type, Q, size and tables it
-// carries. The image is relayed as-is; nothing is decoded on the server. The one cap on a frame is
-// maxUnitBytes, which bounds the packets of its unit.
+// and 1 (4:2:2 and 4:2:0) and, with a restart header, 64 and 65, non-interlaced frames only. A
+// sender such as the board's rtpjpegpay strips the JPEG headers and sends the scan data plus a
+// compact header, so a complete baseline JFIF image is rebuilt here from the type, Q, size and
+// tables it carries. The image is relayed as-is; nothing is decoded on the server. The one cap on
+// a frame is maxUnitBytes, which bounds the packets of its unit.
 
-// Why a frame is refused, so the channel can name each reason once. Every refusal wraps one.
+// Why a frame is refused, so the channel can name each reason once. Every refusal wraps one, and
+// a new sentinel goes into jpegRefusals too, or its refusals are named on every frame.
 var (
 	errJPEGType         = errors.New("unsupported jpeg type")
 	errJPEGQuantization = errors.New("unusable jpeg quantization tables")

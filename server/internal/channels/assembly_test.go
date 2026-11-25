@@ -338,6 +338,26 @@ func TestAJPEGFrameAfterWholePacketsLostBetweenFramesIsPassedOn(t *testing.T) {
 	}
 }
 
+// A loss before a JPEG frame does not damage it, but here it took the frame's first fragment
+// with it: the gap falls right before a packet at an offset other than 0, which still withholds
+// the frame, counted once.
+func TestAJPEGFrameThatLostItsFirstFragmentAfterAGapIsWithheld(t *testing.T) {
+	a := newAssembler()
+	if !accepts(t, a, jpegPacket(t, 10, 9000, true, 0)) {
+		t.Fatal("the first frame was withheld")
+	}
+	if got := incompleteAfter(t, a, jpegPacket(t, 12, 12000, false, 1000)); got != 0 {
+		t.Fatalf("incomplete %d before the frame's end", got)
+	}
+	last := jpegPacket(t, 13, 12000, true, 2000)
+	if result := a.accept(last.packet, last.raw); result.ready || result.incomplete != 1 {
+		t.Fatalf("%+v, want it withheld and counted once", result)
+	}
+	if !accepts(t, a, jpegPacket(t, 14, 15000, true, 0)) {
+		t.Fatal("the whole frame after it was withheld")
+	}
+}
+
 // fragments checks that no packet of the unit counts it incomplete.
 func TestAJPEGUnitOverTheCapIsDroppedNotCounted(t *testing.T) {
 	a := newAssembler()

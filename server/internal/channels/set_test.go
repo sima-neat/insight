@@ -633,6 +633,41 @@ func TestAJPEGOfferWithoutADataChannelIsRefused(t *testing.T) {
 	}
 }
 
+// An application m-line with port 0 is a rejected one: it carries no data channels.
+func TestAJPEGOfferWithARejectedApplicationLineIsRefused(t *testing.T) {
+	s := listen(t, 1)
+	newJPEGApp(t, s, 0).jpegFrame(90_000)
+	m := mediaOf(t, s, 0)
+	offer := newBrowserWith(t, browserOptions{codecs: []Codec{CodecH264}, jpeg: true}).offer(t)
+	var parsed sdp.SessionDescription
+	if err := parsed.Unmarshal([]byte(offer.SDP)); err != nil {
+		t.Fatal(err)
+	}
+	rejected := 0
+	for _, description := range parsed.MediaDescriptions {
+		if description.MediaName.Media == "application" {
+			description.MediaName.Port.Value = 0
+			rejected++
+		}
+	}
+	if rejected != 1 {
+		t.Fatalf("%d application m-lines in the offer, want 1:\n%s", rejected, offer.SDP)
+	}
+	marshaled, err := parsed.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	offer.SDP = string(marshaled)
+
+	_, err = s.Offer(context.Background(), 0, offer)
+	if refusal := AsOfferError(err); refusal.Code != "jpeg_needs_data_channel" || refusal.Status != 415 {
+		t.Fatalf("an offer whose application m-line is rejected: %v", err)
+	}
+	if n := m.viewers(); n != 0 {
+		t.Fatalf("%d viewers after a refused offer", n)
+	}
+}
+
 func TestAnH264ChannelIgnoresTheJPEGChannel(t *testing.T) {
 	s := listen(t, 1)
 	sender := newApp(t, s, 0, payloadTypeH264, h264IDR)
