@@ -75,7 +75,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Watch a channel over WebRTC
-         * @description The browser's SDP offer in, Insight's answer out. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec, `codec_changed` when it changes, `too_many_viewers` while 8 connections to the channel are open or opening, until one leaves); a 4xx is final (415 `codec_unsupported`: this browser cannot decode the channel's codec).
+         * @description The browser's SDP offer in, Insight's answer out. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec, `codec_changed` when it changes, `too_many_viewers` while 8 connections to the channel are open or opening, until one leaves); a 4xx is final (415 `codec_unsupported`: this browser cannot decode the channel's codec; 415 `jpeg_needs_data_channel`: the channel carries JPEG, which travels over a data channel, and the offer has none). What a viewer's connection carries is in [the contracts](docs/contracts.md#what-a-viewers-connection-carries).
          */
         readonly post: operations["offerChannel"];
         readonly delete?: never;
@@ -1174,9 +1174,11 @@ export interface components {
             };
             readonly media: {
                 readonly kind: string;
+                /** @description The channel's codec: `"H264"`, `"H265"` or `"JPEG"`, or `"unknown"` until RTP names it. */
                 readonly codec: string;
                 readonly clock_rate: number;
                 readonly seen_sps: boolean;
+                /** @description The H.264 IDR and H.265 IRAP pictures seen. Every JPEG frame stands alone, so a JPEG channel counts none. */
                 readonly idr_count: number;
             };
             readonly metadata: {
@@ -1199,9 +1201,16 @@ export interface components {
             };
             readonly diagnostics?: {
                 readonly malformed_packets?: number;
+                /** @description Packets of a payload type Insight does not take (RTP/JPEG, payload type 26, is taken, so it is not counted here). */
                 readonly unsupported_packets?: number;
                 /** @description Frames dropped because their RTP packets came to over 16 MiB, more than any picture of H.264 level 5.2 or H.265 level 5.x needs. */
                 readonly oversized_frames?: number;
+                /** @description Frames withheld because a packet was lost, the first one included, for every codec. */
+                readonly incomplete_frames?: number;
+                /** @description JPEG frames whose RTP/JPEG Insight cannot rebuild; the reason is in `recent_errors`. */
+                readonly unusable_frames?: number;
+                /** @description Frames a viewer skipped because its connection's buffer was full, once per frame and viewer. */
+                readonly skipped_frames?: number;
                 readonly recent_errors?: readonly string[];
             };
         };
