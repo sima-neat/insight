@@ -421,7 +421,7 @@ func (h *harness) open() {
 		Relays:         h.relay,
 		FFmpeg:         "/usr/bin/ffmpeg",
 		URLs:           URLOptions{RTSPPort: 18554, WHIPPort: 18889},
-		snapshotEvery:  time.Hour, // the tests take snapshots themselves
+		driven:         true, // settle runs the loop's and the workers' steps
 		probeStream:    h.streams.probe,
 		encode:         h.encoder.encode,
 	})
@@ -452,7 +452,8 @@ func (h *harness) reopen() {
 }
 
 // settle takes a snapshot and reconciles every slot, twice, so what one step changed in the
-// fakes is seen by the next.
+// fakes is seen by the next. It does not wait for the stream and pull probes a snapshot starts,
+// which run on goroutines of their own: a test that needs a probe's outcome waits for it.
 func (h *harness) settle() {
 	h.t.Helper()
 	for range 2 {

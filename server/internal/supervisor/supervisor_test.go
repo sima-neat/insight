@@ -39,9 +39,34 @@ func eventually(t *testing.T, within time.Duration, what string, ok func() bool)
 	t.Fatalf("not within %v: %s", within, what)
 }
 
+// alive says whether pid is a process that has not exited, by its state in /proc/<pid>/stat: a
+// zombie (Z) or a dead process (X) has exited, and so has one /proc no longer lists. The state,
+// unlike the command line, reads the same while the process is in the middle of an exec, and
+// nothing is signaled to find it out.
 func alive(pid int) bool {
-	_, ok := processRuns(pid)
-	return ok
+	stat, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return false
+	}
+	// "<pid> (<comm>) <state> ...", where comm may hold spaces and parentheses.
+	line := string(stat)
+	end := strings.LastIndexByte(line, ')')
+	if end < 0 || end+2 >= len(line) {
+		return false
+	}
+	state := line[end+2]
+	return state != 'Z' && state != 'X'
+}
+
+// waitForExec waits until /proc shows cmd's child running its program. Start returns once the
+// exec has replaced the child's memory, before the kernel has put the new program's arguments
+// in place, and until then its cmdline reads empty, as a process that is gone does.
+func waitForExec(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	eventually(t, 2*time.Second, "the child runs "+cmd.Args[0], func() bool {
+		program, ok := processRuns(cmd.Process.Pid)
+		return ok && program == cmd.Args[0]
+	})
 }
 
 func TestALongLineIsCutAndReadingGoesOn(t *testing.T) {
@@ -191,6 +216,10 @@ func TestStopLeftovers(t *testing.T) {
 		}
 		exited := make(chan struct{})
 		go func() { cmd.Wait(); close(exited) }()
+		// A failed step leaves the child running: kill it, through the Process, which names
+		// this child even once it has been reaped and its PID reused.
+		t.Cleanup(func() { cmd.Process.Kill(); <-exited })
+		waitForExec(t, cmd)
 		if err := writePIDFile(filepath.Join(stateDir, "left.pid"), cmd.Process.Pid, sh(t)); err != nil {
 			t.Fatal(err)
 		}
@@ -199,7 +228,6 @@ func TestStopLeftovers(t *testing.T) {
 		select {
 		case <-exited:
 		case <-time.After(2 * time.Second):
-			cmd.Process.Kill()
 			t.Fatal("the leftover still runs")
 		}
 	})
@@ -210,6 +238,7 @@ func TestStopLeftovers(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { cmd.Process.Kill(); cmd.Wait() }()
+		waitForExec(t, cmd)
 		file := filepath.Join(stateDir, "other.pid")
 		if err := writePIDFile(file, cmd.Process.Pid, sh(t)); err != nil {
 			t.Fatal(err)
@@ -231,6 +260,7 @@ func TestStopLeftovers(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); cmd.Wait() }()
+		waitForExec(t, cmd)
 		if err := writePIDFile(filepath.Join(stateDir, "reused.pid"), cmd.Process.Pid, "/usr/bin/something-else"); err != nil {
 			t.Fatal(err)
 		}

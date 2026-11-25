@@ -127,7 +127,8 @@ func probeOutcome(err error) (PullStatus, string) {
 }
 
 // background runs f in a goroutine Close waits for; called from the loop, whose own count keeps
-// the wait group above zero meanwhile.
+// the wait group above zero meanwhile (with Options.driven, from the test, which does not call
+// Close at the same time).
 func (m *Manager) background(f func()) {
 	m.done.Add(1)
 	go func() {

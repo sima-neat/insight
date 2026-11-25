@@ -131,7 +131,10 @@ type Options struct {
 	// discards them.
 	Output io.Writer
 
-	// Seams for the tests: zero values are the real ones.
+	// Seams for the tests: zero values are the real ones. With driven, New starts neither the
+	// loop nor the slots' workers: the test takes the snapshots and runs the reconciles itself
+	// (tick, reconcile), so none runs between its steps.
+	driven        bool
 	snapshotEvery time.Duration
 	probeStream   StreamProber
 	encode        encoder
@@ -221,10 +224,12 @@ func New(opts Options) (*Manager, error) {
 	}
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 	m.removeUnfinishedRenditions()
-	m.done.Add(1 + Count)
-	go m.loop()
-	for n := 1; n <= Count; n++ {
-		go m.worker(n)
+	if !opts.driven {
+		m.done.Add(1 + Count)
+		go m.loop()
+		for n := 1; n <= Count; n++ {
+			go m.worker(n)
+		}
 	}
 	m.done.Add(1)
 	go func() {
