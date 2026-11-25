@@ -1,0 +1,24 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+/* Host takes the room, the port only what five digits need; on a narrow dialog they stack. */
+.fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6rem minmax(0, 8rem);
+  gap: var(--neat-space-3);
+}
+
+@media (width < 40rem) {
+  .fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--neat-space-2);
+}

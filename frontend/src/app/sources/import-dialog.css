@@ -1,0 +1,41 @@
+/* The dialog lays out its body itself (see NeatDialog). */
+:host {
+  display: contents;
+}
+
+/*
+ * As tall as the tallest tab (Catalog by asset name), so switching tabs does not resize the
+ * dialog; a shorter tab leaves room under the work. Where the screen is lower, the dialog is as
+ * tall as it may be, and its body scrolls.
+ */
+.import {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-4);
+  min-block-size: 42rem;
+}
+
+/* Focused only from code, when the control that had the focus went (see the component). */
+.work {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+  outline: none;
+}
+
+.clash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+  font-size: var(--neat-text-sm);
+}
+
+.clash p {
+  margin: 0;
+}
+
+.answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--neat-space-2);
+}

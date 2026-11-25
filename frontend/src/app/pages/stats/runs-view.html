@@ -1,0 +1,107 @@
+<app-list-column>
+  <!-- Above the list, each taking the height it needs and none while absent. -->
+  <div class="above">
+    @if (runs.runsFailure(); as failure) {
+      <app-sentinel-failure [failure]="failure" [headingLevel]="2" (retry)="runs.rereadRuns()" />
+    }
+
+    @if (report(); as report) {
+      <neat-callout tone="danger" announce="alert" [heading]="report.title" [headingLevel]="2">
+        <ul class="failures">
+          @for (failure of report.failures; track $index) {
+            <li>
+              <p>{{ failure.name }}: {{ failure.title }}</p>
+              @if (failure.detail) {
+                <p>{{ failure.detail }}</p>
+              }
+              @if (failure.hint) {
+                <p neatNote>{{ failure.hint }}</p>
+              }
+            </li>
+          }
+        </ul>
+        @if (report.notTried.length) {
+          <p>Not tried, so still selected: {{ report.notTried.join(', ') }}</p>
+        }
+        @if (report.deleted.length) {
+          <p>Deleted: {{ report.deleted.join(', ') }}</p>
+        }
+        <button
+          neatButton
+          neatCalloutActions
+          type="button"
+          size="small"
+          variant="outlined"
+          (click)="dismiss()"
+        >
+          Dismiss
+        </button>
+      </neat-callout>
+    }
+
+    @if (checkedCount() > 0) {
+      <div class="selection" role="group" aria-label="Selected runs">
+        <span class="count">{{ countText() }}</span>
+        <button
+          neatButton
+          type="button"
+          size="small"
+          [disabled]="!canCompare() || deleting()"
+          (click)="compare()"
+        >
+          Compare
+        </button>
+        <!-- It waits with aria-disabled while a delete runs, so the focus stays on it. -->
+        <button
+          neatButton
+          type="button"
+          size="small"
+          variant="danger-text"
+          [attr.aria-disabled]="deleting() || null"
+          (click)="delete()"
+        >
+          Delete
+        </button>
+        <button neatButton type="button" size="small" variant="text" (click)="clear()">
+          Clear
+        </button>
+      </div>
+    }
+  </div>
+
+  @if (rows(); as rows) {
+    <!-- Where the list is narrow (a phone, or a tablet beside the panel) the line gives way. -->
+    <neat-select-list
+      label="Runs"
+      emptyLabel="No runs yet. Record a trace to create one."
+      checkable
+      [items]="rows"
+      [trackBy]="rowId"
+      [canCheck]="canCheck"
+      [checkBlocked]="checkBlocked()"
+      [checked]="session.checkedRuns()"
+      (checkedChange)="check($event)"
+      [selected]="selectedRow()"
+      (selectedChange)="select($event)"
+      (activated)="open($event)"
+    >
+      <ng-template neatColumn="run" header="Run" width="minmax(0, 1fr)" let-row>
+        <app-cell-text class="name">{{ row.name }}</app-cell-text>
+      </ng-template>
+      <ng-template
+        neatColumn="recorded"
+        header="Recorded"
+        width="minmax(0, 1.4fr)"
+        [hideBelow]="640"
+        let-row
+      >
+        <app-cell-text class="secondary">{{ row.line }}</app-cell-text>
+      </ng-template>
+      <ng-template neatColumn="when" header="When" width="max-content" let-row>
+        <app-cell-text class="secondary">{{ row.when }}</app-cell-text>
+      </ng-template>
+    </neat-select-list>
+  } @else if (!runs.runsFailure()) {
+    <p neatNote role="status" class="state">Reading runs from the board…</p>
+  }
+</app-list-column>

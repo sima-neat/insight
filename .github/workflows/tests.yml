@@ -1,10 +1,10 @@
 name: Tests
 
-# The one test job: pull requests (forks included) run it here, and Vulcan CI calls it on
-# every push and gates its build and publication on it.
+# The test jobs run on every pull request and on every push to main.
 on:
   pull_request:
-  workflow_call:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -22,49 +22,106 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Set up Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
       - name: Install FFmpeg
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # The MediaMTX integration tests run against the release build.sh bundles.
-      - name: Download MediaMTX
-        run: |
-          set -euo pipefail
-          version=$(sed -n 's/^MTX_VERSION="\(.*\)"$/\1/p' build.sh)
-          mkdir -p "$RUNNER_TEMP/mediamtx"
-          curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${version}/mediamtx_v${version}_linux_amd64.tar.gz" \
-            | tar -xz -C "$RUNNER_TEMP/mediamtx" mediamtx
-          echo "NEAT_INSIGHT_MEDIAMTX=$RUNNER_TEMP/mediamtx/mediamtx" >> "$GITHUB_ENV"
-
-      - name: Install Insight
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-
+      # The scripts' tests (the media assets, the test feed) need nothing beyond the standard library.
       - name: Python tests
         env:
-          # ffmpeg is installed above; a missing one must fail the FPS rendition tests, not skip them.
+          # ffmpeg is installed above; a missing one must fail the test-feed metadata tests, not skip them.
           NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS: "1"
         run: python -m unittest discover -s tests -v
 
-      # The frontend steps also run after a Python failure, so one run reports
-      # every failing test; the job still fails.
-      - name: Install frontend dependencies
-        if: ${{ !cancelled() }}
+  server:
+    name: Server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      # The media, relay and MediaMTX tests run the real tools; without them they skip.
+      - name: Install FFmpeg
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Download MediaMTX
+        working-directory: .
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^MTX_VERSION="\(.*\)"$/\1/p' build.sh)
+          sha256=$(sed -n 's/^MTX_SHA256_linux_amd64="\(.*\)"$/\1/p' build.sh)
+          mkdir -p "$RUNNER_TEMP/mediamtx"
+          curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${version}/mediamtx_v${version}_linux_amd64.tar.gz" \
+            -o "$RUNNER_TEMP/mediamtx.tar.gz"
+          scripts/sha256-verify.sh "$RUNNER_TEMP/mediamtx.tar.gz" "$sha256"
+          tar -xzf "$RUNNER_TEMP/mediamtx.tar.gz" -C "$RUNNER_TEMP/mediamtx" mediamtx
+          echo "NEAT_INSIGHT_MEDIAMTX=$RUNNER_TEMP/mediamtx/mediamtx" >> "$GITHUB_ENV"
+
+      - name: Formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: Generated code matches openapi.yaml
+        run: go generate ./... && git diff --exit-code
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Tests
+        run: go test -race ./...
+
+      - name: Third-party notices match go.mod and MTX_VERSION
+        run: python3 ../scripts/third-party-notices.py --check
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
         working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
         run: npm ci
 
-      - name: Frontend tests
-        if: ${{ !cancelled() }}
-        working-directory: frontend
-        run: npm test
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test -- --watch=false
+
+      - name: Build
+        run: npm run build
+
+      # The video code must load with the Viewer route only, not with the first paint.
+      - name: Check the bundle split
+        run: npm run check:bundle
+
+      # The end-to-end tests start the dev server themselves and drive it in Chromium.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run e2e

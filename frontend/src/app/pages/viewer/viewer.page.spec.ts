@@ -1,0 +1,1176 @@
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { Component, signal } from '@angular/core';
+import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { provideRouter, Router } from '@angular/router';
+import { NeatPage, NeatViewport } from '@sima/neat-ui';
+import { NeatNumberField } from '@sima/neat-ui/number-field';
+import { type NeatFrameStats, NeatVideoTile } from '@sima/neat-ui/video';
+import { FakeChannels } from '../../viewer/fake-channels.testing';
+import { FakeLocalStorage } from '../../fake-storage.testing';
+import { ViewerChannels } from '../../viewer/viewer-channels';
+import { ViewerTile } from '../../viewer/viewer-tile';
+import { FakeResizeObserver, ViewerShell as Shell } from './viewer-page.testing';
+import { ViewerPage } from './viewer.page';
+
+const VIEWER_URL = '/api/viewer-url';
+const CHANNELS_URL = '/api/channels';
+
+const range = (count: number, from = 0) =>
+  Array.from({ length: count }, (_, index) => from + index);
+
+/** Another page of the app, to leave the Viewer for. */
+@Component({ template: '' })
+class Elsewhere {}
+
+describe('ViewerPage', () => {
+  let storage: FakeLocalStorage;
+  let fake: FakeChannels;
+  let http: HttpTestingController;
+  let fixture: ComponentFixture<Shell>;
+  /** Whether the screen is narrow, as the kit reports it; wide unless a test says otherwise. */
+  const narrow = signal(false);
+
+  beforeEach(() => {
+    narrow.set(false);
+    storage = new FakeLocalStorage();
+    vi.stubGlobal('localStorage', storage);
+    FakeResizeObserver.instances = [];
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    fake = new FakeChannels();
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([
+          { path: 'viewer', component: ViewerPage },
+          { path: 'elsewhere', component: Elsewhere },
+        ]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: NeatViewport, useValue: { narrow } },
+      ],
+    });
+    TestBed.overrideComponent(ViewerPage, {
+      remove: { providers: [ViewerChannels] },
+      add: { providers: [{ provide: ViewerChannels, useValue: fake.asViewerChannels() }] },
+    });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    document.documentElement.classList.remove('neat-dark');
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    // Last, so an unanswered request fails only its own test, not the clean-up for the next.
+    http.verify();
+  });
+
+  const root = (): HTMLElement => fixture.nativeElement;
+  const page = (): ViewerPage =>
+    fixture.debugElement.query(By.directive(ViewerPage)).componentInstance;
+  const toolbar = (): HTMLElement => root().querySelector('.page-toolbar')!;
+  const button = (label: string): HTMLButtonElement =>
+    toolbar().querySelector(`button[aria-label="${label}"]`)!;
+  /** The side-panel toggle: the kit draws it at the top bar's right edge, outside the page tools. */
+  const sidePanelToggle = (): HTMLButtonElement | null =>
+    root().querySelector<HTMLButtonElement>('header button[aria-label="Side panel"]');
+  /** A toolbar popover's panel: it lives in the overlay, outside the toolbar, while it is open. */
+  const dialog = (label: string): HTMLElement | null =>
+    document.querySelector(`[role="dialog"][aria-label="${label}"]`);
+  const toggle = (text: string): HTMLButtonElement =>
+    [
+      ...(dialog('View options')?.querySelectorAll<HTMLButtonElement>('button[role="switch"]') ??
+        []),
+    ].find((element) => element.textContent?.trim() === text)!;
+  /** The notice over the grid, a callout said politely as it appears; '' while there is none. */
+  const notice = () => {
+    const callout = root().querySelector('neat-callout');
+    if (callout === null) return '';
+    expect(callout.getAttribute('role')).toBe('status');
+    return callout.textContent!.trim();
+  };
+  const pageInput = (): HTMLInputElement => toolbar().querySelector('input[aria-label="Page"]')!;
+  /** The channel field, while the "Go to channel" popover is open. */
+  const channelField = (): HTMLInputElement | null =>
+    dialog('Go to channel')?.querySelector('input[aria-label="Channel"]') ?? null;
+  /** A control's accessible name: its `aria-label`, else its text. */
+  const labelOf = (element: Element): string | null =>
+    element.getAttribute('aria-label') ?? element.textContent?.trim() ?? null;
+  /** "Fit", named by its label, which changes as it steps. */
+  const fitButton = (): HTMLButtonElement => toolbar().querySelector('button.fit')!;
+  const fitLabel = () => fitButton().textContent?.trim();
+  const storedLayout = () => storage.readStored('layout') as { tileWidths: object; fits: object };
+  const slider = (): HTMLElement => toolbar().querySelector('[role="slider"]')!;
+  const gridObserver = () => FakeResizeObserver.grid();
+  const tileWidth = () =>
+    root()
+      .querySelector<HTMLElement>('neat-tile-grid .grid')!
+      .style.getPropertyValue('--grid-tile-width');
+  /** The channels whose tiles are on screen, in screen order. */
+  const shown = () =>
+    fixture.debugElement
+      .queryAll(By.directive(ViewerTile))
+      .map((tile) => (tile.componentInstance as ViewerTile).channel());
+  const tileElement = (channel: number): HTMLElement =>
+    fixture.debugElement
+      .queryAll(By.directive(ViewerTile))
+      .find((tile) => (tile.componentInstance as ViewerTile).channel() === channel)!.nativeElement;
+  const kitTile = (channel: number): NeatVideoTile =>
+    fixture.debugElement
+      .queryAll(By.directive(ViewerTile))
+      .find((tile) => (tile.componentInstance as ViewerTile).channel() === channel)!
+      .query(By.directive(NeatVideoTile)).componentInstance;
+
+  const settle = () => fixture.whenStable();
+
+  /** Lets a popover finish: it moves focus after rendering, and closes a frame after it is told to. */
+  async function settlePopover(): Promise<void> {
+    for (let turn = 0; turn < 3; turn++) {
+      await new Promise((resolve) => setTimeout(resolve));
+      await settle();
+    }
+  }
+
+  async function resize(width: number, height: number): Promise<void> {
+    gridObserver().resize(width, height);
+    await settle();
+  }
+
+  interface Visit {
+    /** The channel limit the server answers, or null for a failed request. */
+    readonly limit?: number | null;
+    /** The grid's size, or null to leave it unmeasured. */
+    readonly area?: readonly [number, number] | null;
+  }
+
+  /**
+   * Opens `url` in the shell, answers the channel limit if the page asks, and sizes the grid. With
+   * `area: null` the grid is left unmeasured; with `limit: null` the limit request fails.
+   */
+  async function open(url: string, visit: Visit = {}): Promise<void> {
+    fixture = TestBed.createComponent(Shell);
+    await visitViewer(url, visit);
+  }
+
+  /** Goes to another page of the app and back to the Viewer at `url`, which opens afresh. */
+  async function leaveAndReturn(url: string, visit: Visit = {}): Promise<void> {
+    await navigate('/elsewhere');
+    expect(fixture.debugElement.query(By.directive(ViewerPage))).toBeNull();
+    await visitViewer(url, visit);
+  }
+
+  async function visitViewer(
+    url: string,
+    { limit = 16, area = [1000, 400] }: Visit = {},
+  ): Promise<void> {
+    await TestBed.inject(Router).navigateByUrl(url);
+    await settle();
+    if (!url.includes('max_channels=')) {
+      const request = http.expectOne(VIEWER_URL);
+      if (limit === null) {
+        request.flush({ error: 'unavailable' }, { status: 500, statusText: 'Server Error' });
+      } else {
+        request.flush({ url: '', max_video_channels: limit });
+      }
+      await settle();
+    }
+    if (area !== null) await resize(area[0], area[1]);
+  }
+
+  /** The text of the tooltip "Fit" shows on mouse hover. */
+  async function fitTooltip(): Promise<string | undefined> {
+    fitButton().dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+    await settlePopover();
+    const text = document
+      .querySelector('[role="tooltip"]:not([data-state="closed"])')
+      ?.textContent?.trim();
+    fitButton().dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
+    await settlePopover();
+    return text;
+  }
+
+  async function navigate(url: string): Promise<void> {
+    await TestBed.inject(Router).navigateByUrl(url);
+    await settle();
+  }
+
+  async function press(key: string, init: KeyboardEventInit = {}, target: EventTarget = window) {
+    // Cancelable like a real key press, so a control's preventDefault is seen by the page.
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }),
+    );
+    await settle();
+  }
+
+  async function click(element: HTMLElement): Promise<void> {
+    element.click();
+    await settle();
+  }
+
+  async function enter(input: HTMLInputElement, value: string): Promise<void> {
+    input.value = value;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settlePopover();
+  }
+
+  /** Opens "Go to channel" from its toolbar button, unless it is open, and returns its field. */
+  async function openChannelField(): Promise<HTMLInputElement> {
+    if (channelField() === null) {
+      await click(button('Go to channel'));
+      await settlePopover();
+    }
+    return channelField()!;
+  }
+
+  /** Goes to a channel by typing it into "Go to channel", as a user does. */
+  async function jumpTo(channel: number): Promise<void> {
+    await enter(await openChannelField(), String(channel));
+  }
+
+  /** Opens "View options" from its toolbar button. */
+  async function openViewOptions(): Promise<void> {
+    await click(button('View options'));
+    await settlePopover();
+  }
+
+  /** Six 300 px tiles per page in the 1000×400 grid: three columns, two rows. */
+  const sixPerPage = () => storage.seed({ layout: { tileWidths: { 16: 300 } } });
+
+  /** Makes the channel's tile play with most of its metadata late, for one stats tick. */
+  async function makeLate(channel: number): Promise<void> {
+    const tile = kitTile(channel);
+    vi.spyOn(tile, 'snapshot').mockReturnValue({ ...tile.snapshot(), recentLateShare: 0.9 });
+    tile.stateChange.emit('playing');
+    tile.frameStats.emit({} as NeatFrameStats);
+    await settle();
+  }
+
+  it('shows one tile per channel on the current page: max 16, perPage 6 → pages 1..3', async () => {
+    sixPerPage();
+    await open('/viewer');
+
+    expect(shown()).toEqual(range(6));
+    expect(toolbar().textContent).toContain('of 3');
+    expect(pageInput().value).toBe('1');
+    expect(button('Previous page').disabled).toBe(true);
+
+    await click(button('Next page'));
+    expect(shown()).toEqual(range(6, 6));
+    expect(pageInput().value).toBe('2');
+
+    await click(button('Next page'));
+    expect(shown()).toEqual([12, 13, 14, 15]);
+    expect(button('Next page').disabled).toBe(true);
+    expect(fake.held()).toEqual([12, 13, 14, 15]);
+  });
+
+  it('turning a page replaces its tiles without Angular warning of an accidental re-creation', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    sixPerPage();
+    await open('/viewer');
+
+    await click(button('Next page'));
+    await click(button('Previous page'));
+
+    expect(shown()).toEqual(range(6));
+    expect(warn.mock.calls.flat().filter((text) => String(text).includes('NG0956'))).toEqual([]);
+  });
+
+  it('src=3,1,9 shows channels 3, 1, 9 in that order and max_channels=4 drops 9', async () => {
+    await open('/viewer?src=3,1,9');
+    expect(shown()).toEqual([3, 1, 9]);
+
+    await navigate('/viewer?src=3,1,9&max_channels=4');
+    expect(shown()).toEqual([3, 1]);
+  });
+
+  it('the stored width for the displayed count wins; without one the fit-all width is used', async () => {
+    storage.seed({ layout: { tileWidths: { 4: 400 } } });
+    await open('/viewer');
+    // 16 tiles in 1000×400 fit at most 167 px wide (4 or 5 columns, 4 rows).
+    expect(tileWidth()).toBe('167px');
+
+    // The fit follows the area until the user picks a size.
+    await resize(600, 400);
+    expect(tileWidth()).toBe('144px');
+
+    await navigate('/viewer?src=0,1,2,3');
+    expect(tileWidth()).toBe('400px');
+  });
+
+  it('fits all with the gap the grid reports, not one of its own', async () => {
+    // A stylesheet that sets the grid's gap to 24 px (jsdom has none, so the grid would use 8).
+    const computed = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) =>
+      element.classList.contains('grid')
+        ? ({ columnGap: '24px' } as CSSStyleDeclaration)
+        : computed(element, pseudo),
+    );
+    await open('/viewer');
+
+    // 16 tiles in 1000×400 fit 167 px wide with an 8 px gap (the test above), 146 px with 24.
+    expect(tileWidth()).toBe('146px');
+    expect(
+      root()
+        .querySelector<HTMLElement>('neat-tile-grid .grid')!
+        .style.getPropertyValue('--grid-gap'),
+    ).toBe('24px');
+  });
+
+  it('moving the slider stores the width for the current count only', async () => {
+    await open('/viewer');
+    expect(storage.readStored('layout')).toBeNull();
+
+    await press('ArrowRight', {}, slider());
+    expect(tileWidth()).toBe('168px');
+    expect(storage.readStored('layout')).toMatchObject({ tileWidths: { 16: 168 } });
+
+    // Four channels have no size of their own: they fit all (2×2 at 348 px), and 16 keeps 168.
+    await navigate('/viewer?src=0,1,2,3');
+    expect(tileWidth()).toBe('348px');
+    expect(storage.readStored('layout')).toMatchObject({ tileWidths: { 16: 168 } });
+    expect(
+      Object.keys((storage.readStored('layout') as { tileWidths: object }).tileWidths),
+    ).toEqual(['16']);
+  });
+
+  it('Fit steps all → 9 → 4 → 1 → all for 16 channels, skipping presets at or above the count', async () => {
+    await open('/viewer');
+    // 16 channels in 1000×400: all fit at 167 px; 36, 25 and 16 are not below the count.
+    expect(fitLabel()).toBe('Fit all');
+    expect(tileWidth()).toBe('167px');
+    expect(await fitTooltip()).toBe('Next: fit 9 (Shift: back)');
+
+    const steps: [string | undefined, string][] = [];
+    for (let step = 0; step < 4; step++) {
+      await click(fitButton());
+      steps.push([fitLabel(), tileWidth()]);
+    }
+
+    // Sized so 9 fit: 227 px, bounded by the height (the grid then packs 4×3); so 4 fit: 348 px
+    // (2×2); so 1 fits: 711 px.
+    expect(steps).toEqual([
+      ['Fit 9', '227px'],
+      ['Fit 4', '348px'],
+      ['Fit 1', '711px'],
+      ['Fit all', '167px'],
+    ]);
+  });
+
+  it('Shift+click steps back, from all to the last preset', async () => {
+    await open('/viewer');
+
+    fitButton().dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await settle();
+    expect(fitLabel()).toBe('Fit 1');
+    expect(await fitTooltip()).toBe('Next: fit all (Shift: back)');
+
+    fitButton().dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await settle();
+    expect(fitLabel()).toBe('Fit 4');
+  });
+
+  it('a fit is stored per count as tiles per page, follows the area, and survives a reload', async () => {
+    await open('/viewer');
+    await click(fitButton());
+    expect(storedLayout()).toMatchObject({ tileWidths: {}, fits: { 16: 9 } });
+
+    // 9 per page in 600×400: 3×3 at 194 px, worked out again for the new area.
+    await resize(600, 400);
+    expect(tileWidth()).toBe('194px');
+
+    await leaveAndReturn('/viewer');
+    expect(fitLabel()).toBe('Fit 9');
+
+    // Four channels have no fit of their own.
+    await navigate('/viewer?src=0,1,2,3');
+    expect(fitLabel()).toBe('Fit all');
+  });
+
+  it('the slider replaces a fit with a width; Fit then shows no step and goes back to all', async () => {
+    await open('/viewer');
+    await click(fitButton());
+
+    await press('ArrowRight', {}, slider());
+    expect(fitLabel()).toBe('Fit');
+    expect(storedLayout()).toMatchObject({ tileWidths: { 16: 228 }, fits: {} });
+
+    await click(fitButton());
+    expect(fitLabel()).toBe('Fit all');
+    expect(tileWidth()).toBe('167px');
+    expect(storedLayout()).toMatchObject({ tileWidths: {}, fits: {} });
+  });
+
+  it('from a slider width, Shift+click goes to the last preset', async () => {
+    await open('/viewer');
+    await press('ArrowRight', {}, slider());
+
+    fitButton().dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await settle();
+
+    expect(fitLabel()).toBe('Fit 1');
+    expect(storedLayout()).toMatchObject({ tileWidths: {}, fits: { 16: 1 } });
+  });
+
+  it('leaves out presets that come out at the width of the step before them', async () => {
+    await open('/viewer');
+    // In 100×100, all 16, 9 and 4 are held at the kit's 64 px minimum; only 1 differs (100 px).
+    await resize(100, 100);
+
+    await click(fitButton());
+    expect(fitLabel()).toBe('Fit 1');
+    await click(fitButton());
+    expect(fitLabel()).toBe('Fit all');
+  });
+
+  it('Fit is disabled when there is nothing to step to', async () => {
+    await open('/viewer?src=3');
+    expect(fitLabel()).toBe('Fit all');
+    expect(fitButton().disabled).toBe(true);
+  });
+
+  it('with one channel and a slider width, Fit goes back to all', async () => {
+    await open('/viewer?src=3');
+    await press('ArrowLeft', {}, slider());
+    expect(fitLabel()).toBe('Fit');
+    expect(fitButton().disabled).toBe(false);
+    expect(await fitTooltip()).toBe('Next: fit all (Shift: back)');
+
+    await click(fitButton());
+
+    expect(fitLabel()).toBe('Fit all');
+    expect(fitButton().disabled).toBe(true);
+    expect(storedLayout()).toMatchObject({ tileWidths: {}, fits: {} });
+  });
+
+  it('a remembered fit the current area leaves out still steps to its neighbours', async () => {
+    storage.seed({ layout: { fits: { 16: 9 } } });
+    await open('/viewer');
+    // In 100×100 only all and 1 differ (see above); 9 is remembered but not a step.
+    await resize(100, 100);
+    expect(fitLabel()).toBe('Fit 9');
+
+    await click(fitButton());
+    expect(fitLabel()).toBe('Fit 1');
+  });
+
+  it('ignores a stored fit at or above the channel count', async () => {
+    storage.seed({ layout: { fits: { 16: 36 } } });
+    await open('/viewer');
+
+    expect(fitLabel()).toBe('Fit all');
+    expect(tileWidth()).toBe('167px');
+  });
+
+  it('shrinking the area keeps the selected channel on screen', async () => {
+    sixPerPage();
+    await open('/viewer');
+
+    await jumpTo(10);
+    expect(shown()).toEqual(range(6, 6));
+    expect(tileElement(10).querySelector('neat-video-tile')!.hasAttribute('data-selected')).toBe(
+      true,
+    );
+
+    // Two columns and two rows of 300 px tiles: four per page, and 10 is on the third.
+    await resize(700, 400);
+    expect(shown()).toEqual([8, 9, 10, 11]);
+    expect(pageInput().value).toBe('3');
+  });
+
+  it('arrow keys page, g focuses the page input, both ignored with modifiers and inside inputs', async () => {
+    sixPerPage();
+    await open('/viewer');
+
+    await press('ArrowRight');
+    expect(shown()).toEqual(range(6, 6));
+    await press('ArrowLeft');
+    expect(shown()).toEqual(range(6));
+
+    for (const modifier of ['ctrlKey', 'altKey', 'metaKey', 'shiftKey']) {
+      await press('ArrowRight', { [modifier]: true });
+      expect(shown()).toEqual(range(6));
+      await press('g', { [modifier]: true });
+      expect(document.activeElement).not.toBe(pageInput());
+    }
+
+    await press('ArrowRight', {}, await openChannelField());
+    await press('ArrowRight', {}, slider());
+    expect(shown()).toEqual(range(6));
+
+    await click(sidePanelToggle()!);
+    await press('ArrowRight', {}, root().querySelector('aside [neatPageAside]')!);
+    expect(shown()).toEqual(range(6));
+
+    await press('g');
+    expect(document.activeElement).toBe(pageInput());
+    // Focus is in the page input now, so a further g is typing, not a shortcut.
+    await press('ArrowRight', {}, pageInput());
+    expect(shown()).toEqual(range(6));
+  });
+
+  it('the g shortcut focuses and selects the Page field through the kit', async () => {
+    const focus = vi.spyOn(NeatNumberField.prototype, 'focus');
+    await open('/viewer');
+
+    await press('g');
+
+    expect(focus).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(pageInput());
+    expect([pageInput().selectionStart, pageInput().selectionEnd]).toEqual([
+      0,
+      pageInput().value.length,
+    ]);
+  });
+
+  it('G (Caps Lock) focuses the page input like g', async () => {
+    await open('/viewer');
+
+    await press('G');
+    expect(document.activeElement).toBe(pageInput());
+  });
+
+  it('go to page refuses a page past the last: the page stays and the field shows it', async () => {
+    sixPerPage();
+    await open('/viewer');
+    expect(pageInput().value).toBe('1');
+
+    // Clamping would have turned to page 3; the field refuses instead.
+    await enter(pageInput(), '9');
+    expect(pageInput().value).toBe('1');
+    expect(shown()).toEqual(range(6));
+  });
+
+  it('leaving the Page field commits what was typed, and leaving it untouched changes nothing', async () => {
+    sixPerPage();
+    await open('/viewer');
+
+    pageInput().focus();
+    pageInput().value = '2';
+    pageInput().dispatchEvent(new Event('input'));
+    pageInput().blur();
+    await settlePopover();
+    expect(pageInput().value).toBe('2');
+    expect(shown()).toEqual(range(6, 6));
+
+    pageInput().focus();
+    pageInput().blur();
+    await settlePopover();
+    expect(pageInput().value).toBe('2');
+    expect(shown()).toEqual(range(6, 6));
+
+    // Typed and refused: the field goes back to the page on screen.
+    pageInput().focus();
+    pageInput().value = '9';
+    pageInput().dispatchEvent(new Event('input'));
+    pageInput().blur();
+    await settlePopover();
+    expect(pageInput().value).toBe('2');
+    expect(shown()).toEqual(range(6, 6));
+  });
+
+  it('go to page takes whole numbers from 1 to the page count only, and restores anything else', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(pageInput(), '2');
+
+    // "3x" used to go to page 3; a page number is whole digits, so the field restores instead.
+    for (const typed of ['3x', '0', '-1', '', '4']) {
+      await enter(pageInput(), typed);
+      expect(pageInput().value).toBe('2');
+      expect(shown()).toEqual(range(6, 6));
+    }
+
+    await enter(pageInput(), '3');
+    expect(pageInput().value).toBe('3');
+    expect(shown()).toEqual([12, 13, 14, 15]);
+  });
+
+  it('the toolbar shows slider, Fit all, paging, Go to channel and View options, with the Side panel toggle outside it, and no switches or channel input', async () => {
+    await open('/viewer');
+
+    const controls = [...toolbar().querySelectorAll('button, [role="slider"], input')];
+    expect(controls.map(labelOf)).toEqual([
+      'Tile size',
+      'Fit all',
+      'Previous page',
+      'Page',
+      'Next page',
+      'Go to channel',
+      'View options',
+    ]);
+    expect(toolbar().contains(sidePanelToggle())).toBe(false);
+    expect(sidePanelToggle()).not.toBeNull();
+    expect(toolbar().querySelector('[role="switch"]')).toBeNull();
+    expect(channelField()).toBeNull();
+    expect(button('Go to channel').getAttribute('neatTooltip')).toBe('Go to channel');
+    expect(button('View options').getAttribute('neatTooltip')).toBe('View options');
+  });
+
+  it('View options holds Bars and Hide empty slots; toggling them changes the layout as before', async () => {
+    sixPerPage();
+    await open('/viewer');
+    expect(dialog('View options')).toBeNull();
+
+    await openViewOptions();
+
+    const switches = [...dialog('View options')!.querySelectorAll('button[role="switch"]')];
+    expect(switches.map((element) => element.textContent?.trim())).toEqual([
+      'Bars',
+      'Hide empty slots',
+    ]);
+    expect(dialog('View options')!.textContent).toContain('Experimental');
+    expect(toggle('Bars').getAttribute('aria-checked')).toBe('true');
+    expect(toggle('Hide empty slots').getAttribute('aria-checked')).toBe('false');
+
+    await click(toggle('Bars'));
+    expect(toggle('Bars').getAttribute('aria-checked')).toBe('false');
+    expect(root().querySelectorAll('neat-video-tile .bar')).toHaveLength(0);
+    expect(storage.readStored('layout')).toMatchObject({ bars: false });
+    // The panel stays open while its controls are used.
+    expect(dialog('View options')).not.toBeNull();
+
+    await click(toggle('Hide empty slots'));
+    expect(toggle('Hide empty slots').getAttribute('aria-checked')).toBe('true');
+    expect(storage.readStored('layout')).toMatchObject({ hideEmpty: true });
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 3, video: { active: true } }] });
+    await settle();
+    expect(shown()).toEqual([3]);
+  });
+
+  it('the Hide empty slots switch is described by the Experimental tag', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await openViewOptions();
+
+    const describedBy = toggle('Hide empty slots').getAttribute('aria-describedby');
+
+    expect(describedBy).not.toBeNull();
+    expect(dialog('View options')!.querySelector(`#${describedBy}`)?.textContent?.trim()).toBe(
+      'Experimental',
+    );
+    expect(toggle('Bars').hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('page shortcuts stay out of View options; Escape closes it without clearing the selection', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await click(tileElement(4));
+    await openViewOptions();
+
+    await press('ArrowRight', {}, toggle('Bars'));
+    await press('g', {}, toggle('Bars'));
+    expect(shown()).toEqual(range(6));
+    expect(document.activeElement).not.toBe(pageInput());
+
+    await press('Escape', {}, toggle('Bars'));
+    await settlePopover();
+
+    expect(dialog('View options')).toBeNull();
+    expect(page().selectedChannel()).toBe(4);
+    expect(document.activeElement).toBe(button('View options'));
+  });
+
+  it('Go to channel: typing 6 and Enter turns to channel 6’s page, selects it and closes the popover', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(pageInput(), '3');
+    expect(shown()).toEqual([12, 13, 14, 15]);
+
+    await jumpTo(6);
+
+    expect(shown()).toEqual(range(6, 6));
+    expect(page().selectedChannel()).toBe(6);
+    expect(dialog('Go to channel')).toBeNull();
+    expect(document.activeElement).toBe(button('Go to channel'));
+  });
+
+  it('Go to channel: an undisplayed channel leaves the popover open and the page unchanged', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await jumpTo(7);
+    expect(shown()).toEqual(range(6, 6));
+
+    const field = await openChannelField();
+    await enter(field, '16');
+    await enter(field, 'x');
+
+    expect(shown()).toEqual(range(6, 6));
+    expect(page().selectedChannel()).toBe(7);
+    expect(dialog('Go to channel')).not.toBeNull();
+    // The field keeps the entry; nothing was applied.
+    expect(field.value).toBe('x');
+  });
+
+  it('Go to channel: Escape closes the popover without jumping and focus goes back to its button', async () => {
+    sixPerPage();
+    await open('/viewer');
+    const field = await openChannelField();
+    field.value = '7';
+
+    await press('Escape', {}, field);
+    await settlePopover();
+
+    expect(dialog('Go to channel')).toBeNull();
+    expect(shown()).toEqual(range(6));
+    expect(page().selectedChannel()).toBeNull();
+    expect(document.activeElement).toBe(button('Go to channel'));
+  });
+
+  it('Go to channel: the field is empty and hints at the channel range', async () => {
+    await open('/viewer');
+    const field = await openChannelField();
+
+    expect(field.value).toBe('');
+    expect(field.placeholder).toBe('0–15');
+    expect(dialog('Go to channel')!.textContent).toContain(
+      'Enter turns to its page and selects it.',
+    );
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('/ opens Go to channel with the field focused; / inside the inspector or with Ctrl does nothing', async () => {
+    await open('/viewer');
+
+    for (const modifier of ['ctrlKey', 'altKey', 'metaKey']) {
+      await press('/', { [modifier]: true });
+      await settlePopover();
+      expect(dialog('Go to channel')).toBeNull();
+    }
+    await press('/', {}, slider());
+    await settlePopover();
+    expect(dialog('Go to channel')).toBeNull();
+    await click(sidePanelToggle()!);
+    await press('/', {}, root().querySelector('aside [neatPageAside]')!);
+    await settlePopover();
+    expect(dialog('Go to channel')).toBeNull();
+
+    await click(sidePanelToggle()!);
+    const event = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+    await settlePopover();
+
+    expect(dialog('Go to channel')).not.toBeNull();
+    expect(document.activeElement).toBe(channelField());
+    // The slash opens the popover; it is not typed into the field it focuses.
+    expect(event.defaultPrevented).toBe(true);
+    expect(channelField()!.value).toBe('');
+  });
+
+  it('/ opens Go to channel on layouts where it is a shifted key', async () => {
+    await open('/viewer');
+
+    await press('/', { shiftKey: true });
+    await settlePopover();
+
+    expect(dialog('Go to channel')).not.toBeNull();
+  });
+
+  it('/ does nothing while a field has focus, so it can be typed', async () => {
+    await open('/viewer');
+
+    await press('/', {}, pageInput());
+    await settlePopover();
+
+    expect(dialog('Go to channel')).toBeNull();
+  });
+
+  it('a click or Enter selects a tile and Escape clears the selection', async () => {
+    sixPerPage();
+    await open('/viewer');
+
+    await click(tileElement(4));
+    expect(page().selectedChannel()).toBe(4);
+
+    await press('Enter', {}, tileElement(2));
+    expect(page().selectedChannel()).toBe(2);
+
+    await press('Escape');
+    expect(page().selectedChannel()).toBeNull();
+  });
+
+  describe('a click into the grid area', () => {
+    const gridArea = (): HTMLElement => root().querySelector('.grid-area')!;
+
+    it('clears the selection from the gap between tiles and from the grid itself', async () => {
+      sixPerPage();
+      await open('/viewer');
+      await click(tileElement(4));
+      expect(page().selectedChannel()).toBe(4);
+
+      await click(root().querySelector<HTMLElement>('neat-tile-grid .grid')!);
+      expect(page().selectedChannel()).toBeNull();
+
+      await click(tileElement(4));
+      await click(gridArea());
+      expect(page().selectedChannel()).toBeNull();
+    });
+
+    it('on a tile selects it and does not clear it', async () => {
+      sixPerPage();
+      await open('/viewer');
+
+      await click(tileElement(4));
+      expect(page().selectedChannel()).toBe(4);
+
+      // Inside the tile too, on what it draws.
+      await click(tileElement(2).querySelector<HTMLElement>('neat-video-tile')!);
+      expect(page().selectedChannel()).toBe(2);
+    });
+
+    it('in the inspector keeps the selection', async () => {
+      sixPerPage();
+      await open('/viewer');
+      await click(tileElement(4));
+      await click(sidePanelToggle()!);
+
+      await click(root().querySelector<HTMLElement>('aside')!);
+
+      expect(page().selectedChannel()).toBe(4);
+    });
+
+    it('the handler moves no focus of its own', async () => {
+      sixPerPage();
+      await open('/viewer');
+      await click(tileElement(4));
+      tileElement(4).focus();
+
+      await click(root().querySelector<HTMLElement>('neat-tile-grid .grid')!);
+
+      expect(document.activeElement).toBe(tileElement(4));
+    });
+  });
+
+  it('hide empty shows only channels live in /api/channels and stops polling when switched off', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    sixPerPage();
+    await open('/viewer');
+
+    await openViewOptions();
+    await click(toggle('Hide empty slots'));
+    // Until the first answer the tiles on screen stay, connections and all: the live ones among
+    // them must not reconnect when the answer comes.
+    expect(shown()).toEqual(range(6));
+    expect(fake.held()).toEqual(range(6));
+    expect(fake.released).toEqual([]);
+    http.expectOne(CHANNELS_URL).flush({
+      channels: [
+        { channel: 2, video: { active: true } },
+        { channel: 5, video: { active: true } },
+      ],
+    });
+    await settle();
+    expect(shown()).toEqual([2, 5]);
+    // Only the empty channels let go; 2 and 5 kept the connection they had.
+    expect([...fake.released].sort((a, b) => a - b)).toEqual([0, 1, 3, 4]);
+
+    vi.advanceTimersByTime(2000);
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 5, video: { active: true } }] });
+    await settle();
+    expect(shown()).toEqual([5]);
+
+    await click(toggle('Hide empty slots'));
+    expect(shown()).toEqual(range(6));
+    vi.advanceTimersByTime(10_000);
+    http.expectNone(CHANNELS_URL);
+  });
+
+  it('with hide empty on, shows no channel and holds no connection until the channel list answers', async () => {
+    storage.seed({ layout: { tileWidths: { 16: 300 }, hideEmpty: true } });
+    await open('/viewer');
+
+    expect(shown()).toEqual([]);
+    expect(fake.held()).toEqual([]);
+    // Not "no channel is receiving video": that is not known yet either.
+    expect(root().querySelector('.empty')).toBeNull();
+    expect(notice()).toBe('');
+
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 3, video: { active: true } }] });
+    await settle();
+    expect(shown()).toEqual([3]);
+    expect(fake.held()).toEqual([3]);
+  });
+
+  it('with the channel list unavailable, hide empty shows every channel and says why', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    storage.seed({ layout: { tileWidths: { 16: 300 }, hideEmpty: true } });
+    await open('/viewer');
+    expect(notice()).toBe('');
+
+    http.expectOne(CHANNELS_URL).flush(null, { status: 502, statusText: 'Bad Gateway' });
+    await settle();
+    expect(shown()).toEqual(range(6));
+    expect(notice()).toBe('Live channels unknown: the channel list is unavailable');
+
+    vi.advanceTimersByTime(2000);
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 3, video: { active: true } }] });
+    await settle();
+    expect(shown()).toEqual([3]);
+    expect(notice()).toBe('');
+  });
+
+  it('a stats failure after a good answer keeps the tiles and shows the notice until the next answer', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    storage.seed({ layout: { tileWidths: { 16: 300 }, hideEmpty: true } });
+    await open('/viewer');
+    http.expectOne(CHANNELS_URL).flush({ channels: [{ channel: 3, video: { active: true } }] });
+    await settle();
+    expect(shown()).toEqual([3]);
+
+    vi.advanceTimersByTime(2000);
+    http.expectOne(CHANNELS_URL).flush(null, { status: 502, statusText: 'Bad Gateway' });
+    await settle();
+    expect(shown()).toEqual([3]);
+    expect(fake.held()).toEqual([3]);
+    expect(notice()).toBe('Live channels unknown: the channel list is unavailable');
+
+    vi.advanceTimersByTime(2000);
+    http.expectOne(CHANNELS_URL).flush({
+      channels: [
+        { channel: 3, video: { active: true } },
+        { channel: 7, video: { active: true } },
+      ],
+    });
+    await settle();
+    expect(shown()).toEqual([3, 7]);
+    expect(notice()).toBe('');
+  });
+
+  it('falls back to all 80 channels when the channel limit cannot be read', async () => {
+    storage.seed({ layout: { tileWidths: { 80: 300 } } });
+    await open('/viewer', { limit: null });
+
+    expect(shown()).toEqual(range(6));
+    expect(toolbar().textContent).toContain('of 14');
+    expect((await openChannelField()).placeholder).toBe('0–79');
+  });
+
+  it('holds no connection before the grid has measured itself', async () => {
+    await open('/viewer', { area: null });
+
+    expect(shown()).toEqual([]);
+    expect(fake.held()).toEqual([]);
+
+    await resize(1000, 400);
+    expect(fake.held()).toEqual(range(16));
+  });
+
+  it('paging from a focused tile moves focus to the first tile of the new page', async () => {
+    sixPerPage();
+    await open('/viewer');
+    tileElement(2).focus();
+
+    await press('ArrowRight', {}, tileElement(2));
+    expect(shown()).toEqual(range(6, 6));
+    expect(document.activeElement).toBe(tileElement(6));
+
+    await press('ArrowLeft', {}, tileElement(6));
+    expect(document.activeElement).toBe(tileElement(0));
+  });
+
+  it('bars off hides labels, statuses and chips on every tile', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await makeLate(0);
+    expect(root().querySelectorAll('neat-video-tile .bar')).toHaveLength(6);
+    expect(root().querySelector('button[neatTileChip]')).not.toBeNull();
+
+    await openViewOptions();
+    await click(toggle('Bars'));
+
+    expect(root().querySelectorAll('neat-video-tile .bar')).toHaveLength(0);
+    expect(root().querySelector('button[neatTileChip]')).toBeNull();
+    expect(storage.readStored('layout')).toMatchObject({ bars: false });
+  });
+
+  it('the late chip selects its tile and opens the inspector on the General tab', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await makeLate(3);
+
+    await click(root().querySelector<HTMLElement>('button[neatTileChip]')!);
+
+    expect(page().selectedChannel()).toBe(3);
+    expect(page().inspectorTab()).toBe('General');
+    expect(root().querySelector('aside')?.textContent).toContain('Channel 3');
+    expect(sidePanelToggle()!.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('on a narrow screen the inspector starts closed although the layout stores it open, and opening it stores nothing', async () => {
+    narrow.set(true);
+    storage.seed({ layout: { inspector: true, tileWidths: { 16: 300 } } });
+    await open('/viewer');
+    expect(root().querySelector('aside')).toBeNull();
+    expect(sidePanelToggle()!.getAttribute('aria-pressed')).toBe('false');
+
+    const writes = storage.writes.length;
+
+    await click(sidePanelToggle()!);
+
+    expect(root().querySelector('aside')).not.toBeNull();
+    expect(sidePanelToggle()!.getAttribute('aria-pressed')).toBe('true');
+    await click(sidePanelToggle()!);
+    expect(root().querySelector('aside')).toBeNull();
+    // Neither opening nor closing wrote anything: the layout still says what a wide screen chose.
+    expect(storage.writes).toHaveLength(writes);
+    expect(storage.readStored('layout')).toMatchObject({ inspector: true });
+  });
+
+  it('gives the page its remembered inspector width, and remembers a new one', async () => {
+    storage.seed({ 'aside-width': '420' });
+    await open('/viewer');
+    const neatPage = fixture.debugElement.query(By.directive(NeatPage))
+      .componentInstance as NeatPage;
+    expect(neatPage.asideWidth()).toBe(420);
+
+    neatPage.asideWidth.set(380);
+    expect(storage.readRaw('aside-width')).toBe('380');
+
+    neatPage.asideWidth.set(null);
+    expect(storage.readStored('aside-width')).toBeNull();
+  });
+
+  it('has no tile shape control', async () => {
+    await open('/viewer');
+
+    const labels = [...toolbar().querySelectorAll('[aria-label]')].map(labelOf);
+    expect(labels.filter((label) => /shape|aspect|16:9|1:1/i.test(label ?? ''))).toEqual([]);
+    expect(toolbar().textContent).not.toMatch(/16:9|1:1/);
+  });
+
+  it('mode=dark applies dark without persisting it', async () => {
+    await open('/viewer?mode=dark');
+
+    expect(document.documentElement.classList.contains('neat-dark')).toBe(true);
+    expect(storage.writes.filter((write) => write.key === 'neat-ui:color-scheme')).toEqual([]);
+  });
+
+  it('debug=1 logs connection events', async () => {
+    await open('/viewer');
+    expect(fake.debug).toBe(false);
+
+    await navigate('/viewer?debug=1');
+    expect(fake.debug).toBe(true);
+  });
+
+  it('the stored debug flag logs connection events too', async () => {
+    storage.seed({ debug: '1' });
+    await open('/viewer');
+
+    expect(fake.debug).toBe(true);
+  });
+
+  it('paging releases off-page channels; destroying the page releases them all', async () => {
+    sixPerPage();
+    await open('/viewer');
+    expect(fake.held()).toEqual(range(6));
+
+    await click(button('Next page'));
+    expect(fake.held()).toEqual(range(6, 6));
+    expect([...fake.released].sort((a, b) => a - b)).toEqual(range(6));
+
+    fixture.destroy();
+    expect(fake.held()).toEqual([]);
+  });
+
+  it('page, selection and inspector tab survive leaving the Viewer and coming back', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await jumpTo(10);
+    await click(sidePanelToggle()!);
+    await click(
+      [...root().querySelectorAll<HTMLElement>('aside [role="tab"]')].find(
+        (tab) => tab.textContent?.trim() === 'General',
+      )!,
+    );
+    expect(page().inspectorTab()).toBe('General');
+
+    await leaveAndReturn('/viewer');
+
+    // Leaving released the channels, as it must; the position came back.
+    expect(fake.released.length).toBeGreaterThan(0);
+    expect(shown()).toEqual(range(6, 6));
+    expect(pageInput().value).toBe('2');
+    expect(page().selectedChannel()).toBe(10);
+    expect(page().inspectorTab()).toBe('General');
+    expect(root().querySelector('aside')?.textContent).toContain('Channel 10');
+  });
+
+  it('a different number of tiles per page on return still shows the first channel left on screen', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(pageInput(), '3');
+    expect(shown()).toEqual([12, 13, 14, 15]);
+
+    // Four 300 px tiles per page now: channel 12 is on the fourth.
+    await leaveAndReturn('/viewer', { area: [700, 400] });
+
+    expect(shown()).toEqual([12, 13, 14, 15]);
+    expect(pageInput().value).toBe('4');
+  });
+
+  it('a link with another src starts on the first page with nothing selected, even for a shared channel', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await jumpTo(10);
+    expect(shown()).toEqual(range(6, 6));
+
+    // The same 16 channels in reverse: 6 and 10 are in it too, but this is another view.
+    await leaveAndReturn(`/viewer?src=${range(16).reverse().join(',')}`);
+
+    expect(shown()).toEqual([15, 14, 13, 12, 11, 10]);
+    expect(pageInput().value).toBe('1');
+    expect(page().selectedChannel()).toBeNull();
+  });
+
+  it('the same src restores the position and selection', async () => {
+    sixPerPage();
+    const url = `/viewer?src=${range(16).reverse().join(',')}`;
+    await open(url);
+    await jumpTo(4);
+    expect(shown()).toEqual([9, 8, 7, 6, 5, 4]);
+
+    await leaveAndReturn(url);
+
+    expect(shown()).toEqual([9, 8, 7, 6, 5, 4]);
+    expect(page().selectedChannel()).toBe(4);
+  });
+
+  it('a link with another max_channels starts on the first page with nothing selected', async () => {
+    storage.seed({ layout: { tileWidths: { 16: 300, 12: 300 } } });
+    await open('/viewer?max_channels=16');
+    await jumpTo(10);
+    expect(shown()).toEqual(range(6, 6));
+
+    await leaveAndReturn('/viewer?max_channels=12');
+
+    expect(shown()).toEqual(range(6));
+    expect(page().selectedChannel()).toBeNull();
+  });
+
+  it('a selection the link changed in place no longer holds is dropped', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await jumpTo(10);
+
+    await navigate('/viewer?src=0,1,2,3');
+
+    expect(shown()).toEqual([0, 1, 2, 3]);
+    expect(page().selectedChannel()).toBeNull();
+  });
+
+  it('once the user pages on a restored Viewer, the remembered channel no longer holds the page', async () => {
+    sixPerPage();
+    await open('/viewer');
+    await enter(pageInput(), '3');
+    await leaveAndReturn('/viewer');
+    expect(shown()).toEqual([12, 13, 14, 15]);
+
+    await click(button('Previous page'));
+    expect(shown()).toEqual(range(6, 6));
+    // Four tiles per page: the second page as usual, not a jump back to channel 12's page.
+    await resize(700, 400);
+    expect(shown()).toEqual([4, 5, 6, 7]);
+  });
+});

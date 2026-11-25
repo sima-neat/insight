@@ -1,0 +1,31 @@
+/* The kind is a code (VID, CAM, EXT, URL), set off from the source it qualifies. */
+.kind {
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* Start… dialog: the slider takes the row, the readout its number's width. */
+.question {
+  margin: 0 0 var(--neat-space-3);
+  font-size: var(--neat-text-sm);
+}
+
+.count-field {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-3);
+  margin-block-end: var(--neat-space-2);
+}
+
+.count-field neat-slider {
+  flex: 1 1 0;
+}
+
+.count-field output {
+  min-width: 2ch;
+  font-size: var(--neat-text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}

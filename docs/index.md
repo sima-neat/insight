@@ -1,68 +1,42 @@
 ---
 title: Insight
-description: Use Neat Insight to inspect workspaces, prepare media streams, view runtime video, and debug Neat application behavior.
+description: Use Neat Insight to serve test video streams to your Neat app and to view the video and AI results your app sends back.
 sidebar_position: 0
 ---
 
 # Insight
 
-Insight is the browser-based inspection and test console for Neat vision application development. It brings the pieces of a vision runtime loop into one place: the project workspace, test media, streaming source setup, live WebRTC video, metadata overlays, and the planned home for system/runtime statistics.
+Neat Insight is a browser tool for developing Neat vision apps. It serves video streams your app
+reads, and shows the video your app sends back with its AI results (boxes, classes, poses, masks,
+tracks) drawn over it. It also lists a board's cameras and microphones and shows the board's
+telemetry.
 
-Use Insight when you want to answer practical development questions quickly:
+```text
+media file, webcam or IP camera ──▶ Insight source srcN ──RTSP──▶ your app
+your app ──video and metadata over UDP──▶ Insight ──WebRTC──▶ the Viewer in your browser
+```
 
-- What files, models, packages, and profiling artifacts are in my workspace?
-- Which test media files are available, and which streaming sources are playing?
-- Is my application producing video on the expected channel?
-- Is metadata arriving in sync with the video frame?
-- Is the problem in the application, the stream path, or the device runtime?
-
-Insight is bundled with the Neat Development Environment and is also available as a Neat artifact package that you can install or upgrade with `sima-cli neat install`. In the SDK, Insight is automatically configured with host port mappings so a browser, a DevKit, or another machine on the network can connect to its UI, streaming sources, and video-rendering ports.
-
-## Documentation
-
-- [Concepts](concepts.md) explains how Insight fits into the Neat development workflow.
-- [Install and Upgrade](install-upgrade.md) covers bundled SDK usage, DevKit installation, and upgrade commands.
-- [User Interface](user-interface.md) describes the Workspace, Media Sources, Streaming Sources, Video Viewer, Stats, and System Information views.
-- [Common Workflows](workflows.md) walks through single-stream, multi-stream, and debugging flows.
-- [Ports and Network Behavior](ports-network.md) lists the ports Insight uses and how SDK port mapping affects links.
-- [REST API Reference](api-reference.md) documents automation endpoints and the in-app OpenAPI/Swagger reference.
+Insight comes with the Neat SDK, where it starts with the container, and can also be installed on
+a DevKit ([Install and upgrade](install-upgrade.md)).
 
 ## Quick start
 
-In the Neat Development Environment, first check that Insight is running:
+1. Open `https://localhost:9900`, or `https://<host-ip>:9900` from another machine. If the SDK
+   published Insight on another port, `neat --json` gives its address as `insight.webUiUrl`.
+2. In **Media**, select **Import…** and import a video from the **Catalog** tab.
+3. In **Streaming**, select slot `src1`, choose the video with **Change…**, then select **Start**.
+   An app in the SDK container reads it at `rtsp://127.0.0.1:8554/src1`.
+4. Run your app with Insight as the destination of its video and metadata on channel 1, as the
+   [contracts](contracts.md) say.
+5. Open **Viewer** to watch channel 1 with its overlays.
 
-```bash
-insight-admin status
-```
+## Documentation
 
-Then open Insight from a browser:
-
-```text
-https://localhost:9900
-```
-
-If you are browsing from another machine on the same network, use the SDK host IP address:
-
-```text
-https://<host-ip>:9900
-```
-
-If the default ports were not available when the SDK was created, the browser-facing ports may be different. Run this command inside the SDK to see the actual port map:
-
-```bash
-neat --json
-```
-
-Look at `insight.webUiUrl` for the main UI and `exposedPorts` for RTSP, video UDP, metadata UDP, WebRTC, and the Video Viewer UI.
-
-The basic development loop is:
-
-1. Open Insight.
-2. Upload or select media in Media Sources.
-3. Start one or more streaming sources.
-4. Run your Neat application.
-5. Watch the output and metadata overlays in Video Viewer.
-6. Use the SDK port map when configuring applications running on a DevKit or another external machine.
-7. Use Workspace to inspect artifacts, and use the Stats placeholder to understand where system/runtime diagnostics will land in the next release.
-
-If you do not already have media files, start with the standard test videos listed in [Common Workflows](workflows.md#import-standard-test-videos).
+- [Concepts](concepts.md): sources, channels, the board, and how they fit together.
+- [Install and upgrade](install-upgrade.md): Insight in the SDK and on a DevKit.
+- [User interface](user-interface.md): each page of Insight.
+- [Common workflows](workflows.md): the tasks you do with Insight, and what to check when video or
+  overlays are missing.
+- [Ports and network](ports-network.md): the ports Insight uses and how the SDK remaps them.
+- [Contracts](contracts.md): what an app does to read Insight's sources and show up in its Viewer.
+- [REST API](api-reference.md): automating Insight.

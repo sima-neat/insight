@@ -1,0 +1,9 @@
+package: api
+output: api.gen.go
+generate:
+  models: true
+  std-http-server: true
+output-options:
+  # Keep schemas no route references yet (Error), so the server writes errors with the
+  # generated type from the start.
+  skip-prune: true

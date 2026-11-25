@@ -1,0 +1,39 @@
+/* The group column is dropped by what the table has room for, not by the screen: in the side panel it never fits. */
+:host {
+  display: block;
+  container-type: inline-size;
+}
+
+.group {
+  color: var(--muted-foreground);
+}
+
+/*
+ * The trend takes the width the other columns leave. A fixed width on a table cell is that
+ * column's least width too, which is what pushed the table past the side panel, so it has none;
+ * the line keeps a least width of its own, so that it never shrinks to a stub.
+ */
+.trend {
+  inline-size: 100%;
+}
+
+neat-sparkline {
+  display: block;
+  min-inline-size: 3rem;
+}
+
+/*
+ * Narrow, the cells give up some of their padding so that the five columns fit a side panel. This
+ * stays here and not in the kit's table: it reads the container this component declares above,
+ * and 40rem is where these five columns stop fitting, which another table would place elsewhere.
+ */
+@container (width < 40rem) {
+  th,
+  td {
+    padding-inline: var(--neat-space-2);
+  }
+
+  .group {
+    display: none;
+  }
+}

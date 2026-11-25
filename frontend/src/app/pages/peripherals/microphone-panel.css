@@ -1,0 +1,26 @@
+.capture {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--neat-text-sm);
+}
+
+/*
+ * The button, the meter and the caption in one row; the meter takes the room
+ * left. A narrow panel wraps the caption under them.
+ */
+.test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-3);
+}
+
+.test neat-level-meter {
+  flex: 1 1 6rem;
+}
+
+.caption {
+  font-size: var(--neat-text-sm);
+  font-variant-numeric: tabular-nums;
+}

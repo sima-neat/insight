@@ -1,0 +1,963 @@
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { Component, computed, signal } from '@angular/core';
+import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { provideRouter, Router, RouterOutlet } from '@angular/router';
+import { NeatPage, NeatShell, type NeatTone } from '@sima/neat-ui';
+import { NeatConfirm } from '@sima/neat-ui/confirm';
+import { NeatSelectList } from '@sima/neat-ui/select-list';
+import { NeatStatusChip } from '@sima/neat-ui/status-chip';
+import { NeatToasts } from '@sima/neat-ui/toast';
+import type {
+  AutoAssignResult,
+  MediaEntry,
+  RenditionsCleared,
+  RenditionUsage,
+  Slot,
+  SlotStartResult,
+  SlotStopResult,
+} from '../../api.generated';
+import { CamerasService } from '../../sources/cameras.service';
+import { MediaLibraryService } from '../../sources/media-library.service';
+import { mediaFile, mediaFolder } from '../../sources/media.testing';
+import type { Progress } from '../../sources/jobs';
+import type { SlotRow } from '../../sources/slot-row';
+import { SlotsService } from '../../sources/slots.service';
+import { fileSlot, publisher, pull, slot, webcamSlot } from '../../sources/slots.testing';
+import { ApiRequestError } from '../../sources/api-errors';
+import { DEFAULT_WEBCAM_CAPTURE, type WebcamCapture } from '../../sources/webcam-capture';
+import type { Camera } from '../../sources/webcam-publishing';
+import { radioLabel } from '../../radio-label.testing';
+import { FakeLocalStorage } from '../../fake-storage.testing';
+import { StreamingPage } from './streaming.page';
+
+/**
+ * The 48 slots with one of each kind near the top: a live file, an idle file at a custom rate,
+ * a webcam, an external publisher with a codec Neat cannot decode, a live pull and an unreachable
+ * one. Everything else is unassigned. Six slots are assigned, one more is external.
+ */
+function mixedSlots(): Slot[] {
+  const slots = Array.from({ length: 48 }, (_, index) => slot(index + 1));
+  slots[0] = fileSlot(1, 'people/walk.mp4', {
+    run: true,
+    state: 'live',
+    publisher: publisher(),
+    active_file: 'people/walk.mp4',
+  });
+  slots[1] = fileSlot(2, 'cars.mp4', { codec: 'h265', native_fps: 25, fps: 15 });
+  slots[2] = webcamSlot(3);
+  slots[3] = slot(4, {
+    state: 'external',
+    codec: 'av1',
+    publisher: publisher({
+      address: '192.168.1.20',
+      codec: 'av1',
+      codec_supported: false,
+    }),
+  });
+  slots[4] = slot(5, {
+    kind: 'pull',
+    run: true,
+    state: 'live',
+    codec: 'h264',
+    pull: pull(),
+    publisher: publisher({
+      protocol: 'rtspSource',
+      address: undefined,
+      width: 1920,
+      height: 1080,
+      fps: 25,
+    }),
+  });
+  slots[5] = slot(6, {
+    kind: 'pull',
+    run: true,
+    state: 'starting',
+    pull: pull({ host: '10.0.0.8:554', status: 'unreachable', error: 'connection refused' }),
+    error: 'connection refused',
+  });
+  slots[6] = fileSlot(7, 'idle.mp4');
+  return slots;
+}
+
+/** `SlotsService` as the page uses it: its signals set by the test, its actions recorded. */
+class FakeSlots {
+  readonly slots = signal<readonly Slot[] | null>(null);
+  readonly unavailable = signal(false);
+  readonly renditions = signal<RenditionUsage | null>(null);
+  readonly encodes = signal<ReadonlyMap<number, Progress>>(new Map());
+  watchers = 0;
+  readonly watch = vi.fn(() => {
+    this.watchers++;
+    let released = false;
+    return () => {
+      if (!released) this.watchers--;
+      released = true;
+    };
+  });
+  readonly refreshRenditions = vi.fn(async () => undefined);
+  readonly startBulk = vi.fn<(count: number) => Promise<SlotStartResult>>();
+  readonly stopAll = vi.fn<() => Promise<SlotStopResult>>();
+  readonly reset = vi.fn<() => Promise<SlotStopResult>>();
+  readonly autoAssign = vi.fn<() => Promise<AutoAssignResult>>();
+  readonly clearRenditions = vi.fn<() => Promise<RenditionsCleared>>();
+  /** What the side panel starts a slot with. */
+  readonly start = vi.fn<(n: number) => Promise<Slot>>();
+  /** What the side panel commits a frame rate with. */
+  readonly assignFile = vi.fn<(n: number, file: string, fps?: number | null) => Promise<Slot>>(
+    async (n, file) => fileSlot(n, file),
+  );
+}
+
+class FakeCameras {
+  readonly assignments = signal<ReadonlyMap<number, Camera>>(new Map());
+  readonly anyChanging = signal(false);
+  // What the side panel reads.
+  readonly cameras = signal<readonly Camera[]>([]);
+  readonly state = signal('unknown');
+  readonly error = signal<string | null>(null);
+  readonly localStreams = signal<ReadonlyMap<number, MediaStream>>(new Map());
+  readonly changingSlots = computed<ReadonlySet<number>>(() => new Set());
+  /** What the side panel's camera form reads of a slot's capture. */
+  readonly captureOf = (): WebcamCapture => DEFAULT_WEBCAM_CAPTURE;
+  readonly releaseAll = vi.fn((options?: { clearAssignments?: boolean }) => {
+    void options;
+  });
+  /** What the side panel's source switch clears a slot with. */
+  readonly clear = vi.fn(async (n: number) => slot(n));
+}
+
+/** A library with streamable files, unless a test sets another answer (or none). */
+class FakeLibrary {
+  readonly tree = signal<readonly MediaEntry[] | null>([
+    mediaFolder('people', [mediaFile('people/walk.mp4')]),
+    mediaFile('cars.mp4'),
+  ]);
+  readonly refresh = vi.fn(async () => undefined);
+}
+
+const stopResult = (stopped: number[]): SlotStopResult => ({ stopped, skipped_external: [4] });
+
+/** The app frame, so the page's toolbar has a top bar to render into. */
+@Component({
+  imports: [NeatShell, RouterOutlet],
+  template: `<neat-shell appName="Neat Insight" [navItems]="[]"><router-outlet /></neat-shell>`,
+})
+class Shell {}
+
+@Component({ template: '' })
+class Elsewhere {}
+
+describe('StreamingPage', () => {
+  let slots: FakeSlots;
+  let cameras: FakeCameras;
+  let library: FakeLibrary;
+  let toasts: { error: ReturnType<typeof vi.fn>; status: ReturnType<typeof vi.fn> };
+  let fixture: ComponentFixture<Shell>;
+
+  beforeEach(() => {
+    slots = new FakeSlots();
+    cameras = new FakeCameras();
+    library = new FakeLibrary();
+    toasts = { error: vi.fn(), status: vi.fn() };
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([
+          { path: 'streaming', component: StreamingPage },
+          { path: 'elsewhere', component: Elsewhere },
+        ]),
+        { provide: SlotsService, useValue: slots },
+        { provide: CamerasService, useValue: cameras },
+        { provide: MediaLibraryService, useValue: library },
+        { provide: NeatToasts, useValue: toasts },
+      ],
+    });
+  });
+
+  let storage: FakeLocalStorage;
+
+  beforeEach(() => {
+    // The side panel's open state is remembered in storage: a fresh one for every test.
+    storage = new FakeLocalStorage();
+    vi.stubGlobal('localStorage', storage);
+    // jsdom has no ResizeObserver; the slot list watches its width to give up narrow columns.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {
+          // jsdom lays nothing out, so no width ever changes.
+        }
+        unobserve(): void {
+          // The kit's slider shares an observer and lets go of its element this way.
+        }
+        disconnect(): void {
+          // Nothing observed.
+        }
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const root = (): HTMLElement => fixture.nativeElement;
+  const settle = () => fixture.whenStable();
+  /** Lets an overlay open or close: it moves focus after rendering and closes a frame later. */
+  async function settleOverlay(): Promise<void> {
+    for (let turn = 0; turn < 3; turn++) {
+      await new Promise((resolve) => setTimeout(resolve));
+      await settle();
+    }
+  }
+
+  async function open(answer: readonly Slot[] | null = mixedSlots()): Promise<void> {
+    slots.slots.set(answer);
+    fixture = TestBed.createComponent(Shell);
+    await TestBed.inject(Router).navigateByUrl('/streaming');
+    await settle();
+  }
+
+  const toolbar = (): HTMLElement => root().querySelector('.page-toolbar')!;
+  const toolbarButton = (name: string): HTMLButtonElement =>
+    [...toolbar().querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => (button.getAttribute('aria-label') ?? button.textContent?.trim()) === name,
+    )!;
+  /** The side-panel toggle: the kit draws it at the top bar's right edge, outside the page tools. */
+  const sidePanelToggle = (): HTMLButtonElement | null =>
+    root().querySelector<HTMLButtonElement>('header button[aria-label="Side panel"]');
+  const filter = (label: string): HTMLButtonElement =>
+    [...toolbar().querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((radio) =>
+      radioLabel(radio).startsWith(label),
+    )!;
+  const listbox = (): HTMLElement => root().querySelector('[role="listbox"]')!;
+  const rows = (): HTMLElement[] => [...listbox().querySelectorAll<HTMLElement>('[role="option"]')];
+  /** A row's cells as their text, in column order, without the warning glyph. */
+  const cells = (row: HTMLElement): string[] =>
+    [...row.querySelectorAll(':scope > div')].map((cell) => {
+      const shown = cell.cloneNode(true) as HTMLElement;
+      shown.querySelectorAll('[role="img"]').forEach((glyph) => glyph.remove());
+      return shown.textContent!.trim();
+    });
+  const rowOf = (name: string): HTMLElement => rows().find((row) => cells(row)[0] === name)!;
+  /** The tone a kit status chip was given, which its fill shows. */
+  const toneOf = (chip: Element): NeatTone =>
+    fixture.debugElement
+      .queryAll(By.directive(NeatStatusChip))
+      .find((debug) => debug.nativeElement === chip)!
+      .componentInstance.tone();
+  const aside = (): HTMLElement | null => root().querySelector('aside');
+  const asideButton = (label: string): HTMLButtonElement =>
+    [...aside()!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === label,
+    )!;
+  const asideHeading = () => aside()?.querySelector('h2')?.textContent?.trim();
+  const notice = () => root().querySelector('[role="status"]')?.textContent?.trim() ?? '';
+  const morePanel = () => document.querySelector('[role="dialog"][aria-label="More actions"]');
+  const menuItem = (label: string): HTMLButtonElement =>
+    [...(morePanel()?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((button) =>
+      button.textContent?.trim().startsWith(label),
+    )!;
+  const confirmDialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+  const confirmText = () =>
+    [...(confirmDialog()?.querySelectorAll('h2, p, button') ?? [])]
+      .map((part) => part.textContent?.trim())
+      .join(' ');
+  const bulkDialog = () => document.querySelector<HTMLElement>('neat-dialog-panel');
+
+  async function click(element: HTMLElement): Promise<void> {
+    element.click();
+    await settleOverlay();
+  }
+
+  async function press(element: HTMLElement, key: string): Promise<void> {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    await settle();
+  }
+
+  async function answer(dialog: HTMLElement, label: string): Promise<void> {
+    [...dialog.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === label)!
+      .click();
+    await settleOverlay();
+  }
+
+  async function openMore(): Promise<void> {
+    await click(toolbarButton('More actions'));
+    expect(morePanel()).not.toBeNull();
+  }
+
+  /** Opens the ⋯ menu and picks a row, as the bulk actions now are. */
+  async function choose(label: string): Promise<void> {
+    await openMore();
+    await click(menuItem(label));
+  }
+
+  it('shows 48 rows with kind, source, state, rate and codec for file, webcam, external and pulled slots', async () => {
+    cameras.assignments.set(new Map([[3, { deviceId: 'd1', label: 'Desk camera' }]]));
+    await open();
+
+    expect(rows()).toHaveLength(48);
+    expect(rows().slice(0, 8).map(cells)).toEqual([
+      ['src1', 'VID', 'people/walk.mp4', 'Live', '30 fps', 'H.264'],
+      ['src2', 'VID', 'cars.mp4', 'Idle', '15 fps · rendition', 'H.265'],
+      // A webcam's rate is its assignment's; its codec is the stream's, which there is none of
+      // until a browser publishes.
+      ['src3', 'CAM', 'Desk camera', 'Idle', '30 fps', '–'],
+      ['src4', 'EXT', '⇢ RTSP · 192.168.1.20 · 1280×720 · 30 fps', 'External', '30 fps', 'AV1'],
+      ['src5', 'URL', '⇠ RTSP · 10.0.0.7:554 · 1920×1080 · 25 fps', 'Live', '25 fps', 'H.264'],
+      [
+        'src6',
+        'URL',
+        '⇠ RTSP · 10.0.0.8:554 · retrying… (connection refused)',
+        'Unreachable',
+        'retrying…',
+        '–',
+      ],
+      ['src7', 'VID', 'idle.mp4', 'Idle', '30 fps', 'H.264'],
+      ['src8', '', 'Not assigned', 'Idle', '', '–'],
+    ]);
+    expect(cells(rowOf('src48'))).toEqual(['src48', '', 'Not assigned', 'Idle', '', '–']);
+    // The chips carry the state's tone for the theme's status colours.
+    const tone = (name: string) => toneOf(rowOf(name).querySelector('neat-status-chip')!);
+    expect(['src1', 'src2', 'src4', 'src5', 'src6'].map(tone)).toEqual([
+      'success',
+      'neutral',
+      'highlight',
+      'success',
+      'warning',
+    ]);
+    // The undecodable codec is in warning colours, and its glyph is named by the warning, which
+    // the row is read with.
+    const codec = rowOf('src4').querySelector(':scope > div:last-child neat-status-chip')!;
+    expect(toneOf(codec)).toBe('warning');
+    expect(codec.querySelector('[role="img"]')!.getAttribute('aria-label')).toBe(
+      'AV1 cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.',
+    );
+  });
+
+  it('tints each row with its state chip’s tone, from one mapping; an idle row stays plain', async () => {
+    // src6 cannot reach its camera; src9 and src10 are pulls refused and still connecting; src7
+    // encodes a rendition.
+    const answer = mixedSlots();
+    const camera = answer[5].pull!;
+    answer[8] = {
+      ...answer[5],
+      n: 9,
+      state: 'failed',
+      pull: { ...camera, status: 'auth_failed', error: undefined },
+    };
+    answer[9] = {
+      ...answer[5],
+      n: 10,
+      pull: { ...camera, status: 'connecting', error: undefined },
+    };
+    slots.encodes.set(new Map([[7, { title: 'Encoding rendition…', detail: '', percent: 10 }]]));
+    await open(answer);
+    const list = fixture.debugElement.query(By.directive(NeatSelectList))
+      .componentInstance as NeatSelectList<SlotRow>;
+    const rowTone = list.rowTone();
+    const states = ['src1', 'src2', 'src4', 'src5', 'src6', 'src9', 'src10', 'src7'].map((name) => {
+      const row = list.items().find((item) => item.name === name)!;
+      const chip = toneOf(rowOf(name).querySelector('neat-status-chip')!);
+      expect(rowTone(row), name).toBe(chip);
+      return `${row.state.label} ${chip}`;
+    });
+    expect(states).toEqual([
+      'Live success',
+      'Idle neutral',
+      'External highlight',
+      'Live success',
+      'Unreachable warning',
+      'Auth failed danger',
+      'Connecting… info',
+      'Encoding info',
+    ]);
+  });
+
+  it('gives up the Rate and Codec columns, headings included, where the list is under 28rem', async () => {
+    // A tablet beside the side panel: the list measures its width as it first renders.
+    let listWidth = 447;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return { width: this.tagName === 'NEAT-SELECT-LIST' ? listWidth : 0 } as DOMRect;
+    });
+    const headings = () =>
+      [...root().querySelectorAll('[data-slot="select-list-header"] span')].map((cell) =>
+        cell.textContent!.trim(),
+      );
+
+    await open();
+    expect(headings()).toEqual(['Slot', 'Kind', 'Source', 'State']);
+    expect(cells(rowOf('src1'))).toEqual(['src1', 'VID', 'people/walk.mp4', 'Live']);
+
+    fixture.destroy();
+    listWidth = 448;
+    await open();
+    expect(headings()).toEqual(['Slot', 'Kind', 'Source', 'State', 'Rate', 'Codec']);
+    expect(cells(rowOf('src1'))).toEqual([
+      'src1',
+      'VID',
+      'people/walk.mp4',
+      'Live',
+      '30 fps',
+      'H.264',
+    ]);
+  });
+
+  it('shows a preparing slot as Encoding with the percent of its encode', async () => {
+    slots.encodes.set(new Map([[2, { title: 'Encoding rendition…', detail: '', percent: 42 }]]));
+    await open(
+      mixedSlots().map((one) =>
+        one.n === 2 ? { ...one, run: true, state: 'preparing' as const, job: 'job-1' } : one,
+      ),
+    );
+
+    expect(cells(rowOf('src2'))).toEqual([
+      'src2',
+      'VID',
+      'cars.mp4',
+      'Encoding',
+      'encoding 42%',
+      'H.265',
+    ]);
+  });
+
+  it('In use shows assigned and external slots only', async () => {
+    await open();
+    expect(radioLabel(filter('All'))).toBe('All 48');
+    expect(radioLabel(filter('In use'))).toBe('In use 7');
+
+    await click(filter('In use'));
+
+    expect(rows().map((row) => cells(row)[0])).toEqual([
+      'src1',
+      'src2',
+      'src3',
+      'src4',
+      'src5',
+      'src6',
+      'src7',
+    ]);
+
+    await click(filter('All'));
+    expect(rows()).toHaveLength(48);
+  });
+
+  it('In use with no slot in use says so', async () => {
+    await open(Array.from({ length: 48 }, (_, index) => slot(index + 1)));
+    await click(filter('In use'));
+
+    expect(rows()).toHaveLength(0);
+    expect(listbox().parentElement!.textContent).toContain('No slot is in use.');
+  });
+
+  it('Start… starts the chosen count and reports what it did', async () => {
+    await open();
+    slots.startBulk.mockResolvedValue({
+      started: [],
+      already_running: [1],
+      errors: [{ n: 2, code: 'file_not_found', error: 'cars.mp4 is not in the media library.' }],
+      skipped_external: [4],
+    });
+
+    await choose('Start…');
+    const dialog = bulkDialog()!;
+    expect(dialog.textContent).toContain('Bulk Start Streams');
+    expect(dialog.textContent).toContain('How many streams do you want to start?');
+    expect(dialog.textContent).toContain(
+      'Slots with a custom FPS may take longer to start while renditions are created.',
+    );
+    const slider = dialog.querySelector<HTMLElement>('[role="slider"]')!;
+    expect(slider.getAttribute('aria-valuemin')).toBe('1');
+    expect(slider.getAttribute('aria-valuemax')).toBe('48');
+    // It opens at 1.
+    expect(slider.getAttribute('aria-valuenow')).toBe('1');
+    await press(slider, 'ArrowRight');
+    expect(dialog.querySelector('output')?.textContent?.trim()).toBe('2');
+
+    await answer(dialog, 'Start');
+
+    expect(bulkDialog()).toBeNull();
+    expect(slots.startBulk).toHaveBeenCalledExactlyOnceWith(2);
+    expect(toasts.status).toHaveBeenCalledWith(
+      'Started 0 source(s), 1 already running, 1 failed. Skipped external: src4.',
+    );
+    expect(toasts.error).toHaveBeenCalledWith('src2: cars.mp4 is not in the media library.');
+
+    // The next time it opens at the count chosen last.
+    await choose('Start…');
+    expect(bulkDialog()!.querySelector('[role="slider"]')!.getAttribute('aria-valuenow')).toBe('2');
+    await answer(bulkDialog()!, 'Cancel');
+  });
+
+  it('Start… waits for the frame rates the side panel is committing, and starts nothing when one was refused', async () => {
+    await open();
+    slots.startBulk.mockResolvedValue({
+      started: [7],
+      already_running: [],
+      errors: [],
+      skipped_external: [],
+    });
+    let landed!: () => void;
+    slots.assignFile.mockReturnValueOnce(
+      new Promise((resolve) => (landed = () => resolve(fileSlot(7, 'idle.mp4', { fps: 15 })))),
+    );
+    await click(rowOf('src7'));
+    const rate = aside()!.querySelector<HTMLInputElement>('input[aria-label="Frames per second"]')!;
+    rate.value = '15';
+    rate.dispatchEvent(new Event('input'));
+    rate.dispatchEvent(new Event('blur'));
+    await settle();
+    expect(slots.assignFile).toHaveBeenCalledWith(7, 'idle.mp4', 15);
+
+    await choose('Start…');
+    await answer(bulkDialog()!, 'Start');
+    // The server must start the rate just committed, not the one before it.
+    expect(slots.startBulk).not.toHaveBeenCalled();
+    landed();
+    await settleOverlay();
+    expect(slots.startBulk).toHaveBeenCalledExactlyOnceWith(1);
+    expect(bulkDialog()).toBeNull();
+
+    // A commit still on its way when Start is pressed, then refused: it is reported once, and the
+    // bulk start sends nothing and stays open.
+    let refuse!: () => void;
+    slots.assignFile.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        refuse = () => reject(new ApiRequestError(400, 'No codec level covers 900 fps.', null));
+      }),
+    );
+    rate.value = '900';
+    rate.dispatchEvent(new Event('input'));
+    rate.dispatchEvent(new Event('blur'));
+    await choose('Start…');
+    await answer(bulkDialog()!, 'Start');
+    refuse();
+    await settleOverlay();
+    expect(toasts.error).toHaveBeenCalledExactlyOnceWith('No codec level covers 900 fps.');
+    expect(slots.startBulk).toHaveBeenCalledOnce();
+    expect(bulkDialog()).not.toBeNull();
+    await answer(bulkDialog()!, 'Cancel');
+  });
+
+  it('the side panel is the selected slot’s own: choosing another slot starts it afresh', async () => {
+    await open();
+    await click(rowOf('src7'));
+    const kind = (label: string) =>
+      [...aside()!.querySelectorAll<HTMLElement>('[role="radio"]')].find(
+        (radio) => radioLabel(radio) === label,
+      )!;
+    await click(kind('Stream URL'));
+    const password = aside()!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    password.value = 'secret';
+    password.dispatchEvent(new Event('input'));
+    await settle();
+
+    await click(rowOf('src9'));
+    expect(asideHeading()).toBe('src9');
+    await click(rowOf('src7'));
+    expect(kind('File').getAttribute('aria-checked')).toBe('true');
+    await click(kind('Stream URL'));
+    expect(aside()!.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe('');
+  });
+
+  it('a slot with a start in flight reads Starting… in its row and its panel, then its server state again', async () => {
+    let started!: (answer: Slot) => void;
+    slots.start.mockReturnValueOnce(new Promise((resolve) => (started = resolve)));
+    await open();
+    await click(rowOf('src7'));
+    const rowChip = () => rowOf('src7').querySelector('neat-status-chip')!;
+    const panelChip = () => aside()!.querySelector('app-panel-title neat-status-chip')!;
+    const read = (chip: Element) => `${chip.textContent!.trim()} ${toneOf(chip)}`;
+    expect([read(rowChip()), read(panelChip())]).toEqual(['Idle neutral', 'Idle neutral']);
+
+    await click(asideButton('Start'));
+    expect(slots.start).toHaveBeenCalledWith(7);
+    expect([read(rowChip()), read(panelChip())]).toEqual(['Starting… info', 'Starting… info']);
+    // Only the slot being started.
+    expect(cells(rowOf('src8'))[3]).toBe('Idle');
+
+    // The poll after it shows the slot as the server holds it.
+    started(fileSlot(7, 'idle.mp4'));
+    await settleOverlay();
+    expect([read(rowChip()), read(panelChip())]).toEqual(['Idle neutral', 'Idle neutral']);
+  });
+
+  it('Start… cancelled starts nothing', async () => {
+    await open();
+    await choose('Start…');
+    await answer(bulkDialog()!, 'Cancel');
+
+    expect(bulkDialog()).toBeNull();
+    expect(slots.startBulk).not.toHaveBeenCalled();
+  });
+
+  it('a refused bulk start shows the server message and keeps the dialog open to try again', async () => {
+    await open();
+    slots.startBulk.mockRejectedValue(
+      new ApiRequestError(409, 'No source has a file assigned.', null),
+    );
+    await choose('Start…');
+    await answer(bulkDialog()!, 'Start');
+
+    expect(toasts.error).toHaveBeenCalledWith('No source has a file assigned.');
+    expect(toasts.status).not.toHaveBeenCalled();
+    expect(bulkDialog()).not.toBeNull();
+    await answer(bulkDialog()!, 'Cancel');
+  });
+
+  it('a slot that began changing while the dialog or the menu was open is reported, and nothing is sent', async () => {
+    await open();
+    await choose('Start…');
+    cameras.anyChanging.set(true);
+    await settle();
+    await answer(bulkDialog()!, 'Start');
+
+    expect(toasts.error).toHaveBeenCalledWith(
+      'Waiting for a source change to finish before starting sources.',
+    );
+    expect(slots.startBulk).not.toHaveBeenCalled();
+    // The dialog stays, so Start can be pressed again once the change is done.
+    expect(bulkDialog()).not.toBeNull();
+    await answer(bulkDialog()!, 'Cancel');
+
+    cameras.anyChanging.set(false);
+    await settle();
+    await openMore();
+    await click(menuItem('Reset'));
+    cameras.anyChanging.set(true);
+    await settle();
+    await answer(confirmDialog()!, 'Reset');
+
+    expect(toasts.error).toHaveBeenLastCalledWith(
+      'Waiting for a source change to finish before resetting sources.',
+    );
+    expect(cameras.releaseAll).not.toHaveBeenCalled();
+    expect(slots.reset).not.toHaveBeenCalled();
+  });
+
+  it("Stop all and Auto assign close this browser's webcams first and report what they did", async () => {
+    await open();
+    slots.stopAll.mockResolvedValue(stopResult([1, 5]));
+    slots.autoAssign.mockResolvedValue({
+      assigned: 3,
+      available: 3,
+      skipped_external: [4],
+      skipped_pulled: [5, 6],
+    });
+
+    await choose('Stop all');
+    // Stop all keeps the cameras picked for the slots; auto assign turns them into file slots.
+    expect(cameras.releaseAll).toHaveBeenLastCalledWith();
+    expect(slots.stopAll).toHaveBeenCalledExactlyOnceWith();
+    expect(toasts.status).toHaveBeenLastCalledWith(
+      'Stopped 2 source(s). External stream(s) left running: src4.',
+    );
+
+    await choose('Auto assign');
+    expect(cameras.releaseAll).toHaveBeenLastCalledWith({ clearAssignments: true });
+    expect(slots.autoAssign).toHaveBeenCalledExactlyOnceWith();
+    expect(toasts.status).toHaveBeenLastCalledWith(
+      'Assigned 3 source(s) with unique media file(s). Skipped external: src4. Skipped pulled: src5, src6.',
+    );
+  });
+
+  it('the bulk actions wait while a slot change or another bulk action is in flight', async () => {
+    await open();
+    const bulk = ['Auto assign', 'Start…', 'Stop all', 'Reset'];
+    const disabled = () => bulk.map((name) => menuItem(name).disabled);
+    await openMore();
+    expect(disabled()).toEqual([false, false, false, false]);
+
+    cameras.anyChanging.set(true);
+    await settle();
+    expect(disabled()).toEqual([true, true, true, true]);
+    await press(morePanel() as HTMLElement, 'Escape');
+    await settleOverlay();
+
+    cameras.anyChanging.set(false);
+    await settle();
+    let finish!: (result: SlotStopResult) => void;
+    slots.stopAll.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    await choose('Stop all');
+    await openMore();
+    expect(disabled()).toEqual([true, true, true, true]);
+    await press(morePanel() as HTMLElement, 'Escape');
+    await settleOverlay();
+
+    finish(stopResult([]));
+    await settleOverlay();
+    await openMore();
+    expect(disabled()).toEqual([false, false, false, false]);
+  });
+
+  it('Start… waits for the library to answer with a streamable file', async () => {
+    library.tree.set(null);
+    await open();
+    await openMore();
+    expect(menuItem('Start…').disabled).toBe(true);
+
+    library.tree.set([mediaFile('notes.txt', false), mediaFolder('empty', [])]);
+    await settle();
+    expect(menuItem('Start…').disabled).toBe(true);
+
+    library.tree.set([mediaFolder('clips', [mediaFile('clips/a.mp4'), mediaFile('clips/b.mp4')])]);
+    await settle();
+    expect(menuItem('Start…').disabled).toBe(false);
+  });
+
+  it('Reset and Clear renditions ask first; Cancel changes nothing', async () => {
+    slots.renditions.set({ count: 3, bytes: 1.2 * 1024 ** 3, in_use: 1 });
+    await open();
+    slots.reset.mockResolvedValue(stopResult([1, 5, 6]));
+    slots.clearRenditions.mockResolvedValue({
+      removed: 2,
+      freed_bytes: 800 * 1024 ** 2,
+      kept: 1,
+    });
+
+    await openMore();
+    await click(menuItem('Reset'));
+    expect(confirmText()).toBe(
+      'Reset all sources? Every slot goes back to unassigned. External streams are left running. Cancel Reset',
+    );
+    await answer(confirmDialog()!, 'Cancel');
+    expect(cameras.releaseAll).not.toHaveBeenCalled();
+    expect(slots.reset).not.toHaveBeenCalled();
+
+    expect(menuItem('Clear renditions').textContent?.trim()).toBe('Clear renditions (3 · 1.20 GB)');
+    await click(menuItem('Clear renditions'));
+    expect(confirmText()).toBe(
+      'Clear cached renditions Delete 3 cached rendition(s) (1.20 GB)? They are re-created on the next start. Renditions a source streams, or is about to, are kept. Cancel Clear',
+    );
+    await answer(confirmDialog()!, 'Cancel');
+    expect(slots.clearRenditions).not.toHaveBeenCalled();
+
+    await click(menuItem('Reset'));
+    await answer(confirmDialog()!, 'Reset');
+    expect(cameras.releaseAll).toHaveBeenCalledExactlyOnceWith({ clearAssignments: true });
+    expect(slots.reset).toHaveBeenCalledExactlyOnceWith();
+    expect(toasts.status).toHaveBeenLastCalledWith(
+      'Reset all source assignments. External stream(s) left running: src4.',
+    );
+    // The action is done; the menu with it. Every slot is unassigned, and the first shows.
+    expect(morePanel()).toBeNull();
+    expect(asideHeading()).toBe('src1');
+
+    await openMore();
+    await click(menuItem('Clear renditions'));
+    await answer(confirmDialog()!, 'Clear');
+    expect(slots.clearRenditions).toHaveBeenCalledOnce();
+    expect(toasts.status).toHaveBeenLastCalledWith(
+      'Removed 2 rendition(s), freed 800.0 MB. 1 kept: in use by a source.',
+    );
+  });
+
+  it('the toolbar holds the filter and the ⋯ menu, the side-panel toggle sits after it; the bulk actions are in the menu', async () => {
+    await open();
+    const buttons = [
+      ...toolbar().querySelectorAll<HTMLButtonElement>('button:not([role="radio"])'),
+    ];
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['More actions']);
+    // The kit draws the toggle at the top bar's right edge, outside the page's tools.
+    expect(toolbar().contains(sidePanelToggle())).toBe(false);
+    expect(sidePanelToggle()).not.toBeNull();
+    for (const label of ['Auto assign', 'Start…', 'Stop all', 'Reset']) {
+      expect(toolbarButton(label), label).toBeUndefined();
+    }
+
+    await openMore();
+    // The bulk actions first, a line, then the two that discard things.
+    const entries = [...morePanel()!.querySelectorAll<HTMLElement>('button, hr')].map((entry) =>
+      entry.tagName === 'HR' ? entry.getAttribute('role') : entry.textContent!.trim(),
+    );
+    expect(entries).toEqual([
+      'Auto assign',
+      'Start…',
+      'Stop all',
+      'separator',
+      'Reset',
+      'Clear renditions',
+    ]);
+  });
+
+  it('a bulk action chosen in the menu closes it, and the focus is on ⋯ when Start…’s dialog closes', async () => {
+    slots.stopAll.mockResolvedValue(stopResult([]));
+    await open();
+    await choose('Stop all');
+    expect(morePanel()).toBeNull();
+    expect(document.activeElement).toBe(toolbarButton('More actions'));
+
+    // Start… asks in a dialog; the menu waits under it, as it does under Reset's question, so the
+    // dialog has a row to give the focus back to, and closes once the dialog has.
+    await choose('Start…');
+    expect(bulkDialog()).not.toBeNull();
+    await answer(bulkDialog()!, 'Cancel');
+    expect(bulkDialog()).toBeNull();
+    expect(morePanel()).toBeNull();
+    expect(document.activeElement).toBe(toolbarButton('More actions'));
+  });
+
+  it('the ⋯ menu’s items are the kit’s menu rows alone: a button’s classes would fight the row look', async () => {
+    await open();
+    await openMore();
+    for (const label of ['Reset', 'Clear renditions']) {
+      expect(menuItem(label).getAttribute('data-slot'), label).toBeNull();
+    }
+  });
+
+  it('Clear renditions asks with the usage fetched as it opens and as it is clicked', async () => {
+    slots.renditions.set({ count: 0, bytes: 0, in_use: 0 });
+    await open();
+    expect(slots.refreshRenditions).toHaveBeenCalledTimes(1);
+
+    await openMore();
+    expect(slots.refreshRenditions).toHaveBeenCalledTimes(2);
+    expect(menuItem('Clear renditions').textContent?.trim()).toBe('Clear renditions');
+    expect(menuItem('Clear renditions').disabled).toBe(true);
+
+    // Another tab started a slot at a custom rate meanwhile: asking fetches the usage again.
+    slots.renditions.set({ count: 1, bytes: 1024, in_use: 0 });
+    await settle();
+    slots.refreshRenditions.mockImplementation(async () => {
+      slots.renditions.set({ count: 2, bytes: 2048, in_use: 0 });
+    });
+    const ask = vi.spyOn(TestBed.inject(NeatConfirm), 'ask');
+    await click(menuItem('Clear renditions'));
+    expect(slots.refreshRenditions).toHaveBeenCalledTimes(3);
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          'Delete 2 cached rendition(s) (2.0 KB)? They are re-created on the next start. Renditions a source streams, or is about to, are kept.',
+      }),
+    );
+    await answer(confirmDialog()!, 'Cancel');
+
+    // Another tab cleared them meanwhile: it still asks, with what is there now.
+    slots.refreshRenditions.mockImplementation(async () => {
+      slots.renditions.set({ count: 0, bytes: 0, in_use: 0 });
+    });
+    await click(menuItem('Clear renditions'));
+    expect(ask).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        message:
+          'Delete 0 cached rendition(s) (0 B)? They are re-created on the next start. Renditions a source streams, or is about to, are kept.',
+      }),
+    );
+    await answer(confirmDialog()!, 'Cancel');
+  });
+
+  it('arrow keys move the selection and the side panel follows', async () => {
+    await open();
+    // The page opens on src1.
+    expect(rowOf('src1').getAttribute('aria-selected')).toBe('true');
+    expect(asideHeading()).toBe('src1');
+
+    listbox().focus();
+    await press(listbox(), 'ArrowDown');
+    expect(rowOf('src2').getAttribute('aria-selected')).toBe('true');
+    expect(asideHeading()).toBe('src2');
+
+    await press(listbox(), 'ArrowDown');
+    expect(asideHeading()).toBe('src3');
+    await press(listbox(), 'End');
+    expect(asideHeading()).toBe('src48');
+
+    // A new poll answer keeps the selection on the same slot, now as the server describes it.
+    slots.slots.set(mixedSlots().map((each) => (each.n === 48 ? fileSlot(48, 'x.mp4') : each)));
+    await settle();
+    expect(rowOf('src48').getAttribute('aria-selected')).toBe('true');
+    expect(asideHeading()).toBe('src48');
+  });
+
+  it('gives the page its remembered side panel width, and remembers a new one', async () => {
+    localStorage.setItem('neat-insight:streaming:aside-width', '420');
+    await open();
+    const neatPage = fixture.debugElement.query(By.directive(NeatPage))
+      .componentInstance as NeatPage;
+    expect(neatPage.asideWidth()).toBe(420);
+
+    neatPage.asideWidth.set(380);
+    expect(localStorage.getItem('neat-insight:streaming:aside-width')).toBe('380');
+
+    neatPage.asideWidth.set(null);
+    expect(localStorage.getItem('neat-insight:streaming:aside-width')).toBeNull();
+  });
+
+  it('the side-panel toggle closes and opens the panel; Enter on a row opens it', async () => {
+    await open();
+    const toggle = sidePanelToggle()!;
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+
+    await click(toggle);
+    expect(aside()).toBeNull();
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+    listbox().focus();
+    await press(listbox(), 'ArrowDown');
+    expect(aside()).toBeNull();
+    await press(listbox(), 'Enter');
+    expect(asideHeading()).toBe('src2');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('remembers the closed side panel in storage, and the selected slot across visits', async () => {
+    await open();
+    listbox().focus();
+    await press(listbox(), 'ArrowDown');
+    await click(sidePanelToggle()!);
+    expect(storage.values.get('neat-insight:streaming:aside')).toBe('closed');
+
+    await TestBed.inject(Router).navigateByUrl('/elsewhere');
+    await settle();
+    await TestBed.inject(Router).navigateByUrl('/streaming');
+    await settle();
+    expect(aside()).toBeNull();
+    expect(sidePanelToggle()!.getAttribute('aria-pressed')).toBe('false');
+    expect(rowOf('src2').getAttribute('aria-selected')).toBe('true');
+
+    await click(sidePanelToggle()!);
+    expect(asideHeading()).toBe('src2');
+    expect(storage.values.get('neat-insight:streaming:aside')).toBe('open');
+  });
+
+  it('watches the slots while shown and fetches the library and the rendition usage on opening', async () => {
+    await open();
+    expect(slots.watchers).toBe(1);
+    expect(library.refresh).toHaveBeenCalledOnce();
+    expect(slots.refreshRenditions).toHaveBeenCalledOnce();
+
+    await TestBed.inject(Router).navigateByUrl('/elsewhere');
+    await settle();
+    expect(slots.watchers).toBe(0);
+  });
+
+  it('a failed library or usage fetch on opening is not an error to show', async () => {
+    library.tree.set(null);
+    library.refresh.mockRejectedValue(new ApiRequestError(500, 'boom', null));
+    slots.refreshRenditions.mockRejectedValue(new ApiRequestError(500, 'boom', null));
+    await open();
+    await settleOverlay();
+
+    expect(toasts.error).not.toHaveBeenCalled();
+    // Without the library Start… stays disabled.
+    await openMore();
+    expect(menuItem('Start…').disabled).toBe(true);
+  });
+
+  it('says so when the slot status could not be refreshed', async () => {
+    await open();
+    expect(notice()).toBe('');
+
+    slots.unavailable.set(true);
+    await settle();
+    expect(notice()).toBe('Slot status could not be refreshed. Showing the last known state.');
+    expect(rows()).toHaveLength(48);
+  });
+});

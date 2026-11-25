@@ -1,0 +1,2 @@
+# Written by `npm run api:types`; `check:api` compares it with the generator's own output.
+src/app/api.generated.ts

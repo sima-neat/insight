@@ -1,0 +1,2976 @@
+openapi: 3.0.3
+info:
+  title: Neat Insight
+  description: >-
+    The HTTP API of the Neat Insight server: the one its web UI uses, open to scripts and tools as
+    well. Routes marked "Frozen" are used outside Insight (the Neat SDK, sima-cli) and keep their
+    paths and fields.
+    One more is Frozen and served beside them: `GET /stream/http/srcN.mjpg`, a slot's HTTP MJPEG
+    output (docs/contracts.md, "Sources"), the same as `urls.http_mjpeg`. A request that changes
+    something (any method but GET, HEAD and OPTIONS) sent by a page of another origin is refused
+    with 403 `cross_origin`; the UI's own, and tools that send no Origin (curl, scripts), are not.
+  version: "1"
+tags:
+  - name: Service and system
+    description: >-
+      Whether Insight is up; its version, build, ports and addresses; what `neat --json` says
+      about this machine; and this computer's CPU, memory and disk.
+  - name: Diagnostics
+    description: >-
+      What arrives on each Viewer channel and what Insight sends on, in the shape the Neat SDK's
+      network tests read.
+  - name: Viewer
+    description: >-
+      The Viewer's channels: which receive video, the WebRTC offer a browser makes to watch one with
+      its metadata, and a link to the Viewer.
+  - name: Media library
+    description: >-
+      The video files in Insight's media library: list, inspect, preview, download and delete them.
+      Paths are relative to the top of the library.
+  - name: Media imports
+    description: >-
+      Filling the library: uploads of files or archives, SiMa's published sample clips from the
+      catalog, and the jobs that bring them in, followed as events.
+  - name: Media sources
+    description: >-
+      The source slots Insight publishes over RTSP and HTTP MJPEG, numbered from 1: assign media, a
+      webcam or a camera to pull, start and stop them, one at a time or all, and the frame-rate
+      renditions they publish from.
+  - name: Board
+    description: >-
+      The board that board-facing features use: this machine, or a DevKit over SSH, chosen, checked
+      and trusted here.
+  - name: Peripherals
+    description: >-
+      The cameras and microphones SiMa Sentinel reports on the selected board: list them, preview a
+      camera, and record and play back a short microphone test.
+  - name: Sentinel
+    description: >-
+      SiMa Sentinel's telemetry from the selected board: its health, the live cache of metrics, its
+      traces, and recorded runs to read and compare.
+  - name: API documentation
+    description: This document, as the server was built with it.
+x-tagGroups:
+  - name: Observe Insight
+    tags: [Service and system, Diagnostics, Viewer]
+  - name: Board and peripherals
+    tags: [Board, Peripherals, Sentinel]
+  - name: Automate Insight
+    tags: [Media library, Media imports, Media sources]
+  - name: API resources
+    tags: [API documentation]
+paths:
+  /api/health:
+    get:
+      tags: ["Service and system"]
+      operationId: getHealth
+      summary: Whether Insight is up
+      description: >-
+        Frozen: the SDK's network test and other tools check `status == "ok"`. Insight answers
+        once its services have started, so an answer is always `ok`.
+      responses:
+        "200":
+          description: Insight is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /api/openapi.yaml:
+    get:
+      tags: ["API documentation"]
+      operationId: getOpenAPIDocument
+      summary: This document
+      description: >-
+        The API's description as the server was built with it, OpenAPI 3.0 in YAML: every route,
+        its parameters, bodies, answers and errors. Read it to call the API or generate a client.
+      responses:
+        "200":
+          description: The document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+                format: binary
+  /api/channels:
+    get:
+      tags: ["Viewer"]
+      operationId: listChannels
+      summary: Which of the Viewer's channels receive video
+      description: >-
+        Every channel Insight serves, and whether video arrives on it (docs/contracts.md). Read
+        from memory; poll it freely. What arrives in detail is `/api/ingest/stats`.
+      responses:
+        "200":
+          description: The channels.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelList"
+  /api/channels/{channel}/offer:
+    post:
+      tags: ["Viewer"]
+      operationId: offerChannel
+      summary: Watch a channel over WebRTC
+      description: >-
+        The browser's SDP offer in, Insight's answer out. A 5xx is worth retrying (503 `no_video` until RTP names the channel's codec,
+        `codec_changed` when it changes, `too_many_viewers` while 8 connections to the channel are
+        open or opening, until one leaves); a 4xx is final (415 `codec_unsupported`: this browser
+        cannot decode the channel's codec; 415 `jpeg_needs_data_channel`: the channel carries JPEG,
+        which travels over a data channel, and the offer has none). What a viewer's connection
+        carries is in [the contracts](docs/contracts.md#what-a-viewers-connection-carries).
+      parameters:
+        - name: channel
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionDescription"
+      responses:
+        "200":
+          description: The answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDescription"
+        "400": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/ingest/stats:
+    get:
+      tags: ["Diagnostics"]
+      operationId: getIngestStats
+      summary: What arrives on each channel, in the old shape
+      description: >-
+        Frozen: the SDK's network test and smoke test read these fields. Without `all`, only
+        channels receiving video now. `verbose` adds `diagnostics`.
+      parameters:
+        - name: all
+          in: query
+          schema:
+            type: string
+        - name: verbose
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The channels.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestStats"
+  /api/viewer-url:
+    get:
+      tags: ["Viewer"]
+      operationId: getViewerUrl
+      summary: A link to the Viewer
+      description: >-
+        Frozen: the SDK's hosted setup and Neat apps' docs use it. The link opens the Viewer on
+        the channels in `src` (all by default) on the origin the browser used, or the hosted
+        public origin.
+      parameters:
+        - name: src
+          in: query
+          description: Channels, comma separated; others are dropped.
+          schema:
+            type: string
+        - name: mode
+          in: query
+          description: light or dark; anything else keeps the viewer's own theme.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The link.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ViewerUrl"
+  /api/slots:
+    get:
+      tags: ["Media sources"]
+      operationId: listSlots
+      summary: The sources src1 to src48 and how each stands
+      description: >-
+        What each slot was asked to do (kind, file, frame rate, run) and how it stands, derived
+        from the world when it is listed: its publisher, MediaMTX's view of its stream, its
+        readers, the encode of its rendition. Read from memory; poll it freely. The URLs name
+        the host the request used.
+      responses:
+        "200":
+          description: The slots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotList"
+  /api/slots/{n}:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    put:
+      tags: ["Media sources"]
+      operationId: assignSlot
+      summary: Assign a file, a camera to pull or a webcam to a slot
+      description: >-
+        `{kind: "file", file, fps?}` streams a library file, at its own rate or at `fps` (a
+        rendition is encoded first when the slot starts and none is cached); a slot that
+        streamed a file keeps running with the new one, any other slot is stopped.
+        `{kind: "pull", url, username?, password?}` has MediaMTX pull a camera (rtsp:// or
+        rtsps://), after probing it: a camera that refuses the credentials is 422
+        `pull_auth_failed`, one that does not answer 502 `pull_unreachable`. A publisher that
+        took the slot during the probe is 409 `slot_busy`, and a MediaMTX that does not answer
+        the check made after it 503 `mediamtx_unavailable`, with nothing assigned. The
+        credentials are kept in memory only. The slot starts pulling at once.
+        `{kind: "webcam", fps?}` makes it a browser's webcam at `fps` frames per second, 30 or 60
+        (30 when absent; another rate, 0 included, is 400 `invalid_fps`): the answer's
+        `urls.whip` is where the browser publishes, a URL of its own per rate, and the stream on
+        `srcN` is re-encoded at that rate whatever the camera sends. Assigning a webcam again at
+        another rate disconnects what publishes at the old one. A slot an external publisher
+        holds is 409 `slot_busy`. The body is sent as application/json.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SlotAssignment"
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: ["Media sources"]
+      operationId: clearSlot
+      summary: Leave a slot with nothing assigned, and stopped
+      description: An external publisher on the slot is left alone.
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/slots/{n}/start:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    post:
+      tags: ["Media sources"]
+      operationId: startSlot
+      summary: Make a slot run
+      description: >-
+        A file slot streams (after encoding its rendition, when it needs one: `state` is
+        `preparing` with the `job`), a pull slot pulls, a webcam slot takes a browser's camera.
+        Answers before the stream is live; `state` says how it goes. Starting a failed slot
+        tries again.
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/slots/{n}/stop:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    post:
+      tags: ["Media sources"]
+      operationId: stopSlot
+      summary: Make a slot stop
+      description: >-
+        Its publisher stops, its rendition's encode is cancelled (unless another slot waits for
+        it), its pull is cleared and its webcam's publisher disconnected. The assignment stays.
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/slots/{n}/take-over:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    post:
+      tags: ["Media sources"]
+      operationId: takeOverSlot
+      summary: Disconnect the external publisher that holds a slot
+      description: >-
+        So the slot's own assignment can run. The publisher may connect again at once, which
+        Insight does not prevent. 409 `not_external` when no external publisher holds it, 503
+        `mediamtx_unavailable` while MediaMTX does not answer.
+      responses:
+        "200":
+          description: The slot as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slot"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/slots/{n}/preview.mjpg:
+    parameters:
+      - $ref: "#/components/parameters/SlotNumber"
+    get:
+      tags: ["Media sources"]
+      operationId: previewSlot
+      summary: A slot's live picture as MJPEG
+      description: >-
+        At most 640 pixels wide, at the stream's own rate, from one shared relay however many
+        browsers watch it. 409 `slot_not_live` while the slot is not live; 429 when Insight
+        relays as many streams as it may.
+      responses:
+        "200":
+          description: The stream, one JPEG per part.
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/Error" }
+  /api/slots/start:
+    post:
+      tags: ["Media sources"]
+      operationId: startSlots
+      summary: Start the first file slots
+      description: >-
+        Starts the first `count` slots with a file assigned, in their order, that no external
+        publisher holds. Answers at once; each slot's `state` says how it goes. 409
+        `nothing_assigned` when no slot has a file. The body is sent as application/json.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SlotStartRequest"
+      responses:
+        "200":
+          description: What was started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotStartResult"
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/slots/stop:
+    post:
+      tags: ["Media sources"]
+      operationId: stopSlots
+      summary: Stop every slot
+      description: As each slot's stop does; external publishers go on.
+      responses:
+        "200":
+          description: What was stopped.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotStopResult"
+  /api/slots/reset:
+    post:
+      tags: ["Media sources"]
+      operationId: resetSlots
+      summary: Stop every slot and leave each with nothing assigned
+      description: External publishers go on.
+      responses:
+        "200":
+          description: What was stopped.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotStopResult"
+  /api/slots/auto-assign:
+    post:
+      tags: ["Media sources"]
+      operationId: autoAssignSlots
+      summary: Give the library's files to the slots, one each
+      description: >-
+        The streamable files in path order, one per slot from src1, every slot stopped. Slots
+        an external publisher holds or that pull a camera keep what they have, and so do their
+        files; slots beyond the files are cleared. A slot keeps its frame rate when it keeps
+        its file.
+      responses:
+        "200":
+          description: What was assigned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoAssignResult"
+        "500": { $ref: "#/components/responses/LibraryError" }
+  /api/renditions:
+    get:
+      tags: ["Media sources"]
+      operationId: getRenditionUsage
+      summary: What the frame-rate renditions take on the disk
+      responses:
+        "200":
+          description: The renditions' count and size.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenditionUsage"
+        "500": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: ["Media sources"]
+      operationId: clearRenditions
+      summary: Remove the renditions no slot streams
+      description: Renditions a slot streams, or is about to, are kept.
+      responses:
+        "200":
+          description: What was removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenditionsCleared"
+        "500": { $ref: "#/components/responses/Error" }
+  /api/media:
+    get:
+      tags: ["Media library"]
+      operationId: getMediaTree
+      summary: The media library as a tree, with each file's probe
+      description: >-
+        Folders first. A file's `probe` is null while it is being probed, and then says its
+        codec, size, rate and whether a slot can stream it. Hidden files and macOS archive
+        metadata are left out. Read from a walk of the media folder at most a few seconds old.
+      responses:
+        "200":
+          description: The library's root folder.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaEntry"
+        "500": { $ref: "#/components/responses/LibraryError" }
+  /api/media/info:
+    get:
+      tags: ["Media library"]
+      operationId: getMediaInfo
+      summary: The full probe of one file
+      parameters:
+        - $ref: "#/components/parameters/MediaPath"
+      responses:
+        "200":
+          description: The file and its probe.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaFileInfo"
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+        "500": { $ref: "#/components/responses/LibraryError" }
+  /api/media/delete:
+    post:
+      tags: ["Media library"]
+      operationId: deleteMedia
+      summary: Delete files and folders of the library
+      description: >-
+        Files, links (as links) and folders with what they hold. The whole request is refused,
+        nothing removed, when a path is not in the library (400) or a slot uses one of the
+        files (409 `in_use`, naming the `slots`). The body is sent as application/json.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MediaDeleteRequest"
+      responses:
+        "200":
+          description: What was removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaDeleted"
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+        "409": { $ref: "#/components/responses/LibraryError" }
+        "500": { $ref: "#/components/responses/LibraryError" }
+  /api/media/uploads:
+    post:
+      tags: ["Media imports"]
+      operationId: uploadMedia
+      summary: Upload a file or an archive into the library
+      description: >-
+        multipart/form-data with one `file` and an optional `on_conflict`. A file the board
+        streams well is saved at once (201); one it would stream badly (B-frames, another codec
+        or profile, keyframes far apart) is re-encoded by a job first (202 with the job, whose
+        result is what was saved). An archive (ZIP, tar, gzipped tar) is unpacked into a folder
+        named after it. A playlist (HLS, DASH, a concat list), on its own or in an archive, is
+        refused (400 `invalid_request` or `invalid_archive`): it names other files. A taken name
+        with `ask` is 409 `name_taken` with the `conflict`, before any work. Replacing a file restarts the slots that streamed it. An upload whose request
+        would not fit on the media folder's disk with 1 GiB to spare is 507 `no_space` before
+        anything is written (a request without a Content-Length counts as the 8 GiB limit).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/MediaUpload"
+      responses:
+        "201":
+          description: Saved in the library.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaSaved"
+        "202":
+          description: Being re-encoded; the job's result is what was saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "409": { $ref: "#/components/responses/LibraryError" }
+        "413": { $ref: "#/components/responses/LibraryError" }
+        "500": { $ref: "#/components/responses/LibraryError" }
+        "503": { $ref: "#/components/responses/LibraryError" }
+        "507": { $ref: "#/components/responses/LibraryError" }
+  /api/media/file:
+    get:
+      tags: ["Media library"]
+      operationId: getMediaFile
+      summary: One file of the library
+      description: >-
+        For the browser to play or show, with range requests. Video and pictures are served as
+        what they are; anything else as a download.
+      parameters:
+        - $ref: "#/components/parameters/MediaPath"
+      responses:
+        "200":
+          description: The file.
+          content:
+            video/*:
+              schema:
+                type: string
+                format: binary
+            image/*:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: The part of the file the range asked for.
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+  /api/media/preview.mjpg:
+    get:
+      tags: ["Media library"]
+      operationId: previewMedia
+      summary: A library file as a moving MJPEG picture
+      description: >-
+        Looped at its own rate, from one shared relay however many browsers watch it. 415
+        `not_previewable` for a file whose probe found no video or picture (a playlist among
+        them); 503 `ffmpeg_missing` without FFmpeg; 429 when Insight relays as many streams as it
+        may.
+      parameters:
+        - $ref: "#/components/parameters/MediaPath"
+      responses:
+        "200":
+          description: The stream, one JPEG per part.
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+        "415": { $ref: "#/components/responses/LibraryError" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/Error" }
+  /api/catalog:
+    get:
+      tags: ["Media imports"]
+      operationId: getCatalog
+      summary: SiMa's published sample clips
+      description: >-
+        The catalog's index as it is published, each asset with its download `url`; fetched
+        again when the last fetch is a few minutes old. 502 `catalog_unavailable` when it
+        cannot be fetched.
+      responses:
+        "200":
+          description: The catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Catalog"
+        "502": { $ref: "#/components/responses/LibraryError" }
+  /api/catalog/imports:
+    post:
+      tags: ["Media imports"]
+      operationId: importCatalogAsset
+      summary: Download a catalog asset into the library
+      description: >-
+        A job that downloads the asset at `path` into catalog/<source>/ and checks its size and
+        SHA-256 before it joins the library; a taken name is saved as name_2. The body is sent
+        as application/json.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CatalogImportRequest"
+      responses:
+        "202":
+          description: The job; its result is what was saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400": { $ref: "#/components/responses/LibraryError" }
+        "404": { $ref: "#/components/responses/LibraryError" }
+        "502": { $ref: "#/components/responses/LibraryError" }
+  /api/jobs/{id}/events:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    get:
+      tags: ["Media imports"]
+      operationId: followJob
+      summary: A job's changes as Server-Sent Events
+      description: >-
+        One `data:` line of the job's JSON at once and after each change, the last one its
+        final state, after which the stream ends; a comment every 15 s keeps a quiet stream
+        open. A browser's EventSource reconnects when a stream ends, so close it on a final
+        state.
+      responses:
+        "200":
+          description: The events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404": { $ref: "#/components/responses/Error" }
+  /api/boards:
+    get:
+      tags: ["Board"]
+      operationId: listBoards
+      summary: The boards Insight knows and the selected one
+      description: >-
+        The board entered by hand (saved in the data folder), the board Insight runs on, and the
+        DevKit the SDK is paired with (`DEVKIT_SYNC_DEVKIT_*`), in the order the selection
+        prefers them; the selected one is the first, with its last connection result, its
+        identity once read, and the `ssh` command that opens a shell on it. Never connects.
+        Peripherals and Stats use the selected board, named by its `id` in their paths; any
+        other id is 404 `not_found`.
+      responses:
+        "200":
+          description: The boards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+    post:
+      tags: ["Board"]
+      operationId: selectBoard
+      summary: Enter a board and select it
+      description: >-
+        Saves `{host, port?, user?}` (port 22 and user `sima` by default) as the board entered
+        by hand, which is then selected. Insight signs in with the SSH keys of the account it
+        runs as; it never takes a password. A different board than the selected one replaces
+        it: its preview and microphone test stop.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BoardSelection"
+      responses:
+        "200":
+          description: The boards after the selection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+        "400": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    delete:
+      tags: ["Board"]
+      operationId: forgetBoard
+      summary: Forget the board entered by hand
+      description: >-
+        The selection falls back to the board Insight runs on, else the SDK's DevKit. Only the
+        entered board can be forgotten: another known board is 409 `not_entered`, an id Insight
+        does not know 404 `not_found`.
+      responses:
+        "200":
+          description: The boards afterwards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/check:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    post:
+      tags: ["Board"]
+      operationId: checkBoard
+      summary: Connect to the selected board and read its identity
+      description: >-
+        Reads its host name, machine and build. A failure is also kept in the board's status:
+        502 `unreachable` or `auth_failed` (with the `command` that authorizes Insight's key),
+        409 `host_key_changed` (with both fingerprints in `host_key`), 504 `timeout`.
+      responses:
+        "200":
+          description: The boards, the selected one connected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/trust-host-key:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    post:
+      tags: ["Board"]
+      operationId: trustBoardHostKey
+      summary: Trust the new host key of a reflashed board
+      description: >-
+        `{fingerprint}` must be the key the board presented when it was refused
+        (`host_key.presented` of `host_key_changed`), which the user confirmed. Insight keeps
+        its own known_hosts, not the user's. The board is replaced (the trusted key may be
+        another board's), so check it again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrustHostKeyRequest"
+      responses:
+        "200":
+          description: The boards afterwards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/peripherals:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      tags: ["Peripherals"]
+      operationId: getPeripherals
+      summary: The board's last peripheral scan
+      description: From memory; `scan` is null before the first Refresh. Never contacts the board.
+      responses:
+        "200":
+          description: The last scan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Peripherals"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/peripherals/refresh:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    post:
+      tags: ["Peripherals"]
+      operationId: refreshPeripherals
+      summary: Scan the board's cameras and microphones
+      description: >-
+        SiMa Sentinel rescans the board's MIPI and USB cameras and ALSA microphones; the devices
+        it found are kept as the board's last scan, with what changed since the one before. Each
+        camera mode carries Sentinel's own verdict (`tier`, `reason`) and whether the preview
+        takes it (`previewable`). A running preview stops first. A refresh that waited for
+        another gets that one's scan. 502 `sentinel_failed` for a catalog Insight cannot read.
+      responses:
+        "200":
+          description: The new scan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Peripherals"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/cameras/preview:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      tags: ["Peripherals"]
+      operationId: getCameraPreview
+      summary: The camera preview running on the board
+      description: From memory; null when none runs. One preview runs on a board at a time.
+      responses:
+        "200":
+          description: The preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewAnswer"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/cameras/{camera}/preview:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/CameraID"
+    post:
+      tags: ["Peripherals"]
+      operationId: startCameraPreview
+      summary: Start a camera's live preview
+      description: >-
+        Runs a GStreamer pipeline on the board (libcamerasrc for MIPI, v4l2src for USB) that
+        writes at most 640 pixels wide, at most 15 JPEG pictures a second, and waits for its
+        first picture (10 s, or two frame periods of a slower mode, at most 60 s). The mode
+        must be one the last scan says is `previewable`: for MIPI an NV12 mode Sentinel does not
+        mark unavailable, at a rate up to the camera's; for USB a mode in MJPG or a raw format,
+        at a rate it advertises. A USB camera without a `/dev/v4l/by-id` link is opened by its
+        `/dev/videoN` node, so a Sentinel rescan first has to find the scanned camera still there
+        (node, vendor, product and serial), else 409 `stale_scan` (also while Sentinel's USB
+        provider fails): refresh, then start again. 409 `preview_active` while one runs, `camera_in_use` when another
+        process holds the camera (Insight never stops it), `no_scan` before a scan; 422
+        `mode_adjusted` when libcamera streams another size (in the hint); 502 `tool_missing`
+        without GStreamer or one of its elements, `command_failed`; 504 `preview_timeout`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreviewMode"
+      responses:
+        "200":
+          description: The running preview; open its stream within 15 s.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewAnswer"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/cameras/{camera}/preview.mjpg:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/CameraID"
+      - $ref: "#/components/parameters/PreviewID"
+    get:
+      tags: ["Peripherals"]
+      operationId: streamCameraPreview
+      summary: The running preview's pictures as MJPEG
+      description: >-
+        One viewer per preview (409 `preview_active` for a second): the preview stops when this
+        answer ends, and after 10 s (two frame periods of a slower mode, at most 60 s) without
+        a picture.
+      responses:
+        "200":
+          description: The stream, one JPEG per part.
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/cameras/{camera}/preview/stop:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/CameraID"
+      - $ref: "#/components/parameters/PreviewID"
+    post:
+      tags: ["Peripherals"]
+      operationId: stopCameraPreview
+      summary: Stop a camera's preview
+      description: >-
+        Kills the pipeline on the board, which releases the camera. A preview of another camera,
+        or another than `preview` names, goes on. Stopping a preview that ended already is no
+        error.
+      responses:
+        "200":
+          description: The board's preview afterwards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewAnswer"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/microphones/test:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      tags: ["Peripherals"]
+      operationId: getMicrophoneTest
+      summary: The board's microphone test
+      description: >-
+        From memory, so poll it while it records (its `level_dbfs` and `elapsed_ms`); then its
+        `level`, or `error`. Null before the first test.
+      responses:
+        "200":
+          description: The test.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MicTestAnswer"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/microphones/{microphone}/test:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/MicrophoneID"
+    post:
+      tags: ["Peripherals"]
+      operationId: startMicrophoneTest
+      summary: Record from a microphone
+      description: >-
+        Records with `arecord` on the board from the ALSA device the last scan names, in 16 bits
+        at 48 kHz (or the nearest rate below that the device has) and at most 2 channels, until
+        stopped or for `seconds` (1 to 30; 30 without a body). Answers at once; read the test
+        for its level and result. One test records on a board at a time (409 `test_running`).
+        A test whose device is busy ends `failed` with `microphone_in_use`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MicTestRequest"
+      responses:
+        "202":
+          description: The test, recording.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MicTestAnswer"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/microphones/{microphone}/test/stop:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/MicrophoneID"
+      - $ref: "#/components/parameters/MicTestID"
+    post:
+      tags: ["Peripherals"]
+      operationId: stopMicrophoneTest
+      summary: End a microphone test now
+      description: >-
+        What was recorded so far is the result, which the answer carries (a test stopped before
+        0.1 s of audio fails with `stopped_early`). With `test`, a stop meant for an earlier test
+        stops nothing.
+      responses:
+        "200":
+          description: The test, finished.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MicTestAnswer"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/microphones/{microphone}/test.wav:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - $ref: "#/components/parameters/MicrophoneID"
+      - $ref: "#/components/parameters/MicTestID"
+    get:
+      tags: ["Peripherals"]
+      operationId: getMicrophoneTestAudio
+      summary: A finished test's recording as WAV
+      description: With range requests, which an audio element sends. 404 once another test replaced it.
+      responses:
+        "200":
+          description: The recording.
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Part of the recording.
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        "404": { $ref: "#/components/responses/Error" }
+        "416": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/boards/{id}/sentinel/health:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      tags: ["Sentinel"]
+      operationId: getSentinelHealth
+      summary: Whether Sentinel runs on the board
+      description: >-
+        Sentinel's `/v1/health` (its version, cached samples, collector errors, active trace),
+        and when its service started. Without Sentinel: 502 `sentinel_missing` (not installed:
+        the hint has the command that installs it), `sentinel_stopped` (installed, not running),
+        `sentinel_denied`, `sentinel_schema` (another API schema), `sentinel_outdated`,
+        `sentinel_failed`.
+      responses:
+        "200":
+          description: Sentinel's health.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SentinelHealth"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/cache:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - name: after
+        in: query
+        required: false
+        description: The timestamp of the newest sample the caller holds.
+        schema:
+          type: string
+    get:
+      tags: ["Sentinel"]
+      operationId: getSentinelCache
+      summary: Sentinel's cache, the Live view's source
+      description: >-
+        `/v1/cache`: the metric definitions, the newest sample and Sentinel's recent samples
+        (240, about 8 minutes), oldest first. With `after` the caller holds the samples up to
+        that one: the answer holds only the newer ones, with `full` false. It holds them all,
+        with `full` true, to replace the caller's, when there is no `after`, when the cache no
+        longer holds it (a daemon restarted, or the caller fell too far behind), and when the
+        board's clock stepped back (the history starts again there).
+      responses:
+        "200":
+          description: The cache.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SentinelCache"
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/traces/active:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      tags: ["Sentinel"]
+      operationId: getSentinelActiveTrace
+      summary: The trace being recorded
+      description: '`/v1/traces/active`: `{trace, summary}`, both null when nothing records.'
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/traces:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    post:
+      tags: ["Sentinel"]
+      operationId: startSentinelTrace
+      summary: Start recording a named trace
+      description: >-
+        `{name, note?, tags?}`: a name of at most 80 bytes of UTF-8, without control characters
+        or a comma (runs are compared by a comma-separated list), a note of at most 512
+        characters, at most 16 tags of 1 to 80. 409 `trace_conflict` when a trace records or
+        the name is taken. Sentinel answers `{trace}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TraceRequest"
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "413": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/traces/stop:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - name: trace
+        in: query
+        required: false
+        description: Stop only this trace, by its id; another one active is 409 `trace_conflict`.
+        schema:
+          type: string
+    post:
+      tags: ["Sentinel"]
+      operationId: stopSentinelTrace
+      summary: Stop and save the active trace
+      description: Sentinel answers the finished trace and its run's summary, `{trace, summary}`.
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/runs:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+    get:
+      tags: ["Sentinel"]
+      operationId: listSentinelRuns
+      summary: The runs Sentinel holds
+      description: >-
+        `/v1/runs`: `{runs}`, each `{id, name, started_at, ended_at, duration_ms, samples,
+        energy_joules}`; a run still recording has a null `ended_at`. Runs are files on the
+        board; Insight keeps none.
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/runs/{run}:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - name: run
+        in: path
+        required: true
+        description: A run's id or name (the delete takes its id).
+        schema:
+          type: string
+    get:
+      tags: ["Sentinel"]
+      operationId: getSentinelRun
+      summary: One run in full
+      description: '`/v1/runs/{run}`: `{metadata, metrics, samples}`; 404 `not_found` for a run Sentinel does not hold.'
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+    delete:
+      tags: ["Sentinel"]
+      operationId: deleteSentinelRun
+      summary: Delete a finished run
+      description: >-
+        By its id, which must have the form of Sentinel's ids (`20260924T175231.958Z-baseline`)
+        and be one Sentinel lists: Sentinel's API cannot delete, so Insight runs `simaai-sentinel
+        runs delete <id>` on the board as the board's user, then reads the runs again to
+        confirm. 400 for another id, 404 `not_found`, 409 `trace_conflict` for a run still
+        recording, 502 `tool_missing` without Sentinel's CLI, `sentinel_denied`.
+      responses:
+        "200":
+          description: The run that went and Sentinel's runs afterwards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunDeleted"
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/boards/{id}/sentinel/compare:
+    parameters:
+      - $ref: "#/components/parameters/BoardID"
+      - name: runs
+        in: query
+        required: true
+        description: 2 to 8 runs' ids or names, comma-separated; the first is the baseline.
+        schema:
+          type: string
+    get:
+      tags: ["Sentinel"]
+      operationId: compareSentinelRuns
+      summary: Compare runs against a baseline
+      description: >-
+        `/v1/compare`: `{baseline_id, generated_at, runs, summaries, baseline_deltas_pct}`, the
+        runs in full, their samples included.
+      responses:
+        "200": { $ref: "#/components/responses/SentinelBody" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/BoardError" }
+        "502": { $ref: "#/components/responses/BoardError" }
+        "504": { $ref: "#/components/responses/BoardError" }
+  /api/system:
+    get:
+      tags: ["Service and system"]
+      operationId: getSystem
+      summary: System Info
+      description: >-
+        Insight's version and build, where it runs, and the ports and addresses it resolved at
+        start; and what `neat --json` says about this machine (environment, components with
+        their versions and updates, the Insight service, the update check, the ports the SDK
+        publishes), allowlisted: never its code UI section or passwords. neat runs once at
+        start and again with `refresh` (up to 15 s, as it checks online for updates); a plain
+        read answers from memory, with `neat.state` `reading` until the first run ends.
+      parameters:
+        - name: refresh
+          in: query
+          required: false
+          description: Run neat again first (or wait for the run in progress).
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: System Info.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemInfo"
+  /api/system/host:
+    get:
+      tags: ["Service and system"]
+      operationId: getSystemHost
+      summary: This computer's CPU, memory and disk
+      description: >-
+        The machine Insight runs on, not the board: CPU use since the reading before (a read
+        within 0.5 s repeats it), memory used of total, and the disk of Insight's data folder.
+        Read from /proc without blocking.
+      responses:
+        "200":
+          description: The readings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostReadings"
+components:
+  parameters:
+    BoardID:
+      name: id
+      in: path
+      required: true
+      description: >-
+        The board's id from /api/boards, URL-escaped: "local", or ssh:user@host:port
+        ("ssh:sima@192.168.1.20:22"). Any but the selected board's is 404 `not_found`.
+      schema:
+        type: string
+    CameraID:
+      name: camera
+      in: path
+      required: true
+      description: The camera's id in the scan's catalog, URL-escaped.
+      schema:
+        type: string
+    MicrophoneID:
+      name: microphone
+      in: path
+      required: true
+      description: The microphone's id in the scan's catalog, URL-escaped.
+      schema:
+        type: string
+    PreviewID:
+      name: preview
+      in: query
+      required: false
+      description: The preview's `id`; with it, a request meant for an earlier preview does nothing.
+      schema:
+        type: string
+    MicTestID:
+      name: test
+      in: query
+      required: false
+      description: The test's `id`; with it, a request meant for an earlier test does nothing.
+      schema:
+        type: string
+    SlotNumber:
+      name: n
+      in: path
+      required: true
+      description: The slot's number, 1 to 48 (srcN).
+      schema:
+        type: integer
+    JobID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    MediaPath:
+      name: path
+      in: query
+      required: true
+      description: A library path, relative to the media folder, with "/".
+      schema:
+        type: string
+  responses:
+    BoardError:
+      description: Refused or failed; the body says why, with what a board's failure adds.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BoardError"
+    SentinelBody:
+      description: Sentinel's answer as it gave it, without its schema marker.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SentinelBody"
+    Error:
+      description: Refused; the body says why.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    LibraryError:
+      description: Refused; the body says why, with what the media library adds.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LibraryError"
+  schemas:
+    SessionDescription:
+      type: object
+      required: [type, sdp]
+      properties:
+        type:
+          type: string
+          description: offer or answer
+        sdp:
+          type: string
+    ChannelList:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          description: Every channel, 0 to the count Insight serves less one.
+          items:
+            $ref: "#/components/schemas/Channel"
+    Channel:
+      type: object
+      required: [channel, video]
+      properties:
+        channel:
+          type: integer
+        video:
+          $ref: "#/components/schemas/ChannelVideo"
+    ChannelVideo:
+      type: object
+      required: [active]
+      properties:
+        active:
+          type: boolean
+          description: Video arrived in the last 3 s.
+    IngestStats:
+      type: object
+      required: [time, active_ttl_ms, channels]
+      properties:
+        time:
+          type: string
+        active_ttl_ms:
+          type: integer
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngestChannel"
+    IngestChannel:
+      type: object
+      required: [channel, udp_port, active, rtp, media, metadata, webrtc]
+      properties:
+        channel:
+          type: integer
+        udp_port:
+          type: integer
+        active:
+          type: boolean
+        first_packet_at:
+          type: string
+        last_packet_at:
+          type: string
+        remote_addr:
+          type: string
+        rtp:
+          type: object
+          required: [ssrc, payload_type, packets_received, bytes_received, bitrate_bps, packet_rate_pps]
+          properties:
+            ssrc:
+              type: integer
+            payload_type:
+              type: integer
+            packets_received:
+              type: integer
+            bytes_received:
+              type: integer
+            bitrate_bps:
+              type: number
+              format: double
+            packet_rate_pps:
+              type: number
+              format: double
+        media:
+          type: object
+          required: [kind, codec, clock_rate, seen_sps, idr_count]
+          properties:
+            kind:
+              type: string
+            codec:
+              type: string
+              description: >-
+                The channel's codec: `"H264"`, `"H265"` or `"JPEG"`, or `"unknown"` until RTP names it.
+            clock_rate:
+              type: integer
+            seen_sps:
+              type: boolean
+            idr_count:
+              type: integer
+              description: >-
+                The H.264 IDR and H.265 IRAP pictures seen. Every JPEG frame stands alone, so a
+                JPEG channel counts none.
+        metadata:
+          type: object
+          required: [udp_port, active, messages_received, bytes_received, bitrate_bps, message_rate_mps, messages_forwarded, invalid_json]
+          properties:
+            udp_port:
+              type: integer
+            active:
+              type: boolean
+            first_message_at:
+              type: string
+            last_message_at:
+              type: string
+            remote_addr:
+              type: string
+            messages_received:
+              type: integer
+            bytes_received:
+              type: integer
+            bitrate_bps:
+              type: number
+              format: double
+            message_rate_mps:
+              type: number
+              format: double
+            messages_forwarded:
+              type: integer
+            invalid_json:
+              type: integer
+        webrtc:
+          type: object
+          required: [peer_count]
+          properties:
+            peer_count:
+              type: integer
+        diagnostics:
+          type: object
+          properties:
+            malformed_packets:
+              type: integer
+            unsupported_packets:
+              type: integer
+              description: >-
+                Packets of a payload type Insight does not take (RTP/JPEG, payload type 26, is
+                taken, so it is not counted here).
+            oversized_frames:
+              type: integer
+              description: >-
+                Frames dropped because their RTP packets came to over 16 MiB, more than any
+                picture of H.264 level 5.2 or H.265 level 5.x needs.
+            incomplete_frames:
+              type: integer
+              description: >-
+                Frames withheld because a packet was lost, the first one included, for every codec.
+                After a loss an H.265 channel also holds the whole frames up to its next IRAP, which
+                reference what was lost; those are not counted, so on H.265 a freeze can last longer
+                than the count suggests.
+            unusable_frames:
+              type: integer
+              description: >-
+                Whole JPEG frames whose RTP/JPEG Insight cannot rebuild into an image; the reason is
+                in `recent_errors`. Frames are rebuilt only for a viewer, so they are counted, and
+                their reason named, only while a viewer has the channel open: with nobody watching,
+                a sender of unusable frames shows 0.
+            skipped_frames:
+              type: integer
+              description: >-
+                Frames a viewer skipped because its connection's buffer was full, once per frame and viewer.
+            recent_errors:
+              type: array
+              items:
+                type: string
+    ViewerUrl:
+      type: object
+      required: [url, max_video_channels, channel_limit_source, sdk_channel_limited]
+      properties:
+        url:
+          type: string
+        max_video_channels:
+          type: integer
+        channel_limit_source:
+          type: string
+          enum: [devkit, sdk-port-map, legacy-default]
+        sdk_channel_limited:
+          type: boolean
+    Health:
+      type: object
+      required: [status, service, time, network]
+      properties:
+        status:
+          type: string
+          description: Always `ok`.
+        service:
+          type: string
+          description: Always `neat-insight`.
+        time:
+          type: string
+          description: The server's time in UTC, ISO 8601 with a `Z`.
+        network:
+          $ref: "#/components/schemas/HealthNetwork"
+    HealthNetwork:
+      type: object
+      description: How browsers reach Insight, as resolved at start.
+      required: [browser_ice_address, browser_ice_address_source, public_origin]
+      properties:
+        browser_ice_address:
+          type: string
+          nullable: true
+          description: The address offered to browsers for WebRTC media, or null for the machine's own.
+        browser_ice_address_source:
+          type: string
+          enum: [browser-ice-address, CONTAINER_HOST_IP, none]
+        public_origin:
+          type: string
+          nullable: true
+          description: The origin a shared proxy serves Insight under, or null.
+    Error:
+      type: object
+      description: Every error answer has this shape; some routes add fields beside `error`.
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: A stable snake_case word the UI may branch on.
+        message:
+          type: string
+          description: A sentence the UI may show as it is.
+        hint:
+          type: string
+          description: What to do about it, when there is something to say.
+    SlotList:
+      type: object
+      required: [count, slots]
+      properties:
+        count:
+          type: integer
+          description: How many slots there are (48).
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/Slot"
+    Slot:
+      type: object
+      description: One slot, srcN, as asked and as it stands.
+      required: [n, kind, run, state, readers, urls]
+      properties:
+        n:
+          type: integer
+          description: The slot's number, N of srcN.
+        kind:
+          type: string
+          enum: [none, file, webcam, pull]
+        file:
+          type: string
+          description: A file slot's library path.
+        fps:
+          type: integer
+          description: >-
+            A file slot's output rate when it is not the file's own; a webcam slot's rate, 30 or
+            60.
+        native_fps:
+          type: integer
+          description: The file's own rate in whole frames per second, once it is probed.
+        codec:
+          type: string
+          description: >-
+            h264, h265, mjpeg or another codec's name: the file's, or the stream's for a pull, a
+            webcam or an external publisher; absent while unknown.
+        pull:
+          $ref: "#/components/schemas/SlotPull"
+        run:
+          type: boolean
+          description: The user's Start; the slot is to run.
+        state:
+          type: string
+          enum: [idle, preparing, starting, live, failed, external]
+          description: >-
+            Derived: idle (stopped, nothing assigned, or a webcam no browser publishes),
+            preparing (a rendition is encoded, see `job`), starting, live (MediaMTX has the
+            stream), failed (see `error`), external (a publisher Insight did not start holds it).
+        error:
+          type: string
+          description: Why the slot failed, or why a pull is not live yet.
+        job:
+          type: string
+          description: The rendition's encode, while the slot is preparing.
+        publisher:
+          $ref: "#/components/schemas/SlotPublisher"
+        readers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SlotReader"
+        urls:
+          $ref: "#/components/schemas/SlotUrls"
+        active_file:
+          type: string
+          description: What the slot's publisher streams, the file or its rendition (.renditions/...).
+    SlotPull:
+      type: object
+      description: A pull slot's camera, without credentials, and how its connection stands.
+      required: [scheme, host, path, status]
+      properties:
+        scheme:
+          type: string
+        host:
+          type: string
+        path:
+          type: string
+        status:
+          type: string
+          enum: [live, connecting, unreachable, auth_failed, needs_credentials, stopped]
+          description: needs_credentials after a restart, which keeps no credentials.
+        error:
+          type: string
+    SlotPublisher:
+      type: object
+      description: The stream a slot carries, while MediaMTX has one.
+      required: [protocol, since, codec_supported]
+      properties:
+        protocol:
+          type: string
+          description: rtsp, webrtc and the like; rtspSource or rtspsSource for a pulled camera.
+        address:
+          type: string
+          description: The publisher's host; absent for a pull.
+        since:
+          type: string
+          format: date-time
+        codec:
+          type: string
+        codec_supported:
+          type: boolean
+          description: Whether Neat decodes the codec (H.264, H.265, MJPEG).
+        width:
+          type: integer
+        height:
+          type: integer
+        fps:
+          type: number
+          format: double
+        bitrate_bps:
+          type: number
+          format: double
+    SlotReader:
+      type: object
+      required: [protocol, address]
+      properties:
+        protocol:
+          type: string
+        address:
+          type: string
+        label:
+          type: string
+          description: insight preview for Insight's own live preview.
+    SlotUrls:
+      type: object
+      description: Where the slot's stream is reached, on the host the request used.
+      required: [rtsp]
+      properties:
+        rtsp:
+          type: string
+        http_mjpeg:
+          type: string
+          description: The HTTP MJPEG output (Frozen, `/stream/http/srcN.mjpg`), for an MJPEG stream.
+        whip:
+          type: string
+          description: >-
+            Where a browser publishes a webcam slot's camera, at the slot's rate (`fps`): each
+            rate has a URL of its own.
+    SlotAssignment:
+      type: object
+      description: >-
+        What to assign: `file` (with `file` and an optional `fps`), `pull` (with `url` and
+        optional `username` and `password`, which replace credentials in the URL) or `webcam`
+        (with an optional `fps`).
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [file, pull, webcam]
+        file:
+          type: string
+          description: A library path.
+        fps:
+          type: integer
+          description: >-
+            The output rate: a file's, absent for the file's own; a webcam's, 30 or 60, absent
+            for 30.
+        url:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+    SlotStartRequest:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+          description: How many file slots to start, at least 1.
+    SlotStartResult:
+      type: object
+      required: [started, already_running, skipped_external, errors]
+      properties:
+        started:
+          type: array
+          items:
+            type: integer
+        already_running:
+          type: array
+          items:
+            type: integer
+        skipped_external:
+          type: array
+          items:
+            type: integer
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SlotFailure"
+    SlotFailure:
+      type: object
+      required: [n, code, error]
+      properties:
+        n:
+          type: integer
+        code:
+          type: string
+        error:
+          type: string
+    SlotStopResult:
+      type: object
+      required: [stopped, skipped_external]
+      properties:
+        stopped:
+          type: array
+          description: The slots that were to run.
+          items:
+            type: integer
+        skipped_external:
+          type: array
+          description: The slots an external publisher holds, whose streams go on.
+          items:
+            type: integer
+    AutoAssignResult:
+      type: object
+      required: [assigned, available, skipped_external, skipped_pulled]
+      properties:
+        assigned:
+          type: integer
+          description: The slots given a file.
+        available:
+          type: integer
+          description: The files there were to give.
+        skipped_external:
+          type: array
+          items:
+            type: integer
+        skipped_pulled:
+          type: array
+          items:
+            type: integer
+    RenditionUsage:
+      type: object
+      required: [count, bytes, in_use]
+      properties:
+        count:
+          type: integer
+        bytes:
+          type: integer
+          format: int64
+        in_use:
+          type: integer
+          description: Those a slot streams or is about to.
+    RenditionsCleared:
+      type: object
+      required: [removed, freed_bytes, kept]
+      properties:
+        removed:
+          type: integer
+        freed_bytes:
+          type: integer
+          format: int64
+        kept:
+          type: integer
+          description: Kept because a slot streams them or is about to.
+    MediaEntry:
+      type: object
+      description: A folder or a file of the library.
+      required: [name, path, folder, streamable, probe]
+      properties:
+        name:
+          type: string
+          description: The entry's own name; the root's is empty.
+        path:
+          type: string
+          description: The library path; the root's is empty.
+        folder:
+          type: boolean
+        children:
+          type: array
+          description: A folder's entries, folders first; absent for a file and an empty folder.
+          items:
+            $ref: "#/components/schemas/MediaEntry"
+        streamable:
+          type: boolean
+          description: >-
+            Whether a slot can stream the file: from its probe, else from its extension; for a
+            folder, whether any file below it is.
+        streamable_count:
+          type: integer
+          description: For a folder, the streamable files below it.
+        probe:
+          nullable: true
+          description: Null while the file is being probed, and for a folder.
+          allOf:
+            - $ref: "#/components/schemas/MediaProbe"
+    MediaProbe:
+      type: object
+      description: What ffprobe says about a file's first video stream.
+      required: [kind, size, streamable]
+      properties:
+        kind:
+          type: string
+          enum: [video, image, unknown]
+        codec:
+          type: string
+          description: h264, h265, mjpeg or ffprobe's name of another codec.
+        codec_name:
+          type: string
+          description: The codec as the UI shows it (H.264).
+        profile:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        fps:
+          type: number
+          format: double
+        frame_rate:
+          type: string
+          description: The rate as ffprobe writes it (30000/1001).
+        duration_ms:
+          type: integer
+          format: int64
+        size:
+          type: integer
+          format: int64
+        streamable:
+          type: boolean
+        problem:
+          type: string
+          description: Why ffprobe could not read the file.
+    MediaFileInfo:
+      type: object
+      required: [name, path, probe]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        probe:
+          $ref: "#/components/schemas/MediaProbe"
+    MediaDeleteRequest:
+      type: object
+      required: [paths]
+      properties:
+        paths:
+          type: array
+          items:
+            type: string
+    MediaDeleted:
+      type: object
+      required: [paths]
+      properties:
+        paths:
+          type: array
+          items:
+            type: string
+    MediaUpload:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+        on_conflict:
+          type: string
+          enum: [ask, keep_both, replace]
+          description: What a taken name does; ask unless said.
+    MediaSaved:
+      type: object
+      description: A file or folder that joined the library.
+      required: [path]
+      properties:
+        path:
+          type: string
+        folder:
+          type: boolean
+        reencoded:
+          type: array
+          description: The files re-encoded before they were saved.
+          items:
+            type: string
+        restarted:
+          type: array
+          description: The slots that streamed what it replaced, restarted on it.
+          items:
+            type: integer
+        unassigned:
+          type: array
+          description: The slots whose file a replaced folder no longer has.
+          items:
+            type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+    MediaConflict:
+      type: object
+      description: What an upload's name clashes with.
+      required: [existing, suggested]
+      properties:
+        existing:
+          type: string
+          description: The library path that is taken.
+        suggested:
+          type: string
+          description: The free name keep_both would save under.
+    LibraryError:
+      type: object
+      description: The error shape, with what the media library adds.
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        conflict:
+          $ref: "#/components/schemas/MediaConflict"
+        slots:
+          type: array
+          description: With in_use, the slots that use the files.
+          items:
+            type: integer
+    Catalog:
+      type: object
+      description: The published catalog of sample clips, as its index has it.
+      required: [index_url, base_url, sources, assets]
+      properties:
+        schema:
+          type: string
+        generated_at:
+          type: string
+        index_url:
+          type: string
+        base_url:
+          type: string
+        sources:
+          type: array
+          description: The videos the assets are made from, as the index has them.
+          items:
+            type: object
+            additionalProperties: true
+        assets:
+          type: array
+          description: The files to import, as the index has them, each with its download url.
+          items:
+            type: object
+            required: [path, url]
+            properties:
+              path:
+                type: string
+              url:
+                type: string
+            additionalProperties: true
+    CatalogImportRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: An asset's path in the catalog.
+    Job:
+      type: object
+      description: Long work (an encode, a re-encode, a download) at one moment.
+      required: [id, kind, title, state, progress, created_at]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: rendition, upload or catalog_import.
+        title:
+          type: string
+        state:
+          type: string
+          enum: [queued, running, done, failed, cancelled]
+        progress:
+          $ref: "#/components/schemas/JobProgress"
+        result:
+          type: object
+          description: >-
+            Once done: what was saved (MediaSaved) for an upload or an import, `{rendition}`
+            for a rendition.
+          additionalProperties: true
+        error:
+          type: string
+          description: Once failed, why, as a sentence.
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+    JobProgress:
+      type: object
+      required: [phase, detail]
+      properties:
+        percent:
+          type: number
+          format: double
+        phase:
+          type: string
+          description: encode, download, save and the like.
+        detail:
+          type: string
+    BoardError:
+      type: object
+      description: The error shape, with what a board's failure adds.
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        host_key:
+          $ref: "#/components/schemas/HostKeyChange"
+        command:
+          type: string
+          description: With auth_failed, the shell command that authorizes Insight's key on the board.
+    HostKeyChange:
+      type: object
+      description: With host_key_changed, the key Insight trusts and the one the board presented.
+      required: [host, expected, presented]
+      properties:
+        host:
+          type: string
+          description: The board's name in known_hosts, "host" or "[host]:port".
+        expected:
+          type: string
+          description: The trusted key's SHA256 fingerprint.
+        presented:
+          type: string
+          description: The presented key's, which trust-host-key takes.
+    BoardList:
+      type: object
+      required: [boards, selected]
+      properties:
+        boards:
+          type: array
+          description: Every known board, the selected one first.
+          items:
+            $ref: "#/components/schemas/BoardTarget"
+        selected:
+          nullable: true
+          description: The selected board; null when none is entered, found or paired.
+          allOf:
+            - $ref: "#/components/schemas/SelectedBoard"
+    BoardTarget:
+      type: object
+      required: [id, mode, source, label]
+      properties:
+        id:
+          type: string
+        mode:
+          type: string
+          enum: [ssh, local]
+          description: ssh reaches the board over SSH; local is the board Insight runs on.
+        source:
+          type: string
+          enum: [manual, on-board, sdk-env]
+          description: Entered by hand, the board Insight runs on, or the DevKit the SDK is paired with.
+        host:
+          type: string
+        port:
+          type: integer
+        user:
+          type: string
+        label:
+          type: string
+          description: '"This board", or user@host with :port off port 22.'
+    SelectedBoard:
+      type: object
+      required: [id, label, status, identity]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        status:
+          $ref: "#/components/schemas/BoardStatus"
+        identity:
+          nullable: true
+          description: What the last successful check read; null before one.
+          allOf:
+            - $ref: "#/components/schemas/BoardIdentity"
+        ssh:
+          type: string
+          description: The command that opens a shell on the board, for an SSH board ("ssh -p 2222 sima@192.168.1.20").
+    BoardStatus:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [unknown, connected, error]
+          description: unknown until a check or a failure; error while the last contact failed.
+        checked_at:
+          type: string
+          format: date-time
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        host_key:
+          $ref: "#/components/schemas/HostKeyChange"
+        command:
+          type: string
+          description: With auth_failed, the command that authorizes Insight's key.
+    BoardIdentity:
+      type: object
+      required: [hostname, machine, build, host_key]
+      properties:
+        hostname:
+          type: string
+        machine:
+          type: string
+          description: /etc/build's MACHINE, "modalix".
+        build:
+          type: string
+          description: /etc/build's SIMA_BUILD_VERSION.
+        host_key:
+          type: string
+          description: The SHA256 fingerprint of the board's SSH host key; "" for the local board.
+    BoardSelection:
+      type: object
+      required: [host]
+      properties:
+        host:
+          type: string
+          description: An IP address or a host name.
+        port:
+          type: integer
+          description: 1 to 65535; 22 when absent.
+        user:
+          type: string
+          description: sima when absent.
+    TrustHostKeyRequest:
+      type: object
+      required: [fingerprint]
+      properties:
+        fingerprint:
+          type: string
+    SentinelBody:
+      type: object
+      description: >-
+        One of Sentinel's answers as it gave it, without its schema marker; its fields are
+        Sentinel's (its API is the one its public clients use).
+      additionalProperties: true
+    SentinelHealth:
+      type: object
+      required: [health, started_at]
+      properties:
+        health:
+          $ref: "#/components/schemas/SentinelBody"
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When Sentinel's service started, on Insight's clock; null when systemd does not say.
+    SentinelCache:
+      type: object
+      description: >-
+        Sentinel's `/v1/cache`: `version`, `metrics` (the definitions), `latest` (the newest
+        sample), `samples` (oldest first, each `{timestamp, values}`) and `errors`, with
+        `full`.
+      required: [samples, full]
+      properties:
+        samples:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        full:
+          type: boolean
+          description: The samples replace what the caller holds; false, they follow its `after`.
+      additionalProperties: true
+    TraceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        note:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    RunDeleted:
+      type: object
+      required: [deleted, runs]
+      properties:
+        deleted:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        runs:
+          $ref: "#/components/schemas/SentinelBody"
+    Peripherals:
+      type: object
+      required: [scan]
+      properties:
+        scan:
+          nullable: true
+          description: The last scan; null before the first.
+          allOf:
+            - $ref: "#/components/schemas/PeripheralScan"
+    PeripheralScan:
+      type: object
+      required: [scanned_at, scan_ms, items, issues, camera_setup, changes]
+      properties:
+        scanned_at:
+          type: string
+          format: date-time
+        scan_ms:
+          type: integer
+          description: How long Sentinel's scan took.
+        items:
+          type: array
+          description: The devices the scan found, cameras first, then microphones, then other kinds, each in Sentinel's order.
+          items:
+            $ref: "#/components/schemas/PeripheralItem"
+        issues:
+          type: array
+          description: Sentinel's providers that failed in this scan; the devices of one are its last successful scan's.
+          items:
+            $ref: "#/components/schemas/PeripheralIssue"
+        camera_setup:
+          nullable: true
+          description: The board's camera setup as Sentinel reads it from the device tree; null from a Sentinel that does not.
+          allOf:
+            - $ref: "#/components/schemas/CameraSetup"
+        changes:
+          nullable: true
+          description: What this scan found or missed against the one before; null for the first.
+          allOf:
+            - $ref: "#/components/schemas/PeripheralChanges"
+    PeripheralItem:
+      description: A device of a scan, told apart by `kind`; a kind Insight has no view for is an OtherItem.
+      oneOf:
+        - $ref: "#/components/schemas/CameraItem"
+        - $ref: "#/components/schemas/MicrophoneItem"
+        - $ref: "#/components/schemas/OtherItem"
+    CameraItem:
+      type: object
+      required: [id, kind, connection, name, model, device, support, modes_source, formats, default_selection, notes, errors]
+      properties:
+        id:
+          type: string
+          description: Sentinel's id, stable across scans of one board.
+        kind:
+          type: string
+          enum: [camera]
+        connection:
+          type: string
+          description: mipi or usb; otherwise Sentinel's backend for it.
+        name:
+          type: string
+        model:
+          type: string
+          nullable: true
+        device:
+          $ref: "#/components/schemas/CameraDevice"
+        support:
+          description: The camera's best verdict over all its modes.
+          allOf:
+            - $ref: "#/components/schemas/DeviceSupport"
+        modes_source:
+          type: string
+          enum: [live, previous-scan, unavailable]
+          description: >-
+            `live` from this scan; `previous-scan` kept from a failed provider's last good scan
+            (the camera may have been unplugged since); `unavailable` when no mode could be read.
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/CameraFormat"
+        default_selection:
+          nullable: true
+          description: >-
+            The mode to preselect: 1920 wide when Available, else the widest Available size below,
+            else the smallest, at its fastest Available rate; null when no mode is Available.
+          allOf:
+            - $ref: "#/components/schemas/PreviewMode"
+        notes:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceError"
+    CameraDevice:
+      type: object
+      description: >-
+        How the camera's device is reached: a MIPI camera's libcamera facts, a USB camera's V4L2
+        nodes and USB facts. A fact the board does not report is absent.
+      properties:
+        camera_name:
+          type: string
+          description: >-
+            The ID a Neat application opens the camera by: libcamera's name for a MIPI camera
+            (`CameraInput`), and for a USB camera the name Sentinel gives it (`UsbCameraInput`),
+            which only a Sentinel that checks USB cameras reports.
+        media_device:
+          type: string
+        bus_info:
+          type: string
+        csi:
+          type: string
+          description: The CSI receiver the sensor is attached to.
+        video_node:
+          type: string
+          description: "`/dev/videoN`, whose number can change across reboots."
+        by_id:
+          type: string
+          description: The `/dev/v4l/by-id/...` link, stable across reboots.
+        usb:
+          $ref: "#/components/schemas/UsbFacts"
+    UsbFacts:
+      type: object
+      description: A device's USB facts; a fact it does not report is absent.
+      properties:
+        vendor_id:
+          type: string
+        product_id:
+          type: string
+        manufacturer:
+          type: string
+        product:
+          type: string
+        serial:
+          type: string
+        bus_path:
+          type: string
+          description: The device's place on the bus; a camera's sysfs path, a microphone's ALSA name for it (`1-1.2`).
+        interface:
+          type: string
+          description: A microphone's USB interface of the audio function.
+        speed_mbps:
+          type: number
+          format: double
+          description: A camera's link speed in Mb/s (1.5, 12, 480, 5000...).
+    DeviceSupport:
+      type: object
+      description: >-
+        Sentinel's verdict on a camera, format or mode: available when Neat's camera input can use
+        it (`CameraInput` for MIPI, `UsbCameraInput` for USB). A USB camera's modes are available
+        when Sentinel reports them in MJPEG on the `uvcvideo` driver, and unsupported with
+        Sentinel's reason otherwise. Only a Sentinel that reports a USB camera's driver checks USB
+        cameras: with an older one, every USB mode is unsupported with a reason to update it.
+        Unsupported modes can still be previewable.
+      required: [tier, reason]
+      properties:
+        tier:
+          type: string
+          enum: [available, unsupported]
+        reason:
+          type: string
+          description: Why it is not available; empty when it is.
+    DeviceError:
+      type: object
+      description: A problem with one device, such as a camera without modes (`no_modes`).
+      required: [code, message, hint]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        hint:
+          type: string
+    CameraFormat:
+      type: object
+      description: One pixel format of a camera, with the sizes it offers, in Sentinel's order.
+      required: [format, label, support, range, sizes]
+      properties:
+        format:
+          type: string
+          description: The V4L2 or libcamera FourCC, such as NV12 or MJPG.
+        label:
+          type: string
+        support:
+          $ref: "#/components/schemas/DeviceSupport"
+        range:
+          nullable: true
+          description: The bounds of a stepwise or continuous size range; null for discrete sizes.
+          allOf:
+            - $ref: "#/components/schemas/CameraFormatRange"
+        sizes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CameraSize"
+    CameraFormatRange:
+      type: object
+      required: [min_width, min_height, max_width, max_height, step_width, step_height]
+      properties:
+        min_width:
+          type: integer
+        min_height:
+          type: integer
+        max_width:
+          type: integer
+        max_height:
+          type: integer
+        step_width:
+          type: integer
+        step_height:
+          type: integer
+    CameraSize:
+      type: object
+      description: One size of a format, with the frame rates it runs at, fastest first.
+      required: [width, height, fps]
+      properties:
+        width:
+          type: integer
+        height:
+          type: integer
+        fps:
+          type: array
+          items:
+            $ref: "#/components/schemas/CameraMode"
+    CameraMode:
+      type: object
+      description: >-
+        One mode: a frame rate of its size and format, with Sentinel's verdict on it, and whether
+        the preview takes it (for MIPI, NV12 Sentinel does not refuse; for USB, MJPG or a raw
+        format). The rates are the ones the camera advertises for the size (standard ones of a
+        range); for a MIPI mode that advertises none, 30 fps up to the camera's own rate.
+      required: [value, tier, previewable]
+      properties:
+        value:
+          type: number
+          format: double
+          description: The rate, to a thousandth, as a preview's start takes it.
+        tier:
+          type: string
+          enum: [available, unsupported]
+        reason:
+          type: string
+          description: Why the mode is not available; absent when it is.
+        previewable:
+          type: boolean
+    MicrophoneItem:
+      type: object
+      required: [id, kind, connection, name, device, capture, record, notes, errors]
+      properties:
+        id:
+          type: string
+          description: Sentinel's id, stable across scans of one board.
+        kind:
+          type: string
+          enum: [microphone]
+        connection:
+          type: string
+          enum: [usb, onboard]
+        name:
+          type: string
+        device:
+          $ref: "#/components/schemas/MicrophoneDevice"
+        capture:
+          type: array
+          nullable: true
+          description: The capture combinations the device reports; null when they cannot be read without opening it.
+          items:
+            $ref: "#/components/schemas/MicrophoneCapture"
+        record:
+          type: string
+          description: >-
+            A fingerprint of what identifies the device behind the id (Sentinel's capture target
+            and identity): a microphone listed again under its id with another record is another
+            device.
+        notes:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceError"
+    MicrophoneDevice:
+      type: object
+      description: A microphone's ALSA identity; a fact the card does not report is absent.
+      properties:
+        card_index:
+          type: integer
+        card_id:
+          type: string
+        card_name:
+          type: string
+        card_driver:
+          type: string
+        pcm_device:
+          type: integer
+        pcm_node:
+          type: string
+        alsa_name:
+          type: string
+          description: "`hw:CARD=<id>,DEV=<n>`."
+        by_path:
+          type: string
+        by_id:
+          type: string
+        usb:
+          $ref: "#/components/schemas/UsbFacts"
+        part_of:
+          description: The USB camera of the same scan this microphone belongs to (a webcam's).
+          allOf:
+            - $ref: "#/components/schemas/DeviceRef"
+    MicrophoneCapture:
+      type: object
+      description: One capture combination a microphone reports; a fact it does not report is absent.
+      required: [rates]
+      properties:
+        format:
+          type: string
+        channels:
+          type: integer
+        bits:
+          type: integer
+        rates:
+          type: array
+          description: Discrete sample rates, in Hz.
+          items:
+            type: integer
+        rate_range:
+          type: object
+          description: A continuous range of sample rates, in Hz.
+          required: [min, max]
+          properties:
+            min:
+              type: integer
+            max:
+              type: integer
+        channel_map:
+          type: array
+          items:
+            type: string
+    OtherItem:
+      type: object
+      description: A device of a kind Insight has no view for, listed with its name and notes.
+      required: [id, kind, connection, name, notes, errors]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: Sentinel's device type.
+        connection:
+          type: string
+          description: Sentinel's backend for it.
+        name:
+          type: string
+        notes:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceError"
+    PeripheralIssue:
+      type: object
+      description: A warning about the scan as a whole, such as a provider that failed.
+      required: [code, message, hint]
+      properties:
+        code:
+          type: string
+          description: Sentinel's code for it.
+        message:
+          type: string
+        hint:
+          type: string
+    CameraSetup:
+      type: object
+      required: [model, overlays]
+      properties:
+        model:
+          type: string
+          nullable: true
+        overlays:
+          type: array
+          description: The device-tree overlays that configure a camera sensor, such as `modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo`.
+          items:
+            type: string
+    PeripheralChanges:
+      type: object
+      required: [added, removed]
+      properties:
+        added:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceRef"
+        removed:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceRef"
+    DeviceRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    PreviewMode:
+      type: object
+      required: [format, width, height, fps]
+      properties:
+        format:
+          type: string
+          description: A V4L2 format the scan lists for the camera (NV12, MJPG, YUYV, ...).
+        width:
+          type: integer
+        height:
+          type: integer
+        fps:
+          type: number
+          format: double
+          description: A rate the camera advertises for the size (the inverse of a frame interval), to a thousandth.
+    PreviewAnswer:
+      type: object
+      required: [preview]
+      properties:
+        preview:
+          nullable: true
+          description: The running preview; null when none runs.
+          allOf:
+            - $ref: "#/components/schemas/CameraPreview"
+    CameraPreview:
+      type: object
+      required: [id, camera, mode, started_at, camera_fps, viewer]
+      properties:
+        id:
+          type: string
+        camera:
+          type: string
+        mode:
+          $ref: "#/components/schemas/PreviewMode"
+        started_at:
+          type: string
+          format: date-time
+        camera_fps:
+          type: number
+          format: double
+          nullable: true
+          description: The rate the camera runs at; for MIPI null until Sentinel read it, a few seconds in.
+        viewer:
+          type: boolean
+          description: A browser shows the preview; its stream has one viewer.
+    MicTestRequest:
+      type: object
+      properties:
+        seconds:
+          type: integer
+          description: 1 to 30; 30 when absent.
+    MicTestAnswer:
+      type: object
+      required: [test]
+      properties:
+        test:
+          nullable: true
+          description: The board's latest test; null before the first.
+          allOf:
+            - $ref: "#/components/schemas/MicTest"
+    MicTest:
+      type: object
+      required: [id, microphone, state, device, format, elapsed_ms]
+      properties:
+        id:
+          type: string
+        microphone:
+          type: string
+        state:
+          type: string
+          enum: [recording, ready, failed]
+        device:
+          type: string
+          description: The ALSA device arecord records from.
+        format:
+          type: object
+          required: [rate, channels, bits, seconds]
+          properties:
+            rate:
+              type: integer
+            channels:
+              type: integer
+            bits:
+              type: integer
+            seconds:
+              type: integer
+        elapsed_ms:
+          type: integer
+          description: How much was recorded.
+        level_dbfs:
+          type: number
+          format: double
+          description: While recording, the newest 50 ms's peak; absent for digital silence.
+        level:
+          $ref: "#/components/schemas/MicLevel"
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    MicLevel:
+      type: object
+      description: What a finished recording picked up.
+      required: [peak_dbfs, rms_dbfs, silent]
+      properties:
+        peak_dbfs:
+          type: number
+          format: double
+          nullable: true
+        rms_dbfs:
+          type: number
+          format: double
+          nullable: true
+        silent:
+          type: boolean
+          description: Its typical level is below -60 dBFS (one click does not count).
+    SystemInfo:
+      type: object
+      required: [insight, neat]
+      properties:
+        insight:
+          $ref: "#/components/schemas/SystemInsight"
+        neat:
+          $ref: "#/components/schemas/SystemNeat"
+    SystemInsight:
+      type: object
+      required: [version, build, place, data_dir, port, web_ui_url, network, ports]
+      properties:
+        version:
+          type: string
+        build:
+          type: object
+          required: [go_version, platform]
+          properties:
+            go_version:
+              type: string
+            platform:
+              type: string
+            revision:
+              type: string
+            time:
+              type: string
+            modified:
+              type: boolean
+        place:
+          type: string
+          enum: [board, sdk, host]
+        data_dir:
+          type: string
+        port:
+          type: integer
+        web_ui_url:
+          type: string
+          description: The public origin when a proxy serves Insight, else the address the request came to.
+        network:
+          type: object
+          required: [certificate_host, browser_ice_address_source]
+          properties:
+            certificate_host:
+              type: string
+            browser_ice_address:
+              type: string
+            browser_ice_address_source:
+              type: string
+            public_origin:
+              type: string
+            url_routing:
+              type: string
+        ports:
+          type: object
+          required: [channels, channels_source, webrtc_start, webrtc_end, rtsp, whip, whip_ice]
+          properties:
+            channels:
+              type: integer
+            channels_source:
+              type: string
+            webrtc_start:
+              type: integer
+            webrtc_end:
+              type: integer
+            rtsp:
+              type: integer
+              description: The host port the SDK publishes RTSP on; 0 where none is named.
+            whip:
+              type: integer
+            whip_ice:
+              type: integer
+    SystemNeat:
+      type: object
+      required: [state, exposed_ports]
+      properties:
+        state:
+          type: string
+          enum: [reading, ready, missing, failed]
+        read_at:
+          type: string
+          format: date-time
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        environment:
+          type: object
+          properties:
+            mode: { type: string, nullable: true, description: "elxr-sdk or modalix-board." }
+            label: { type: string, nullable: true }
+            sdkVersion: { type: string, nullable: true }
+            devkitBuildVersion: { type: string, nullable: true }
+            sysroot: { type: string, nullable: true }
+        components:
+          type: object
+          description: By component id (core, pyneat, runtime, insight, modelCompiler, ...).
+          additionalProperties:
+            $ref: "#/components/schemas/NeatComponent"
+        insight:
+          type: object
+          properties:
+            serviceState: { type: string, nullable: true }
+            venv: { type: string, nullable: true }
+            webUiUrl: { type: string, nullable: true }
+        update_check:
+          type: object
+          properties:
+            offline: { type: boolean, nullable: true }
+            status: { type: string, nullable: true }
+            errors:
+              type: array
+              items:
+                type: string
+        exposed_ports:
+          type: array
+          description: The ports the SDK container publishes, neat's, else the port map's.
+          items:
+            type: object
+            required: [name, hostPortStart, hostPortEnd]
+            properties:
+              name: { type: string }
+              protocol: { type: string }
+              hostPortStart: { type: integer, nullable: true }
+              hostPortEnd: { type: integer, nullable: true }
+    NeatComponent:
+      type: object
+      required: [name, version]
+      properties:
+        name: { type: string, nullable: true }
+        version: { type: string, nullable: true }
+        detail: { type: string, nullable: true }
+        channel: { type: string, nullable: true }
+        tag: { type: string, nullable: true }
+        channelAssumed: { type: boolean, nullable: true }
+        latestTag: { type: string, nullable: true }
+        latestVersion: { type: string, nullable: true }
+        metadataUrl: { type: string, nullable: true }
+        updateAvailable: { type: boolean, nullable: true }
+        installed: { type: boolean, nullable: true }
+        serviceState: { type: string, nullable: true }
+        venv: { type: string, nullable: true }
+    HostReadings:
+      type: object
+      required: [cpu_percent, memory, disk]
+      properties:
+        cpu_percent:
+          type: number
+          format: double
+          nullable: true
+        memory:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Usage"
+        disk:
+          nullable: true
+          description: The disk of Insight's data folder.
+          allOf:
+            - $ref: "#/components/schemas/Usage"
+    Usage:
+      type: object
+      required: [total, used, percent]
+      properties:
+        total:
+          type: integer
+          format: int64
+          description: Bytes.
+        used:
+          type: integer
+          format: int64
+        percent:
+          type: number
+          format: double
+        path:
+          type: string
+          description: A disk's folder.

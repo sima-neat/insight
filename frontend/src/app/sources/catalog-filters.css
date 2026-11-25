@@ -1,0 +1,6 @@
+/* Side by side; stacked where the dialog is narrow. */
+:host {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--neat-space-3);
+}

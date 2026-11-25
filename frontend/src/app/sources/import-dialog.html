@@ -1,0 +1,63 @@
+<neat-dialog-body>
+  <div class="import">
+    <p neatNote>Upload local files or import catalog assets.</p>
+    <neat-tabs label="Import source" [(value)]="tab">
+      <neat-tab label="Local files" value="local">
+        <ng-template><app-import-local /></ng-template>
+      </neat-tab>
+      <neat-tab label="Catalog" value="catalog">
+        <ng-template><app-import-catalog /></ng-template>
+      </neat-tab>
+    </neat-tabs>
+
+    <div #work class="work" tabindex="-1">
+      @if (runner.clash(); as clash) {
+        <div class="clash" role="group" [attr.aria-label]="clash.question">
+          <p>{{ clash.question }}</p>
+          @for (note of clash.notes; track $index) {
+            <p neatNote>{{ note }}</p>
+          }
+          <div class="answers">
+            <button
+              neatButton
+              type="button"
+              variant="outlined"
+              size="small"
+              (click)="runner.answer('replace')"
+            >
+              Replace
+            </button>
+            <button
+              #keepBoth
+              neatButton
+              type="button"
+              size="small"
+              (click)="runner.answer('keep_both')"
+            >
+              Keep both
+            </button>
+            <button
+              neatButton
+              type="button"
+              variant="text"
+              size="small"
+              (click)="runner.answer('skip')"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      }
+      @if (runner.progress(); as progress) {
+        <neat-progress
+          [heading]="progress.title"
+          [detail]="progress.detail"
+          [value]="progress.percent"
+        />
+      }
+      @if (runner.failure(); as failure) {
+        <neat-error-note>{{ failure }}</neat-error-note>
+      }
+    </div>
+  </div>
+</neat-dialog-body>

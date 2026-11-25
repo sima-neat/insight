@@ -1,0 +1,4 @@
+/* No box of its own: the chart is the area's part, one gap from the next. */
+:host {
+  display: contents;
+}

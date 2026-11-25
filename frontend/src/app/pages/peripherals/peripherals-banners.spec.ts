@@ -1,0 +1,231 @@
+import { Component, signal } from '@angular/core';
+import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import type { NeatTone } from '@sima/neat-ui';
+import { NeatCallout } from '@sima/neat-ui/callout';
+import { AppDialogs } from '../../app-dialogs';
+import { BoardProblem } from '../../board/board-error';
+import { BoardService } from '../../board/board.service';
+import { boardList, boardWith, DEVKIT, FakeBoard } from '../../board/board.testing';
+import type { PeripheralIssue, PeripheralSnapshot } from '../../peripherals/api';
+import { imx477, usb } from '../../peripherals/cameras.testing';
+import { PeripheralsService } from '../../peripherals/peripherals.service';
+import { peripheralSnapshot } from '../../peripherals/snapshots.testing';
+import { PeripheralsBanners } from './peripherals-banners';
+
+/** `PeripheralsService` as the banners read it. */
+class FakePeripherals {
+  readonly snapshot = signal<PeripheralSnapshot | null>(null);
+  readonly scanning = signal<number | null>(null);
+  readonly scanError = signal<BoardProblem | null>(null);
+}
+
+@Component({
+  imports: [PeripheralsBanners],
+  template: `<app-peripherals-banners
+    [loadError]="loadError()"
+    (refresh)="refreshes = refreshes + 1"
+  />`,
+})
+class Host {
+  readonly loadError = signal<BoardProblem | null>(null);
+  refreshes = 0;
+}
+
+const unreachable = new BoardProblem('Could not connect to sima@192.168.1.20.', 'unreachable', '');
+
+const STATUS_HINT = 'Check `systemctl status simaai-sentinel` on the board, then Refresh.';
+
+/** The server's warning about a Sentinel provider that failed. */
+const failedProvider = (provider: string): PeripheralIssue => ({
+  code: 'provider.failed',
+  message: `SiMa Sentinel's ${provider} provider failed: timed out`,
+  hint: STATUS_HINT,
+});
+
+/** Another board than the DevKit the snapshot is of. */
+const OTHER = { ...DEVKIT, id: 'ssh:sima@10.0.0.9:22', host: '10.0.0.9', label: 'sima@10.0.0.9' };
+
+describe('PeripheralsBanners', () => {
+  let board: FakeBoard;
+  let peripherals: FakePeripherals;
+  let dialogs: { openBoard: ReturnType<typeof vi.fn> };
+  let fixture: ComponentFixture<Host>;
+
+  beforeEach(async () => {
+    board = new FakeBoard();
+    board.state.set(boardWith(DEVKIT));
+    peripherals = new FakePeripherals();
+    dialogs = { openBoard: vi.fn(async () => undefined) };
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: BoardService, useValue: board },
+        { provide: PeripheralsService, useValue: peripherals },
+        { provide: AppDialogs, useValue: dialogs },
+      ],
+    });
+    fixture = TestBed.createComponent(Host);
+    await fixture.whenStable();
+  });
+
+  const settle = () => fixture.whenStable();
+  const callouts = () => fixture.debugElement.queryAll(By.directive(NeatCallout));
+  const headingOf = (callout: HTMLElement) =>
+    callout.querySelector('[role="heading"]')?.textContent?.trim() ?? '';
+  /** Each callout as its tone, heading, body text and live role, in the order shown. */
+  const shown = () =>
+    callouts().map((debug) => {
+      const host = debug.nativeElement as HTMLElement;
+      const instance = debug.componentInstance as NeatCallout;
+      const body = host.querySelector('[data-slot="callout-body"]');
+      return {
+        tone: instance.tone() as NeatTone,
+        heading: headingOf(host),
+        body: [...(body?.children ?? [])].map((line) => line.textContent?.trim()),
+        role: host.getAttribute('role'),
+      };
+    });
+  const button = (label: string): HTMLButtonElement | undefined =>
+    [...(fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button')].find(
+      (candidate) => candidate.textContent?.trim() === label,
+    );
+
+  it('shows nothing for a scan of the selected board that went well', async () => {
+    peripherals.snapshot.set(peripheralSnapshot([imx477]));
+    await settle();
+    expect(callouts()).toHaveLength(0);
+  });
+
+  it('board changed: a warning naming both boards, with Refresh now while a board is selected', async () => {
+    peripherals.snapshot.set(peripheralSnapshot([imx477]));
+    board.state.set(boardWith(OTHER));
+    await settle();
+    expect(shown()).toEqual([
+      {
+        tone: 'warning',
+        heading: 'Board changed — refresh',
+        body: [
+          'These results are from sima@192.168.1.20; the selected board is now sima@10.0.0.9. Preview is disabled until you refresh.',
+        ],
+        role: null,
+      },
+    ]);
+    button('Refresh now')!.click();
+    expect(fixture.componentInstance.refreshes).toBe(1);
+
+    // While a scan runs, Refresh now waits with it.
+    peripherals.scanning.set(Date.now());
+    await settle();
+    expect(button('Refresh now')!.getAttribute('aria-disabled')).toBe('true');
+
+    // With no board selected, the page says so in place of the list: no banner repeats it.
+    board.state.set(boardList());
+    await settle();
+    expect(shown()).toEqual([]);
+  });
+
+  it('a scan failure is an alert; a connection failure adds the fallback hint and Open board settings', async () => {
+    peripherals.scanError.set(unreachable);
+    await settle();
+    expect(shown()).toEqual([
+      {
+        tone: 'danger',
+        heading: 'Scan failed: Could not connect to sima@192.168.1.20.',
+        body: ['Insight could not reach the board.'],
+        role: 'alert',
+      },
+    ]);
+    button('Open board settings')!.click();
+    expect(dialogs.openBoard).toHaveBeenCalledTimes(1);
+
+    // The server's own hint wins over the fallback.
+    peripherals.scanError.set(
+      new BoardProblem('Host key changed.', 'host_key_changed', 'Trust the new key.'),
+    );
+    await settle();
+    expect(shown()[0].body).toEqual(['Trust the new key.']);
+
+    // Any other failure has its hint and no board settings: they would not help.
+    peripherals.scanError.set(
+      new BoardProblem('Sentinel is not installed on the board.', 'sentinel_missing', ''),
+    );
+    await settle();
+    expect(shown()).toEqual([
+      {
+        tone: 'danger',
+        heading: 'Scan failed: Sentinel is not installed on the board.',
+        body: [],
+        role: 'alert',
+      },
+    ]);
+    expect(button('Open board settings')).toBeUndefined();
+  });
+
+  it('a failed read of the peripherals says what failed, with its hint', async () => {
+    fixture.componentInstance.loadError.set(
+      new BoardProblem('Internal Server Error', '', 'Check the Insight log.'),
+    );
+    await settle();
+    expect(shown()).toEqual([
+      {
+        tone: 'danger',
+        heading: 'Could not load peripherals: Internal Server Error',
+        body: ['Check the Insight log.'],
+        role: 'alert',
+      },
+    ]);
+  });
+
+  it("the change summary is one status line per change; each of Sentinel's issues is a warning callout", async () => {
+    peripherals.snapshot.set(
+      peripheralSnapshot([imx477], {
+        changes: {
+          added: [{ id: imx477.id, name: 'imx477' }],
+          removed: [{ id: usb.id, name: usb.name }],
+        },
+        issues: [failedProvider('camera.v4l2'), failedProvider('microphone.alsa')],
+      }),
+    );
+    await settle();
+    expect(shown()).toEqual([
+      {
+        tone: 'info',
+        heading: '',
+        body: ['Disconnected since last refresh: HD Webcam C270', 'New: imx477'],
+        role: 'status',
+      },
+      {
+        tone: 'warning',
+        heading: 'Warning',
+        body: ["SiMa Sentinel's camera.v4l2 provider failed: timed out", STATUS_HINT],
+        role: null,
+      },
+      {
+        tone: 'warning',
+        heading: 'Warning',
+        body: ["SiMa Sentinel's microphone.alsa provider failed: timed out", STATUS_HINT],
+        role: null,
+      },
+    ]);
+  });
+
+  it('shows the banners in the order board changed, load failure, scan failure, changes, issues', async () => {
+    peripherals.snapshot.set(
+      peripheralSnapshot([imx477], {
+        changes: { added: [{ id: imx477.id, name: 'imx477' }], removed: [] },
+        issues: [failedProvider('camera.v4l2')],
+      }),
+    );
+    board.state.set(boardWith(OTHER));
+    peripherals.scanError.set(unreachable);
+    fixture.componentInstance.loadError.set(new BoardProblem('Bad Gateway', '', ''));
+    await settle();
+    expect(shown().map((callout) => callout.heading)).toEqual([
+      'Board changed — refresh',
+      'Could not load peripherals: Bad Gateway',
+      'Scan failed: Could not connect to sima@192.168.1.20.',
+      '',
+      'Warning',
+    ]);
+  });
+});

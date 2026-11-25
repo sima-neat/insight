@@ -1,0 +1,4 @@
+/* The block has no box of its own: the rail item inside is a row of the rail's end group. */
+:host {
+  display: contents;
+}

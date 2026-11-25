@@ -1,0 +1,161 @@
+/*
+ * The view's parts, top to bottom, one gap apart in the page's column. The tables give up columns
+ * by the width the view has (below), so it is their container.
+ */
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-4);
+  container-type: inline-size;
+}
+
+/*
+ * Back to Runs, the heading and its facts at the start; the baseline (its label before the box)
+ * and Export CSV at the end. On a phone the actions wrap under the rest.
+ */
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-2) var(--neat-space-4);
+}
+
+/* The kit has no heading size: the view's heading reads at the body's size, set off by weight. */
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.facts {
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-sm);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-3);
+  max-inline-size: 100%;
+  margin-inline-start: auto;
+}
+
+/*
+ * The label takes some of the width, so the box keeps about the 12rem it had under it, but never
+ * more than the view: on a phone the select takes the row and Export CSV wraps under it.
+ */
+.actions neat-select {
+  min-inline-size: min(16rem, 100cqi);
+}
+
+/* One chip per run: its colour, its name, and B on the baseline. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--neat-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+  min-inline-size: 0;
+  padding: var(--neat-space-2) var(--neat-space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--neat-text-sm);
+}
+
+.name {
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A run column's note, muted under its name. It wraps (the heading's figures keep to one line)
+ * within a width, so a long note does not widen the column.
+ */
+.note {
+  display: block;
+  max-inline-size: 16rem;
+  margin-inline-start: auto;
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+  font-weight: 400;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.run {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+/* A series tab's panel: the chart over its summary. */
+.series {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-4);
+  padding-block-start: var(--neat-space-2);
+}
+
+/*
+ * A group tab's panel: Changes only, the status line and the table, closer together. The status
+ * line takes no room while it says nothing (it is visually hidden then).
+ */
+.metrics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+  padding-block-start: var(--neat-space-2);
+}
+
+/* The switch hugs its label. */
+.metrics [neatSwitch] {
+  align-self: start;
+}
+
+/* A run's change follows its mean, in the same colour: lower is not always better. */
+.change {
+  margin-inline-start: var(--neat-space-2);
+}
+
+/*
+ * Narrow, the cells give up some of their padding and the summary its least needed columns: the
+ * spread (Min, Median, P95) first, then Samples, Max and Energy on a phone, which keeps each run's
+ * mean and change; a run without readings then says "No samples" in its Mean cell (`.narrow`), and
+ * a change goes under its mean. The widths are where these columns stop fitting.
+ */
+.narrow {
+  display: none;
+}
+
+@container (width < 46rem) {
+  th,
+  td {
+    padding-inline: var(--neat-space-2);
+  }
+
+  .spread {
+    display: none;
+  }
+
+  .change {
+    display: block;
+    margin-inline-start: 0;
+  }
+}
+
+@container (width < 28rem) {
+  .wide {
+    display: none;
+  }
+
+  .narrow {
+    display: inline;
+  }
+}

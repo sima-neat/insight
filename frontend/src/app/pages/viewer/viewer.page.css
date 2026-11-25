@@ -1,0 +1,63 @@
+/*
+ * Toolbar. The shell's toolbar row (or kiosk mode's floating bar) lays the controls out; only their
+ * own sizes are set here. It fits a 1366 px wide top bar beside the page title, and where it does
+ * not (a tablet) the row scrolls sideways, so no control may shrink and wrap its label.
+ */
+
+.field-label {
+  flex: none;
+  font-size: var(--neat-text-sm);
+  white-space: nowrap;
+}
+
+/* The slider fills its box, so the box sets its width. */
+.size-field {
+  flex: none;
+  display: flex;
+  width: 6rem;
+}
+
+/* Wide enough for its widest label, so the bar does not shift as "Fit" steps. */
+.fit {
+  min-width: 5.5rem;
+}
+
+/*
+ * Popovers. Their content sits in the kit's panel, which stacks it with a gap and an inset; only
+ * what the panel does not lay out is set here.
+ */
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+/*
+ * Grid. Full-bleed in the page, inset by one tile gap so the outer tiles keep off the edges. A
+ * notice above it, one tile gap away, takes its height from the grid, which measures its own box
+ * and repacks.
+ */
+.grid-area {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+  box-sizing: border-box;
+  height: 100%;
+  padding: var(--neat-space-2);
+}
+
+neat-tile-grid {
+  flex: 1 1 0;
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-sm);
+}

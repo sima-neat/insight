@@ -1,0 +1,7 @@
+/*
+ * No box of its own: the title and the area's parts are the side panel's, one gap apart (the
+ * column `neatAsidePanel` makes).
+ */
+:host {
+  display: contents;
+}

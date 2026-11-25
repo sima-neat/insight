@@ -1,0 +1,62 @@
+<app-panel-title [chip]="chip()">{{ microphone().name }}</app-panel-title>
+@if (partOf()) {
+  <p neatNote>{{ partOf() }}</p>
+}
+<app-device-errors [errors]="microphone().errors" />
+
+<h3 neatAsideHeading>Capture</h3>
+@if (captureLines(); as lines) {
+  @if (lines.length) {
+    <ul class="capture">
+      @for (line of lines; track line.key) {
+        <li>{{ line.text }}</li>
+      }
+    </ul>
+  } @else {
+    <p neatNote>No capture formats listed.</p>
+  }
+} @else {
+  <p neatNote>This device does not report its capture formats.</p>
+}
+
+<h3 neatAsideHeading>Test Microphone</h3>
+<app-announcement>{{ announcement() }}</app-announcement>
+<!--
+  One button for every step: a press changes what it does, and the focus stays on it. While the
+  board stops the recording it waits with aria-disabled rather than disabled, which would drop the
+  focus.
+-->
+<div class="test">
+  <button
+    neatButton
+    type="button"
+    size="small"
+    [variant]="action().action === 'record' ? 'primary' : 'outlined'"
+    [attr.aria-disabled]="action().disabled || null"
+    (click)="act()"
+  >
+    {{ action().label }}
+  </button>
+  <neat-level-meter [sample]="sample()" />
+  @if (caption()) {
+    <span class="caption">{{ caption() }}</span>
+  } @else if (view().status === 'done') {
+    <button neatInlineButton type="button" (click)="replay()">Replay</button>
+  }
+</div>
+@if (silenceNotice()) {
+  <neat-callout tone="warning" announce="alert">
+    <p>{{ silenceNotice() }}</p>
+  </neat-callout>
+}
+@if (error(); as error) {
+  <neat-callout tone="danger" announce="alert" [heading]="error.message" [headingLevel]="4">
+    @if (error.hint) {
+      <p>{{ error.hint }}</p>
+    }
+  </neat-callout>
+}
+<!-- The recording plays here; never shown. -->
+<audio #audio preload="auto" hidden></audio>
+
+<app-device-details [item]="microphone()" />

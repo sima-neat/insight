@@ -1,0 +1,17 @@
+/* Whatever the box shows shares its one grid cell; a caller's overlay may position itself in it. */
+:host {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--muted);
+}
+
+img,
+video {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}

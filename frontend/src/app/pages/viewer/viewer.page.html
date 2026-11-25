@@ -1,0 +1,183 @@
+<ng-container *neatPageToolbar>
+  <span class="field-label" aria-hidden="true">Size</span>
+  <span class="size-field">
+    <neat-slider
+      label="Tile size"
+      [min]="minTileWidth"
+      [max]="sliderMax()"
+      [step]="1"
+      [value]="tileWidth()"
+      (valueChange)="rememberTileWidth($event)"
+    />
+  </span>
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    class="fit"
+    [neatTooltip]="fitTooltip()"
+    neatTooltipPosition="bottom"
+    [disabled]="!canFit()"
+    (click)="cycleFit($event)"
+  >
+    <neat-icon name="fit-all" [size]="16" />
+    {{ fitLabel() }}
+  </button>
+
+  <hr neatPageToolbarDivider />
+
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    iconOnly
+    aria-label="Previous page"
+    neatTooltip="Previous page"
+    neatTooltipPosition="bottom"
+    [disabled]="state.page() === 0"
+    (click)="state.previous()"
+  >
+    <neat-icon name="previous" />
+  </button>
+  <neat-number-field
+    #pageField
+    label="Page"
+    [value]="state.page() + 1"
+    [accept]="isPage"
+    (commit)="state.goToPage($event)"
+  >
+    <span neatNumberFieldSuffix>of {{ state.pageCount() }}</span>
+  </neat-number-field>
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    iconOnly
+    aria-label="Next page"
+    neatTooltip="Next page"
+    neatTooltipPosition="bottom"
+    [disabled]="state.page() === state.pageCount() - 1"
+    (click)="state.next()"
+  >
+    <neat-icon name="next" />
+  </button>
+
+  <hr neatPageToolbarDivider />
+
+  <neat-popover label="Go to channel" align="end" [(open)]="channelJumpOpen">
+    <button
+      neatButton
+      neatPopoverTrigger
+      type="button"
+      variant="text"
+      size="small"
+      iconOnly
+      aria-label="Go to channel"
+      neatTooltip="Go to channel"
+      neatTooltipPosition="bottom"
+    >
+      <neat-icon name="search" />
+    </button>
+    <ng-template neatPopoverContent>
+      <input
+        #channelInput
+        neatInput
+        inputmode="numeric"
+        aria-label="Channel"
+        aria-describedby="channel-jump-hint"
+        [placeholder]="channelRange()"
+        (keydown.enter)="jumpToChannel(channelInput)"
+      />
+      <p neatNote id="channel-jump-hint">Enter turns to its page and selects it.</p>
+    </ng-template>
+  </neat-popover>
+  <neat-popover label="View options" align="end">
+    <button
+      neatButton
+      neatPopoverTrigger
+      type="button"
+      variant="text"
+      size="small"
+      iconOnly
+      aria-label="View options"
+      neatTooltip="View options"
+      neatTooltipPosition="bottom"
+    >
+      <neat-icon name="more" />
+    </button>
+    <ng-template neatPopoverContent>
+      <button neatSwitch [checked]="prefs.bars()" (checkedChange)="prefs.setBars($event)">
+        Bars
+      </button>
+      <span class="option">
+        <button
+          neatSwitch
+          aria-describedby="hide-empty-experimental"
+          [checked]="prefs.hideEmpty()"
+          (checkedChange)="prefs.setHideEmpty($event)"
+        >
+          Hide empty slots
+        </button>
+        <neat-status-chip id="hide-empty-experimental">Experimental</neat-status-chip>
+      </span>
+    </ng-template>
+  </neat-popover>
+</ng-container>
+
+<neat-aside-toggle [open]="inspector.open()" (openChange)="inspector.set($event)" />
+
+<neat-page
+  scroll="none"
+  padding="none"
+  [aside]="inspector.open() ? 'open' : 'closed'"
+  [asideWidth]="prefs.inspectorWidth()"
+  (asideWidthChange)="prefs.setInspectorWidth($event)"
+>
+  <div class="grid-area">
+    @if (liveUnknown()) {
+      <neat-callout tone="warning" announce="status">
+        Live channels unknown: the channel list is unavailable
+      </neat-callout>
+    }
+    <neat-tile-grid
+      [tileWidth]="tileWidth()"
+      [count]="state.pageChannels().length"
+      (layout)="onLayout($event)"
+    >
+      <!--
+        A page turn replaces every tile on purpose: a tile is one channel's connection. The key is
+        the channel either way; the wrapper only keeps Angular's dev-mode check, which flags every
+        full replacement under track-by-identity, from warning (NG0956) about an intended one.
+        Keep it, or the warning comes back on each page turn.
+      -->
+      @for (tile of pageTiles(); track tile.channel) {
+        @let channel = tile.channel;
+        <app-viewer-tile
+          tabindex="0"
+          [channel]="channel"
+          [bars]="prefs.bars()"
+          [selected]="state.selected() === channel"
+          (click)="state.select(channel)"
+          (keydown.enter)="state.select(channel)"
+          (lateNotice)="openLateNotice(channel)"
+        />
+      }
+    </neat-tile-grid>
+    @if (emptyText(); as text) {
+      <p class="empty">{{ text }}</p>
+    }
+  </div>
+
+  @if (inspector.open()) {
+    <app-viewer-inspector
+      neatPageAside
+      [channel]="selectedChannel()"
+      [channels]="channels()"
+      [(tab)]="inspectorTab"
+      (dismiss)="closeInspector()"
+    />
+  }
+</neat-page>

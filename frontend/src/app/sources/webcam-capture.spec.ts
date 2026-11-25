@@ -1,0 +1,249 @@
+import {
+  captureModeIdsWithin,
+  CAPTURE_MODES,
+  DEFAULT_WEBCAM_RATE,
+  effectiveCaptureMode,
+  keepWebcamResolution,
+  offeredCaptureModes,
+  webcamBitrateKbps,
+  webcamCaptureConstraints,
+  webcamRate,
+  withWebcamBitrate,
+} from './webcam-capture';
+import { ALL_MODE_IDS } from './cameras.testing';
+
+// The tests of `webcamPublishing.test.js` in sima-neat/insight#248, over the modes this port
+// offers: upstream's, its 60 fps modes included, which Insight's normalizer streams at 60.
+
+const limits = (width: number, height: number, frameRate: number) => ({
+  width: { min: 1, max: width },
+  height: { min: 1, max: height },
+  frameRate: { min: 1, max: frameRate },
+});
+
+describe('the capture modes', () => {
+  it('are listed largest first, 60 fps before 30 at a size, with the camera default last', () => {
+    expect(CAPTURE_MODES.map((mode) => mode.id)).toEqual([
+      '2160p30',
+      '1440p30',
+      '1080p60',
+      '1080p30',
+      '720p60',
+      '720p30',
+      '480p30',
+      'camera',
+    ]);
+    expect(CAPTURE_MODES.map((mode) => mode.label)).toEqual([
+      '3840×2160 at 30 fps',
+      '2560×1440 at 30 fps',
+      '1920×1080 at 60 fps',
+      '1920×1080 at 30 fps',
+      '1280×720 at 60 fps',
+      '1280×720 at 30 fps',
+      '640×480 at 30 fps',
+      'Camera default',
+    ]);
+    expect(ALL_MODE_IDS).toEqual(CAPTURE_MODES.map((mode) => mode.id));
+  });
+
+  it('a camera is offered only the modes within its largest reported size and rate', () => {
+    expect(captureModeIdsWithin(limits(3840, 2160, 60))).toEqual(ALL_MODE_IDS);
+    expect(captureModeIdsWithin(limits(1920, 1080, 60))).toEqual([
+      '1080p60',
+      '1080p30',
+      '720p60',
+      '720p30',
+      '480p30',
+      'camera',
+    ]);
+    // A camera that reaches no 60 fps is not offered a 60 fps mode, so it streams at 30.
+    expect(captureModeIdsWithin(limits(1920, 1080, 30))).toEqual([
+      '1080p30',
+      '720p30',
+      '480p30',
+      'camera',
+    ]);
+    expect(captureModeIdsWithin(limits(1280, 720, 60))).toEqual([
+      '720p60',
+      '720p30',
+      '480p30',
+      'camera',
+    ]);
+    expect(captureModeIdsWithin(limits(1920, 1080, 15))).toEqual(['camera']);
+  });
+
+  it('read a reported 59.94 fps maximum as 60', () => {
+    expect(captureModeIdsWithin(limits(1280, 720, 59.94))).toEqual([
+      '720p60',
+      '720p30',
+      '480p30',
+      'camera',
+    ]);
+  });
+
+  it('read a reported 29.97 fps maximum as 30, as NTSC cameras report it', () => {
+    expect(captureModeIdsWithin(limits(1920, 1080, 29.97))).toEqual([
+      '1080p30',
+      '720p30',
+      '480p30',
+      'camera',
+    ]);
+  });
+
+  it('are all offered when the browser reports no limits (Firefox, Safari, Chrome before permission)', () => {
+    expect(captureModeIdsWithin(undefined)).toEqual(ALL_MODE_IDS);
+    expect(captureModeIdsWithin({})).toEqual(ALL_MODE_IDS);
+  });
+
+  it('are offered as the modes of the ids a camera reaches, all of them for a camera with none given', () => {
+    expect(offeredCaptureModes(['720p30', 'camera']).map((mode) => mode.id)).toEqual([
+      '720p30',
+      'camera',
+    ]);
+    expect(offeredCaptureModes(undefined).map((mode) => mode.id)).toEqual(ALL_MODE_IDS);
+  });
+
+  it('show the chosen mode when the camera reaches it, else its size at the other rate, else the largest it does', () => {
+    expect(effectiveCaptureMode('720p30', undefined)).toBe('720p30');
+    expect(effectiveCaptureMode('720p30', ['720p30', 'camera'])).toBe('720p30');
+    expect(effectiveCaptureMode('1080p30', ['720p30', 'camera'])).toBe('720p30');
+    expect(effectiveCaptureMode('unknown', ['480p30', 'camera'])).toBe('480p30');
+    // A 60 fps choice on a camera that reaches 30 only keeps its size at 30, rather than taking
+    // the camera's largest mode.
+    const upTo4k30 = ['2160p30', '1440p30', '1080p30', '720p30', '480p30', 'camera'];
+    expect(effectiveCaptureMode('1080p60', upTo4k30)).toBe('1080p30');
+    expect(effectiveCaptureMode('720p60', upTo4k30)).toBe('720p30');
+    expect(effectiveCaptureMode('1080p60', ['1080p30', '720p30', '480p30', 'camera'])).toBe(
+      '1080p30',
+    );
+    // A size the camera does not reach at either rate falls to its largest mode.
+    expect(effectiveCaptureMode('1080p60', ['720p30', '480p30', 'camera'])).toBe('720p30');
+  });
+});
+
+describe('webcamRate', () => {
+  it("is the mode's rate, which the server streams the slot at", () => {
+    expect(webcamRate('1080p60')).toBe(60);
+    expect(webcamRate('720p60')).toBe(60);
+    expect(webcamRate('1080p30')).toBe(30);
+    expect(webcamRate('2160p30')).toBe(30);
+  });
+
+  it('is 30 for the camera default, which asks for no rate, and for an unknown mode', () => {
+    expect(DEFAULT_WEBCAM_RATE).toBe(30);
+    expect(webcamRate('camera')).toBe(30);
+    expect(webcamRate('unknown')).toBe(30);
+  });
+});
+
+describe('webcamCaptureConstraints', () => {
+  const device = { deviceId: { exact: 'cam1' } };
+
+  it('asks for 1920x1080 at 30 fps unless another mode is chosen, and for an unknown mode', () => {
+    const ideal = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+    expect(webcamCaptureConstraints('cam1')).toEqual({ video: { ...device, ...ideal } });
+    expect(webcamCaptureConstraints('cam1', 'unknown')).toEqual({ video: { ...device, ...ideal } });
+  });
+
+  it('asks for the chosen size as ideal, so a camera without it falls back to its nearest', () => {
+    expect(webcamCaptureConstraints('cam1', '720p30')).toEqual({
+      video: {
+        ...device,
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30 },
+      },
+    });
+  });
+
+  it('asks for 60 fps as ideal for a 60 fps mode', () => {
+    expect(webcamCaptureConstraints('cam1', '720p60')).toEqual({
+      video: {
+        ...device,
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 60 },
+      },
+    });
+  });
+
+  it('asks for the device alone for the camera default', () => {
+    expect(webcamCaptureConstraints('cam1', 'camera')).toEqual({ video: device });
+  });
+});
+
+describe('webcamBitrateKbps', () => {
+  it('sends Auto at about 0.13 bits per pixel of the mode', () => {
+    expect(webcamBitrateKbps()).toBe(8087);
+    expect(webcamBitrateKbps('auto', '720p30')).toBe(3594);
+    expect(webcamBitrateKbps('auto', '2160p30')).toBe(32348);
+    expect(webcamBitrateKbps('auto', '1080p60')).toBe(16174);
+  });
+
+  it("takes the default mode's rate for the camera default or an unknown mode", () => {
+    expect(webcamBitrateKbps('auto', 'camera')).toBe(8087);
+    expect(webcamBitrateKbps('auto', 'unknown')).toBe(8087);
+  });
+
+  it('sends a fixed choice at its rate, and an unknown choice as Auto', () => {
+    expect(webcamBitrateKbps('4mbps', '2160p30')).toBe(4000);
+    expect(webcamBitrateKbps('unknown', '720p30')).toBe(3594);
+  });
+});
+
+describe('keepWebcamResolution', () => {
+  it("keeps the camera's size under short bandwidth and lets the sender reach the bitrate", async () => {
+    const setParameters = vi.fn(async () => undefined);
+    const sender = {
+      getParameters: () => ({ transactionId: 't1', encodings: [{ active: true }] }),
+      setParameters,
+    };
+
+    await keepWebcamResolution(sender, 3594);
+
+    expect(setParameters).toHaveBeenCalledExactlyOnceWith({
+      transactionId: 't1',
+      degradationPreference: 'maintain-resolution',
+      encodings: [{ active: true, maxBitrate: 3594000 }],
+    });
+  });
+
+  it('lets a browser that refuses the settings publish with its own, and says so on the console', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const sender = {
+      getParameters: () => ({ encodings: [{}] }),
+      setParameters: async () => {
+        throw new Error('InvalidModificationError');
+      },
+    };
+
+    await expect(keepWebcamResolution(sender, 8087)).resolves.toBeUndefined();
+
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+});
+
+describe('withWebcamBitrate', () => {
+  it("starts the answer's H.264 formats at the bitrate and leaves the other formats alone", () => {
+    const answer = [
+      'm=video 9 UDP/TLS/RTP/SAVPF 96 97',
+      'a=rtpmap:96 H264/90000',
+      'a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f',
+      'a=rtpmap:97 rtx/90000',
+      'a=fmtp:97 apt=96',
+      '',
+    ].join('\r\n');
+
+    expect(withWebcamBitrate(answer, 8087)).toBe(
+      [
+        'm=video 9 UDP/TLS/RTP/SAVPF 96 97',
+        'a=rtpmap:96 H264/90000',
+        'a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f;x-google-start-bitrate=8087;x-google-min-bitrate=4044',
+        'a=rtpmap:97 rtx/90000',
+        'a=fmtp:97 apt=96',
+        '',
+      ].join('\r\n'),
+    );
+  });
+});

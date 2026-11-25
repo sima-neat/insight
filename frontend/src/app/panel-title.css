@@ -1,0 +1,29 @@
+/* The chip sits on the heading's first line: `baseline` lines it up with that line's text. */
+:host {
+  display: flex;
+  align-items: baseline;
+  gap: var(--neat-space-2);
+}
+
+/*
+ * A long subject wraps rather than pushing the chip out of the panel: a MIPI camera's name is its
+ * device path (`/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a`), with no space to break at.
+ */
+h2 {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The chip keeps its width; the heading gives way. */
+neat-status-chip {
+  flex: none;
+}
+
+/* What follows the chip keeps its width too, and takes no room (nor a gap) while nothing is there. */
+.end {
+  flex: none;
+}
+
+.end:empty {
+  display: none;
+}

@@ -1,0 +1,63 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--neat-space-2);
+}
+
+/* The search takes the row; Refresh keeps its width at the end. */
+.search {
+  flex: 1 1 auto;
+}
+
+.mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+/* The count, with Select all and Clear at the row's end. */
+.bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+.bulk p {
+  flex: 1 1 auto;
+}
+
+/* A list fills the height it is given and scrolls its rows inside it. */
+.list {
+  display: flex;
+  block-size: 12rem;
+}
+
+/* The sources beside the selected one's detail; stacked where the dialog is narrow. */
+.by-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--neat-space-4);
+}
+
+/* The sources list is as tall as the detail beside it, and at least as tall as a list. */
+.sources {
+  display: flex;
+  flex: 1 1 12rem;
+  min-block-size: 12rem;
+}
+
+.detail {
+  flex: 2 1 20rem;
+  min-width: 0;
+}
+
+/* A size reads against the others in its column, in figures of one width. */
+.size {
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,12 @@
+/*
+ * A body state in the list's place (loading, a failed read, no board) keeps its own height at the
+ * top of the list column rather than being stretched over the row.
+ */
+.state {
+  align-self: start;
+}
+
+/* A device's model or the camera it is part of, after its name. */
+.subtitle {
+  color: var(--muted-foreground);
+}

@@ -76,8 +76,6 @@ metadata: UDP 9100 + N
 
 請確保影片和中繼資料的頻道編號一致。如果您的應用程式將影片傳送到頻道 `3`，則請將對應的中繼資料傳送到頻道 `3` 的中繼資料端口。
 
-影片連接埠接受 RTP H.264（酬載類型 `96`）、H.265（`98`）或 JPEG（`26`，即 GStreamer `rtpjpegpay` 所傳送的 RFC 2435 格式）。每個 RTP 封包請保持在 4096 位元組以內；若是 JPEG，請將 `rtpjpegpay mtu=` 設為 4096 或更小。JPEG 影格會透過與中繼資料相同的 WebRTC 連線送達瀏覽器，因此不需要額外的連接埠。
-
 ## SDK 埠對應
 
 在 Neat 開發環境中，SDK 容器可能會重新映射端口。Insight 會在可用時讀取 SDK 端口映射配置，以便 UI 連結指向瀏覽器可存取的宿主端口。
@@ -131,14 +129,6 @@ metadata channel 3: <sdk-host-ip>:19103
 ```
 
 如果應用程式和 Insight 在同一個 SDK 容器中執行，請改用預設的本機連接埠。
-
-### SDK 直接連線與共用 Proxy
-
-`/home/docker/.insight-config/url-routing` 可明確選擇 URL 路由方式。請以單行寫入 `direct` 或 `proxy`，變更後重新啟動 Insight。空白或無效的值會導致啟動失敗。若檔案不存在，則使用 `proxy`，以維持既有託管環境的行為。
-
-在 `proxy` 模式下，無論連接埠號碼為何，`launch-url` 都會提供檢視器、WHIP 及 HTTP MJPEG URL 的共用來源。Proxy 必須將各路徑轉送至對應服務。在 `direct` 模式下，SDK 啟動功能仍可使用 `launch-url`，但 Insight 不會將其當作公開來源。產生的 URL 會使用請求的主機名稱與各服務設定的連接埠；檢視器使用 SDK 連接埠對應中的 `videoUI`，未設定時則使用 `8081`。瀏覽器 ICE 位址設定與此設定互相獨立。
-
-若本機 SDK 覆寫了啟動 URL，例如 `https://127.0.0.1:9900/`，請將 `url-routing` 設為 `direct`。若不需要覆寫啟動 URL，也可移除 `launch-url`。執行 `insight-admin restart` 後，檢查 `/api/health`：直接路由會顯示 `network.public_origin: null`。即使 Proxy 的連接埠剛好與 SDK 的 `mainUI` 相同，Proxy 來源也不會被改寫。
 
 ## 相關工具
 

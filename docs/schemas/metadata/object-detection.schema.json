@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "object-detection message",
+  "description": "Boxes with a caption, each in its class color. Version 1 of the contract in docs/contracts.md.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "object-detection" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "required": ["objects"],
+      "properties": {
+        "objects": {
+          "description": "Every detection of the frame. An empty list clears the boxes of the frame before.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/object" }
+        }
+      }
+    },
+    "object": {
+      "type": "object",
+      "required": ["bbox"],
+      "properties": {
+        "bbox": {
+          "$ref": "envelope.schema.json#/$defs/bbox",
+          "description": "The box. With oriented_bbox, the upright extent of the rotated box: it drives the region-of-interest filter and is what a viewer without rotated boxes draws. Without a valid oriented_bbox it places the caption."
+        },
+        "label": { "$ref": "envelope.schema.json#/$defs/label" },
+        "confidence": {
+          "$ref": "envelope.schema.json#/$defs/confidence",
+          "description": "Compared with the viewer's confidence threshold; a detection without one always passes."
+        },
+        "id": { "$ref": "envelope.schema.json#/$defs/id" },
+        "oriented_bbox": {
+          "description": "A rotated box [cx, cy, width, height, angle]: its center and size in video pixels, and its rotation in radians, a positive angle turning it clockwise on screen. The Viewer then draws it instead of bbox, its caption upright at the topmost corner; anything but five finite numbers falls back to bbox.",
+          "type": "array",
+          "prefixItems": [
+            { "type": "number" },
+            { "type": "number" },
+            { "type": "number", "minimum": 0 },
+            { "type": "number", "minimum": 0 },
+            { "type": "number" }
+          ],
+          "minItems": 5,
+          "maxItems": 5
+        }
+      }
+    }
+  }
+}

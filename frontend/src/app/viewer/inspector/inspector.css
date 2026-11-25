@@ -1,0 +1,26 @@
+/*
+ * The page's aside gives the panel its width, inset and scrolling; the panel (a kit aside panel)
+ * only stacks its parts. Nothing here scrolls on its own.
+ */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--neat-space-2);
+}
+
+/* The kit tile fills the box it is given: a 16:9 one across the panel. */
+.preview {
+  flex: none;
+  aspect-ratio: 16 / 9;
+}
+
+/* A tab's settings start a little below the tabs. */
+.panel {
+  padding-block-start: var(--neat-space-2);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+}

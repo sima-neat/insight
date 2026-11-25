@@ -1,0 +1,10 @@
+/* No box of its own: the tiles and the charts are the panel's parts, one gap apart. */
+:host {
+  display: contents;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: var(--neat-space-3);
+}

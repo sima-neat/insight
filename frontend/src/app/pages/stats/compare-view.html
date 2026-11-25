@@ -1,0 +1,251 @@
+<!--
+  Top to bottom: the header (back to Runs, the heading, the runs and their common window, the
+  baseline and Export CSV), the run chips, the series tabs over the chart and its summary, then
+  the per-metric comparison, folded.
+-->
+<header class="header">
+  <a neatButton routerLink="/stats/runs" variant="text" size="small">
+    <neat-icon name="previous" />
+    Runs
+  </a>
+  <h2 class="title">Comparison</h2>
+  @if (baselineChoice(); as choice) {
+    <span class="facts">{{ facts() }}</span>
+    <div class="actions">
+      <neat-select
+        label="Baseline"
+        labelPosition="inline"
+        size="small"
+        [options]="choice.options"
+        [value]="choice.baseline"
+        (valueChange)="chooseBaseline($event)"
+      />
+      <button
+        neatButton
+        type="button"
+        size="small"
+        variant="outlined"
+        [disabled]="!answer()"
+        (click)="exportCsv()"
+      >
+        Export CSV
+      </button>
+    </div>
+  }
+</header>
+
+@let state = gate();
+@switch (state.kind) {
+  @case ('too-few') {
+    <neat-callout tone="info" heading="Choose two or more runs to compare" [headingLevel]="3">
+      <p>Tick the runs to compare in Runs, then choose Compare.</p>
+      <a neatButton neatCalloutActions routerLink="/stats/runs" size="small" variant="outlined">
+        Open Runs
+      </a>
+    </neat-callout>
+  }
+  @case ('reading-list') {
+    <p neatNote role="status">Reading runs from the board…</p>
+  }
+  @case ('list-failed') {
+    <app-sentinel-failure [failure]="state.failure" (retry)="runs.rereadRuns()" />
+  }
+  @case ('missing') {
+    <neat-callout tone="info" heading="Some runs are no longer on the board" [headingLevel]="3">
+      <p>
+        The board’s run list no longer has {{ state.ids.join(', ') }}. Choose the runs to compare
+        again.
+      </p>
+      <a neatButton neatCalloutActions routerLink="/stats/runs" size="small" variant="outlined">
+        Open Runs
+      </a>
+    </neat-callout>
+  }
+  @case ('recording') {
+    <neat-callout
+      tone="info"
+      [heading]="state.name + ' is still recording; compare it once the trace has stopped'"
+      [headingLevel]="3"
+    >
+      <p>Sentinel compares saved runs. Stop the trace from the toolbar, or wait for it.</p>
+    </neat-callout>
+  }
+  @case ('open') {
+    @if (answer(); as answer) {
+      <ul class="chips" aria-label="Compared runs">
+        @for (chip of chips(); track chip.id) {
+          <li class="chip">
+            <ng-container
+              [ngTemplateOutlet]="runName"
+              [ngTemplateOutletContext]="{ $implicit: chip }"
+            />
+          </li>
+        }
+      </ul>
+
+      @if (seriesOptions().length) {
+        <neat-tabs
+          label="Series to compare"
+          [value]="series()?.key"
+          (valueChange)="session.compareSeries.set($event ?? null)"
+        >
+          @for (option of seriesOptions(); track option.key) {
+            <neat-tab [label]="option.label" [value]="option.key">
+              <ng-template><ng-container [ngTemplateOutlet]="seriesPanel" /></ng-template>
+            </neat-tab>
+          }
+        </neat-tabs>
+      } @else {
+        <p neatNote>These runs share no series in one unit to draw.</p>
+      }
+
+      <neat-collapsible label="Per-metric comparison" [summary]="rowCount()" [(open)]="tableOpen">
+        <!-- Every metric of every run: built only while someone looks. -->
+        @if (tableOpen()) {
+          @if (partial()) {
+            <p neatNote class="partial">Sentinel summarised only some of these runs.</p>
+          }
+          <neat-tabs
+            label="Metric groups"
+            [value]="shownGroup()"
+            (valueChange)="chooseGroup($event)"
+          >
+            @for (choice of groups(); track choice.group) {
+              <neat-tab [label]="choice.label" [value]="choice.group">
+                <ng-template><ng-container [ngTemplateOutlet]="metricTable" /></ng-template>
+              </neat-tab>
+            }
+          </neat-tabs>
+        }
+      </neat-collapsible>
+    } @else if (failure(); as failure) {
+      <app-sentinel-failure [failure]="failure" (retry)="retry()" />
+    } @else {
+      <p neatNote role="status">Reading the comparison from the board…</p>
+    }
+  }
+}
+
+<!-- Said once the comparison is in, where the reading note stood; empty while it is read. -->
+<app-announcement>{{ announcement() }}</app-announcement>
+
+<!--
+  A run as the chips and the per-metric headings name it: its swatch, its name, and B on the
+  baseline (said as ", baseline").
+-->
+<ng-template #runName let-run>
+  <neat-series-swatch [index]="run.index" />
+  <span class="name">{{ run.name }}</span>
+  @if (run.baseline) {
+    <neat-status-chip aria-hidden="true">B</neat-status-chip
+    ><span class="visually-hidden">, baseline</span>
+  }
+</ng-template>
+
+<!-- The open series tab's panel: its chart over the common window, then its summary per run. -->
+<ng-template #seriesPanel>
+  <div class="series">
+    @if (chart(); as overlay) {
+      <app-stats-chart
+        headless
+        size="large"
+        axis="elapsed"
+        [label]="series()!.label"
+        [chart]="overlay.chart"
+        [times]="overlay.times"
+      />
+    } @else {
+      <p neatNote class="no-chart">No run has two readings of {{ series()?.label }} to draw.</p>
+    }
+
+    <table neatTable aria-label="Summary">
+      <thead>
+        <tr>
+          <th scope="col">Run</th>
+          <th scope="col" neatNumeric class="wide">Samples</th>
+          <th scope="col" neatNumeric class="spread">Min</th>
+          <th scope="col" neatNumeric>Mean</th>
+          <th scope="col" neatNumeric class="spread">Median</th>
+          <th scope="col" neatNumeric class="spread">P95</th>
+          <th scope="col" neatNumeric class="wide">Max</th>
+          <th scope="col" neatNumeric>vs. baseline</th>
+          <th scope="col" neatNumeric class="wide">{{ energyLabel }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of summary(); track row.id) {
+          <tr>
+            <th scope="row">
+              <span class="run">
+                <neat-series-swatch [index]="row.index" />
+                {{ row.name }}
+              </span>
+            </th>
+            <td neatNumeric class="wide">{{ row.samples }}</td>
+            <td neatNumeric class="spread">{{ row.minimum }}</td>
+            <td neatNumeric>
+              <!-- Where Samples gives way to the width, a run without readings says so here. -->
+              @if (row.empty) {
+                <span class="wide">{{ row.mean }}</span>
+                <span class="narrow">{{ row.samples }}</span>
+              } @else {
+                {{ row.mean }}
+              }
+            </td>
+            <td neatNumeric class="spread">{{ row.median }}</td>
+            <td neatNumeric class="spread">{{ row.p95 }}</td>
+            <td neatNumeric class="wide">{{ row.maximum }}</td>
+            <td neatNumeric>{{ row.change }}</td>
+            <td neatNumeric class="wide">{{ row.energy }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</ng-template>
+
+<!-- The open group tab's panel: Changes only, what the filters leave out, then the table. -->
+<ng-template #metricTable>
+  <div class="metrics">
+    <button neatSwitch [(checked)]="changesOnly">Changes only</button>
+    <!-- Always rendered, so screen readers hear it when it starts to say something. -->
+    <p neatNote role="status" class="table-status" [class.visually-hidden]="!table().status">
+      {{ table().status }}
+    </p>
+    <table neatTable aria-label="Per-metric comparison">
+      <thead>
+        <tr>
+          <th scope="col">Metric</th>
+          @for (column of table().columns; track column.id) {
+            <th scope="col" neatNumeric>
+              <span class="run">
+                <ng-container
+                  [ngTemplateOutlet]="runName"
+                  [ngTemplateOutletContext]="{ $implicit: column }"
+                />
+              </span>
+              @if (column.note) {
+                <span class="note">{{ column.note }}</span>
+              }
+            </th>
+          }
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of table().rows; track row.key) {
+          <tr>
+            <th scope="row">{{ row.label }}</th>
+            @for (cell of row.cells; track $index) {
+              <td neatNumeric>
+                {{ cell.mean }}
+                @if (cell.change) {
+                  <span class="change">{{ cell.change }}</span>
+                }
+              </td>
+            }
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</ng-template>

@@ -1,0 +1,27 @@
+/* The callout is the notice's box; this lays out what goes in it. */
+:host {
+  display: block;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+}
+
+.text {
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--neat-space-2);
+}
+
+.sub {
+  margin: 0 0 var(--neat-space-2);
+  color: var(--muted-foreground);
+  font-size: var(--neat-text-xs);
+}

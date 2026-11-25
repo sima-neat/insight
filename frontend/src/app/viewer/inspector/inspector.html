@@ -1,0 +1,110 @@
+<header class="header">
+  <!-- Focusable by script only, as the place focus goes when what had it is gone. -->
+  <h2 #heading id="viewer-inspector-title" neatAsideTitle tabindex="-1">{{ title() }}</h2>
+  <button
+    neatButton
+    type="button"
+    variant="text"
+    size="small"
+    iconOnly
+    aria-label="Close side panel"
+    neatTooltip="Close side panel"
+    neatTooltipPosition="left"
+    (click)="dismiss.emit()"
+  >
+    <neat-icon name="close" />
+  </button>
+</header>
+
+@if (preview(); as preview) {
+  <div class="preview">
+    <neat-video-tile
+      [source]="preview.connection.source"
+      [notice]="preview.connection.source.notice()"
+      [settings]="preview.settings"
+      [retentionMs]="preview.retentionMs"
+      [mirror]="preview.turn.mirror"
+      [flipVertical]="preview.turn.flipVertical"
+      [channel]="preview.channel"
+      [bars]="false"
+      (frameStats)="onPreviewStats($event)"
+    >
+      @if (roiOpen()) {
+        <neat-roi-editor
+          neatTileOverlay
+          [regions]="editable()"
+          [mode]="drawMode()"
+          [(highlighted)]="highlightedRegion"
+          (regionsChange)="addRegion($event)"
+        />
+      }
+    </neat-video-tile>
+  </div>
+}
+@if (status(); as status) {
+  <dl neatDetails>
+    <dt>Stream</dt>
+    <dd>{{ status.stream }}</dd>
+    <dt>Sync buffer</dt>
+    <dd>{{ status.buffer }}</dd>
+    <dt>Late metadata</dt>
+    <dd>{{ status.lateness }}</dd>
+  </dl>
+}
+
+<neat-tabs label="Settings" [value]="tab()" (valueChange)="selectTab($event)">
+  <neat-tab label="Metadata" value="Metadata">
+    <ng-template>
+      <div neatAsidePanel class="panel">
+        <!-- One column: a heading sits nearer its settings than the settings before it. -->
+        @for (section of metadataSections; track section.heading) {
+          <h3 neatAsideHeading>{{ section.heading }}</h3>
+          @for (setting of section.settings; track setting.id) {
+            <app-setting-row
+              [scope]="scope()"
+              [setting]="setting"
+              [name]="section.heading + ': ' + setting.label"
+            />
+          }
+          @if (section.note) {
+            <p neatNote>{{ section.note }}</p>
+          }
+        }
+      </div>
+    </ng-template>
+  </neat-tab>
+  <neat-tab label="ROI" value="ROI">
+    <ng-template>
+      <div neatAsidePanel class="panel">
+        <app-roi-tab
+          [scope]="scope()"
+          [channels]="channels()"
+          [(drawMode)]="drawMode"
+          [(highlighted)]="highlightedRegion"
+          [backdrop]="backdrop()"
+          (backdropChange)="pick.set($event)"
+        />
+      </div>
+    </ng-template>
+  </neat-tab>
+  <neat-tab label="General" value="General">
+    <ng-template>
+      <div neatAsidePanel class="panel">
+        @if (lateDetails(); as details) {
+          <app-late-notice [details]="details" (raise)="raise($event)" />
+        }
+        @for (setting of generalSettings; track setting.id) {
+          <app-setting-row [scope]="scope()" [setting]="setting" />
+        }
+      </div>
+    </ng-template>
+  </neat-tab>
+</neat-tabs>
+
+@if (canResetAll()) {
+  <div class="footer">
+    <button neatButton type="button" variant="outlined" (click)="resetAll()">
+      Reset all channels to global…
+    </button>
+  </div>
+}

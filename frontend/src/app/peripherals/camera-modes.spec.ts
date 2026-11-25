@@ -1,0 +1,356 @@
+import { DEVKIT } from '../board/board.testing';
+import type { CameraItem } from './api';
+import {
+  blockedFormatSummary,
+  cameraSummaryLine,
+  formatOptions,
+  formatRangeLabel,
+  modeLabel,
+  previewBlock,
+  rateLabel,
+  resolveSelection,
+  sameSelection,
+  selectionTier,
+  sizeOptions,
+} from './camera-modes';
+import {
+  format,
+  imx477,
+  imx568,
+  inUse,
+  NOT_IN_OVERLAYS,
+  previewSession,
+  sel,
+  size,
+  support,
+  usb,
+  USB_REASON,
+} from './cameras.testing';
+
+// `neat-select` has no option groups, so a menu that mixes tiers names the tier on each label that
+// is not Available.
+
+const NV12_ONLY = "Neat's CameraInput outputs NV12 only.";
+
+describe('camera modes', () => {
+  it('unsupported formats stay selectable; only a format without a size and rate is disabled', () => {
+    const [nv12, rgb] = formatOptions(imx568);
+    expect(nv12.disabled).toBe(false);
+    expect(nv12.label).toBe('NV12 (YUV 4:2:0)');
+    expect(nv12.tier).toBe('unsupported');
+    expect(rgb.disabled).toBe(true);
+    expect(rgb.label).toBe('RGB888');
+    expect(rgb.tier).toBe('unsupported');
+    expect(rgb.reason).toBe('no sizes with a frame rate were reported for it.');
+    expect(formatOptions(usb).map((o) => [o.value, o.disabled, o.tier])).toEqual([
+      ['MJPG', false, 'unsupported'],
+      ['YUYV', false, 'unsupported'],
+    ]);
+    expect(formatOptions(imx477)[0].tier).toBe('available');
+  });
+
+  it('size options carry their best state', () => {
+    expect(sizeOptions(imx477, 'NV12').map((o) => [o.label, o.tier])).toEqual([
+      ['1920×1080', 'available'],
+      ['1280×720 · Unsupported', 'unsupported'],
+    ]);
+    expect(sizeOptions(imx477, 'RGB888')).toEqual([]);
+  });
+
+  it('a resolution names its size only, for USB and MIPI cameras alike', () => {
+    expect(sizeOptions(usb, 'MJPG').map((o) => o.label)).toEqual(['1280×720', '640×480']);
+    // The rate is still chosen (highest Available, else highest) and carried in the selection, just not shown.
+    const webcam: CameraItem = {
+      ...usb,
+      formats: [
+        format('YUYV', 'YUYV 4:2:2', support('available'), [
+          size(640, 480, [60, 'unsupported'], [30, 'available']),
+          size(320, 240, [29.97, 'unsupported'], [15, 'unsupported']),
+          size(160, 120, [7.5, 'unsupported']),
+        ]),
+      ],
+    };
+    expect(sizeOptions(webcam, 'YUYV').map((o) => [o.value, o.label])).toEqual([
+      ['640x480', '640×480'],
+      ['320x240', '320×240 · Unsupported'],
+      ['160x120', '160×120 · Unsupported'],
+    ]);
+    expect(resolveSelection(webcam, { format: 'YUYV', width: 640, height: 480 })?.fps).toBe(30);
+    for (const camera of [imx477, imx568]) {
+      for (const option of sizeOptions(camera, 'NV12')) expect(option.label).not.toMatch(/fps/);
+    }
+  });
+
+  it('a rate reads as a whole number within 1% of one, else as reported', () => {
+    for (const [rate, label] of [
+      [30, '30 fps'],
+      [66.18, '66 fps'],
+      [29.97, '30 fps'],
+      [59.94, '60 fps'],
+      [7.5, '7.5 fps'],
+      [12.345, '12.35 fps'],
+    ] as const) {
+      expect(rateLabel(rate)).toBe(label);
+    }
+    for (const unknown of [null, undefined, 0, -5, NaN, Infinity])
+      expect(rateLabel(unknown)).toBe('');
+  });
+
+  it('the default selection is preselected; without one an Available mode is preferred', () => {
+    expect(resolveSelection(imx477, null)).toEqual(sel('NV12', 1920, 1080, 30));
+    // A USB camera has no Available mode and no default; its first reported mode is shown.
+    expect(resolveSelection(usb, null)).toEqual(sel('MJPG', 1280, 720, 30));
+    const mixed: CameraItem = {
+      ...imx477,
+      default_selection: null,
+      formats: [
+        format('AR24', 'AR24', support('unsupported', NV12_ONLY), [
+          size(4056, 3040, [30, 'unsupported']),
+        ]),
+        format('NV12', 'NV12', support('available'), [
+          size(4056, 3040, [30, 'unsupported']),
+          size(1920, 1080, [15, 'unsupported'], [30, 'available']),
+        ]),
+      ],
+    };
+    expect(resolveSelection(mixed, null)).toEqual(sel('NV12', 1920, 1080, 30));
+  });
+
+  it('a missing or unusable default falls back to the best mode', () => {
+    expect(resolveSelection(imx568, null)).toEqual(sel('NV12', 2432, 2048, 30));
+    const rgbDefault = { ...imx568, default_selection: sel('RGB888', 1920, 1080, 30) };
+    expect(resolveSelection(rgbDefault, null)?.format).toBe('NV12');
+    expect(resolveSelection({ ...imx568, formats: [imx568.formats[1]] }, null)).toBeNull();
+  });
+
+  it('changing one level keeps the rest of the selection when it is still offered', () => {
+    expect(resolveSelection(usb, { format: 'YUYV' })).toEqual(sel('YUYV', 640, 480, 30));
+    expect(resolveSelection(usb, sel('YUYV', 640, 480, 30))).toEqual(sel('YUYV', 640, 480, 30));
+    expect(resolveSelection(usb, sel('YUYV', 1280, 720, 30))).toEqual(sel('YUYV', 640, 480, 30));
+    expect(resolveSelection(usb, { format: 'MJPG' })).toEqual(sel('MJPG', 1280, 720, 30));
+    expect(resolveSelection(imx477, sel('NV12', 1280, 720, 30))).toEqual(
+      sel('NV12', 1280, 720, 60),
+    );
+    expect(resolveSelection(imx568, sel('NV12', 1920, 1080, 59.94))).toEqual(
+      sel('NV12', 1920, 1080, 59.94),
+    );
+  });
+
+  it('a selection that disappears after refresh falls back instead of clearing', () => {
+    const refreshed = {
+      ...imx477,
+      formats: [{ ...imx477.formats[0], sizes: [imx477.formats[0].sizes[0]] }],
+    };
+    expect(resolveSelection(refreshed, sel('NV12', 1280, 720, 60))).toEqual(
+      sel('NV12', 1920, 1080, 60),
+    );
+    expect(resolveSelection(refreshed, sel('NV12', 1280, 720, 15))).toEqual(
+      sel('NV12', 1920, 1080, 30),
+    );
+    expect(resolveSelection(usb, sel('H264', 1920, 1080, 30))?.format).toBe('MJPG');
+  });
+
+  it('mode labels and selection equality drive the fallback notice', () => {
+    const mode = sel('NV12', 1920, 1080, 30);
+    // No camera's rate is named before it runs, USB included.
+    expect(modeLabel(mode)).toBe('NV12 1920×1080');
+    expect(modeLabel({ ...mode, fps: 59.94 })).toBe('NV12 1920×1080');
+    expect(modeLabel(null)).toBe('');
+    expect(sameSelection(mode, { ...mode })).toBe(true);
+    expect(sameSelection(mode, { ...mode, width: 1280, height: 720 })).toBe(false);
+    expect(sameSelection(mode, { ...mode, format: 'YUYV' })).toBe(false);
+    expect(sameSelection(mode, { ...mode, fps: 15 })).toBe(false);
+    expect(sameSelection(null, null)).toBe(true);
+    expect(sameSelection(null, mode)).toBe(false);
+  });
+
+  it('blocked formats collapse into one line', () => {
+    expect(blockedFormatSummary(formatOptions(imx477))).toBe('');
+    expect(blockedFormatSummary(formatOptions(imx568))).toBe('1 format cannot be used (RGB888)');
+    expect(
+      blockedFormatSummary([
+        { value: 'A', disabled: true },
+        { value: 'B', disabled: true },
+        { value: 'C', disabled: false },
+      ]),
+    ).toBe('2 formats cannot be used (A, B)');
+  });
+
+  it('stepwise and continuous format ranges keep their bounds and steps visible', () => {
+    expect(
+      formatRangeLabel({
+        min_width: 16,
+        min_height: 16,
+        max_width: 1920,
+        max_height: 1080,
+        step_width: 16,
+        step_height: 8,
+      }),
+    ).toBe('16–1920×16–1080 in 16×8 steps');
+    const camera = {
+      ...usb,
+      formats: [
+        format('YUYV', 'YUYV', support('unsupported', USB_REASON), [], {
+          min_width: 16,
+          min_height: 16,
+          max_width: 1920,
+          max_height: 1080,
+          step_width: 16,
+          step_height: 16,
+        }),
+      ],
+    };
+    expect(formatOptions(camera)[0].reason).toMatch(
+      /Reported range: 16–1920×16–1080 in 16×16 steps\./,
+    );
+  });
+
+  it("the selected mode keeps Sentinel's verdict on it", () => {
+    expect(selectionTier(imx477, sel('NV12', 1920, 1080, 30))).toBe('available');
+    expect(selectionTier(imx477, sel('NV12', 1280, 720, 60))).toBe('unsupported');
+    expect(selectionTier(usb, sel('MJPG', 1280, 720, 30))).toBe('unsupported');
+    expect(selectionTier(imx477, sel('NV12', 640, 480, 30))).toBe('');
+    expect(selectionTier(imx477, null)).toBe('');
+  });
+
+  it('the detail pane shows one explanation line, chosen by priority', () => {
+    expect(cameraSummaryLine(imx568)).toBe(NOT_IN_OVERLAYS);
+    // An Available camera says nothing: the mode menus carry the Available/Unsupported labels.
+    expect(cameraSummaryLine(imx477)).toBe('');
+    // Whether another program holds the camera is not a scan fact: a preview that cannot open the
+    // camera says so.
+    expect(cameraSummaryLine(inUse)).toBe('');
+    // A USB camera says why as a MIPI camera does, and nothing while it is Available.
+    expect(cameraSummaryLine(usb)).toBe(usb.support.reason);
+    expect(cameraSummaryLine({ ...usb, support: support('available') })).toBe('');
+    expect(cameraSummaryLine({ ...imx477, support: support('unsupported') })).toBe('Unsupported.');
+  });
+
+  it('Start preview is blocked with the reason for every state that forbids it', () => {
+    const block = (
+      camera: CameraItem | null,
+      selection: ReturnType<typeof sel> | null,
+      extra: Partial<Parameters<typeof previewBlock>[0]> = {},
+    ) => previewBlock({ camera, selection, target: DEVKIT, ...extra });
+    const open = { blocked: false, reason: '' };
+    const mipiMode = sel('NV12', 1920, 1080, 30);
+    expect(block(imx477, mipiMode)).toEqual(open);
+
+    expect(block(imx477, mipiMode, { target: null }).reason).toMatch(/No board is selected/);
+    expect(block(null, null).reason).toMatch(/Select a camera/);
+    expect(block(imx477, mipiMode, { stale: true }).reason).toMatch(/board changed/);
+    // A camera kept from a failed provider's last scan may be another device now.
+    expect(block({ ...imx477, modes_source: 'previous-scan' }, mipiMode).reason).toMatch(
+      /last successful scan/,
+    );
+
+    // A USB camera previews any listed mode in a format the preview reads, Available or not.
+    expect(block(usb, sel('MJPG', 1280, 720, 30))).toEqual(open);
+    expect(block(usb, null).reason).toMatch(/no mode Insight can start/);
+
+    // A USB format the preview does not read: the server says the preview does not take it.
+    const h264 = block(
+      {
+        ...usb,
+        formats: [
+          format('H264', 'H264', support('unsupported', USB_REASON), [
+            size(1280, 720, [30, 'unsupported', false]),
+          ]),
+        ],
+      },
+      sel('H264', 1280, 720, 30),
+    );
+    expect(h264.blocked).toBe(true);
+    expect(h264.reason).toMatch(/not H264\. Choose another format\.$/);
+
+    expect(block(imx477, null).reason).toMatch(/no mode Insight can start/);
+
+    // A MIPI mode the preview does not take, with Sentinel's reason when it gave one.
+    const refused = {
+      ...imx477,
+      formats: [
+        format('NV12', 'NV12', support('unsupported', NOT_IN_OVERLAYS), [
+          {
+            width: 1920,
+            height: 1080,
+            fps: [
+              {
+                value: 30,
+                tier: 'unsupported' as const,
+                reason: NOT_IN_OVERLAYS,
+                previewable: false,
+              },
+            ],
+          },
+        ]),
+      ],
+    };
+    expect(block(refused, mipiMode).reason).toBe(
+      `NV12 1920×1080 cannot be previewed: ${NOT_IN_OVERLAYS} Choose an Available mode.`,
+    );
+    expect(block(imx477, sel('NV12', 1280, 720, 60)).reason).toBe(
+      'NV12 1280×720 cannot be previewed. Choose an Available mode.',
+    );
+
+    // A camera kept from an earlier scan once in use blocks nothing; a busy camera is reported by
+    // the start itself.
+    expect(block({ ...inUse, modes_source: 'live' }, mipiMode)).toEqual(open);
+
+    expect(
+      block(imx477, mipiMode, { session: previewSession({ camera: imx568.id }) }).reason,
+    ).toMatch(/already running on camera:econ-imx568-fpga 5-0042/);
+    expect(block(imx477, mipiMode, { session: previewSession() }).blocked).toBe(false);
+  });
+
+  it('a MIPI mode Sentinel left without a verdict is Unsupported in the menus, yet previewable', () => {
+    const camera: CameraItem = {
+      ...imx477,
+      default_selection: null,
+      support: support('unsupported', 'no verdict'),
+      formats: [
+        format('NV12', 'NV12', support('unsupported', 'no verdict'), [
+          size(1920, 1080, [30, 'unsupported', true]),
+        ]),
+      ],
+    };
+    expect(sizeOptions(camera, 'NV12').map((o) => o.label)).toEqual(['1920×1080']);
+    expect(
+      previewBlock({ camera, selection: sel('NV12', 1920, 1080, 30), target: DEVKIT }),
+    ).toEqual({ blocked: false, reason: '' });
+  });
+
+  it('mode options name their tier when more than one tier is offered', () => {
+    // One tier: the labels are the format and the size alone, in the board's order.
+    expect(formatOptions(usb).map((o) => o.label)).toEqual(['Motion-JPEG', 'YUYV 4:2:2']);
+    expect(sizeOptions(imx568, 'NV12').map((o) => o.label)).toEqual(['2432×2048', '1920×1080']);
+
+    // Both: Available first, then Unsupported, the board's order within each, and every label
+    // but an Available one names its tier.
+    const camera: CameraItem = {
+      ...imx477,
+      formats: [
+        format('AR24', 'AR24', support('unsupported', NV12_ONLY), [
+          size(4056, 3040, [30, 'unsupported']),
+        ]),
+        format('RGB888', 'RGB888', support('unsupported'), []),
+        format('NV12', 'NV12 (YUV 4:2:0)', support('available'), [
+          size(4056, 3040, [30, 'unsupported']),
+          size(1920, 1080, [30, 'available']),
+          size(2028, 1520, [30, 'available']),
+        ]),
+      ],
+    };
+    expect(formatOptions(camera).map((o) => [o.value, o.label, o.disabled])).toEqual([
+      ['NV12', 'NV12 (YUV 4:2:0)', false],
+      ['AR24', 'AR24 · Unsupported', false],
+      ['RGB888', 'RGB888 · Unsupported', true],
+    ]);
+    expect(sizeOptions(camera, 'NV12').map((o) => [o.value, o.label])).toEqual([
+      ['1920x1080', '1920×1080'],
+      ['2028x1520', '2028×1520'],
+      ['4056x3040', '4056×3040 · Unsupported'],
+    ]);
+    // A size option carries its size, so the menu's value leads back to the mode.
+    expect(sizeOptions(camera, 'NV12')[1]).toMatchObject({ width: 2028, height: 1520 });
+  });
+});

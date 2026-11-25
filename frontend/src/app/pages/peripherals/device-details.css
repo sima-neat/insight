@@ -1,0 +1,13 @@
+/*
+ * No box of its own: with nothing to show, the panel's gap is not spent on an empty element, and
+ * otherwise the section is the panel's part.
+ */
+:host {
+  display: contents;
+}
+
+.notes {
+  margin: var(--neat-space-2) 0 0;
+  padding-inline-start: var(--neat-space-4);
+  font-size: var(--neat-text-sm);
+}

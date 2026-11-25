@@ -1,0 +1,58 @@
+<app-preview-frame
+  role="group"
+  [attr.aria-label]="'Preview of src' + slot().n"
+  [attr.aria-describedby]="badge() ? badgeId : null"
+  [file]="file()"
+>
+  @for (image of liveImages(); track image.src) {
+    <img
+      #live
+      appEndsStream
+      [src]="image.src"
+      [alt]="'Live preview of src' + slot().n"
+      [class.waiting]="connecting()"
+      (error)="failed(image.src)"
+    />
+  } @empty {
+    @if (failure(); as failure) {
+      @if (failure !== 'checking') {
+        <p class="message">
+          {{
+            failure === 'busy'
+              ? 'Preview unavailable: too many previews open'
+              : 'Preview unavailable.'
+          }}
+          <button neatButton type="button" variant="text" size="small" (click)="retry()">
+            Retry
+          </button>
+        </p>
+      }
+    } @else if (camera()) {
+      <video #camera autoplay muted playsinline [muted]="true"></video>
+    } @else if (!file() && idleText()) {
+      <p class="message">{{ idleText() }}</p>
+    }
+  }
+  <!-- Announced when it appears; the bar itself is silent, as a progressbar is. -->
+  <div class="connecting" role="status">
+    @if (connecting()) {
+      <neat-progress [value]="null" [label]="'Connecting to src' + slot().n + '…'" />
+      <span>Connecting to src{{ slot().n }}…</span>
+    }
+  </div>
+  <!--
+    Said once: the frame's description names this element, and a description is read from a hidden
+    element too, so hiding it keeps the frame's content from saying it a second time.
+  -->
+  @if (badge(); as badge) {
+    <neat-live-badge
+      class="badge"
+      aria-hidden="true"
+      [id]="badgeId"
+      [live]="badge.live"
+      [onPicture]="onPicture()"
+    >
+      {{ badge.label }}
+    </neat-live-badge>
+  }
+</app-preview-frame>

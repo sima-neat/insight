@@ -1,145 +1,60 @@
-# neat-insight
+# Neat Insight
+
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 **Documentation:** [English](docs/index.md) | [한국어](docs/i18n/ko/index.md) | [日本語](docs/i18n/ja/index.md) | [繁體中文](docs/i18n/zh-Hant/index.md) | [Українська](docs/i18n/uk/index.md)
 
-[![Vulcan CI](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml/badge.svg)](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+Neat Insight is SiMa.ai's browser tool for developing Neat vision apps: it publishes video streams
+for your app to read, and views the video your app sends back with its AI detections drawn over
+it.
 
-`neat-insight` is a web app for inspecting NEAT apps and helping to setup test for vision ML apps.
-
-It provides:
-- Multi-channel WebRTC video viewer with MetadataReceiver support
-- Frame-correlated auxiliary visualization panels, including BlazePose 3D
-- Codec-aware media source control with RTSP and HTTP MJPEG streaming
-- System and application metrics dashboard
-
-The standalone [mediaserver](mediaserver/README.md) container serves prerecorded
-RTSP/TCP and HTTP MJPEG sources from a mounted media volume.
-
-User documentation for the software docs site is maintained in
-[`docs/index.md`](docs/index.md).
+- **Media** and **Streaming**: play video files, your browser's webcam or an IP camera as RTSP
+  sources `src1` to `src48`.
+- **Viewer**: a grid of channels, each showing an app's video with its object detection,
+  classification, tracking, pose and segmentation results.
+- **Peripherals** and **Stats**: a board's cameras and microphones, and its telemetry from SiMa
+  Sentinel, live and as recorded runs.
 
 ## Install
 
-### Option 1: Install from PyPI (official release)
+Insight comes with the Neat SDK, which starts it with the container. To install it on a DevKit:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install neat-insight
+sima-cli neat install insight
+source ~/.simaai/neat-insight/venv/bin/activate
+neat-insight
 ```
 
-### Option 2: Install from Neat artifacts
+On a DevKit, Insight makes its HTTPS certificate with [mkcert](https://github.com/FiloSottile/mkcert),
+which must be installed there (Insight stops an mkcert that has not finished in 5 minutes and says
+so). [Install and upgrade](docs/install-upgrade.md) has the details and how to upgrade.
 
-```bash
-sima-cli neat install insight@main
-```
+## Open it
 
-This installs the platform-compatible `neat-insight` wheel into an isolated virtual environment.
+Open `https://<host>:9900` in a browser, where `<host>` is the machine Insight runs on
+(`localhost` in the SDK). In the SDK, `neat --json` names the address if the SDK published Insight
+on another port. [The user interface](docs/user-interface.md) describes each page.
 
-## Run
+## Make your app show up in Insight
 
-`neat-insight` uses `mkcert` to create a locally trusted HTTPS certificate at startup. If `mkcert` is missing, startup attempts to install it with a supported package manager: Homebrew on macOS, common Linux package managers, winget/Chocolatey/Scoop on Windows, or `go install` as a fallback.
+An app reads a source at `rtsp://<host>:8554/srcN` and shows up on Viewer channel `N` by sending
+its video (RTP) to UDP `9000+N` and its results (JSON) to UDP `9100+N`. The
+[contracts](docs/contracts.md) give the exact rules, with a minimal pyneat app; Neat's
+`VideoSender` and `MetadataSender` follow them.
 
-```bash
-source .venv/bin/activate
-neat-insight --port 9900
-```
+`neat-insight-metadata-test <channel>`, which comes with Insight, sends a channel a test pattern
+with metadata matched to its frames, to check the Viewer without an app
+([Common workflows](docs/workflows.md#check-the-viewer-without-an-app)).
 
-Then open:
-- `https://${NFS_SERVER_HOST_IP}:9900` when `NFS_SERVER_HOST_IP` is set
-- `https://127.0.0.1:9900` otherwise
+## Documentation
 
-Notes:
-- When `/sdk-cert/neat-sdk.pem` exists, the app validates and uses that SDK-provided certificate before attempting mkcert generation. The private key may be embedded in that PEM or provided as `/sdk-cert/neat-sdk-key.pem`, `/sdk-cert/neat-sdk.key`, or `/sdk-cert/key.pem`.
-- The app runs `mkcert -install` and regenerates `cert.pem`/`key.pem` under the neat-insight data directory on startup.
-- Certificates include the configured host IP, `127.0.0.1`, and `localhost`.
-- If automatic mkcert installation is unavailable, install mkcert manually and restart `neat-insight`.
+- [Overview and quick start](docs/index.md)
+- [Common workflows](docs/workflows.md), including what to check when video or overlays are missing
+- [Ports and network](docs/ports-network.md)
+- [REST API](docs/api-reference.md): the server serves its OpenAPI document at `/api/openapi.yaml`
 
-## Basic usage
+## Contributing
 
-1. Open the Viewer tab to monitor active channels.
-2. Open Streaming to assign/start/stop input sources. To publish a webcam attached to your browser's computer as a live source, enable a camera under Media Sources → Local cameras and select it in a source slot.
-3. Open Stats to inspect live and recorded Sentinel telemetry from the selected board.
-
-## Viewer settings
-
-Open the global viewer menu or a channel tile menu to configure overlays. Global
-settings apply to all channels; channel settings override the global values for
-that channel.
-
-Available metadata settings:
-- Object Detection: confidence threshold and per-label box style.
-- Segmentation: confidence threshold, mask opacity, and per-label mask color and outline style.
-- Tracking: confidence threshold, track history visibility, trail length, and how
-  long lost-track trails remain visible.
-- Other metadata types are rendered with defaults until type-specific settings
-  are added.
-
-ROI settings are split into filtering and display:
-- Apply ROI Filtering controls whether ROI polygons filter box-like metadata.
-- Show ROI Overlay controls only whether ROI polygons are drawn over the video.
-
-General settings include Overlay Delay, which delays metadata selection so boxes
-and tracks can be aligned with the displayed WebRTC frame.
-
-Frame-correlated data that should not cover the video can use an auxiliary
-visualization panel. See [`docs/auxiliary-visualizations.md`](docs/auxiliary-visualizations.md)
-for the generic contract and built-in BlazePose 3D renderer. Viewer Configuration
-controls the panel per channel, and the 3D skeleton stays frame-aligned with the
-2D pose overlay.
-
-## Build from source
-
-Use this when you need to modify functionality.
-
-Prerequisites:
-- Python 3.10+
-- Node.js 20+ and npm
-- Go 1.24+
-- A C compiler for each Linux target: `gcc` for the host, plus
-  `gcc-aarch64-linux-gnu` or `gcc-x86-64-linux-gnu` to cross-build the other
-  Linux wheel. Linux wheels bundle a small `LD_PRELOAD` shim
-  (`tools/ffmpeg_nodelay.c`) that keeps the RTSP publishers' TCP sockets
-  free of Nagle delay; `NEAT_INSIGHT_FFMPEG_PRELOAD` overrides its path at
-  runtime.
-- mkcert, or a supported package manager for automatic runtime installation
-
-Build and install into your current virtualenv:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-./build.sh --install
-```
-
-Run:
-
-```bash
-neat-insight --port 9900
-```
-
-Useful build options:
-- `--target-platform <host|all|linux-aarch64|linux-amd64|macos-arm64|windows-amd64>`
-- `--skip-frontend`
-- `--skip-shim` (Linux wheels then run ffmpeg with Nagle enabled)
-
-## Testing metadata
-
-`neat-insight` now ships a metadata test sender for vf metadata ports (`9100-9179`).
-
-Examples:
-
-```bash
-neat-insight-metadata-test --count 1 --types object-detection
-neat-insight-metadata-test --count 4 --types object-detection,classification,pose-estimation,segmentation,tracking
-neat_insight/tools/multisrc-harness.sh start --count 16
-```
-
-Notes:
-- Default destination is `127.0.0.1`, starting at UDP port `9100`.
-- Supported metadata types are `object-detection`, `classification`, `pose-estimation`, `segmentation`, and `tracking`.
-- Overlay colors follow the identity rules in [docs/user-interface.md](docs/user-interface.md#metadata-colors): class for detection, segmentation and classification, `id` for tracking and pose estimation.
-- An `object-detection` object may carry `oriented_bbox` (`[cx, cy, width, height, angle]`, angle in radians, clockwise on screen) to draw a rotated box; `bbox` stays required as its upright extent. The test sender includes one rotated `ship`.
-- `neat_insight/tools/metadata-test.py` remains as a compatibility wrapper, but the packaged CLI is the preferred entry point.
+Insight is a Go server (`server/`) with an Angular web UI (`frontend/`), packaged as a Python wheel.
+[AGENTS.md](AGENTS.md) explains how the repository is put together, how to build, test and try a
+change in the SDK container, and the rules that changes follow.

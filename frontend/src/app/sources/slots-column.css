@@ -1,0 +1,4 @@
+/* The column is `app-list-column`'s; this element only names it for the slot pages. */
+:host {
+  display: contents;
+}

@@ -1,26 +1,18 @@
 __pycache__
-mediamtx
-vf
-go.mod
-go.sum
+# A MediaMTX binary unpacked at the top (neat_insight/bin/ has its own rule below).
+/mediamtx
 .venv
 build/
-dist/
+# The wheels; the server's embedded frontend build (server/internal/spa/dist) has its own rule.
+/dist/
 neat_insight.egg-info/
 neat_insight/bin/
-neat_insight/tools/mediadata_sender
 frontend/node_modules/
 frontend/dist/
-front_dist/
-neat_insight/frontend_dist/
 *.pem
-cfg.json
 .vscode/
 *_mpk.tar.gz
-mipi-sweep-*.log
-folder-navigation-insight.log
-mipi-util/vendor/
 
-# Superpowers brainstorming sessions
-.superpowers/
-docs/superpowers/
+# Angular build cache
+.angular/
+

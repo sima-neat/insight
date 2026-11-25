@@ -1,0 +1,20 @@
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-4);
+  /*
+   * The term column of every list in the dialog: the lists sit in sections that open and close on
+   * their own, so they cannot share one grid, and each would size its column to its own longest
+   * term. Wide enough for the longest key neat reports ("DevKit build version"). The kit's list
+   * reads this width for its term column.
+   */
+  --neat-details-term-width: 10rem;
+}
+
+/* The version and its status chip on one line; the muted line under it is the paragraph. */
+.component {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-2);
+}

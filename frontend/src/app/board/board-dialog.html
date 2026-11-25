@@ -1,0 +1,107 @@
+<neat-dialog-body>
+  <div class="board">
+    @if (board.state(); as state) {
+      <div class="status">
+        <p class="status-line">
+          @if (chip(); as chip) {
+            <neat-status-chip [tone]="chip.tone">{{ chip.label }}</neat-status-chip>
+          }
+          @if (summary()) {
+            <span>{{ summary() }}</span>
+          }
+        </p>
+        @if (checked()) {
+          <p neatNote class="checked">Checked {{ checked() }}</p>
+        }
+      </div>
+
+      @if (state.selected; as selected) {
+        <div class="actions">
+          <button
+            #checkButton
+            neatButton
+            type="button"
+            size="small"
+            [attr.aria-disabled]="busy() ? true : null"
+            (click)="check()"
+          >
+            {{ busy() === 'check' ? 'Checking…' : 'Check again' }}
+          </button>
+        </div>
+        @if (selected.ssh) {
+          <div class="shell">
+            <p neatNote>Open a shell on the board from a terminal:</p>
+            <neat-code-block [code]="selected.ssh" copy="ssh command" />
+          </div>
+        }
+      }
+    } @else if (!board.error()) {
+      <p neatNote role="status">Loading board…</p>
+    }
+
+    @if (board.selected()) {
+      <!-- Two branches, so that an action's own problem is a new notice that is said as it
+           appears, while one already recorded when the dialog opens is not. -->
+      @if (actionError(); as own) {
+        <app-board-problem-notice
+          [problem]="own"
+          [busy]="busy() !== null"
+          announce
+          (trust)="trust($event)"
+        />
+      } @else if (recordedProblem(); as recorded) {
+        <app-board-problem-notice
+          [problem]="recorded"
+          [busy]="busy() !== null"
+          (trust)="trust($event)"
+        />
+      }
+    }
+
+    @if (board.error(); as readFailure) {
+      <app-board-problem-notice [problem]="readFailure">
+        <button
+          neatButton
+          neatCalloutActions
+          type="button"
+          size="small"
+          variant="outlined"
+          (click)="retry()"
+        >
+          Retry
+        </button>
+      </app-board-problem-notice>
+    }
+
+    @if (facts().length) {
+      <neat-collapsible label="Details" [summary]="factTerms()">
+        <dl neatDetails>
+          @for (fact of facts(); track fact[0]) {
+            <dt>{{ fact[0] }}</dt>
+            <dd>{{ fact[1] }}</dd>
+          }
+        </dl>
+      </neat-collapsible>
+    }
+
+    @if (board.state() && !board.selected()) {
+      <neat-callout tone="info" heading="No board selected">
+        <p>Insight needs a board to discover peripherals. Any of these gives it one:</p>
+        <ol class="steps">
+          <li>Run Insight on the board itself; it then uses that board automatically.</li>
+          <li>
+            Pair the SDK with a DevKit: run
+            <code neatCode>sima-cli sdk setup --devkit &lt;ip&gt;</code>, then reload this page.
+          </li>
+          <li>
+            Enter a board below. Insight connects with your SSH key; it never asks for a password.
+          </li>
+        </ol>
+      </neat-callout>
+    }
+
+    @if (board.state()) {
+      <app-board-form [(busy)]="busy" (selected)="actionError.set(null)" />
+    }
+  </div>
+</neat-dialog-body>

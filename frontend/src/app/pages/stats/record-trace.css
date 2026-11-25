@@ -1,0 +1,44 @@
+/* The trigger and the recording line take part in the toolbar's row as if they stood there. */
+:host {
+  display: contents;
+}
+
+/*
+ * The recording line keeps to one line: a long trace name gives way (with an ellipsis) before the
+ * elapsed time does, whose digits keep their width as they tick.
+ */
+.recording {
+  font-size: var(--neat-text-sm);
+  white-space: nowrap;
+}
+
+/* The dot leads the words; the line's text stays plain so it reads with single spaces. */
+.dot {
+  margin-inline-end: var(--neat-space-2);
+  vertical-align: middle;
+}
+
+.name {
+  display: inline-block;
+  overflow: hidden;
+  max-inline-size: 16rem;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.elapsed {
+  font-variant-numeric: tabular-nums;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+/* Cancel, then Start at the end, as the panel's last row. */
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--neat-space-2);
+}

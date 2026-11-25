@@ -1,45 +1,54 @@
 {
-  "name": "neat-insight-frontend",
-  "version": "0.1.0",
+  "name": "insight",
+  "version": "0.0.0",
   "private": true,
-  "type": "module",
+  "packageManager": "npm@11.19.1",
+  "engines": {
+    "node": "^22.22.3 || ^24.15.0"
+  },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "build:viewer": "vite build --config viewer.vite.config.js",
-    "test:unit": "node --test src/*.test.js src/media/*.test.js",
-    "test:viewer": "node --test src/viewer/*.test.js",
-    "test:peripherals": "node --test src/peripherals/*.test.js",
-    "test:stats": "node --test src/stats/*.test.js",
-    "test:streaming": "node --test src/streaming/*.test.js",
-    "test": "node --test src/*.test.js src/*/*.test.js",
-    "test:genai": "node --test src/genai/*.test.js",
-    "test:e2e": "playwright test --config e2e/playwright.config.js",
-    "preview": "vite preview"
+    "ng": "ng",
+    "start": "ng serve",
+    "build": "ng build",
+    "check:bundle": "node scripts/check-bundle-split.mjs",
+    "test": "ng test",
+    "lint": "npm run check:api && ng lint && stylelint \"src/**/*.css\" --allow-empty-input && tsc -p e2e/tsconfig.json",
+    "api:types": "openapi-typescript ../server/api/openapi.yaml --immutable --root-types --root-types-no-schema-prefix -o src/app/api.generated.ts",
+    "check:api": "npm run api:types -- --check",
+    "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
-    "@codemirror/commands": "^6.10.3",
-    "@codemirror/lang-cpp": "^6.0.3",
-    "@codemirror/lang-go": "^6.0.1",
-    "@codemirror/lang-javascript": "^6.2.5",
-    "@codemirror/lang-json": "^6.0.2",
-    "@codemirror/lang-markdown": "^6.5.0",
-    "@codemirror/lang-python": "^6.2.1",
-    "@codemirror/language": "^6.12.3",
-    "@codemirror/search": "^6.7.0",
-    "@codemirror/state": "^6.6.0",
-    "@codemirror/view": "^6.41.1",
-    "@xyflow/react": "^12.10.2",
-    "elkjs": "^0.11.1",
-    "js-yaml": "^4.1.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "@angular/cdk": "~22.1.0",
+    "@angular/common": "~22.2.0",
+    "@angular/compiler": "~22.2.0",
+    "@angular/core": "~22.2.0",
+    "@angular/forms": "~22.2.0",
+    "@angular/platform-browser": "~22.2.0",
+    "@angular/router": "~22.2.0",
+    "@sima/neat-ui": "file:vendor/sima-neat-ui-0.41.0.tgz",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.0",
-    "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.10"
+    "@angular/build": "~22.2.0",
+    "@angular/cli": "~22.2.0",
+    "@angular/compiler-cli": "~22.2.0",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "~1.64.1",
+    "@types/node": "^24.19.2",
+    "angular-eslint": "22.6.0",
+    "eslint": "^10.12.0",
+    "jsdom": "^30.0.0",
+    "openapi-typescript": "^7.13.0",
+    "prettier": "^3.8.1",
+    "stylelint": "^17.16.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "8.71.0",
+    "vitest": "^5.0.0"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   }
 }

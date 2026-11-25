@@ -1,0 +1,41 @@
+/* The preview's status chip, then the sentence, which wraps beside it; the chip on its first line. */
+.status {
+  display: flex;
+  align-items: baseline;
+  gap: var(--neat-space-2);
+  font-size: var(--neat-text-sm);
+}
+
+.status > p {
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.status > neat-status-chip {
+  flex: none;
+}
+
+.modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+}
+
+/* The two pickers side by side, as wide as each other; each fills its column. */
+.pickers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--neat-space-3);
+}
+
+/* The button row and, under it, why Start cannot start. */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-2);
+}
+
+.blocked {
+  margin: 0;
+  padding-inline-start: var(--neat-space-4);
+}

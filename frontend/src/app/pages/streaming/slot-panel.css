@@ -1,0 +1,63 @@
+/* The main action fills its row of the panel, which the flex-wrapped actions row gives it alone. */
+.main-action {
+  inline-size: 100%;
+}
+
+.text {
+  margin: 0;
+  font-size: var(--neat-text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* A short list: a row per camera, a few rows high before it scrolls. */
+.cameras {
+  block-size: 7.5rem;
+}
+
+.pull {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+.credentials {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--neat-space-3);
+}
+
+.fps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--neat-space-3);
+}
+
+/*
+ * The URL and its Copy side by side: a long URL wraps within its own column, and Copy keeps its
+ * place beside it rather than drop to a line of its own.
+ */
+.url {
+  display: flex;
+  align-items: baseline;
+  gap: var(--neat-space-2);
+}
+
+.url code {
+  min-width: 0;
+}
+
+.url neat-copy-button {
+  flex: none;
+}
+
+.frame-rate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+}
+
+/* The codec warning reads on a line of its own under the video it is about. */
+.warning {
+  display: block;
+}

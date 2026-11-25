@@ -1,0 +1,18 @@
+/* The inspector's panel spaces the tab from the tabs above; the tab stacks its parts. */
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--neat-space-3);
+  font-size: var(--neat-text-sm);
+}
+
+.draw {
+  display: flex;
+  align-items: center;
+  gap: var(--neat-space-2);
+}
+
+/* The line of the region the pointer is on, on the list or on the preview. */
+.highlighted {
+  background-color: var(--accent);
+}

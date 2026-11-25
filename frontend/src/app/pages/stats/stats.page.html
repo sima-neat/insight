@@ -1,0 +1,293 @@
+<!--
+  Left to right: the view's own state and actions, Record (on every view while Sentinel answers),
+  then Live's ⋯ menu and the side panel's toggle. The views themselves are the page's items in the rail.
+-->
+<ng-container *neatPageToolbar>
+  @if (body() === 'ready' && view() === 'live') {
+    <neat-status-chip [tone]="updateChip().tone">{{ updateChip().label }}</neat-status-chip>
+    @switch (updateAction()) {
+      @case ('resume') {
+        <button neatButton type="button" variant="text" size="small" (click)="telemetry.resume()">
+          <neat-icon name="play" />
+          Resume
+        </button>
+      }
+      @case ('retry') {
+        <button neatButton type="button" variant="text" size="small" (click)="telemetry.retry()">
+          <neat-icon name="refresh" />
+          Retry
+        </button>
+      }
+      @case ('pause') {
+        <button neatButton type="button" variant="text" size="small" (click)="telemetry.pause()">
+          <neat-icon name="pause" />
+          Pause
+        </button>
+      }
+    }
+  }
+
+  @if (body() === 'ready') {
+    <app-record-trace />
+  }
+
+  @if (view() === 'live') {
+    <neat-popover label="More actions" align="end" [(open)]="moreOpen">
+      <button
+        neatButton
+        neatPopoverTrigger
+        type="button"
+        variant="text"
+        size="small"
+        iconOnly
+        aria-label="More actions"
+        neatTooltip="More actions"
+        neatTooltipPosition="bottom"
+      >
+        <neat-icon name="more" />
+      </button>
+      <ng-template neatPopoverContent>
+        <!-- The Sentinel facts head the menu, each once it is known. -->
+        @if (version(); as version) {
+          <p neatNote>Sentinel {{ version }}</p>
+        }
+        @if (sessionStarted(); as started) {
+          <p neatNote>{{ started }}</p>
+        }
+        <!-- The item's tooltip opens to the left, where it covers no other item. -->
+        <button
+          type="button"
+          neatPopoverItem
+          [neatTooltip]="exportTooltip()"
+          neatTooltipPosition="left"
+          [disabled]="!canExport()"
+          (click)="exportCsv()"
+        >
+          Export CSV
+        </button>
+      </ng-template>
+    </neat-popover>
+  }
+</ng-container>
+
+<!-- The panel is about what the view shows, so its toggle shows only with it. -->
+@if (body() === 'ready' && view() !== 'compare') {
+  <neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('stats', $event)" />
+}
+
+<neat-page
+  [scroll]="listShown() ? 'none' : 'body'"
+  [aside]="asideShown() ? 'open' : 'closed'"
+  [asideWidth]="asides.width('stats')"
+  (asideWidthChange)="asides.setWidth('stats', $event)"
+>
+  <app-announcement>{{ announcement() }}</app-announcement>
+
+  @switch (body()) {
+    @case ('read-failed') {
+      <app-board-problem-notice [problem]="board.error()!">
+        <app-board-settings-action neatCalloutActions />
+      </app-board-problem-notice>
+    }
+    @case ('no-target') {
+      <div class="empty">
+        <neat-callout tone="info" heading="Select a board to see its telemetry" [headingLevel]="2">
+          <p>Stats shows the live telemetry SiMa Sentinel reads on the selected board.</p>
+          <button
+            neatButton
+            neatCalloutActions
+            type="button"
+            size="small"
+            variant="outlined"
+            (click)="openBoard()"
+          >
+            Choose a board
+          </button>
+        </neat-callout>
+      </div>
+    }
+    @case ('checking') {
+      <p neatNote role="status">Checking Sentinel on the board…</p>
+    }
+    @case ('ready') {
+      @if (view() === 'live') {
+        <div class="telemetry">
+          @if (boardFailure(); as failure) {
+            <app-board-problem-notice [problem]="failure.problem">
+              @if (telemetry.failure()?.retryable) {
+                <button
+                  neatButton
+                  neatCalloutActions
+                  type="button"
+                  size="small"
+                  variant="outlined"
+                  (click)="telemetry.retry()"
+                >
+                  Retry
+                </button>
+              }
+              <app-board-settings-action neatCalloutActions />
+            </app-board-problem-notice>
+          } @else if (telemetryProblem(); as failure) {
+            <app-sentinel-failure
+              [failure]="failure"
+              [headingLevel]="2"
+              (retry)="telemetry.retry()"
+            />
+          }
+
+          @if (collectorErrors().length) {
+            <neat-callout
+              tone="warning"
+              heading="Sentinel reported collector errors"
+              [headingLevel]="2"
+            >
+              <ul class="errors">
+                @for (error of collectorErrors(); track $index) {
+                  <li>{{ error }}</li>
+                }
+              </ul>
+            </neat-callout>
+          }
+
+          @if (telemetry.window(); as window) {
+            <div class="cards">
+              @for (view of cards(); track view.card.id) {
+                <neat-chart-card
+                  selectable
+                  [heading]="view.card.heading"
+                  [value]="view.value"
+                  [unit]="view.unit"
+                  [caption]="view.caption"
+                  [selected]="selectedCard() === view.card.id"
+                  (activate)="openCard(view.card.id)"
+                >
+                  @if (view.chip; as chip) {
+                    <neat-status-chip neatChartCardChip [tone]="chip.tone">
+                      {{ chip.label }}
+                    </neat-status-chip>
+                  }
+                  <!-- The card's plot is small: its lines and time axis, without the values. -->
+                  @if (view.stack; as stack) {
+                    <neat-stacked-chart
+                      size="medium"
+                      headless
+                      [valueLabels]="false"
+                      [label]="view.card.heading"
+                      [headline]="stack.headline"
+                      [series]="stack.series"
+                      [times]="window.times"
+                      [domain]="stack.domain"
+                      [format]="megabytes"
+                    />
+                  } @else {
+                    <app-stats-chart
+                      headless
+                      [valueLabels]="false"
+                      [label]="view.card.heading"
+                      [chart]="view.chart"
+                      [times]="window.times"
+                    />
+                  }
+                </neat-chart-card>
+              }
+            </div>
+
+            <neat-collapsible
+              label="All metrics"
+              [summary]="
+                window.metrics.length + (window.metrics.length === 1 ? ' metric' : ' metrics')
+              "
+              [(open)]="allMetricsOpen"
+            >
+              <!-- Every metric's sparkline redrawn on each poll: only while someone looks. -->
+              @if (allMetricsOpen()) {
+                <app-metrics-table
+                  [metrics]="window.metrics"
+                  [window]="window"
+                  label="All metrics"
+                />
+              }
+            </neat-collapsible>
+          } @else {
+            <p neatNote>Waiting for the first reading from Sentinel…</p>
+          }
+        </div>
+      } @else if (view() === 'runs') {
+        <app-stats-runs />
+      } @else {
+        <app-stats-compare />
+      }
+    }
+    @case ('not-ready') {
+      @if (notReadyBoardFailure(); as failure) {
+        <app-board-problem-notice [problem]="failure.problem">
+          <ng-container ngProjectAs="[neatCalloutActions]" [ngTemplateOutlet]="checkAgain" />
+          <app-board-settings-action neatCalloutActions />
+        </app-board-problem-notice>
+      } @else {
+        @let shown = notReady();
+        <div class="empty" [attr.aria-busy]="telemetry.rechecking() || null">
+          <neat-callout [tone]="shown.tone" [heading]="shown.heading" [headingLevel]="2">
+            @if (shown.message) {
+              <p>{{ shown.message }}</p>
+            }
+            @if (shown.hint) {
+              <p neatNote>{{ shown.hint }}</p>
+            }
+            <!-- Insight runs nothing on the board for this: the command is the user's to run. -->
+            @if (shown.command) {
+              <neat-code-block [code]="shown.command" copy="command for the board" />
+            }
+            <ng-container ngProjectAs="[neatCalloutActions]" [ngTemplateOutlet]="checkAgain" />
+          </neat-callout>
+        </div>
+      }
+    }
+  }
+
+  @if (asideShown() && view() === 'live') {
+    <section neatPageAside neatAsidePanel aria-label="Stats area">
+      @if (telemetry.window(); as window) {
+        <app-stats-area-panel [area]="area()" [window]="window" />
+      } @else {
+        <p neatNote>Waiting for the first reading from Sentinel…</p>
+      }
+    </section>
+  }
+
+  @if (asideShown() && view() === 'runs') {
+    <section neatPageAside neatAsidePanel aria-label="Selected run">
+      @for (selected of selectedRuns(); track selected.id) {
+        @if (selected.run; as run) {
+          <app-run-panel [run]="run" />
+        } @else if (selected.listed) {
+          <neat-callout tone="info" heading="This run is no longer on the board" [headingLevel]="2">
+            <p>The board's run list no longer has it. Pick another run from the list.</p>
+          </neat-callout>
+        } @else if (selected.failed) {
+          <p neatNote>The run list could not be read.</p>
+        } @else {
+          <p neatNote>Reading runs from the board…</p>
+        }
+      } @empty {
+        <p neatNote>Select a run to see its detail.</p>
+      }
+    </section>
+  }
+</neat-page>
+
+<!-- Check again asks Sentinel's health again, and says so while it does. -->
+<ng-template #checkAgain>
+  <button
+    neatButton
+    neatCalloutActions
+    type="button"
+    size="small"
+    variant="outlined"
+    [attr.aria-disabled]="telemetry.rechecking() || null"
+    (click)="recheck()"
+  >
+    {{ telemetry.rechecking() ? 'Checking…' : 'Check again' }}
+  </button>
+</ng-template>

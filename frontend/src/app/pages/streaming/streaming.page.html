@@ -1,0 +1,193 @@
+<ng-container *neatPageToolbar>
+  <neat-segmented label="Slots shown" [options]="filterOptions()" [(value)]="filter" />
+
+  <neat-popover
+    label="More actions"
+    align="end"
+    [open]="moreOpen()"
+    (openChange)="moreOpenChange($event)"
+  >
+    <button
+      neatButton
+      neatPopoverTrigger
+      type="button"
+      variant="text"
+      size="small"
+      iconOnly
+      aria-label="More actions"
+      neatTooltip="More actions"
+      neatTooltipPosition="bottom"
+    >
+      <neat-icon name="more" />
+    </button>
+    <ng-template neatPopoverContent>
+      <!--
+        The bulk actions, then (after the line) the two that discard things. The items' tooltips
+        open to the left, where they cover no other item.
+      -->
+      <button
+        type="button"
+        neatPopoverItem
+        [neatTooltip]="autoAssignTooltip()"
+        neatTooltipPosition="left"
+        [disabled]="bulkLocked()"
+        (click)="autoAssign()"
+      >
+        Auto assign
+      </button>
+      <button
+        type="button"
+        neatPopoverItem
+        [neatTooltip]="bulkTooltip()"
+        neatTooltipPosition="left"
+        [disabled]="bulkLocked() || noStreamableFile()"
+        (click)="openBulkStart()"
+      >
+        Start…
+      </button>
+      <button
+        type="button"
+        neatPopoverItem
+        [neatTooltip]="bulkTooltip()"
+        neatTooltipPosition="left"
+        [disabled]="bulkLocked()"
+        (click)="stopAll()"
+      >
+        Stop all
+      </button>
+      <hr neatPopoverDivider />
+      <button
+        type="button"
+        neatPopoverItem
+        [neatTooltip]="bulkTooltip()"
+        neatTooltipPosition="left"
+        [disabled]="bulkLocked()"
+        (click)="reset()"
+      >
+        Reset
+      </button>
+      <button
+        type="button"
+        neatPopoverItem
+        neatTooltip="Delete cached FPS renditions; they are re-created on the next start"
+        neatTooltipPosition="left"
+        [disabled]="!hasRenditions()"
+        (click)="clearRenditions()"
+      >
+        {{ clearRenditionsLabel() }}
+      </button>
+    </ng-template>
+  </neat-popover>
+</ng-container>
+
+<neat-aside-toggle [open]="asideOpen()" (openChange)="asides.setOpen('streaming', $event)" />
+
+<neat-page
+  scroll="none"
+  [aside]="asideOpen() ? 'open' : 'closed'"
+  [asideWidth]="asides.width('streaming')"
+  (asideWidthChange)="asides.setWidth('streaming', $event)"
+>
+  <app-slots-column>
+    <!--
+      Where the list is narrow (a tablet beside the side panel) the slot, the start of its source
+      and its state stay readable: those columns keep a width, and under 28rem (448px) rate and
+      codec give their room up entirely, since a sliver of either would say nothing. The row is
+      then read without them too, codec warning included; the slot's panel still shows both.
+    -->
+    <neat-select-list
+      label="Streaming slots"
+      [items]="rows()"
+      [trackBy]="rowKey"
+      [rowTone]="rowTone"
+      [selected]="selectedRow()"
+      [emptyLabel]="emptyLabel()"
+      (selectedChange)="select($event)"
+      (activated)="openAside()"
+    >
+      <ng-template neatColumn="slot" header="Slot" width="3rem" let-row>
+        <app-cell-text>{{ row.name }}</app-cell-text>
+      </ng-template>
+      <ng-template neatColumn="kind" header="Kind" width="2rem" let-row>
+        <app-cell-text
+          ><span class="kind">{{ row.kind }}</span></app-cell-text
+        >
+      </ng-template>
+      <ng-template neatColumn="source" header="Source" width="minmax(2.75rem, 3fr)" let-row>
+        <app-cell-text>{{ row.source }}</app-cell-text>
+      </ng-template>
+      <ng-template neatColumn="state" header="State" width="minmax(5.25rem, 1fr)" let-row>
+        <neat-status-chip [tone]="row.state.tone">{{ row.state.label }}</neat-status-chip>
+      </ng-template>
+      <ng-template
+        neatColumn="rate"
+        header="Rate"
+        width="minmax(0, 1.4fr)"
+        [hideBelow]="448"
+        let-row
+      >
+        <app-cell-text>{{ row.rate }}</app-cell-text>
+      </ng-template>
+      <ng-template
+        neatColumn="codec"
+        header="Codec"
+        width="minmax(0, 0.9fr)"
+        [hideBelow]="448"
+        let-row
+      >
+        <app-cell-text>
+          @if (row.codecWarning; as warning) {
+            <!-- The codec in warning colours, the glyph naming the problem. -->
+            <neat-status-chip tone="warning">
+              {{ row.codec }}
+              <span role="img" [attr.aria-label]="warning" [neatTooltip]="warning">⚠</span>
+            </neat-status-chip>
+          } @else {
+            {{ row.codec }}
+          }
+        </app-cell-text>
+      </ng-template>
+    </neat-select-list>
+  </app-slots-column>
+
+  @if (asideOpen()) {
+    <section neatPageAside aria-label="Selected slot">
+      <!--
+        One panel per slot: choosing another slot builds the panel afresh, so nothing typed for
+        one slot (a stream URL, a password, a frame rate) carries over to the next.
+      -->
+      @for (row of selectedRows(); track row.slot.n) {
+        <app-slot-panel [row]="row" />
+      } @empty {
+        <p neatNote>No slot selected.</p>
+      }
+    </section>
+  }
+</neat-page>
+
+<ng-template #bulkStart let-dialog>
+  <neat-dialog-body>
+    <p class="question">How many streams do you want to start?</p>
+    <div class="count-field">
+      <neat-slider
+        label="How many streams do you want to start?"
+        describedBy="bulk-start-hint"
+        [min]="1"
+        [max]="slotCount"
+        [step]="1"
+        [(value)]="bulkCount"
+      />
+      <!-- The slider announces its value; this is the readout for the eye. -->
+      <output aria-hidden="true">{{ bulkCount() }}</output>
+    </div>
+    <p neatNote id="bulk-start-hint">
+      Slots with a custom FPS may take longer to start while renditions are created.
+    </p>
+  </neat-dialog-body>
+  <neat-dialog-actions>
+    <button neatButton type="button" variant="outlined" (click)="dialog.close()">Cancel</button>
+    <button neatButton type="button" [disabled]="bulkRunning()" (click)="startBulk(dialog)">
+      Start
+    </button>
+  </neat-dialog-actions>
+</ng-template>

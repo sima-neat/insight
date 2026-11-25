@@ -6,90 +6,50 @@ sidebar_position: 2
 
 # Install and Upgrade
 
-Insight is bundled with the Neat Development Environment. It can also be installed directly on a Modalix DevKit and upgraded with `sima-cli neat install`.
+## In the Neat SDK
 
-## In the Neat Development Environment
-
-When the SDK container starts with Insight enabled, Insight is installed, configured, and supervised automatically. The server listens over HTTPS and the SDK publishes a set of host ports for the browser, DevKit, and other external clients.
-
-Check the service state:
+The SDK container installs Insight and starts it with the container. `insight-admin` manages it:
 
 ```bash
-insight-admin status
+insight-admin status        # is it running
+insight-admin restart
+insight-admin logs 200      # its last 200 log lines
 ```
 
-Open Insight from a browser:
-
-```text
-https://localhost:9900
-```
-
-If you are browsing from another machine on the same network, use the SDK host IP address:
-
-```text
-https://<host-ip>:9900
-```
-
-The default web UI port is `9900`, but the SDK can allocate a different host port if `9900` is already in use. The `neat` command reports the actual Insight Web UI URL and exposed port mapping:
-
-```bash
-neat --json
-```
-
-Use `insight.webUiUrl` for the main UI. Use the `exposedPorts` array when configuring DevKit applications, RTSP clients, or external media senders.
+Open `https://localhost:9900`, or `https://<host-ip>:9900` from another machine. If port 9900 was
+taken when the SDK was set up, the SDK published Insight on another port: `neat --json` gives the
+address as `insight.webUiUrl` ([Ports and network](ports-network.md)).
 
 ## On a DevKit
 
-Insight can be installed directly on a Modalix DevKit. This is useful when you want the inspection console to run on the target device, or when you are validating a standalone DevKit setup.
-
-Install Insight with `sima-cli`:
-
-```bash
-sima-cli neat install insight@{release-tag}
-```
-
-For development builds, replace the release tag with the branch or tag you want to install:
+Insight needs two programs on the DevKit: [mkcert](https://github.com/FiloSottile/mkcert), for its
+HTTPS certificate (without it, Insight does not start and says so), and `ffmpeg`, for its sources
+and media library. Install them once, then install Insight with `sima-cli` and start it from the
+virtual environment the installer creates:
 
 ```bash
-sima-cli neat install insight@main
-```
-
-After installation, activate the created virtual environment and start Insight:
-
-```bash
+sudo apt install mkcert ffmpeg
+sima-cli neat install insight
 source ~/.simaai/neat-insight/venv/bin/activate
-neat-insight --port 9900
+neat-insight                # serves https://<devkit-ip>:9900; --port picks another port
 ```
 
-Then open:
+## The certificate
 
-```text
-https://<devkit-ip>:9900
-```
+Insight gives each mkcert call 5 minutes; if one has not finished by then (`mkcert -install` waiting for
+a `sudo` password no one sees, say), Insight stops it, says so and does not start: run `mkcert -install`
+in a terminal, then start Insight again.
 
-When Insight runs directly on the DevKit, applications on that DevKit can usually use the default local ports. When applications outside the DevKit connect to it, use the DevKit IP address and the ports exposed by that Insight instance.
+Insight serves HTTPS only: with the SDK's certificate in the SDK, with its mkcert certificate
+elsewhere. A browser that does not trust the certificate warns before it opens the page, and allows
+camera access (a webcam source) only once it trusts it. Trust the certificate's authority in your
+browser, or accept the warning for the page and for the webcam publishing port
+([Use a webcam](workflows.md#use-your-webcam-as-a-source)).
 
-## Upgrade Insight
+## Upgrade
 
-Because Insight is packaged as a Neat artifact, you can upgrade it with the same `sima-cli neat install` flow used for installation.
+In the SDK, `insight-admin update` installs the version the SDK names and restarts Insight;
+`insight-admin update main` installs the latest build of the `main` branch instead.
 
-For a release:
-
-```bash
-sima-cli neat install insight@{release-tag}
-```
-
-For the latest build from a branch:
-
-```bash
-sima-cli neat install insight@main
-```
-
-In the Neat Development Environment, Insight normally runs from `/opt/neat-insight/venv`. To upgrade the supervised SDK instance, install into that virtual environment and restart the service:
-
-```bash
-NEAT_INSIGHT_VENV_DIR=/opt/neat-insight/venv sima-cli neat install insight@main
-supervisorctl restart neat-insight
-```
-
-If your SDK image requires elevated permissions for `/opt/neat-insight`, run the install command with the appropriate privileges for your environment.
+On a DevKit, run `sima-cli neat install insight` again (`insight@<release-tag>` for a given
+release), then restart `neat-insight`.
