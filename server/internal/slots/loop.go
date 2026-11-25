@@ -94,7 +94,7 @@ func (m *Manager) scheduleProbesLocked() {
 
 // probePull probes slot n's camera again.
 func (m *Manager) probePull(n int, url string) {
-	_, err := m.probeInfo(url)
+	err := m.probeCameraCtx(m.ctx, url)
 	m.mu.Lock()
 	rt := m.rt[n-1]
 	rt.pullProbe.running = false

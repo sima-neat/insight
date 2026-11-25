@@ -147,7 +147,7 @@ Insight serves channels `0` to `count - 1`: 80 on a DevKit, and in the SDK the n
 
 ### Ingest Stats
 
-`/api/ingest/stats` keeps vf's field names because the SDK's network and smoke tests read them. Per channel:
+`/api/ingest/stats` keeps its field names (it is Frozen) because the SDK's network and smoke tests read them. Per channel:
 
 | Field | Meaning |
 | --- | --- |

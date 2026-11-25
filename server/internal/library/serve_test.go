@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,15 +73,23 @@ func TestFile(t *testing.T) {
 func TestPreviewCommand(t *testing.T) {
 	f := newFixture(t, func(o *Options) { o.FFmpeg = "/usr/bin/ffmpeg" })
 	abs := f.write(t, "clip.avi", "x")
+	if _, err := f.lib.PreviewCommand(abs); err == nil {
+		t.Fatal("a file not probed yet made a command")
+	}
+	f.probes.set("clip.avi", media.Info{Kind: media.KindVideo, Codec: "mpeg4"})
+	if _, err := f.lib.cache.Probe(t.Context(), abs); err != nil {
+		t.Fatal(err)
+	}
 	cmd, err := f.lib.PreviewCommand(abs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	args := strings.Join(cmd.Args[1:], " ")
-	if !strings.Contains(args, "-re -stream_loop -1 -i "+abs+" -map 0:v:0 -an -c:v mjpeg -q:v 5 -f mpjpeg") {
+	if !strings.Contains(args, "-re -stream_loop -1 -protocol_whitelist file -i file:"+abs+" -map 0:v:0 -an -c:v mjpeg -q:v 5 -f mpjpeg") {
 		t.Fatalf("a preview of an H.264 file: %s", args)
 	}
 	f.probes.set("clip.avi", media.Info{Kind: media.KindVideo, Codec: media.CodecMJPEG})
+	f.write(t, "clip.avi", "another version") // probed again
 	if _, err := f.lib.cache.Probe(t.Context(), abs); err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +132,7 @@ func TestPreviewWithFFmpeg(t *testing.T) {
 	t.Cleanup(relays.Close)
 	f := newFixture(t, func(o *Options) {
 		o.FFmpeg, o.Relays, o.Probe = ffmpeg, relays, media.FFprobe(ffprobe)
+		o.Cache = media.NewCache(t.Context(), media.FFprobe(ffprobe))
 	})
 	lib = f.lib
 	makeVideo(t, ffmpeg, f.root, "clip.mp4", 1, "-c:v", "libx264", "-pix_fmt", "yuv420p")
@@ -143,5 +154,58 @@ func TestPreviewWithFFmpeg(t *testing.T) {
 	n, _ := io.ReadAtLeast(bufio.NewReader(resp.Body), head, 1024)
 	if !bytes.Contains(head[:n], []byte{0xff, 0xd8}) {
 		t.Fatalf("no JPEG in the first %d bytes", n)
+	}
+}
+
+// recordingRelays are relays whose producers are recorded, never run.
+func recordingRelays(t *testing.T) (*relay.Relays, *[]string) {
+	t.Helper()
+	var mu sync.Mutex
+	started := &[]string{}
+	relays, err := relay.New(relay.Options{MaxRelays: 2, IdleStop: 100 * time.Millisecond, StallTimeout: time.Second,
+		Start: func(key, _ string) (*exec.Cmd, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			*started = append(*started, key)
+			return nil, errors.New("recorded, not run")
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(relays.Close)
+	return relays, started
+}
+
+// A file the probe did not read as a video or a picture never reaches ffmpeg: a playlist would
+// make it stream the files the playlist names, wherever they are.
+func TestAPreviewOfWhatIsNoVideoRunsNothing(t *testing.T) {
+	relays, started := recordingRelays(t)
+	f := newFixture(t, func(o *Options) { o.FFmpeg, o.Relays = "/usr/bin/ffmpeg", relays })
+	f.write(t, "list.m3u8", "#EXTM3U\n#EXTINF:1,\n/elsewhere/private.ts\n")
+	f.probes.fail("list.m3u8", fmt.Errorf("probing list.m3u8: %w", media.ErrPlaylist))
+	f.write(t, "notes.txt", "text")
+	for _, rel := range []string{"list.m3u8", "notes.txt"} {
+		rec := get(t, func(w http.ResponseWriter, r *http.Request) { f.lib.Preview(w, r, rel) })
+		if rec.Code != http.StatusUnsupportedMediaType || errorCode(t, rec) != CodeNotPreviewable {
+			t.Errorf("Preview(%q) answered %d %s", rel, rec.Code, rec.Body)
+		}
+	}
+	if len(*started) != 0 {
+		t.Fatalf("producers started for %v", *started)
+	}
+}
+
+// The same with the real ffprobe, for a playlist naming a clip outside the library.
+func TestAPreviewOfAPlaylistWithFFprobeRunsNothing(t *testing.T) {
+	ffmpeg, ffprobe := tools(t)
+	relays, started := recordingRelays(t)
+	f := newFixture(t, func(o *Options) {
+		o.FFmpeg, o.Relays, o.Cache = ffmpeg, relays, media.NewCache(t.Context(), media.FFprobe(ffprobe))
+	})
+	private := makeVideo(t, ffmpeg, t.TempDir(), "private.ts", 1, "-c:v", "libx264", "-pix_fmt", "yuv420p")
+	f.write(t, "list.m3u8", "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\n"+private+"\n#EXT-X-ENDLIST\n")
+	rec := get(t, func(w http.ResponseWriter, r *http.Request) { f.lib.Preview(w, r, "list.m3u8") })
+	if rec.Code != http.StatusUnsupportedMediaType || len(*started) != 0 {
+		t.Fatalf("a playlist's preview: %d %s, producers %v", rec.Code, rec.Body, *started)
 	}
 }

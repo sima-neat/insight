@@ -196,3 +196,27 @@ func TestRunNeat(t *testing.T) {
 		t.Errorf("a hanging neat: %v after %s", err, time.Since(started))
 	}
 }
+
+func TestRunNeatEndsWithItsGroup(t *testing.T) {
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	write := func(script string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(bin, "neat"), []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A neat that answers and exits, leaving a child of its own on its output: the child goes with
+	// the group, so the answer comes at once and whole.
+	write("sleep 30 &\necho '{\"ok\":true}'\n")
+	started := time.Now()
+	output, err := runNeat(t.Context())
+	if err != nil || strings.TrimSpace(string(output)) != `{"ok":true}` || time.Since(started) > 900*time.Millisecond {
+		t.Errorf("a neat that left a child: %q %v after %s", output, err, time.Since(started))
+	}
+	// A failure says the end of what neat wrote to stderr.
+	write("echo 'no such board' >&2\nexit 3\n")
+	if _, err := runNeat(t.Context()); err == nil || !strings.Contains(err.Error(), "no such board") || !strings.Contains(err.Error(), "exit status 3") {
+		t.Errorf("a failing neat: %v", err)
+	}
+}

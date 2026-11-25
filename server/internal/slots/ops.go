@@ -144,7 +144,7 @@ func (m *Manager) AssignPull(ctx context.Context, n int, url, user, password str
 	if err != nil {
 		return err
 	}
-	_, err = m.probeInfoCtx(ctx, pull.full)
+	err = m.probeCameraCtx(ctx, pull.full)
 	if err != nil {
 		var probeErr *ProbeError
 		switch {
@@ -185,22 +185,34 @@ func (m *Manager) AssignPull(ctx context.Context, n int, url, user, password str
 	})
 }
 
-// probeInfoCtx runs one stream probe, at most streamProbes at once, until ctx (a request's) or
-// the Manager ends.
-func (m *Manager) probeInfoCtx(ctx context.Context, url string) (StreamInfo, error) {
+// probeInfoCtx runs one stream probe of a MediaMTX path, probeCameraCtx one of a pull's camera,
+// at most streamProbes of either at once, until ctx (a request's) or the Manager ends.
+func (m *Manager) probeInfoCtx(ctx context.Context, url string) (info StreamInfo, err error) {
+	err = m.limitProbe(ctx, func(ctx context.Context) error {
+		info, err = m.opts.probeStream(ctx, url)
+		return err
+	})
+	return info, err
+}
+
+func (m *Manager) probeCameraCtx(ctx context.Context, url string) error {
+	return m.limitProbe(ctx, func(ctx context.Context) error { return m.opts.probeCamera(ctx, url) })
+}
+
+func (m *Manager) limitProbe(ctx context.Context, probe func(context.Context) error) error {
 	select {
 	case m.probing <- struct{}{}:
 	case <-ctx.Done():
-		return StreamInfo{}, ctx.Err()
+		return ctx.Err()
 	case <-m.ctx.Done():
-		return StreamInfo{}, newError(http.StatusServiceUnavailable, CodeShuttingDown, "Insight is shutting down.")
+		return newError(http.StatusServiceUnavailable, CodeShuttingDown, "Insight is shutting down.")
 	}
 	defer func() { <-m.probing }()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := context.AfterFunc(m.ctx, cancel)
 	defer stop()
-	return m.opts.probeStream(ctx, url)
+	return probe(ctx)
 }
 
 // AssignWebcam makes slot n a webcam's at fps frames per second, 30 or 60 (an assignment that

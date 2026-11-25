@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -21,8 +22,7 @@ type StreamInfo struct {
 	FPS           float64 // 0 when unknown
 }
 
-// StreamProber probes the stream at a URL (a camera, or one of MediaMTX's paths). A failure
-// is a *ProbeError.
+// StreamProber probes the stream at a URL, one of MediaMTX's paths. A failure is a *ProbeError.
 type StreamProber func(ctx context.Context, url string) (StreamInfo, error)
 
 // ProbeError is a stream that could not be probed: refused credentials, or no answer.
@@ -48,24 +48,20 @@ func (e *ProbeError) Error() string {
 const streamProbeTimeout = 10 * time.Second
 
 // FFprobeStream is the StreamProber that runs the ffprobe at ffprobePath: RTSP over TCP, a
-// socket timeout of 5 s, as little probing as gives the size and rate.
+// socket timeout of 5 s, as little probing as gives the size and rate. A URL with credentials is
+// refused before anything runs: a command line is any local user's to read (/proc, ps), so a
+// camera is probed by DescribeCamera instead.
 func FFprobeStream(ffprobePath string) StreamProber {
-	return func(ctx context.Context, url string) (StreamInfo, error) {
+	return func(ctx context.Context, rawURL string) (StreamInfo, error) {
+		if parsed, err := neturl.Parse(rawURL); err != nil || parsed.User != nil {
+			return StreamInfo{}, &ProbeError{Detail: "Insight passes no credentials to ffprobe"}
+		}
 		if ffprobePath == "" {
 			return StreamInfo{}, &ProbeError{Detail: "ffprobe is not installed"}
 		}
 		ctx, cancel := context.WithTimeout(ctx, streamProbeTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, ffprobePath,
-			"-v", "error",
-			"-rtsp_transport", "tcp",
-			"-timeout", "5000000",
-			"-analyzeduration", "2000000",
-			"-select_streams", "v:0",
-			"-show_entries", "stream=codec_name,width,height,avg_frame_rate,r_frame_rate",
-			"-of", "json",
-			"-i", url,
-		)
+		cmd := exec.CommandContext(ctx, ffprobePath, streamProbeArgs(rawURL)...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		cmd.WaitDelay = time.Second
@@ -77,10 +73,21 @@ func FFprobeStream(ffprobePath string) StreamProber {
 			return StreamInfo{}, ctx.Err()
 		}
 		if err != nil {
-			return StreamInfo{}, classifyProbeFailure(stderr.String(), url)
+			return StreamInfo{}, classifyProbeFailure(stderr.String(), rawURL)
 		}
 		return parseStreamProbe(stdout.Bytes())
 	}
+}
+
+func streamProbeArgs(url string) []string {
+	return append([]string{
+		"-v", "error",
+		"-timeout", "5000000",
+		"-analyzeduration", "2000000",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=codec_name,width,height,avg_frame_rate,r_frame_rate",
+		"-of", "json",
+	}, media.RTSPInput(url)...)
 }
 
 var (

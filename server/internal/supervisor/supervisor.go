@@ -54,11 +54,13 @@ type Status struct {
 }
 
 const (
-	tailLines      = 100
-	firstBackoff   = time.Second
-	maxBackoff     = 30 * time.Second
-	stableRun      = 30 * time.Second
-	defaultGrace   = 5 * time.Second
+	tailLines    = 100
+	firstBackoff = time.Second
+	maxBackoff   = 30 * time.Second
+	stableRun    = 30 * time.Second
+	defaultGrace = 5 * time.Second
+	// outputGrace is how long a run's exit waits for its output to be read to its end.
+	outputGrace    = 2 * time.Second
 	pidFileSuffix  = ".pid"
 	pidFileVersion = 1
 )
@@ -84,7 +86,7 @@ type Process struct {
 	pidFile string
 
 	mu       sync.Mutex
-	cmd      *exec.Cmd
+	group    *procgroup.Group // the current run's, or the last one's
 	status   Status
 	tail     []string
 	stopping bool
@@ -191,12 +193,12 @@ func (p *Process) Stop(ctx context.Context) error {
 		p.stopping = true
 		close(p.stop)
 	}
-	cmd := p.cmd
+	group := p.group
 	running := p.status.Running
 	p.mu.Unlock()
 
-	if running && cmd != nil {
-		if err := procgroup.Signal(cmd.Process.Pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if running && group != nil {
+		if err := group.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
 	}
@@ -206,8 +208,8 @@ func (p *Process) Stop(ctx context.Context) error {
 	case <-time.After(p.spec.Grace):
 	case <-ctx.Done():
 	}
-	if running && cmd != nil {
-		if err := procgroup.Signal(cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if running && group != nil {
+		if err := group.Signal(syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
 	}
@@ -224,28 +226,43 @@ func (p *Process) Stop(ctx context.Context) error {
 func (p *Process) launchLocked() (<-chan error, error) {
 	cmd := exec.Command(p.spec.Path, p.spec.Args...)
 	cmd.Env, cmd.Dir = p.spec.Env, p.spec.Dir
-	procgroup.Own(cmd)
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
 	cmd.Stdout, cmd.Stderr = writer, writer
-	if err := cmd.Start(); err != nil {
+	group, err := procgroup.Start(cmd)
+	if err != nil {
 		reader.Close()
 		writer.Close()
 		return nil, fmt.Errorf("starting %s: %w", p.spec.Name, err)
 	}
 	writer.Close() // the child holds its own copy
-	go p.readLines(reader)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		p.readLines(reader)
+	}()
 
 	if err := writePIDFile(p.pidFile, cmd.Process.Pid, p.spec.Path); err != nil {
 		slog.Warn("writing a PID file", "child", p.spec.Name, "error", err)
 	}
-	p.cmd = cmd
+	p.group = group
 	p.status.Running, p.status.PID = true, cmd.Process.Pid
 
 	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	// The group may still hold the child's own children; Wait kills them with it. The exit is
+	// delivered once the output is read to its end, so whoever reads the tail or the output after
+	// the run (an ffmpeg run's error) has its last lines; a process that left the group and holds
+	// the pipe is waited for outputGrace at most, and its lines are still read after.
+	go func() {
+		err := group.Wait()
+		select {
+		case <-drained:
+		case <-time.After(outputGrace):
+		}
+		exited <- err
+	}()
 	return exited, nil
 }
 
@@ -257,15 +274,10 @@ func (p *Process) watch(exited <-chan error) {
 		started := time.Now()
 		err := <-exited
 		p.mu.Lock()
-		cmd := p.cmd
 		p.status.Running, p.status.PID = false, 0
 		p.status.LastExit = exitText(err)
 		stopping := p.stopping
 		p.mu.Unlock()
-		// The group may still hold the child's own children; they go with it.
-		if cmd != nil {
-			_ = procgroup.Signal(cmd.Process.Pid, syscall.SIGKILL)
-		}
 		removePIDFile(p.pidFile)
 
 		if stopping || !p.spec.Restart {

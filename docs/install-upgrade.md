@@ -36,6 +36,10 @@ neat-insight                # serves https://<devkit-ip>:9900; --port picks anot
 
 ## The certificate
 
+Insight gives each mkcert call 5 minutes; if one has not finished by then (`mkcert -install` waiting for
+a `sudo` password no one sees, say), Insight stops it, says so and does not start: run `mkcert -install`
+in a terminal, then start Insight again.
+
 Insight serves HTTPS only: with the SDK's certificate in the SDK, with its mkcert certificate
 elsewhere. A browser that does not trust the certificate warns before it opens the page, and allows
 camera access (a webcam source) only once it trusts it. Trust the certificate's authority in your

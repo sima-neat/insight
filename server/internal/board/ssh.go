@@ -28,8 +28,7 @@ const (
 	keepAliveEvery = 15 * time.Second
 )
 
-// keyFiles are the service account's keys Insight signs in with, as the old backend (paramiko)
-// looked for them. A passphrase-protected key is skipped: Insight cannot ask for it.
+// keyFiles are the service account's keys Insight signs in with, in the order it tries them. A passphrase-protected key is skipped: Insight cannot ask for it.
 var keyFiles = []string{"id_ed25519", "id_ecdsa", "id_rsa"}
 
 // sshTransport is one SSH connection to a board, shared by every operation on it: each command

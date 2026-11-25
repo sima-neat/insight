@@ -1,4 +1,4 @@
-import { formatDuration } from '../duration';
+import { formatRunDuration } from '../duration';
 import { NO_VALUE } from '../no-value';
 import { formatRelativeTime } from '../relative-time';
 import type { MetricStatus, RunMetadata, RunSample, RunSummary, SavedRun } from './api';
@@ -65,7 +65,7 @@ export function isRecording(run: RunSummary): boolean {
 export function runLine(run: RunSummary): string {
   return [
     isRecording(run) ? 'Recording' : 'Complete',
-    formatDuration(run.duration_ms),
+    formatRunDuration(run.duration_ms),
     formatEnergy(run.energy_joules),
     count(run.samples, 'sample'),
   ].join(' · ');

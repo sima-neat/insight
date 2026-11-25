@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -26,9 +27,19 @@ func startNothing(supervisor.Spec) (supervisor.Child, error) {
 
 func TestProducersHandEachKeyToItsOwner(t *testing.T) {
 	root := t.TempDir()
-	lib, err := library.New(library.Options{Root: root, Cache: media.NewCache(t.Context(), nil),
+	// A file preview runs only on a file probed as a video.
+	video := func(context.Context, string) (media.Info, error) { return media.Info{Kind: media.KindVideo}, nil }
+	cache := media.NewCache(t.Context(), video)
+	lib, err := library.New(library.Options{Root: root, Cache: cache,
 		FFmpeg: "/opt/ffmpeg", Start: startNothing, Jobs: jobs.New(nil), Files: noSlots{}})
 	if err != nil {
+		t.Fatal(err)
+	}
+	clip := filepath.Join(root, "clip.mp4")
+	if err := os.WriteFile(clip, []byte("video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Probe(t.Context(), clip); err != nil {
 		t.Fatal(err)
 	}
 	p := &producers{ffmpeg: "/opt/ffmpeg"}

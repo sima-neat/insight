@@ -2,6 +2,7 @@ package library
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,6 +57,56 @@ func TestUploadRefusals(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("refused uploads left %v", entries)
 	}
+}
+
+func TestUploadRefusesAPlaylist(t *testing.T) {
+	f := newFixture(t, nil)
+	f.probes.fail("list.m3u8", fmt.Errorf("probing list.m3u8: %w", media.ErrPlaylist))
+	_, err := f.upload(t, "list.m3u8", []byte("#EXTM3U"), "")
+	if code(err) != CodeInvalidRequest || !strings.Contains(err.Error(), "playlist") {
+		t.Fatalf("%v, want invalid_request about the playlist", err)
+	}
+	if entries, _ := os.ReadDir(f.root); len(entries) != 0 {
+		t.Fatalf("the refused upload left %v", entries)
+	}
+}
+
+func TestAnUploadThatWouldNotFitIsRefusedBeforeItIsWritten(t *testing.T) {
+	f := newFixture(t, nil)
+	var free int64
+	known := true
+	asked := ""
+	f.lib.freeSpace = func(dir string) (int64, bool) { asked = dir; return free, known }
+
+	req := uploadRequest(t, "clip.mp4", []byte("video"))
+	free = req.ContentLength + media.FreeSpaceMargin - 1
+	_, err := f.lib.Upload(httptest.NewRecorder(), req)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != CodeNoSpace || refusal.Status != http.StatusInsufficientStorage {
+		t.Fatalf("one byte short: %v", err)
+	}
+	if asked != f.root {
+		t.Errorf("asked about %q, want the media folder %q", asked, f.root)
+	}
+	if entries, _ := os.ReadDir(f.root); len(entries) != 0 {
+		t.Fatalf("the refused upload left %v", entries)
+	}
+
+	req = uploadRequest(t, "clip.mp4", []byte("video"))
+	free = req.ContentLength + media.FreeSpaceMargin
+	f.save(t, "clip.mp4", []byte("video"), "")
+
+	// A request that does not say its length may be as long as the limit.
+	chunked := uploadRequest(t, "chunked.mp4", []byte("video"))
+	chunked.ContentLength = -1
+	free = f.lib.maxUpload + media.FreeSpaceMargin - 1
+	if _, err := f.lib.Upload(httptest.NewRecorder(), chunked); code(err) != CodeNoSpace {
+		t.Fatalf("a request of unknown length: %v", err)
+	}
+
+	known = false // a file system that does not say: the write itself answers a full disk
+	free = 0
+	f.save(t, "other.mp4", []byte("video"), "")
 }
 
 func twoFiles(t *testing.T) *http.Request {

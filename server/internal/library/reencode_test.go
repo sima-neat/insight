@@ -58,17 +58,17 @@ func TestPlanEncode(t *testing.T) {
 
 	for name, want := range map[string]bool{"good.mp4": false, "photo.jpg": false, "broken.mp4": false,
 		"notes.txt": false, "sparse.mp4": true, "hevc.mkv": true} {
-		plan, encode := f.lib.planEncode(t.Context(), filepath.Join(dir, name))
+		plan, encode, _ := f.lib.planEncode(t.Context(), filepath.Join(dir, name))
 		if encode != want {
 			t.Errorf("%s: re-encode %v, want %v (%+v)", name, encode, want, plan)
 		}
 	}
-	plan, _ := f.lib.planEncode(t.Context(), filepath.Join(dir, "sparse.mp4"))
+	plan, _, _ := f.lib.planEncode(t.Context(), filepath.Join(dir, "sparse.mp4"))
 	want := media.Encode{Codec: media.CodecH264, Width: 1920, Height: 1080, FPS: 30}
 	if !slices.Equal(plan.reasons, []string{"keyframes 10 s apart"}) || plan.encode != want {
 		t.Fatalf("sparse.mp4: %+v", plan)
 	}
-	plan, _ = f.lib.planEncode(t.Context(), filepath.Join(dir, "hevc.mkv"))
+	plan, _, _ = f.lib.planEncode(t.Context(), filepath.Join(dir, "hevc.mkv"))
 	want = media.Encode{Codec: media.CodecH265, Width: 3840, Height: 2160, FPS: 60}
 	if plan.encode != want || plan.duration != time.Minute {
 		t.Fatalf("hevc.mkv: %+v", plan)
@@ -175,5 +175,12 @@ func TestUploadReencodesWithFFmpeg(t *testing.T) {
 	}
 	if snapshot := result.Job.Snapshot(); snapshot.State != jobs.Done || snapshot.Title != "Prepare bframes.mp4 for streaming" {
 		t.Fatalf("the job: %+v", snapshot)
+	}
+}
+
+func TestKeyframeArgsReadTheFileOnly(t *testing.T) {
+	args := strings.Join(keyframeArgs("/m/a.mp4"), " ")
+	if !strings.HasSuffix(args, " -protocol_whitelist file -i file:/m/a.mp4") {
+		t.Fatalf("the keyframe probe's arguments: %s", args)
 	}
 }

@@ -107,8 +107,8 @@ imported from the wrong entry point.
   only. Insight installs and starts nothing on the board: where Sentinel is missing or stopped,
   the page shows the command the error's hint names.
 - **The Viewer.** The kit's video entry (`neat-video-tile`, `neat-tile-grid`) draws and knows
-  nothing of the server. The app connects it in `src/app/viewer/` (`vf/`, named after the old
-  viewer, holds a channel's WebRTC connection), and the page, `src/app/pages/viewer/`, owns the
+  nothing of the server. The app connects it in `src/app/viewer/` (a channel's WebRTC connection
+  is the kit's `neatInsightChannel`), and the page, `src/app/pages/viewer/`, owns the
   connections while it is shown. Regions of interest are display-only and never leave the browser.
 - **The initial bundle** carries whatever the app root imports statically, on every page. So the
   Viewer's video code, the Streaming, Media, Peripherals and Stats pages, the kit entries only they
@@ -151,8 +151,9 @@ imported from the wrong entry point.
   own.
 - **Startup** (`cmd/neat-insight`) resolves the configuration once (`internal/config`), then the
   certificate (`internal/certs`: the SDK's, a valid earlier one, or a new one from mkcert, which
-  Insight never installs), then starts the channels, MediaMTX, the sources and the board registry;
-  the server listens only once they have started, so `/api/health` always answers `ok`. Shutdown
+  Insight never installs and gives 300 s per call, killing its process group after that), then
+  starts the channels, MediaMTX, the sources and the board registry; the server listens only once
+  they have started, so `/api/health` always answers `ok`. Shutdown
   runs the other way. The programs Insight ships (`mediamtx`, its `mediamtx.yml`,
   `ffmpeg_nodelay.so`) are found beside the server's binary; ffmpeg and ffprobe on `PATH`.
 - **Children** run under `internal/supervisor`: each in its own process group, stopped as a group,
@@ -238,7 +239,12 @@ Node 24, Go (Go fetches the toolchain `server/go.mod` names unless `GOTOOLCHAIN=
 compiler per Linux target (`gcc`, or `gcc-aarch64-linux-gnu` and `gcc-x86-64-linux-gnu` to
 cross-build). Options: `--target-platform <host|all|linux-aarch64|linux-amd64|macos-arm64>`,
 `--skip-frontend`, `--skip-shim`, and `--install` into the active virtualenv. It never prompts, so
-a workflow can call it per platform.
+a workflow can call it per platform. The wheel carries `THIRD_PARTY_NOTICES` (the licenses of the
+Go modules linked into the server, and in a second part those of the MediaMTX binary, resolved
+through the Go module proxy at `MTX_VERSION`) and MediaMTX's own license: after a change to
+`server/go.mod` or to `MTX_VERSION`, `scripts/third-party-notices.py` writes the file again, and CI
+fails while it is stale. A new MediaMTX version takes its archives' SHA-256 beside `MTX_VERSION` in
+`build.sh`.
 
 **Trying a branch in the Neat SDK container** on `:9900`: `scripts/deploy-sdk-dev.sh`, run from
 this checkout with Node 24 and Go on `PATH`, builds the frontend and the server for the container,

@@ -44,7 +44,7 @@ func startMediaMTX(t *testing.T) *liveMediaMTX {
 	}
 	dir := t.TempDir()
 	rtspPort, apiPort := freePort(t), freePort(t)
-	// The test's ports instead of the fixed ones, as the old backend's integration tests do:
+	// The test's ports instead of the fixed ones:
 	// RTSP over TCP only (UDP would bind MediaMTX's fixed RTP ports), and no WHIP or SRT
 	// listener, which would bind fixed ports the tests do not use.
 	shipped := string(readShipped(t))

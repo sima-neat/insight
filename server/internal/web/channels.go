@@ -91,19 +91,21 @@ func (h *handlers) GetIngestStats(w http.ResponseWriter, r *http.Request, params
 		c.Webrtc.PeerCount = s.Viewers
 		if verbose {
 			malformed, unsupported, errs := int(s.Video.Malformed), int(s.Video.Unsupported), nonNil(s.Errors)
+			oversized := int(s.Video.Oversized)
 			c.Diagnostics = &struct {
 				MalformedPackets   *int      `json:"malformed_packets,omitempty"`
+				OversizedFrames    *int      `json:"oversized_frames,omitempty"`
 				RecentErrors       *[]string `json:"recent_errors,omitempty"`
 				UnsupportedPackets *int      `json:"unsupported_packets,omitempty"`
-			}{&malformed, &errs, &unsupported}
+			}{&malformed, &oversized, &errs, &unsupported}
 		}
 		stats.Channels = append(stats.Channels, c)
 	}
 	writeJSON(w, http.StatusOK, stats)
 }
 
-// GetViewerUrl builds the link as the old backend did, parameters in the same order: mode (when
-// light or dark), src, max_channels.
+// GetViewerUrl builds the link (Frozen), its parameters in this order: mode (when light or dark),
+// src, max_channels.
 func (h *handlers) GetViewerUrl(w http.ResponseWriter, r *http.Request, params api.GetViewerUrlParams) {
 	channelsInfo := h.deps.Config.Channels
 	count := channelsInfo.Count
@@ -145,7 +147,7 @@ func (h *handlers) GetViewerUrl(w http.ResponseWriter, r *http.Request, params a
 	})
 }
 
-// truthy reads a query flag as the old backend did: 1, true, yes or on, in any case.
+// truthy reads a query flag: 1, true, yes or on, in any case.
 func truthy(value *string) bool {
 	if value == nil {
 		return false

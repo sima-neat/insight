@@ -80,12 +80,20 @@ func (f *fakeFiles) calls() (restarted, unassigned []int) {
 type fakeProbes struct {
 	mu     sync.Mutex
 	byName map[string]media.Info
+	errs   map[string]error
 	gaps   map[string]time.Duration
 	calls  int
 }
 
 func newFakeProbes() *fakeProbes {
-	return &fakeProbes{byName: map[string]media.Info{}, gaps: map[string]time.Duration{}}
+	return &fakeProbes{byName: map[string]media.Info{}, errs: map[string]error{}, gaps: map[string]time.Duration{}}
+}
+
+// fail makes the probe of the file named name fail with err.
+func (p *fakeProbes) fail(name string, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.errs[name] = err
 }
 
 func (p *fakeProbes) set(name string, info media.Info) {
@@ -98,6 +106,9 @@ func (p *fakeProbes) probe(_ context.Context, abs string) (media.Info, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
+	if err := p.errs[filepath.Base(abs)]; err != nil {
+		return media.Info{}, err
+	}
 	info, ok := p.byName[filepath.Base(abs)]
 	if !ok {
 		return media.Info{Kind: media.KindUnknown}, nil

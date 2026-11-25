@@ -167,6 +167,8 @@ type VideoState struct {
 	Keyframes                  uint64
 	SeenSPS                    bool
 	Unsupported, Malformed     uint64
+	// Oversized are the frames dropped for growing over the cap of one frame's bytes.
+	Oversized uint64
 }
 
 // MetadataState is what arrived on a channel's metadata port and what became of it.
@@ -209,6 +211,7 @@ func (c *Channel) state(now time.Time) State {
 		SSRC: v.ssrc, PayloadType: v.payloadType, Codec: v.codec.String(),
 		Packets: v.packets, Bytes: v.bytes, PacketsPerSecond: packetRate, BitsPerS: bitRate,
 		Keyframes: v.keyframes, SeenSPS: v.seenSPS, Unsupported: v.unsupported, Malformed: v.malformed,
+		Oversized: v.oversized,
 	}
 	metadataActive := !m.last.IsZero() && now.Sub(m.last) <= activeFor
 	messageRate, metadataBits := m.rate.at(metadataActive)

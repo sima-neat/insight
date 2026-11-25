@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
 	"insight/internal/apierr"
@@ -40,9 +39,6 @@ var renditionFile = regexp.MustCompile(`^[A-Za-z0-9._-]+_([0-9a-f]{16})_([0-9a-f
 
 // renditionTemp matches an encode's unfinished output.
 var renditionTemp = regexp.MustCompile(`^\.([A-Za-z0-9._-]+_[0-9a-f]{16}_[0-9a-f]{16}_[1-9][0-9]*fps_(h264|h265)\.mp4)\.tmp$`)
-
-// freeSpaceMargin is the room an encode leaves on the disk beside its expected size.
-const freeSpaceMargin = 1 << 30
 
 // rendition is one rendition of a library file.
 type rendition struct {
@@ -228,15 +224,14 @@ func encoderName(codec string) string {
 }
 
 func checkFreeSpace(dir string, expected int64) error {
-	var fs syscall.Statfs_t
-	if err := syscall.Statfs(dir, &fs); err != nil {
+	free, known := media.FreeBytes(dir)
+	if !known {
 		return nil // nothing to check against; the encode itself fails on a full disk
 	}
-	free := int64(fs.Bavail) * fs.Bsize
-	needed := expected + freeSpaceMargin
+	needed := expected + media.FreeSpaceMargin
 	if free < needed {
 		return fmt.Errorf("There is not enough free disk space for this rendition: it needs about %s free (%s for the file and %s to spare), and %s is free. Clear renditions or free some space, then try again.",
-			formatBytes(needed), formatBytes(expected), formatBytes(freeSpaceMargin), formatBytes(free))
+			formatBytes(needed), formatBytes(expected), formatBytes(media.FreeSpaceMargin), formatBytes(free))
 	}
 	return nil
 }

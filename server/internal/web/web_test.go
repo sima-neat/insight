@@ -87,7 +87,7 @@ func TestRouting(t *testing.T) {
 
 func TestAnUnknownAPIRoute(t *testing.T) {
 	h := NewHandler(Deps{UI: marker("ui"), Now: fixed})
-	// The old backend's routes among them: nothing behind the server answers them any more.
+	// Routes earlier releases had among them: nothing behind the server answers them any more.
 	for _, target := range []string{"/api/nothing", "/api/docs", "/api/openapi.json", "/api/import/youtube"} {
 		w := serve(t, h, http.MethodGet, target)
 		var body struct{ Error struct{ Code string } }

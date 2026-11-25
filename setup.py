@@ -31,6 +31,9 @@ setup(
     author="Sima.ai",
     author_email="support@sima.ai",
     license="Apache-2.0",
+    # In the wheel's .dist-info: Insight's license, and those of what its binaries are built
+    # from (scripts/third-party-notices.py).
+    license_files=["LICENSE", "THIRD_PARTY_NOTICES"],
     packages=find_packages(exclude=["neat_insight.bin*"]),
     include_package_data=True,
     zip_safe=False,
@@ -39,6 +42,7 @@ setup(
             # The server, with the web UI built in, and the MediaMTX it runs.
             "bin/neat-insight",
             "bin/mediamtx",
+            "bin/mediamtx.LICENSE",
             "bin/mediamtx.yml",
             "bin/ffmpeg_nodelay.so",
         ]
