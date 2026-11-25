@@ -82,7 +82,7 @@ program. See [Common workflows](workflows.md) for webcams, IP cameras and extern
 ![The Viewer with four channels of the test feed: detection boxes with tracks, a segmentation mask, a pose and a classification](images/ui-viewer.webp)
 
 The Viewer shows the channels your apps send, as a grid of tiles, with their metadata drawn over
-the video. The toolbar sets the tile **Size**, fits all tiles or a number of them on a page
+the video. A tile's status line names the channel's codec: H.264, H.265 or JPEG. The toolbar sets the tile **Size**, fits all tiles or a number of them on a page
 (**Fit all**, **Fit N**), turns pages, and **Go to channel** jumps to one (`/`). The ⋯ menu shows or
 hides each tile's bar, and can hide channels without video.
 
@@ -98,7 +98,9 @@ and can be reset. The panel's tabs:
 - **ROI**: regions of interest you draw on a channel, to show and to filter detections by. They
   stay in this browser.
 - **General**: the **Video sync buffer** (how long the video is held back so metadata can catch up,
-  300 ms by default), **Metadata retention** and **Line width**.
+  300 ms by default), **Orientation** (**None**, **Mirror**, **Flip vertical** or **Rotate 180°**,
+  which turns the picture and its overlays together and keeps the text upright), **Metadata
+  retention** and **Line width**.
 
 When much of a channel's metadata arrives after its frame was shown, the tile shows **Metadata
 late**. Select it to raise the video sync buffer for that channel or for all of them.
