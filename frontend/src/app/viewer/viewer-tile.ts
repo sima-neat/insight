@@ -21,16 +21,17 @@ import { ChannelLateness } from './channel-lateness';
 import { ChannelPlayback } from './channel-playback';
 import { formatChannelStats } from './channel-status';
 import { LateChip } from './late-chip';
+import { orientationInputs } from './orientation';
 import { ViewerSettingsStore } from './settings/viewer-settings.store';
 import { type ViewerChannel, ViewerChannels } from './viewer-channels';
 
 /**
  * One channel of the Viewer grid: the kit's video tile fed by the channel's connection and its
- * resolved settings. It holds the channel for as long as it exists, so a tile paged away releases
- * it, and it is where the connection meets the tile: the tile shows the connection's notice and
- * stats, its own message rate goes back to the channel for the status line, and each stats tick
- * decides the "Metadata late" chip, which it also publishes for the inspector (`ChannelLateness`),
- * as it does whether its video plays (`ChannelPlayback`).
+ * resolved settings, turned by its orientation. It holds the channel for as long as it exists, so
+ * a tile paged away releases it, and it is where the connection meets the tile: the tile shows the
+ * connection's notice and stats, its own message rate goes back to the channel for the status
+ * line, and each stats tick decides the "Metadata late" chip, which it also publishes for the
+ * inspector (`ChannelLateness`), as it does whether its video plays (`ChannelPlayback`).
  *
  * The page owns selection; the tile only shows it.
  */
@@ -49,6 +50,8 @@ import { type ViewerChannel, ViewerChannels } from './viewer-channels';
       [notice]="connection()?.source?.notice() ?? null"
       [settings]="settings()"
       [retentionMs]="retentionMs()"
+      [mirror]="turn().mirror"
+      [flipVertical]="turn().flipVertical"
       [channel]="channel()"
       [label]="label()"
       [status]="status()"
@@ -87,6 +90,10 @@ export class ViewerTile {
 
   protected readonly connection = signal<ViewerChannel | null>(null);
   protected readonly settings = computed(() => this.store.resolved(this.channel())());
+  /** The channel's orientation as the tile's two flips. */
+  protected readonly turn = computed(() =>
+    orientationInputs(this.store.orientation(this.channel())()),
+  );
   private readonly sync = computed(() => this.store.general(this.channel())());
   protected readonly retentionMs = computed(() => this.sync().metadataRetentionMs);
   private readonly syncBufferMs = computed(() => this.sync().videoSyncBufferMs);

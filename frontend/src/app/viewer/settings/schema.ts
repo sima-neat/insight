@@ -18,11 +18,21 @@ export const CLASS_STYLE_TYPES = [
   'pose-estimation',
 ] as const satisfies readonly MetadataType[];
 
+/**
+ * How a channel's picture and its overlays are turned in the Viewer, upstream Insight's values
+ * (sima-neat/insight@a1f557f). The stream and the metadata's coordinates are unchanged.
+ */
+export const ORIENTATIONS = ['none', 'mirror', 'flip-vertical', 'rotate-180'] as const;
+
+export type Orientation = (typeof ORIENTATIONS)[number];
+
 export interface GeneralSettings extends Readonly<NeatOverlaySettings['general']> {
   /** How far video is held back so metadata can catch up with its frame, in ms. */
   readonly videoSyncBufferMs: number;
   /** How long queued metadata is kept for its frame before it expires, in ms; 0 never expires. */
   readonly metadataRetentionMs: number;
+  /** How the picture and its overlays are turned. */
+  readonly orientation: Orientation;
 }
 
 /** What a channel's connection and tile need besides its overlay settings. */
@@ -35,6 +45,7 @@ export type TypeSettings = NeatOverlaySettings['types'];
 export const GENERAL_DEFAULTS: GeneralSettings = {
   videoSyncBufferMs: 300,
   metadataRetentionMs: 0,
+  orientation: 'none',
   ...NEAT_OVERLAY_DEFAULTS.general,
 };
 
@@ -45,6 +56,7 @@ export interface SettingValues {
   'general.videoSyncBufferMs': number;
   'general.metadataRetentionMs': number;
   'general.lineWidth': number;
+  'general.orientation': Orientation;
   'general.showRoi': boolean;
   'general.applyRoiFiltering': boolean;
   'types.object-detection.confidenceThreshold': number;
@@ -74,6 +86,11 @@ export type BooleanSettingId = {
   [Id in SettingId]: SettingValues[Id] extends boolean ? Id : never;
 }[SettingId];
 
+/** The settings whose value is one of a fixed list of strings. */
+export type ChoiceSettingId = {
+  [Id in SettingId]: SettingValues[Id] extends string ? Id : never;
+}[SettingId];
+
 export interface NumberRange {
   readonly min: number;
   readonly max: number;
@@ -96,6 +113,11 @@ export const NUMBER_RANGES: Readonly<Record<NumericSettingId, NumberRange>> = {
   'types.tracking.confidenceThreshold': { min: 0, max: 1, integer: false },
   'types.tracking.history.trailLength': { min: 1, max: 120, integer: true },
   'types.tracking.history.lostTrackTtlMs': { min: 0, max: 30000, integer: true },
+};
+
+/** The values each choice setting can hold; anything else stored reads as its default. */
+export const SETTING_CHOICES: Readonly<Record<ChoiceSettingId, readonly string[]>> = {
+  'general.orientation': ORIENTATIONS,
 };
 
 export type SettingTab = 'General' | 'ROI' | 'Metadata';
@@ -126,6 +148,7 @@ export const SCALAR_SETTINGS: readonly ScalarSetting[] = [
   scalar('general.videoSyncBufferMs', 'General'),
   scalar('general.metadataRetentionMs', 'General'),
   scalar('general.lineWidth', 'General'),
+  scalar('general.orientation', 'General'),
   scalar('general.showRoi', 'ROI'),
   scalar('general.applyRoiFiltering', 'ROI'),
   scalar('types.object-detection.confidenceThreshold', 'Metadata', 'object-detection'),

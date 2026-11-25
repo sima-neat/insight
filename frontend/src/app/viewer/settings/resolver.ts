@@ -7,11 +7,14 @@ import {
 } from '@sima/neat-ui/video';
 import {
   CLASS_STYLE_TYPES,
+  type ChoiceSettingId,
   DEFAULTS_ROOT,
   type GeneralSettings,
   NUMBER_RANGES,
   type NumericSettingId,
+  type Orientation,
   SCALAR_SETTINGS,
+  SETTING_CHOICES,
   type SettingId,
   type SettingValues,
   settingPath,
@@ -100,8 +103,8 @@ function defaultValue<Id extends SettingId>(id: Id): SettingValues[Id] {
 
 /**
  * Normalizes one raw value the way the original's per-section normalizers did. Anything not of
- * the setting's kind falls back to its default: a boolean keeps only a boolean, a number is parsed,
- * clamped to its range and rounded where whole.
+ * the setting's kind falls back to its default: a boolean keeps only a boolean, a choice only one
+ * of its values, a number is parsed, clamped to its range and rounded where whole.
  */
 export function normalizeSettingValue<Id extends SettingId>(
   id: Id,
@@ -111,7 +114,12 @@ export function normalizeSettingValue<Id extends SettingId>(
   if (typeof fallback === 'boolean') {
     return (typeof raw === 'boolean' ? raw : fallback) as SettingValues[Id];
   }
-  // Every setting that is not a boolean is a number with a range.
+  if (typeof fallback === 'string') {
+    // Membership in the list, never a lookup by key, which would find 'toString' on any object.
+    const choices: readonly unknown[] = SETTING_CHOICES[id as ChoiceSettingId];
+    return (choices.includes(raw) ? raw : fallback) as SettingValues[Id];
+  }
+  // Every other setting is a number with a range.
   const { min, max, integer } = NUMBER_RANGES[id as NumericSettingId];
   const clamped = Math.max(min, Math.min(max, parseNumber(raw, fallback as number)));
   return (integer ? Math.round(clamped) : clamped) as SettingValues[Id];
@@ -286,4 +294,9 @@ export function resolveSyncSettings(global: ScopeOverrides, channel: ScopeOverri
     videoSyncBufferMs: resolveValue(global, channel, 'general.videoSyncBufferMs'),
     metadataRetentionMs: resolveValue(global, channel, 'general.metadataRetentionMs'),
   };
+}
+
+/** How the channel's picture is turned. */
+export function resolveOrientation(global: ScopeOverrides, channel: ScopeOverrides): Orientation {
+  return resolveValue(global, channel, 'general.orientation');
 }

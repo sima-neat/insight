@@ -42,6 +42,8 @@ describe('ViewerInspector', () => {
   beforeEach(() => {
     storage = new FakeLocalStorage();
     vi.stubGlobal('localStorage', storage);
+    // jsdom has no scrollIntoView, which the kit's select calls on its active option.
+    Element.prototype.scrollIntoView = vi.fn();
     FakeResizeObserver.instances = [];
     vi.stubGlobal('ResizeObserver', FakeResizeObserver);
     fake = new FakeChannels();
@@ -280,6 +282,32 @@ describe('ViewerInspector', () => {
     await type(field('Video sync buffer'), '600');
     expect(bufferOf(0)).toBe(600);
     expect(bufferOf(7)).toBe(600);
+  });
+
+  it('lists Orientation in the General tab', async () => {
+    await open();
+    await click(sidePanelToggle());
+    await click(tab('General'));
+
+    const orientation = row('Orientation');
+    expect([...inspector().querySelectorAll('app-setting-row')].at(-1)).toBe(orientation);
+    const select = orientation.querySelector<HTMLElement>('[role="combobox"]')!;
+    expect(flat(select)).toBe('None');
+
+    await click(select);
+    const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(options.map((option) => flat(option))).toEqual([
+      'None',
+      'Mirror',
+      'Flip vertical',
+      'Rotate 180°',
+    ]);
+    await click(options[2]);
+
+    // A global choice turns every channel.
+    expect(gridTile(0).flipVertical()).toBe(true);
+    expect(gridTile(7).flipVertical()).toBe(true);
+    expect(gridTile(7).mirror()).toBe(false);
   });
 
   it('with channel 2 selected a change writes an override marked "overrides global"; reset restores global', async () => {
@@ -887,6 +915,29 @@ describe('ViewerInspector', () => {
       expect(editor()).toBeNull();
     });
 
+    it('shows the preview unturned while the ROI editor is open', async () => {
+      storage.seed({
+        'settings:channel:2': { version: 10, general: { orientation: 'rotate-180' } },
+      });
+      await open();
+      await inspect(2);
+      expect(previewTile()!.mirror()).toBe(true);
+      expect(previewTile()!.flipVertical()).toBe(true);
+
+      // The kit's region editor works in the unflipped picture.
+      await click(tab('ROI'));
+      expect(editor()).not.toBeNull();
+      expect(previewTile()!.mirror()).toBe(false);
+      expect(previewTile()!.flipVertical()).toBe(false);
+      // Only the preview: the channel's grid tile stays turned.
+      expect(gridTile(2).mirror()).toBe(true);
+      expect(gridTile(2).flipVertical()).toBe(true);
+
+      await click(tab('General'));
+      expect(previewTile()!.mirror()).toBe(true);
+      expect(previewTile()!.flipVertical()).toBe(true);
+    });
+
     it('the preview filters by the regions the editor shows, not by the backdrop channel’s own', async () => {
       const points = [
         { x: 0.1, y: 0.1 },
@@ -1216,6 +1267,8 @@ class StandInTile {
   readonly notice = input<string | null>();
   readonly settings = input<NeatOverlaySettings>();
   readonly retentionMs = input<number>();
+  readonly mirror = input<boolean>();
+  readonly flipVertical = input<boolean>();
   readonly channel = input<number>();
   readonly bars = input<boolean>();
   readonly frameStats = output<NeatFrameStats>();

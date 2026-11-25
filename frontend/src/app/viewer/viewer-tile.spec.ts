@@ -168,6 +168,24 @@ describe('ViewerTile', () => {
     expect(kitTile().settings().general.lineWidth).toBe(4);
   });
 
+  it('turns the tile by the channel’s orientation', async () => {
+    const tileHost = (): HTMLElement => fixture.nativeElement.querySelector('neat-video-tile');
+    host().store.set(2, 'general.orientation', 'rotate-180');
+    await fixture.whenStable();
+
+    // Rotate 180° is the kit's mirror and vertical flip together.
+    expect(kitTile().mirror()).toBe(true);
+    expect(kitTile().flipVertical()).toBe(true);
+    expect(tileHost().hasAttribute('data-mirrored')).toBe(true);
+    expect(tileHost().hasAttribute('data-flipped')).toBe(true);
+
+    host().channel.set(1);
+    await fixture.whenStable();
+
+    expect(tileHost().hasAttribute('data-mirrored')).toBe(false);
+    expect(tileHost().hasAttribute('data-flipped')).toBe(false);
+  });
+
   it('hands the tile’s message rate to the channel, for the status line', async () => {
     await tick();
 

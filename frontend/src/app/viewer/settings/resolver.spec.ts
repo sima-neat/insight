@@ -2,6 +2,8 @@ import { NEAT_OVERLAY_DEFAULTS, NEAT_OVERLAY_STYLE_FALLBACK_COLOR } from '@sima/
 import {
   EMPTY_OVERRIDES,
   holdsSomething,
+  normalizeSettingValue,
+  resolveOrientation,
   resolveOverlaySettings,
   resolveValue,
   settingsOverrides,
@@ -22,6 +24,7 @@ describe('viewer settings resolver', () => {
       showRoi: true,
       applyRoiFiltering: true,
       lineWidth: 3,
+      orientation: 'none',
     });
   });
 
@@ -107,6 +110,7 @@ describe('viewer settings resolver', () => {
       { id: 'general.videoSyncBufferMs', tab: 'General', metadataType: null },
       { id: 'general.metadataRetentionMs', tab: 'General', metadataType: null },
       { id: 'general.lineWidth', tab: 'General', metadataType: null },
+      { id: 'general.orientation', tab: 'General', metadataType: null },
       { id: 'general.showRoi', tab: 'ROI', metadataType: null },
       { id: 'general.applyRoiFiltering', tab: 'ROI', metadataType: null },
       {
@@ -184,6 +188,30 @@ describe('viewer settings resolver', () => {
 
     expect(resolved.roi).toBe(roi);
     expect(resolved.general.lineWidth).toBe(5);
+  });
+
+  it('resolves orientation channel over global, none by default', () => {
+    const global = settingsOverrides({ version: 10, general: { orientation: 'mirror' } });
+    const channel = settingsOverrides({ version: 10, general: { orientation: 'rotate-180' } });
+
+    expect(resolveOrientation(EMPTY_OVERRIDES, EMPTY_OVERRIDES)).toBe('none');
+    expect(resolveOrientation(global, EMPTY_OVERRIDES)).toBe('mirror');
+    expect(resolveOrientation(global, channel)).toBe('rotate-180');
+    expect(resolveOrientation(EMPTY_OVERRIDES, channel)).toBe('rotate-180');
+  });
+
+  it('keeps a stored orientation only when it is one of the four', () => {
+    const orientationOf = (orientation: unknown) =>
+      settingsOverrides({ version: 10, general: { orientation } }).general.orientation;
+
+    for (const orientation of ['none', 'mirror', 'flip-vertical', 'rotate-180']) {
+      expect(orientationOf(orientation)).toBe(orientation);
+    }
+    // 'toString' is found on every object's prototype: membership is in the list, not a lookup.
+    for (const junk of ['sideways', 7, 'toString', null, true, ['mirror']]) {
+      expect(orientationOf(junk), String(junk)).toBe('none');
+      expect(normalizeSettingValue('general.orientation', junk)).toBe('none');
+    }
   });
 
   it('a scope stored at another version, or at none, holds nothing', () => {

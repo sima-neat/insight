@@ -13,9 +13,15 @@ import { NeatCollapsible } from '@sima/neat-ui/collapsible';
 import { NeatConfirm } from '@sima/neat-ui/confirm';
 import { NeatInput } from '@sima/neat-ui/input';
 import { NeatLine, NeatLineEnd, NeatLineList } from '@sima/neat-ui/line-list';
+import { NeatSelect } from '@sima/neat-ui/select';
 import { NeatSlider } from '@sima/neat-ui/slider';
 import { NeatSwitch } from '@sima/neat-ui/switch';
-import type { BooleanSettingId, NumericSettingId } from '../settings/schema';
+import type {
+  BooleanSettingId,
+  ChoiceSettingId,
+  NumericSettingId,
+  SettingValues,
+} from '../settings/schema';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
 
 interface SettingBase {
@@ -49,7 +55,17 @@ export interface NumberSetting extends SettingBase {
   readonly describe: (value: number) => string;
 }
 
-export type SettingControl = SwitchSetting | NumberSetting;
+/**
+ * A setting that is one of a few values, shown as a select with its label before it. Each option
+ * is a value the store keeps for the setting, with the words the select shows for it.
+ */
+export interface ChoiceSetting extends SettingBase {
+  readonly control: 'select';
+  readonly id: ChoiceSettingId;
+  readonly options: readonly { readonly value: string; readonly label: string }[];
+}
+
+export type SettingControl = SwitchSetting | NumberSetting | ChoiceSetting;
 
 /** "1 channel", "2 channels". */
 export function channelCount(count: number): string {
@@ -70,7 +86,9 @@ export function settingCount(count: number): string {
  *
  * The control is named by `name`, which says where the setting belongs when its label alone does
  * not (the Metadata tab has a "Show overlay" per type), and it is described by the override note,
- * so the override state is heard on focus.
+ * so the override state is heard on focus. A select is the exception on both counts: the kit's
+ * select shows the name it is given as its label, and takes no description, so its note is only
+ * read after it.
  */
 @Component({
   selector: 'app-setting-row',
@@ -83,6 +101,7 @@ export function settingCount(count: number): string {
     NeatLineEnd,
     NeatLineList,
     NeatNote,
+    NeatSelect,
     NeatSlider,
     NeatSwitch,
     NeatTooltip,
@@ -149,6 +168,17 @@ export function settingCount(count: number): string {
       @if (setting.hint) {
         <p neatNote [id]="hintId()">{{ setting.hint }}</p>
       }
+    }
+    @if (choiceSetting(); as setting) {
+      <neat-select
+        labelPosition="inline"
+        size="small"
+        [label]="fullName()"
+        [options]="setting.options"
+        [disabled]="disabled()"
+        [value]="choiceValue()"
+        (valueChange)="choose(setting, $event)"
+      />
     }
     @if (overrides()) {
       <div class="scope-row">
@@ -231,7 +261,11 @@ export class SettingRow {
   });
   protected readonly numberSetting = computed(() => {
     const setting = this.setting();
-    return setting.control === 'switch' ? null : setting;
+    return setting.control === 'slider' || setting.control === 'number' ? setting : null;
+  });
+  protected readonly choiceSetting = computed(() => {
+    const setting = this.setting();
+    return setting.control === 'select' ? setting : null;
   });
   protected readonly switchValue = computed(() => {
     const setting = this.switchSetting();
@@ -240,6 +274,10 @@ export class SettingRow {
   protected readonly numberValue = computed(() => {
     const setting = this.numberSetting();
     return setting === null ? 0 : this.store.value(this.scope(), setting.id);
+  });
+  protected readonly choiceValue = computed(() => {
+    const setting = this.choiceSetting();
+    return setting === null ? null : this.store.value(this.scope(), setting.id);
   });
   protected readonly disabled = computed(() => {
     const requires = this.setting().requires;
@@ -256,7 +294,7 @@ export class SettingRow {
     const channel = this.channel();
     return channel !== null && this.store.isOverride(channel, this.setting().id);
   });
-  /** The global value in words: on or off, or as the setting describes its numbers. */
+  /** The global value in words, as `valueText` says it. */
   protected readonly globalText = computed(() =>
     this.valueText(this.store.value('global', this.setting().id)),
   );
@@ -317,7 +355,7 @@ export class SettingRow {
   focusControl(): void {
     const row = this.host.nativeElement;
     const control = row.querySelector<HTMLElement>(
-      'input:not(:disabled), [role="switch"], [role="slider"]',
+      'input:not(:disabled), [role="switch"], [role="slider"], [role="combobox"]:not(:disabled)',
     );
     if (control !== null) {
       control.focus();
@@ -341,6 +379,15 @@ export class SettingRow {
       this.store.set(this.scope(), setting.id, Math.min(setting.max, Math.max(setting.min, typed)));
     }
     field.value = String(this.numberValue());
+  }
+
+  /** A choice from the select, stored as the scope's own value. */
+  protected choose(setting: ChoiceSetting, value: string | null): void {
+    // The select emits only its options' values, and the store keeps only the setting's own: the
+    // cast claims nothing the store does not check. Null is the select's "none picked".
+    if (value !== null) {
+      this.store.set(this.scope(), setting.id, value as SettingValues[ChoiceSettingId]);
+    }
   }
 
   protected useGlobalLabel(channel: number): string {
@@ -379,11 +426,17 @@ export class SettingRow {
     for (const channel of this.store.overridesOf(id)) this.store.resetOverride(channel, id);
   }
 
-  /** A value in words: a switch as on or off ("On", "Off" listed alone), a number as described. */
-  private valueText(value: boolean | number, listed = false): string {
+  /**
+   * A value in words: a switch as on or off ("On", "Off" listed alone), a choice as its option's
+   * label, a number as described.
+   */
+  private valueText(value: boolean | number | string, listed = false): string {
     if (typeof value === 'boolean') {
       if (listed) return value ? 'On' : 'Off';
       return value ? 'on' : 'off';
+    }
+    if (typeof value === 'string') {
+      return this.choiceSetting()!.options.find((option) => option.value === value)?.label ?? value;
     }
     return this.numberSetting()!.describe(value);
   }

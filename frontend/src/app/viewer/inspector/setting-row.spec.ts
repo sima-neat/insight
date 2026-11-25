@@ -60,6 +60,17 @@ const LOST_TRACK_TTL: SettingControl = {
   describe: (value) => `${value} ms`,
   requires: 'types.tracking.history.enabled',
 };
+const ORIENTATION: SettingControl = {
+  control: 'select',
+  id: 'general.orientation',
+  label: 'Orientation',
+  options: [
+    { value: 'none', label: 'None' },
+    { value: 'mirror', label: 'Mirror' },
+    { value: 'flip-vertical', label: 'Flip vertical' },
+    { value: 'rotate-180', label: 'Rotate 180°' },
+  ],
+};
 
 @Component({
   imports: [SettingRow],
@@ -79,6 +90,8 @@ describe('SettingRow', () => {
   beforeEach(() => {
     storage = new FakeLocalStorage();
     vi.stubGlobal('localStorage', storage);
+    // jsdom has no scrollIntoView, which the kit's select calls on its active option.
+    Element.prototype.scrollIntoView = vi.fn();
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -120,6 +133,7 @@ describe('SettingRow', () => {
   const toggle = (): HTMLButtonElement => root().querySelector('button[role="switch"]')!;
   const slider = (): HTMLElement => root().querySelector('[role="slider"]')!;
   const field = (): HTMLInputElement => root().querySelector('input')!;
+  const combobox = (): HTMLElement => root().querySelector('[role="combobox"]')!;
   const readout = () => root().querySelector('.readout')?.textContent?.trim();
   /** The text of what the element's `aria-describedby` points at, or null without one. */
   const description = (element: Element) => {
@@ -179,6 +193,16 @@ describe('SettingRow', () => {
   async function click(element: HTMLElement): Promise<void> {
     element.click();
     await fixture.whenStable();
+  }
+
+  /** Opens the select and picks the option shown as `label`; the list is on the overlay layer. */
+  async function choose(label: string): Promise<void> {
+    await click(combobox());
+    await click(
+      [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (option) => option.textContent?.trim() === label,
+      )!,
+    );
   }
 
   it('a switch shows the value in effect and stores the change for its scope', async () => {
@@ -262,6 +286,50 @@ describe('SettingRow', () => {
     expect(field().value).toBe('300');
     expect(text()).not.toContain('overrides global');
     expect(description(field())).toBeNull();
+  });
+
+  it('shows a choice setting as a select, and marks and resets a channel override', async () => {
+    await render(ORIENTATION);
+    expect(combobox().getAttribute('aria-label')).toBe('Orientation');
+    expect(combobox().textContent?.trim()).toBe('None');
+
+    await choose('Mirror');
+
+    expect(storage.readStored('settings:global')).toEqual({
+      version: 10,
+      general: { orientation: 'mirror' },
+      types: {},
+    });
+    expect(combobox().textContent?.trim()).toBe('Mirror');
+
+    // A channel follows global until it is given its own value.
+    await render(ORIENTATION, 2);
+    expect(combobox().textContent?.trim()).toBe('Mirror');
+    expect(text()).not.toContain('overrides global');
+
+    await choose('Rotate 180°');
+
+    expect(storage.readStored('settings:channel:2')).toEqual({
+      version: 10,
+      general: { orientation: 'rotate-180' },
+      types: {},
+    });
+    expect(combobox().textContent?.trim()).toBe('Rotate 180°');
+    expect(text()).toContain('overrides global · Global: Mirror');
+    const reset = button('Reset')!;
+    expect(reset.getAttribute('aria-label')).toBe('Reset Orientation to the global value (Mirror)');
+
+    // "All channels" lists the channel with its choice as the select shows it.
+    await render(ORIENTATION);
+    await click(overrideNote()!);
+    expect(overrideLines()).toEqual(['Channel 2 Rotate 180° Use global', 'Reset on 1 channel…']);
+
+    await render(ORIENTATION, 2);
+    await click(button('Reset')!);
+
+    expect(storage.readStored('settings:channel:2')).toBeNull();
+    expect(combobox().textContent?.trim()).toBe('Mirror');
+    expect(text()).not.toContain('overrides global');
   });
 
   it('the override note is collapsed by default and expands to list channels with their values', async () => {
@@ -526,10 +594,11 @@ describe('SettingRow', () => {
     expect(document.activeElement).toBe(slider());
   });
 
-  it('puts focus on the field of a number setting and on the switch of a switch setting', async () => {
+  it('puts focus on the field of a number setting, the switch of a switch setting and the select of a choice', async () => {
     storage.seed({
       'settings:channel:1': { version: 10, general: { videoSyncBufferMs: 900 } },
       'settings:channel:2': { version: 10, types: { 'object-detection': { visible: false } } },
+      'settings:channel:3': { version: 10, general: { orientation: 'mirror' } },
     });
     await render(SYNC_BUFFER);
     await click(overrideNote()!);
@@ -543,6 +612,11 @@ describe('SettingRow', () => {
     await click(overrideNote()!);
     await click(button('Use global')!);
     expect(document.activeElement).toBe(toggle());
+
+    await render(ORIENTATION);
+    await click(overrideNote()!);
+    await click(button('Use global')!);
+    expect(document.activeElement).toBe(combobox());
   });
 
   describe('with a number field that is disabled', () => {
