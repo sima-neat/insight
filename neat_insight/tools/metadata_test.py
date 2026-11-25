@@ -5,10 +5,11 @@
                                [--codec h264|jpeg] [--size <width>x<height>] [--rate <fps>]
 
 ffmpeg encodes `testsrc2` (640x480 at 15 fps by default; `--size` and `--rate` change both) with a
-white square sweeping across it and sends it as RTP to a loopback socket of this program: H.264
-as payload type 96, or with `--codec jpeg` RTP/JPEG (RFC 2435, payload type 26; MJPEG in 4:2:0,
-RFC 2435 type 1, with ffmpeg's default Huffman tables, since RFC 2435 carries none), which forwards every packet to
-Insight's video port 9000+N. For each frame (its RTP marker packet) it sends one message of each
+white square sweeping across it and sends it as RTP to a loopback socket of this program, which
+forwards every packet to Insight's video port 9000+N: H.264 as payload type 96, or with
+`--codec jpeg` RTP/JPEG (RFC 2435, payload type 26: MJPEG in 4:2:0, RFC 2435 type 1, with
+ffmpeg's default Huffman tables, since RFC 2435 carries none; sizes in multiples of 8 up to 2040,
+as RTP/JPEG carries them). For each frame (its RTP marker packet) it sends one message of each
 type asked for (`--types`, object-detection by default) to Insight's metadata port 9100+N, each
 drawn on the square: a box (and a rotated ship that stays put and turns), a track, a pose on its
 corners, an elliptic RLE mask, and two classes.
@@ -21,9 +22,9 @@ them. The overlays follow the square in the video, so one that leaves its square
 frame-matching problem.
 
 `--metadata-delay-ms` holds each message back, as a slow model would, to provoke the Viewer's
-"Metadata late" notice. The feed runs until SIGINT or SIGTERM. It needs only ffmpeg (with libx264 for H.264)
-and Python 3, so `scripts/test-feed.sh` copies this file into the Neat SDK container and runs it
-there.
+"Metadata late" notice. The feed runs until SIGINT or SIGTERM. It needs only ffmpeg (with libx264
+for H.264) and Python 3, so `scripts/test-feed.sh` copies this file into the Neat SDK container and
+runs it there.
 """
 
 import argparse
@@ -47,6 +48,13 @@ SQUARE = 96
 BOX_MARGIN = 4
 RTP_CLOCK_RATE = 90_000
 PAYLOAD_TYPES = {"h264": 96, "jpeg": 26}
+# RTP/JPEG carries a frame's width and height in units of 8 pixels, one byte each (RFC 2435).
+JPEG_SIZE_STEP, JPEG_MAX_SIDE = 8, 2040
+# The relay socket's receive buffer. The kernel's default (about 208 KiB) overflowed above about
+# 40 Mbit/s of video (a heavy JPEG feed) and dropped packets before this program could forward
+# them, so Insight counted nearly every frame incomplete; 4 MiB took 92 Mbit/s without loss. The
+# kernel holds the request to net.core.rmem_max, so a host whose limit is lower needs it raised.
+RELAY_RECEIVE_BUFFER = 4 << 20
 
 CODEC_NAMES = {"h264": "H.264", "jpeg": "RTP/JPEG"}
 
@@ -254,6 +262,7 @@ def run_feed(
     since the pattern never ends (returns ffmpeg's exit code, or 1 if that is 0)."""
     relay = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    relay.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RELAY_RECEIVE_BUFFER)
     relay.bind(("127.0.0.1", 0))
     # The muxer prints an SDP description on stdout, which nobody here reads.
     ffmpeg = subprocess.Popen(ffmpeg_command(relay.getsockname()[1], codec, width, height, fps), stdout=subprocess.DEVNULL)
@@ -342,6 +351,11 @@ def parse_args(argv):
     parser.add_argument("--rate", type=parse_rate, default=FPS, metavar="N", help="frames per second (default 15)")
     args = parser.parse_args(argv)
     args.width, args.height = args.size
+    if args.codec == "jpeg" and not all(side % JPEG_SIZE_STEP == 0 and side <= JPEG_MAX_SIDE for side in args.size):
+        parser.error(
+            f"--size with --codec jpeg: RTP/JPEG carries widths and heights in multiples of {JPEG_SIZE_STEP} "
+            f"up to {JPEG_MAX_SIDE}, such as 1280x720"
+        )
     if args.metadata_delay_ms < 0:
         parser.error("--metadata-delay-ms must not be negative")
     return args

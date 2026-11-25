@@ -238,6 +238,16 @@ class ParseArgsTests(unittest.TestCase):
             with self.subTest(argv=argv), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 feed.parse_args(argv)
 
+    def test_jpeg_takes_only_sizes_rtp_jpeg_carries(self):
+        self.assertEqual(feed.parse_args(["0", "--codec", "jpeg", "--size", "2040x8"]).size, (2040, 8))
+        self.assertEqual(feed.parse_args(["0", "--size", "2560x1442"]).size, (2560, 1442))
+        for size in ("2560x1440", "2048x1080", "642x480", "640x484"):
+            with self.subTest(size=size):
+                stderr = io.StringIO()
+                with self.assertRaises(SystemExit), contextlib.redirect_stderr(stderr):
+                    feed.parse_args(["0", "--codec", "jpeg", "--size", size])
+                self.assertIn("multiples of 8 up to 2040", stderr.getvalue())
+
     def test_the_boxes_follow_the_size_and_rate(self):
         [message] = feed.frame_messages(90_000, 0, width=1280, height=720, fps=30)
         self.assertEqual(message["frame_id"], 30)

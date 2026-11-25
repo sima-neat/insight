@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Feeds a Viewer channel in the Neat SDK container with a test stream for the Viewer: an H.264 or,
-# with --codec jpeg, an RTP/JPEG test pattern (640x480 at 15 fps by default; --size and --rate
-# change them) on UDP 9000+N and object-detection metadata
-# matched to its frames on UDP 9100+N. The work happens in the container, in the package's
-# neat_insight/tools/metadata_test.py (the neat-insight-metadata-test command), which says how the
-# metadata is matched and which options it takes after the channel.
+# with --codec jpeg, an RTP/JPEG test pattern (4:2:0, RFC 2435 type 1; 640x480 at 15 fps by
+# default, --size and --rate change them) on UDP 9000+N, and metadata of the types --types names
+# (object detection by default) matched to its frames on UDP 9100+N. The work happens in the
+# container, in the package's neat_insight/tools/metadata_test.py (the neat-insight-metadata-test
+# command), which says how the metadata is matched and which options it takes after the channel.
 #
 # Usage, from the laptop:
 #   scripts/test-feed.sh <channel> [<option>...]               runs until Ctrl-C
