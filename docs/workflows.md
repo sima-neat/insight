@@ -51,7 +51,10 @@ publishing URL the message names once and accept its certificate.
    rejects the username or password.
 
 Insight forwards the camera's stream unchanged; Neat apps decode H.264, H.265 and MJPEG.
-**Stop** releases the slot. A pulled camera is not restored when Insight restarts.
+**Stop** ends the pull but keeps the camera on the slot, which shows **Stopped**; **Start** pulls it
+again. When Insight restarts, the slot keeps its camera but does not pull until you select
+**Start**. Insight keeps the camera's URL only when it holds no username, password or query
+string; otherwise the slot shows **Needs URL**, and you enter the URL and credentials again.
 
 ## Publish into a slot from another program
 
