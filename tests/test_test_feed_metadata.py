@@ -51,14 +51,23 @@ class FrameEndTests(unittest.TestCase):
     """Which relayed packets end a video frame, and so get that frame's metadata."""
 
     def test_the_marker_packet_of_the_video_ends_its_frame(self):
-        self.assertEqual(feed.frame_end(rtp_header(123_456, marker=True)), 123_456)
+        self.assertEqual(feed.frame_end(rtp_header(123_456, marker=True), 96), 123_456)
 
     def test_other_packets_end_nothing(self):
-        self.assertIsNone(feed.frame_end(rtp_header(123_456, marker=False)))
+        self.assertIsNone(feed.frame_end(rtp_header(123_456, marker=False), 96))
         # A marker on another payload type is not the H.264 stream's frame boundary.
-        self.assertIsNone(feed.frame_end(rtp_header(123_456, marker=True, payload_type=97)))
-        self.assertIsNone(feed.frame_end(b"\x40" + rtp_header(123_456, marker=True)[1:]))
-        self.assertIsNone(feed.frame_end(b""))
+        self.assertIsNone(feed.frame_end(rtp_header(123_456, marker=True, payload_type=97), 96))
+        self.assertIsNone(feed.frame_end(b"\x40" + rtp_header(123_456, marker=True)[1:], 96))
+        self.assertIsNone(feed.frame_end(b"", 96))
+
+
+class FrameEndJpegTests(unittest.TestCase):
+    def test_the_marker_packet_of_the_jpeg_video_ends_its_frame(self):
+        self.assertEqual(feed.frame_end(rtp_header(77, marker=True, payload_type=26), 26), 77)
+        self.assertIsNone(feed.frame_end(rtp_header(77, marker=False, payload_type=26), 26))
+        # A packet of the other codec's payload type ends no frame.
+        self.assertIsNone(feed.frame_end(rtp_header(77, marker=True, payload_type=96), 26))
+        self.assertIsNone(feed.frame_end(rtp_header(77, marker=True, payload_type=26), 96))
 
 
 def detection_message(rtp_timestamp, first_timestamp):
@@ -190,6 +199,53 @@ class ParseArgsTests(unittest.TestCase):
     def test_types_take_a_comma_separated_list(self):
         self.assertEqual(feed.parse_args(["3", "--types", "tracking, segmentation"]).types, ("tracking", "segmentation"))
 
+    def test_codec_defaults_to_h264(self):
+        args = feed.parse_args(["0"])
+        self.assertEqual(args.codec, "h264")
+        self.assertEqual((args.width, args.height, args.rate), (640, 480, 15))
+
+    def test_jpeg_uses_mjpeg_420_with_default_huffman_tables_and_pt_26(self):
+        command = " ".join(feed.ffmpeg_command(5000, "jpeg", 640, 480, 15))
+        for part in ("mjpeg", "yuvj420p", "-huffman default", "-payload_type 26"):
+            self.assertIn(part, command)
+        self.assertNotIn("libx264", command)
+        self.assertEqual(feed.PAYLOAD_TYPES, {"h264": 96, "jpeg": 26})
+        h264 = " ".join(feed.ffmpeg_command(5000, "h264", 640, 480, 15))
+        self.assertIn("libx264", h264)
+        self.assertIn("-payload_type 96", h264)
+
+    def test_size_and_rate_reach_the_pattern(self):
+        args = feed.parse_args(["0", "--size", "1280x720", "--rate", "30"])
+        self.assertEqual((args.width, args.height, args.rate), (1280, 720, 30))
+        command = feed.ffmpeg_command(5000, "jpeg", args.width, args.height, args.rate)
+        graph = command[command.index("-i") + 1]
+        self.assertIn("testsrc2=size=1280x720:rate=30", graph)
+        self.assertIn("rate=30", graph.split("[pattern];")[1])
+
+    def test_rejects_a_codec_size_or_rate_that_is_not_one(self):
+        for argv in (
+            ["0", "--codec", "vp8"],
+            ["0", "--size", "640"],
+            ["0", "--size", "0x480"],
+            ["0", "--size", "-4x480"],
+            ["0", "--size", "640x480;ls"],
+            ["0", "--size", "640x480x2"],
+            ["0", "--rate", "0"],
+            ["0", "--rate", "-3"],
+            ["0", "--rate", "15.5"],
+            ["0", "--rate", "1;ls"],
+        ):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                feed.parse_args(argv)
+
+    def test_the_boxes_follow_the_size_and_rate(self):
+        [message] = feed.frame_messages(90_000, 0, width=1280, height=720, fps=30)
+        self.assertEqual(message["frame_id"], 30)
+        x, y, w, h = square_of(message)["bbox"]
+        self.assertLessEqual(y, (720 - 96) // 2)
+        self.assertGreaterEqual(y + h, (720 - 96) // 2 + 96)
+        self.assertLessEqual(x + w, 1280)
+
     def test_rejects_an_unknown_type_and_a_channel_out_of_range(self):
         for argv in (["0", "--types", "boxes"], ["0", "--types", ","], ["80"]):
             with self.subTest(argv=argv), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
@@ -200,7 +256,7 @@ class ParseArgsTests(unittest.TestCase):
 class FeedTests(unittest.TestCase):
     """The feed end to end: ffmpeg's RTP relayed to one socket, its metadata sent to another."""
 
-    def run_feed(self, seconds, metadata_delay_s=0.0, types=("object-detection",)):
+    def run_feed(self, seconds, metadata_delay_s=0.0, types=("object-detection",), codec="h264"):
         video = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         metadata = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         for sock in (video, metadata):
@@ -212,7 +268,7 @@ class FeedTests(unittest.TestCase):
         thread = threading.Thread(
             target=lambda: result.setdefault(
                 "code",
-                feed.run_feed(video.getsockname(), metadata.getsockname(), metadata_delay_s, stop, types),
+                feed.run_feed(video.getsockname(), metadata.getsockname(), metadata_delay_s, stop, types, codec),
             )
         )
         thread.start()
@@ -233,7 +289,7 @@ class FeedTests(unittest.TestCase):
                         self.assertLessEqual(len(data), 1200)
                         packet = feed.parse_rtp(data)
                         self.assertIsNotNone(packet)
-                        self.assertEqual(packet.payload_type, 96)
+                        self.assertEqual(packet.payload_type, feed.PAYLOAD_TYPES[codec])
                         if packet.marker:
                             frames[packet.timestamp] = time.monotonic()
                     else:
@@ -257,6 +313,14 @@ class FeedTests(unittest.TestCase):
             self.assertIsNotNone(self.matching_frame(frames, message), message)
         frame_ids = [message["frame_id"] for _, message in messages]
         self.assertEqual(frame_ids, list(range(frame_ids[0], frame_ids[0] + len(frame_ids))))
+
+    def test_every_message_matches_a_frame_of_the_relayed_jpeg_video(self):
+        frames, messages = self.run_feed(seconds=2.5, codec="jpeg")
+
+        self.assertGreaterEqual(len(frames), 15)
+        self.assertGreaterEqual(len(messages), 15)
+        for _, message in messages:
+            self.assertIsNotNone(self.matching_frame(frames, message), message)
 
     def test_every_type_asked_for_comes_for_every_frame(self):
         frames, messages = self.run_feed(seconds=1.5, types=feed.TYPES)
