@@ -397,7 +397,7 @@ export class ViewerInspector {
     const sync = this.sync();
     if (channel === null || connection === null || sync === null) return null;
     const { source } = connection;
-    const buffer = source.videoBufferSupported
+    const buffer = source.videoBufferSupported()
       ? `${sync.videoSyncBufferMs} ms`
       : `${sync.videoSyncBufferMs} ms (this browser cannot delay video)`;
     return {
@@ -420,7 +420,7 @@ export class ViewerInspector {
     return lateNoticeDetails(
       reading.snapshot,
       sync.videoSyncBufferMs,
-      connection.source.videoBufferSupported,
+      connection.source.videoBufferSupported(),
       this.store.value('global', 'general.videoSyncBufferMs'),
     );
   });

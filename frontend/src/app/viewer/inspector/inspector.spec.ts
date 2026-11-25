@@ -562,7 +562,7 @@ describe('ViewerInspector', () => {
       framesPerSecond: 15,
       bitsPerSecond: 812_400,
     });
-    channel.source.videoBufferSupported = false;
+    channel.source.videoBufferSupported.set(false);
     await makeLate(gridTile(2));
     // After the stats tick that made it late, which carries no message rate here.
     channel.messagesPerSecond.set(15);
@@ -573,6 +573,20 @@ describe('ViewerInspector', () => {
       ['Sync buffer', '300 ms (this browser cannot delay video)'],
       ['Late metadata', '90 % late, ~80 ms after its frame'],
     ]);
+  });
+
+  it('offers the late notice’s buffer suggestion while the channel plays frames in a browser without jitterBufferTarget', async () => {
+    await open();
+    await inspect(2);
+    // The channel plays frames: the source says the buffer is supported although the browser has
+    // no jitterBufferTarget.
+    fake.channels.get(2)!.source.videoBufferSupported.set(true);
+    await makeLate(gridTile(2));
+    await click(tileElement(2).querySelector<HTMLElement>('button[neatTileChip]')!);
+
+    expect(noticeValue('Video sync buffer')).toBe('300 ms');
+    expect(buttonIn(notice()!, 'Raise for this channel to 450 ms')).toBeDefined();
+    expect(status()).toContainEqual(['Sync buffer', '300 ms']);
   });
 
   it('the late notice raises the channel buffer, or raises global without lowering it', async () => {
