@@ -31,6 +31,11 @@ type accessUnit struct {
 // could not see the gap itself. A unit left unfinished, when a packet of another unit arrives
 // before its marker, is withheld too.
 //
+// For H.264 and H.265 a loss before a unit's first packet (the unit before lost its end, or whole
+// packets fell between them) damages the unit as well, since a lost picture may be referenced by
+// the next. A JPEG frame references nothing, so only a gap inside it or a missing start damages
+// it: a frame that starts at offset 0 and has no gap inside it is whole, whatever was lost before.
+//
 // A unit that grows over maxUnitBytes is dropped as a damaged one is: its packets are let go at
 // once and the rest of it, up to its marker, is not kept.
 //
@@ -49,7 +54,7 @@ type assembler struct {
 	codec        Codec
 	active       bool // a unit is being collected
 	complete     bool // its first packet began the picture
-	damaged      bool // a sequence gap fell inside it, or between it and the unit before
+	damaged      bool // a sequence gap fell inside it (H.264 and H.265: or between it and the unit before)
 	oversized    bool // it grew over maxUnitBytes
 	randomAccess bool
 
@@ -106,7 +111,8 @@ func (a *assembler) accept(packet *rtp.Packet, raw []byte) (result acceptResult)
 		abandoned := a.active && sameSource
 		a.packets, a.size = a.packets[:0], 0
 		a.ssrc, a.timestamp, a.codec = packet.SSRC, packet.Timestamp, codec
-		a.complete, a.damaged, a.randomAccess, a.active = starts, abandoned || gap, randomAccess, true
+		// A JPEG frame references nothing, so a loss before it does not damage it.
+		a.complete, a.damaged, a.randomAccess, a.active = starts, codec != CodecJPEG && (abandoned || gap), randomAccess, true
 		a.oversized = false
 	} else if gap {
 		a.complete, a.damaged = false, true

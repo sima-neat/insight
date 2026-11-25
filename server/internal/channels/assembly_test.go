@@ -301,6 +301,43 @@ func TestAGapInsideAJPEGUnitIsCounted(t *testing.T) {
 	}
 }
 
+// A JPEG frame references nothing, so the loss of frame 1's last packet withholds frame 1 only.
+func TestAJPEGFrameAfterALostLastPacketIsPassedOn(t *testing.T) {
+	a := newAssembler()
+	if got := incompleteAfter(t, a, jpegPacket(t, 10, 9000, false, 0)); got != 0 {
+		t.Fatalf("incomplete %d before the loss shows", got)
+	}
+	next := jpegPacket(t, 12, 12000, true, 0)
+	if result := a.accept(next.packet, next.raw); !result.ready || result.incomplete != 1 {
+		t.Fatalf("%+v, want the next frame ready and 1 counted", result)
+	}
+}
+
+// The same loss in H.264 damages the next picture too, which may reference the lost one.
+func TestAnH264PictureAfterALostLastPacketIsWithheldToo(t *testing.T) {
+	a := newAssembler()
+	if got := incompleteAfter(t, a, h264(t, 10, 1, false, []byte{0x7c, 0x85, 0x88})); got != 0 {
+		t.Fatalf("incomplete %d before the loss shows", got)
+	}
+	next := h264(t, 12, 2, true, h264Slice)
+	if result := a.accept(next.packet, next.raw); result.ready || result.incomplete != 2 {
+		t.Fatalf("%+v, want it withheld and 2 counted", result)
+	}
+}
+
+// Whole packets lost between two complete frames leave both complete: the second starts at
+// offset 0 and has no gap inside it.
+func TestAJPEGFrameAfterWholePacketsLostBetweenFramesIsPassedOn(t *testing.T) {
+	a := newAssembler()
+	if !accepts(t, a, jpegPacket(t, 10, 9000, true, 0)) {
+		t.Fatal("the first frame was withheld")
+	}
+	next := jpegPacket(t, 14, 12000, true, 0)
+	if result := a.accept(next.packet, next.raw); !result.ready || result.incomplete != 0 {
+		t.Fatalf("%+v, want the frame ready and none counted", result)
+	}
+}
+
 // fragments checks that no packet of the unit counts it incomplete.
 func TestAJPEGUnitOverTheCapIsDroppedNotCounted(t *testing.T) {
 	a := newAssembler()
