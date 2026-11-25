@@ -61,6 +61,9 @@ type stats struct {
 		malformed    uint64
 		unsupported  uint64 // packets of a payload type Insight does not play
 		oversized    uint64 // frames dropped for growing over maxUnitBytes
+		incomplete   uint64 // frames withheld because a packet was lost, the first one included
+		unusable     uint64 // whole JPEG frames no image could be rebuilt from
+		skipped      uint64 // JPEG frames a viewer skipped for its full buffer, once per viewer
 		keyframes    uint64
 		lastKeyframe uint32 // its RTP time, so a keyframe of several packets counts once
 		seenSPS      bool

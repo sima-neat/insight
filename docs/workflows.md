@@ -51,7 +51,11 @@ publishing URL the message names once and accept its certificate.
    rejects the username or password.
 
 Insight forwards the camera's stream unchanged; Neat apps decode H.264, H.265 and MJPEG.
-**Stop** releases the slot. A pulled camera is not restored when Insight restarts.
+**Stop** ends the pull but keeps the camera on the slot, which reads **Idle** (its side panel says
+**Stopped**); **Start** pulls it again. When Insight restarts, the slot keeps its camera but does
+not pull until you select **Start**. Across a restart, Insight keeps the camera's URL only when it
+holds no username, password or query string; otherwise the slot shows **Needs URL**, and you enter
+the URL and credentials again.
 
 ## Publish into a slot from another program
 
@@ -97,10 +101,16 @@ Check in this order:
    every channel: whether video arrives (`active`), its payload type and codec (`rtp.payload_type`,
    `media.codec`), and the metadata messages received, not valid JSON, and forwarded to a browser
    (`metadata.messages_received`, `invalid_json`, `messages_forwarded`). Packets of a payload type
-   Insight does not play count as `diagnostics.unsupported_packets`. While the Viewer shows the
+   Insight does not play count as `diagnostics.unsupported_packets`.
+   `diagnostics.incomplete_frames` counts frames withheld because a packet was lost (every codec;
+   the whole frames an H.265 channel then holds until its next IRAP are not counted),
+   `unusable_frames` the JPEG frames Insight could not rebuild (counted, with the reason in
+   `recent_errors`, only while a viewer watches the channel) and `skipped_frames` the frames a
+   viewer skipped because its connection was too slow to take them. While the Viewer shows the
    channel, messages received but never forwarded matched no frame.
 4. **The browser.** It must reach the WebRTC ports (`webRTC` in the SDK's port map). A browser
-   that cannot decode H.265 says so on an H.265 tile.
+   that cannot decode H.265 says so on an H.265 tile. A JPEG tile needs no decoder in the browser:
+   the page draws its frames.
 5. **Unmatched metadata.** A message's `timestamp` must be its frame's time in whole milliseconds on
    the video's RTP clock, as the [contracts](contracts.md#matching-a-message-to-its-frame) say;
    seconds, nanoseconds or the wall clock match nothing.

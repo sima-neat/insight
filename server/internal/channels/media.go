@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -8,13 +9,20 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// media is one generation of a channel's video: a codec and the track every viewer of it shares.
-// A sender that changes codec starts a new generation, and the old one's viewers are closed, so
-// they offer again and get the new codec.
+// media is one generation of a channel's video: a codec, and how its viewers receive it. For
+// H.264 and H.265 that is a track every viewer shares. JPEG has no track: its frames go to each
+// viewer's jpeg data channel, frameViewers, which belong to the generation so that a codec change
+// retires them with their viewers. A sender that changes codec starts a new generation, and the
+// old one's viewers are closed, so they offer again and get the new codec.
 type media struct {
-	codec      Codec
-	parameters webrtc.RTPCodecParameters
-	track      *countedTrack
+	codec        Codec
+	parameters   webrtc.RTPCodecParameters // none for JPEG
+	track        *countedTrack             // nil for JPEG
+	frameViewers viewers[frameChannel]     // JPEG's open jpeg channels
+
+	// Owned by the channel's video reader: the reasons of the refused JPEG frames already named
+	// in the channel's recent errors, so a sender that keeps sending such frames shows each once.
+	namedRefusals map[error]bool
 
 	mu      sync.Mutex
 	retired bool
@@ -40,6 +48,10 @@ func codecParameters(codec Codec) (webrtc.RTPCodecParameters, error) {
 }
 
 func newMedia(codec Codec) (*media, error) {
+	m := &media{codec: codec, peers: map[*webrtc.PeerConnection]struct{}{}}
+	if codec == CodecJPEG {
+		return m, nil
+	}
 	parameters, err := codecParameters(codec)
 	if err != nil {
 		return nil, err
@@ -48,8 +60,37 @@ func newMedia(codec Codec) (*media, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &media{codec: codec, parameters: parameters, track: &countedTrack{TrackLocalStaticRTP: track},
-		peers: map[*webrtc.PeerConnection]struct{}{}}, nil
+	m.parameters, m.track = parameters, &countedTrack{TrackLocalStaticRTP: track}
+	return m, nil
+}
+
+// watched says whether any browser receives the generation's video: one bound to its track, or
+// with an open jpeg channel. Unwatched, the reader skips the work of sending.
+func (m *media) watched() bool {
+	if m.track == nil {
+		return m.frameViewers.count() > 0
+	}
+	return m.track.bindings.Load() > 0
+}
+
+// nameRefusal says whether a refused JPEG frame's reason is still to be named in this
+// generation, and marks it named. The reason is the jpegImage sentinel err wraps; an err that
+// wraps none is named every time rather than hidden.
+func (m *media) nameRefusal(err error) bool {
+	for _, reason := range jpegRefusals {
+		if !errors.Is(err, reason) {
+			continue
+		}
+		if m.namedRefusals[reason] {
+			return false
+		}
+		if m.namedRefusals == nil {
+			m.namedRefusals = map[error]bool{}
+		}
+		m.namedRefusals[reason] = true
+		return true
+	}
+	return true
 }
 
 // maxViewers bounds the connections of one channel, the ones still negotiating or waiting for ICE

@@ -24,7 +24,7 @@ type Channel struct {
 	media atomic.Pointer[media]
 	corr  correlator
 	queue chan outbound
-	views viewers
+	views viewers[*webrtc.DataChannel]
 
 	// Owned by the video reader.
 	assembler      *assembler
@@ -60,24 +60,38 @@ func (c *Channel) video(raw []byte, from netip.AddrPort, now time.Time) {
 		return
 	}
 	if m != c.assemblerMedia {
-		c.assembler, c.assemblerMedia, c.assemblerIdle = newAssembler(), m, m.track.idle.Load()
-	} else if idle := m.track.idle.Load(); idle != c.assemblerIdle {
-		// Everyone left and someone came back between two packets: start them at a keyframe.
-		c.assembler.rearm()
-		c.assemblerIdle = idle
+		c.assembler, c.assemblerMedia, c.assemblerIdle = newAssembler(), m, 0
+		if m.track != nil {
+			c.assemblerIdle = m.track.idle.Load()
+		}
+	} else if m.track != nil {
+		// Everyone left and someone came back between two packets: start them at a keyframe. A
+		// trackless generation has no such epoch: every JPEG frame stands alone.
+		if idle := m.track.idle.Load(); idle != c.assemblerIdle {
+			c.assembler.rearm()
+			c.assemblerIdle = idle
+		}
 	}
-	unit, ready, oversized := c.assembler.accept(&packet, raw)
-	if oversized {
+	result := c.assembler.accept(&packet, raw)
+	if result.oversized {
 		c.stats.count(func(s *stats) { s.video.oversized++ })
 		c.stats.failed("dropped a frame over %d MiB from %s", maxUnitBytes>>20, from)
 	}
-	if m.track.bindings.Load() == 0 {
-		if ready {
+	if result.incomplete > 0 {
+		c.stats.count(func(s *stats) { s.video.incomplete += uint64(result.incomplete) })
+	}
+	if !m.watched() {
+		if result.ready {
 			c.assembler.rearm()
 		}
 		return
 	}
-	if !ready {
+	if !result.ready {
+		return
+	}
+	unit := result.unit
+	if m.codec == CodecJPEG {
+		c.sendJPEG(m, unit, from, now)
 		return
 	}
 	outgoing := c.line.frame(unit.timestamp, unit.ssrc, unit.afterSequenceBreak, now)
@@ -92,9 +106,41 @@ func (c *Channel) video(raw []byte, from netip.AddrPort, now time.Time) {
 		}
 		sent = true
 	}
-	if !sent {
+	if sent {
+		c.release(unit, outgoing, now)
+	}
+}
+
+// sendJPEG rebuilds a whole JPEG unit into its JFIF image and sends it to every open jpeg channel
+// of the generation, on the reader as the track is written. The frame keeps its outgoing RTP time
+// in its chunks' header; no sequence numbers are rewritten, since no RTP is sent.
+func (c *Channel) sendJPEG(m *media, unit accessUnit, from netip.AddrPort, now time.Time) {
+	image, err := jpegImage(unit.packets)
+	if err != nil {
+		c.stats.count(func(s *stats) { s.video.unusable++ })
+		if m.nameRefusal(err) {
+			c.stats.failed("dropped a JPEG frame from %s: %v", from, err)
+		}
 		return
 	}
+	outgoing := c.line.frame(unit.timestamp, unit.ssrc, unit.afterSequenceBreak, now)
+	result := sendJPEGFrame(m.frameViewers.list(), jpegChunks(outgoing, image))
+	for _, failure := range result.Failures {
+		c.stats.failed("sending a JPEG frame: %v", failure.Err)
+		// sendJPEGFrame closed it, but Pion reports the close only once the browser has closed
+		// its side too, and a channel left in the set would fail every frame until then.
+		m.frameViewers.remove(failure.Channel)
+	}
+	if result.Skipped > 0 {
+		c.stats.count(func(s *stats) { s.video.skipped += uint64(result.Skipped) })
+	}
+	if result.Took > 0 {
+		c.release(unit, outgoing, now)
+	}
+}
+
+// release records a frame sent with outgoing and queues the metadata that was waiting for it.
+func (c *Channel) release(unit accessUnit, outgoing uint32, now time.Time) {
 	for _, out := range c.corr.frame(unit.ssrc, unit.timestamp, outgoing, now) {
 		c.enqueue(out)
 	}
@@ -192,37 +238,38 @@ func (c *Channel) send(out outbound) {
 	}
 }
 
-// viewers are the metadata DataChannels open to the channel's browsers.
-type viewers struct {
+// viewers are the data channels of one kind open to browsers: a channel's metadata channels, a
+// JPEG generation's jpeg channels.
+type viewers[C comparable] struct {
 	mu  sync.Mutex
-	dcs map[*webrtc.DataChannel]struct{}
+	dcs map[C]struct{}
 }
 
-func (v *viewers) add(dc *webrtc.DataChannel) {
+func (v *viewers[C]) add(dc C) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.dcs == nil {
-		v.dcs = map[*webrtc.DataChannel]struct{}{}
+		v.dcs = map[C]struct{}{}
 	}
 	v.dcs[dc] = struct{}{}
 }
 
-func (v *viewers) remove(dc *webrtc.DataChannel) {
+func (v *viewers[C]) remove(dc C) {
 	v.mu.Lock()
 	delete(v.dcs, dc)
 	v.mu.Unlock()
 }
 
-func (v *viewers) count() int {
+func (v *viewers[C]) count() int {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return len(v.dcs)
 }
 
-func (v *viewers) list() []*webrtc.DataChannel {
+func (v *viewers[C]) list() []C {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	list := make([]*webrtc.DataChannel, 0, len(v.dcs))
+	list := make([]C, 0, len(v.dcs))
 	for dc := range v.dcs {
 		list = append(list, dc)
 	}

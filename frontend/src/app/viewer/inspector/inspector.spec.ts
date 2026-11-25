@@ -24,6 +24,7 @@ import { LayoutPrefs } from '../settings/layout-prefs';
 import { RoiStore } from '../settings/roi-store';
 import { ViewerChannels } from '../viewer-channels';
 import { radioLabel } from '../../radio-label.testing';
+import { stubScrollIntoView } from '../../scroll-into-view.testing';
 import { ViewerTile } from '../viewer-tile';
 import { ViewerInspector } from './inspector';
 
@@ -38,6 +39,8 @@ describe('ViewerInspector', () => {
   let storage: FakeLocalStorage;
   let fake: FakeChannels;
   let fixture: ComponentFixture<ViewerShell>;
+
+  stubScrollIntoView();
 
   beforeEach(() => {
     storage = new FakeLocalStorage();
@@ -95,9 +98,10 @@ describe('ViewerInspector', () => {
     const name = section === undefined ? label : `${section}: ${label}`;
     return inspector().querySelector(`[aria-label="${name}"]`)!.closest('app-setting-row')!;
   };
+  /** Each row's control name, in order: the control comes first in a row, its reset button after. */
   const rowLabels = () =>
-    [...inspector().querySelectorAll('app-setting-row .label')].map((label) =>
-      label.textContent?.trim(),
+    [...inspector().querySelectorAll('app-setting-row')].map((settingRow) =>
+      settingRow.querySelector('[aria-label]')?.getAttribute('aria-label'),
     );
   const buttonIn = (container: Element, label: string): HTMLButtonElement =>
     [...container.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
@@ -276,10 +280,41 @@ describe('ViewerInspector', () => {
 
     await click(tab('General'));
     expect(headings()).toEqual([]);
-    expect(rowLabels()).toEqual(['Video sync buffer', 'Metadata retention', 'Line width']);
+    expect(rowLabels()).toEqual([
+      'Video sync buffer',
+      'Metadata retention',
+      'Line width',
+      'Orientation',
+    ]);
     await type(field('Video sync buffer'), '600');
     expect(bufferOf(0)).toBe(600);
     expect(bufferOf(7)).toBe(600);
+  });
+
+  it('lists Orientation in the General tab', async () => {
+    await open();
+    await click(sidePanelToggle());
+    await click(tab('General'));
+
+    const orientation = row('Orientation');
+    expect([...inspector().querySelectorAll('app-setting-row')].at(-1)).toBe(orientation);
+    const select = orientation.querySelector<HTMLElement>('[role="combobox"]')!;
+    expect(flat(select)).toBe('None');
+
+    await click(select);
+    const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(options.map((option) => flat(option))).toEqual([
+      'None',
+      'Mirror',
+      'Flip vertical',
+      'Rotate 180°',
+    ]);
+    await click(options[2]);
+
+    // A global choice turns every channel.
+    expect(gridTile(0).flipVertical()).toBe(true);
+    expect(gridTile(7).flipVertical()).toBe(true);
+    expect(gridTile(7).mirror()).toBe(false);
   });
 
   it('with channel 2 selected a change writes an override marked "overrides global"; reset restores global', async () => {
@@ -562,7 +597,7 @@ describe('ViewerInspector', () => {
       framesPerSecond: 15,
       bitsPerSecond: 812_400,
     });
-    channel.source.videoBufferSupported = false;
+    channel.source.videoBufferSupported.set(false);
     await makeLate(gridTile(2));
     // After the stats tick that made it late, which carries no message rate here.
     channel.messagesPerSecond.set(15);
@@ -573,6 +608,20 @@ describe('ViewerInspector', () => {
       ['Sync buffer', '300 ms (this browser cannot delay video)'],
       ['Late metadata', '90 % late, ~80 ms after its frame'],
     ]);
+  });
+
+  it('offers the late notice’s buffer suggestion while the source’s videoBufferSupported() is true', async () => {
+    await open();
+    await inspect(2);
+    // The notice follows the signal, which kit 0.41 sets where the browser has jitterBufferTarget
+    // and while the channel plays frames; the browser's own support is not consulted.
+    fake.channels.get(2)!.source.videoBufferSupported.set(true);
+    await makeLate(gridTile(2));
+    await click(tileElement(2).querySelector<HTMLElement>('button[neatTileChip]')!);
+
+    expect(noticeValue('Video sync buffer')).toBe('300 ms');
+    expect(buttonIn(notice()!, 'Raise for this channel to 450 ms')).toBeDefined();
+    expect(status()).toContainEqual(['Sync buffer', '300 ms']);
   });
 
   it('the late notice raises the channel buffer, or raises global without lowering it', async () => {
@@ -695,7 +744,7 @@ describe('ViewerInspector', () => {
 
       await click(tab('ROI'));
       expect(tab('ROI').getAttribute('aria-selected')).toBe('true');
-      expect(rowLabels()).toEqual([]);
+      expect(rowLabels()).toEqual(['Show regions', 'Filter by regions']);
       expect(inspector().querySelector('app-roi-tab')).not.toBeNull();
     });
 
@@ -871,6 +920,29 @@ describe('ViewerInspector', () => {
       await click(tab('General'));
       expect(previewTile()!.settings().general.showRoi).toBe(true);
       expect(editor()).toBeNull();
+    });
+
+    it('shows the preview unturned while the ROI editor is open', async () => {
+      storage.seed({
+        'settings:channel:2': { version: 10, general: { orientation: 'rotate-180' } },
+      });
+      await open();
+      await inspect(2);
+      expect(previewTile()!.mirror()).toBe(true);
+      expect(previewTile()!.flipVertical()).toBe(true);
+
+      // The kit's region editor works in the unflipped picture.
+      await click(tab('ROI'));
+      expect(editor()).not.toBeNull();
+      expect(previewTile()!.mirror()).toBe(false);
+      expect(previewTile()!.flipVertical()).toBe(false);
+      // Only the preview: the channel's grid tile stays turned.
+      expect(gridTile(2).mirror()).toBe(true);
+      expect(gridTile(2).flipVertical()).toBe(true);
+
+      await click(tab('General'));
+      expect(previewTile()!.mirror()).toBe(true);
+      expect(previewTile()!.flipVertical()).toBe(true);
     });
 
     it('the preview filters by the regions the editor shows, not by the backdrop channel’s own', async () => {
@@ -1202,6 +1274,8 @@ class StandInTile {
   readonly notice = input<string | null>();
   readonly settings = input<NeatOverlaySettings>();
   readonly retentionMs = input<number>();
+  readonly mirror = input<boolean>();
+  readonly flipVertical = input<boolean>();
   readonly channel = input<number>();
   readonly bars = input<boolean>();
   readonly frameStats = output<NeatFrameStats>();

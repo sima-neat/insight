@@ -16,6 +16,21 @@ describe('formatChannelStats', () => {
     ).toBe('H.265 · 1920×1080 · 30.0 fps · 4.2 Mbit/s · 30 msg/s');
   });
 
+  it('says JPEG as it is', () => {
+    expect(
+      formatChannelStats(
+        {
+          codec: 'JPEG',
+          width: 640,
+          height: 480,
+          framesPerSecond: 15,
+          bitsPerSecond: 812_400,
+        },
+        15,
+      ),
+    ).toBe('JPEG · 640×480 · 15.0 fps · 812 kbit/s · 15 msg/s');
+  });
+
   it('leaves out what the browser has not reported, and keeps a codec it has no label for', () => {
     expect(
       formatChannelStats(

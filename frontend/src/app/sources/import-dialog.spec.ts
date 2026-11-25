@@ -19,6 +19,7 @@ import {
   sent,
   tick,
 } from './import.testing';
+import { stubScrollIntoView } from '../scroll-into-view.testing';
 import { MediaLibraryService } from './media-library.service';
 import { SlotsService } from './slots.service';
 
@@ -86,6 +87,8 @@ describe('ImportDialog', () => {
   let fixture: ComponentFixture<Frame>;
   let opener: Opener;
 
+  stubScrollIntoView();
+
   beforeEach(async () => {
     // jsdom has no ResizeObserver; brain's tabs observe their list's size.
     vi.stubGlobal(
@@ -96,8 +99,6 @@ describe('ImportDialog', () => {
         readonly disconnect = vi.fn();
       },
     );
-    // Nor scrollIntoView, which the kit's select calls on its active option.
-    Element.prototype.scrollIntoView = vi.fn();
     library = new FakeLibrary();
     slots = new FakeSlots();
     toasts = new FakeToasts();
@@ -123,7 +124,6 @@ describe('ImportDialog', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    delete (Element.prototype as Partial<Element>).scrollIntoView;
   });
 
   async function settle(): Promise<void> {

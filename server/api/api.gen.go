@@ -819,21 +819,35 @@ type IngestChannel struct {
 	Active      bool `json:"active"`
 	Channel     int  `json:"channel"`
 	Diagnostics *struct {
+		// IncompleteFrames Frames withheld because a packet was lost, the first one included, for every codec. After a loss an H.265 channel also holds the whole frames up to its next IRAP, which reference what was lost; those are not counted, so on H.265 a freeze can last longer than the count suggests.
+		IncompleteFrames *int `json:"incomplete_frames,omitempty"`
 		MalformedPackets *int `json:"malformed_packets,omitempty"`
 
 		// OversizedFrames Frames dropped because their RTP packets came to over 16 MiB, more than any picture of H.264 level 5.2 or H.265 level 5.x needs.
-		OversizedFrames    *int      `json:"oversized_frames,omitempty"`
-		RecentErrors       *[]string `json:"recent_errors,omitempty"`
-		UnsupportedPackets *int      `json:"unsupported_packets,omitempty"`
+		OversizedFrames *int      `json:"oversized_frames,omitempty"`
+		RecentErrors    *[]string `json:"recent_errors,omitempty"`
+
+		// SkippedFrames Frames a viewer skipped because its connection's buffer was full, once per frame and viewer.
+		SkippedFrames *int `json:"skipped_frames,omitempty"`
+
+		// UnsupportedPackets Packets of a payload type Insight does not take (RTP/JPEG, payload type 26, is taken, so it is not counted here).
+		UnsupportedPackets *int `json:"unsupported_packets,omitempty"`
+
+		// UnusableFrames Whole JPEG frames whose RTP/JPEG Insight cannot rebuild into an image; the reason is in `recent_errors`. Frames are rebuilt only for a viewer, so they are counted, and their reason named, only while a viewer has the channel open: with nobody watching, a sender of unusable frames shows 0.
+		UnusableFrames *int `json:"unusable_frames,omitempty"`
 	} `json:"diagnostics,omitempty"`
 	FirstPacketAt *string `json:"first_packet_at,omitempty"`
 	LastPacketAt  *string `json:"last_packet_at,omitempty"`
 	Media         struct {
-		ClockRate int    `json:"clock_rate"`
-		Codec     string `json:"codec"`
-		IdrCount  int    `json:"idr_count"`
-		Kind      string `json:"kind"`
-		SeenSps   bool   `json:"seen_sps"`
+		ClockRate int `json:"clock_rate"`
+
+		// Codec The channel's codec: `"H264"`, `"H265"` or `"JPEG"`, or `"unknown"` until RTP names it.
+		Codec string `json:"codec"`
+
+		// IdrCount The H.264 IDR and H.265 IRAP pictures seen. Every JPEG frame stands alone, so a JPEG channel counts none.
+		IdrCount int    `json:"idr_count"`
+		Kind     string `json:"kind"`
+		SeenSps  bool   `json:"seen_sps"`
 	} `json:"media"`
 	Metadata struct {
 		Active            bool    `json:"active"`

@@ -579,6 +579,7 @@ describe('ViewerSettingsStore (ported resolver tests)', () => {
       'types.pose-estimation.showKeypointLabels': true,
       'general.metadataRetentionMs': 5000,
       'general.lineWidth': 6,
+      'general.orientation': 'rotate-180',
       'general.applyRoiFiltering': false,
       'types.segmentation.confidenceThreshold': 0.3,
       'types.segmentation.maskOpacity': 0.9,
@@ -922,6 +923,36 @@ describe('ViewerSettingsStore', () => {
     expect(general()).toStrictEqual({ videoSyncBufferMs: 300, metadataRetentionMs: 1000 });
   });
 
+  it('orientation(channel) is cached, follows global and its own value, and changes only with them', () => {
+    const store = load({
+      'settings:channel:2': { version: 10, general: { orientation: 'mirror' } },
+    });
+    const orientation = store.orientation(1);
+    expect(store.orientation(1)).toBe(orientation);
+    expect(orientation()).toBe('none');
+    expect(store.orientation(2)()).toBe('mirror');
+
+    let changes = 0;
+    const watched = computed(() => {
+      orientation();
+      return ++changes;
+    });
+    expect(watched()).toBe(1);
+    // Another setting on the channel leaves the orientation as it is.
+    store.set(1, 'general.lineWidth', 6);
+    expect(watched()).toBe(1);
+
+    store.set('global', 'general.orientation', 'flip-vertical');
+    expect(orientation()).toBe('flip-vertical');
+    expect(store.orientation(2)()).toBe('mirror');
+    store.set(1, 'general.orientation', 'rotate-180');
+    expect(orientation()).toBe('rotate-180');
+    expect(stored('settings:channel:1')?.general).toStrictEqual({
+      lineWidth: 6,
+      orientation: 'rotate-180',
+    });
+  });
+
   it('setting a value a scope already owns writes nothing', () => {
     const store = load({ 'settings:channel:1': { version: 10, general: { lineWidth: 6 } } });
     const resolved = store.resolved(1)();
@@ -1109,12 +1140,13 @@ describe('ViewerSettingsStore', () => {
 });
 
 /**
- * The value the resolution gives a channel for `id`: timing values from general(), the rest from
- * resolved().
+ * The value the resolution gives a channel for `id`: timing values from general(), the orientation
+ * from orientation(), the rest from resolved().
  */
 function resolvedValueForId(store: ViewerSettingsStore, channel: number, id: SettingId): unknown {
   if (id === 'general.videoSyncBufferMs') return store.general(channel)().videoSyncBufferMs;
   if (id === 'general.metadataRetentionMs') return store.general(channel)().metadataRetentionMs;
+  if (id === 'general.orientation') return store.orientation(channel)();
   return id
     .split('.')
     .reduce<unknown>(

@@ -36,6 +36,7 @@ import {
 import { ChannelLateness, type LatenessReading } from '../channel-lateness';
 import { ChannelPlayback } from '../channel-playback';
 import { formatChannelStats } from '../channel-status';
+import { orientationInputs } from '../orientation';
 import { RoiStore } from '../settings/roi-store';
 import type { NumericSettingId, SettingTab } from '../settings/schema';
 import { type SettingsScope, ViewerSettingsStore } from '../settings/viewer-settings.store';
@@ -178,6 +179,17 @@ const GENERAL_SETTINGS: readonly SettingControl[] = [
     step: 1,
     describe: (value) => `${value} px`,
   },
+  {
+    control: 'select',
+    id: 'general.orientation',
+    label: 'Orientation',
+    options: [
+      { value: 'none', label: 'None' },
+      { value: 'mirror', label: 'Mirror' },
+      { value: 'flip-vertical', label: 'Flip vertical' },
+      { value: 'rotate-180', label: 'Rotate 180°' },
+    ],
+  },
 ];
 
 /**
@@ -202,7 +214,8 @@ function describeLateness(reading: LatenessReading | null): string {
  * The ROI tab draws regions of interest on the preview: the selected channel's, or with none
  * selected the global ones, on a displayed channel's preview chosen as a backdrop. While the tab is
  * open the preview carries the region editor, which draws the regions itself, so the tile's own
- * region overlay is off.
+ * region overlay is off, and the preview shows the picture unturned, since the editor works in the
+ * unflipped picture.
  *
  * The preview is a second kit tile on the channel's one connection, held like the grid tile holds
  * it, so selecting a channel opens no second peer connection. While the channel has a grid tile,
@@ -384,6 +397,8 @@ export class ViewerInspector {
           }
         : settings,
       retentionMs: sync.metadataRetentionMs,
+      // The kit's region editor works in the unflipped picture, so the ROI tab shows it unturned.
+      turn: orientationInputs(this.roiOpen() ? 'none' : this.store.orientation(channel)()),
     };
   });
 
@@ -397,7 +412,7 @@ export class ViewerInspector {
     const sync = this.sync();
     if (channel === null || connection === null || sync === null) return null;
     const { source } = connection;
-    const buffer = source.videoBufferSupported
+    const buffer = source.videoBufferSupported()
       ? `${sync.videoSyncBufferMs} ms`
       : `${sync.videoSyncBufferMs} ms (this browser cannot delay video)`;
     return {
@@ -420,7 +435,7 @@ export class ViewerInspector {
     return lateNoticeDetails(
       reading.snapshot,
       sync.videoSyncBufferMs,
-      connection.source.videoBufferSupported,
+      connection.source.videoBufferSupported(),
       this.store.value('global', 'general.videoSyncBufferMs'),
     );
   });

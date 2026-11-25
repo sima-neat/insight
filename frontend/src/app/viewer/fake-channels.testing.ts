@@ -1,5 +1,6 @@
 import { computed, signal } from '@angular/core';
 import type { NeatInsightVideoStats } from '@sima/neat-ui/insight';
+import type { NeatEncodedFrames } from '@sima/neat-ui/video';
 import type { ViewerChannel, ViewerChannels } from './viewer-channels';
 
 /** A channel's connection without WebRTC: its signals are set by the test. */
@@ -10,8 +11,9 @@ export class FakeSource {
   readonly notice = computed(() => this.failure() ?? this.waiting());
   readonly videoDelayMs = signal<number | null>(null);
   readonly stats = signal<NeatInsightVideoStats | null>(null);
+  readonly frames = signal<NeatEncodedFrames | null>(null);
   /** A browser that holds video, until a test says otherwise. */
-  videoBufferSupported = true;
+  readonly videoBufferSupported = signal(true);
   closed = false;
 
   onMetadata(): () => void {

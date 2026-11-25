@@ -33,6 +33,24 @@ func h264(t *testing.T, sequence uint16, timestamp uint32, marker bool, payload 
 	return packetOf(t, payloadTypeH264, sequence, timestamp, marker, payload)
 }
 
+// jpegPacket is an RTP/JPEG packet whose payload is an 8-byte main header (type 1, Q 50, 640 ×
+// 480) with the fragment offset, and a few bytes of scan data.
+func jpegPacket(t *testing.T, sequence uint16, timestamp uint32, marker bool, offset uint32) testPacket {
+	header := []byte{0, byte(offset >> 16), byte(offset >> 8), byte(offset), 1, 50, 640 / 8, 480 / 8}
+	return packetOf(t, payloadTypeJPEG, sequence, timestamp, marker, append(header, 0x12, 0x34))
+}
+
+// fromSSRC is p sent by another sender.
+func fromSSRC(t *testing.T, p testPacket, ssrc uint32) testPacket {
+	t.Helper()
+	p.packet.SSRC = ssrc
+	raw, err := p.packet.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return testPacket{p.packet, raw}
+}
+
 var (
 	h265IRAP  = []byte{0x26, 0x01} // type 19, IDR_W_RADL
 	h265Delta = []byte{0x02, 0x01} // type 1
@@ -42,26 +60,39 @@ var (
 
 func accepts(t *testing.T, a *assembler, p testPacket) bool {
 	t.Helper()
-	_, ready, _ := a.accept(p.packet, p.raw)
-	return ready
+	return a.accept(p.packet, p.raw).ready
 }
 
-// fragments sends one unit of FU fragments, each a full datagram, until it holds more than
+// incompleteAfter sends packets in order and returns how many units they counted incomplete.
+func incompleteAfter(t *testing.T, a *assembler, packets ...testPacket) int {
+	t.Helper()
+	incomplete := 0
+	for _, p := range packets {
+		incomplete += a.accept(p.packet, p.raw).incomplete
+	}
+	return incomplete
+}
+
+// fragments sends one unit of fragments, each a full datagram, until it holds more than
 // maxUnitBytes, then its marker. first and rest are the payload's first bytes for the fragment
 // with the unit's start and for the ones after it; it says how often a packet was reported as
-// making the unit too large, and the sequence number after the unit.
+// making the unit too large, and the sequence number after the unit. An oversized unit keeps its
+// own count, so no packet of it may count it incomplete.
 func fragments(t *testing.T, a *assembler, payloadType uint8, sequence uint16, timestamp uint32, first, rest, end []byte) (reported int, next uint16) {
 	t.Helper()
 	fragment := make([]byte, 1400)
 	copy(fragment, first)
 	for sent := 0; sent <= maxUnitBytes; sequence++ {
 		p := packetOf(t, payloadType, sequence, timestamp, false, fragment)
-		_, ready, oversized := a.accept(p.packet, p.raw)
-		if ready {
+		result := a.accept(p.packet, p.raw)
+		if result.ready {
 			t.Fatal("ready before the marker")
 		}
-		if oversized {
+		if result.oversized {
 			reported++
+		}
+		if result.incomplete != 0 {
+			t.Fatalf("a packet of the oversized unit counted %d incomplete", result.incomplete)
 		}
 		if a.size > maxUnitBytes {
 			t.Fatalf("the unit holds %d bytes, over the cap of %d", a.size, maxUnitBytes)
@@ -69,8 +100,9 @@ func fragments(t *testing.T, a *assembler, payloadType uint8, sequence uint16, t
 		sent += len(p.raw)
 		copy(fragment, rest)
 	}
-	if accepts(t, a, packetOf(t, payloadType, sequence, timestamp, true, end)) {
-		t.Fatal("a unit over the cap was passed on")
+	last := packetOf(t, payloadType, sequence, timestamp, true, end)
+	if result := a.accept(last.packet, last.raw); result.ready || result.incomplete != 0 {
+		t.Fatalf("its marker: %+v, want it withheld and not counted incomplete", result)
 	}
 	return reported, sequence + 1
 }
@@ -211,13 +243,7 @@ func TestARestartedSourcesFirstUnitIsPassedOn(t *testing.T) {
 		payload     []byte
 	}{"h264": {payloadTypeH264, h264IDR}, "h265": {payloadTypeH265, h265IRAP}} {
 		restarted := func(t *testing.T, timestamp uint32) testPacket {
-			p := packetOf(t, kind.payloadType, 500, timestamp, true, kind.payload)
-			p.packet.SSRC = 4242
-			raw, err := p.packet.Marshal()
-			if err != nil {
-				t.Fatal(err)
-			}
-			return testPacket{p.packet, raw}
+			return fromSSRC(t, packetOf(t, kind.payloadType, 500, timestamp, true, kind.payload), 4242)
 		}
 		t.Run(name+" after a finished unit", func(t *testing.T) {
 			a := newAssembler()
@@ -234,6 +260,195 @@ func TestARestartedSourcesFirstUnitIsPassedOn(t *testing.T) {
 				t.Fatal("withheld")
 			}
 		})
+	}
+}
+
+func TestAJPEGUnitIsPassedOn(t *testing.T) {
+	a := newAssembler()
+	for _, p := range []testPacket{jpegPacket(t, 10, 9000, false, 0), jpegPacket(t, 11, 9000, false, 1000)} {
+		if result := a.accept(p.packet, p.raw); result.ready || result.incomplete != 0 {
+			t.Fatalf("before the marker: %+v", result)
+		}
+	}
+	last := jpegPacket(t, 12, 9000, true, 2000)
+	result := a.accept(last.packet, last.raw)
+	if !result.ready || result.incomplete != 0 {
+		t.Fatalf("a whole JPEG unit: %+v", result)
+	}
+	if len(result.unit.packets) != 3 || result.unit.timestamp != 9000 {
+		t.Fatalf("%d packets at %d, want 3 at 9000", len(result.unit.packets), result.unit.timestamp)
+	}
+}
+
+// The first packet the assembler sees is at an offset other than 0: no sequence gap shows the
+// loss, only the fragment offset.
+func TestAJPEGUnitThatLostItsFirstFragmentIsWithheldAndCounted(t *testing.T) {
+	a := newAssembler()
+	accepts(t, a, jpegPacket(t, 11, 9000, false, 1000))
+	last := jpegPacket(t, 12, 9000, true, 2000)
+	if result := a.accept(last.packet, last.raw); result.ready || result.incomplete != 1 {
+		t.Fatalf("%+v, want it withheld and counted once", result)
+	}
+}
+
+func TestAGapInsideAJPEGUnitIsCounted(t *testing.T) {
+	a := newAssembler()
+	if got := incompleteAfter(t, a, jpegPacket(t, 10, 9000, false, 0), jpegPacket(t, 12, 9000, true, 2000)); got != 1 {
+		t.Fatalf("incomplete %d, want 1", got)
+	}
+	if !accepts(t, a, jpegPacket(t, 13, 12000, true, 0)) {
+		t.Fatal("the whole unit after it was withheld")
+	}
+}
+
+// A JPEG frame references nothing, so the loss of frame 1's last packet withholds frame 1 only.
+func TestAJPEGFrameAfterALostLastPacketIsPassedOn(t *testing.T) {
+	a := newAssembler()
+	if got := incompleteAfter(t, a, jpegPacket(t, 10, 9000, false, 0)); got != 0 {
+		t.Fatalf("incomplete %d before the loss shows", got)
+	}
+	next := jpegPacket(t, 12, 12000, true, 0)
+	if result := a.accept(next.packet, next.raw); !result.ready || result.incomplete != 1 {
+		t.Fatalf("%+v, want the next frame ready and 1 counted", result)
+	}
+}
+
+// The same loss in H.264 damages the next picture too, which may reference the lost one.
+func TestAnH264PictureAfterALostLastPacketIsWithheldToo(t *testing.T) {
+	a := newAssembler()
+	if got := incompleteAfter(t, a, h264(t, 10, 1, false, []byte{0x7c, 0x85, 0x88})); got != 0 {
+		t.Fatalf("incomplete %d before the loss shows", got)
+	}
+	next := h264(t, 12, 2, true, h264Slice)
+	if result := a.accept(next.packet, next.raw); result.ready || result.incomplete != 2 {
+		t.Fatalf("%+v, want it withheld and 2 counted", result)
+	}
+}
+
+// Whole packets lost between two complete frames leave both complete: the second starts at
+// offset 0 and has no gap inside it.
+func TestAJPEGFrameAfterWholePacketsLostBetweenFramesIsPassedOn(t *testing.T) {
+	a := newAssembler()
+	if !accepts(t, a, jpegPacket(t, 10, 9000, true, 0)) {
+		t.Fatal("the first frame was withheld")
+	}
+	next := jpegPacket(t, 14, 12000, true, 0)
+	if result := a.accept(next.packet, next.raw); !result.ready || result.incomplete != 0 {
+		t.Fatalf("%+v, want the frame ready and none counted", result)
+	}
+}
+
+// A loss before a JPEG frame does not damage it, but here it took the frame's first fragment
+// with it: the gap falls right before a packet at an offset other than 0, which still withholds
+// the frame, counted once.
+func TestAJPEGFrameThatLostItsFirstFragmentAfterAGapIsWithheld(t *testing.T) {
+	a := newAssembler()
+	if !accepts(t, a, jpegPacket(t, 10, 9000, true, 0)) {
+		t.Fatal("the first frame was withheld")
+	}
+	if got := incompleteAfter(t, a, jpegPacket(t, 12, 12000, false, 1000)); got != 0 {
+		t.Fatalf("incomplete %d before the frame's end", got)
+	}
+	last := jpegPacket(t, 13, 12000, true, 2000)
+	if result := a.accept(last.packet, last.raw); result.ready || result.incomplete != 1 {
+		t.Fatalf("%+v, want it withheld and counted once", result)
+	}
+	if !accepts(t, a, jpegPacket(t, 14, 15000, true, 0)) {
+		t.Fatal("the whole frame after it was withheld")
+	}
+}
+
+// fragments checks that no packet of the unit counts it incomplete.
+func TestAJPEGUnitOverTheCapIsDroppedNotCounted(t *testing.T) {
+	a := newAssembler()
+	start := []byte{0, 0, 0, 0, 1, 50, 640 / 8, 480 / 8}
+	rest := []byte{0, 0, 0x05, 0x78, 1, 50, 640 / 8, 480 / 8}
+	reported, next := fragments(t, a, payloadTypeJPEG, 10, 9000, start, rest, rest)
+	if reported != 1 {
+		t.Fatalf("reported %d times, want once", reported)
+	}
+	if !accepts(t, a, jpegPacket(t, next, 12000, true, 0)) {
+		t.Fatal("the unit after it was withheld")
+	}
+}
+
+// Packet 3 is lost, and with it t=1's end or t=2's start: t=1 is abandoned when t=2 begins, and
+// t=2 is damaged by the gap, so the one packet counts both.
+func TestAnAbandonedUnitIsCounted(t *testing.T) {
+	a := newAssembler()
+	if got := incompleteAfter(t, a, h264(t, 1, 1, false, []byte{0x7c, 0x85, 0x88}), h264(t, 2, 1, false, []byte{0x7c, 0x05, 0x88})); got != 0 {
+		t.Fatalf("incomplete %d before the loss shows", got)
+	}
+	last := h264(t, 4, 2, true, h264Slice)
+	if result := a.accept(last.packet, last.raw); result.ready || result.incomplete != 2 {
+		t.Fatalf("%+v, want it withheld and 2 counted", result)
+	}
+}
+
+func TestTheH265GateHoldsWholeUnitsWithoutCountingThem(t *testing.T) {
+	a := newAssembler()
+	if got := incompleteAfter(t, a, h265(t, 10, 9000, true, h265Delta)); got != 0 {
+		t.Fatalf("a delta picture before any IRAP counted %d", got)
+	}
+	if !accepts(t, a, h265(t, 11, 18000, true, h265IRAP)) {
+		t.Fatal("the IRAP")
+	}
+	// The loss of 12 damages 13 and closes the gate; 14 is whole but held.
+	if got := incompleteAfter(t, a, h265(t, 13, 27000, true, h265Delta), h265(t, 14, 36000, true, h265Delta)); got != 1 {
+		t.Fatalf("incomplete %d, want 1: the damaged unit only", got)
+	}
+	if !accepts(t, a, h265(t, 15, 45000, true, h265IRAP)) {
+		t.Fatal("the next IRAP did not reopen the gate")
+	}
+}
+
+// A JPEG sender restarted mid-unit comes with a new SSRC, sequence and timestamp: the unit it
+// interrupted counts, and its own first whole unit passes.
+func TestARestartedJPEGSendersFirstFrameIsPassedOn(t *testing.T) {
+	a := newAssembler()
+	if !accepts(t, a, jpegPacket(t, 10, 9000, true, 0)) {
+		t.Fatal("the first unit was withheld")
+	}
+	if got := incompleteAfter(t, a, jpegPacket(t, 11, 12000, false, 0)); got != 0 {
+		t.Fatalf("incomplete %d before the restart", got)
+	}
+	if got := incompleteAfter(t, a, fromSSRC(t, jpegPacket(t, 500, 777000, false, 0), 4242)); got != 1 {
+		t.Fatalf("incomplete %d, want 1: the interrupted unit", got)
+	}
+	last := fromSSRC(t, jpegPacket(t, 501, 777000, true, 1000), 4242)
+	if result := a.accept(last.packet, last.raw); !result.ready || result.incomplete != 0 {
+		t.Fatalf("the new sender's first whole unit: %+v", result)
+	}
+}
+
+func TestPayloadType26IsJPEG(t *testing.T) {
+	if codec := codecOf(26); codec != CodecJPEG || codec.String() != "JPEG" {
+		t.Fatalf("payload type 26: %d %q", codec, codec)
+	}
+}
+
+func TestStartsPicture(t *testing.T) {
+	cases := []struct {
+		name    string
+		codec   Codec
+		payload []byte
+		want    bool
+	}{
+		{"h264 single", CodecH264, h264IDR, true},
+		{"h264 FU-A start", CodecH264, []byte{0x7c, 0x85}, true},
+		{"h264 FU-A middle", CodecH264, []byte{0x7c, 0x05}, false},
+		{"h265 FU start", CodecH265, []byte{0x62, 0x01, 0x93}, true},
+		{"h265 FU middle", CodecH265, []byte{0x62, 0x01, 0x13}, false},
+		{"jpeg offset 0", CodecJPEG, []byte{0, 0, 0, 0, 1, 50, 80, 60}, true},
+		{"jpeg offset 1", CodecJPEG, []byte{0, 0, 0, 1, 1, 50, 80, 60}, false},
+		{"jpeg offset in the high byte", CodecJPEG, []byte{0, 1, 0, 0, 1, 50, 80, 60}, false},
+		{"jpeg too short for its offset", CodecJPEG, []byte{0, 0, 0}, false},
+		{"empty", CodecH264, nil, false},
+	}
+	for _, c := range cases {
+		if got := startsPicture(c.codec, c.payload); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

@@ -13,6 +13,7 @@ import {
   holdsSomething,
   normalizeSettingValue,
   ownValue,
+  resolveOrientation,
   resolveOverlaySettings,
   resolveSyncSettings,
   resolveValue,
@@ -23,6 +24,7 @@ import {
 } from './resolver';
 import { RoiStore } from './roi-store';
 import {
+  type Orientation,
   type SettingId,
   type SettingValues,
   SCALAR_SETTINGS,
@@ -79,6 +81,7 @@ export class ViewerSettingsStore {
   private readonly channelChanges = signal(0);
   private readonly resolvedCache = new Map<number, Signal<NeatOverlaySettings>>();
   private readonly syncCache = new Map<number, Signal<SyncSettings>>();
+  private readonly orientationCache = new Map<number, Signal<Orientation>>();
 
   constructor() {
     const owners: number[] = [];
@@ -119,6 +122,20 @@ export class ViewerSettingsStore {
       this.syncCache.set(channel, sync);
     }
     return sync;
+  }
+
+  /**
+   * How the channel's picture is turned; a new value only when it changes, as a string compares
+   * by value.
+   */
+  orientation(channel: number): Signal<Orientation> {
+    let orientation = this.orientationCache.get(channel);
+    if (orientation === undefined) {
+      const own = this.channelSignal(channel);
+      orientation = computed(() => resolveOrientation(this.global(), own()));
+      this.orientationCache.set(channel, orientation);
+    }
+    return orientation;
   }
 
   /**

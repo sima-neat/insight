@@ -37,8 +37,10 @@ var (
 	// One leaving frees a place, so this one is retried too.
 	errTooManyViewers = &OfferError{503, "too_many_viewers",
 		fmt.Sprintf("This channel has %d viewers already; try again once one leaves.", maxViewers)}
-	// A 4xx is final: this browser cannot decode the channel's codec.
-	errUnsupported = &OfferError{415, "codec_unsupported", "This browser cannot play the channel's codec."}
+	// A 4xx is final: this browser cannot decode the channel's codec, or cannot receive JPEG.
+	errUnsupported          = &OfferError{415, "codec_unsupported", "This browser cannot play the channel's codec."}
+	errJPEGNeedsDataChannel = &OfferError{415, "jpeg_needs_data_channel",
+		"This channel sends JPEG, which a viewer receives over a data channel this offer does not open."}
 )
 
 // negotiator answers browsers' offers. Its Pion APIs, one per codec, are built once: the port
@@ -48,36 +50,64 @@ type negotiator struct {
 }
 
 func newNegotiator(portStart, portEnd uint16, iceAddress string) (*negotiator, error) {
+	settings := webrtc.SettingEngine{}
+	if err := settings.SetEphemeralUDPPortRange(portStart, portEnd); err != nil {
+		return nil, fmt.Errorf("the WebRTC port range %d-%d: %w", portStart, portEnd, err)
+	}
+	if iceAddress != "" {
+		settings.SetNAT1To1IPs([]string{iceAddress}, webrtc.ICECandidateTypeHost)
+	}
 	n := &negotiator{apis: map[Codec]*webrtc.API{}}
-	for _, codec := range []Codec{CodecH264, CodecH265} {
-		parameters, err := codecParameters(codec)
+	for _, codec := range []Codec{CodecH264, CodecH265, CodecJPEG} {
+		engine, registry, err := mediaEngine(codec)
 		if err != nil {
 			return nil, err
 		}
-		engine := &webrtc.MediaEngine{}
-		if err := engine.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo); err != nil {
-			return nil, err
-		}
-		// A NACK responder resends what a browser lost, and sender reports keep its clock
-		// mapping fresh. No PLI: a keyframe is the app's to send (docs/contracts.md).
-		registry := &interceptor.Registry{}
-		if err := webrtc.ConfigureNack(engine, registry); err != nil {
-			return nil, err
-		}
-		if err := webrtc.ConfigureRTCPReports(registry); err != nil {
-			return nil, err
-		}
-		settings := webrtc.SettingEngine{}
-		if err := settings.SetEphemeralUDPPortRange(portStart, portEnd); err != nil {
-			return nil, fmt.Errorf("the WebRTC port range %d-%d: %w", portStart, portEnd, err)
-		}
-		if iceAddress != "" {
-			settings.SetNAT1To1IPs([]string{iceAddress}, webrtc.ICECandidateTypeHost)
-		}
+		// WithSettingEngine copies the struct but not what its slices hold (the NAT 1:1 address),
+		// so the APIs share those; nothing changes them once set above.
 		n.apis[codec] = webrtc.NewAPI(webrtc.WithMediaEngine(engine),
 			webrtc.WithInterceptorRegistry(registry), webrtc.WithSettingEngine(settings))
 	}
 	return n, nil
+}
+
+// mediaEngine is what a viewer's connection to a codec's channel negotiates and runs.
+func mediaEngine(codec Codec) (*webrtc.MediaEngine, *interceptor.Registry, error) {
+	engine, registry := &webrtc.MediaEngine{}, &interceptor.Registry{}
+	if codec == CodecJPEG {
+		// JPEG frames go over the viewer's jpeg data channel, so no codec is sent. VP8 and
+		// H.264, which every browser offers, are registered only so that the video m-line is
+		// not rejected (answer makes it inactive): Pion writes the answer's ICE candidates into
+		// the first m-line, and a browser ignores them on a rejected one. With no RTP there is
+		// nothing to resend or report, so the registry stays empty (left out, Pion would fill it
+		// with its defaults).
+		for i, mimeType := range []string{webrtc.MimeTypeVP8, webrtc.MimeTypeH264} {
+			parameters := webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: mimeType, ClockRate: clockRate},
+				PayloadType:        webrtc.PayloadType(96 + i),
+			}
+			if err := engine.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo); err != nil {
+				return nil, nil, err
+			}
+		}
+		return engine, registry, nil
+	}
+	parameters, err := codecParameters(codec)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := engine.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, err
+	}
+	// A NACK responder resends what a browser lost, and sender reports keep its clock mapping
+	// fresh. No PLI: a keyframe is the app's to send (docs/contracts.md).
+	if err := webrtc.ConfigureNack(engine, registry); err != nil {
+		return nil, nil, err
+	}
+	if err := webrtc.ConfigureRTCPReports(registry); err != nil {
+		return nil, nil, err
+	}
+	return engine, registry, nil
 }
 
 // answer negotiates a viewer of channel c and returns the answer for its browser.
@@ -95,8 +125,15 @@ func (n *negotiator) answer(ctx context.Context, c *Channel, offer Description) 
 		return Description{}, errBadOffer
 	}
 	// Refused before anything is set up: no negotiation can succeed, and a 5xx would have the
-	// browser retry forever.
-	if !offersCodec(parsed.MediaDescriptions, m.parameters.MimeType) {
+	// browser retry forever. A JPEG channel needs no decoder of the browser's, but its frames
+	// travel on a data channel, so an offer without one (no application m-line) would connect
+	// and wait forever.
+	jpeg := m.codec == CodecJPEG
+	if jpeg {
+		if !offersDataChannels(parsed.MediaDescriptions) {
+			return Description{}, errJPEGNeedsDataChannel
+		}
+	} else if !offersCodec(parsed.MediaDescriptions, m.parameters.MimeType) {
 		return Description{}, errUnsupported
 	}
 
@@ -127,13 +164,21 @@ func (n *negotiator) answer(ctx context.Context, c *Channel, offer Description) 
 			m.remove(pc)
 		}
 	})
+	// The browser sends nothing Insight reads on either channel.
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		if dc.Label() != "metadata" {
-			return
+		switch dc.Label() {
+		case "metadata":
+			dc.OnOpen(func() { c.views.add(dc) })
+			dc.OnClose(func() { c.views.remove(dc) })
+		case "jpeg":
+			// The browser opens it on every channel, since it offers before it knows the
+			// codec; only a JPEG channel sends on it.
+			if !jpeg {
+				return
+			}
+			dc.OnOpen(func() { m.frameViewers.add(dc) })
+			dc.OnClose(func() { m.frameViewers.remove(dc) })
 		}
-		dc.OnOpen(func() { c.views.add(dc) })
-		dc.OnClose(func() { c.views.remove(dc) })
-		// The browser sends nothing Insight reads.
 	})
 	failed := func(step string, err error) (Description, error) {
 		if m.isRetired() {
@@ -143,12 +188,31 @@ func (n *negotiator) answer(ctx context.Context, c *Channel, offer Description) 
 		return Description{}, errNegotiation
 	}
 
-	sender, err := pc.AddTrack(m.track)
-	if err != nil {
-		return failed("adding the track", err)
+	var sender *webrtc.RTPSender // none for JPEG, which has no track
+	if !jpeg {
+		if sender, err = pc.AddTrack(m.track); err != nil {
+			return failed("adding the track", err)
+		}
 	}
 	if err := pc.SetRemoteDescription(remote); err != nil {
 		return failed("reading the offer", err)
+	}
+	if jpeg {
+		// Pion answers the browser's recvonly video sendonly, even with no track to send; a
+		// stopped transceiver is answered inactive, its codecs kept, so the m-line is neither
+		// rejected nor promises a track the browser would wait for. That is Pion's behavior, not
+		// JSEP's: JSEP answers a stopped transceiver's m-section rejected, with port 0, and a
+		// browser would then ignore the ICE candidates Pion writes into it. A Pion upgrade may
+		// follow JSEP; TestAJPEGOfferIsAnsweredWithAnInactiveVideoLine pins the inactive line
+		// with a live port and its candidates.
+		for _, transceiver := range pc.GetTransceivers() {
+			if transceiver.Kind() != webrtc.RTPCodecTypeVideo {
+				continue
+			}
+			if err := transceiver.Stop(); err != nil {
+				return failed("answering the video inactive", err)
+			}
+		}
 	}
 	local, err := pc.CreateAnswer(nil)
 	if err != nil {
@@ -168,14 +232,16 @@ func (n *negotiator) answer(ctx context.Context, c *Channel, offer Description) 
 	}
 	// The interceptors read RTCP from here (the browser's NACKs and reports); reading it keeps
 	// them going, and ends with the connection.
-	go func() {
-		buf := make([]byte, 1500)
-		for {
-			if _, _, err := sender.Read(buf); err != nil {
-				return
+	if sender != nil {
+		go func() {
+			buf := make([]byte, 1500)
+			for {
+				if _, _, err := sender.Read(buf); err != nil {
+					return
+				}
 			}
-		}
-	}()
+		}()
+	}
 	done = true
 	return Description{Type: "answer", SDP: pc.LocalDescription().SDP}, nil
 }
@@ -192,6 +258,17 @@ func offersCodec(media []*sdp.MediaDescription, mimeType string) bool {
 			if attribute.Key == "rtpmap" && strings.Contains(strings.ToUpper(attribute.Value), wanted) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// offersDataChannels says whether an offer has an application m-line, which carries its data
+// channels, that is not rejected: one with port 0 carries none.
+func offersDataChannels(media []*sdp.MediaDescription) bool {
+	for _, description := range media {
+		if description.MediaName.Media == "application" && description.MediaName.Port.Value != 0 {
+			return true
 		}
 	}
 	return false

@@ -164,14 +164,14 @@ RTP ([RFC 3550](https://www.rfc-editor.org/rfc/rfc3550)) over UDP to `9000 + N`.
 
 | Item | Rule |
 | --- | --- |
-| Codec | Chosen by the RTP payload type, since Insight reads no SDP: **96** is H.264 ([RFC 6184](https://www.rfc-editor.org/rfc/rfc6184): single NAL units, STAP-A, FU-A), **98** is H.265 ([RFC 7798](https://www.rfc-editor.org/rfc/rfc7798)). **26**, RTP/JPEG ([RFC 2435](https://www.rfc-editor.org/rfc/rfc2435)), is **planned**; until then such a tile waits. Insight ignores any other payload type. |
-| Clock | 90 kHz. All packets of one picture share its RTP timestamp, and the last one has the marker bit set. |
-| Keyframes | Send one (an IDR for H.264, an IRAP for H.265) at least every second. A viewer starts at the next keyframe and Insight cannot ask the app for one, so the keyframe interval is the longest a new viewer waits. |
-| Parameter sets | In band, at least before every keyframe (SPS and PPS; VPS too for H.265). Core sends them every second (`config-interval=1`). |
-| Packet size | Up to 65,507 bytes per datagram. Keep packets at about 1,400 bytes, as GStreamer's payloaders do, so they are not fragmented. |
+| Codec | Chosen by the RTP payload type, since Insight reads no SDP: **96** is H.264 ([RFC 6184](https://www.rfc-editor.org/rfc/rfc6184): single NAL units, STAP-A, FU-A), **98** is H.265 ([RFC 7798](https://www.rfc-editor.org/rfc/rfc7798)). **26** is RTP/JPEG ([RFC 2435](https://www.rfc-editor.org/rfc/rfc2435)): types 0 and 1 (4:2:2 and 4:2:0, as webcams write them) and 64 and 65 (the same with restart markers), with Q 1 to 99 or the tables in band (Q 128 to 255). Insight takes no interlaced frames, no tables out of band and no Q of 0 or 100 to 127, and counts such a frame as unusable while a viewer watches. Sizes are multiples of 8 up to 2040, RTP/JPEG's own limit. Core's `VideoSender` with MJPEG sends exactly this. Insight ignores any other payload type. |
+| Clock | 90 kHz. All packets of one picture share its RTP timestamp, and the last one has the marker bit set. A picture is at most 16 MiB of RTP bytes, for every codec; Insight drops a larger one. |
+| Keyframes | Send one (an IDR for H.264, an IRAP for H.265) at least every second. A viewer starts at the next keyframe and Insight cannot ask the app for one, so the keyframe interval is the longest a new viewer waits. Every JPEG frame stands alone, so JPEG has no keyframe interval. |
+| Parameter sets | In band, at least before every keyframe (SPS and PPS; VPS too for H.265). Core sends them every second (`config-interval=1`). JPEG has none. |
+| Packet size | Up to 65,507 bytes per datagram. Keep packets at about 1,400 bytes, as GStreamer's payloaders and Core's do, so they are not fragmented. |
 | Senders | One sender per channel. A sender may restart at any time with a new SSRC, sequence and timestamps; the tile goes on playing. Changing the codec on a channel reconnects its viewers. |
 | RTCP | None expected, none sent back. |
-| Browser | The browser decodes the video. A browser without H.265 shows "Codec not supported by this browser" on an H.265 tile. Insight offers H.264 as constrained baseline but passes any profile the browser decodes. |
+| Browser | For H.264 and H.265 the browser decodes the video. For JPEG the page draws the frames, which Insight sends over a data channel ([What a viewer's connection carries](#what-a-viewers-connection-carries)), in any browser. A browser without H.265 shows "Codec not supported by this browser" on an H.265 tile. Insight offers H.264 as constrained baseline but passes any profile the browser decodes. |
 
 ### Metadata datagrams
 
@@ -276,8 +276,10 @@ milliseconds loses, so the rule never picks a neighboring frame.
 - Inference often runs slower than the video. A frame with no message of a type redraws that type's
   last message for up to 200 ms. Send an empty list (`"objects": []`) to clear the overlay at once.
 
-Frame-accurate drawing needs a browser that reports each frame's RTP timestamp: Chromium-based
-browsers (Chrome, Edge). Other browsers draw the newest message on each frame.
+Frame-accurate drawing of an H.264 or H.265 channel needs a browser that reports each frame's RTP
+timestamp: Chromium-based browsers (Chrome, Edge). Other browsers draw the newest message on each
+frame. A JPEG channel is frame-accurate in every browser, since each of its frames arrives with its
+RTP timestamp.
 
 ### Coordinates
 
@@ -493,6 +495,65 @@ link on the address the caller reached Insight on (or on the public address a ho
 
 The browser receives the video over WebRTC from Insight's own UDP ports. In the SDK container they
 are published as `webRTC` in the port map; the browser must reach them.
+
+### What a viewer's connection carries
+
+A viewer's browser connects to Insight's own UDP ports, and Insight sends it one channel's video
+and metadata over that connection. The browser's offer goes to `POST /api/channels/{channel}/offer`
+and the answer comes back in the same request. H.264 and H.265 travel as a WebRTC video track. JPEG
+cannot, since browsers have no RTP/JPEG decoder, so its frames travel over a data channel and the
+page draws them. This section is the rule for both ends.
+
+- **The offer** always has a receive-only video m-line and an application m-line with two data
+  channels: `metadata` (`{ ordered: true, maxRetransmits: 0 }`, text) and `jpeg`. The browser opens
+  both on every channel, since it does not know the codec when it offers.
+- **For a JPEG channel** the answer adds no track and answers the video m-line inactive, not
+  rejected: a browser ignores the ICE candidates of a rejected m-line, and Insight writes them into
+  the first one.
+- **An offer for a JPEG channel without an application m-line**, or with a rejected one (port 0),
+  can never receive frames. Insight refuses it with 415 `jpeg_needs_data_channel`, which is final:
+  the browser does not retry.
+- **For an H.264 or H.265 channel** Insight ignores the `jpeg` channel, as Insight before JPEG
+  support did.
+
+#### The `jpeg` data channel
+
+- **Label** `jpeg`. The browser opens it with `{ ordered: true, maxPacketLifeTime: 300 }` and sets
+  `binaryType = 'arraybuffer'`. It carries frames from Insight to the browser only; the browser
+  sends nothing on it.
+- **One message is one chunk of one frame**, binary:
+
+  | Byte | Size | Value |
+  | --- | --- | --- |
+  | 0 | 4 | RTP timestamp, unsigned, big-endian: the frame's outgoing timestamp, the value its metadata carries as `_insight.rtp_timestamp` |
+  | 4 | 2 | Chunk index, unsigned, big-endian, from 0 |
+  | 6 | 2 | Chunk count, unsigned, big-endian, at least 1 |
+  | 8 | 1 or more | The chunk's bytes |
+
+- **Chunks are 60,000 bytes**, the last one shorter, which is below every WebRTC stack's limit on a
+  message's size.
+- **A frame is a complete baseline JFIF image**, from SOI to EOI, which every browser's image
+  decoder takes. Its chunks are sent in index order, one after another, before any chunk of the
+  next frame.
+- **A frame is at most 16 MiB**, so it has at most 280 chunks. A receiver drops a frame whose count
+  says more.
+- **The receiver's rules:**
+  - A message of 8 bytes or less, or with an index not below its count, is dropped.
+  - A chunk whose timestamp or count differs from the frame being collected starts a new frame.
+    The channel is ordered but may abandon a message, so the unfinished frame lost a chunk: it is
+    dropped and counted.
+  - A repeated index is ignored.
+  - A frame is whole once all its chunks are in.
+- **Backpressure:** before each frame Insight checks each viewer's buffered amount. A viewer over
+  512 KiB skips the whole frame, never part of one, and Insight counts the skip
+  (`skipped_frames`). A slow viewer then shows a current frame late, not every frame later and
+  later.
+- **A failed send closes that viewer's `jpeg` channel.** The browser rebuilds its connection when
+  its `jpeg` channel closes, rather than waiting on a silent channel.
+- **Versioning is the label.** The header has no version field. An incompatible change would take
+  a new label (`jpeg2`), which Insight versions that do not know it ignore.
+
+JPEG viewers count toward the channel's viewer limit like any other viewer.
 
 When a tile stays empty or draws nothing, [Missing video or overlays](workflows.md#missing-video-or-overlays)
 says what to check.

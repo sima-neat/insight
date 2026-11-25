@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Feeds a Viewer channel in the Neat SDK container with a test stream for the Viewer: an H.264 test
-# pattern (640x480 at 15 fps, RTP payload type 96) on UDP 9000+N and object-detection metadata
-# matched to its frames on UDP 9100+N. The work happens in the container, in the package's
-# neat_insight/tools/metadata_test.py (the neat-insight-metadata-test command), which says how the
-# metadata is matched and which options it takes after the channel.
+# Feeds a Viewer channel in the Neat SDK container with a test stream for the Viewer: an H.264 or,
+# with --codec jpeg, an RTP/JPEG test pattern (4:2:0, RFC 2435 type 1; 640x480 at 15 fps by
+# default, --size and --rate change them) on UDP 9000+N, and metadata of the types --types names
+# (object detection by default) matched to its frames on UDP 9100+N. The work happens in the
+# container, in the package's neat_insight/tools/metadata_test.py (the neat-insight-metadata-test
+# command), which says how the metadata is matched and which options it takes after the channel.
 #
 # Usage, from the laptop:
 #   scripts/test-feed.sh <channel> [<option>...]               runs until Ctrl-C
@@ -24,7 +25,8 @@ usage() {
 Usage:
   scripts/test-feed.sh <channel> [<option>...]               runs until Ctrl-C
   scripts/test-feed.sh stop [<channel>]                       stops that channel's feed, or all
-Options: --types <type>,...  --metadata-delay-ms <ms>  (neat_insight/tools/metadata_test.py --help)
+Options: --types <type>,...  --metadata-delay-ms <ms>  --codec h264|jpeg  --size <W>x<H>  --rate <N>
+         (neat_insight/tools/metadata_test.py --help)
 EOF
   exit "${1:-2}"
 }

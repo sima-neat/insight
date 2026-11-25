@@ -29,6 +29,12 @@
   gap: var(--neat-space-2);
 }
 
+/* The kit's select fills its box, which takes the rest of the row. */
+.select {
+  flex: 1;
+  min-width: 0;
+}
+
 /* The kit's field fills its box: room for five digits. */
 .field {
   display: flex;

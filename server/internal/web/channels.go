@@ -92,12 +92,16 @@ func (h *handlers) GetIngestStats(w http.ResponseWriter, r *http.Request, params
 		if verbose {
 			malformed, unsupported, errs := int(s.Video.Malformed), int(s.Video.Unsupported), nonNil(s.Errors)
 			oversized := int(s.Video.Oversized)
+			incomplete, unusable, skipped := int(s.Video.Incomplete), int(s.Video.Unusable), int(s.Video.Skipped)
 			c.Diagnostics = &struct {
+				IncompleteFrames   *int      `json:"incomplete_frames,omitempty"`
 				MalformedPackets   *int      `json:"malformed_packets,omitempty"`
 				OversizedFrames    *int      `json:"oversized_frames,omitempty"`
 				RecentErrors       *[]string `json:"recent_errors,omitempty"`
+				SkippedFrames      *int      `json:"skipped_frames,omitempty"`
 				UnsupportedPackets *int      `json:"unsupported_packets,omitempty"`
-			}{&malformed, &oversized, &errs, &unsupported}
+				UnusableFrames     *int      `json:"unusable_frames,omitempty"`
+			}{&incomplete, &malformed, &oversized, &errs, &skipped, &unsupported, &unusable}
 		}
 		stats.Channels = append(stats.Channels, c)
 	}
