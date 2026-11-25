@@ -1302,7 +1302,7 @@ type Slot struct {
 	// File A file slot's library path.
 	File *string `json:"file,omitempty"`
 
-	// Fps A file slot's output rate when it is not the file's own.
+	// Fps A file slot's output rate when it is not the file's own; a webcam slot's rate, 30 or 60.
 	Fps *int `json:"fps,omitempty"`
 
 	// Job The rendition's encode, while the slot is preparing.
@@ -1338,12 +1338,12 @@ type SlotKind string
 // SlotState Derived: idle (stopped, nothing assigned, or a webcam no browser publishes), preparing (a rendition is encoded, see `job`), starting, live (MediaMTX has the stream), failed (see `error`), external (a publisher Insight did not start holds it).
 type SlotState string
 
-// SlotAssignment What to assign: `file` (with `file` and an optional `fps`), `pull` (with `url` and optional `username` and `password`, which replace credentials in the URL) or `webcam`.
+// SlotAssignment What to assign: `file` (with `file` and an optional `fps`), `pull` (with `url` and optional `username` and `password`, which replace credentials in the URL) or `webcam` (with an optional `fps`).
 type SlotAssignment struct {
 	// File A library path.
 	File *string `json:"file,omitempty"`
 
-	// Fps The output rate; absent for the file's own.
+	// Fps The output rate: a file's, absent for the file's own; a webcam's, 30 or 60, absent for 30.
 	Fps      *int               `json:"fps,omitempty"`
 	Kind     SlotAssignmentKind `json:"kind"`
 	Password *string            `json:"password,omitempty"`
@@ -1438,7 +1438,7 @@ type SlotUrls struct {
 	HttpMjpeg *string `json:"http_mjpeg,omitempty"`
 	Rtsp      string  `json:"rtsp"`
 
-	// Whip Where a browser publishes a webcam slot's camera.
+	// Whip Where a browser publishes a webcam slot's camera, at the slot's rate (`fps`): each rate has a URL of its own.
 	Whip *string `json:"whip,omitempty"`
 }
 

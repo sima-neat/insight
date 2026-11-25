@@ -149,20 +149,24 @@ describe('slotRow', () => {
     expect(label(slotRow(external(4), { starting: true }))).toBe('External (highlight)');
   });
 
-  it('a webcam slot: CAM and the camera this browser picked, else "Select a camera"', () => {
+  it('a webcam slot: CAM and the camera this browser picked, else "Select a camera", at its rate', () => {
     const webcam = webcamSlot(5);
     expect(columns(slotRow(webcam, { camera: { deviceId: 'd1', label: 'Desk camera' } }))).toEqual([
       'src5',
       'CAM',
       'Desk camera',
       'Idle (neutral)',
-      '',
+      '30 fps',
       '–',
     ]);
     const live = { ...webcam, state: 'live' as const, codec: 'h264', publisher: publisher() };
     expect(slotRow(live).source).toBe('Select a camera');
     expect(slotRow(live).state.label).toBe('Live');
     expect(slotRow(live).codec).toBe('H.264');
+    // The rate it is assigned, which the server streams it at.
+    expect(slotRow(webcamSlot(5, { fps: 60, state: 'live', publisher: publisher() })).rate).toBe(
+      '60 fps',
+    );
   });
 
   it('an external slot: EXT, the publisher chip, External, its rate and codec', () => {

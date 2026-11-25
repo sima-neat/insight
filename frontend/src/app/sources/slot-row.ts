@@ -215,7 +215,7 @@ export function dimensionsText(stream: {
 
 /**
  * The rate the slot streams at. A file at a rate other than its own streams a rendition; a webcam
- * always goes out at the normalizer's rate, which the server does not report, so it shows none.
+ * goes out at the rate it is assigned, whatever its camera sends.
  */
 export function slotRate(slot: Slot, encode?: Progress): string {
   if (slot.state === 'external') return fpsText(slot.publisher?.fps);
@@ -224,6 +224,7 @@ export function slotRate(slot: Slot, encode?: Progress): string {
     return slot.pull?.status === 'live' ? fpsText(slot.publisher?.fps) : '';
   }
   if (encode) return encode.percent === null ? 'encoding' : `encoding ${encode.percent}%`;
+  if (slot.kind === 'webcam') return fpsText(slot.fps);
   if (slot.kind !== 'file') return '';
   const fps = slot.fps ?? slot.native_fps;
   if (fps === undefined) return '';

@@ -157,7 +157,7 @@ export interface paths {
         readonly get?: never;
         /**
          * Assign a file, a camera to pull or a webcam to a slot
-         * @description `{kind: "file", file, fps?}` streams a library file, at its own rate or at `fps` (a rendition is encoded first when the slot starts and none is cached); a slot that streamed a file keeps running with the new one, any other slot is stopped. `{kind: "pull", url, username?, password?}` has MediaMTX pull a camera (rtsp:// or rtsps://), after probing it: a camera that refuses the credentials is 422 `pull_auth_failed`, one that does not answer 502 `pull_unreachable`. A publisher that took the slot during the probe is 409 `slot_busy`, and a MediaMTX that does not answer the check made after it 503 `mediamtx_unavailable`, with nothing assigned. The credentials are kept in memory only. The slot starts pulling at once. `{kind: "webcam"}` makes it a browser's webcam: the answer's `urls.whip` is where the browser publishes. A slot an external publisher holds is 409 `slot_busy`. The body is sent as application/json.
+         * @description `{kind: "file", file, fps?}` streams a library file, at its own rate or at `fps` (a rendition is encoded first when the slot starts and none is cached); a slot that streamed a file keeps running with the new one, any other slot is stopped. `{kind: "pull", url, username?, password?}` has MediaMTX pull a camera (rtsp:// or rtsps://), after probing it: a camera that refuses the credentials is 422 `pull_auth_failed`, one that does not answer 502 `pull_unreachable`. A publisher that took the slot during the probe is 409 `slot_busy`, and a MediaMTX that does not answer the check made after it 503 `mediamtx_unavailable`, with nothing assigned. The credentials are kept in memory only. The slot starts pulling at once. `{kind: "webcam", fps?}` makes it a browser's webcam at `fps` frames per second, 30 or 60 (30 when absent; another rate, 0 included, is 400 `invalid_fps`): the answer's `urls.whip` is where the browser publishes, a URL of its own per rate, and the stream on `srcN` is re-encoded at that rate whatever the camera sends. Assigning a webcam again at another rate disconnects what publishes at the old one. A slot an external publisher holds is 409 `slot_busy`. The body is sent as application/json.
          */
         readonly put: operations["assignSlot"];
         readonly post?: never;
@@ -1255,7 +1255,7 @@ export interface components {
             readonly kind: "none" | "file" | "webcam" | "pull";
             /** @description A file slot's library path. */
             readonly file?: string;
-            /** @description A file slot's output rate when it is not the file's own. */
+            /** @description A file slot's output rate when it is not the file's own; a webcam slot's rate, 30 or 60. */
             readonly fps?: number;
             /** @description The file's own rate in whole frames per second, once it is probed. */
             readonly native_fps?: number;
@@ -1320,16 +1320,16 @@ export interface components {
             readonly rtsp: string;
             /** @description The HTTP MJPEG output (Frozen, `/stream/http/srcN.mjpg`), for an MJPEG stream. */
             readonly http_mjpeg?: string;
-            /** @description Where a browser publishes a webcam slot's camera. */
+            /** @description Where a browser publishes a webcam slot's camera, at the slot's rate (`fps`): each rate has a URL of its own. */
             readonly whip?: string;
         };
-        /** @description What to assign: `file` (with `file` and an optional `fps`), `pull` (with `url` and optional `username` and `password`, which replace credentials in the URL) or `webcam`. */
+        /** @description What to assign: `file` (with `file` and an optional `fps`), `pull` (with `url` and optional `username` and `password`, which replace credentials in the URL) or `webcam` (with an optional `fps`). */
         readonly SlotAssignment: {
             /** @enum {string} */
             readonly kind: "file" | "pull" | "webcam";
             /** @description A library path. */
             readonly file?: string;
-            /** @description The output rate; absent for the file's own. */
+            /** @description The output rate: a file's, absent for the file's own; a webcam's, 30 or 60, absent for 30. */
             readonly fps?: number;
             readonly url?: string;
             readonly username?: string;

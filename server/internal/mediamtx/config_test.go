@@ -46,6 +46,19 @@ func TestRenderConfigOfTheShippedFile(t *testing.T) {
 			t.Errorf("the rendered configuration still holds %q", placeholder)
 		}
 	}
+	// A webcam normalizer per rate, 30 fps on camN and 60 fps on camNr60, each publishing onto
+	// srcN with this run's tag (the slots' tests hold the commands to the rates).
+	for _, pattern := range []string{
+		"\n  \"~^cam([1-9]|[1-3][0-9]|4[0-8])$\":\n    runOnReady: >\n",
+		"\n  \"~^cam([1-9]|[1-3][0-9]|4[0-8])r60$\":\n    runOnReady: >\n",
+	} {
+		if !strings.Contains(text, pattern) {
+			t.Errorf("the rendered configuration lacks the webcam path %q", pattern)
+		}
+	}
+	if n := strings.Count(text, "src$G1?"+testSecrets.PublisherQuery()+"\n"); n != 2 {
+		t.Errorf("%d webcam normalizers publish with this run's tag, not 2", n)
+	}
 	// Nothing else changed.
 	back := strings.Replace(text, `"s3cret_-PW"`, passwordPlaceholder, 1)
 	back = strings.ReplaceAll(back, testSecrets.PublisherQuery(), publisherPlaceholder)

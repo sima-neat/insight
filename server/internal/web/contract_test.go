@@ -87,7 +87,17 @@ func TestTheAPIAnswersAsItsDocumentSays(t *testing.T) {
 
 	// The slots: src1 carries an external H.264 stream, src2 an external MJPEG one.
 	c.ok(c.send(http.MethodPut, "/api/slots/3", `{"kind":"file","file":"clip.mp4"}`))
-	c.ok(c.send(http.MethodPut, "/api/slots/4", `{"kind":"webcam"}`))
+	if body := c.ok(c.send(http.MethodPut, "/api/slots/4", `{"kind":"webcam"}`)); !strings.Contains(body, `"fps":30`) {
+		t.Errorf("a webcam that names no rate: %s", body)
+	}
+	if body := c.ok(c.send(http.MethodPut, "/api/slots/7", `{"kind":"webcam","fps":60}`)); !strings.Contains(body, `"fps":60`) ||
+		!strings.Contains(body, `"whip":"https://127.0.0.1:18889/cam7r60/whip"`) {
+		t.Errorf("a webcam at 60 fps: %s", body)
+	}
+	c.refused(c.send(http.MethodPut, "/api/slots/7", `{"kind":"webcam","fps":25}`), 400, "invalid_fps")
+	// A present 0 is a rate, and not one a webcam streams at; for a file it is the file's own.
+	c.refused(c.send(http.MethodPut, "/api/slots/7", `{"kind":"webcam","fps":0}`), 400, "invalid_fps")
+	c.ok(c.send(http.MethodPut, "/api/slots/8", `{"kind":"file","file":"clip.mp4","fps":0}`))
 	c.refused(c.send(http.MethodPut, "/api/slots/5", `{"kind":"pull","url":"rtsp://127.0.0.1:1/cam"}`), 502, "pull_unreachable")
 	c.refused(c.send(http.MethodPut, "/api/slots/1", `{"kind":"file","file":"clip.mp4"}`), 409, "slot_busy")
 	c.refused(c.send(http.MethodPut, "/api/slots/49", `{"kind":"webcam"}`), 404, "no_such_slot")

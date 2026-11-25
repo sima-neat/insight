@@ -104,4 +104,8 @@ Where Insight runs behind a proxy or a NAT, the hosting setup writes optional fi
 | `launch-url` | The URL browsers open Insight at. The links Insight makes (the Viewer, webcam publishing, HTTP MJPEG) use its origin. A value Insight cannot use is logged and ignored. |
 | `url-routing` | `proxy` (the default) to make links through the launch URL, `direct` to make them on Insight's own ports. |
 
+With `proxy`, a browser publishes its webcam through the launch URL's origin, at `/camN/whip`
+for a source at 30 fps and `/camNr60/whip` at 60 fps (`N` from 1 to 48), so the proxy forwards
+both to `webrtcWhip`.
+
 **System information** shows the browser address and public origin Insight applied.

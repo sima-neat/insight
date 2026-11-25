@@ -52,10 +52,10 @@ func (u urls) httpMJPEG(host string, n int) string {
 	return "https://" + host + "/" + suffix
 }
 
-// whip is where a browser publishes webcam n: on the public origin when there is one, else on
-// MediaMTX's WHIP port of the host the browser used.
-func (u urls) whip(host string, n int) string {
-	suffix := camName(n) + "/whip"
+// whip is where a browser publishes webcam n at fps (camName): on the public origin when there
+// is one, else on MediaMTX's WHIP port of the host the browser used.
+func (u urls) whip(host string, n, fps int) string {
+	suffix := camName(n, fps) + "/whip"
 	if u.origin != "" {
 		return u.origin + suffix
 	}

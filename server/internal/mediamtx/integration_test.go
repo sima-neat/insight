@@ -262,14 +262,32 @@ func TestMediaMTXPullsAndReaders(t *testing.T) {
 }
 
 func TestMediaMTXWebcamNormalizerIsInsightsOwn(t *testing.T) {
-	// A browser publishes to camN; MediaMTX's runOnReady ffmpeg republishes it on srcN with
-	// this run's tag, so it must not read as an external publisher on the webcam's slot.
+	// A browser publishes to camN at 30 fps and to camNr60 at 60; MediaMTX's runOnReady ffmpeg
+	// republishes it on srcN at that rate with this run's tag, so it must not read as an
+	// external publisher on the webcam's slot. The test pictures come at 15 fps, as from a
+	// camera slower than the rate: the normalizer repeats pictures to reach it.
 	m := startMediaMTX(t)
 	m.needFFmpeg(t)
-	m.publish(t, "cam2", "")
-	path := m.waitFor(t, "src2", "the normalizer publishes", func(p Path) bool { return p.Ready })
-	if path.External() || !path.Source.Insight {
-		t.Errorf("the normalized webcam: %+v", *path.Source)
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("no ffprobe to read the normalized rate with")
+	}
+	for _, c := range []struct{ cam, src, rate string }{{"cam2", "src2", "30/1"}, {"cam3r60", "src3", "60/1"}} {
+		m.publish(t, c.cam, "")
+		path := m.waitFor(t, c.src, "the normalizer publishes", func(p Path) bool { return p.Ready })
+		if path.External() || !path.Source.Insight {
+			t.Errorf("the normalized webcam on %s: %+v", c.src, *path.Source)
+		}
+		// Its stderr may say it joined between keyframes; only what it prints counts.
+		out, err := exec.Command(ffprobe, "-v", "error", "-rtsp_transport", "tcp", "-select_streams", "v:0",
+			"-show_entries", "stream=profile,r_frame_rate", "-of", "default=noprint_wrappers=1",
+			m.rtsp+"/"+c.src).Output()
+		if err != nil {
+			t.Fatalf("probing %s: %v", c.src, err)
+		}
+		if got, want := string(out), "profile=Constrained Baseline\nr_frame_rate="+c.rate+"\n"; got != want {
+			t.Errorf("%s published to %s comes out as %q, not %q", c.cam, c.src, got, want)
+		}
 	}
 }
 

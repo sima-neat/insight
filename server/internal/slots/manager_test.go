@@ -103,7 +103,7 @@ func TestAssigningAFileRestartsARunningSlotWithIt(t *testing.T) {
 	}
 
 	// A webcam slot that becomes a file slot does not start streaming by itself.
-	_, err := h.m.AssignWebcam(4, "")
+	_, err := h.m.AssignWebcam(4, "", DefaultWebcamFPS)
 	must(t, err)
 	must(t, h.m.AssignFile(4, "a.mp4", 0))
 	if s := h.slot(4); s.Run {
@@ -529,7 +529,7 @@ func TestAPullThatLaterRefusesItsCredentialsIsPaused(t *testing.T) {
 
 func TestAWebcamSlotKicksWhatItNoLongerWants(t *testing.T) {
 	h := newHarness(t)
-	url, err := h.m.AssignWebcam(7, "[fd00::1]:9900")
+	url, err := h.m.AssignWebcam(7, "[fd00::1]:9900", DefaultWebcamFPS)
 	must(t, err)
 	if url != "https://[fd00::1]:18889/cam7/whip" {
 		t.Errorf("the WHIP URL: %s", url)
@@ -566,12 +566,88 @@ func TestAWebcamSlotKicksWhatItNoLongerWants(t *testing.T) {
 	}
 }
 
+func TestAssigningAWebcamChecksItsRate(t *testing.T) {
+	h := newHarness(t)
+	for _, c := range []struct {
+		fps, rate int
+		whip      string
+	}{
+		{30, 30, ":18889/cam5/whip"},
+		{60, 60, ":18889/cam5r60/whip"},
+	} {
+		url, err := h.m.AssignWebcam(5, "", c.fps)
+		must(t, err)
+		s := h.slot(5)
+		if !strings.HasSuffix(url, c.whip) || !strings.HasSuffix(s.URLs.WHIP, c.whip) || s.FPS == nil || *s.FPS != c.rate || s.Kind != KindWebcam || !s.Run {
+			t.Errorf("a webcam assigned at %d fps: %s %+v", c.fps, url, s)
+		}
+	}
+	// A rate no normalizer path encodes is refused, and the slot keeps what it had.
+	// 0 too: an assignment without a rate passes DefaultWebcamFPS (the handler does).
+	for _, fps := range []int{-30, 0, 1, 25, 29, 31, 59, 61, 120} {
+		_, err := h.m.AssignWebcam(5, "", fps)
+		wantCode(t, err, CodeInvalidFPS)
+	}
+	if s := h.slot(5); *s.FPS != 60 || !strings.HasSuffix(s.URLs.WHIP, "/cam5r60/whip") {
+		t.Errorf("a refused rate changed the slot: %+v", s)
+	}
+	_, err := h.m.AssignWebcam(49, "", 25)
+	wantCode(t, err, CodeNoSuchSlot)
+}
+
+func TestAWebcamAtANewRateKicksWhatPublishesAtTheOld(t *testing.T) {
+	h := newHarness(t)
+	_, err := h.m.AssignWebcam(7, "", 30)
+	must(t, err)
+	at30 := mediamtx.Path{Name: "cam7", Ready: true, Codec: "h264",
+		Source: &mediamtx.Source{Type: "webRTCSession", ID: "browser-30", Protocol: "webrtc", Address: "10.0.0.20"}}
+	h.mtx.setPath(at30)
+	h.settle()
+	if s := h.slot(7); s.State != Starting {
+		t.Errorf("a webcam slot a browser publishes on at its rate: %+v", s)
+	}
+
+	// The tab starts again at 60 fps: the slot wants cam7r60, and what still publishes on cam7
+	// would feed src7 at 30.
+	_, err = h.m.AssignWebcam(7, "", 60)
+	must(t, err)
+	at60 := at30
+	at60.Name = "cam7r60"
+	at60.Source = &mediamtx.Source{Type: "webRTCSession", ID: "browser-60", Protocol: "webrtc", Address: "10.0.0.20"}
+	h.mtx.setPath(at60)
+	h.settle()
+	if calls := h.mtx.takeCalls(); !slices.Equal(calls, []string{"kick webRTCSession browser-30"}) {
+		t.Errorf("the old rate's publisher: %v", calls)
+	}
+	if s := h.slot(7); s.State != Starting {
+		t.Errorf("a webcam slot a browser publishes on at its new rate: %+v", s)
+	}
+	// Only a publisher at the slot's own rate makes it start; one at the other is kicked.
+	_, err = h.m.AssignWebcam(8, "", 60)
+	must(t, err)
+	h.mtx.setPath(mediamtx.Path{Name: "cam8", Ready: true, Codec: "h264",
+		Source: &mediamtx.Source{Type: "webRTCSession", ID: "browser-8", Protocol: "webrtc"}})
+	h.settle()
+	if s := h.slot(8); s.State != Idle {
+		t.Errorf("a webcam slot at 60 fps with a browser on its 30 fps path: %+v", s)
+	}
+	if calls := h.mtx.takeCalls(); !slices.Equal(calls, []string{"kick webRTCSession browser-8"}) {
+		t.Errorf("a publisher at the rate slot 8 does not want: %v", calls)
+	}
+
+	must(t, h.m.Stop(7))
+	h.settle()
+	if calls := h.mtx.takeCalls(); !slices.Equal(calls, []string{"kick webRTCSession browser-60"}) {
+		t.Errorf("stopping a webcam at 60 fps: %v", calls)
+	}
+}
+
 func TestRestoredSlotsComeBackStopped(t *testing.T) {
 	h := newHarness(t)
 	h.file("a.mp4", h264Info)
 	must(t, h.m.AssignFile(1, "a.mp4", 15))
 	must(t, h.m.Start(1))
-	_, err := h.m.AssignWebcam(2, "")
+	_, err := h.m.AssignWebcam(2, "", 60)
 	must(t, err)
 	h.settle()
 	// The encode runs as a job, on a goroutine of its own.
@@ -583,8 +659,8 @@ func TestRestoredSlotsComeBackStopped(t *testing.T) {
 	if s := h.slot(1); s.Kind != KindFile || s.File != "a.mp4" || *s.FPS != 15 || s.Run || s.State != Idle {
 		t.Errorf("a restored file slot: %+v", s)
 	}
-	if s := h.slot(2); s.Kind != KindWebcam || s.Run {
-		t.Errorf("a restored webcam slot: %+v", s)
+	if s := h.slot(2); s.Kind != KindWebcam || s.Run || s.FPS == nil || *s.FPS != 60 || !strings.HasSuffix(s.URLs.WHIP, "/cam2r60/whip") {
+		t.Errorf("a restored webcam slot keeps its rate: %+v", s)
 	}
 	h.noPublisher(1)
 	if h.encoder.count() != encodes || h.starter.count() != publishers {

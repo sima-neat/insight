@@ -101,6 +101,39 @@ func preloadEnv(shim string) []string {
 // pathName is slot n's MediaMTX path, srcN.
 func pathName(n int) string { return fmt.Sprintf("src%d", n) }
 
-// camName is the path a browser publishes slot n's webcam to, camN; MediaMTX's normalizer
-// re-encodes it onto srcN.
-func camName(n int) string { return fmt.Sprintf("cam%d", n) }
+// The rates a webcam slot streams at, in frames per second. MediaMTX's normalizer
+// (webrtc/mediamtx.yml) has a path pattern of its own per rate, each with a fixed command line,
+// so a rate is the path a browser publishes to and never a value on a command line. An
+// assignment without a rate, and a webcam saved before there were two, takes DefaultWebcamFPS,
+// the one rate there was.
+const DefaultWebcamFPS = 30
+
+var webcamRates = [...]int{DefaultWebcamFPS, 60}
+
+// isWebcamRate says whether a normalizer path encodes at fps.
+func isWebcamRate(fps int) bool {
+	for _, rate := range webcamRates {
+		if fps == rate {
+			return true
+		}
+	}
+	return false
+}
+
+// camName is the path a browser publishes slot n's webcam to at a rate of webcamRates: camN at
+// DefaultWebcamFPS, camNr60 at 60. MediaMTX's normalizer re-encodes it onto srcN at that rate.
+func camName(n, fps int) string {
+	if fps == DefaultWebcamFPS {
+		return fmt.Sprintf("cam%d", n)
+	}
+	return fmt.Sprintf("cam%dr%d", n, fps)
+}
+
+// camNames are the paths a browser may publish slot n's webcam to, one per rate.
+func camNames(n int) []string {
+	names := make([]string, len(webcamRates))
+	for i, rate := range webcamRates {
+		names[i] = camName(n, rate)
+	}
+	return names
+}

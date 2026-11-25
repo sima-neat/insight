@@ -14,7 +14,8 @@ type Slot struct {
 	Kind Kind `json:"kind"`
 	// File is a file slot's library path.
 	File string `json:"file,omitempty"`
-	// FPS is a file slot's output rate when it is not the file's own.
+	// FPS is a file slot's output rate when it is not the file's own, and a webcam slot's rate,
+	// 30 or 60.
 	FPS *int `json:"fps,omitempty"`
 	// NativeFPS is the file's own rate, in whole frames per second, once it is probed.
 	NativeFPS *int `json:"native_fps,omitempty"`
@@ -92,7 +93,7 @@ type observation struct {
 	external bool           // a publisher Insight did not start holds srcN
 	bitrate  *float64       // srcN's received rate
 	stats    *StreamInfo    // a probe of srcN's stream
-	cam      bool           // a browser publishes on camN
+	cam      bool           // a browser publishes on the webcam slot's path at its rate
 	proc     *procState     // the file slot's publisher
 	active   string         // what it streams
 	job      *jobs.Snapshot // the rendition's encode
@@ -129,6 +130,10 @@ func derive(o observation) Slot {
 				s.NativeFPS = &native
 			}
 		}
+	}
+	if d.Kind == KindWebcam {
+		fps := d.FPS
+		s.FPS = &fps
 	}
 	ready := o.path != nil && o.path.Ready
 	if ready {
@@ -174,7 +179,7 @@ func derive(o observation) Slot {
 		s.URLs.HTTPMJPEG = o.urls.httpMJPEG(o.host, o.n)
 	}
 	if d.Kind == KindWebcam {
-		s.URLs.WHIP = o.urls.whip(o.host, o.n)
+		s.URLs.WHIP = o.urls.whip(o.host, o.n, d.FPS)
 	}
 	return s
 }
@@ -264,8 +269,8 @@ func (m *Manager) observeLocked(n int, host string) observation {
 		}
 	}
 	o.external = m.externalLocked(n) != nil
-	if cam, ok := m.snap.Paths[camName(n)]; ok && cam.Source != nil && cam.Source.ID != "" {
-		o.cam = true
+	if o.desired.Kind == KindWebcam {
+		_, o.cam = camPublisher(m.snap, camName(n, o.desired.FPS))
 	}
 	if rt.proc != nil {
 		status := rt.proc.Status()

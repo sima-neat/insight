@@ -61,7 +61,8 @@ pathDefaults:
   overridePublisher: no
 
 # Webcam ingest + normalization. A browser WHIP-publishes its camera to
-# cam{N} (see server/internal/slots/publish.go camName), NOT to src{N}. A
+# cam{N} at 30 fps or cam{N}r60 at 60 fps (see server/internal/slots/publish.go
+# camName; the server picks the name by the assignment's rate), NOT to src{N}. A
 # browser's WebRTC stream is encoded for a video call: sparse keyframes and
 # whatever H.264 profile it negotiates, which the board's hardware decoder and
 # GStreamer rtspsrc cannot consume (rtspsrc fails waiting for a keyframe; the
@@ -71,7 +72,7 @@ pathDefaults:
 # (server/internal/slots/levels.go) — so a webcam is directly consumable
 # by the viewer and by detection apps with no manual ffmpeg hop. MediaMTX owns
 # this process: it starts when the browser publishes, restarts on failure, and
-# is killed when the browser leaves. The pattern is bounded to 1..48 to match
+# is killed when the browser leaves. The patterns are bounded to 1..48 to match
 # the src{N} slots below, so a stray publish cannot restart-loop against an
 # undefined output path. src{N} stays the only path anything reads.
 paths:
@@ -83,16 +84,24 @@ paths:
   # rather than `-force_key_frames "expr:..."`. -profile:v baseline matches what
   # the browser emits and what the decoder accepts.
   #
+  # One pattern per rate, each with its own fixed command, so the rate is the
+  # path the browser publishes to and never a value on the command line. The two
+  # commands differ in the rate alone (-r, -g and -keyint_min, a keyframe every
+  # second at both); TestTheNormalizerHasAPathPerRate in
+  # server/internal/slots/publish_test.go holds them to that.
+  #
   # The ?publisher= query on the output marks src{N} as Insight's own stream, not
   # an external publisher; Insight swaps in its per-run tag at launch
   # (server/internal/mediamtx/config.go RenderConfig).
   #
-  # -r 30 is required, not cosmetic: a WebRTC webcam has no fixed framerate, so
+  # -r is required, not cosmetic: a WebRTC webcam has no fixed framerate, so
   # libx264 cannot compute an H.264 level and emits the maximum (6.2), which the
-  # hardware decoder rejects with a media-caps mismatch. Forcing a constant 30fps
-  # output gives a defined framerate and a decoder-friendly level (3.0 at VGA),
-  # and matches the detector's expected input rate. It must come before -g 30 so
-  # the GOP is 30 frames = 1s at the forced rate.
+  # hardware decoder rejects with a media-caps mismatch. Forcing a constant rate
+  # gives a defined framerate and a decoder-friendly level (3.0 at VGA and 30fps;
+  # at 60fps 4.2 for 1080p and 3.2 for 720p, which the DevKit's decoder was
+  # checked to decode). A camera that sends fewer frames is brought up to the
+  # rate by repeating frames. -r must come before -g so the GOP is one second
+  # at the forced rate.
   #
   # Keep the RTSP input low-latency. FFmpeg's default demux probing and input
   # buffering add hundreds of milliseconds even though cam{N} is a live stream
@@ -111,6 +120,17 @@ paths:
       -i rtsp://127.0.0.1:8554/$MTX_PATH -an
       -c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency
       -pix_fmt yuv420p -r 30 -g 30 -keyint_min 30
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src$G1?publisher=insight-unrendered
+    runOnReadyRestart: yes
+
+  "~^cam([1-9]|[1-3][0-9]|4[0-8])r60$":
+    runOnReady: >
+      ffmpeg -nostdin -hide_banner -loglevel error
+      -rtsp_transport tcp
+      -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32
+      -i rtsp://127.0.0.1:8554/$MTX_PATH -an
+      -c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency
+      -pix_fmt yuv420p -r 60 -g 60 -keyint_min 60
       -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src$G1?publisher=insight-unrendered
     runOnReadyRestart: yes
 

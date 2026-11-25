@@ -31,7 +31,8 @@ import (
 )
 
 // Count is how many slots there are: src1 to src48. It is stated here once; MediaMTX's
-// configuration (webrtc/mediamtx.yml) names the same paths and its webcam paths cam1 to cam48.
+// configuration (webrtc/mediamtx.yml) names the same paths, and its webcam paths (camName) cam1 to
+// cam48 and cam1r60 to cam48r60.
 const Count = 48
 
 // Kind is what feeds a slot.

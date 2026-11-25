@@ -49,15 +49,20 @@ type slotRuntime struct {
 	appliedPull   string
 	pullAppliedAt time.Time
 	pullProbe     pullProbe
-	// clearedAt and kickedID/At keep a reconcile from repeating a clear or kick before a
-	// snapshot taken after it could show its effect.
+	// clearedAt and kicked keep a reconcile from repeating a clear or kick before a snapshot
+	// taken after it could show its effect; kicked is by webcam path (camName).
 	clearedAt time.Time
-	kickedID  string
-	kickedAt  time.Time
+	kicked    map[string]kick
 
 	// stats is the last probe of the stream the slot's path carries, for a stream Insight
 	// knows nothing about (an external publisher, a camera, a webcam).
 	stats streamStats
+}
+
+// kick is the browser session last disconnected from a webcam path, and when.
+type kick struct {
+	id string
+	at time.Time
 }
 
 type pullProbe struct {
@@ -79,7 +84,7 @@ type target struct {
 	publish *publishTarget // a publisher to run
 	encode  *rendition     // a rendition to encode before the publisher can run
 	pull    string         // the camera URL MediaMTX is to pull, "" for none
-	webcam  bool           // a browser may publish on camN
+	webcam  string         // the path a browser may publish the slot's webcam on, "" for none
 	problem string
 	info    *media.Info
 	needs   string // the rendition the slot streams or will stream, "" for none
@@ -140,7 +145,7 @@ func (m *Manager) want(n int) target {
 	}
 	switch d.Kind {
 	case KindWebcam:
-		t.webcam = true
+		t.webcam = camName(n, d.FPS)
 	case KindPull:
 		if fullURL != "" && probe != PullAuthFailed {
 			t.pull = fullURL
@@ -304,34 +309,51 @@ func (m *Manager) setPull(n int, t target) {
 	}
 }
 
-// kickWebcam ends a browser's publishing on camN when slot n does not want a webcam: a stop,
-// a reassignment, or a tab that kept publishing after either.
+// kickWebcam ends a browser's publishing on each of slot n's webcam paths but the one it wants:
+// on all of them after a stop or a reassignment, or for a tab that kept publishing after either,
+// and on the other rate's after an assignment at a new rate.
 func (m *Manager) kickWebcam(n int, t target) {
-	if t.webcam {
-		return
+	for _, name := range camNames(n) {
+		if name != t.webcam {
+			m.kickCam(n, name)
+		}
 	}
+}
+
+// kickCam disconnects the browser publishing on webcam path name of slot n, unless this run
+// kicked that session already and no snapshot since could show it gone.
+func (m *Manager) kickCam(n int, name string) {
 	m.mu.Lock()
 	rt := m.rt[n-1]
-	cam, ok := m.snap.Paths[camName(n)]
-	var source mediamtx.Source
-	if ok && cam.Source != nil {
-		source = *cam.Source
-	}
-	kick := m.mtxUp && source.ID != "" && (source.ID != rt.kickedID || m.snap.At.After(rt.kickedAt))
+	source, publishing := camPublisher(m.snap, name)
+	last := rt.kicked[name]
+	due := m.mtxUp && publishing && (source.ID != last.id || m.snap.At.After(last.at))
 	m.mu.Unlock()
-	if !kick {
+	if !due {
 		return
 	}
 	ctx, cancel := context.WithTimeout(m.ctx, stopTimeout)
 	defer cancel()
 	err := m.opts.MediaMTX.Kick(ctx, source.Type, source.ID)
 	if err != nil && !errors.Is(err, mediamtx.ErrNotFound) {
-		slog.Warn("a webcam publisher could not be disconnected; trying again", "slot", pathName(n), "error", err)
+		slog.Warn("a webcam publisher could not be disconnected; trying again", "slot", pathName(n), "path", name, "error", err)
 		return
 	}
 	m.mu.Lock()
-	rt.kickedID, rt.kickedAt = source.ID, time.Now()
+	if rt.kicked == nil {
+		rt.kicked = map[string]kick{}
+	}
+	rt.kicked[name] = kick{id: source.ID, at: time.Now()}
 	m.mu.Unlock()
+}
+
+// camPublisher is the browser session publishing on webcam path name in snap; false while none
+// does.
+func camPublisher(snap mediamtx.Snapshot, name string) (mediamtx.Source, bool) {
+	if cam, ok := snap.Paths[name]; ok && cam.Source != nil && cam.Source.ID != "" {
+		return *cam.Source, true
+	}
+	return mediamtx.Source{}, false
 }
 
 // followRendition makes the slot wait for the rendition its target needs, starting its encode
@@ -371,7 +393,7 @@ func (m *Manager) externalIn(snap mediamtx.Snapshot, n int) *mediamtx.Path {
 		return nil
 	}
 	if d := m.store.get(n); d.Kind == KindWebcam && d.Run {
-		if cam, ok := snap.Paths[camName(n)]; ok && cam.Source != nil && cam.Source.ID != "" {
+		if _, publishing := camPublisher(snap, camName(n, d.FPS)); publishing {
 			return nil
 		}
 	}
