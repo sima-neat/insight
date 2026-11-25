@@ -219,7 +219,7 @@ func producerPID(t *testing.T, r *Relays, key string) int {
 	if s.proc == nil {
 		t.Fatalf("%s has no producer", key)
 	}
-	return s.proc.pid
+	return s.proc.group.Pid()
 }
 
 func TestNewChecksItsOptions(t *testing.T) {

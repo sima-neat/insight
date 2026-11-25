@@ -35,7 +35,7 @@ func TestTheKeyframeIntervalIsOneSecond(t *testing.T) {
 func TestEncodeArgs(t *testing.T) {
 	rendition := strings.Join(Encode{Codec: CodecH264, Width: 1280, Height: 720, FPS: 15, Resample: true}.
 		Args("/m/a.mp4", "/m/.renditions/.x.tmp", "mp4"), " ")
-	for _, want := range []string{"-i file:/m/a.mp4 -map 0:v:0 -an", "-vf setpts=PTS-STARTPTS,fps=15 -fps_mode cfr",
+	for _, want := range []string{"-protocol_whitelist file -i file:/m/a.mp4 -map 0:v:0 -an", "-vf setpts=PTS-STARTPTS,fps=15 -fps_mode cfr",
 		"-c:v libx264 -preset medium -profile:v baseline -refs 1 -sc_threshold 0",
 		"-pix_fmt yuv420p -g 15 -keyint_min 15 -bf 0 -flags +cgop -b:v 2000000 -maxrate 2000000 -bufsize 2000000",
 		"repeat-headers=1:force-cfr=1:open-gop=0", "-tag:v avc1",

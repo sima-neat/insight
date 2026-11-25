@@ -137,6 +137,7 @@ type Options struct {
 	driven        bool
 	snapshotEvery time.Duration
 	probeStream   StreamProber
+	probeCamera   CameraProber
 	encode        encoder
 }
 
@@ -167,7 +168,7 @@ type Manager struct {
 	done   sync.WaitGroup
 
 	refresh chan struct{} // asks the loop for a snapshot now
-	probing chan struct{} // a slot per stream probe running
+	probing chan struct{} // a slot per probe running, of a stream or a camera
 
 	mu      sync.Mutex
 	store   *Store
@@ -197,6 +198,9 @@ func New(opts Options) (*Manager, error) {
 	}
 	if opts.probeStream == nil {
 		opts.probeStream = FFprobeStream(opts.FFprobe)
+	}
+	if opts.probeCamera == nil {
+		opts.probeCamera = DescribeCamera
 	}
 	store, err := LoadStore(opts.StorePath)
 	if err != nil {

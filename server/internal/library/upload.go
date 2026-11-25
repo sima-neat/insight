@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -13,7 +14,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"insight/internal/apierr"
 	"insight/internal/jobs"
+	"insight/internal/media"
 )
 
 // UploadResult is how an upload ended: in the library already (Saved, 201), or re-encoded first
@@ -49,6 +52,9 @@ func (l *Library) Upload(w http.ResponseWriter, r *http.Request) (UploadResult, 
 	if r.ContentLength > l.maxUpload+formSlack {
 		return UploadResult{}, tooLarge(l.maxUpload)
 	}
+	if err := l.checkRoom(r.ContentLength); err != nil {
+		return UploadResult{}, err
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, l.maxUpload+formSlack)
 	form, err := r.MultipartReader()
 	if err != nil {
@@ -79,6 +85,32 @@ func (l *Library) upload(ctx context.Context, form *multipart.Reader, stage stri
 		return l.uploadArchive(ctx, up, folder, isZip, stage)
 	}
 	return l.uploadFile(ctx, up, stage)
+}
+
+// checkRoom refuses an upload whose request of length bytes (-1 when it does not say: up to the
+// limit) would not fit on the media folder's disk with media.FreeSpaceMargin to spare, before
+// anything of it is written. A disk that fills meanwhile is still answered by the write
+// (saveError).
+func (l *Library) checkRoom(length int64) error {
+	if length < 0 {
+		length = l.maxUpload
+	}
+	free, known := l.freeSpace(l.root)
+	if !known || free >= length+media.FreeSpaceMargin {
+		return nil
+	}
+	return noRoom("The upload", length, free)
+}
+
+// noRoom refuses what needs bytes on the media folder's disk, beside media.FreeSpaceMargin, when
+// only free is free.
+func noRoom(what string, bytes, free int64) error {
+	return &apierr.Error{
+		Status: http.StatusInsufficientStorage, Code: CodeNoSpace,
+		Message: fmt.Sprintf("%s needs about %s free on the media folder's disk (%s for it and %s to spare), and %s is free.",
+			what, sizeText(bytes+media.FreeSpaceMargin), sizeText(bytes), sizeText(media.FreeSpaceMargin), sizeText(free)),
+		Hint: "Delete media you no longer need, then try again.",
+	}
 }
 
 // receive reads the request's fields, streaming the file into stage.
@@ -166,7 +198,10 @@ func readError(err error, limit int64) error {
 
 // uploadFile saves an uploaded file, at once or after a re-encode.
 func (l *Library) uploadFile(ctx context.Context, up received, stage string) (UploadResult, error) {
-	plan, encode := l.planEncode(ctx, up.staged)
+	plan, encode, err := l.planEncode(ctx, up.staged)
+	if err != nil {
+		return UploadResult{}, invalidRequest("%s is a playlist, which names other files; the media library takes none.", up.name)
+	}
 	var warnings []string
 	if encode && l.ffmpeg == "" {
 		encode = false
@@ -228,7 +263,11 @@ func (l *Library) uploadArchive(ctx context.Context, up received, folder string,
 		return UploadResult{}, err
 	}
 	unpacked := filepath.Join(stage, "unpacked")
-	if err := unpack(up.staged, unpacked, isZip, l.maxUpload); err != nil {
+	free, known := l.freeSpace(l.root)
+	if !known {
+		free = math.MaxInt64
+	}
+	if err := unpack(up.staged, unpacked, isZip, l.maxUpload, free); err != nil {
 		return UploadResult{}, err
 	}
 	_ = os.Remove(up.staged) // the archive itself, in the stage; its room is better free
@@ -238,14 +277,25 @@ func (l *Library) uploadArchive(ctx context.Context, up received, folder string,
 		plan encodePlan
 	}
 	var work []pending
+	var refused error
 	_ = filepath.WalkDir(unpacked, func(p string, entry fs.DirEntry, err error) error {
-		if err == nil && entry.Type().IsRegular() {
-			if plan, encode := l.planEncode(ctx, p); encode {
-				work = append(work, pending{p, plan})
-			}
+		if err != nil || !entry.Type().IsRegular() {
+			return nil
+		}
+		plan, encode, err := l.planEncode(ctx, p)
+		if err != nil {
+			below, _ := filepath.Rel(unpacked, p)
+			refused = invalidArchive("The archive holds %s, a playlist, which names other files; the media library takes none.", filepath.ToSlash(below))
+			return filepath.SkipAll
+		}
+		if encode {
+			work = append(work, pending{p, plan})
 		}
 		return nil
 	})
+	if refused != nil {
+		return UploadResult{}, refused
+	}
 	var warnings []string
 	if len(work) > 0 && l.ffmpeg == "" {
 		warnings = append(warnings, fmt.Sprintf(

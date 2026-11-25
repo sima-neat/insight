@@ -318,3 +318,44 @@ func TestCacheWithFFprobe(t *testing.T) {
 		t.Fatalf("Get = %+v", info)
 	}
 }
+
+// A burst of Probe calls for a file not probed yet runs one probe; each caller waits for it, a
+// caller whose context ends stops waiting, and the others still get the answer.
+func TestConcurrentProbesOfAFileRunOne(t *testing.T) {
+	fake := newFakeProber()
+	fake.hold = true
+	c := NewCache(t.Context(), fake.probe)
+	path := writeFile(t, t.TempDir(), "clip.mp4", "x")
+
+	gone, leave := context.WithCancel(t.Context())
+	left := make(chan error, 1)
+	go func() {
+		_, err := c.Probe(gone, path)
+		left <- err
+	}()
+	<-fake.started // the first caller's probe runs
+	answers := make(chan Info, 8)
+	for range 8 {
+		go func() {
+			info, err := c.Probe(t.Context(), path)
+			if err != nil {
+				t.Error(err)
+			}
+			answers <- info
+		}()
+	}
+	leave()
+	if err := <-left; !errors.Is(err, context.Canceled) {
+		t.Fatalf("the caller that left: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond) // the others are waiting by now
+	close(fake.release)
+	for range 8 {
+		if info := <-answers; info.Codec != "clip.mp4" {
+			t.Fatalf("an answer: %+v", info)
+		}
+	}
+	if calls := fake.callsOf(path); calls != 1 {
+		t.Fatalf("%d probes of one file", calls)
+	}
+}

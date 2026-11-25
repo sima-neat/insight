@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// Carried over from vf's tests (webrtc/metadata_reassembly_test.go).
-
 var sender = netip.MustParseAddrPort("192.0.2.1:5000")
 
 func chunk(messageID uint64, index, count byte, payload []byte) []byte {

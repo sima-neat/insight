@@ -176,6 +176,30 @@ func TestStreamEndsWithItsContext(t *testing.T) {
 	eventually(t, "the command's end", func() bool { return f.server.commands() == 0 })
 }
 
+// startRecorder is a transport whose start records its context and fails.
+type startRecorder struct {
+	transport
+	deadline time.Time
+	bounded  bool
+}
+
+func (r *startRecorder) start(ctx context.Context, _ []string) (process, error) {
+	r.deadline, r.bounded = ctx.Deadline()
+	return nil, errors.New("not started")
+}
+
+func TestAStreamsStartIsBoundedThoughItsLifeIsNot(t *testing.T) {
+	recorder := &startRecorder{}
+	b := newBoard(Target{Mode: ModeSSH, Host: "devkit", Port: 22, User: "sima"}, recorder, "")
+	before := time.Now()
+	if _, err := b.Stream(context.Background(), []string{"gst-launch-1.0"}); err == nil {
+		t.Fatal("the recorder's failure was lost")
+	}
+	if !recorder.bounded || recorder.deadline.After(before.Add(streamStartTimeout).Add(time.Second)) {
+		t.Fatalf("the start's deadline: %v (bounded %v), want within %s", recorder.deadline, recorder.bounded, streamStartTimeout)
+	}
+}
+
 // serveSentinel serves an HTTP API on socket that answers with what it was asked.
 func serveSentinel(t *testing.T, socket string) {
 	t.Helper()

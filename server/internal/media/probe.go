@@ -41,8 +41,7 @@ type Info struct {
 	CodecName string
 	// Profile is ffprobe's name of the codec profile ("High", "Constrained Baseline"), or "".
 	Profile string
-	// PixelFormat is ffprobe's name of the pixel format ("yuv420p", "rgb24"); for a picture it
-	// takes the place of Pillow's mode the old backend showed.
+	// PixelFormat is ffprobe's name of the pixel format ("yuv420p", "rgb24"), for a picture too.
 	PixelFormat   string
 	Width, Height int
 	// FPS is the stream's frame rate: the average when ffprobe knows it, else the base rate. 0 for
@@ -75,7 +74,7 @@ func (i Info) Streamable() bool {
 }
 
 // probeTimeout bounds one ffprobe run. Probes run in the background, so a generous bound costs
-// no request anything; a short one (the old backend had 10 s) timed out on a busy board.
+// no request anything; a short one (10 s) timed out on a busy board.
 const probeTimeout = 30 * time.Second
 
 // ProbeFile runs ffprobe once on the regular file at abs and reads its first video stream. A
@@ -98,15 +97,7 @@ func ProbeFile(ctx context.Context, ffprobePath, abs string) (Info, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	// abs starts with "/", so ffprobe takes it for a file, never for an option or a protocol.
-	cmd := exec.CommandContext(ctx, ffprobePath,
-		"-v", "error",
-		"-select_streams", "v:0",
-		"-show_entries", "stream=codec_name,profile,pix_fmt,has_b_frames,width,height,avg_frame_rate,r_frame_rate,duration",
-		"-show_entries", "format=format_name,duration",
-		"-of", "json",
-		abs,
-	)
+	cmd := exec.CommandContext(ctx, ffprobePath, probeFileArgs(abs)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.WaitDelay = time.Second
@@ -129,6 +120,31 @@ func ProbeFile(ctx context.Context, ffprobePath, abs string) (Info, error) {
 	}
 	info.Size = stat.Size()
 	return info, nil
+}
+
+func probeFileArgs(abs string) []string {
+	return append([]string{
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=codec_name,profile,pix_fmt,has_b_frames,width,height,avg_frame_rate,r_frame_rate,duration",
+		"-show_entries", "format=format_name,duration",
+		"-of", "json",
+	}, FileInput(abs)...)
+}
+
+// ErrPlaylist is a probe's refusal of a playlist (namesOtherFiles): the library takes none, and
+// ffmpeg is never run on one.
+var ErrPlaylist = errors.New("it is a playlist and names other files, which Insight does not open")
+
+// namesOtherFiles says whether ffprobe read the file with a demuxer that opens the files it
+// names: an HLS or DASH playlist, a concat list. FileInput keeps them off the network, yet they
+// could still stream any media file of the machine, so the library takes none of them.
+func namesOtherFiles(formatName string) bool {
+	switch formatName {
+	case "hls", "dash", "concat":
+		return true
+	}
+	return false
 }
 
 // probeOutput is the part of ffprobe's JSON that ProbeFile asks for.
@@ -154,6 +170,9 @@ func parseProbe(out []byte) (Info, error) {
 	var probe probeOutput
 	if err := json.Unmarshal(out, &probe); err != nil {
 		return Info{}, fmt.Errorf("ffprobe wrote no JSON: %w", err)
+	}
+	if namesOtherFiles(probe.Format.FormatName) {
+		return Info{}, fmt.Errorf("%w (%s)", ErrPlaylist, probe.Format.FormatName)
 	}
 	if len(probe.Streams) == 0 {
 		return Info{Kind: KindUnknown}, nil

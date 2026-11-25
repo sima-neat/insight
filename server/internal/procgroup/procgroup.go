@@ -3,7 +3,9 @@
 // Each child Insight starts leads a group of its own (Setpgid), so a signal to the group reaches
 // what the child started too. A group signal is a kill(-pid): with a pid of 0 or below, 1, or
 // Insight's own, it would reach Insight's own group, init, or every process the user may
-// signal. Signal refuses those, so no caller can pass such a pid by mistake.
+// signal. Signal refuses those, so no caller can pass such a pid by mistake. A child's pid stops
+// naming its group once the child is reaped; Group, for a child Insight waits for, signals only
+// before that.
 package procgroup
 
 import (

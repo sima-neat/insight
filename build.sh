@@ -3,6 +3,11 @@ set -e
 
 # ==== Configuration ====
 MTX_VERSION="1.12.1"
+# The SHA-256 of each MediaMTX archive downloaded, from the release's .sha256sum files for
+# MTX_VERSION. A new version takes new ones (and CI reads linux_amd64's).
+MTX_SHA256_linux_arm64="e0d2d16e7bf22d43290231f781659d291db5600ed146e7b3f33257c5f162f1e0"
+MTX_SHA256_linux_amd64="3fa66f5ffa546d74875b24c18984500a865b58309cd44eaca24c65ce4375d880"
+MTX_SHA256_darwin_arm64="e7f7da716ae00c5363db98ab72c661978e439803e5983442ced3222571a8dcb4"
 BUILD_DIR="build"
 MTX_BASE_URL="https://github.com/bluenviron/mediamtx/releases/download/v${MTX_VERSION}"
 INSIGHT_BIN="neat_insight/bin"
@@ -307,11 +312,15 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     MTX_ARCHIVE="${TARGET}.tar.gz"
     MTX_URL="${MTX_BASE_URL}/${MTX_ARCHIVE}"
     echo "⬇️ Downloading mediamtx: $MTX_URL"
-    curl -L "$MTX_URL" -o "$BUILD_DIR/$MTX_ARCHIVE"
+    curl -fsSL "$MTX_URL" -o "$BUILD_DIR/$MTX_ARCHIVE"
+    MTX_SHA256_VAR="MTX_SHA256_${PLATFORM}"
+    scripts/sha256-verify.sh "$BUILD_DIR/$MTX_ARCHIVE" "${!MTX_SHA256_VAR:-}"
 
     echo "📦 Extracting $MTX_ARCHIVE"
     tar -xzf "$BUILD_DIR/$MTX_ARCHIVE" -C "$BUILD_DIR"
     cp "$BUILD_DIR/$MTX_BIN_NAME" "$INSIGHT_BIN/$MTX_BIN_NAME"
+    # MediaMTX's own license, which THIRD_PARTY_NOTICES points to (its modules are listed there).
+    cp "$BUILD_DIR/LICENSE" "$INSIGHT_BIN/mediamtx.LICENSE"
     chmod +x "$INSIGHT_BIN/$MTX_BIN_NAME" || true
     rm "$BUILD_DIR/$MTX_ARCHIVE"
 

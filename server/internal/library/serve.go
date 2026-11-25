@@ -81,12 +81,35 @@ func (l *Library) Preview(w http.ResponseWriter, r *http.Request, rel string) {
 		apierr.WriteError(w, errors.New("the library has no relays for previews"))
 		return
 	}
+	info, err := l.cache.Probe(r.Context(), abs)
+	if err == nil {
+		err = previewable(l.libraryPath(abs), info)
+	}
+	if err != nil {
+		apierr.WriteError(w, err)
+		return
+	}
 	l.relays.Serve(w, r, PreviewKeyPrefix+l.libraryPath(abs), abs)
 }
 
+// previewable says whether a file the probe read as info may be previewed: a video or a
+// picture. ffmpeg runs on nothing else, since a file it reads may open others (a playlist, which
+// the probe refuses, streams the files it names wherever they are), and a library file may have
+// come in by any way, not only an upload.
+func previewable(rel string, info media.Info) error {
+	if info.Kind == media.KindVideo || info.Kind == media.KindImage {
+		return nil
+	}
+	message := fmt.Sprintf("%s holds no video or picture to preview.", rel)
+	if info.Problem != "" {
+		message = fmt.Sprintf("%s cannot be previewed: %s.", rel, info.Problem)
+	}
+	return &apierr.Error{Status: http.StatusUnsupportedMediaType, Code: CodeNotPreviewable, Message: message}
+}
+
 // PreviewCommand makes the producer of a file preview for the relays: source is the absolute
-// path Preview passed. The old backend's arguments: the first video stream at real time, looped,
-// as MJPEG (copied when the file is MJPEG already, as its probe says).
+// path Preview passed, whose probe Preview awaited. The first video stream at real time, looped,
+// as MJPEG (copied when the file is MJPEG already).
 func (l *Library) PreviewCommand(source string) (*exec.Cmd, error) {
 	if l.ffmpeg == "" {
 		return nil, errors.New("FFmpeg is not installed")
@@ -96,15 +119,21 @@ func (l *Library) PreviewCommand(source string) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("%s is not a file in the media library", source)
 	}
 	info, ok := l.cache.Get(source)
-	return exec.Command(l.ffmpeg, previewArgs(source, ok && info.Codec == media.CodecMJPEG)...), nil
+	if !ok {
+		return nil, fmt.Errorf("%s has no probe of its current version", source)
+	}
+	if err := previewable(filepath.ToSlash(below), info); err != nil {
+		return nil, err
+	}
+	return exec.Command(l.ffmpeg, previewArgs(source, info.Codec == media.CodecMJPEG)...), nil
 }
 
 func previewArgs(abs string, copyMJPEG bool) []string {
-	args := []string{
+	args := append([]string{
 		"-nostdin", "-hide_banner", "-loglevel", "error",
 		"-fflags", "+genpts+igndts", "-re", "-stream_loop", "-1",
-		"-i", abs, "-map", "0:v:0", "-an",
-	}
+	}, media.FileInput(abs)...)
+	args = append(args, "-map", "0:v:0", "-an")
 	if copyMJPEG {
 		args = append(args, "-c:v", "copy")
 	} else {

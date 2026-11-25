@@ -134,11 +134,19 @@ func (b *Board) Run(ctx context.Context, argv []string) (Result, error) {
 	return result, nil
 }
 
+// streamStartTimeout bounds the start of a Stream, which a caller's context may not: a preview
+// outlives its request. A board that takes the connection but answers no session leaves the
+// start waiting otherwise.
+const streamStartTimeout = 15 * time.Second
+
 // Stream starts argv on the board and gives its stdout as it comes, for output that does not
-// end by itself (a camera preview, a microphone recording). Closing the stream, or the end of
-// ctx, kills the command.
+// end by itself (a camera preview, a microphone recording). The start fails after
+// streamStartTimeout, or when ctx ends first; closing the stream, or the end of ctx, kills the
+// command.
 func (b *Board) Stream(ctx context.Context, argv []string) (*Stream, error) {
-	p, err := b.start(ctx, argv)
+	start, cancel := context.WithTimeout(ctx, streamStartTimeout)
+	defer cancel()
+	p, err := b.start(start, argv)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +197,7 @@ func (b *Board) Sentinel(ctx context.Context, method, path string, body io.Reade
 	if !strings.HasPrefix(path, "/") {
 		return nil, boardError(CodeInvalidRequest, fmt.Sprintf("Sentinel path %q does not start with /.", path), "", nil)
 	}
-	// Sentinel's own client (the old backend's) sends Host: localhost.
+	// Sentinel's own client sends Host: localhost.
 	request, err := http.NewRequestWithContext(ctx, method, "http://localhost"+path, body)
 	if err != nil {
 		return nil, boardError(CodeInvalidRequest, "Not a Sentinel request.", "", err)

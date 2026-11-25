@@ -34,6 +34,9 @@ var (
 	errNoVideo      = &OfferError{503, "no_video", "No video has reached this channel yet."}
 	errCodecChanged = &OfferError{503, "codec_changed", "The channel's video changed codec; try again."}
 	errNegotiation  = &OfferError{500, "negotiation_failed", "Insight could not set up the connection."}
+	// One leaving frees a place, so this one is retried too.
+	errTooManyViewers = &OfferError{503, "too_many_viewers",
+		fmt.Sprintf("This channel has %d viewers already; try again once one leaves.", maxViewers)}
 	// A 4xx is final: this browser cannot decode the channel's codec.
 	errUnsupported = &OfferError{415, "codec_unsupported", "This browser cannot play the channel's codec."}
 )
@@ -56,7 +59,7 @@ func newNegotiator(portStart, portEnd uint16, iceAddress string) (*negotiator, e
 			return nil, err
 		}
 		// A NACK responder resends what a browser lost, and sender reports keep its clock
-		// mapping fresh; vf had neither. No PLI: a keyframe is the app's to send (docs/contracts.md).
+		// mapping fresh. No PLI: a keyframe is the app's to send (docs/contracts.md).
 		registry := &interceptor.Registry{}
 		if err := webrtc.ConfigureNack(engine, registry); err != nil {
 			return nil, err
@@ -97,13 +100,16 @@ func (n *negotiator) answer(ctx context.Context, c *Channel, offer Description) 
 		return Description{}, errUnsupported
 	}
 
+	if err := m.admits(); err != nil {
+		return Description{}, err // no connection made only to be closed
+	}
 	pc, err := n.apis[m.codec].NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		return Description{}, errNegotiation
 	}
-	if !m.add(pc) {
+	if err := m.add(pc); err != nil {
 		_ = pc.Close()
-		return Description{}, errCodecChanged
+		return Description{}, err
 	}
 	done := false
 	defer func() {

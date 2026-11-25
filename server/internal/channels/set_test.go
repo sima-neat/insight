@@ -266,6 +266,37 @@ func TestACodecChangeClosesTheViewersOfTheOldOne(t *testing.T) {
 	}
 }
 
+func TestAFullChannelRefusesTheNextViewerUntilOneLeaves(t *testing.T) {
+	s := listen(t, 1)
+	newApp(t, s, 0, payloadTypeH264, h264IDR).frame(90_000)
+	waitFor(t, "the channel's media", func() bool { return s.channels[0].media.Load() != nil })
+	for i := range maxViewers {
+		if _, err := s.Offer(context.Background(), 0, newBrowser(t, CodecH264).offer(t)); err != nil {
+			t.Fatalf("viewer %d: %v", i+1, err)
+		}
+	}
+	_, err := s.Offer(context.Background(), 0, newBrowser(t, CodecH264).offer(t))
+	if refusal := AsOfferError(err); refusal.Code != "too_many_viewers" || refusal.Status != 503 {
+		t.Fatalf("one viewer over the cap: %v", err)
+	}
+
+	m := s.channels[0].media.Load()
+	m.mu.Lock()
+	var first *webrtc.PeerConnection
+	for peer := range m.peers {
+		first = peer
+		break
+	}
+	m.mu.Unlock()
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "a place free", func() bool { return m.viewers() < maxViewers })
+	if _, err := s.Offer(context.Background(), 0, newBrowser(t, CodecH264).offer(t)); err != nil {
+		t.Fatalf("after one left: %v", err)
+	}
+}
+
 func TestAnOfferForAChannelThatIsNotThere(t *testing.T) {
 	s := listen(t, 2)
 	for _, index := range []int{-1, 2} {

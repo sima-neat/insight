@@ -119,6 +119,9 @@ type Library struct {
 	now       func() time.Time
 	// remove removes a library entry; tests replace it to see what would be removed.
 	remove func(root, abs string, folder bool) error
+	// freeSpace is what may still be written on the disk of a folder (media.FreeBytes); tests
+	// replace it.
+	freeSpace func(dir string) (int64, bool)
 
 	mu        sync.Mutex
 	scan      *scanned // nil when it must be walked again
@@ -150,6 +153,7 @@ func New(opts Options) (*Library, error) {
 		maxUpload: opts.MaxUploadBytes,
 		now:       time.Now,
 		remove:    removeEntry,
+		freeSpace: media.FreeBytes,
 	}
 	if l.probe == nil {
 		l.probe = media.FFprobe(opts.FFprobe)

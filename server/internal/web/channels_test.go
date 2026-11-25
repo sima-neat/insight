@@ -169,7 +169,6 @@ func viewerURL(t *testing.T, cfg config.Config, target string, tlsOn bool, host 
 	return body["url"].(string), body
 }
 
-// Carried over from the old backend's tests (tests/test_viewer_url.py and test_runtime_urls.py).
 func TestViewerURL(t *testing.T) {
 	sdk4 := config.Config{Channels: config.Channels{Count: 4, Source: "sdk-port-map", Limited: true}}
 	all := config.Config{Channels: config.Channels{Count: 80, Source: "legacy-default"}}

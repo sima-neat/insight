@@ -66,7 +66,11 @@ func (c *Channel) video(raw []byte, from netip.AddrPort, now time.Time) {
 		c.assembler.rearm()
 		c.assemblerIdle = idle
 	}
-	unit, ready := c.assembler.accept(&packet, raw)
+	unit, ready, oversized := c.assembler.accept(&packet, raw)
+	if oversized {
+		c.stats.count(func(s *stats) { s.video.oversized++ })
+		c.stats.failed("dropped a frame over %d MiB from %s", maxUnitBytes>>20, from)
+	}
 	if m.track.bindings.Load() == 0 {
 		if ready {
 			c.assembler.rearm()

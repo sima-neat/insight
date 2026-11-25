@@ -17,7 +17,7 @@ import (
 // Network is how browsers reach Insight, from the files sima-cli and the hosting setup write
 // into the configuration folder, and from the environment.
 type Network struct {
-	// BrowserICEAddress is the address vf and MediaMTX offer browsers for WebRTC media, or
+	// BrowserICEAddress is the address the channels and MediaMTX offer browsers for WebRTC media, or
 	// empty to offer the machine's own.
 	BrowserICEAddress string
 	// BrowserICEAddressSource says where BrowserICEAddress came from: "browser-ice-address"

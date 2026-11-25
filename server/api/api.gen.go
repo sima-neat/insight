@@ -819,7 +819,10 @@ type IngestChannel struct {
 	Active      bool `json:"active"`
 	Channel     int  `json:"channel"`
 	Diagnostics *struct {
-		MalformedPackets   *int      `json:"malformed_packets,omitempty"`
+		MalformedPackets *int `json:"malformed_packets,omitempty"`
+
+		// OversizedFrames Frames dropped because their RTP packets came to over 16 MiB, more than any picture of H.264 level 5.2 or H.265 level 5.x needs.
+		OversizedFrames    *int      `json:"oversized_frames,omitempty"`
 		RecentErrors       *[]string `json:"recent_errors,omitempty"`
 		UnsupportedPackets *int      `json:"unsupported_packets,omitempty"`
 	} `json:"diagnostics,omitempty"`

@@ -218,7 +218,7 @@ func outTime(key, value string) (time.Duration, bool) {
 	return 0, false
 }
 
-// clock writes d as the old backend did: "01:05" under an hour, "1:02:03" from one, whole seconds.
+// clock writes d as a clock does: "01:05" under an hour, "1:02:03" from one, whole seconds.
 func clock(d time.Duration) string {
 	total := int(max(0, d) / time.Second)
 	hours, minutes, seconds := total/3600, total/60%60, total%60

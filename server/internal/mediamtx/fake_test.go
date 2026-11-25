@@ -12,8 +12,7 @@ import (
 	"testing"
 )
 
-// The shapes below are MediaMTX 1.12.1's API v3 answers, as the old backend's tests captured
-// them (tests/test_mediamtx_client.py); testPublisher's query is that of a stream Insight
+// The shapes below are MediaMTX 1.12.1's API v3 answers; testPublisher's query is that of a stream Insight
 // started.
 const testPublisher = "publisher=insight-0123456789abcdef"
 
