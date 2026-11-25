@@ -205,9 +205,9 @@ func (m *Manager) probeInfoCtx(ctx context.Context, url string) (StreamInfo, err
 
 // AssignWebcam makes slot n a webcam's at fps frames per second, 30 or 60 (an assignment that
 // names no rate passes DefaultWebcamFPS), and returns where the browser publishes it (WHIP) for a
-// browser that reached Insight at host. MediaMTX re-encodes what the browser publishes onto srcN at that rate, the
-// rate being the path the URL names. The slot is ready at once: Stop disconnects whatever
-// publishes on it, as a new assignment does what publishes at another rate.
+// browser that reached Insight at host. MediaMTX re-encodes what the browser publishes onto srcN
+// at that rate, the rate being the path the URL names. The slot is ready at once: Stop disconnects
+// whatever publishes on it, as a new assignment does what publishes at another rate.
 func (m *Manager) AssignWebcam(n int, host string, fps int) (string, error) {
 	if err := checkSlot(n); err != nil {
 		return "", err
