@@ -169,10 +169,12 @@ type VideoState struct {
 	Unsupported, Malformed     uint64
 	// Oversized are the frames dropped for growing over the cap of one frame's bytes.
 	Oversized uint64
-	// Incomplete are the frames withheld because a packet was lost, the first one included.
+	// Incomplete are the frames withheld because a packet was lost, the first one included. The
+	// whole H.265 frames the gate holds after a loss, until the next IRAP, are not counted.
 	Incomplete uint64
-	// Unusable are the whole JPEG frames no image could be rebuilt from (a type, tables or
-	// header Insight cannot use), counted only while a viewer watches.
+	// Unusable are the whole JPEG frames no image could be rebuilt from (a type, tables or header
+	// Insight cannot use, or broken fragments), counted only while a viewer watches, since
+	// nothing is rebuilt otherwise.
 	Unusable uint64
 	// Skipped are the JPEG frames a viewer skipped because its buffer was full, once per viewer.
 	Skipped uint64

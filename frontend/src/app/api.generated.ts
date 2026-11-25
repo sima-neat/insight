@@ -1205,9 +1205,9 @@ export interface components {
                 readonly unsupported_packets?: number;
                 /** @description Frames dropped because their RTP packets came to over 16 MiB, more than any picture of H.264 level 5.2 or H.265 level 5.x needs. */
                 readonly oversized_frames?: number;
-                /** @description Frames withheld because a packet was lost, the first one included, for every codec. */
+                /** @description Frames withheld because a packet was lost, the first one included, for every codec. After a loss an H.265 channel also holds the whole frames up to its next IRAP, which reference what was lost; those are not counted, so on H.265 a freeze can last longer than the count suggests. */
                 readonly incomplete_frames?: number;
-                /** @description JPEG frames whose RTP/JPEG Insight cannot rebuild; the reason is in `recent_errors`. */
+                /** @description Whole JPEG frames whose RTP/JPEG Insight cannot rebuild into an image; the reason is in `recent_errors`. Frames are rebuilt only for a viewer, so they are counted, and their reason named, only while a viewer has the channel open: with nobody watching, a sender of unusable frames shows 0. */
                 readonly unusable_frames?: number;
                 /** @description Frames a viewer skipped because its connection's buffer was full, once per frame and viewer. */
                 readonly skipped_frames?: number;

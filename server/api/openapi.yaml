@@ -1507,10 +1507,16 @@ components:
               type: integer
               description: >-
                 Frames withheld because a packet was lost, the first one included, for every codec.
+                After a loss an H.265 channel also holds the whole frames up to its next IRAP, which
+                reference what was lost; those are not counted, so on H.265 a freeze can last longer
+                than the count suggests.
             unusable_frames:
               type: integer
               description: >-
-                JPEG frames whose RTP/JPEG Insight cannot rebuild; the reason is in `recent_errors`.
+                Whole JPEG frames whose RTP/JPEG Insight cannot rebuild into an image; the reason is
+                in `recent_errors`. Frames are rebuilt only for a viewer, so they are counted, and
+                their reason named, only while a viewer has the channel open: with nobody watching,
+                a sender of unusable frames shows 0.
             skipped_frames:
               type: integer
               description: >-

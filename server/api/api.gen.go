@@ -819,7 +819,7 @@ type IngestChannel struct {
 	Active      bool `json:"active"`
 	Channel     int  `json:"channel"`
 	Diagnostics *struct {
-		// IncompleteFrames Frames withheld because a packet was lost, the first one included, for every codec.
+		// IncompleteFrames Frames withheld because a packet was lost, the first one included, for every codec. After a loss an H.265 channel also holds the whole frames up to its next IRAP, which reference what was lost; those are not counted, so on H.265 a freeze can last longer than the count suggests.
 		IncompleteFrames *int `json:"incomplete_frames,omitempty"`
 		MalformedPackets *int `json:"malformed_packets,omitempty"`
 
@@ -833,7 +833,7 @@ type IngestChannel struct {
 		// UnsupportedPackets Packets of a payload type Insight does not take (RTP/JPEG, payload type 26, is taken, so it is not counted here).
 		UnsupportedPackets *int `json:"unsupported_packets,omitempty"`
 
-		// UnusableFrames JPEG frames whose RTP/JPEG Insight cannot rebuild; the reason is in `recent_errors`.
+		// UnusableFrames Whole JPEG frames whose RTP/JPEG Insight cannot rebuild into an image; the reason is in `recent_errors`. Frames are rebuilt only for a viewer, so they are counted, and their reason named, only while a viewer has the channel open: with nobody watching, a sender of unusable frames shows 0.
 		UnusableFrames *int `json:"unusable_frames,omitempty"`
 	} `json:"diagnostics,omitempty"`
 	FirstPacketAt *string `json:"first_packet_at,omitempty"`
