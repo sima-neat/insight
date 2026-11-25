@@ -11,8 +11,8 @@ import (
 type Snapshot struct {
 	// At is when MediaMTX answered the path list, which the byte counts are from.
 	At time.Time
-	// Paths are keyed by name ("src3", "cam3"). A configured path is listed whether or not
-	// anything publishes; a cam path only while a browser publishes to it.
+	// Paths are keyed by name ("src3", "cam3", "cam3r60"). A configured path is listed whether
+	// or not anything publishes; a cam path only while a browser publishes to it.
 	Paths map[string]Path
 }
 

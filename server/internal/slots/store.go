@@ -15,7 +15,8 @@ type Desired struct {
 	Kind Kind
 	// File is the library path a file slot streams.
 	File string
-	// FPS is a file slot's output rate, 0 for the file's own.
+	// FPS is the slot's output rate: a file slot's, 0 for the file's own; a webcam slot's, one
+	// of webcamRates, which names the path its browser publishes to (camName).
 	FPS int
 	// Run says the user pressed Start (and has not pressed Stop since). It is never saved:
 	// after a restart nothing starts by itself.
@@ -108,7 +109,14 @@ func (saved storedSlot) desired() (Desired, error) {
 	}
 	d := Desired{Kind: saved.Kind}
 	switch saved.Kind {
-	case KindNone, KindWebcam:
+	case KindNone:
+	case KindWebcam:
+		// A store from before there were two rates saves none: the one rate there was.
+		rate, ok := webcamRate(saved.FPS)
+		if !ok {
+			return Desired{}, fmt.Errorf("saved source %d's webcam rate %d is not one Insight streams at, so it was left out", saved.N, saved.FPS)
+		}
+		d.FPS = rate
 	case KindFile:
 		if saved.File == "" || saved.FPS < 0 {
 			return Desired{}, fmt.Errorf("saved source %d's file was left out", saved.N)

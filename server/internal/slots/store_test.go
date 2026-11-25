@@ -19,7 +19,7 @@ func TestTheStoreKeepsTheDesiredStateButNotRunOrSecrets(t *testing.T) {
 	open, err := parsePullURL("rtsp://10.0.0.8:8554/stream", "", "")
 	must(t, err)
 	s.set(1, Desired{Kind: KindFile, File: "clips/a.mp4", FPS: 15, Run: true})
-	s.set(2, Desired{Kind: KindWebcam, Run: true})
+	s.set(2, Desired{Kind: KindWebcam, FPS: 60, Run: true})
 	s.set(3, Desired{Kind: KindPull, Pull: &pull.target, Run: true})
 	s.set(48, Desired{Kind: KindPull, Pull: &open.target})
 	must(t, s.write(s.encode()))
@@ -36,7 +36,7 @@ func TestTheStoreKeepsTheDesiredStateButNotRunOrSecrets(t *testing.T) {
 	if d := loaded.get(1); d.Kind != KindFile || d.File != "clips/a.mp4" || d.FPS != 15 || d.Run {
 		t.Errorf("slot 1: %+v", d)
 	}
-	if d := loaded.get(2); d.Kind != KindWebcam || d.Run {
+	if d := loaded.get(2); d.Kind != KindWebcam || d.FPS != 60 || d.Run {
 		t.Errorf("slot 2: %+v", d)
 	}
 	if d := loaded.get(3); d.Kind != KindPull || d.Pull.Host != "cam:554" || d.Pull.Path != "/live?token=***" || d.Pull.URL != "" {
@@ -76,13 +76,18 @@ func TestADamagedStoreStartsEmpty(t *testing.T) {
 	// Entries that cannot be slots are left out, the rest kept.
 	must(t, os.WriteFile(path, []byte(`{"version": 1, "slots": [
 		{"n": 0, "kind": "webcam"}, {"n": 49, "kind": "webcam"}, {"n": 2, "kind": "magic"},
-		{"n": 3, "kind": "file"}, {"n": 4, "kind": "pull"}, {"n": 5, "kind": "webcam"}]}`), 0o644))
+		{"n": 3, "kind": "file"}, {"n": 4, "kind": "pull"}, {"n": 6, "kind": "webcam", "fps": 25},
+		{"n": 5, "kind": "webcam"}]}`), 0o644))
 	s, err = LoadStore(path)
-	if err == nil || strings.Count(err.Error(), "\n") != 4 {
-		t.Errorf("five bad entries: %v", err)
+	if err == nil || strings.Count(err.Error(), "\n") != 5 || !strings.Contains(err.Error(), "webcam rate 25") {
+		t.Errorf("six bad entries: %v", err)
 	}
-	if s.get(5).Kind != KindWebcam || s.get(2).Kind != KindNone || s.get(3).Kind != KindNone {
-		t.Errorf("the good entry was not kept")
+	// A webcam saved before there were two rates, with none, is at the one rate there was.
+	if d := s.get(5); d.Kind != KindWebcam || d.FPS != DefaultWebcamFPS {
+		t.Errorf("the good entry was not kept: %+v", d)
+	}
+	if s.get(2).Kind != KindNone || s.get(3).Kind != KindNone || s.get(6).Kind != KindNone {
+		t.Errorf("a bad entry was kept")
 	}
 }
 

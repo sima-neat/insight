@@ -224,9 +224,12 @@ paths:
         took the slot during the probe is 409 `slot_busy`, and a MediaMTX that does not answer
         the check made after it 503 `mediamtx_unavailable`, with nothing assigned. The
         credentials are kept in memory only. The slot starts pulling at once.
-        `{kind: "webcam"}` makes it a browser's webcam: the answer's `urls.whip` is where the
-        browser publishes. A slot an external publisher holds is 409 `slot_busy`. The body is
-        sent as application/json.
+        `{kind: "webcam", fps?}` makes it a browser's webcam at `fps` frames per second, 30 or 60
+        (30 when absent; another rate is 400 `invalid_fps`): the answer's `urls.whip` is where
+        the browser publishes, a URL of its own per rate, and the stream on `srcN` is re-encoded
+        at that rate whatever the camera sends. Assigning a webcam again at another rate
+        disconnects what publishes at the old one. A slot an external publisher holds is 409
+        `slot_busy`. The body is sent as application/json.
       requestBody:
         required: true
         content:
@@ -1573,7 +1576,9 @@ components:
           description: A file slot's library path.
         fps:
           type: integer
-          description: A file slot's output rate when it is not the file's own.
+          description: >-
+            A file slot's output rate when it is not the file's own; a webcam slot's rate, 30 or
+            60.
         native_fps:
           type: integer
           description: The file's own rate in whole frames per second, once it is probed.
@@ -1680,12 +1685,15 @@ components:
           description: The HTTP MJPEG output (Frozen, `/stream/http/srcN.mjpg`), for an MJPEG stream.
         whip:
           type: string
-          description: Where a browser publishes a webcam slot's camera.
+          description: >-
+            Where a browser publishes a webcam slot's camera, at the slot's rate (`fps`): each
+            rate has a URL of its own.
     SlotAssignment:
       type: object
       description: >-
         What to assign: `file` (with `file` and an optional `fps`), `pull` (with `url` and
-        optional `username` and `password`, which replace credentials in the URL) or `webcam`.
+        optional `username` and `password`, which replace credentials in the URL) or `webcam`
+        (with an optional `fps`).
       required: [kind]
       properties:
         kind:
@@ -1696,7 +1704,9 @@ components:
           description: A library path.
         fps:
           type: integer
-          description: The output rate; absent for the file's own.
+          description: >-
+            The output rate: a file's, absent for the file's own; a webcam's, 30 or 60, absent
+            for 30.
         url:
           type: string
         username:

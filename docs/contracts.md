@@ -99,7 +99,8 @@ rtsp://<insight-host>:8554/srcN
 
 - `N` runs from 1 to 48. There is no `src0`.
 - The codec is H.264 or H.265, as the file or camera has it, and RTP/JPEG for an MJPEG file. A
-  webcam is H.264 baseline at 30 fps with a keyframe every second.
+  webcam is H.264 baseline at the rate of its capture mode, 30 or 60 fps, with a keyframe every
+  second.
 - A file plays in a loop, in real time.
 - Reading needs no credentials. In the SDK container Insight serves RTSP over TCP.
 - Take the URL as a parameter of your app. Assume nothing else about Insight.
@@ -126,8 +127,11 @@ A program may publish its own stream into an unused source over RTSP, at the sam
 publisher wins; a second one is refused. Insight shows such a source as External and warns unless
 it is H.264, H.265 or MJPEG.
 
-Browser webcams reach Insight over WHIP (on port 8889, ICE on UDP 8189). That is Insight's own
-way in, used by its Streaming page, and not a contract for apps.
+Browser webcams reach Insight over WHIP (on port 8889, ICE on UDP 8189). A webcam source is
+assigned a rate, 30 or 60 fps, and its publishing URL carries it: the browser publishes to
+`camN` at 30 fps and to `camNr60` at 60, and Insight re-encodes the stream onto `srcN` at that
+rate whatever the camera sends, repeating frames for a camera that sends fewer. That is Insight's
+own way in, used by its Streaming page, and not a contract for apps.
 
 ## Channels
 

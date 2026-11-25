@@ -137,8 +137,12 @@ func TestURLs(t *testing.T) {
 		if got := c.u.httpMJPEG(c.host, 3); got != c.http {
 			t.Errorf("http at %q: %s", c.host, got)
 		}
-		if got := c.u.whip(c.host, 3); got != c.whip {
+		if got := c.u.whip(c.host, 3, 30); got != c.whip {
 			t.Errorf("whip at %q: %s", c.host, got)
+		}
+		// At 60 fps the browser publishes to the path of that rate.
+		if got, want := c.u.whip(c.host, 3, 60), strings.Replace(c.whip, "/cam3/", "/cam3r60/", 1); got != want {
+			t.Errorf("whip at 60 fps at %q: %s, want %s", c.host, got, want)
 		}
 	}
 }

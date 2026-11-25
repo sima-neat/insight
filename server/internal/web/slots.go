@@ -35,7 +35,8 @@ func (h *handlers) AssignSlot(w http.ResponseWriter, r *http.Request, n api.Slot
 	case api.SlotAssignmentKindPull:
 		err = h.deps.Slots.AssignPull(r.Context(), n, value(body.Url), value(body.Username), value(body.Password))
 	case api.SlotAssignmentKindWebcam:
-		_, err = h.deps.Slots.AssignWebcam(n, r.Host) // the answer's urls.whip says the same
+		// The answer's urls.whip says the same.
+		_, err = h.deps.Slots.AssignWebcam(n, r.Host, value(body.Fps))
 	default:
 		apierr.Write(w, http.StatusBadRequest, "invalid_request", "kind is file, pull or webcam.", "")
 		return
