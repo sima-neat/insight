@@ -16,6 +16,7 @@ import type {
 import { LatestOnly, visiblePoller } from '../polling';
 import { JobEvents, jobProgress, type Progress } from './jobs';
 import { ApiRequestError, withRequestErrors } from './api-errors';
+import type { WebcamRate } from './webcam-capture';
 
 const SLOTS_URL = '/api/slots';
 const RENDITIONS_URL = '/api/renditions';
@@ -217,9 +218,13 @@ export class SlotsService {
     return this.assign(n, { kind: 'pull', ...pull });
   }
 
-  /** Makes the slot a browser's webcam; the answer's `urls.whip` is where the browser publishes. */
-  assignWebcam(n: number): Promise<Slot> {
-    return this.assign(n, { kind: 'webcam' });
+  /**
+   * Makes the slot a browser's webcam streaming at `fps`; the answer's `urls.whip` is where the
+   * browser publishes, a URL of that rate's. Assigning it again at another rate disconnects what
+   * publishes at the old one.
+   */
+  assignWebcam(n: number, fps: WebcamRate): Promise<Slot> {
+    return this.assign(n, { kind: 'webcam', fps });
   }
 
   /** Leaves the slot with nothing assigned, and stopped. */

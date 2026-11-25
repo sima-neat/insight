@@ -286,7 +286,8 @@ describe('SlotsService', () => {
           'PUT',
           { kind: 'pull', url: 'rtsp://cam/stream', username: 'u', password: 'p' },
         ],
-        [() => service.assignWebcam(4), 'PUT', { kind: 'webcam' }],
+        [() => service.assignWebcam(4, 60), 'PUT', { kind: 'webcam', fps: 60 }],
+        [() => service.assignWebcam(4, 30), 'PUT', { kind: 'webcam', fps: 30 }],
         [() => service.clear(4), 'DELETE', null],
       ];
       for (const [run, method, body] of cases) {

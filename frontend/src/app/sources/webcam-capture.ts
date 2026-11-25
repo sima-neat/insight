@@ -5,12 +5,20 @@
  * structural types, so they are tested without a camera or a peer connection;
  * `CamerasService` applies them.
  *
- * **Every mode is at 30 fps, deliberately.** Upstream also offers 1080p60 and 720p60, but
- * MediaMTX's normalizer (`webrtc/mediamtx.yml`) re-encodes every webcam at a fixed `-r 30`, which
- * it needs for the encoder to state an H.264 level the board's decoder accepts. A 60 fps capture
- * would reach the stream URL at 30 fps, so the list does not offer what the stream cannot carry.
- * The size passes through unchanged.
+ * **A mode's rate is the stream's rate, 30 or 60 fps.** MediaMTX's normalizer
+ * (`webrtc/mediamtx.yml`) re-encodes every webcam at a fixed rate, which it needs: a WebRTC
+ * stream has no fixed rate, and without one the encoder states an H.264 level the board's decoder
+ * refuses. It has a path per rate, so the slot is assigned the rate of the mode it publishes in
+ * (`webcamRate`) and its WHIP URL names that path; the size passes through unchanged. A camera
+ * that sends fewer frames than its mode asks for still streams at the mode's rate, the normalizer
+ * repeating frames.
  */
+
+/** A rate the normalizer streams a webcam at. */
+export type WebcamRate = 30 | 60;
+
+/** The rate of the camera default, and of every webcam before there were two. */
+export const DEFAULT_WEBCAM_RATE: WebcamRate = 30;
 
 /** A size and rate a webcam source can ask its camera for. */
 export interface CaptureMode {
@@ -19,10 +27,10 @@ export interface CaptureMode {
   /** Absent for the camera default, which asks for no size at all. */
   readonly width?: number;
   readonly height?: number;
-  readonly frameRate?: number;
+  readonly frameRate?: WebcamRate;
 }
 
-const mode = (width: number, height: number, frameRate: number): CaptureMode => ({
+const mode = (width: number, height: number, frameRate: WebcamRate): CaptureMode => ({
   id: `${height}p${frameRate}`,
   label: `${width}×${height} at ${frameRate} fps`,
   width,
@@ -31,19 +39,34 @@ const mode = (width: number, height: number, frameRate: number): CaptureMode => 
 });
 
 /**
- * The capture modes, largest first. Each size and rate is requested as `ideal`, so a camera
- * without that mode sends its nearest one instead of failing to start.
+ * The capture modes, largest first and the faster first at a size. Each size and rate is requested
+ * as `ideal`, so a camera without that mode sends its nearest one instead of failing to start.
+ * Where the browser reports the camera's largest rate (Chrome does), a camera below 60 fps is not
+ * offered the 60 fps modes (`captureModeIdsWithin`); where it does not, a camera that cannot send
+ * 60 fps sends what it can, and the stream still comes out at 60.
  */
 export const CAPTURE_MODES: readonly CaptureMode[] = [
   mode(3840, 2160, 30),
   mode(2560, 1440, 30),
+  mode(1920, 1080, 60),
   mode(1920, 1080, 30),
+  mode(1280, 720, 60),
   mode(1280, 720, 30),
   mode(640, 480, 30),
   { id: 'camera', label: 'Camera default' },
 ];
 
 export const DEFAULT_CAPTURE_MODE = '1080p30';
+
+/**
+ * The rate a slot is assigned for a mode, which the server's normalizer streams it at: the mode's,
+ * or `DEFAULT_WEBCAM_RATE` for the camera default and an unknown mode.
+ */
+export function webcamRate(modeId: string): WebcamRate {
+  return (
+    CAPTURE_MODES.find((candidate) => candidate.id === modeId)?.frameRate ?? DEFAULT_WEBCAM_RATE
+  );
+}
 
 /** A camera's largest size and rate, as Chrome's `InputDeviceInfo.getCapabilities()` reports them. */
 export interface CaptureLimits {

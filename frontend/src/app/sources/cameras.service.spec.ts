@@ -67,7 +67,11 @@ describe('CamerasService', () => {
     media = new FakeCameraMedia();
     media.devices = [DESK, LAPTOP];
     slotList.set(Array.from({ length: 4 }, (_, i) => webcamSlot(i + 1)));
-    slotsFake.assignWebcam.mockReset().mockImplementation(async (n: number) => slotOf(n));
+    // The server takes the rate and answers with the publish URL of it.
+    slotsFake.assignWebcam.mockReset().mockImplementation(async (n: number, fps: number) => {
+      setSlot(n, { fps, urls: webcamSlot(n, { fps }).urls });
+      return slotOf(n);
+    });
     slotsFake.assignFile
       .mockReset()
       .mockImplementation(async (n: number, file: string) => fileSlot(n, file));
@@ -271,7 +275,7 @@ describe('CamerasService', () => {
 
       await service.assign(2, 'cam-laptop');
 
-      expect(slotsFake.assignWebcam).toHaveBeenCalledWith(2);
+      expect(slotsFake.assignWebcam).toHaveBeenCalledWith(2, 30);
       expect(service.assignments().get(2)).toEqual({
         deviceId: 'cam-laptop',
         label: 'Laptop camera',
@@ -284,14 +288,14 @@ describe('CamerasService', () => {
       await service.assign(2, 'cam-laptop');
 
       await service.assign(2, null);
-      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(2);
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(2, 30);
       expect(service.assignments().has(2)).toBe(false);
 
       // A publishing slot is ended first, as for another camera.
       await publishDesk(service);
       await service.assign(1, null);
       expect(peerOf().closed).toBe(true);
-      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1);
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1, 30);
       expect(service.assignments().has(1)).toBe(false);
       expect(service.localStreams().has(1)).toBe(false);
     });
@@ -350,7 +354,7 @@ describe('CamerasService', () => {
 
       expect(peerOf().closed).toBe(true);
       expect(streamOf().stopped).toBe(true);
-      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1);
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1, 30);
       expect(service.localStreams().has(1)).toBe(false);
       expect(service.assignments().get(1)?.deviceId).toBe('cam-laptop');
     });
@@ -709,6 +713,82 @@ describe('CamerasService', () => {
       await service.publish(1);
 
       expect(media.opened[0].constraints).toEqual({ video: { deviceId: { exact: 'cam-desk' } } });
+    });
+
+    it('assigns the slot at the rate of the mode it would publish in', async () => {
+      media.devices = [DESK, HD];
+      const service = await create();
+      service.setCapture(1, { mode: '1080p60', bitrate: 'auto' });
+      service.setCapture(2, { mode: '720p60', bitrate: 'auto' });
+
+      await service.assign(1, 'cam-desk');
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1, 60);
+      // A camera that reports no 60 fps publishes in its largest 30 fps mode, so at 30.
+      await service.assign(2, 'cam-hd');
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(2, 30);
+    });
+
+    it('publishes a 60 fps mode at 60, to the publish URL of that rate', async () => {
+      const service = await create();
+      service.setCapture(1, { mode: '1080p60', bitrate: 'auto' });
+
+      await publishDesk(service);
+
+      expect(slotsFake.assignWebcam).toHaveBeenCalledTimes(1);
+      expect(media.opened[0].constraints).toEqual({
+        video: {
+          deviceId: { exact: 'cam-desk' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 60 },
+        },
+      });
+      expect(posts('/whip').map((call) => call.url)).toEqual([
+        'https://10.0.0.2:8889/cam1r60/whip',
+      ]);
+    });
+
+    it('assigns the slot again when its mode changed to another rate since, and publishes to the new URL', async () => {
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1, 30);
+      service.setCapture(1, { mode: '720p60', bitrate: 'auto' });
+
+      await service.publish(1);
+
+      expect(slotsFake.start).toHaveBeenCalledWith(1);
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1, 60);
+      expect(posts('/whip').map((call) => call.url)).toEqual([
+        'https://10.0.0.2:8889/cam1r60/whip',
+      ]);
+
+      // And back: a 30 fps mode publishes to the 30 fps URL again.
+      await service.release(1);
+      service.setCapture(1, { mode: '720p30', bitrate: 'auto' });
+      await service.publish(1);
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1, 30);
+      expect(posts('/whip').map((call) => call.url)).toEqual([
+        'https://10.0.0.2:8889/cam1r60/whip',
+        whipUrl(1),
+      ]);
+    });
+
+    it('a start released while it assigns the slot at a new rate opens no camera', async () => {
+      const service = await create();
+      await service.assign(1, 'cam-desk');
+      service.setCapture(1, { mode: '1080p60', bitrate: 'auto' });
+      const assigning = deferred<Slot>();
+      slotsFake.assignWebcam.mockReturnValueOnce(assigning.promise);
+      const publishing = service.publish(1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(slotsFake.assignWebcam).toHaveBeenLastCalledWith(1, 60);
+
+      const releasing = service.release(1);
+      assigning.resolve(webcamSlot(1, { fps: 60 }));
+      await Promise.all([publishing, releasing]);
+
+      expect(media.opened).toEqual([]);
+      expect(posts('/whip')).toEqual([]);
     });
 
     it('is held per slot and kept when the slot takes another camera', async () => {

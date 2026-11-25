@@ -11,8 +11,10 @@ import {
   keepWebcamResolution,
   webcamBitrateKbps,
   webcamCaptureConstraints,
+  webcamRate,
   withWebcamBitrate,
   type WebcamCapture,
+  type WebcamRate,
 } from './webcam-capture';
 import {
   camerasFromDevices,
@@ -73,12 +75,12 @@ class NoLongerWebcam extends Error {
  * connection, a removed camera, or the page going away (`pagehide`).
  *
  * **How this tab and Insight share a webcam slot.** The server makes a slot a webcam's on
- * `assignWebcam` and answers with where to publish (`urls.whip`); the browser publishes there and
- * the slot is live once MediaMTX has its stream. A stop or a reassignment of the slot, from this
- * tab or any other, disconnects whatever publishes on it. So every path that ends a session here
- * closes the camera and the peer connection itself, and tells the server (a stop, or the new
- * assignment), and every assignment from Streaming goes through this service, which ends the
- * slot's session first:
+ * `assignWebcam`, at the rate of the capture mode, and answers with where to publish (`urls.whip`,
+ * a URL of that rate's); the browser publishes there and the slot is live once MediaMTX has its
+ * stream. A stop or a reassignment of the slot, from this tab or any other, disconnects whatever
+ * publishes on it. So every path that ends a session here closes the camera and the peer
+ * connection itself, and tells the server (a stop, or the new assignment), and every assignment
+ * from Streaming goes through this service, which ends the slot's session first:
  * - A start spans several awaits (the camera, the offer, the server's confirmation). Each slot has
  *   a generation that everything which changes the slot moves on, and a start checks it after
  *   each await and abandons itself rather than publish a camera the user already replaced.
@@ -219,11 +221,12 @@ export class CamerasService {
   }
 
   /**
-   * Makes the slot a webcam on the server and remembers `deviceId` as its camera; nothing is
-   * published until `publish`. With no `deviceId` the slot is a webcam with no camera yet (the
-   * source switch's Camera), and any camera it had is forgotten. A session the slot has is ended
-   * first: the old track would keep publishing to the same MediaMTX path, and the new one would be
-   * refused. Rejects with the server's message, leaving the slot with no camera.
+   * Makes the slot a webcam on the server, at the rate of the mode it would publish in, and
+   * remembers `deviceId` as its camera; nothing is published until `publish`. With no `deviceId`
+   * the slot is a webcam with no camera yet (the source switch's Camera), and any camera it had is
+   * forgotten. A session the slot has is ended first: the old track would keep publishing to the
+   * same MediaMTX path, and the new one would be refused. Rejects with the server's message,
+   * leaving the slot with no camera.
    */
   assign(slot: number, deviceId: string | null): Promise<void> {
     const camera: Camera | null =
@@ -239,7 +242,7 @@ export class CamerasService {
       this.teardown(slot);
       const generation = this.generations.get(slot);
       try {
-        await this.slots.assignWebcam(slot);
+        await this.slots.assignWebcam(slot, this.rateFor(slot, camera));
         if (this.generations.get(slot) === generation) this.setCamera(slot, camera);
       } catch (failure) {
         // The camera we closed above is not coming back, and the server's slot may or may not
@@ -279,10 +282,13 @@ export class CamerasService {
   async publish(slot: number): Promise<void> {
     const camera = this.assignments().get(slot);
     if (!camera) throw new Error(NO_CAMERA_TEXT);
-    const whipUrl = this.slots.slots()?.find((s) => s.n === slot)?.urls.whip;
-    if (!whipUrl) throw new Error(NO_PUBLISH_URL_TEXT);
+    // Whether the slot is a webcam to publish to at all; the URL itself is the server's answer to
+    // the start, of the rate the start publishes at.
+    if (!this.slots.slots()?.find((s) => s.n === slot)?.urls.whip) {
+      throw new Error(NO_PUBLISH_URL_TEXT);
+    }
 
-    await this.whileChanging(slot, () => this.start(slot, camera, whipUrl));
+    await this.whileChanging(slot, () => this.start(slot, camera));
   }
 
   /**
@@ -316,7 +322,7 @@ export class CamerasService {
     }
   }
 
-  private async start(slot: number, camera: Camera, whipUrl: string): Promise<void> {
+  private async start(slot: number, camera: Camera): Promise<void> {
     // A session the slot still has is replaced, not leaked, and anything still starting is
     // abandoned: this start is the slot's from here on.
     this.teardown(slot);
@@ -344,6 +350,13 @@ export class CamerasService {
       const capture = this.captureOf(slot);
       const mode = effectiveCaptureMode(capture.mode, camera.captureModeIds);
       const kbps = webcamBitrateKbps(capture.bitrate, mode);
+      // The server streams the slot at its rate, which the publish URL names. A mode chosen at
+      // another rate since the slot was assigned assigns it again, at the mode's.
+      const rate = webcamRate(mode);
+      const target = started.fps === rate ? started : await this.slots.assignWebcam(slot, rate);
+      if (superseded()) throw new StartSuperseded();
+      const whipUrl = target.urls.whip;
+      if (!whipUrl) throw new Error(NO_PUBLISH_URL_TEXT);
       const stream = await this.media.getUserMedia(webcamCaptureConstraints(camera.deviceId, mode));
       built.stream = stream;
       if (superseded()) throw new StartSuperseded();
@@ -421,6 +434,14 @@ export class CamerasService {
       if (failure instanceof StartSuperseded) return;
       throw new Error(describeWebcamError(failure), { cause: failure });
     }
+  }
+
+  /**
+   * The rate the slot's webcam streams at: that of the mode it publishes in, the chosen one or the
+   * largest the camera reaches (all modes count for no camera yet).
+   */
+  private rateFor(slot: number, camera: Camera | null): WebcamRate {
+    return webcamRate(effectiveCaptureMode(this.captureOf(slot).mode, camera?.captureModeIds));
   }
 
   /** Runs an assignment that takes the slot from any webcam it was: its session and camera go first. */

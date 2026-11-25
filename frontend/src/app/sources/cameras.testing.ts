@@ -2,7 +2,16 @@ import type { CameraMedia, PublishPeer } from './camera-media';
 import type { DeviceInfo } from './webcam-publishing';
 
 /** Every capture mode's id: what a camera that reports no limits is offered. */
-export const ALL_MODE_IDS = ['2160p30', '1440p30', '1080p30', '720p30', '480p30', 'camera'];
+export const ALL_MODE_IDS = [
+  '2160p30',
+  '1440p30',
+  '1080p60',
+  '1080p30',
+  '720p60',
+  '720p30',
+  '480p30',
+  'camera',
+];
 
 /** A camera stream whose tracks record that they were stopped. */
 export class FakeCameraStream {

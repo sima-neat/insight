@@ -771,7 +771,9 @@ describe('SlotPanel', () => {
       expect(await offered('Resolution')).toEqual([
         '3840×2160 at 30 fps',
         '2560×1440 at 30 fps',
+        '1920×1080 at 60 fps',
         '1920×1080 at 30 fps',
+        '1280×720 at 60 fps',
         '1280×720 at 30 fps',
         '640×480 at 30 fps',
         'Camera default',

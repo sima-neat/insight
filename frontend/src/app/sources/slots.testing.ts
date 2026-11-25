@@ -20,12 +20,18 @@ export function fileSlot(n: number, file: string, overrides: Partial<Slot> = {})
   return slot(n, { kind: 'file', file, codec: 'h264', native_fps: 30, ...overrides });
 }
 
-/** A webcam slot as the server answers its assignment: on, waiting for a browser to publish. */
+/**
+ * A webcam slot as the server answers its assignment: on, waiting for a browser to publish, at
+ * 30 fps unless `overrides` says 60, with the publish URL of its rate.
+ */
 export function webcamSlot(n: number, overrides: Partial<Slot> = {}): Slot {
+  const fps = overrides.fps ?? 30;
+  const path = fps === 30 ? `cam${n}` : `cam${n}r${fps}`;
   return slot(n, {
     kind: 'webcam',
     run: true,
-    urls: { rtsp: `rtsp://10.0.0.2:8554/src${n}`, whip: `https://10.0.0.2:8889/cam${n}/whip` },
+    fps,
+    urls: { rtsp: `rtsp://10.0.0.2:8554/src${n}`, whip: `https://10.0.0.2:8889/${path}/whip` },
     ...overrides,
   });
 }
