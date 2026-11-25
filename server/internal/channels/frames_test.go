@@ -138,8 +138,8 @@ func TestAFailedSendClosesThatViewerOnly(t *testing.T) {
 	if len(good.sent) != 3 || good.closed != 0 {
 		t.Errorf("good viewer: %d sent, %d closed, want 3 and 0", len(good.sent), good.closed)
 	}
-	if res.Took != 1 || res.Skipped != 0 || len(res.Failures) != 1 {
-		t.Errorf("result = %+v, want Took 1, Skipped 0, 1 failure", res)
+	if res.Took != 1 || res.Skipped != 0 || len(res.Failures) != 1 || res.Failures[0].Channel != bad {
+		t.Errorf("result = %+v, want Took 1, Skipped 0, the failing viewer's failure", res)
 	}
 }
 

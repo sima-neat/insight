@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/jpeg"
 	"net"
 	"sync"
 	"testing"
@@ -260,20 +261,75 @@ func (b *browser) waitOpen(t *testing.T) {
 	}
 }
 
-// sawADetectionOnAFrame says whether a detection arrived that names a frame the browser received.
-func (b *browser) sawADetectionOnAFrame() bool {
-	var matched struct {
-		Type    string `json:"type"`
-		Insight struct {
-			RTPTimestamp uint32 `json:"rtp_timestamp"`
-		} `json:"_insight"`
-	}
+// matchedMessage is what the tests read of a metadata message: its own timestamp and, once
+// Insight matched it to a frame, that frame's RTP time.
+type matchedMessage struct {
+	Timestamp uint32 `json:"timestamp"`
+	Insight   *struct {
+		RTPTimestamp uint32 `json:"rtp_timestamp"`
+	} `json:"_insight"`
+}
+
+// matchedMessages are the metadata messages that arrived matched to a frame.
+func (b *browser) matchedMessages() []matchedMessage {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	var all []matchedMessage
 	for _, text := range b.messages {
-		if json.Unmarshal([]byte(text), &matched) == nil && b.rtpTimes[matched.Insight.RTPTimestamp] {
+		var matched matchedMessage
+		if json.Unmarshal([]byte(text), &matched) == nil && matched.Insight != nil {
+			all = append(all, matched)
+		}
+	}
+	return all
+}
+
+// sawADetectionOnAFrame says whether a detection arrived that names a frame the browser received.
+func (b *browser) sawADetectionOnAFrame() bool {
+	for _, matched := range b.matchedMessages() {
+		b.mu.Lock()
+		received := b.rtpTimes[matched.Insight.RTPTimestamp]
+		b.mu.Unlock()
+		if received {
 			return true
 		}
+	}
+	return false
+}
+
+// matchedFrame is the RTP time of the frame Insight matched the message of timestampMS to, once
+// that message came.
+func (b *browser) matchedFrame(timestampMS uint32) (uint32, bool) {
+	for _, matched := range b.matchedMessages() {
+		if matched.Timestamp == timestampMS {
+			return matched.Insight.RTPTimestamp, true
+		}
+	}
+	return 0, false
+}
+
+// jpegFrames are the whole frames the jpeg channel brought so far, and how many it dropped.
+func (b *browser) jpegFrames() ([]receivedFrame, int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]receivedFrame(nil), b.frames...), b.dropped
+}
+
+// watch has the browser offer to watch channel 0, and takes the answer.
+func (b *browser) watch(t *testing.T, s *Set) {
+	t.Helper()
+	answer, err := s.Offer(context.Background(), 0, b.offer(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.accept(t, answer)
+}
+
+// closedByInsight says whether the browser's connection ended, as a browser sees Insight close it.
+func (b *browser) closedByInsight() bool {
+	switch b.pc.ConnectionState() {
+	case webrtc.PeerConnectionStateClosed, webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateDisconnected:
+		return true
 	}
 	return false
 }
@@ -377,13 +433,105 @@ func TestACodecChangeClosesTheViewersOfTheOldOne(t *testing.T) {
 
 	sender.payloadType, sender.keyframePacket = payloadTypeH265, h265IRAP
 	sender.frame(93_600)
-	waitFor(t, "the old viewer closed", func() bool {
-		state := viewer.pc.ConnectionState()
-		return state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed ||
-			state == webrtc.PeerConnectionStateDisconnected
-	})
+	waitFor(t, "the old viewer closed", viewer.closedByInsight)
 	if got := s.channels[0].media.Load().codec; got != CodecH265 {
 		t.Fatalf("codec %v", got)
+	}
+}
+
+func TestACodecChangeRetiresTheJPEGViewers(t *testing.T) {
+	s := listen(t, 1)
+	sender := newApp(t, s, 0, payloadTypeH264, h264IDR)
+	sender.frame(90_000)
+	h264Media := mediaOf(t, s, 0)
+	early := newBrowserWith(t, browserOptions{codecs: []Codec{CodecH264}, jpeg: true})
+	early.watch(t, s)
+	waitFor(t, "connected", func() bool { return early.pc.ConnectionState() == webrtc.PeerConnectionStateConnected })
+
+	// H.264 to JPEG: the H.264 viewer is closed, and its jpeg channel, which the H.264
+	// generation ignored, joins no other.
+	sender.payloadType = payloadTypeJPEG
+	sender.jpegFrame(93_600)
+	waitFor(t, "the H.264 viewer closed", early.closedByInsight)
+	jpegMedia := s.channels[0].media.Load()
+	if jpegMedia.codec != CodecJPEG || !h264Media.isRetired() {
+		t.Fatalf("codec %v, the H.264 generation retired %v", jpegMedia.codec, h264Media.isRetired())
+	}
+	late := newBrowserWith(t, browserOptions{codecs: []Codec{CodecH264}, jpeg: true})
+	late.watch(t, s)
+	waitFor(t, "the JPEG viewer's jpeg channel open", func() bool { return jpegMedia.frameViewers.count() == 1 })
+	timestamp := uint32(97_200)
+	for range 3 {
+		sender.jpegFrame(timestamp)
+		timestamp += 3600
+	}
+	waitFor(t, "three JPEG frames", func() bool { frames, _ := late.jpegFrames(); return len(frames) == 3 })
+
+	// And back: the JPEG viewer is closed, its jpeg channel leaves the old generation, and
+	// nothing more reaches it.
+	sender.payloadType = payloadTypeH264
+	sender.frame(timestamp)
+	waitFor(t, "the JPEG viewer closed", late.closedByInsight)
+	waitFor(t, "the old generation's jpeg channel gone", func() bool { return jpegMedia.frameViewers.count() == 0 })
+	if m := s.channels[0].media.Load(); m.codec != CodecH264 || !jpegMedia.isRetired() || m.frameViewers.count() != 0 {
+		t.Fatalf("codec %v, the JPEG generation retired %v, %d jpeg channels on H.264", m.codec, jpegMedia.isRetired(), m.frameViewers.count())
+	}
+	for range 3 {
+		timestamp += 3600
+		sender.frame(timestamp)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if frames, _ := late.jpegFrames(); len(frames) != 3 {
+		t.Fatalf("the JPEG viewer got %d frames, want its generation's 3", len(frames))
+	}
+	if frames, _ := early.jpegFrames(); len(frames) != 0 {
+		t.Fatalf("the H.264 viewer got %d JPEG frames", len(frames))
+	}
+}
+
+func TestJPEGFramesAndTheirMetadataShareTimestamps(t *testing.T) {
+	s := listen(t, 1)
+	sender := newJPEGApp(t, s, 0)
+	sender.jpegFrame(45_000) // starts the JPEG generation; nobody watches it yet
+	m := mediaOf(t, s, 0)
+	viewer := newBrowserWith(t, browserOptions{codecs: []Codec{CodecH264}, jpeg: true})
+	viewer.watch(t, s)
+	waitFor(t, "the metadata and jpeg channels open", func() bool {
+		return s.channels[0].views.count() == 1 && m.frameViewers.count() == 1
+	})
+
+	stamps := []uint32{1000, 1033, 1066, 1100} // ms
+	for i, stamp := range stamps {
+		// Either side may arrive first; both are matched.
+		if i%2 == 0 {
+			sender.detection(stamp)
+		}
+		sender.jpegFrame(stamp * 90)
+		if i%2 == 1 {
+			sender.detection(stamp)
+		}
+		waitFor(t, fmt.Sprintf("frame %d and its metadata", i), func() bool {
+			frames, _ := viewer.jpegFrames()
+			_, matched := viewer.matchedFrame(stamp)
+			return len(frames) > i && matched
+		})
+	}
+
+	frames, dropped := viewer.jpegFrames()
+	if len(frames) != len(stamps) || dropped != 0 {
+		t.Fatalf("%d frames whole and %d dropped, want %d and none", len(frames), dropped, len(stamps))
+	}
+	for i, frame := range frames {
+		picture, err := jpeg.Decode(bytes.NewReader(frame.data))
+		if err != nil {
+			t.Fatalf("frame %d does not decode: %v", i, err)
+		}
+		if size := picture.Bounds().Size(); size.X != 64 || size.Y != 48 {
+			t.Fatalf("frame %d is %v, want 64 × 48", i, size)
+		}
+		if matched, _ := viewer.matchedFrame(stamps[i]); matched != frame.timestamp {
+			t.Fatalf("frame %d: its metadata names RTP time %d, the frame carries %d", i, matched, frame.timestamp)
+		}
 	}
 }
 

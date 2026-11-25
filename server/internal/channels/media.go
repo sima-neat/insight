@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,10 @@ type media struct {
 	parameters   webrtc.RTPCodecParameters // none for JPEG
 	track        *countedTrack             // nil for JPEG
 	frameViewers viewers[frameChannel]     // JPEG's open jpeg channels
+
+	// Owned by the channel's video reader: the reasons of the refused JPEG frames already named
+	// in the channel's recent errors, so a sender that keeps sending such frames shows each once.
+	namedRefusals map[error]bool
 
 	mu      sync.Mutex
 	retired bool
@@ -66,6 +71,26 @@ func (m *media) watched() bool {
 		return m.frameViewers.count() > 0
 	}
 	return m.track.bindings.Load() > 0
+}
+
+// nameRefusal says whether a refused JPEG frame's reason is still to be named in this
+// generation, and marks it named. The reason is the jpegImage sentinel err wraps; an err that
+// wraps none is named every time rather than hidden.
+func (m *media) nameRefusal(err error) bool {
+	for _, reason := range jpegRefusals {
+		if !errors.Is(err, reason) {
+			continue
+		}
+		if m.namedRefusals[reason] {
+			return false
+		}
+		if m.namedRefusals == nil {
+			m.namedRefusals = map[error]bool{}
+		}
+		m.namedRefusals[reason] = true
+		return true
+	}
+	return true
 }
 
 // maxViewers bounds the connections of one channel, the ones still negotiating or waiting for ICE

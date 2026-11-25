@@ -89,10 +89,11 @@ func (c *Channel) video(raw []byte, from netip.AddrPort, now time.Time) {
 	if !result.ready {
 		return
 	}
-	if m.codec == CodecJPEG {
-		return // no JPEG frame is rebuilt or sent yet
-	}
 	unit := result.unit
+	if m.codec == CodecJPEG {
+		c.sendJPEG(m, unit, from, now)
+		return
+	}
 	outgoing := c.line.frame(unit.timestamp, unit.ssrc, unit.afterSequenceBreak, now)
 	sent := false
 	for _, raw := range unit.packets {
@@ -105,9 +106,41 @@ func (c *Channel) video(raw []byte, from netip.AddrPort, now time.Time) {
 		}
 		sent = true
 	}
-	if !sent {
+	if sent {
+		c.release(unit, outgoing, now)
+	}
+}
+
+// sendJPEG rebuilds a whole JPEG unit into its JFIF image and sends it to every open jpeg channel
+// of the generation, on the reader as the track is written. The frame keeps its outgoing RTP time
+// in its chunks' header; no sequence numbers are rewritten, since no RTP is sent.
+func (c *Channel) sendJPEG(m *media, unit accessUnit, from netip.AddrPort, now time.Time) {
+	image, err := jpegImage(unit.packets)
+	if err != nil {
+		c.stats.count(func(s *stats) { s.video.unusable++ })
+		if m.nameRefusal(err) {
+			c.stats.failed("dropped a JPEG frame from %s: %v", from, err)
+		}
 		return
 	}
+	outgoing := c.line.frame(unit.timestamp, unit.ssrc, unit.afterSequenceBreak, now)
+	result := sendJPEGFrame(m.frameViewers.list(), jpegChunks(outgoing, image))
+	for _, failure := range result.Failures {
+		c.stats.failed("sending a JPEG frame: %v", failure.Err)
+		// sendJPEGFrame closed it, but Pion reports the close only once the browser has closed
+		// its side too, and a channel left in the set would fail every frame until then.
+		m.frameViewers.remove(failure.Channel)
+	}
+	if result.Skipped > 0 {
+		c.stats.count(func(s *stats) { s.video.skipped += uint64(result.Skipped) })
+	}
+	if result.Took > 0 {
+		c.release(unit, outgoing, now)
+	}
+}
+
+// release records a frame sent with outgoing and queues the metadata that was waiting for it.
+func (c *Channel) release(unit accessUnit, outgoing uint32, now time.Time) {
 	for _, out := range c.corr.frame(unit.ssrc, unit.timestamp, outgoing, now) {
 		c.enqueue(out)
 	}

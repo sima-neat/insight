@@ -22,6 +22,8 @@ var (
 	errJPEGQuantization = errors.New("unusable jpeg quantization tables")
 	errJPEGFragments    = errors.New("broken jpeg fragments")
 	errJPEGHeader       = errors.New("malformed jpeg header")
+
+	jpegRefusals = []error{errJPEGType, errJPEGQuantization, errJPEGFragments, errJPEGHeader}
 )
 
 // jpegFragmentOffset reads the fragment offset of a payload of at least 4 bytes: bytes 1 to 3 of

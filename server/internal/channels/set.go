@@ -171,6 +171,11 @@ type VideoState struct {
 	Oversized uint64
 	// Incomplete are the frames withheld because a packet was lost, the first one included.
 	Incomplete uint64
+	// Unusable are the whole JPEG frames no image could be rebuilt from (a type, tables or
+	// header Insight cannot use), counted only while a viewer watches.
+	Unusable uint64
+	// Skipped are the JPEG frames a viewer skipped because its buffer was full, once per viewer.
+	Skipped uint64
 }
 
 // MetadataState is what arrived on a channel's metadata port and what became of it.
@@ -213,7 +218,7 @@ func (c *Channel) state(now time.Time) State {
 		SSRC: v.ssrc, PayloadType: v.payloadType, Codec: v.codec.String(),
 		Packets: v.packets, Bytes: v.bytes, PacketsPerSecond: packetRate, BitsPerS: bitRate,
 		Keyframes: v.keyframes, SeenSPS: v.seenSPS, Unsupported: v.unsupported, Malformed: v.malformed,
-		Oversized: v.oversized, Incomplete: v.incomplete,
+		Oversized: v.oversized, Incomplete: v.incomplete, Unusable: v.unusable, Skipped: v.skipped,
 	}
 	metadataActive := !m.last.IsZero() && now.Sub(m.last) <= activeFor
 	messageRate, metadataBits := m.rate.at(metadataActive)

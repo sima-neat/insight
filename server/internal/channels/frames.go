@@ -45,22 +45,29 @@ type frameChannel interface {
 }
 
 // frameSendResult says what one frame did: how many viewers took it whole, how many skipped it
-// because their buffer was full, and why each failed send failed.
-type frameSendResult struct {
+// because their buffer was full, and which channels failed and why.
+type frameSendResult[C frameChannel] struct {
 	Took, Skipped int
-	Failures      []error
+	Failures      []frameFailure[C]
+}
+
+// frameFailure is a channel whose send failed, closed for it, and the reason, so that the caller
+// can drop it from its set.
+type frameFailure[C frameChannel] struct {
+	Channel C
+	Err     error
 }
 
 // sendJPEGFrame sends one frame's chunks to every channel that has room for it.
-func sendJPEGFrame[C frameChannel](channels []C, chunks [][]byte) frameSendResult {
-	var res frameSendResult
+func sendJPEGFrame[C frameChannel](channels []C, chunks [][]byte) frameSendResult[C] {
+	var res frameSendResult[C]
 	for _, ch := range channels {
 		if ch.BufferedAmount() > jpegMaxBufferedBytes {
 			res.Skipped++
 			continue
 		}
 		if err := sendChunks(ch, chunks); err != nil {
-			res.Failures = append(res.Failures, err)
+			res.Failures = append(res.Failures, frameFailure[C]{ch, err})
 			_ = ch.Close()
 			continue
 		}
